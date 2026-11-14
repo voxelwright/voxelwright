@@ -1,4 +1,4 @@
-// A realm from words (#264): "Create a realm called matrix. You are Neo." The idea is fleshed out first, by the
+// A realm from words (#264): "Create a realm called harbour. You are the pilot." The idea is fleshed out first, by the
 // asker's own model: what the realm is about (its setting, its people, how they behave and look), how it looks on
 // arriving, and a few short questions where the idea leaves something open, for the asker to answer or not, as
 // they choose. Then the realm is made on the server (`POST /realms`, the REALMS lane's), and its rules are
@@ -65,7 +65,7 @@ const idOf = (name) => `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace
  * could not be written is still there, empty of rules, and said so (`state: 'there'`, `rough`).
  * `say(words, stage)`: { stage: 'realm', id, name } once it is made, then a rule's own stages.
  */
-export async function realm({ server, name, about, look, answers = [], by = 'maker', model, trial, cannot, say = () => {} }) {
+export async function realm({ server, name, about, look, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
   name = words(name, 40); about = words(about, WISH_MOST)
   if (!name) return { state: 'refused', why: 'a realm has a name' }
   const chosen = answers.map((a) => `${words(a.ask, 80)} ${words(a.answer, 60)}.`).join(' ')
@@ -76,7 +76,7 @@ export async function realm({ server, name, about, look, answers = [], by = 'mak
   // Where one arrives is where the realm's people are to be: the rules are written for someone standing there.
   const to = record.arrive?.at ?? [700, 4060], at = to.length === 3 ? to : [to[0], (await (await fetch(`${world}/world/at?x=${to[0]}&y=0&z=${to[1]}`)).json()).ground + 1, to[1]]
   const wish = `The whole of a realm called "${name}": ${about}${chosen ? ` ${chosen}` : ''}`
-  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, trial, cannot, say })
+  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial, cannot, say })
   if (r.state !== 'there') return { ...r, state: 'there', realm: record.id, name, rough: `its rules could not be written: ${r.why}`, cannot: r.cannot ?? [] }
   return { ...r, realm: record.id, rule: r.id, name }
 }

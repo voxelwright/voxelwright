@@ -94,29 +94,53 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)
     // Until there is a portal to step through (the REALMS lane), stepping in opens the realm in place of this world.
-    const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : ''}.`, ['Step in', 'Stay here'])
+    const step = await hud.choose(`${plan.name} is ready${done.rough ? ', though its rules are not written yet' : done.more ? '. It will grow fuller as you play' : ''}.`, ['Step in', 'Stay here'])
     if (step === 0) { const to = new URLSearchParams(location.search); to.set('realm', done.realm); to.delete('shared'); location.assign(`${location.pathname}?${to}`) }
     return done
   }
-  /** What the words ask for. Uncertain, it is a thing: that is what the bar has always made. */
-  const kind = (text: string): 'realm' | 'rule' | 'thing' | 'said' => {
+  /** Whether the world this page is in has rules: people who may hear what is said and act on it. Asked of the world, and remembered a few seconds. */
+  let ruledAt = 0, ruledSo = false
+  const ruled = async (): Promise<boolean> => {
+    if (performance.now() - ruledAt < 4000) return ruledSo
+    const realm = new URLSearchParams(location.search).get('realm')
+    try { const r = await fetch(realm ? `/realm/${encodeURIComponent(realm)}/world/rules` : '/world/rules'); const list = r.ok ? await r.json() : []; ruledSo = Array.isArray(list) && list.some((x) => x.running) } catch { ruledSo = false }
+    ruledAt = performance.now()
+    return ruledSo
+  }
+  /**
+   * What the words ask for. In a world that has rules, what is typed is said: the world's own people hear it and
+   * may act at once ("I want to fly", "slow time", "I know kung fu" are for the realm to answer, never things to
+   * make). It goes to a maker only when the words plainly ask for one: a thing ("make a ...", "conjure ...",
+   * "a red door"), or a change to how the world goes ("add ...", "change ...", "from now on ...", "let me ...").
+   * In a world with no rules there is nobody to hear a power asked for, so those words ask for a rule.
+   */
+  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' => {
     if (/^thing:/i.test(text)) return 'thing'
     if (/^(rule|play):/i.test(text)) return 'rule'
+    if (/^(say|said):/i.test(text)) return 'said'
     if (/\brealm\b/i.test(text) && /^\s*(please\s+)?(create|make|new|start|open|build|imagine)\b/i.test(text)) return 'realm'
-    // Something that happens: people who do things, a game, a power.
-    if (/\b(a game of|whenever|when (someone|somebody|anyone|i|you|they|we)\b|who (plays|sells|follows|comes|says|answers|chases|runs|walks|dances|sings|waves|greets|tells|asks|fights|sits|stands|waits)|let me|make me|make (them|everyone)|give (them|everyone)|everyone (should|must|will|is)|slow time|i can (now )?)\b/i.test(text)) return 'rule'
-    // What is said to whoever is there: a question, a greeting, or words that begin as talk does ("I am ...", "you
-    // ...", "yes"). Nobody wants a thing called "what is this place?". ("I want a red car" is still a wish.)
-    if (hud.line.onsubmit && !/^i (want|wish|would like|need)\b/i.test(text) && (/\?\s*$/.test(text) || /^(hello|hi|hey|good (morning|evening|afternoon|day)|i|i'm|im|you|we|they|he|she|it|it's|this|that|yes|no|ok|okay|thanks|thank you|please|sorry|where|who|what|why|how|do|does|did|is|are|can|could|will|would|stop|come|go|follow|wait|run)\b/i.test(text))) return 'said'
-    return 'thing'
+    // A change to how the world goes, asked for as one.
+    const change = /^\s*(please\s+)?(add|change|from now on|make (them|everyone|people|him|her|it so)|give (them|everyone|him|her)|let (there|them|everyone)|everyone (should|must|will)|whenever|when (someone|somebody|anyone)|a game of)\b/i.test(text) || /\bwho (plays|sells|follows|comes|says|answers|chases|runs|walks|dances|sings|waves|greets|tells|asks|fights|sits|stands|waits)\b/i.test(text)
+    if (change) return 'rule'
+    // A thing, asked for as one: a verb of making and what to make, or the thing named with its article.
+    const made = /^\s*(please\s+)?((make|build|conjure|create|spawn|summon|put|place|give me|i want|i need|i wish for|i would like)\s+(me\s+)?(a|an|the|some|two|three|four|five|\d+)\s|(a|an|some|two|three)\s+\S)/i.test(text)
+    // A power asked for in the asker's own words: for the realm's rule to hear. Where there are no rules, for a rule to be written.
+    const power = /^\s*(i want to|i wanna|i wish to|i would like to|let me|make me|i can|i know|i am|i'm|slow|stop time|freeze|speed up)\b/i.test(text)
+    if (power) return rules ? 'said' : /^\s*(i am|i'm|i know)\b/i.test(text) ? 'said' : 'rule'
+    if (made) return 'thing'
+    // Nothing plain: in a world with rules it is said; elsewhere talk is said and the rest is a thing, as the bar has always made.
+    if (rules) return 'said'
+    return /\?\s*$/.test(text) || /^(hello|hi|hey|good (morning|evening|afternoon|day)|you|we|they|he|she|it|it's|this|that|yes|no|ok|okay|thanks|thank you|please|sorry|where|who|what|why|how|do|does|did|is|are|can|could|will|would|stop|come|go|follow|wait|run)\b/i.test(text) ? 'said' : 'thing'
   }
   const thing = make
-  const asked = (ask: Ask): Promise<Done> => {
+  const asked = async (ask: Ask): Promise<Done> => {
     // A picture or a link is of a thing. Words alone say what they are.
     if (ask.picture || ask.link || !ask.wish) return thing(ask)
-    const what = kind(ask.wish), words = ask.wish.replace(/^(thing|rule|play):\s*/i, '')
-    if (what === 'said') { hud.line.onsubmit?.(words); return Promise.resolve({ stage: 'done', state: 'refused', why: 'said' }) }
+    const what = kind(ask.wish, await ruled()), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
+    // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
+    if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words }) }
     return what === 'realm' ? realm(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
   }
+
   return Object.assign(asked, { on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
 }

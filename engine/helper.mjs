@@ -213,9 +213,11 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         if (!text(body?.name, 40)) return end(400, { why: 'a realm has a name: {name, about}' })
         return stream(async (line, tell) => {
           say(`asked by ${text(body.by, 24) || 'someone'} for a realm: ${text(body.name, 40)}`)
-          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, answers, by: text(body.by, 24) || 'someone', model, cannot, say: tell })
+          // Its rules are written quickly first, so the realm can be stepped into; the fuller ones follow and are put under the same id.
+          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+          void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
-          line({ stage: 'done', state: r.state, why: r.why, realm: r.realm, rule: r.rule, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries })
+          line({ stage: 'done', state: r.state, why: r.why, realm: r.realm, rule: r.rule, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries, more: !!r.better })
         })
       }
       if (url.pathname === '/put') {

@@ -349,19 +349,28 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   13, Opus 5.5: seven asks that are not alike (a busker, a game of tag, and the five realms of #264), seven rules
   that ran on the first asking, 41 to 121 s each.
 - **From the ask bar** (`page/making.ts`, the helper's `/rule`, `/imagine`, `/realm`). Words decide what is asked
-  for. "Create a realm called matrix. You are Neo. ..." is a realm: the asker chooses to be asked a few things first
+  for. "Create a realm called harbour. You are the pilot. ..." is a realm: the asker chooses to be asked a few things first
   or not, the idea is fleshed out by their model (`make/realm.mjs`: what it is about, how it looks, at most three
   short questions, read as strict data), the realm is made on the server (`POST /realms`), its rules are written,
   tried and put into it, and the page offers to step in (today by opening the realm in place of this world: the
   portal is the REALMS lane's). Words that say what happens ("someone who waves when I say hello", "a game of tag",
   "let me fly", "give them all red coats") are a rule for the world the asker is in; in a realm with one rule they
   change that rule, put again under its id, so its people and what it kept stay. A question, a greeting, or words
-  that begin as talk does ("I am in the Matrix") are said to whoever is there. Anything else is a thing, as
-  before; `thing:` or `rule:` before the words says which. What is asked for from a page in a realm is made in that
+  that begin as talk does are said to whoever is there. In a world that has rules everything typed is said first,
+  so that its rules hear a power asked for in the asker's own words ("I want to fly", "slow time"), and only words
+  that plainly ask for a thing ("make a ...", "a red door") or for a change ("add ...", "change ...", "from now
+  on ...") go to a maker. Elsewhere anything else is a thing, as before; `thing:` or `rule:` before the words says which. What is asked for from a page in a realm is made in that
   realm. An ask may be 4,000 characters; past that the asker is told. Real run, November 13 (Opus 5.5 for the
-  rules, Sonnet 5.5 for the idea): the Matrix realm from the bar, asked one question back after 7 s, ready 138 s
+  rules, Sonnet 5.5 for the idea): the first realm of #264 from the bar, asked one question back after 7 s, ready 138 s
   after Enter, stepped into; inside, a resident answered "hello there" and another the question about the world;
-  "give them all red coats" changed its rule in 41 s. Pictures: `~/.village/engine/making-ui/realm-matrix/`.
+  "give them all red coats" changed its rule in 41 s. Pictures: `~/.village/engine/making-ui/realm-first/`.
+- **Quick first, fuller behind.** Where the time goes was measured (November 13, the first realm of #264 in the
+  owner's words): it is the model writing. Opus 5.5 took 200 s for its first reply and Sonnet 5.5 took 54 s; the
+  trial is 7 to 14 s. So a realm's rules are written by the quick model first and the realm can be stepped into
+  (142 s from Enter, where it had been 247 to 268 s); the full model is then asked for the fuller rule as a change
+  of the quick one and it is put under the same id when it has been tried (319 s later in that run), unless
+  someone changed the rule meanwhile, whose change stands. The trial talks no faster than a person does: both
+  models' first rules had failed it for asking an actor to think twice, which nobody would have caused.
 - **What a person types is something heard.** `e.text` and names reach a rule as text to match or to pass on.
 - Measured (M1 Pro): 0.4 ms a call for a rule with one actor; 1.5 ms for one that compares every pair of 66
   people; sixteen rules are running 0.2 s after they are asked for and take 18 MB each; with rules that never

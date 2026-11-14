@@ -244,9 +244,20 @@ try {
   await page.waitForFunction(() => document.querySelector('#choice').hidden)
   // Words that are talk are said, though the bar is set to make: a question, and "I am ...".
   const thingsBefore = await page.evaluate(() => engine.things.all.size)
-  for (const words of ['what is this place?', 'I am in the Matrix']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter') }
-  await page.waitForFunction(() => document.querySelector('#said')?.textContent.includes('Ada: I am in the Matrix'), null, { timeout: 5000 })
+  for (const words of ['what is this place?', 'I am the harbour pilot']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter') }
+  await page.waitForFunction(() => document.querySelector('#said')?.textContent.includes('Ada: I am the harbour pilot'), null, { timeout: 5000 })
   check(await page.evaluate((n) => document.querySelector('#said').textContent.includes('Ada: what is this place?') && engine.things.all.size === n && engine.asker.busy === 0, thingsBefore), 'a question and "I am ..." typed in the bar are said to whoever is there, not made into things')
+  // This world has a rule now, so what is typed is said first: a power asked for in one's own words is for the
+  // world's rule to hear, and is never made as a thing. Words that plainly ask for a thing still make one.
+  const madeBefore = await page.evaluate(() => engine.things.all.size), rulesBefore = rulesAsked
+  for (const words of ['I want to fly.', 'let me fly', 'slow time', 'I know kung fu']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter'); await page.waitForFunction((w) => document.querySelector('#said')?.textContent.includes(`Ada: ${w}`), words, { timeout: 5000 }) }
+  check(await page.evaluate((n) => engine.things.all.size === n && engine.asker.busy === 0 && !document.querySelector('#cues p'), madeBefore) && rulesAsked === rulesBefore, '"I want to fly", "let me fly", "slow time", "I know kung fu" are said for the world\'s rule to hear: nothing is made of them')
+  await page.evaluate(() => { engine.pose.x += 5 })
+  await page.keyboard.press('Enter'); await page.keyboard.type('make a tea crate'); await page.keyboard.press('Enter')
+  await page.waitForFunction((n) => engine.things.all.size === n + 1, madeBefore, { timeout: 30_000 })
+  check(rulesAsked === rulesBefore, 'and "make a tea crate" still makes one')
+  await page.waitForFunction(() => engine.asker.busy === 0)
+  await page.evaluate(() => { engine.pose.x -= 5 })
   // In a realm with one rule, what is asked for changes that rule: put again under its id.
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
@@ -289,7 +300,7 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   server = await serve('/dev/null', ['--world', file])
   const back = await (await fetch(`${server.url}/world/things`)).json(), cellsBack = await (await fetch(`${server.url}/world/things?id=${went.done.id}`)).json()
-  check(back.length === 7 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
+  check(back.length === 8 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
   check((await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'x', gone: went.done.id }) })).status === 202, 'it can be forgotten')
   // The world does asks in its own time: it is gone when the world says so.
   for (let i = 0; i < 50 && (await (await fetch(`${server.url}/world/things`)).json()).some((t) => t.id === went.done.id); i++) await new Promise((r) => setTimeout(r, 100))

@@ -41,7 +41,7 @@ export type Stage =
   | Done
 /** How it ended. `there`: it stands in the world, and the world's stream brings it. Anything else: nothing was made, and `why`. */
 /** `held`: it is made and no place near would take it. `held` is what `put` takes to stand it where the asker says next. */
-export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
+export interface Done { stage: 'done'; state: 'there' | 'fell' | 'not there' | 'unknown' | 'refused' | 'held'; held?: string; moved?: number; left?: number; /** A rule that was written: its id; what it could not do with what the engine offers; `rough` if it was put in though its trial went wrong. A realm that was made: its id. */ rule?: string; realm?: string; cannot?: string[]; rough?: string; /** Its rules were written quickly to be played at once: fuller ones are being written and will take their place. */ more?: boolean; why?: string; id?: string; name?: string; at?: [number, number, number]; size?: [number, number, number]; ms?: number; tries?: number }
 
 export interface Asker {
   /** Whether this page knows of a helper (it may not be running: `hello` asks it). */

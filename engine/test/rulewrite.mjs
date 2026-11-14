@@ -78,6 +78,20 @@ try {
   await wait(900)
   const heard = (await get('around?by=wren&within=1200')).heard.map((h) => h.text)
   check(heard.some((t) => /^heard [1-9]/.test(t)) && (await get('rules')).find((x) => x.id === made.id).actors === 1, `changed, it still has its one actor and what it kept (${heard.filter((t) => t.startsWith('heard')).join(', ')})`)
+
+  // ── Quick first, fuller behind: something to play at once, and the better rule in its place when it is ready ──
+  const quick = kept(reply(WAVER, { name: 'A quick waver' })), fuller = kept(reply(WAVER.replace("'*waves* hello, '", "'*waves both arms* hello, '"), { name: 'A fuller waver' }))
+  const both = await write({ wish: 'someone who waves', world, where, model: fuller, first: quick, trial: trial.url, cannot })
+  check(both.state === 'there' && both.name === 'A quick waver' && quick.seen.length === 1 && both.better, 'with a quick model given, its rule is put in first and is what the asker gets')
+  const then = await both.better
+  const now = await get(`rules?id=${both.id}`)
+  check(then.state === 'there' && now.source.includes('both arms') && fuller.seen[0].prompt.includes('The rule as it stands') && (await get('rules')).find((x) => x.id === both.id).actors === 1, 'the fuller rule is asked for as a change of the quick one and put under the same id: its actor stays')
+  // Someone changes the quick rule while the fuller one is being written: their change stands.
+  const slow = Object.assign(async (q) => { await wait(2500); return { text: reply(WAVER.replace("'*waves* hello, '", "'*salutes* hello, '")), model: 'a kept reply', ms: 0, cost: 0 } }, {})
+  const raced = await write({ wish: 'someone who waves', world, where, model: slow, first: kept(reply(WAVER)), trial: trial.url, cannot })
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'wren', rule: { id: raced.id, name: 'changed by hand', source: WAVER.replace("'*waves* hello, '", "'*nods* hello, '") } }) })
+  const lost = await raced.better
+  check(lost.state === 'refused' && /changed meanwhile/.test(lost.why) && (await get(`rules?id=${raced.id}`)).source.includes('*nods*'), 'a rule changed by someone while its fuller one was being written keeps their change')
 } catch (e) { failures.push(`the check did not run to its end: ${e.stack ?? e}`) } finally {
   await trial.stop(); server.stop(); rmSync(dir, { recursive: true, force: true })
 }
