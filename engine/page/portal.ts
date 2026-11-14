@@ -110,7 +110,9 @@ export async function portal(o: {
   let side = 0, stepping = false, asked = 0
   /** How the eye rode before the person came near the window, while it rides in their head; else null. */
   let rode: 'behind' | 'head' | null = null
-  const stats = { rect: [0, 0, 0, 0] as [number, number, number, number], scale: 1, share: 0, steps: [] as unknown[], opened: null as unknown }
+  const stats = { rect: [0, 0, 0, 0] as [number, number, number, number], scale: 1, share: 0, steps: [] as unknown[], opened: null as unknown, released: false }
+  /** How long a closed window keeps the other realm's stream, ms. */
+  const LET_GO = Number(new URLSearchParams(location.search).get('portalkeeps') ?? 60) * 1000
   /** Where one left each realm, by its id: the foot of the window one went through there. Going back leads there. */
   const left = new Map<string, [number, number, number]>()
   /** Who is in the other realm, as its held stream says: drawn behind the window. And which residents a rule there has taken. */
@@ -140,6 +142,15 @@ export async function portal(o: {
     return shownThere
   }
 
+  /** Which way the looks through the window go, along the ground (set each frame it is drawn). */
+  let way: [number, number] = [0, 0], seenThere = 0
+  /** Only those past the window, where it stands in the other world: someone between that eye and the window is not behind it, as the cells there are not (the looks begin at the window). */
+  const past = (source: People['from'][number]): People['from'][number] => (view, seconds) => {
+    const all = source(view, seconds), g = gate
+    const kept = g ? all.filter((p) => (p.at[0] - g.to[0]) * way[0] + (p.at[2] - g.to[2]) * way[1] >= 0) : all
+    if (source === there) seenThere = kept.length
+    return kept
+  }
   /** The other world's eye for this one's: as far from where the window leads as this eye is from the window. */
   const through = (view: View): View => ({ ...view, eye: [view.eye[0] + gate!.to[0] - gate!.at[0], view.eye[1] + gate!.to[1] - gate!.at[1], view.eye[2] + gate!.to[2] - gate!.at[2]] })
   const across = (g: Gate): [number, number, number] => [Math.cos(g.yaw), 0, Math.sin(g.yaw)]
@@ -199,25 +210,45 @@ export async function portal(o: {
   const eye = (): [number, number, number] => [o.pose.x * M, o.pose.y * M, o.pose.z * M]
   /** How far a place is before the window (over 0) or past it (under), along the way the window faces, counted from the side the person came up to it on. */
   const before = (g: Gate, p: readonly number[]) => { const a = across(g); return ((p[0] - g.at[0]) * -a[2] + (p[2] - g.at[2]) * a[0]) * side }
-  /** A place for a window before the person, facing them: on the ground where there is room for it and for someone to walk through, tried nearer and further and a little to each side. */
+  /**
+   * A place for a window before the person, facing them: near, on the ground, with room for all of it and a clear
+   * walk to it. Tried straight ahead from three metres out to seven, then to each side of that and at last behind;
+   * a place with room but no clear walk is taken only if none all the way round has both.
+   */
   const stand = (): { at: [number, number, number]; yaw: number } => {
-    const at = body(), yaw = o.pose.yaw, ahead = [Math.sin(yaw), -Math.cos(yaw)], right = [Math.cos(yaw), Math.sin(yaw)]
-    const tries: [number, number][] = [[60, 0], [45, 0], [80, 0], [60, -20], [60, 20], [100, 0], [35, 0]]
-    let fallback: [number, number, number] | null = null
-    for (const [far, off] of tries) {
-      const x = Math.round(at[0] + ahead[0] * far + right[0] * off), z = Math.round(at[2] + ahead[1] * far + right[1] * off)
+    const at = body(), feet = Math.round(at[1] - 16.5)
+    /** Whether a body can be where a column of cells is: nothing from the shins to over the head, taking the ground as it is found. */
+    const open = (x: number, z: number, from: number) => { for (let up = 3; up <= 18; up += 3) if (o.kind(x, from + up, z)) return false; return true }
+    let roomy: { at: [number, number, number]; yaw: number } | null = null, any: { at: [number, number, number]; yaw: number } | null = null
+    // Ahead first; then round to each side, and behind if nowhere ahead can be walked to: a window one must turn to see is better than one behind a wall.
+    for (const turn of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.57, -1.57, 2.2, -2.2, Math.PI]) for (const far of [40, 30, 50, 60, 70]) {
+      const yaw = o.pose.yaw + turn, ahead = [Math.sin(yaw), -Math.cos(yaw)], right = [Math.cos(yaw), Math.sin(yaw)]
+      const x = Math.round(at[0] + ahead[0] * far), z = Math.round(at[2] + ahead[1] * far)
       // The ground there: the first cell with something under it and air in it, from a little over the eye down.
       let y = Math.round(at[1]) + 20
       while (y > at[1] - 80 && !o.kind(x, y - 1, z)) y--
-      if (o.kind(x, y, z)) continue
-      fallback ??= [x, y + SIZE[1] / 2, z]
+      if (o.kind(x, y, z) || Math.abs(y - feet) > 12) continue
+      const here = { at: [x, y + SIZE[1] / 2, z] as [number, number, number], yaw }
+      any ??= here
       let room = true
-      for (let across = -SIZE[0] / 2; across <= SIZE[0] / 2 && room; across += 5) for (let up = 3; up < SIZE[1] && room; up += 6) for (let deep = -4; deep <= 4 && room; deep += 4) {
+      for (let across = -SIZE[0] / 2; across <= SIZE[0] / 2 && room; across += 5) for (let up = 3; up < SIZE[1] && room; up += 6) for (let deep = -3; deep <= 3 && room; deep++) {
         if (o.kind(Math.round(x + right[0] * across + ahead[0] * deep), y + up, Math.round(z + right[1] * across + ahead[1] * deep))) room = false
       }
-      if (room) return { at: [x, y + SIZE[1] / 2, z], yaw }
+      if (!room) continue
+      roomy ??= here
+      // The walk to it: a body's width of open way all along, the ground rising or falling no more than a kerb at a step.
+      let clear = true, ground = feet
+      // A cell at a time: a wall one cell thick is a wall.
+      for (let step = 3; step < far && clear; step++) for (const side of [-4, 0, 4]) {
+        const px = Math.round(at[0] + ahead[0] * step + right[0] * side), pz = Math.round(at[2] + ahead[1] * step + right[1] * side)
+        let g = ground + 3
+        while (g > ground - 4 && !o.kind(px, g - 1, pz)) g--
+        if (o.kind(px, g, pz) || !open(px, pz, g)) { clear = false; break }
+        if (side === 0) ground = g
+      }
+      if (clear) return here
     }
-    return { at: fallback ?? [Math.round(at[0] + ahead[0] * 60), Math.round(at[1]) + 2, Math.round(at[2] + ahead[1] * 60)], yaw }
+    return roomy ?? any ?? { at: [Math.round(at[0] + Math.sin(o.pose.yaw) * 40), Math.round(at[1]) + 2, Math.round(at[2] - Math.cos(o.pose.yaw) * 40)], yaw: o.pose.yaw }
   }
   /** The foot of where one enters a realm: where one left it, else where it says one arrives, else where this page began. */
   const entry = (to: string, realm: Realm): [number, number, number] => {
@@ -233,7 +264,7 @@ export async function portal(o: {
     get to() { return id },
     get other() { return other },
     /** How far open the window is, how much of it is still light, and whether one may walk through. */
-    get state() { return { open, veil, passable: !!gate && !closing && veil < 0.5 && !stepping, people: shownThere.length, drawn: folk2?.drawn.people ?? 0 } },
+    get state() { return { open, veil, passable: !!gate && !closing && veil < 0.5 && !stepping, people: seenThere, there: shownThere.length, drawn: folk2?.drawn.people ?? 0 } },
     /** A size for the other world's picture fixed for a measurement (0: the window's own choice). */
     set scale(v: number) { fixed = v },
     stats,
@@ -259,6 +290,7 @@ export async function portal(o: {
      */
     async open(to: string, g?: Gate, standing = false) {
       const began = performance.now(), mine = ++asked
+      stats.released = false
       // Where it stands is settled at once, as the person stood when they asked; where it leads, when the realm has said what it is.
       const here = g ? null : stand()
       let realm: Realm
@@ -268,7 +300,7 @@ export async function portal(o: {
       const first = !other
       other ??= o.make()
       march2 ??= await o.marcher(other)
-      if (!folk2) { folk2 = await o.people(march2); folk2.from.push(there, o.residents(() => look, taken)) }
+      if (!folk2) { folk2 = await o.people(march2); folk2.from.push(past(there), past(o.residents(() => look, taken))) }
       const built = performance.now() - began - ready
       const before = other.stats.made
       const held = o.far.held()
@@ -294,6 +326,8 @@ export async function portal(o: {
         if (s.wanted === 0 && s.stale === 0 && performance.now() - began > 100) return stats.opened = { to, ready, built: first ? built : 0, shown: shown || performance.now() - began, clear: clear || performance.now() - began, made: performance.now() - began, sectors: s.made - before, poolMb: s.poolUsed / 262144 }
       }
     },
+    /** Where a window would stand if it were opened now: for the checks. */
+    where: () => stand(),
     /** A window to a realm, whatever is open now: one that leads there already is left as it is, another is closed first. */
     async lead(to: string) {
       if (gate && !closing && id === to) return null
@@ -301,7 +335,14 @@ export async function portal(o: {
       return self.toggle(to)
     },
     /** Closes the window: it goes in on itself. The other world stays held, so opened again it is there at once. */
-    close() { if (gate) closing = true; if (rode !== null) { o.riding(rode); rode = null } },
+    close() {
+      if (gate) closing = true
+      if (rode !== null) { o.riding(rode); rode = null }
+      // Left closed for a minute, the other realm's stream is let go, so that a realm nobody is in can rest. Its
+      // sectors stay held: opened again, only what was done there since is made.
+      const mine = asked
+      setTimeout(() => { if (mine === asked && !gate) { o.far.release(); o.far.onheld = null; theirs.clear(); taken.clear(); stats.released = true } }, LET_GO)
+    },
     /** A frame: the other world is kept made round where this eye would be in it, and drawn into the window's pixels with whoever is there. Called after the page's own march into `to`. */
     draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number) {
       const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000)
@@ -328,6 +369,7 @@ export async function portal(o: {
         const only: [number, number, number, number] = [Math.floor(r[0] * scale), Math.floor(r[1] * scale), Math.max(1, Math.min(target.size[0] - Math.floor(r[0] * scale), Math.ceil(r[2] * scale))), Math.max(1, Math.min(target.size[1] - Math.floor(r[1] * scale), Math.ceil(r[3] * scale)))]
         // The other world's looks begin at the window, where it stands there: its land may rise between that eye and the window.
         const a = across(gate), away = Math.sign((view.eye[0] - gate.at[0]) * -a[2] + (view.eye[2] - gate.at[2]) * a[0]) || 1, n: [number, number, number] = [a[2] * away, 0, -a[0] * away]
+        way = [n[0], n[2]]
         march2.draw(encoder, target, v2, flags, time, undefined, only, [n[0], n[1], n[2], n[0] * gate.to[0] + n[2] * gate.to[2]])
         folk2?.draw(encoder, target, v2, time)
       }

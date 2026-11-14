@@ -500,7 +500,7 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
   is, a body on foot standing on the cells of the realm it is in, and back.
 - **The portal** (`page/portal.ts`): **P** (on a phone, the Portal button) opens a window before you to the
   selected realm (`engine.realms.selected`; from a realm, to home) and closes it. It stands on the ground where
-  there is room, facing you, three metres wide and four high, and leads to where one enters that realm: where you
+  there is room and a clear walk to it (three to seven metres off), facing you, three metres wide and four high, and leads to where one enters that realm: where you
   last left it, else its `arrive`. It opens as the other place is made behind it: light until every box of that
   world is whole over half its width, growing meanwhile, then clear. Through it the other realm is seen live, with
   the people who are there. Walk through and you are there, on your feet, the window leading back; turn round and

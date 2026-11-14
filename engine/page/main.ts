@@ -531,7 +531,16 @@ async function main() {
   /** What becomes of a wish: asked, and shown at its place as it goes (making.ts). */
   /** How one steps into a realm that was just made: a portal to it, once there is one (set below); until then the page is opened there. */
   let enterRealm = (id: string) => { const to = new URLSearchParams(location.search); to.set('realm', id); to.delete('shared'); location.assign(`${location.pathname}?${to}`) }
-  const wish = making(over, wishes, gaze, (id) => enterRealm(id))
+  /** The line to type on, opened with a new realm's words begun and the caret after them: from the wheel, and again when a realm was asked for with nothing said of it. */
+  const beginRealm = () => { over.line.show(); const line = document.querySelector<HTMLInputElement>('#line'); if (line) { line.value = 'Create a realm called '; line.dispatchEvent(new Event('input', { bubbles: true })); line.focus(); line.setSelectionRange(line.value.length, line.value.length) } }
+  // Words that say only that a realm is wanted are not sent to be made: the line stays, in the same turn of the keys, so that what is typed next is its idea.
+  over.line.take((ask) => {
+    if (ask.picture || ask.link || !/\brealm\b/i.test(ask.wish ?? '') || (ask.wish ?? '').replace(/\b(please|create|make|new|start|open|build|imagine|a|an|the|realm|called|named|me|us)\b/gi, '').replace(/[^\p{L}\p{N}]+/gu, '')) return false
+    over.notice('Say what the realm is: a name, a place, what happens there', 6000)
+    queueMicrotask(beginRealm)
+    return true
+  })
+  const wish = making(over, wishes, gaze, (id) => enterRealm(id), () => setTimeout(beginRealm, 0))
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
   over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']
@@ -892,7 +901,7 @@ async function main() {
   const gate = far && realm ? await portal({
     gpu, far, realms: realm, world, march, pose, began,
     make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
-    marcher: (w) => marcher(device, gpu.format, w),
+    marcher: (w) => marcher(device, gpu.format, w, true),
     people: (m) => people(device, gpu.format, m),
     residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
     light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) },
@@ -916,16 +925,17 @@ async function main() {
     const ring = wheel({
       hud: over, input: controls, realms: realm!, canvas,
       lead: (id) => void gate.lead(id),
-      create: () => { over.line.show(); const line = document.querySelector<HTMLInputElement>('#line'); if (line) { line.value = 'Create a realm called '; line.dispatchEvent(new Event('input', { bubbles: true })); line.setSelectionRange(line.value.length, line.value.length) } },
+      create: beginRealm,
     })
-    enterRealm = (id) => { realm!.selected = id; void gate.lead(id) }
+    // Stepping in leaves the person free to walk: the line they typed the realm on is put away.
+    enterRealm = (id) => { over.line.hide(); realm!.selected = id; void gate.lead(id) }
     controls.always('Tab', (e) => { e.preventDefault(); void ring.toggle(); return true })
     const realmsButton = button.cloneNode() as HTMLButtonElement
     realmsButton.textContent = 'Realms'; realmsButton.title = 'Pick or make a realm (Tab)'
     realmsButton.onclick = () => void ring.toggle()
     // Shown on a desktop too, small in the corner: they say that there are keys for these.
     buttons.append(button, realmsButton)
-    Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring, enterRealm: (id: string) => enterRealm(id) })
   }
   portalDraw = gate ? (encoder, to, v, time) => { gate.walk(); gate.draw(encoder, to, v, flags, time) } : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })

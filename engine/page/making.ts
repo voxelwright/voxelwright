@@ -19,7 +19,7 @@ export interface Making {
   on(each: (stage: Stage, ask: Ask) => void): () => void
 }
 
-export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number, number]; toward: [number, number, number] }, /** How one steps into a realm that was made (#264, the REALMS lane: a portal opens to it). Without it, the page is opened in that realm. */ into?: (realm: string) => void): Making {
+export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number, number]; toward: [number, number, number] }, /** How one steps into a realm that was made (#264, the REALMS lane: a portal opens to it). Without it, the page is opened in that realm. */ into?: (realm: string) => void, /** Asks again for a realm's idea when none was given (the line to type on, with the words begun). */ again?: () => void): Making {
   const told = new Set<(stage: Stage, ask: Ask) => void>()
   const make = async (ask: Ask) => {
     const what = called(ask)
@@ -80,6 +80,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
   /** A realm (#264): fleshed out first, with a few questions if the asker wants them; then made, its rules written; then stepped into. */
   const realm = async (idea: string): Promise<Done> => {
     const none = (why: string): Done => ({ stage: 'done', state: 'refused', why })
+    // Words that say only that a realm is wanted, and nothing of what it is: asked for, not made up.
+    if (!idea.replace(/\b(please|create|make|new|start|open|build|imagine|a|an|the|realm|called|named|me|us)\b/gi, '').replace(/[^\p{L}\p{N}]+/gu, '')) { hud.notice('Say what the realm is: a name, a place, what happens there', 6000); again?.(); return none('nothing was said of it') }
     const how = await hud.choose('A new realm. Shall I ask you a few things first?', ['Make it now', 'Ask me first', 'Never mind'])
     if (how !== 0 && how !== 1) return none('let go')
     hud.notice('Imagining it', 6000)

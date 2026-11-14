@@ -2529,3 +2529,38 @@ The run and its times are in `engine/README.md` "The workshop". What it taught:
 - **"In the game" is: merged, and the server lists the pull request's plugins with no error.** It cannot tell a new
   version of a plugin that was already in from the old one; good for a new plugin, which is what a session builds.
 
+## The portal and the wheel after a first real play (#264, November 13)
+
+The lead played the whole flow on the live server (Tab, new realm, type, make, step in, walk in), and a review
+named what the checks had not looked at. What was wrong, and what it taught:
+
+- **Keys typed while no line holds them are the game's keys.** The wheel handed over to the ask bar 40 ms late,
+  Enter out of habit sent "Create a realm called " with nothing after it, a placeholder realm was made, the bar
+  closed, and the idea typed next went to the game: R is rain, so it rained at home. That looked like a realm's
+  look leaking and was not. Now the key that picks is not typed (`preventDefault` in the wheel's mode) and the
+  line opens in the same turn; words that say only that a realm is wanted are taken before they are a wish
+  (`hud.line.take`) and the line is opened again in the same turn (`queueMicrotask`), so not one key is lost.
+  The check types `0`, Enter and the idea with no pauses and reads the line and `engine.rain`.
+- **"Step in" left the ask bar open**, and W did not walk. Stepping in puts the line away.
+- **"Where there is room" must mean a clear walk, and near.** The window stood six metres off behind a parked
+  car. Now: three to seven metres, straight ahead first and then up to 60 degrees to each side, the first place
+  with room for the window and a body's width of open way to it, tried a cell at a time (a wall one cell thick
+  was stepped over at three). The check builds a wall across the way.
+- **People short of the window were drawn in it.** The cells' looks begin at the window's plane; the second
+  `people` had no such cut, so someone between that eye and the window stood large in the frame. Both sources
+  are cut at the plane (`past`).
+- **The shader change, measured at last**, by swapping it in and out of one page turn about (`march.reshade`,
+  `engine.paced()`, four rounds, fixed work 1.4 to 1.5 ms): the street 23.7 to 24.0 ms without the plane and 23.9
+  to 24.1 with it; a far view 42.8 to 44.1 without and 43.4 to 46.2 with: one to three in a hundred, on every
+  page, for something only a window needs. So only the window's marcher is compiled with it
+  (`marcher(..., behind)`); the page's own shader is as it was before the portal.
+- **The wheel's picture cost a frame**: reading the WebGPU canvas took 12 to 17 ms every five seconds. It is now
+  taken once a few seconds after arriving in a realm and then once a minute, made small by `createImageBitmap`;
+  it still costs one frame of about 18 ms each time, since the canvas is read on this thread whatever is asked.
+- **A closed window never let go**: it kept the other realm's stream, so that realm never rested. A minute
+  after closing the stream is let go (`link.release`); the sectors stay held (300 MB while the page is open), so
+  opened again it is clear in 0.37 s.
+- **Checked now, and were not**: an ask after a step names the realm the page is in (a stand-in helper keeps
+  what it is sent); a page in a realm at three in the morning draws 3 residents where home draws 115, and still
+  3 when the page's own keys show noon.
+

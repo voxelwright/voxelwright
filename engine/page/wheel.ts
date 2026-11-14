@@ -16,6 +16,8 @@ export interface Wheel {
   pick(id: string): void
   /** The last picture of a realm kept by this browser (a data address), or null. */
   shot(id: string): string | null
+  /** What taking the last picture cost this thread, ms. */
+  readonly cost: number
 }
 
 const STYLE = `
@@ -55,28 +57,38 @@ export function wheel(o: {
   const ring = document.createElement('div'), middle = document.createElement('div')
   ring.className = 'ring'; middle.className = 'middle'
   panel.append(ring)
-  let open = false, entries: string[] = [], listed: Listed[] = [], at = 0, leave: (() => void) | null = null
+  let open = false, entries: string[] = [], listed: Listed[] = [], at = 0, leave: (() => void) | null = null, cost = 0
 
   // The last picture of each realm: the page's own, made small every few seconds while it is there, kept by this browser.
   const small = document.createElement('canvas')
   small.width = 192; small.height = 108
   const shot = (id: string) => { try { return localStorage.getItem(`village.realm.shot.${id}`) } catch { return null } }
+  const to = small.getContext('2d', { willReadFrequently: true })!
   const keep = () => {
-    // Right after the page has drawn: the picture is then the canvas's own.
+    // Right after the page has drawn, the picture is the canvas's own. It is made small off this thread (reading
+    // the canvas here took 12 to 17 ms, a frame lost each time), and what is left to do here is a few thousand pixels.
     requestAnimationFrame(() => {
       if (open || document.hidden) return
-      try {
-        const to = small.getContext('2d')!
-        to.drawImage(o.canvas, 0, 0, small.width, small.height)
-        // A picture that is all one dark colour is no picture (the page had not drawn yet).
-        const d = to.getImageData(0, 0, small.width, small.height).data
-        let lit = 0
-        for (let i = 0; i < d.length; i += 64) if (d[i] + d[i + 1] + d[i + 2] > 60) lit++
-        if (lit > 40) localStorage.setItem(`village.realm.shot.${o.realms.here}`, small.toDataURL('image/jpeg', 0.7))
-      } catch { /* a browser that keeps nothing, or a canvas that cannot be read: there is then no picture */ }
+      const began = performance.now(), where = o.realms.here
+      void createImageBitmap(o.canvas, { resizeWidth: small.width, resizeHeight: small.height, resizeQuality: 'low' }).then((picture) => {
+        const then = performance.now()
+        try {
+          to.drawImage(picture, 0, 0)
+          picture.close()
+          // A picture that is all one dark colour is no picture (the page had not drawn yet).
+          const d = to.getImageData(0, 0, small.width, small.height).data
+          let lit = 0
+          for (let i = 0; i < d.length; i += 64) if (d[i] + d[i + 1] + d[i + 2] > 60) lit++
+          if (lit > 40 && where === o.realms.here) localStorage.setItem(`village.realm.shot.${where}`, small.toDataURL('image/jpeg', 0.7))
+        } catch { /* a browser that keeps nothing: there is then no picture */ }
+        cost += performance.now() - then
+      }, () => { /* a canvas that cannot be read: no picture */ })
+      cost = performance.now() - began
     })
   }
-  setInterval(keep, 5000)
+  // Soon after the page is somewhere, and then now and again: a picture a minute old is still that place.
+  let kept = '', took = '', since = 0
+  setInterval(() => { const now = performance.now(), here = o.realms.here; if (here !== kept) { kept = here; since = now } else if (now - since > (shot(here) && took === here ? 60_000 : 4000)) { since = now; took = here; keep() } }, 1000)
 
   const say = (r: Listed | null) => {
     middle.replaceChildren()
@@ -89,8 +101,7 @@ export function wheel(o: {
   const mark = () => { ring.querySelectorAll('button').forEach((b, i) => b.classList.toggle('at', i === at)); say(listed.find((r) => r.id === entries[at]) ?? null) }
   const pick = (id: string) => {
     hide()
-    // A moment later: the key that picked it is still going down, and would be typed into the line that opens.
-    if (id === '+') return void setTimeout(o.create, 40)
+    if (id === '+') return o.create()
     if (id !== 'home') o.realms.selected = id
     if (id === o.realms.here) return o.hud.notice('You are there already', 3000)
     o.lead(id)
@@ -128,7 +139,9 @@ export function wheel(o: {
     panel.classList.add('on')
     document.exitPointerLock?.()
     // Its keys: a number picks, the arrows go round, Enter picks what is marked, Escape or Tab puts it away.
-    leave = o.input.push({ name: 'wheel', solid: true, every: true, key: (code) => {
+    // The key that picks is not also typed: picking the new one opens a line to type on, at once, so that what is typed next goes into it.
+    leave = o.input.push({ name: 'wheel', solid: true, every: true, key: (code, e) => {
+      e.preventDefault()
       const digit = /^(?:Digit|Numpad)(\d)$/.exec(code)
       if (digit) { const i = digit[1] === '0' ? entries.length - 1 : Number(digit[1]) - 1; if (i < entries.length) pick(entries[i]) }
       else if (code === 'ArrowRight' || code === 'ArrowDown' || code === 'KeyD') { at = (at + 1) % entries.length; mark() }
@@ -146,5 +159,6 @@ export function wheel(o: {
     get entries() { return entries },
     pick,
     shot,
+    get cost() { return cost },
   }
 }

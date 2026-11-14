@@ -426,7 +426,7 @@ const BLOCK = /* wgsl */ `
           }
           kind = 0u;`
 
-const code = (world: World, grid = world.options.grid) => /* wgsl */ `
+const code = (world: World, behind = false, grid = world.options.grid) => /* wgsl */ `
 ${GLOBALS}
 // One tile of a map being drawn: where its first texel's middle is (across and up from the anchor), a texel's width, the box, the tile's corner in the map.
 struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
@@ -1161,8 +1161,10 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   var rd = normalize(g.forward + g.right * (uv.x * g.tanHalf * g.aspect) - g.up * (uv.y * g.tanHalf));
   rd = select(rd, vec3f(0.00001), abs(rd) < vec3f(0.00001));
   let shadows = g.flags & 1u;
+  ${behind ? `// A marcher for a world behind a window (#264): its looks begin at a plane, not at the eye. Only that marcher's
+  // shader has these lines: measured by swapping them in and out of one page, they cost a far view 1 ms in 43.
   let toward = dot(rd, g.starts.xyz);
-  let begins = select(0.0, max(0.0, (g.starts.w - dot(g.eye, g.starts.xyz)) / toward), toward != 0.0);
+  let begins = select(0.0, max(0.0, (g.starts.w - dot(g.eye, g.starts.xyz)) / toward), toward != 0.0);` : 'let begins = 0.0;'}
   var hit = trace(g.eye, rd, begins, 0u, g.most, 0.0, g.pixel * g.detail, false, false, true);
   // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
   if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
@@ -1311,9 +1313,10 @@ export interface Marcher {
   readonly day: number
 }
 
-export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World): Promise<Marcher> {
+/** `behind`: a marcher for a world seen through a window, whose looks may begin at a plane (`draw`'s `starts`). */
+export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false): Promise<Marcher> {
   const grid = world.options.grid
-  const module = await shader(device, 'march', code(world))
+  const module = await shader(device, 'march', code(world, behind))
   // The sun stands in the south-west, two fifths of the way up.
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
@@ -1467,7 +1470,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
     async reshade(change) {
-      const began = performance.now(), next = await shader(device, 'march', change(code(world)))
+      const began = performance.now(), next = await shader(device, 'march', change(code(world, behind)))
       const compiled = performance.now() - began, [a, b] = await Promise.all([marching(next), sunning(next)])
       // Between two frames: the pipelines, and everything bound by their layouts.
       pipeline = a; sunPipeline = b; bind = binding(); sunBind = sunBinding()

@@ -5,6 +5,7 @@
 //
 //   node test/step.mjs [--out dir]     --out keeps a picture of each realm
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -28,6 +29,16 @@ const thing = (id, x, y, z) => ({ by: 'check', edit: [1, 3, x, x + 6, y, z, 8, x
 /** The height of the first cell of air over the land at a place: the land slopes. */
 const over = async (x, z) => (await get(`/world/at?x=${x}&y=0&z=${z}`)).ground + 1
 const RULE = { id: 'greeter', name: 'Someone', source: 'on("start", (world) => world.actor("guide", {name: "Odile", at: [9670, 4009]}))\non("tick", (world) => { if (!world.people.some((p) => p.mine)) world.actor("guide", {name: "Odile", at: [9670, 4009]}) })' }
+// Something standing in for the asker's helper: it answers the page as a helper would and keeps what it was asked.
+const asked = []
+const helper = createServer((req, res) => {
+  const cors = { 'Access-Control-Allow-Origin': req.headers.origin ?? '*', 'Access-Control-Allow-Headers': 'Content-Type, X-Village-Secret', 'Cross-Origin-Resource-Policy': 'cross-origin' }
+  if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
+  let body = ''
+  req.on('data', (c) => { body += c })
+  req.on('end', () => { if (req.method === 'POST') { try { asked.push({ path: req.url, ...JSON.parse(body) }) } catch { asked.push({ path: req.url }) } } res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(req.method === 'POST' ? '{"stage":"done","state":"refused","why":"a check"}\n' : '{"helper":1}') })
+})
+await new Promise((r) => helper.listen(0, '127.0.0.1', r))
 const browser = await chrome()
 try {
   // Two realms unlike each other: home, where the town starts, with a wall and someone in a seat; and one 896 m east
@@ -51,7 +62,7 @@ try {
   page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
   let loads = 0
   page.on('load', () => loads++)
-  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&living=car`)
+  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&living=car#helper=${encodeURIComponent(`http://127.0.0.1:${helper.address().port}`)}&secret=check`)
   await page.waitForFunction(() => globalThis.engine, null, { timeout: 90_000 })
   await still(page, { limit: 90_000 })
   await page.evaluate(() => { globalThis.sameDocument = true })
@@ -63,6 +74,8 @@ try {
   check(await kind([692, H + 1, 4040]) === 8 && await kind([9662, D + 1, 4040]) === 0, 'and its own core has home\'s wall and not the other realm\'s')
   if (out) await page.screenshot({ path: join(out, 'step-home.png') })
 
+  // What is asked for at home names no realm.
+  await page.evaluate(() => globalThis.engine.ask({ wish: 'a bench' }))
   // The step, taken while riding a living thing.
   await page.evaluate(() => globalThis.engine.alive.mount(globalThis.engine.alive.things[0]))
   check((await seen()).riding && atHome.living === 1, 'at home a car lives, and the page gets on it')
@@ -84,6 +97,10 @@ try {
   if (out) await page.screenshot({ path: join(out, 'step-dawn.png') })
   console.log(`  the step took ${there.ready.toFixed(0)} ms to read the realm's history (${there.edits} edits), ${there.went.toFixed(0)} ms to go over, ${there.shown.toFixed(0)} ms to a picture with every box whole over half its width, ${there.near.toFixed(0)} ms to a picture with the three nearest boxes whole, ${there.whole.toFixed(0)} ms to everything made (${there.sectors} sectors)`)
 
+  // What is asked of the helper now is to be made in the realm the page is in.
+  await page.evaluate(() => globalThis.engine.ask({ wish: 'a bench' }))
+  const wishes = asked.filter((a) => a.wish === 'a bench')
+  check(wishes.length === 2 && wishes[0].realm === undefined && wishes[1].realm === 'dawn', `a thing asked for at home names no realm; asked for after the step it names the realm the page is in (${wishes.map((w) => w.realm ?? 'home').join(', ')})`)
   // What it asks now is done there and nowhere else.
   await page.evaluate((y) => globalThis.engine.set([9700, y + 3, 4070], 3, 8), P)
   await wait(800)
@@ -127,6 +144,17 @@ try {
   await still(page, { limit: 90_000 })
   const near = await page.evaluate(() => globalThis.engine.realms.step('twin', { x: 70, y: 17, z: 407, yaw: 0, pitch: -0.2 }))
   check(near.sectors < 400 && (await seen()).things.join() === 'twin-wall', `a step to a realm at the same place makes again only what the two worlds' edits reach (${near.sectors} sectors, ${near.whole.toFixed(0)} ms)`)
+  // One hour for a realm: in a realm at three in the morning the page has few of the town's residents out, whatever hour it shows itself.
+  await post('/realms', { by: 'check', id: 'small-hours', name: 'Three in the morning', look: { hour: 3 } })
+  const street = { x: 70, y: 17, z: 412, yaw: 0, pitch: -0.2 }, drawn = async () => { await page.waitForTimeout(1500); return page.evaluate(() => globalThis.engine.folk.drawn.people) }
+  await page.evaluate((to) => globalThis.engine.realms.step('home', to), street)
+  const byDay = await drawn()
+  await page.evaluate((to) => globalThis.engine.realms.step('small-hours', to), street)
+  const byNight = await drawn()
+  await page.evaluate(() => { globalThis.engine.hour = 12 })
+  const shownNoon = await drawn()
+  check(byDay >= 6 && byNight * 2 < byDay && shownNoon <= byNight + 2, `a page at home draws ${byDay} people in the street; in a realm at three in the morning ${byNight}; and still ${shownNoon} there when the page itself is set to show noon`)
+  await page.evaluate(() => { globalThis.engine.hour = null })
   // And to one that sleeps: its process starts as the step asks for its stream.
   await post('/realms', { by: 'check', id: 'asleep', name: 'Nobody has been here' })
   const woke = await page.evaluate(() => globalThis.engine.realms.step('asleep', { x: 70, y: 17, z: 407, yaw: 0, pitch: -0.2 }))
@@ -134,6 +162,7 @@ try {
   console.log(`  a step in place took ${near.ready.toFixed(0)} ms to read, ${near.whole.toFixed(0)} ms to everything made (${near.sectors} sectors)`)
 } catch (e) { failures.push(`the check itself failed: ${e.stack ?? e}`) }
 await browser.close()
+helper.close()
 server.kill()
 rmSync(dir, { recursive: true, force: true })
 if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }

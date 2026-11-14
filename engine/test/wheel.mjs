@@ -4,6 +4,7 @@
 //
 //   node test/wheel.mjs [--out dir]
 import { spawn } from 'node:child_process'
+import { createServer } from 'node:http'
 import { mkdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -20,6 +21,16 @@ const url = await new Promise((resolve, reject) => {
   server.on('exit', (code) => reject(new Error(`the server ended (${code})`)))
 })
 const post = (path, body) => fetch(url + path, { method: 'POST', body: JSON.stringify(body) }).then((r) => r.status)
+// Something standing in for the asker's helper, so that the page takes wishes: it answers and keeps what it was asked.
+const asked = []
+const helper = createServer((req, res) => {
+  const cors = { 'Access-Control-Allow-Origin': req.headers.origin ?? '*', 'Access-Control-Allow-Headers': 'Content-Type, X-Village-Secret', 'Cross-Origin-Resource-Policy': 'cross-origin' }
+  if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
+  let body = ''
+  req.on('data', (c) => { body += c })
+  req.on('end', () => { if (req.method === 'POST') asked.push(req.url); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(req.method === 'POST' ? '{"stage":"done","state":"refused","why":"a check"}\n' : '{"helper":1}') })
+})
+await new Promise((r) => helper.listen(0, '127.0.0.1', r))
 const browser = await chrome()
 try {
   // Two realms beside home; one of them has a name that would be markup if it were not shown as text.
@@ -28,7 +39,7 @@ try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
   const page = await context.newPage()
   page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&at=70,17.2,412.5&look=0,-4`)
+  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&at=70,17.2,412.5&look=0,-4#helper=${encodeURIComponent(`http://127.0.0.1:${helper.address().port}`)}&secret=check`)
   await page.waitForFunction(() => globalThis.engine?.wheel, null, { timeout: 90_000 })
   await still(page, { limit: 90_000 })
   await page.evaluate(() => { try { localStorage.clear() } catch { /* nothing kept */ } globalThis.sameDocument = true })
@@ -75,17 +86,32 @@ try {
   // The new one: the ask bar opens with the words begun.
   await page.keyboard.press('Tab')
   await page.waitForFunction(() => globalThis.engine.wheel.open, null, { timeout: 5000 })
+  // Typed at once, as someone would: the key that picks it, Enter out of habit, then the words. None of it is lost,
+  // none of it is taken for the game's keys (R is rain), and a realm with nothing said of it is not made.
+  await page.keyboard.press('Digit0')
+  await page.keyboard.press('Enter')
+  await page.keyboard.type('a rainy harbour', { delay: 15 })
+  await page.waitForTimeout(300)
+  const typed = await page.evaluate(() => ({ open: globalThis.engine.hud.line.open, words: document.querySelector('#line')?.value, rain: globalThis.engine.rain, tool: globalThis.engine.tool }))
+  check(typed.open && typed.words === 'Create a realm called a rainy harbour' && typed.rain === 0 && asked.length === 0, `the new one, Enter and words typed at once: the line holds them, nothing was made of an empty idea, and no key reached the game (${JSON.stringify(typed)}; ${asked.length} asks of the helper)`)
+  await page.keyboard.press('Escape')
+  await page.keyboard.press('Tab')
+  await page.waitForFunction(() => globalThis.engine.wheel.open, null, { timeout: 5000 })
   await page.keyboard.press('Digit0')
   await page.waitForFunction(() => globalThis.engine.hud.line.open, null, { timeout: 5000 })
   const bar = await page.evaluate(() => ({ open: globalThis.engine.hud.line.open, words: document.querySelector('#line')?.value, wheel: globalThis.engine.wheel.open }))
   check(bar.open && bar.words === 'Create a realm called ' && !bar.wheel, `the new one hands over to the ask bar, the words begun (${JSON.stringify(bar)})`)
   await page.keyboard.press('Escape')
-  // A realm that was made is stepped into by a window, not by loading the page: what the making flow calls.
-  await page.evaluate(() => globalThis.engine.portal.lead('dusk'))
+  // A realm that was made is stepped into by a window, not by loading the page, and the line is put away so that the keys walk: what "Step in" does.
+  await page.keyboard.press('Enter')
+  await page.waitForFunction(() => globalThis.engine.hud.line.open, null, { timeout: 5000 })
+  await page.evaluate(() => globalThis.engine.enterRealm('dusk'))
+  check(await page.evaluate(() => !globalThis.engine.hud.line.open && globalThis.engine.input.top !== 'typing'), 'stepping in puts the line away: the keys are the person\'s to walk with')
   await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.to === 'dusk', null, { timeout: 15_000 })
   check(await page.evaluate(() => globalThis.sameDocument === true), 'and the page was never loaded again')
 } catch (e) { failures.push(`the check itself failed: ${e.stack ?? e}`) }
 await browser.close()
+helper.close()
 server.kill()
 rmSync(dir, { recursive: true, force: true })
 if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }

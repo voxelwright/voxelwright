@@ -36,19 +36,19 @@ try {
   for (let i = 0; i < 200; i++) { const x = 9560 + (i % 20) * 11 + ((i % 20) >= 10 ? 60 : -60), z = 3996 + Math.floor(i / 20) * 5; if (await post('/realm/dusk/world/ask', { by: 'check', edit: [0, x, D + 1, z, 2, i % 3 ? 8 : 7], release: [x, D + 1, z] }) === 429) { await wait(1000); i-- } }
   await wait(2500)
   await post('/realm/dusk/world/ask', { by: 'check', rule: { id: 'greeter', name: 'Someone', source: 'on("start", (world) => world.actor("guide", {name: "Odile", at: [9672, 4052]}))\non("tick", (world) => { if (!world.people.some((p) => p.mine)) world.actor("guide", {name: "Odile", at: [9672, 4052]}) })' } })
-  check(await post('/realm/dusk/world/join', { by: 'bo', at: [9650, 4050] }) === 200, 'someone has a seat in the other realm, near where one arrives')
+  check(await post('/realm/dusk/world/join', { by: 'bo', at: [9650, 4050] }) === 200 && await post('/realm/dusk/world/join', { by: 'nia', at: [9662, 4100] }) === 200, 'two people have seats in the other realm: one past where one arrives, one three metres short of it')
   // They stay: a seat nobody asks anything of goes after three minutes.
-  const keep = setInterval(() => void get('/realm/dusk/world/me?by=bo').catch(() => {}), 20_000)
+  const keep = setInterval(() => { void get('/realm/dusk/world/me?by=bo').catch(() => {}); void get('/realm/dusk/world/me?by=nia').catch(() => {}) }, 20_000)
 
   const context = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 })
   const page = await context.newPage()
   page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
   page.on('console', (m) => { if (m.type() === 'error') console.log(`  page error: ${m.text().slice(0, 300)}`) })
-  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&at=70,17.2,412.5&look=0,-4${arg('workers', '') ? `&portalworkers=${arg('workers', '')}` : ''}`)
+  await page.goto(`${url}/city?fly=0&shared=1&fire=0&sound=0&name=Cy&at=70,17.2,412.5&look=0,-4&portalkeeps=3${arg('workers', '') ? `&portalworkers=${arg('workers', '')}` : ''}`)
   await page.waitForFunction(() => globalThis.engine?.portal, null, { timeout: 90_000 })
   await still(page, { limit: 90_000 })
   await page.evaluate(() => { globalThis.sameDocument = true; globalThis.engine.realms.selected = 'dusk' })
-  const state = () => page.evaluate(() => { const e = globalThis.engine, p = e.portal; return { ...p.state, gate: p.gate && { at: p.gate.at, to: p.gate.to }, to: p.to, realm: e.realms.here, afoot: e.me.on, feet: e.me.feet?.at ?? null, hour: e.look().hour, others: e.others, same: globalThis.sameDocument === true, undrawn: e.march.sun.undrawn, scale: p.stats.scale, share: p.stats.share, fps: Math.round(1000 / e.frameMs) } })
+  const state = () => page.evaluate(() => { const e = globalThis.engine, p = e.portal; return { ...p.state, gate: p.gate && { at: p.gate.at, to: p.gate.to }, to: p.to, realm: e.realms.here, afoot: e.me.on, feet: e.me.feet?.at ?? null, hour: e.look().hour, rain: e.rain, others: e.others, same: globalThis.sameDocument === true, undrawn: e.march.sun.undrawn, scale: p.stats.scale, share: p.stats.share, fps: Math.round(1000 / e.frameMs) } })
   const gaps = () => page.evaluate(() => { globalThis.gaps = []; let last = performance.now(); const tick = (now) => { globalThis.gaps.push(now - last); last = now; if (globalThis.gaps.length < 3000) requestAnimationFrame(tick) }; requestAnimationFrame(tick) })
   const worst = () => page.evaluate(() => { const g = globalThis.gaps.slice().sort((a, b) => a - b); globalThis.gaps.length = 3000; return { worst: g.at(-1) ?? 0, p95: g[Math.floor(g.length * 0.95)] ?? 0, frames: g.length } })
   // On foot in the home street, facing up it.
@@ -77,8 +77,9 @@ try {
     console.log(`  while it opened: ${opening.frames} frames, the longest ${opening.worst.toFixed(0)} ms, 95 in 100 within ${opening.p95.toFixed(0)} ms`)
     await page.waitForTimeout(1200)
     const seen = await state()
-    check(seen.people >= 2 && seen.drawn >= 2, `the people of the other realm are drawn behind the window: someone in a seat and a rule's actor (${seen.people} there, ${seen.drawn} drawn with the residents in sight)`)
+    check(seen.people === 2 && seen.there === 3 && seen.drawn >= 2, `the people of the other realm past the window are drawn behind it: someone in a seat and a rule's actor; the one who stands short of it, between that eye and the window, is not (${seen.people} of ${seen.there}; ${seen.drawn} drawn with the residents in sight)`)
     console.log(`  the window is ${(seen.share * 100).toFixed(0)}% of the picture from where they stand, drawn at ${seen.scale} of its pixels each way; ${seen.fps} frames a second`)
+    check(seen.rain === 0, `it rains in the other realm and not at home, where the window stands (${seen.rain})`)
     if (out) await page.screenshot({ path: join(out, 'play-3-open.png') })
 
     // Through it, on foot.
@@ -106,6 +107,7 @@ try {
     await page.waitForTimeout(900)
     await page.keyboard.up('KeyW')
     const back = await page.evaluate(() => globalThis.engine.portal.stats.steps.at(-1)), backGaps = await worst(), home = await state()
+    check(home.rain === 0 && there.rain === 0.3, `in the other realm it rained, and back at home it does not (${there.rain}, then ${home.rain})`)
     check(home.realm === 'home' && home.hour === null && home.afoot && home.to === 'dusk' && home.same, `turned round and walked back through the same window, they are at home on their feet (${JSON.stringify({ realm: home.realm, afoot: home.afoot, to: home.to })})`)
     console.log(`  the step back: everything made after ${back.whole.toFixed(0)} ms (${back.sectors} sectors); the longest frame ${backGaps.worst.toFixed(0)} ms, 95 in 100 within ${backGaps.p95.toFixed(0)} ms; ${home.fps} frames a second after`)
     // The key closes it.
@@ -129,6 +131,33 @@ try {
   await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 })
   console.log(`  opened again, it could be walked through after ${Date.now() - t1} ms`)
   check(Date.now() - t1 < 1500, 'a window opened again to a place still held opens in under a second and a half')
+  // Closed and left for a while, it lets go of the other realm's stream, so that realm can rest; opened again it is there all the same.
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.stats.released, null, { timeout: 15_000 }).catch(() => {})
+  await page.waitForTimeout(400)
+  const let_ = { released: await page.evaluate(() => globalThis.engine.portal.stats.released), pages: (await get('/realms')).realms.find((r) => r.id === 'dusk').pages }
+  check(let_.released && let_.pages === 0, `a window left closed lets go of the other realm's stream: the server has nobody reading that realm (${JSON.stringify(let_)})`)
+  const t2 = Date.now()
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 })
+  check(Date.now() - t2 < 2500, `and opened again after that it can be walked through after ${Date.now() - t2} ms: its sectors were still held`)
+  // With a wall across the way three metres ahead, the window stands where the walk to it is clear, not behind the wall.
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => !globalThis.engine.portal.gate, null, { timeout: 5000 })
+  const me = await page.evaluate(() => { const e = globalThis.engine; e.pose.yaw = 0; return e.me.feet.at.map(Math.round) })
+  const wall = []
+  // From a little under the ground up and six cells thick, so that it stands (one cell thick, it sometimes went over before the key was pressed).
+  for (let up = -2; up <= 22; up++) for (let deep = 28; deep <= 33; deep++) wall.push(me[0] - 40, me[0] + 41, me[1] + up, me[2] - deep, 8)
+  const walled = await post('/world/ask', { by: 'check', edit: [1, wall.length / 5, ...wall], release: [me[0], me[1] + 1, me[2] - 28] })
+  await page.waitForTimeout(1500)
+  check(walled === 202 && await page.evaluate(([x, y, z]) => (globalThis.engine.wand.kind(x, y, z) & 15) === 8, [me[0], me[1] + 10, me[2] - 28]), 'a wall of brick is put across the way, and the page knows of it')
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.gate, null, { timeout: 10_000 })
+  const stood = await page.evaluate(() => globalThis.engine.portal.gate.at)
+  const still_ = await page.evaluate(([x, y, z]) => (globalThis.engine.wand.kind(x, y, z) & 15) === 8, [me[0], me[1] + 10, me[2] - 28])
+  // The walk: nothing at the height of a body's middle along the straight line from the person to the window.
+  const walk = await page.evaluate(([from, to]) => { let met = 0; for (let i = 3; i < 100; i++) { const t = i / 100; if (globalThis.engine.wand.kind(Math.round(from[0] + (to[0] - from[0]) * t), from[1] + 9, Math.round(from[2] + (to[2] - from[2]) * t))) met++ } return met }, [me, stood])
+  check(still_ && walk === 0, `with a wall three metres ahead the window stands where the walk to it is clear (nothing met on the way; ${Math.round(me[0] - stood[0])} cells across, ${Math.round(me[2] - stood[2])} ahead; the wall is 28 ahead)`)
   const memory = await page.evaluate(() => globalThis.engine.portal.memory)
   console.log(`  the second world takes ${memory.pool.toFixed(0)} MB of the GPU for its trees and boxes, ${memory.sun.toFixed(0)} MB for its sun's maps, ${memory.picture.toFixed(0)} MB for the window's pictures`)
   if (bench) {

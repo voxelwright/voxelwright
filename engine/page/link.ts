@@ -96,6 +96,8 @@ export interface Link {
    * this page joined. False if none is ready.
    */
   go(between: () => void): boolean
+  /** Lets go of the world made ready: its stream is hung up on, so that a realm nobody is in can rest. */
+  release(): void
   /** What the world made ready has said so far, in order: its asks as echoes and the core's words (for whoever shows that world before the page is in it). Empty when none is ready. */
   held(): Held[]
   /** Each thing the world made ready says after all that was kept, as it says it. */
@@ -129,7 +131,7 @@ export function link(base = '/world'): Link {
     me: Math.random().toString(36).slice(2, 10),
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onbodies: null, onblow: null, onrealm: null,
     get base() { return base },
-    ready: () => Promise.reject(new Error('not yet')), go: () => false, held: () => [], onheld: null,
+    ready: () => Promise.reject(new Error('not yet')), go: () => false, held: () => [], onheld: null, release: () => {},
     get realm() { return realm },
     get onplugged() { return plugged },
     set onplugged(f: ((m: Plugged) => void) | null) { plugged = f; if (f) for (const m of plugs.values()) f(m) },
@@ -222,6 +224,7 @@ export function link(base = '/world'): Link {
     next?.stop.abort()
     return nextIs = new Promise((resolve) => { next = open(at, (l) => resolve(l.realm)) })
   }
+  self.release = () => { next?.stop.abort(); next = null; nextIs = null }
   self.go = (between) => {
     const to = next
     if (!to?.whole || !to.held) return false
