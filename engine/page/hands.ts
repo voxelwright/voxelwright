@@ -45,8 +45,8 @@ export interface Hands {
 /** Keys the page gives to offers that asked for none, in order. B and P are the page's own whatever is offered (leaving the body, the portal): never given. */
 const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyV', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
 
-/** How near (cells) a thing must be to be picked up, and to put one down. */
-const REACH = 60
+/** How near (cells) a thing must be to be picked up, and to put one down: from the person on foot, from the eye when they fly as one. */
+const REACH = 45
 
 /**
  * @param made   the made things of this world

@@ -28,7 +28,7 @@ import { blows } from './rules/blows.mjs'
 import { bodies, CAN } from './rules/bodies.mjs'
 import { built } from './rules/built.mjs'
 import { hands } from './rules/hands.mjs'
-import { holding } from './rules/holding.mjs'
+import { boxOf, holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -642,8 +642,12 @@ const lay = (ask) => { if (!ask || grasp.put(ask)) return; parentPort.postMessag
 const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell, seated: () => driven.seated(), kept: (by) => away.has(by) })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
-// Thrown, what a hand held is a body of its own cells; its record goes, for it lies wherever it lands (rules/holding.mjs `letGo`).
-const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id }, blast: (at, radius, spark) => { shock(at, radius); told(core.bodies_blast(at[0], at[1], at[2], radius, -1, spark ? 1 : 0), true); nudged = true }, ignite: (at, radius) => { core.bodies_ignite(at[0], at[1], at[2], radius); told(core.bodies_advance(0), false); nudged = true } , letGo: (by) => { const h = grasp?.letGo(by); if (!h) return null; const g = grid(h.rows, false); parentPort.postMessage({ echo: { by, gone: h.thing } }); return { ...g, thing: h.thing, called: h.called } } })
+// Thrown, what a hand held is a body of its own cells: in the air its record says nobody can hold it (THROWN), and where it comes to rest it is the made thing again (rules/holding.mjs `letGo`, rules/blows.mjs `rested`).
+const THROWN = '(thrown)'
+const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id }, blast: (at, radius, spark) => { shock(at, radius); told(core.bodies_blast(at[0], at[1], at[2], radius, -1, spark ? 1 : 0), true); nudged = true }, ignite: (at, radius) => { core.bodies_ignite(at[0], at[1], at[2], radius); told(core.bodies_advance(0), false); nudged = true } , letGo: (by) => { const h = grasp?.letGo(by); if (!h) return null; const g = grid(h.rows, false); parentPort.postMessage({ echo: { by, thing: { id: h.thing, held: THROWN } } }); return { ...g, thing: h.thing, called: h.called } },
+  // Come to rest, a thrown thing is the made thing again where it lies (its record says where, and its cells are those rows): it can be picked up again. Broken, or never come to rest, its record goes.
+  rested: (id, by, rows) => { const box = boxOf(rows); parentPort.postMessage({ echo: { by: by ?? 'the world', put: id, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1], edit: [1, rows.length / 5, ...rows], box, thing: { id, held: null, at: [(box[0] + box[3]) >> 1, box[1], (box[2] + box[5]) >> 1] } } }) },
+  lost: (id, by) => parentPort.postMessage({ echo: { by: by ?? 'the world', gone: id } }) })
 does.set('throw', blow.throw)
 does.set('push', blow.push)
 does.set('down', blow.down)

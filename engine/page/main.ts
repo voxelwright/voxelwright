@@ -810,7 +810,11 @@ async function main() {
   const grip = hands(far, controls, over, () => { const v = view(); return { from: v.eye, to: v.forward } }, made, async () => {
     // The first cell the eye meets: the marcher says how far, and the cell is a little past that along the look.
     const v = view(), hit = await march.pick(v)
-    return hit ? { cell: v.eye.map((e, a) => Math.floor(e + v.forward[a] * (hit.t + 0.3))) as [number, number, number], far: hit.t } : null
+    if (!hit) return null
+    const cell = v.eye.map((e, a) => Math.floor(e + v.forward[a] * (hit.t + 0.3))) as [number, number, number]
+    // How far off it is, is from the person: on foot the eye may be three metres behind them, and what lay at their feet was out of reach (#366).
+    const feet = me.on ? me.feet?.at : null
+    return { cell, far: feet ? Math.hypot(cell[0] - feet[0], cell[1] - (feet[1] + 10), cell[2] - feet[2]) : hit.t }
   })
   const casts = () => { staff.powers = [{ name: inHand.name }, ...grip.offered.filter((o) => o.aim).map((o) => ({ name: o.word, offer: o }))] }
   grip.onchange = casts

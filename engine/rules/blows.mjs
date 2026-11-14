@@ -35,9 +35,11 @@ const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number
  * @param thing   which living thing a body of the core is, by its thing's id, or undefined
  * @param blast   breaks the world at a place, as an ask does: (at, radius, spark)
  * @param ignite  lights what burns at a place, as an ask does: (at, radius)
+ * @param rested  a held thing that was thrown has come to rest as cells again: (thing id, who threw it, its rows) => it is a made thing where it lies, to be picked up again
+ * @param lost    a held thing that was thrown broke, or never came to rest: (thing id, who threw it) => its record goes
  * @param letGo   what someone holds leaves their hand to be thrown (rules/holding.mjs): (by) => its cells as the core takes a living thing's ({cells, size}), or nothing
  */
-export function blows({ core, folk, tell, post, told, happen, hear, thing, blast, ignite, letGo = () => null }) {
+export function blows({ core, folk, tell, post, told, happen, hear, thing, blast, ignite, letGo = () => null, rested = () => {}, lost = () => {} }) {
   /** How many blasts and fires each rule asked for this second. */
   const blasted = new Map(), lit = new Map()
   /** Ghosts by who they stand for, and who by ghost. */
@@ -103,7 +105,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
   /** Ghosts of those who are no longer there go; what was thrown long ago is forgotten. */
   function sweep(now) {
     for (const [by, ghost] of ghosts) if (!folk.has(by)) { core.living_vanish(ghost); ghosts.delete(by); whose.delete(ghost); going.delete(by) }
-    for (const [body, t] of thrown) if (now - t.t > REMEMBERED) thrown.delete(body)
+    for (const [body, t] of thrown) if (now - t.t > REMEMBERED) { thrown.delete(body); if (t.thing && !t.broke) lost(t.thing, t.from) }
     for (const [pair, t] of lately) if (now - t > AGAIN) lately.delete(pair)
     threw.clear(); blasted.clear(); lit.clear()
   }
@@ -113,9 +115,16 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
     const f = new Float32Array(words.buffer, words.byteOffset, words.length)
     // What was thrown and broke: its pieces are the same throw, and strike nobody it has struck.
     let pieces = null
+    // The rows of cells the core last put into the world, one after another: a body that came to rest is told as those, then as gone.
+    let laid = []
+    const i32 = new Int32Array(words.buffer, words.byteOffset, words.length)
     for (let i = 0; i < words.length;) {
       const tag = words[i], n = words[i + 1], at = i + 2
-      if (tag === 6) pieces = thrown.get(words[at]) ?? null
+      if (tag === 1) { for (let k = at + 6; k + 5 <= at + n; k += 5) if (i32[k + 4]) laid.push(i32[k], i32[k + 1], i32[k + 2], i32[k + 3], i32[k + 4]) }
+      // A held thing that was thrown and lies still is a made thing again where it lies; one that broke is no thing any more.
+      else if (tag === 3) { const t = thrown.get(words[at]); if (t?.thing && !t.broke) { thrown.delete(words[at]); if (laid.length) rested(t.thing, t.from, laid); else lost(t.thing, t.from) } }
+      if (tag !== 1) laid = []
+      if (tag === 6) { pieces = thrown.get(words[at]) ?? null; if (pieces?.thing && !pieces.broke) { pieces.broke = true; lost(pieces.thing, pieces.from) } }
       else if (tag === 2 && pieces) thrown.set(words[at], { ...pieces, t: now })
       else if (tag === 10 && (words[at] === 0 || words[at + 1] === 0)) {
         // What was thrown met the world, and no body: its rule hears where, once for each thing thrown.
