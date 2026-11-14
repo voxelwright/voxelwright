@@ -151,7 +151,16 @@ export function link(base = '/world'): Link {
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
     here(at, yaw, name, frame) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw, frame }) }).catch(() => {}) },
     // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.
-    say(name, text) { void fetch(`${base}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
+    say(name, text) {
+      // A page that has only just opened, or just stepped into a realm, may speak before that world has heard where
+      // it is (a page says so ten times a second): the world answers 409, and the first words were lost without a
+      // word (found by the hands lane, November 14). They are said again for a few seconds before anything is given up.
+      const send = (tries: number): void => void fetch(`${base}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => {
+        if (r.status === 409 && tries > 0) { setTimeout(() => send(tries - 1), 300); return }
+        if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` })
+      }, () => {})
+      send(12)
+    },
     clock: () => (Date.now() + behind) / 1000,
     get live() { return live },
     postMessage(ask) {
