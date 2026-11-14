@@ -546,7 +546,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/sound` (`world.sound`: a rule's sound, told to pages once), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns

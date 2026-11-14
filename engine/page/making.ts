@@ -13,6 +13,8 @@ export interface Making {
    * Resolves to how it ended; never throws.
    */
   (ask: Ask): Promise<Done>
+  /** Has a thing made, whatever the words: for what knows it is a thing that is wanted (a rule that asked for one, `plugins/make`). */
+  thing(ask: Ask): Promise<Done>
   /** Hears every stage of every ask, with the ask: for what covers the wait in the world. */
   on(each: (stage: Stage, ask: Ask) => void): () => void
 }
@@ -142,5 +144,5 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     return what === 'realm' ? realm(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
   }
 
-  return Object.assign(asked, { on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
+  return Object.assign(asked, { thing, on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
 }

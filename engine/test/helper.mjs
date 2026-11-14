@@ -257,7 +257,18 @@ try {
   await page.waitForFunction((n) => engine.things.all.size === n + 1, madeBefore, { timeout: 30_000 })
   check(rulesAsked === rulesBefore, 'and "make a tea crate" still makes one')
   await page.waitForFunction(() => engine.asker.busy === 0)
-  await page.evaluate(() => { engine.pose.x -= 5 })
+  // A rule that asks for a thing by words (world.make): said aloud to the rule, made by this page's own helper for
+  // the one who said it, where they look.
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'giver', name: 'giver', source: "on('said', (world, e) => { if (/sesame/i.test(e.text)) world.make({ wish: 'a tea crate', for: e.by }) })" } }) })
+  for (let i = 0; i < 50 && !(await (await fetch(`${world}/world/rules`)).json()).find((r) => r.id === 'giver')?.running; i++) await new Promise((r) => setTimeout(r, 100))
+  await page.evaluate(() => { engine.pose.x += 5 })
+  const askedBefore = asked
+  await page.keyboard.press('Enter'); await page.keyboard.type('open sesame'); await page.keyboard.press('Enter')
+  await page.waitForFunction((n) => engine.things.all.size === n + 2, madeBefore, { timeout: 30_000 })
+  check(await page.evaluate(() => [...engine.things.all.values()].at(-1).by === 'Ada') && asked <= askedBefore + 1, 'a rule that hears a word asks for a thing, and the page of the one who said it has it made by its own helper')
+  await page.waitForFunction(() => engine.asker.busy === 0)
+  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'giver' }) })
+  await page.evaluate(() => { engine.pose.x -= 10 })
   // In a realm with one rule, what is asked for changes that rule: put again under its id.
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
@@ -300,7 +311,7 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   server = await serve('/dev/null', ['--world', file])
   const back = await (await fetch(`${server.url}/world/things`)).json(), cellsBack = await (await fetch(`${server.url}/world/things?id=${went.done.id}`)).json()
-  check(back.length === 8 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
+  check(back.length === 9 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
   check((await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'x', gone: went.done.id }) })).status === 202, 'it can be forgotten')
   // The world does asks in its own time: it is gone when the world says so.
   for (let i = 0; i < 50 && (await (await fetch(`${server.url}/world/things`)).json()).some((t) => t.id === went.done.id); i++) await new Promise((r) => setTimeout(r, 100))
