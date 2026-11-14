@@ -148,6 +148,9 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
           const by = from ? { kind: 'thrown', rule: from.rule, ...(thrower ? { from: who(thrower) } : {}), material: MATERIALS[kind & 15], ...(from.thing ? { thing: from.thing, called: from.called } : {}), ...(from.tag ? { tag: from.tag } : {}) } : living ? { kind: 'thing', id: living } : { kind: 'loose', material: MATERIALS[kind & 15] }
           const where = [f[at + 2], f[at + 3], f[at + 4]]
           const e = { whom: who(p), by, speed: Math.round(f[at + 5]), push: Math.round(f[at + 6]), at: where.map(Math.round), up: Math.max(0, Math.min(1, (where[1] - p.at[1]) / BOX[1])) }
+          // A thing someone held and threw, striking a body the world moves (an actor, a seat), puts it on the ground as a
+          // hard push does: a sword thrown at someone is not shrugged off because their rule has no word for it.
+          if (from?.thing && (p.rule || p.seat) && e.speed >= 30) { p.down = now + 2500; p.goal = null; tell(p) }
           // An actor's own rule hears of it with the id it gave; everyone hears of a person or a seat.
           if (p.rule) hear(p.rule, 'struck', { ...e, whom: { ...e.whom, mine: true } }); else happen('struck', e)
         }
