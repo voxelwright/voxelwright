@@ -464,6 +464,7 @@ does.set('show', hand.show)
 // What a realm sounds like (rules/sound.mjs): a sound at a place or on someone, for everyone near.
 const noise = sounding({ folk, tall: TALL, stand, tell: (m) => parentPort.postMessage(m) })
 does.set('sound', noise.sound)
+does.set('music', noise.music)
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
   const wrong = (what) => { rule.error = what }

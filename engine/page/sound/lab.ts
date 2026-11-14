@@ -7,7 +7,7 @@ import { patch, sounds, type Patch } from './patch.ts'
 import { conductor } from './music/conductor.ts'
 import { playable, surface } from './instrument.ts'
 import { INSTRUMENTS, type Instrument } from './instruments.ts'
-import { MOODS, TRIES } from './music/compose.ts'
+import { MODES, MOODS, TRIES, moodKey } from './music/compose.ts'
 
 const voice = await sound()
 const sections = document.querySelector('#sections')!, state = document.querySelector('#state')!
@@ -88,9 +88,16 @@ slider(beds, 'rubble', 0, (v) => voice.set(SET.rumble, v))
 const tunes = section('Music that follows the place', `Composed here as it plays: for each voice ${TRIES} random patterns are scored against named rules and the best is kept. Pick a place; picking another hands over at the next bar.`)
 const music = conductor(voice)
 const moodButtons = new Map<string, HTMLButtonElement>()
-const pickMood = (name: string | null) => { music.want(name, true); for (const [k, b] of moodButtons) b.classList.toggle('on', k === name) }
+// What a realm's rule may say of its music (world.music): the mood, a pace and a mode of its own, and how much of it is in.
+let liked: string | null = null, pace = 0, mode = ''
+const retune = () => music.want(liked ? moodKey(liked, pace, mode) : null, true)
+const pickMood = (name: string | null) => { liked = name; retune(); for (const [k, b] of moodButtons) b.classList.toggle('on', k === name) }
 for (const name of Object.keys(MOODS)) moodButtons.set(name, button(tunes, name, () => pickMood(name)))
 button(tunes, 'none', () => pickMood(null))
+const asRule = section('As a realm\u2019s rule sets it', 'A rule says what the music is like and changes it with its own numbers: a pace, a mode, and how much of it is playing. The pace and the mode come in at the next beat here; drive at once.')
+slider(asRule, 'pace (own, 40 to 180)', 0, (v) => { pace = v === 0 ? 0 : Math.round(40 + 140 * v); retune() })
+slider(asRule, 'drive (off, 0 to 1)', 0, (v) => { music.drive = v === 0 ? null : v; music.steady = v > 0 })
+for (const name of ['', ...Object.keys(MODES)]) button(asRule, name || 'its own mode', () => { mode = name; retune() })
 const sheet = document.createElement('div')
 sheet.className = 'sheet'
 tunes.after(sheet)

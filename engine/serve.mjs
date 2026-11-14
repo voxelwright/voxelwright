@@ -24,6 +24,7 @@ import { CHANNELS, KEYS_MOST, NAMED as MOVES } from './page/moves.ts'
 import { CARRIED, WORN } from './page/wear.ts'
 import { RULES_MOST } from './rules/run.mjs'
 import { HELD_MOST, NOTES_MOST, SOUNDS_A_SECOND } from './rules/sound.mjs'
+import { MODES, MOODS, PACE } from './page/sound/music/compose.ts'
 import { LIKES } from './page/sound/likes.ts'
 import { text } from './text.mjs'
 
@@ -85,10 +86,11 @@ async function report(req, res) {
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
 //   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
+//  11 music   what the realm's music is like, if a rule has said (rules/sound.mjs), as JSON: {like, pace, mode, drive, now} or null. Not kept: said to each reader as it joins.
 //  10 sound   a sound a rule made (rules/sound.mjs), as JSON: {at, like | patch, force, size, hz, gap, for, reach}. For whoever reads now; not kept.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, MUSIC = 11
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -154,6 +156,7 @@ world.show(id, {line, meters, score, choice, to})   shows people something on th
   on('pick',  (world, e) => {})   someone picked from a choice this rule shows them: e = {by, name, show (its id), pick (the pick's id), at}. Only the rule that shows it hears it; the choice stays until the rule changes or hides it
 POST /world/pick          {"by": name, "rule": id, "id": id, "pick": id}   pick from a choice a rule shows, from outside a page
 world.sound({like, at, on, force, size, note, notes, gap, for, reach, patch})   makes a sound that everyone near hears where it is, quieter and later the further off. It needs what it is (like, or patch) and where (on, or at). on: an actor of this rule or an id of world.people: it sounds where they are. at: [x, z] or [x, y, z]. like is one of: ${Object.entries(LIKES).map(([k, v]) => `${k} (${v.says})`).join('; ')}. force 0 to 1 is how hard (louder and brighter; 0.7 unless said). size 0.25 to 4 makes the same thing bigger and lower (a tower bell is a bell of size 3). note is its pitch as a MIDI note, 12 to 120 (60 is middle C, 69 is A), or pitch in Hz; notes is up to ${NOTES_MOST} notes sounded one after another, gap ms apart (0 to 1000): a chord strummed is notes with gap 25, a tune is notes with gap 250, and a longer tune is a call each tick. for is how many seconds a held one lasts (0.05 to ${HELD_MOST}). reach 2 to 300 is the metres at which it is half as loud as beside it (each like has its own). A rule makes at most ${SOUNDS_A_SECOND} sounds a second. Nothing is heard by rules: a sound is for people's ears
+world.music({like, pace, mode, drive, now})   says what the realm's music is like, for everyone in it. It is not a track: the page composes it as it plays and it never repeats, so say what it should be like and change that as the rule's own numbers change (calm to hunted, the last lap, the final round). Only the fields given change. like is one of: ${Object.values(MOODS).map((m) => `${m.name} (${m.idiom}, ${m.bpm} beats a minute)`).join('; ')}. pace ${PACE[0]} to ${PACE[1]} is beats a minute in place of its own. mode is the scale in place of its own: ${Object.keys(MODES).join(', ')} (major and lydian are bright, dorian and minor darker, phrygian threatening). drive 0 to 1 is how much of it is playing: 0 one quiet voice, 1 every voice; unsaid, a piece comes in a voice at a time by itself. A new like, pace or mode comes in at the next bar, or at the next beat with now: true; drive changes at once. like: null gives the music back to the place (which has music of its own by where people are). One realm has one music: the rule that spoke last has it, and when that rule is taken out the place's own comes back. After a restart say it again on start
   patch: a sound of your own in place of like, as data. Nothing is recorded: say what is struck, plucked, blown or rubbed and what it is. {how: "struck" | "plucked" | "blown" | "rubbed", hard: 0 to 1 (felt 0.1, wood 0.5, steel 1: harder is brighter), rough: 0 to 1 (grit, breath), shape: "bar" | "plate" | "bell" | "skin" | "string" | "tube" | "pipe" | "hollow" | "lump" | "cup", pitch: 20 to 8000 Hz of its lowest tone, ring: 0.01 to 12 seconds it takes to die away (brick 0.06, wood 0.15, glass 0.5, a bell 5; for blown or rubbed, how long it takes to stop), damp: 0 to 1 how much sooner its high tones die (metal 0.1, wood 0.7, earth 0.9), gain: 0 to 1}, all of those always; and if wanted bend: -2 to 2 octaves it starts off its pitch (a drum +0.5, a drop of water -0.5), waver: 0 to 1 a held tone trembling, pieces: {count: 1 to 40, over: seconds, spread: 0 to 1} small ones of the same after the blow (glass breaking, a rattle), air: {from: Hz, to: Hz, for: seconds, gain: 0 to 1} a rush of noise sweeping between two pitches (a crash, a puff, a hiss). No other key. It can never be louder than the page lets anything be
 POST /world/act           {"by": name, "rule": id, "id": id, "phase": "down" | "up", "from": [x, y, z], "to": [dx, dy, dz]}   do something a rule offers, from outside a page
 world.actor(id, {move, aim})   what the actor does with its limbs, laid over its standing, walking or running (an actor going faster than about 2 m/s runs, and looks it). move is a name: ${Object.keys(MOVES).join(', ')}. Or keys of your own, for anything else: {keys: [{t: seconds, joint: value, ...}, ...], loop, hold}, at most ${KEYS_MOST} keys in order of time, each naming only the joints it sets (the rest go on as they were: a wave leaves the legs walking). loop: round and round until another is set. hold: stay in the last pose (sitting, aiming, lying). Otherwise the body goes back to what it was doing. move: null ends it. aim: [x, y, z] is what an aiming arm points at (the middle of a person is their feet plus 10). Joints, in radians: ${CHANNELS.join(', ')}. lean is the chest forward; twist and turn are the chest and head to the right; nod the head down; lift an arm forward and up (1.57 level, 3.14 overhead), out an arm sideways, bend an elbow; swing a thigh forward, knee a knee; crouch and sit are 0 to 1; rise is cells off the ground; lie is 0 to 1 onto the back (to -1 onto the front); aimL and aimR are 0 to 1, that arm straight at aim. Example, a salute: {keys: [{t: 0.25, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.2, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.5, liftR: 0, outR: 0, bendR: 0.1}]}. A move is how a body looks and no more: it strikes nobody and moves nothing. world.people shows an actor's move while it lasts.
@@ -392,7 +395,7 @@ function open(of) {
   const readers = new Set()
   let down = ''
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
-  let offered = null, showing = null
+  let offered = null, showing = null, playing = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
@@ -408,6 +411,8 @@ function open(of) {
     // What rules offer people to do: for whoever reads now, and kept here for whoever joins.
     if (m.offers) { offered = frame(OFFERS, 0, Buffer.from(JSON.stringify(m.offers))); for (const r of readers) r.write(offered); return }
     if (m.shown) { showing = frame(SHOWN, 0, Buffer.from(JSON.stringify(m.shown))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(showing); return }
+    // What the realm's music is like: for whoever reads now, and kept here for whoever joins.
+    if (m.music !== undefined) { playing = frame(MUSIC, 0, Buffer.from(JSON.stringify(m.music))); for (const r of readers) r.write(playing); return }
     // A sound a rule made: for whoever reads now and is not far behind.
     if (m.sound) { const f = frame(SOUND, 0, Buffer.from(JSON.stringify(m.sound))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(f); return }
     // Where people are and what they say goes to whoever is reading now, and is not kept.
@@ -541,6 +546,7 @@ function open(of) {
       res.write(frame(NOW, log.length, Buffer.from(Float64Array.of(Date.now()).buffer)))
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
+      if (playing) res.write(playing)
       if (showing) res.write(showing)
       // What sleeps says nothing: the world says once more where everything is.
       thread.postMessage({ nudge: true })

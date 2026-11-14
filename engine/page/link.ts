@@ -43,6 +43,8 @@ export interface Link {
   onecho: ((echo: Echo, live: boolean) => void) | null
   /** Which body a living thing is now (#245), by its thing's id; body 0 when it lives no more. Said as it changes and to each page as it joins. */
   onliving: ((living: { thing: string; body: number }) => void) | null
+  /** What the realm's music is like, if a rule has said (rules/sound.mjs), or null: as last said, told at once to whoever starts to listen. */
+  onmusic: ((music: unknown) => void) | null
   /** A sound a rule made (rules/sound.mjs): what it holds came through a rule, and is read again by whoever plays it. */
   onsound: ((sound: unknown) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
@@ -92,7 +94,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, MUSIC = 11
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
@@ -106,6 +108,8 @@ export function link(base = '/world'): Link {
   /** The stream being read, and one made ready beside it: what it has said so far, and whether all that was kept has come. */
   interface Line { base: string; stop: AbortController; held: { kind: number; data: unknown }[] | null; realm: Realm; whole: boolean }
   let line: Line, next: Line | null = null
+  /** What the realm's music is like, as last said, and who is told. */
+  let music: unknown = null, tunes: ((music: unknown) => void) | null = null
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
@@ -119,6 +123,8 @@ export function link(base = '/world'): Link {
     pick(rule, id, pick) { void fetch(`${base}/pick`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, pick }) }).catch(() => {}) },
     get onoffers() { return hears },
     set onoffers(f: ((offers: Offer[]) => void) | null) { hears = f; f?.(offers) },
+    get onmusic() { return tunes },
+    set onmusic(f: ((music: unknown) => void) | null) { tunes = f; f?.(music) },
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
     drive(id, go, turn, rise, once) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
@@ -148,6 +154,7 @@ export function link(base = '/world'): Link {
     }
     else if (kind === SHOWN) { shown = data as Shown[]; self.onshown?.(shown) }
     else if (kind === OFFERS) { offers = data as Offer[]; self.onoffers?.(offers) }
+    else if (kind === MUSIC) { music = data; self.onmusic?.(music) }
     else if (kind === SOUND) { if (live) self.onsound?.(data as Parameters<NonNullable<Link['onsound']>>[0]) }
     else if (kind === LIVING) { const l = data as { thing: string; body: number }; if (l.body) alive.add(l.thing); else alive.delete(l.thing); self.onliving?.(l) }
     else if (kind === HERE) { const who = data as Someone; if (who.by === self.me) return; if (who.gone) there.delete(who.by); else there.set(who.by, who); self.onhere?.(who) }
@@ -212,6 +219,7 @@ export function link(base = '/world'): Link {
     // What the old world showed and offered is no longer shown or offered: the other says its own.
     shown = []; self.onshown?.(shown)
     offers = []; self.onoffers?.(offers)
+    music = null; self.onmusic?.(music)
     // All that was held, in order: what came before "now" is what was done before this page joined.
     const held = to.held
     to.held = null
