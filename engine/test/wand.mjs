@@ -18,7 +18,7 @@ try {
   /** Turns the head until the middle of the picture is on something of a material, near by. */
   const find = (material, most = 200) => page.evaluate(async ([material, most]) => {
     const e = globalThis.engine, p = e.pose
-    for (let yaw = -3.14; yaw < 3.14; yaw += 0.03) for (const pitch of [-0.3, -0.15, 0, 0.2, 0.45]) {
+    for (let yaw = -3.14; yaw < 3.14; yaw += 0.06) for (const pitch of [-0.3, -0.12, 0.05, 0.15, 0.35]) {
       p.yaw = yaw; p.pitch = pitch
       const hit = await e.pick(0, 0)
       if (hit && hit.material === material && hit.t < most && hit.t > 40) return true

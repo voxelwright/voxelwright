@@ -82,6 +82,10 @@ export interface Puffs {
   blast(at: readonly [number, number, number], radius: number): void
   /** Dust thrown up where something came down: `count` puffs of a colour (as the screen shows it) round `at`, spreading `radius` cells. */
   dust(at: readonly [number, number, number], radius: number, count: number, colour: readonly [number, number, number]): void
+  /** One frame of a ball of fire in flight (a spell, #246): a white-hot heart, and flames and a little smoke left behind it. */
+  ball(at: readonly [number, number, number], radius: number, dt: number): void
+  /** A flash of a spell's own cool light, with no fire and no smoke. */
+  glint(at: readonly [number, number, number], radius: number): void
   /** A burning cell, for one frame of `dt` seconds: flames, and now and then smoke. */
   flame(at: readonly [number, number, number], dt: number): void
   /** A place where falling water lands, for one frame of `dt` seconds: now and then mist. */
@@ -169,6 +173,14 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
       for (let k = count; k > 0; k--) {
         puff(at, radius * 0.7, rnd(10, 34), rnd(1, 7), { size: rnd(5, 11) + radius * 0.45, grow: rnd(5, 11), life: rnd(4, 9), heat: 0, cool: 0, rise: 2, drag: 1.7, colour, cover: 0.36 })
       }
+    },
+    ball(at, r, dt) {
+      puff(at, r * 0.15, 0, 0, { size: r * 0.8, grow: -r * 2, life: 0.1, heat: 0.8, cool: 0, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
+      if (Math.random() < dt * 90) puff(at, r * 0.45, rnd(2, 9), rnd(0, 8), { size: r * rnd(0.7, 1.2), grow: r * 1.4, life: rnd(0.25, 0.5), heat: 0.82, cool: rnd(1.1, 1.7), rise: 30, drag: 2.5, colour: [0.1, 0.09, 0.08], cover: 0.3 })
+      if (Math.random() < dt * 14) { const grey = rnd(0.2, 0.34); puff(at, r * 0.5, rnd(2, 6), rnd(4, 12), { size: r * rnd(0.9, 1.5), grow: r * 1.2, life: rnd(1.2, 2.4), heat: 0, cool: 0, rise: 16, drag: 1.2, colour: [grey, grey, grey], cover: 0.32, late: 0.1 }) }
+    },
+    glint(at, r) {
+      puff(at, 0, 0, 0, { size: r * 2, grow: r * 9, life: 0.22, heat: 0.5, cool: 2, rise: 0, drag: 0, colour: [0, 0, 0], cover: 0 })
     },
     flame(at, dt) {
       // Not white-hot: with the fire's colours as a blast's are, a burning crown at heat 1 was a white blob.

@@ -29,6 +29,8 @@ export interface Hud {
     onsubmit: ((text: string) => void) | null
     /** What is done with a wish: words, a picture, a link, or any of them together. */
     onask: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null
+    /** Adds someone who may take a wish before it is made (the wand: words that call a known spell). True if it took it. */
+    take(taker: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean): void
     /** Wishes offered to start from while the line is empty. */
     starters: readonly string[]
     readonly open: boolean
@@ -113,6 +115,7 @@ export function hud(input: Input): Hud {
     set onsubmit(f: ((text: string) => void) | null) { takes.say = f; draw() },
     get onask() { return takes.ask },
     set onask(f: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null) { takes.ask = f; draw() },
+    take(taker: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean) { takers.push(taker) },
     starters: [] as readonly string[],
     get open() { return leave !== null },
     show() {
@@ -138,6 +141,7 @@ export function hud(input: Input): Hud {
       self.show()
     },
   }
+  const takers: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean)[] = []
   /** `fresh` (Shift with Enter): make it anew, even if one like it was made before. */
   const submit = (fresh = false) => {
     const text = line.value.trim()
@@ -147,6 +151,7 @@ export function hud(input: Input): Hud {
     if (!wish && !picture && !found) { self.hide(); return }
     const asked = { ...(wish ? { wish } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}), ...(fresh ? { fresh } : {}) }
     self.hide()
+    if (takers.some((taker) => taker(asked))) return
     self.onask?.(asked)
   }
   line.addEventListener('keydown', (e) => {

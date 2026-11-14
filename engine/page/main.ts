@@ -23,7 +23,8 @@ import { presence } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
-import { wand } from './wand.ts'
+import { wand, type Target as Aim } from './wand.ts'
+import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
@@ -250,6 +251,7 @@ async function main() {
     const v = view(), to = fit()
     staff.frame(v)
     ears?.frame(v.eye, pose.yaw, dt)
+    magic.step(dt)
     lap('steer')
     fallOn(dt)
     lap('fallOn')
@@ -633,9 +635,35 @@ async function main() {
     return p.ms
   }
 
+  // ── Spells (#246) ───────────────────────────────────────────────────────
+  // A known spell is done at once from the kept library (spells.ts). With the wand in hand a click casts the spell
+  // in hand at what is aimed at, and words on the ask bar that call a known spell take it in hand and cast it.
+  const magic = caster({
+    kind: staff.kind, feet: (x, z) => core.feet_at(x, z), make, strike,
+    light: (at, radius) => { ticking = true; mover.postMessage({ ignite: at, radius, tick: 0 } satisfies Ask) },
+    ball: smoke.ball, flash: smoke.glint,
+  })
+  let inHand: Spell = LIBRARY[0]
+  staff.label = inHand.name
+  /** Casts a spell at a target, and says why not if it could not be. */
+  const spell = (which: Spell, target: Aim | null) => { const why = magic.cast(which, target, view()); if (why) over.notice(why); return why }
+  staff.oncast = (target) => { spell(inHand, target) }
+  // Words alone that call a known spell are taken before they are a wish; anything else is the making lane's wish.
+  over.line.take((ask) => {
+    if (!staff.held) return false
+    const called = ask.wish && !ask.picture && !ask.link ? known(ask.wish) : null
+    if (!called) return false
+    inHand = called
+    staff.label = called.name
+    staff.cast()
+    return true
+  })
+
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
+  // The wand's spells, on a line of their own (#246).
+  Object.assign((globalThis as unknown as { engine: object }).engine, { magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
 
   // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
   if (query.get('living') === 'car') void (async () => {

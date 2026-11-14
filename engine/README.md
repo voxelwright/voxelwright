@@ -50,7 +50,20 @@ of the picture, three ways (keys 1 to 3 or the bar), each drawn in the world:
   Side (its faces that look the way the pointed face does): X, the wheel or the bar. One thing is the cells that
   touch, down to where someone would stand; a house is joined to its terrace and is taken a part at a time.
 
-A click (the round button on a phone) casts at what is aimed at. `engine.wand.target` is what is aimed at.
+A click (the round button on a phone) casts the spell in hand at what is aimed at; it starts as Fireball. With the
+wand in hand, words on the ask bar (Enter) that call a known spell take it in hand and cast it. Known spells are
+done at once from the kept library (`page/spells.ts`), with no model:
+
+- **Fireball** (and "great fireball"): seen to fly from the caster, then a blast that lights what burns.
+- **A colour** ("make it pink", twenty names): the cells keep their material and take the colour.
+- **A material** ("turn it to steel", glass, wood, brick, stone, concrete…): the cells become it. Steel does not burn.
+- **Shiny**: a mark on the kind that makes the cells mirror. A look only.
+- **Twice as large**, three times, half: the thing's cells are made again from where it stands; what then has
+  nothing under it falls.
+
+A change of up to 3,276 rows of cells is one edit, whole or not at all; a bigger one (a house wall) is several, sent
+together.
+`engine.spell(words, target)` casts from the console; `node test/spells.mjs` checks each.
 
 ## Making (#220, #244)
 
@@ -239,7 +252,7 @@ node test/shared.mjs --suite  # before a change to the solver or to how a shared
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
-further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
+further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/spells.mjs` (known spells with no model: pink, shiny, steel that does not burn, twice as large, a fireball seen on its way, a change too big for one edit done as several), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
 (a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run

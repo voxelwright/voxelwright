@@ -49,6 +49,8 @@ export interface Wand {
   area: [number, number, number]
   /** What is aimed at now, or null (the sky, or nothing yet). */
   readonly target: Target | null
+  /** The spell in hand, by name: what a click casts. Shown before the aim. */
+  label: string
   /** What it says of the aim, as the bar shows it. */
   readonly says: string
   /** Every edit the page applies, in order: the wand reads the world as it stands. */
@@ -62,6 +64,8 @@ export interface Wand {
   aim(view: View): Promise<Target | null>
   /** What a cast does with the target: set by whoever knows spells. */
   oncast: ((target: Target | null) => void) | null
+  /** A flash on the aim, as when something is cast at it. */
+  flash(): void
   /** Casts at what is aimed at: a flash on the aim, and `oncast`. */
   cast(): void
 }
@@ -392,6 +396,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
     get target() { return target() },
     get says() { return says() },
     oncast: null,
+    label: '',
     changed(edit) {
       const room = core.edits_room(edit.words.length)
       new Int32Array(core.memory.buffer, room, edit.words.length).set(edit.words)
@@ -416,6 +421,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
       while (going) { gatherOn(); if (going) await new Promise((done) => setTimeout(done, 0)) }
       return target()
     },
+    flash() { flash = 1 },
     cast() {
       flash = 1
       self.oncast?.(target())
@@ -462,7 +468,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
         for (const b of [smaller, bigger]) b.hidden = mode !== 'area'
         gap.hidden = mode === 'point'
       },
-      tell() { const text = says(); if (text !== last) told.textContent = last = text },
+      tell() { const text = `${self.label ? `${self.label} · ` : ''}${says()}`; if (text !== last) told.textContent = last = text },
     }
   })()
   /** An area made bigger or smaller, all three ways together; `only` picks one way (0 across, 1 deep, 2 high). */

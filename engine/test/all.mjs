@@ -29,6 +29,7 @@ const checks = [
   ['tools', 'node', ['test/tools.mjs'], true],
   ['chain', 'node', ['test/chain.mjs'], true],
   ['wand', 'node', ['test/wand.mjs'], true],
+  ['spells', 'node', ['test/spells.mjs'], true],
   ['aims', 'node', ['test/aims.mjs'], true],
   ['skips', 'node', ['test/skips.mjs'], true],
   ['hours', 'node', ['test/hours.mjs'], true],

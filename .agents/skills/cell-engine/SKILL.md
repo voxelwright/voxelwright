@@ -1697,3 +1697,29 @@ What cost time, beyond what `engine/README.md` "Making" says:
 - **The Write tool turns `\u2028` in a regex into the character itself** and the file no longer parses: use
   `\p{Zl}\p{Zp}` or build the pattern from pieces.
 - **zsh does not split `$s` in `set -- $s`**: a loop over "name args" strings ran every command with no arguments.
+
+## The wand's aim and known spells (`page/wand.ts`, `page/spells.ts`, #246, November 13)
+
+- **What is aimed at** is asked of the marcher (`pick`), then of the cells: a short walk along the look from two cells
+  before where the marcher said, to the first solid cell and the face it was entered by. `pick` now answers one at a
+  time (it has one read-back buffer; a hover look in flight made a tool's look fail). A look takes 30 to 60 ms here.
+- **The page's own core is told every edit the page applies** (`world_edit(-1)` from `change`), so `world_kind` on
+  the main thread is the world as it stands, in a shared world too. Before, it was the town as the rules made it.
+- **One thing** is the cells that touch, down to where someone on foot would stand (`feet_at`): a parked car 5,818
+  cells in 3 ms, a street tree 7,929 in 6 ms, a hydrant 74. Stopping at ground materials failed (a pavement and a
+  house's foot are both concrete). A house is joined to its terrace: over 60,000 cells or 19 m it is taken a part
+  at a time (cells of one kind that touch). 150,000 cells take 250 ms, so a thing is gathered 3 ms a frame.
+- **The aim is one full-screen pass** that reads the picture's depth, finds each pixel's place, and asks a 3D
+  texture of one byte a cell whether that cell is chosen. 0.5 to 1.3 ms at 2560 x 1440 beside a march of 45 ms on a
+  busy GPU. The face a pixel shows must be the wall the look crossed last among those with nothing chosen beyond:
+  asked of the place alone, every cell's edge was taken for a face and the whole thing was drawn as a grid.
+- **A change is one edit of rows**, whole or not at all: at most 3,276 rows. A car is 334 rows to recolour and 1,556
+  to double; a tree 1,384; a house wall that runs along z is thousands (6,473 for one part) and is refused. Kinds
+  are rewritten keeping bits 4 and 5. The release is asked at a cell of air over the thing.
+- **Bit 6 of a kind is POLISHED** (`kinds.rs`, read in `march.ts` where `mirror` is set): a look only. Bit 7 is free.
+- **Real and not**: colour and material are the cells' kinds (a steel tree does not burn: checked). Size is real
+  cells; a doubled car sheds a few bodies where its weight is more than its wheels bear. Shiny is a look. Liquid
+  and soft are not built: flowing water is a depth field fed only by a yard's tank, and nothing gives.
+- **A fireball's flight is the caster's page only**; the blast and fire it ends in are the world's. 361 frames in
+  6 s with none over 17 ms.
+
