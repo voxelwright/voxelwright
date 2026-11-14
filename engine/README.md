@@ -9,7 +9,7 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 - `page/`: the city, flown through. `main.ts` (the page), `world.ts` (boxes of sectors round
   the camera), `worker.ts` (makes sectors), `march.ts` (the ray marcher), `sun.ts` (the sun's shadows kept in maps), `edits.ts`,
   `mover.ts` (the worker that moves what has come loose and burns what burns), `told.ts` (what it says), `pieces.ts` (a body on its way), `crumbs.ts`, `puffs.ts` (fire, smoke and dust),
-  `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
+  `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `moves.ts` (what a figure does with its limbs, as data), `wear.ts` (what it wears and carries, as data), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
   report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world, home, and any
@@ -288,6 +288,14 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
 - **Kept with the world**, as the asks that put it in and took it out. A world started again has its rules, each
   with its actors where they stood and what it kept (`<world file>.people.json`, written when it changes, two
   seconds behind at most): `start` is told `why: "restart"` and need place nobody who is there.
+- **Moves and looks are data** (#218). `world.actor(id, {move, aim})` has an actor do something with its limbs:
+  a move that has a name (wave, cheer, strike, kick, block, aim, fire, hit, fall, get-up, sit and more: the guide
+  lists them) or keys of the rule's own (`{keys: [{t, liftR: 1.9, ...}], loop, hold}`: a pose is a number for each
+  of twenty-one joints, and a key names only the joints it sets), laid over the standing, walk or run. `look` now
+  takes things worn by name (`wear: ["suit", "tie #7a1c1c", "glasses"]`), something carried, and boxes of the
+  rule's own on any part of the body. A body going faster than about 2 m/s runs and is drawn running.
+  `page/moves.ts` and `page/wear.ts` hold the names, which are no more than data written down, and check what a
+  rule sends. `node test/moves.mjs` checks it with a rule that is no game.
 - **A rule can take a resident of the town as its own** (#218). `world.residents` is who of the town's own people
   is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk

@@ -16,7 +16,9 @@
 import { readFile } from 'node:fs/promises'
 import { parentPort, workerData } from 'node:worker_threads'
 import { controlsOf, numbers } from './page/living.ts'
+import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
+import { lookOf } from './page/wear.ts'
 import { hands } from './rules/hands.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
@@ -182,7 +184,14 @@ function footing(x, y, z) {
 const COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west']
 /** Which way something lies from a place, as a word: north is -z, east is +x. */
 const bearing = (dx, dz) => COMPASS[((Math.round(Math.atan2(dx, -dz) / (Math.PI / 4)) % 8) + 8) % 8]
-const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}) } })
+/** What a body is doing with its limbs (page/moves.ts), as pages are told it: its name, or its keys when it has none (those once a second and when it changes, not with every step), when it began and what it is aimed at. */
+const doing = (p, now) => {
+  if (!p.move) return {}
+  const whole = !p.move.name && (p.move.told !== p.move.n || now - p.move.toldAt > 1000)
+  if (whole) { p.move.told = p.move.n; p.move.toldAt = now }
+  return { move: { n: p.move.n, since: p.move.since, ...(p.move.name ? { name: p.move.name } : whole ? { keys: p.move.data } : {}), ...(p.move.aim ? { aim: p.move.aim } : {}) } }
+}
+const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()) } })
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -305,7 +314,7 @@ function take(rule, short, id, now, wrong) {
 }
 /** A taken resident is let go: nobody's any more, it walks back to its round. */
 function release(p) {
-  p.rule = '~'; p.name = ''; p.look = undefined; p.stopped = ''; p.pace = BACK_PACE; p.back = Date.now() + BACK_WITHIN
+  p.rule = '~'; p.name = ''; p.look = undefined; p.move = undefined; p.stopped = ''; p.pace = BACK_PACE; p.back = Date.now() + BACK_WITHIN
   tell(p)
 }
 /** A body on its way back: towards where its round has got to; there (or out of time), it is a resident again. Says whether it has gone. */
@@ -373,24 +382,13 @@ const ACTOR_ID = /^[a-z0-9][a-z0-9-]{0,23}$/, COLOUR = /^#[0-9a-f]{6}$/
 const ACTORS_MOST = 64, WANTS_MOST = 64, PEOPLE_MOST = 256
 /** The fastest an actor may go, cells a second (a walk is 13), and the most a rule's actors may say a second. */
 const PACE_MOST = 140, SAYS_A_SECOND = 8
-/** What of a figure a rule may choose (page/people.ts `figure`): colours as #rrggbb, and how tall and how broad against the usual. */
-const LOOK_COLOURS = ['coat', 'legs', 'hair', 'skin', 'shoes'], LOOK_BUILD = ['tall', 'broad']
 const pair = (a) => Array.isArray(a) && (a.length === 2 || a.length === 3) && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
-/** What of how a figure looks may be chosen, from what someone sent: or nothing. */
-function lookOf(from) {
-  const look = {}
-  if (from && typeof from === 'object') {
-    for (const k of LOOK_COLOURS) if (typeof from[k] === 'string' && COLOUR.test(from[k].toLowerCase())) look[k] = from[k].toLowerCase()
-    for (const k of LOOK_BUILD) if (Number.isFinite(from[k])) look[k] = Math.max(0.8, Math.min(1.2, from[k]))
-  }
-  return Object.keys(look).length ? look : undefined
-}
 /** Who is there, as a rule is told it: its own actors by the names it gave them, anyone else by the name the world knows them by. */
 function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
@@ -441,6 +439,12 @@ does.set('actor', (rule, w, now, wrong) => {
   if (w.to !== undefined) { if (w.to === null) p.goal = null; else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.stopped = '' } else wrong('where to go is to: [x, z], or null to stop') }
   if (w.face !== undefined) { if (pair(w.face)) { const dx = w.face[0] - p.at[0], dz = w.face[w.face.length - 1] - p.at[2]; if (dx || dz) p.yaw = Math.atan2(dx, -dz) } else wrong('what to face is face: [x, z]') }
   if (w.look !== undefined) p.look = lookOf(w.look)
+  // What it does with its limbs: a move that has a name, or keys of the rule's own; null ends it. And what it is aimed at.
+  if (w.move !== undefined) {
+    if (w.move === null) p.move = undefined
+    else { const move = moveOf(w.move); if (move) p.move = { n: (p.move?.n ?? 0) + 1, since: now, ...(typeof w.move === 'string' ? { name: w.move } : { data: move }), long: lengthOf(move), stays: !!(move.loop || move.hold), aim: p.move?.aim }; else wrong(typeof w.move === 'string' ? `"${w.move.slice(0, 24)}" is not a move with a name: the guide lists them, or send keys` : 'a move is a name, or {keys: [{t, ...joints}], loop, hold}') }
+  }
+  if (w.aim !== undefined && p.move) { if (w.aim === null) p.move.aim = undefined; else if (Array.isArray(w.aim) && w.aim.length === 3 && w.aim.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) p.move.aim = w.aim.map((v) => Math.round(v * 10) / 10); else wrong('what a move is aimed at is aim: [x, y, z], or null') }
   if (w.say !== undefined) {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
@@ -499,7 +503,7 @@ parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, r
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false)
   // Someone has joined: where everything is is said once more, for what sleeps says nothing by itself.
-  if (nudge) { nudged = true; for (const p of folk.values()) if (p.rule) tell(p); return }
+  if (nudge) { nudged = true; for (const p of folk.values()) if (p.rule) { if (p.move) p.move.told = -1; tell(p) } return }
   if (asks) return parentPort.postMessage({ id, ...seat(asks) })
   // A page's own body: its eyes are where its view is.
   if (here) {

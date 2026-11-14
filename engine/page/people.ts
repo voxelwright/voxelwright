@@ -7,7 +7,8 @@
 // looks like and how one moves.
 import { shader, type Target } from '../probe/gpu.ts'
 import { GLOBALS, LIGHT, SUNLIT, type Marcher, type View } from './march.ts'
-import type { Look } from './link.ts'
+import { CHANNELS, play, type Channel, type Move } from './moves.ts'
+import { CARRIED, WORN, named, type Extra, type Look, type Part } from './wear.ts'
 import { chance, residents, type Land, type Resident, type Shock } from './residents.ts'
 
 /** One person, as whoever draws them is told. Lengths are the world's finest cells (10 cm). */
@@ -24,6 +25,12 @@ export interface Person {
   stride?: number
   /** How much of a walk it is, 0 standing to 1 walking: the legs and arms swing by it. */
   walking?: number
+  /** How much of that walk is a run, 0 to 1 (`runningAt` of its pace): a runner's stride is longer (`strideAt`). */
+  running?: number
+  /** What it is doing with its limbs (moves.ts): the move, how many seconds into it, and where it is aimed (the world's cells), if it is aimed. Laid over the walk or the standing. */
+  move?: Doing
+  /** The move it was in before this one, still running: this one takes over from it without a jump. */
+  was?: Doing
   /** Whether an umbrella is up over them. */
   umbrella?: boolean
   /** Which way the head is turned from the body, radians to the right. */
@@ -40,6 +47,9 @@ export interface Person {
   name?: string
   says?: string
 }
+
+/** A move under way: how far in (seconds), and what it is aimed at. */
+export interface Doing { move: Move; t: number; aim?: readonly [number, number, number] }
 
 /** Floats a box: where its middle is, a number of its own; half its size, how big its cells are; two of its three axes with the height of the feet and what it is made as; its colour. */
 const EACH = 20
@@ -275,6 +285,18 @@ export const STRIDE = 14.4
 const CELL = 0.5
 const THIGH = 4.5, CALF = 4, SOLE = 0.5
 
+/** Where each joint is in a pose (moves.ts CHANNELS). */
+const J = Object.fromEntries(CHANNELS.map((c, i) => [c, i])) as Record<Channel, number>
+const POSE = new Float64Array(CHANNELS.length), POSE_WAS = new Float64Array(CHANNELS.length)
+/** How long one move takes to give way to the next (seconds): no joint jumps. */
+const GIVE = 0.16
+const smooth = (v: number) => { const c = Math.max(0, Math.min(1, v)); return c * c * (3 - 2 * c) }
+/** How long a pair of steps is at a pace (cells a second): a walker's 14.4 cells, a runner's up to seven metres. Whoever moves a figure gives distance over this as `stride`. */
+export const strideAt = (pace: number) => STRIDE + Math.max(0, Math.min(56, (pace - 16) * 0.5))
+/** How much of a run a pace is, 0 a walk to 1 a run. */
+export const runningAt = (pace: number) => smooth((pace - 18) / 16)
+const NO_EXTRAS: Extra[] = []
+
 /**
  * Writes a person's boxes into `out` from float `at`, places taken from `anchor`. Returns the float after the last.
  * `far` leaves out what cannot be seen from a way off (hands, neck, feet's own boxes).
@@ -284,10 +306,30 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   // Build: how tall, how broad.
   const chosen = p.look, tinted = (hex: string | undefined, or: V3): V3 => (hex ? tint(hex) : or)
   const tall = (0.93 + 0.12 * chance(s, 1)) * (chosen?.tall ?? 1), broad = (0.9 + 0.22 * chance(s, 2)) * (chosen?.broad ?? 1)
-  const coat = tinted(chosen?.coat, pick(COATS, s, 3)), legs = tinted(chosen?.legs, pick(LEGS, s, 4)), skin = tinted(chosen?.skin, pick(SKINS, s, 5)), hair = tinted(chosen?.hair, pick(HAIRS, s, 6)), shoe = tinted(chosen?.shoes, pick(SHOES, s, 7))
+  const coat = tinted(chosen?.coat, pick(COATS, s, 3)), skin = tinted(chosen?.skin, pick(SKINS, s, 5)), hair = tinted(chosen?.hair, pick(HAIRS, s, 6)), shoe = tinted(chosen?.shoes, pick(SHOES, s, 7))
+  let legs = tinted(chosen?.legs, pick(LEGS, s, 4)), hands = skin
   const bright = pick(BRIGHT, s, 8)
-  const long = chance(s, 9) < 0.45, hairstyle = Math.floor(chance(s, 10) * 5), scarf = chance(s, 11) < 0.3, bag = Math.floor(chance(s, 12) * 4)
-  const walking = p.walking ?? 0, flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, time = p.time ?? 0
+  let long = chance(s, 9) < 0.45, hairstyle = Math.floor(chance(s, 10) * 5), scarf = chance(s, 11) < 0.3, bag = Math.floor(chance(s, 12) * 4)
+  // What is worn and carried by name is boxes on parts of the body, and now and then a change to the figure itself.
+  let extras = NO_EXTRAS
+  const roles: Record<string, V3> = { coat, legs, skin, hair, shoes: shoe }
+  const put = (thing: { thing: { boxes: Extra[] }; own: string }) => { for (const b of thing.thing.boxes) (extras === NO_EXTRAS ? (extras = []) : extras).push(b.colour === 'own' ? { ...b, colour: thing.own } : b) }
+  if (chosen?.wear) for (const sent of chosen.wear) {
+    const w = named(WORN, sent)
+    if (!w) continue
+    const set = w.thing.set
+    if (set?.long !== undefined) long = set.long
+    if (set?.legs === 'coat') legs = coat
+    if (set?.hands === 'own') hands = tint(w.own)
+    if (set?.hair) hairstyle = set.hair === 'bald' ? -1 : set.hair === 'short' ? 1 : 3
+    if (set?.plain) { scarf = false; bag = 0; if (hairstyle === 0) hairstyle = 1 }
+    put(w)
+  }
+  if (typeof chosen?.carry === 'string') { const c = named(CARRIED, chosen.carry); if (c) put(c) } else if (chosen?.carry) for (const b of chosen.carry) (extras === NO_EXTRAS ? (extras = []) : extras).push(b)
+  if (chosen?.extra) for (const b of chosen.extra) (extras === NO_EXTRAS ? (extras = []) : extras).push(b)
+  // A hat of any kind goes over the hair, not through a knitted cap of the figure's own.
+  if (hairstyle === 0 && extras.some((b) => b.on === 'head' && b.at[1] > 2.4)) hairstyle = 1
+  const walking = p.walking ?? 0, running = walking * (p.running ?? 0), flinch = p.flinch ?? 0, down = p.down ?? 0, reading = p.reading ?? 0, time = p.time ?? 0
   const stride = (p.stride ?? 0) * Math.PI * 2
   const feet = p.at[1]
   let n = at
@@ -301,31 +343,68 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     out[n + 16] = colour[0]; out[n + 17] = colour[1]; out[n + 18] = colour[2]; out[n + 19] = 1
     n += EACH
   }
-  // The legs first, as angles: how far each foot is under the hip says how high the hip is, so a foot is always
-  // on the ground and the body rises and falls as it walks.
+  /** The boxes worn or carried on a part, drawn in that part's frame (a hand's from the hand, down the forearm). */
+  const wornOn = (part: Part, f: Frame, dy = 0) => { for (const b of extras) if (b.on === part) box(f, b.at[0], b.at[1] + dy, b.at[2], b.size[0], b.size[1], b.size[2], roles[b.colour] ?? tint(b.colour), b.shiny ? LEATHER : CLOTH) }
+
+  // ── The pose: what each joint would be doing anyway, then whatever move is laid over it. ──
+  const P = POSE
+  P.fill(0)
   // Going down and getting up, the body folds at knee and hip: it is not a board tipped over on its heels.
   const fold = 4 * down * (1 - down)
-  const crouch = flinch * 0.55 + fold * 0.6
+  P[J.crouch] = flinch * 0.55 + fold * 0.6
+  P[J.lie] = down
+  // A walk, and a run: a runner's thighs swing twice as far, the knees come up, the body leans into it and leaves the ground between steps.
+  for (const side of [-1, 1]) {
+    const ph = stride + (side < 0 ? 0 : Math.PI), arm = stride + (side < 0 ? Math.PI : 0)
+    P[side < 0 ? J.swingL : J.swingR] = walking * ((0.4 + 0.42 * running) * Math.sin(ph) + 0.04 + 0.12 * running)
+    P[side < 0 ? J.kneeL : J.kneeR] = 0.06 + walking * (0.95 + 0.85 * running) * Math.max(0, Math.cos(ph + 0.3)) ** 2 + running * 0.22
+    P[side < 0 ? J.liftL : J.liftR] = walking * (0.4 + 0.55 * running) * Math.sin(arm) + flinch * 2.5
+    P[side < 0 ? J.bendL : J.bendR] = 0.12 + walking * (0.22 + 0.2 * Math.max(0, Math.sin(arm))) + running * 1.3 + flinch * 1.9
+    P[side < 0 ? J.outL : J.outR] = flinch * 0.25
+  }
+  P[J.rise] = running * 1.5 * Math.abs(Math.sin(stride + 0.6))
+  P[J.lean] = walking * 0.06 + running * 0.24 + flinch * 0.55 + fold * 0.7
+  P[J.twist] = walking * Math.sin(stride) * -0.1 * (1 + running * 1.4)
+  P[J.turn] = (p.glance ?? 0) + (1 - walking) * Math.sin(time * 0.23 + s * 1.7) * 0.25 * (1 - reading)
+  P[J.nod] = reading * 0.45 + flinch * 0.4
+  // One arm holds an umbrella up, or a phone before the face.
+  if (p.umbrella) { P[J.liftR] = 0.25 + flinch * 1.5; P[J.bendR] = 1.75 }
+  else if (reading > 0) { P[J.liftR] = P[J.liftR] * (1 - reading) + reading * 0.35; P[J.bendR] = P[J.bendR] * (1 - reading) + reading * 1.85 }
+  let aim = p.move?.aim
+  if (p.move) {
+    const was = p.was, give = was ? smooth(p.move.t / GIVE) : 1
+    if (was && give < 1) {
+      // The move before gives way to this one: each joint goes from where that had it to where this has it.
+      POSE_WAS.set(P)
+      play(was.move, was.t, POSE_WAS)
+      play(p.move.move, p.move.t, P)
+      for (let c = 0; c < P.length; c++) P[c] = POSE_WAS[c] + (P[c] - POSE_WAS[c]) * give
+      aim ??= was.aim
+    } else play(p.move.move, p.move.t, P)
+  }
+
+  // ── The body, built from the pose. ──
+  // The legs first: how far each foot is under the hip says how high the hip is, so a foot is always on the
+  // ground, the body rises and falls as it walks, and someone who sits is at the height of a seat.
+  const crouch = P[J.crouch], sit = P[J.sit], lie = P[J.lie]
   const legOf = (side: number) => {
-    const ph = stride + (side < 0 ? 0 : Math.PI)
-    const swing = walking * (0.4 * Math.sin(ph) + 0.04) + crouch * 0.9
-    const knee = 0.06 + walking * 0.95 * Math.max(0, Math.cos(ph + 0.3)) ** 2 + crouch * 1.7
+    let swing = P[side < 0 ? J.swingL : J.swingR] + crouch * 0.9, knee = P[side < 0 ? J.kneeL : J.kneeR] + crouch * 1.7
+    swing += (1.5 - swing) * sit; knee += (1.5 - knee) * sit
     return { swing, knee, drop: THIGH * tall * Math.cos(swing) + CALF * tall * Math.cos(swing - knee) + SOLE }
   }
   const left = legOf(-1), right = legOf(1)
-  const hipHigh = Math.max(left.drop, right.drop)
+  const hipHigh = Math.max(left.drop, right.drop, 1.2) + P[J.rise]
   ROOT.fill(0)
   ROOT[0] = Math.cos(p.yaw); ROOT[2] = Math.sin(p.yaw); ROOT[4] = 1; ROOT[6] = -Math.sin(p.yaw); ROOT[8] = Math.cos(p.yaw)
   ROOT[9] = p.at[0]; ROOT[10] = p.at[1]; ROOT[11] = p.at[2]
-  if (down > 0) {
-    // Onto the back, about the heels; lying, the back is on the ground.
-    pitch(ROOT, -down * Math.PI / 2)
-    ROOT[10] += down * 1.3
+  if (lie !== 0) {
+    // Onto the back (or the front), about the heels; lying, the body is on the ground.
+    pitch(ROOT, lie * Math.PI / 2)
+    ROOT[10] += Math.abs(lie) * 1.3
   }
   const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * Math.sin(time * 0.6 + s) * 0.012
   child(HIP, ROOT, 0, hipHigh, 0)
   roll(HIP, sway)
-  // Legs.
   for (const side of [-1, 1]) {
     const leg = side < 0 ? left : right
     child(LEG, HIP, side * 1.0 * broad, 0, 0)
@@ -339,18 +418,19 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     pitch(FOOT, leg.knee - leg.swing - walking * 0.35 * Math.max(0, Math.cos(stride + (side < 0 ? 0 : Math.PI) + 1.5)))
     box(FOOT, 0, -SOLE / 2 + 0.05, -0.6, 1.25, 0.75, 2.75, shoe, LEATHER)
   }
-  // The trunk: hips, then the chest leaning as it walks or shrinks.
+  // The trunk: hips, then the chest.
   box(HIP, 0, 0.5, 0, 3.5 * broad, 1.75, 2, long ? coat : legs, CLOTH)
   child(CHEST, HIP, 0, 1.2, 0)
-  pitch(CHEST, walking * 0.06 + flinch * 0.55 + fold * 0.7)
-  roll(CHEST, -sway * 1.6)
-  turn(CHEST, walking * Math.sin(stride) * -0.1)
+  // (A frame turned about its right by a positive angle tips its top back: a hanging limb swings forward, a chest leans back.)
+  pitch(CHEST, -P[J.lean])
+  roll(CHEST, -sway * 1.6 + P[J.tilt])
+  turn(CHEST, P[J.twist])
   const breath = Math.sin(time * 1.3 + s) * 0.05
   box(CHEST, 0, 2.3, 0, 3.75 * broad, 4.75, 2.25 + breath, coat, CLOTH)
   box(CHEST, 0, 4.3, 0, 4.5 * broad, 1.25, 2.4, coat, CLOTH)
   if (long) {
     // A long coat hangs to the knee and opens a little as the legs move.
-    box(HIP, 0, -1.9, 0.1, 3.75 * broad, 4.25, 2.4 + walking * 0.5, coat, CLOTH)
+    box(HIP, 0, -1.9, 0.1, 3.75 * broad, 4.25 * (1 - sit * 0.6), 2.4 + walking * 0.5, coat, CLOTH)
   }
   if (scarf) box(CHEST, 0, 5.1, -0.1, 2.5, 1, 2.6, bright, CLOTH)
   if (bag === 1) {
@@ -360,10 +440,11 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     // A bag at the hip, its strap across the chest.
     box(HIP, 2.1 * broad, 0.2, 0.1, 0.9, 2.5, 3, pick(BRIGHT, s, 14), LEATHER)
   }
+  if (extras !== NO_EXTRAS) { wornOn('hip', HIP); wornOn('chest', CHEST) }
   // The head: a neck, a face, hair.
   child(HEAD, CHEST, 0, 4.9, 0)
-  turn(HEAD, (p.glance ?? 0) + (1 - walking) * Math.sin(time * 0.23 + s * 1.7) * 0.25 * (1 - reading))
-  pitch(HEAD, reading * 0.45 + flinch * 0.4)
+  turn(HEAD, P[J.turn])
+  pitch(HEAD, -P[J.nod])
   if (!far) box(HEAD, 0, 0.3, 0, 1.2, 0.9, 1.2, skin, SKIN)
   box(HEAD, 0, 1.75, -0.05, 1.75, 2.25, 2, skin, SKIN)
   if (!far) {
@@ -377,29 +458,38 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   if (hairstyle === 0) {
     // A hat: a knitted cap pulled down.
     box(HEAD, 0, 2.55, 0, 2, 1, 2.25, bright, CLOTH)
-  } else {
+  } else if (hairstyle > 0) {
     box(HEAD, 0, 2.75, 0.1, 2, 0.6, 2.25, hair, HAIR)
     box(HEAD, 0, 2.55, -0.95, 2, 0.5, 0.3, hair, HAIR)
     box(HEAD, 0, 1.95, 0.95, 2, 1.75, 0.5, hair, HAIR)
     if (hairstyle >= 3) box(HEAD, 0, 0.9, 1.0, 2, 2.4, 0.6, hair, HAIR)
     if (hairstyle === 2 && !far) { box(HEAD, 0.95, 2.1, 0.2, 0.3, 1.2, 1.4, hair, HAIR); box(HEAD, -0.95, 2.1, 0.2, 0.3, 1.2, 1.4, hair, HAIR) }
   }
-  // Arms: they swing against the legs; one holds an umbrella or a phone; both go over the head in a flinch.
+  if (extras !== NO_EXTRAS) wornOn('head', HEAD)
+  // Arms: each lifts, goes out from the body and bends as the pose says; one that aims lies straight along the
+  // line from its shoulder to what is aimed at.
   for (const side of [-1, 1]) {
-    const ph = stride + (side < 0 ? Math.PI : 0)
     const holds = side > 0 && (p.umbrella || reading > 0)
-    let lift = walking * 0.4 * Math.sin(ph) + flinch * 2.5
-    let bend = 0.12 + walking * (0.22 + 0.2 * Math.max(0, Math.sin(ph))) + flinch * 1.9
-    if (holds && p.umbrella) { lift = 0.25 + flinch * 1.5; bend = 1.75 }
-    else if (holds) { lift = lift * (1 - reading) + reading * 0.35; bend = bend * (1 - reading) + reading * 1.85 }
+    let lift = P[side < 0 ? J.liftL : J.liftR], bend = P[side < 0 ? J.bendL : J.bendR], out = P[side < 0 ? J.outL : J.outR], round = 0
+    const aims = P[side < 0 ? J.aimL : J.aimR]
     child(ARM, CHEST, side * (2.25 * broad + 0.5), 4.6, 0)
-    roll(ARM, side * (0.05 + flinch * 0.25))
+    if (aims > 0) {
+      // Which way the thing is from this shoulder, in the chest's own frame: to the right, up, ahead. With nothing to aim at, straight ahead.
+      let rightward = -side * 0.12, up = 0, ahead = 1
+      if (aim) { const dx = aim[0] - ARM[9], dy = aim[1] - ARM[10], dz = aim[2] - ARM[11]; rightward = dx * CHEST[0] + dy * CHEST[1] + dz * CHEST[2]; up = dx * CHEST[3] + dy * CHEST[4] + dz * CHEST[5]; ahead = -(dx * CHEST[6] + dy * CHEST[7] + dz * CHEST[8]) }
+      round = Math.max(-1.5, Math.min(1.5, Math.atan2(rightward, Math.max(ahead, 0.01)))) * aims
+      lift += (Math.PI / 2 + Math.atan2(up, Math.hypot(rightward, ahead)) - lift) * aims
+      bend += (0.05 - bend) * aims; out *= 1 - aims
+    }
+    turn(ARM, round)
+    roll(ARM, side * (0.05 + out))
     pitch(ARM, lift)
     box(ARM, 0, -1.7, 0, 1.25, 3.6, 1.4, coat, CLOTH)
     child(FORE, ARM, 0, -3.4, 0)
     pitch(FORE, bend)
     box(FORE, 0, -1.5, 0, 1.1, 3.2, 1.2, coat, CLOTH)
-    if (!far) box(FORE, 0, -3.5, 0, 0.9, 1, 1, skin, SKIN)
+    if (!far) box(FORE, 0, -3.5, 0, 0.9, 1, 1, hands, SKIN)
+    if (extras !== NO_EXTRAS) wornOn(side > 0 ? 'handR' : 'handL', FORE, -3.5)
     if (holds && p.umbrella) {
       // The shaft stands upright whatever the arm does, and the canopy is eight-sided as near as boxes go.
       child(HELD, FORE, 0, -3.5, 0)

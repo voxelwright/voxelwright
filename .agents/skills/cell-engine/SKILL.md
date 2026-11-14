@@ -1985,3 +1985,39 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
   jolt). Behind, the eye passes through walls: not built.
 - **The check's street**: cars are parked a metre to the right of the lane at x 760 to 900; step left, not right.
 
+
+## Moves and looks as data (#218 for #264, November 13)
+
+- **A pose is twenty-one numbers** (`page/moves.ts` `CHANNELS`: lean, twist, tilt, nod, turn, lift/out/bend for
+  each arm, swing/knee for each leg, crouch, sit, rise, lie, aimL, aimR). `figure()` first works out what the body
+  would be doing anyway (standing, walking, running, shrinking, lying) as a pose, lays the move over it, then
+  builds the boxes. The hip's height still comes from the legs, so a kick, a crouch and a seat need no rule of
+  their own: with the thighs level the hips are at the height of a chair.
+- **A move is keys over time, each naming only the joints it sets.** A wave leaves the legs to walk. `loop` goes
+  round, `hold` stays in the last pose, otherwise the body goes back to what it was doing over 0.3 s. One move
+  gives way to the next over 0.16 s (`Person.was`), so nothing jumps.
+- **Data against a fixed list, tried side by side**: a strike as five keys beside the same written as code, a
+  curve for every joint with a snap and a follow-through, sampled sixty times a second. At eight moments the two
+  rows could not be told apart (`~/.village/engine/people/moves-data-against-code.png`). So there is no list in
+  code: the moves with names (`NAMED`, twenty-three of them) are keys written down, and a rule or a model sends
+  its own the same way (24 keys at most, every joint clamped, read as from a stranger by `moveOf`).
+- **An arm that aims** lies along the line from its shoulder to the target (`aim`, the world's cells), by a turn
+  about the chest's up and a lift: so a long thing carried along the forearm points where it should. With no
+  target it points straight ahead.
+- **A frame pitched by a positive angle tips its top back.** A hanging limb swings forward, a chest leans back, a
+  body goes over onto its back. The first figure had a flinch that leaned back and a knocked-down body that fell on
+  its face for that reason; both are right now (`lean` and `nod` are negated where they are applied).
+- **A run**: over about 2 m/s (`runningAt`) the thighs swing twice as far, the knees come up, the elbows bend, the
+  chest leans in and the body leaves the ground between steps. A runner's pair of steps is longer than a walker's
+  (`strideAt`: 1.44 m at a walk to 7 m at 14 m/s), or the legs blur.
+- **Looks** (`page/wear.ts`): things worn by name are boxes on a part of the body (head, chest, hip, either hand)
+  and now and then a change to the figure itself (a suit makes the legs the coat's colour and the coat short).
+  Each takes a colour of its own (`"tie #7a1c1c"`). A rule sends boxes of its own the same way (`extra`, twelve
+  at most; `carry`, eight). A hand's boxes are told from the hand with -y out past the fingers.
+- **On the wire**: a `here` frame carries `move: {n, since, name | keys, aim}`. `since` is the world's clock, so
+  every page is at the same moment of it. Keys go with the first telling, once a second after, and when a page
+  joins: not with every step.
+- **A move is how a body looks and no more.** It strikes nobody: blows are the bodies lane's.
+- **Not there**: a held move is not kept over a restart (the actor stands). Nobody sits *on* anything: a seat is
+  wherever the rule put the body. Fingers, faces and feet do nothing. An aiming body does not turn its head or its
+  feet to the target: the rule faces it.
