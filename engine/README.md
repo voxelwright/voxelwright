@@ -1081,7 +1081,7 @@ node test/core-time.mjs --rows 45000                             # what a sector
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
-node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow,room,fight,air [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
+node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow,room,fight,air,steer [--quiet] [--minutes 20] [--made realm.log]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march (#367): A and B measured turn about, seconds apart, only while the GPU is quiet; `--other dir` for A from another checkout; alone it is A against A
 ```
 

@@ -29,6 +29,9 @@ const recorder = () => {
   // Whether the eye is in something that stands (all but water and leaves), or within a cell of it sideways: the picture's near edge then cuts into it.
   const solid = (e, x, y, z) => { const k = e.kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
   const inside = (e) => { const x = e.pose.x * 10, y = e.pose.y * 10, z = e.pose.z * 10; return solid(e, x, y, z) ? 2 : solid(e, x + 1, y, z) || solid(e, x - 1, y, z) || solid(e, x, y, z + 1) || solid(e, x, y, z - 1) || solid(e, x, y - 1, z) ? 1 : 0 }
+  // What kept the page's thread busy outside its frames (a message from a worker or the world, a timer): tasks over 50 ms, as the browser says.
+  const tasks = []
+  try { new PerformanceObserver((list) => { for (const t of list.getEntries()) tasks.push({ at: t.startTime, ms: t.duration, label: names[label] }) }).observe({ type: 'longtask', buffered: true }) } catch { /* no such observer */ }
   const raf = globalThis.requestAnimationFrame.bind(globalThis)
   globalThis.requestAnimationFrame = (f) => raf((now) => {
     const t0 = performance.now()
@@ -50,7 +53,7 @@ const recorder = () => {
     turn(rate) { turning = rate },
     slow(ms) { burn = ms },
     peek(name) { const got = []; for (let i = 0; i < n; i++) if (names[rows[i * F + 3]] === name) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9], rows[i * F + 12]]); return got },
-    take() { const got = { rows: Array.from(rows.subarray(0, n * F)), long: long.splice(0), names: [...names], F }; n = 0; return got },
+    take() { const got = { rows: Array.from(rows.subarray(0, n * F)), long: long.splice(0), tasks: tasks.splice(0), names: [...names], F }; n = 0; return got },
   }
 }
 
@@ -246,6 +249,16 @@ parts.air = async () => {
   for (const name of ['fly-up', 'fly-along', 'fly-down']) { t = await traced(name); eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0); line(`${name}: feet went ${(Math.hypot(t.at(-1)[1] - t[0][1], t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m along, ${((t.at(-1)[2] - t[0][2]) / 10).toFixed(1)} m up; the eye's biggest move in a frame ${Math.max(...eye).toFixed(1)} cells; in something ${t.filter((r) => r[7] === 2).length} of ${t.length} frames`) }
   await page.evaluate(() => { globalThis.engine.me.can = {} })
 }
+// The picture's size when the view is suddenly dear: the ground at one's feet looked at until the picture has grown, then the long street at once, as a turn of the head does.
+parts.steer = async () => {
+  await down()
+  for (let i = 0; i < 3; i++) {
+    await mark('cheap'); await page.evaluate(() => { globalThis.engine.pose.pitch = -1.5 }); await wait(7000)
+    const big = await page.evaluate(() => globalThis.engine.scale)
+    await mark('cheap-to-dear'); await page.evaluate(() => { globalThis.engine.pose.pitch = -0.05 }); await wait(4000)
+    line(`looking at the ground the picture grew to ${big.toFixed(2)} of full size; looking up along the street at once, ${await page.evaluate(() => globalThis.engine.scale.toFixed(2))} four seconds on`)
+  }
+}
 // Slow frames: the same run with the page's thread kept busy 30 and 60 ms a frame. The body should get as far.
 parts.slow = async () => {
   for (const ms of [0, 30, 60]) {
@@ -298,7 +311,7 @@ for (let i = 0; i < list.length; i++) {
   await parts[name]().catch((e) => console.log(`  the part ${name} did not finish: ${String(e).slice(0, 200)}`))
   for (const code of ['KeyW', 'ShiftLeft', 'KeyA', 'KeyD', 'Space', 'KeyC']) await page.keyboard.up(code)
   const got = await page.evaluate(() => globalThis.sitting.take())
-  all.rows.push(...got.rows); all.long.push(...got.long); all.names = got.names; all.F = got.F
+  all.rows.push(...got.rows); all.long.push(...got.long); (all.tasks ??= []).push(...got.tasks); all.names = got.names; all.F = got.F
 }
 await browser.close(); server.stop(); done(); both()
 
@@ -327,6 +340,11 @@ for (const l of worst) {
   const top = Object.entries(l.laps).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', ')
   console.log(`  ${l.gap.toFixed(0).padStart(4)} ms in ${l.label.padEnd(12)} inside the frame ${l.cpu.toFixed(1)} ms (${top}); making ${l.wanted}, stale ${l.stale}, picture ${l.scale.toFixed(2)}, bodies ${l.bodies}, pieces ${l.pieces}, sun tiles to draw ${l.sun}, march ${l.gpu.toFixed(1)} ms${l.through ? ` (${l.through.toFixed(1)} of it through a window)` : ''}${l.portal ? `, portal ${JSON.stringify(l.portal)}` : ''}`)
 }
+let sized = 0
+for (let i = F; i < all.rows.length; i += F) if (all.rows[i + 11] !== all.rows[i - F + 11] && all.names[all.rows[i + 3]] !== 'start') sized++
+console.log(`the picture changed size ${sized} times in ${(all.rows.length / F / 3600).toFixed(1)} minutes of frames`)
+const busy = (all.tasks ?? []).filter((t) => t.label !== 'start' && t.label !== 'picture')
+if (busy.length) console.log(`\nthe page's thread was kept busy over 50 ms outside its frames ${busy.length} times: ${busy.slice(0, 12).map((t) => `${t.ms.toFixed(0)} ms in ${t.label}`).join(', ')}`)
 writeFileSync(join(out, `sitting-${Date.now()}.json`), JSON.stringify(all))
 if (errors.length) console.log(`page errors:\n  ${errors.join('\n  ')}`)
 console.log(`kept in ${out}`)

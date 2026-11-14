@@ -177,8 +177,20 @@ async function main() {
   let held = 0
   // A phone's GPU clock is not to be believed: the iPhone's read 0.01 to 10 ms for the same work from one second to the next.
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
-  const steer = (budget: number) => {
-    if (fixed || --held > 0) return
+  // Frames in a row that came well late, and whether the picture's size has just been brought down for that.
+  let lateRun = 0
+  const steer = (budget: number, gap: number) => {
+    if (fixed) return
+    // A look turned from a cheap view to a dear one (#367): the march is suddenly several frames long, and coming down
+    // 15% every 45 frames the picture took three seconds to fit again (60 frames dropped in one turn of the head, with
+    // the march at 50 ms). Two late frames in a row with the GPU's clock saying why bring it down at once to what fits.
+    lateRun = gap > budget * 1.4 ? lateRun + 1 : 0
+    if (lateRun >= 2 && clocked && marchMs > budget && scale > 0.3) {
+      const fits = Math.round(Math.max(0.3, Math.min(scale - 0.05, scale * Math.sqrt((0.6 * budget) / marchMs))) * 20) / 20
+      scale = fits; held = 20; lateRun = 0
+      return
+    }
+    if (--held > 0) return
     // Frames that come late are the one sure sign: back off. Otherwise, with a clock to believe, aim the march at
     // six tenths of a frame; without one, go up a step at a time while frames keep coming on time.
     const late = frameMs > budget * 1.12
@@ -266,7 +278,7 @@ async function main() {
     read: device.createBuffer({ size: 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     busy: false,
   } : null
-  let gpuMs = 0, windowMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
+  let gpuMs = 0, marchMs = 0, windowMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
   // The screen's own rate: the shortest gap between frames seen lately.
   let screenMs = 16.7, shortest = Infinity
 
@@ -285,7 +297,8 @@ async function main() {
   const frame = (now: number) => {
     const began = mark = performance.now()
     const dt = Math.min(0.1, (now - last) / 1000)
-    for (const each of watchers) each(now - last)
+    const gap = now - last
+    for (const each of watchers) each(gap)
     if (paused) { last = now; requestAnimationFrame(frame); return }
     frameMs += ((now - last) - frameMs) * 0.05
     shortest = Math.min(shortest, now - last)
@@ -293,7 +306,7 @@ async function main() {
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
-    steer(Math.max(1000 / 60, screenMs))
+    steer(Math.max(1000 / 60, screenMs), gap)
     const v = view(), to = fit()
     staff.frame(v)
     ears?.frame(v.eye, pose.yaw, dt)
@@ -347,7 +360,8 @@ async function main() {
         clock.busy = false
         const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
-        if (b > a) gpuMs += (Number(b - a) / 1e6 + through - gpuMs) * 0.1
+        // (The last one as it was is kept beside the smoothed: late frames are answered by what the march took just now.)
+        if (b > a) { marchMs = Number(b - a) / 1e6 + through; gpuMs += (marchMs - gpuMs) * 0.1 }
       })
     }
     if (++frames % 15 === 0) {
