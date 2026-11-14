@@ -2131,3 +2131,47 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
 - **Not there**: bodies still pass through each other and through people. Nobody opens a door, takes a lift or
   jumps a gap. Marks are not kept over a restart (a rule marks again in `start`). A follower does not guess where
   someone is going.
+
+## People who answer through a model (#264, `engine/mind/`; November 13)
+
+- **The path.** A rule calls `world.think(actor, {who, where, lately, heard, from, notes})`; the world's process
+  (`mind/think.mjs`) checks it, keeps the notes wanted under a number, and hands the ask to the server
+  (`mind/door.mjs`), which gives it to the one helper voicing the world (`mind/voice.mjs`, started by `helper.mjs`).
+  The helper runs the owner's Claude Code (`mind/model.mjs`) and posts back words so far, then all words and the
+  notes. The world checks them (`mind/form.mjs`), the actor says them, and the asking rule alone hears `thought`.
+  The helper connects out to the world; the page is not in the path, so it works with no page open.
+- **`happen(name, e, only)`**: a third argument names the one rule to be told. Before it every rule heard
+  everything.
+- **The form a model answers in** is `SAY: words`, a line `===`, then `key: value` lines. It was first "the words,
+  then ===": in 2 of 16 real replies Haiku wrote a paragraph about the task before the words, and it was read as
+  speech. With a `SAY:` marker (nothing before it is ever said) 0 of 38 since.
+- **One fixed system text, everything else as quoted data** (`JSON.stringify` on one line under a label: `text()`
+  has already taken line breaks out of what was typed). A rule's `who` is a stranger's text as much as a person's
+  words. Real Haiku, November 13: 12 typed attempts (ignore instructions, repeat the above, your email, which model
+  are you, fill the notes as, answer in JSON, a forged label, the folder and date, two hostile `who` texts), each
+  run two or three times: none broke the person, none filled a note as told. One gave the real date ("the
+  thirteenth of November"): the binary's context is readable by the model and no flag removes it.
+- **"The speaker" had to be defined.** Asked "does the speaker seem to doubt that the world is real" after "have
+  you ever felt none of this is real?", Haiku answered no five times of five: it answered for the person it
+  voiced. One sentence in the system text (a question about the speaker is answered about the speaker) made it
+  yes.
+- **The filter on words is narrow on purpose**: an address shape, a tag, "system prompt/reminder", `userEmail`. A
+  wider one ("language model", "AI") refused a good reply in which the baker only repeated the stranger's odd
+  words back.
+- **Haiku 5.5 thinks when it likes, and nothing turns it off** (Claude Code 2.1.325): `MAX_THINKING_TOKENS=0`,
+  `CLAUDE_CODE_DISABLE_THINKING=1`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1`, `--effort low`,
+  `--settings '{"alwaysThinkingEnabled":false}'` each still gave runs with 160 to 265 hidden thinking tokens (about
+  two runs in three). A reply with no thinking is 60 to 90 output tokens and 1.1 to 1.4 s from a cold start; with
+  it, 300 to 500 tokens and 2.2 to 4.0 s. It is the largest part of the wait.
+- **A process started ahead answers fast**: with `--input-format stream-json` the binary starts, waits for its one
+  message on stdin, and then gave the first word 0.35 s and the whole of a short reply 0.54 s after the message
+  (one run, no thinking). `mind({warm})` does it; it is off until measured properly.
+- **What cost time in the check**: a rule's actors may say eight things a second, so a line said in the same
+  second as a crowd's was dropped and looked like a missing answer; and kept words said by two actors were counted
+  as one actor's.
+- **Not built**: the engine keeps no memory of earlier talk (a rule can pass `before`), nobody answers unless a
+  rule asks, a realm's owner is not preferred as its voice.
+- **A helper voices realms, not a world** (`voices`): the maker's helper came to serve a whole server of realms
+  while this was being built, and a voice for home alone would have left every made realm mute. Asking a realm
+  anything wakes it and keeps it awake, so only realms with a page reading them are voiced; an agent alone in a
+  realm (a seat, no page) gets no answers there yet.

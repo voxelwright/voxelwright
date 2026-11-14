@@ -26,6 +26,7 @@ import { found as pluginsFound } from './plugins.mjs'
 import { RULES_MOST } from './rules/run.mjs'
 import { HELD_MOST, NOTES_MOST, SOUNDS_A_SECOND } from './rules/sound.mjs'
 import { LIKES } from './page/sound/likes.ts'
+import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
@@ -84,6 +85,7 @@ async function report(req, res) {
 //   4 now     ... and it carries this machine's clock (ms, a float64): the town's residents go by one clock.
 //   5 here    where someone in the world is, as JSON: {by, name, at (their feet, the finest cells), yaw, walking,
 //             down, flinch, seat (a body the world moves for someone outside a page), gone}.
+//             thinking: an actor asked to think has not answered yet (#264).
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
 //   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
 //  12 bodies  what people's bodies can do and how fast the world goes, as JSON: {clock: {rate, spare}, can: {by: {pace, jump, climb, fly, fall}}}. Not kept: said to each reader as it joins.
@@ -167,8 +169,12 @@ world.mark(id, {at: [x, z], within})   marks a place (within cells of at, up to 
 world.actor(id, {move, aim})   what the actor does with its limbs, laid over its standing, walking or running (an actor going faster than about 2 m/s runs, and looks it). move is a name: ${Object.keys(MOVES).join(', ')}. Or keys of your own, for anything else: {keys: [{t: seconds, joint: value, ...}, ...], loop, hold}, at most ${KEYS_MOST} keys in order of time, each naming only the joints it sets (the rest go on as they were: a wave leaves the legs walking). loop: round and round until another is set. hold: stay in the last pose (sitting, aiming, lying). Otherwise the body goes back to what it was doing. move: null ends it. aim: [x, y, z] is what an aiming arm points at (the middle of a person is their feet plus 10). Joints, in radians: ${CHANNELS.join(', ')}. lean is the chest forward; twist and turn are the chest and head to the right; nod the head down; lift an arm forward and up (1.57 level, 3.14 overhead), out an arm sideways, bend an elbow; swing a thigh forward, knee a knee; crouch and sit are 0 to 1; rise is cells off the ground; lie is 0 to 1 onto the back (to -1 onto the front); aimL and aimR are 0 to 1, that arm straight at aim. Example, a salute: {keys: [{t: 0.25, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.2, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.5, liftR: 0, outR: 0, bendR: 0.1}]}. A move is how a body looks and no more: it strikes nobody and moves nothing. world.people shows an actor's move while it lasts.
 LOOKS   look.wear is a list of things worn, by name, each with a colour of its own if you give one ("tie", "tie #7a1c1c"): ${Object.keys(WORN).join(', ')}. look.carry is what is in the right hand: ${Object.keys(CARRIED).join(', ')} (a long thing lies along the forearm, so an arm that aims, aims it); or boxes of your own. look.extra is up to 12 boxes of your own anywhere: {on: "head" | "chest" | "hip" | "handR" | "handL", at: [x, y, z], size: [w, h, d], colour: "#rrggbb" or "coat", "legs", "skin", "hair", "shoes", shiny}, in cells (10 cm) from the part's own origin: a head is 1.75 wide with its face at z -1.05 and its crown at y 2.9; a chest's front is at z -1.13 and its shoulders at y 4.9; a hand's boxes are told from the hand, -y out past the fingers. look replaces the whole look each time it is given.
 world.actor(id, {take: residentId, ...})   takes a resident as this rule's own actor: it stands where the resident stood, looking as it looked, and from then it is an actor like any other (name it, walk it, change its look, have it speak; world.people shows it with was: residentId). world.gone(id) lets it go: it walks back to its round and is a resident again. The world's rules may hold ${128} residents between them, and a resident is one rule's at a time
+world.think(id, {who, where, lately, heard, from, notes, quiet})   asks an actor of this rule to answer as a person would, through a model. who (needed, up to 600 characters) says who they are and how they talk; where and lately say what they know of the place and of what just happened; heard and from are what was said to them and by whom (leave heard out and they speak of their own accord). The actor shows that it is thinking, then says the answer aloud itself (quiet: true and it says nothing: the rule is only told). One thought at a time for each actor, ${8} at once and ${40} a minute for a rule.
+  notes: {key: {ask: "a question about what was heard or about the moment", is: "yes/no" | "words" | ["a", "choice", "of", "these"] | [low, high]}}   up to ${8}: what the rule wants to know, as data. Each comes back as true or false, a few words, one of the choices, a number in the range, or null if no fit answer came
+  on('thought', (world, e) => {})   the answer, told only to the rule that asked: e = {id, from, heard, say, notes: {key: value}, ms}, or with failed: "why" (nobody voices this world, the model did not answer, it took over 20 seconds). e.say is what the actor said; act on e.notes, never on words
+A model never runs in the world: it runs on the machine of one person who is there, through the helper they started (the first to come voices everyone). So an answer takes a second or two, and with no helper running a thought fails at once: say something plain then.
 %PLUGINS%An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
-What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says.
+What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says. Passed to world.think as heard it is still only that: the model is told it is something overheard, and the person who typed it does not get to fill in a note.
 A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
                           {"by": name, "unrule": id}   takes a rule out, and its actors with it (those that were residents go back to their rounds)
@@ -443,8 +449,11 @@ function open(of) {
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
   let offered = null, showing = null, bodied = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
+  const minds = door({ send, answer: (thought) => thread.postMessage({ thought }) })
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
+    // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
+    if (m.think) return minds.think(m.think)
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
     // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
     // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
@@ -482,6 +491,7 @@ function open(of) {
       down = 'this realm has been stopped'
       for (let i = 0; i < 40 && waiting.size; i++) await new Promise((r) => setTimeout(r, 50))
       for (const r of readers) r.end()
+      minds.close()
       await thread.terminate()
     },
     guide: (res) => send(res, 200, guide()),
@@ -585,6 +595,9 @@ function open(of) {
       const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ rules: true, id: n }) })
       send(res, 200, JSON.stringify(m.rules), TYPES['.json'])
     },
+    /** A helper that voices this world asks what its people were asked to think, and answers (mind/door.mjs). */
+    minds: (url, res) => (down ? send(res, 503, 'the world has stopped') : minds.take(url, res)),
+    mind: async (req, res) => { const b = await body(req, 4096); return down ? send(res, 503, 'the world has stopped') : minds.mind(b, res) },
     realm: (res) => send(res, 200, JSON.stringify({ ...realm, rules: [...rules.keys()] }), TYPES['.json']),
     stream(res, from) {
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
@@ -780,6 +793,8 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && route === '/world/things') return world.things(url, res)
     if (req.method === 'GET' && route === '/world/rules') return done(world.rules(url, res))
     if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
+    if (req.method === 'GET' && route === '/world/minds') return world.minds(url, res)
+    if (req.method === 'POST' && route === '/world/mind') return done(world.mind(req, res))
     if (req.method === 'GET' && route === '/world/') return world.guide(res)
     return send(res, 404, 'not here')
   }

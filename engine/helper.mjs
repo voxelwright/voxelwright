@@ -9,6 +9,8 @@
 //   --journal file     where what was made is written down (default ~/.village/engine/made.jsonl)
 //   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see "From a phone" in engine/README.md
 //   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
+//   --voice haiku      which of your models answers for the people of the world when a rule asks one to think (#264, mind/voice.mjs);
+//                      --no-voice and nobody is voiced from this machine; --voice-most 40 is the most answers a minute
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
 // Who may ask. It starts a model on your subscription, so it answers only: a request to this machine's own name
@@ -44,6 +46,7 @@ import { reply } from './make/model.mjs'
 import { imagine, realm as makeRealm } from './make/realm.mjs'
 import { write as writeRule } from './make/rules.mjs'
 import { towards } from './make/place.mjs'
+import { voices as voicing } from './mind/voice.mjs'
 
 /** A picture is at most this much base64: the page makes it small first (page/picture.ts). */
 const WISH_MOST = 400, LINK_MOST = 2000, PICTURE_MOST = 4 << 20, BODY_MOST = PICTURE_MOST + (1 << 16)
@@ -106,7 +109,7 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, cannot }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, cannot, voice = null }) {
   /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
   const shelf = kept ? library(kept) : null
   world = world.replace(/\/$/, '')
@@ -276,8 +279,10 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
   await listen(nearServer, port)
   if (farServer) await listen(farServer, reachPort)
   const server = nearServer
+  // The people of the server's worlds are voiced from this machine too (#264): by a loop of the talk lane's own, which asks each world someone is in and answers it.
+  const voiced = voice ? voicing({ server: world, say, ...voice }) : null
   const url = `http://127.0.0.1:${server.address().port}`
-  return { url, secret, link: `${(page ?? world).replace(/\/$/, '')}/city?shared=1#helper=${encodeURIComponent((reach ?? url).replace(/\/$/, ''))}&secret=${secret}`, reachPort: farServer?.address().port, close: () => Promise.all([nearServer, farServer].filter(Boolean).map((one) => new Promise((resolve) => { one.closeAllConnections(); one.close(resolve) }))) }
+  return { url, secret, link: `${(page ?? world).replace(/\/$/, '')}/city?shared=1#helper=${encodeURIComponent((reach ?? url).replace(/\/$/, ''))}&secret=${secret}`, reachPort: farServer?.address().port, voiced, close: () => (void voiced?.close(), Promise.all([nearServer, farServer].filter(Boolean).map((one) => new Promise((resolve) => { one.closeAllConnections(); one.close(resolve) })))) }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -286,7 +291,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') ? null : { name: flag('voice') ?? 'haiku', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40) }, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
+  if (h.voiced) console.log(`it also answers for the people of that world when a rule asks one to think, with your own Claude Code (${flag('voice') ?? 'haiku'}), at most ${Number(flag('voice-most') ?? 40)} answers a minute: --no-voice turns that off`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)
 }

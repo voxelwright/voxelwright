@@ -507,6 +507,55 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   (`world.near` is the box's); a page side cannot yet say anything back to its world side but through what is
   there (`act`, `pick`, an ask); modules replaced stay in memory until the process ends (a few KB each). Whether
   the core and the marcher's shader can be swapped the same way is being tried next: see #264.
+## People who answer (#264)
+
+A rule can ask one of its actors to think: to answer what was said to them as a person of that world would. The
+answer comes from a model on the machine of someone who is there, and the rule hears it as data.
+
+```sh
+node serve.mjs --port 5795 --world ~/.village/engine/talk/try.log
+node helper.mjs --world http://127.0.0.1:5795 --port 5796      # voices the world's people with your own Claude Code (Haiku); --no-voice turns it off
+```
+
+```js
+on('said', (world, e) => world.think('odile', { who: 'A baker, dry and kind.', where: 'outside her bakery', heard: e.text, from: e.name,
+  notes: { doubts: { ask: 'does the speaker seem to doubt that the world is real', is: 'yes/no' } } }))
+on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, to: [760, 4009] }) })
+```
+
+- **What a rule asks** (`world.think`, `mind/think.mjs`): who the actor is, where they are and what happened
+  lately as the rule knows it, what they heard and from whom, and the notes it wants: each a question and a kind
+  (`"yes/no"`, `"words"`, a list of choices, `[low, high]`). The actor shows dots over its head, then says the
+  answer itself, the first sentence as soon as the model has written it.
+- **What it hears** (`on('thought')`, told only to the rule that asked): the words, and each note as a value of
+  its kind or null. The world's process checks both (`mind/form.mjs`): a note that is not of its kind is null,
+  words with an address or a tag in them are not said. A thought that fails (nobody voices the world, the model
+  failed, twenty seconds passed) is told with `failed`, within a second when no helper is running.
+- **Whose model.** The server never runs one. A helper asks the world what its people were asked
+  (`GET /world/minds`) and answers (`POST /world/mind`); `mind/door.mjs` hands each ask to one helper. **One helper
+  voices everyone in a world: the first that came, while it keeps asking; when it closes or goes quiet for ten
+  seconds, the next.** So in a world with several people, what anyone says near an actor goes to the model of
+  whoever's helper came first, on their subscription. The world asks nobody who they are, so it cannot yet prefer
+  a realm's owner.
+- **Every realm someone is in.** A helper voices home and each realm of its server that is awake with a page
+  reading it, found by asking `GET /realms` every two seconds; a realm nobody is in is left alone, so that it can
+  rest. One count of what is spent covers them all.
+- **What it spends.** A rule may have eight actors thinking at once and ask forty times a minute; the helper
+  answers at most forty a minute (`--voice-most`) and three at once, whatever a world asks for.
+- **What was typed is something heard.** The model is given one fixed text of the engine's own (`SYSTEM` in
+  `mind/form.mjs`); who the actor is, what they heard and the notes come as quoted data under labels, a rule's
+  words as much as a person's. The reply is read as `SAY:` words, a line of `===`, and `key: value` notes: anything
+  before `SAY:` is never said. Sixteen cases (ordinary talk, questions about what the world is, twelve typed
+  attempts to break the person or fill in a note) are kept with a real model's replies in `test/mind-kept.json`;
+  `node test/mind.mjs --real` asks them again (sixteen short replies on your subscription).
+- **Limits.** The binary puts the account's email address and the date in every model's context and no flag takes
+  them out. The model is told the person knows neither, and a reply with anything shaped like an address is
+  refused twice (helper and world), but a model talked into spelling an address out in words would not be caught,
+  and asked the date one reply gave the real one. Fine for one person and their own helper; before strangers share
+  a voice it needs a model run without that context.
+- `node test/mind.mjs` checks it with no model: the kept replies, replies written to be wrong, and the real server
+  with a stand-in model (nobody voicing, a voice, early words, caps, a second helper, a forged answer, a helper
+  that closes or goes quiet, dots on a page).
 
 ## Checks and tools
 
