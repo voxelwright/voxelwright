@@ -2671,3 +2671,46 @@ named what the checks had not looked at. What was wrong, and what it taught:
   air by a restart mid-leap falls from there; `down` and `cling` as numbers for an actor; a flyer finds no way round a ceiling (it rises, and
   stops if it cannot); a leap does not look at who stands where it lands; nothing new for a seat (`/world/walk`
   only walks); a climb is one face, not round an overhang. `node test/able.mjs`.
+
+## A rule builds (#264, `plugins/build`, `rules/built.mjs`; November 14)
+
+`world.build(id, {at, parts})` puts shapes into the world's cells as ordinary edits; `{clear: true}` or taking the
+rule out puts back what they replaced. What cost time, and what to keep:
+
+- **The world's process can make an edit itself**: post `{echo: {by, edit, box, release, ...}}`, put the same words
+  into the core, and call `told(n, true)` once for it. The server keeps a world-made echo as it keeps an ask's and
+  replays it; pages apply it. A page ignores an edit echo with no `box` (high corner exclusive), and counts one
+  released answer for every edit echo (`main.ts` `asked`): one each, in any order. Nothing the server checks on an
+  ask is checked on these, so the maker holds the limits (65,536 numbers an edit, rows sorted by y, then z, then x).
+- **What must outlive a rest is read back from the world's own history.** A plugin's `state()` crosses a hot swap
+  only; a realm rests and wakes by replaying its file. Each of a build's edits carries `built: {rule, id, sum, k,
+  of}`, `serve.mjs` passes that with `replay`, and the ledger reads the cells just before the replayed edit goes
+  in: the same cells it read the first time, so nothing else is written anywhere. The ledger lives in `world.mjs`'s
+  own imports, not in the plugin: replays arrive before plugins load.
+- **Put every tile of an edit in before asking the core what holds.** `bodies_release` asks about a box 16 m
+  across. Asked tile by tile as the tiles went in, a rail crossing a tile's edge had half of itself and one post in
+  the world, and that half fell (the first span of a fence, every time).
+- **Asking what holds is 60 ms a tile** (it gathers 160 x 224 x 160 cells). Ask only for a tile that could have
+  left something unheld (a cell filled over nothing, or a cell emptied under something: one read a cell), and one
+  tile at a time between the world's other work. A track of 25 tiles went from holding the world 1.4 s to 0.26 s.
+- **Cells join by their faces.** A band one cell high that follows stepping ground is in pieces: a column must
+  reach up to where the next begins. A line one cell wide must step along x or z, never both (a 4-connected walk).
+  With both, rails of every material hold 10 m between posts; the guide tells a model 8.
+- **Ground is never level**: 2 to 26 m of rise over 400 m, in the town too. So a level box that starts on the
+  ground is carried down to it where it falls away, and everything long is laid on the ground under each column
+  (`feet_at`, 0.1 to 0.8 microseconds a column, the land's rule, not what stands on it).
+- **Coarser copies of the world take one cell in 2, 4, 8 of an edit** (`scratch.rs` `merged`: `y & mask == half`).
+  A layer one cell thick on sloping ground therefore shows as stripes along the contours from 30 m off, and one
+  four or eight thick still does from high above, because the coarse cell that holds the ground's top is not
+  always the one sampled. Roads are told to be four thick. The mend is in the core, not done: show a coarse cell
+  that holds the ground's top as the top is after edits.
+- **A model writes shapes, not rows.** Given boxes alone it built a ring well (boxes are a ring's own form) but
+  needed three askings; for a track on a slope it took 417 s, spent 325 looks finding the ground, and asked for a
+  line that follows it. Given `line`, `loop`, `posts`, `steps` it built both on the first asking in 37 and 44 s.
+  It read every number in the guide: with the guide's example at "high 1" its track was one cell thick.
+- **A plugin's guide is cut at 4,000 characters without a word** (`plugins.mjs` `GUIDE_MOST`): the check asks the
+  guide for the plugin's last line. `plugins/sound/guide.txt` is 4,744 characters on main as this is written.
+- **The trial of a model's rule stands a seat where the asker is**, and a seat is the world's to move, so the trial
+  never sees "someone is in the way". A rule that builds on top of the asker passes the trial and is refused in
+  the realm. The guide says to build 40 cells off; the first two rules did (16 m south, in the yard).
+

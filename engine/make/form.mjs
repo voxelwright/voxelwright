@@ -29,7 +29,7 @@ const CRUMBS = 12
 export const ROWS_MOST = Math.floor((65536 - 2) / 5)
 
 /** A colour of the palette by name: "own", "white", "black", "grey:0" to "grey:14" (white to black), or "hue:tone" (24 hues, ten tones). */
-function colour(name) {
+export function colour(name) {
   if (name === 'own') return 0
   if (name === 'white') return 1
   if (name === 'black') return 15

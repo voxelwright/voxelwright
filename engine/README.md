@@ -493,6 +493,32 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
   was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
   follows how far her story is (November 14).
+- **A rule builds** (`plugins/build`, `rules/built.mjs`). `world.build(id, {at, parts})` puts a place into the
+  world's own cells: parts are shapes as data, in the engine's materials and colours (a made thing's: `make/form.mjs`).
+  `box`, `wedge` and `steps` are level, measured from the ground at `at`; `line`, `loop`, `ring`, `disc` and `posts`
+  lie on the ground under each column, so a road follows rolling land and a rail hung over it stays one piece. Later
+  parts replace earlier ones and `air` cuts, into the ground too. What is built is the world's like any edit: echoed
+  as an ask is, so it is kept in the world's file and applied by every page, and it breaks, burns and falls.
+  `world.build(id, {clear: true})` takes it away and puts back what it replaced; taking the rule out does the same.
+  The world's process remembers what each build replaced, and when a world starts again it reads that from its own
+  history (each kept edit says whose build it is, and is read just before it goes in). Put back: every cell that is
+  still what the build made it. Left: what was broken since, what another build holds, and the columns someone at a
+  page stands in. A build is whole or not at all: refused in words (and heard as `built` with `failed`) if a part
+  is not the form's, if it is over 600,000 cells, 45,000 rows or 3,000 cells from `at`, if someone at a page or
+  something that lives is in or right over a cell it changes, or if it would change another build's cells. A rule has 16
+  builds and a world 64. Asked for again as it is, nothing is done, so a rule builds on every `start`; with other
+  parts, the old is taken away first (a gate opens). Actors and seats standing there are stood again on what is
+  there. Form decided by trial (November 14, Opus 5.5, four real runs): shapes against boxes alone (the nearest a
+  model can write to raw rows). A ring with ropes and a stand: shapes 37 s on the first asking, boxes 91 s on the
+  third. A kart track on sloping open ground: shapes 44 s on the first asking; with boxes alone 417 s, and its model
+  surveyed the ground with 325 looks and asked for "a way to lay cells along a line or a curve". Measured (M1 Pro):
+  a track 170 m round, 8 m wide and four cells thick is 535,000 cells in 25 edits and 2 MB of the world's file; the
+  world answers a question within 260 ms while it is laid and within 100 to 260 ms while it is taken away. What
+  could fall is asked of the core a tile at a time between the world's other work (60 ms a tile: asked all at once
+  a fenced track held the world 1.6 s). `node plugins/build/check.mjs`: a road mender and a carpenter, neither a
+  game. **Known**: a road thinner than four cells shows in stripes from far off, and any road does from high above
+  (coarser copies of the world take one cell in 2, 4, 8 of an edit, and the ground's top is not always the one
+  taken); a build stops the world's clock for up to a quarter of a second.
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.
@@ -610,7 +636,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   - `world.mjs`, one file: `export default (world) => ({ does: { name(rule, want, now, wrong) {} }, dropped(ruleId) {}, state() {}, close() {} })`.
     `does` is what a rule may ask for (`world.<name>({...})` in a rule arrives as `want`: check every field as a
     stranger's). `world` is the doors it is given: `folk` (everyone with a body), `text`, `tell` (a body, to pages),
-    `release`, `look`, `stand`, `tall`, `living(id)` (where a thing that lives is, or null), `core()` (the core's exports as they are now: ask each time), `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
+    `release`, `look`, `stand`, `tall`, `builds` (what rules have built: `rules/built.mjs`), `living(id)` (where a thing that lives is, or null), `core()` (the core's exports as they are now: ask each time), `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
     (one rule hears it), `pages.state(v)` and `pages.once(v)` (to its page side), and `was` (what the version before
     handed on through `state()`).
   - `page.ts`, if a page needs anything: `export default ({ engine, link }) => ({ state(v) {}, once(v) {}, close() {} })`.
@@ -637,7 +663,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
   (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
   both sides, is in and shown 14 ms after the look.
-- **There now**: `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once; and with `as`, a sound that stays on someone and is heard moving, kept as what is so), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+- **There now**: `plugins/build` (`world.build`: a rule puts a place into the world's cells and takes it out again; "Rules" above), `plugins/make` (`world.make({wish, for, at})`: a rule asks for a thing by words for someone at a page; that person's own page has it made by their own helper and model, as if they had typed it, so a rule cannot spend anyone else's model; made before, made at once), `plugins/sound` (`world.sound`: a rule's sound, told to pages once; and with `as`, a sound that stays on someone and is heard moving, kept as what is so), `plugins/music` (`world.music`: what a realm's music is like, with a page side that hands it to the page's music), `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
   hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
   the engine had).
 - **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns

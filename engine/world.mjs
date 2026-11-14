@@ -26,6 +26,7 @@ import { lookOf, ownLook } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
 import { blows } from './rules/blows.mjs'
 import { bodies, CAN } from './rules/bodies.mjs'
+import { built } from './rules/built.mjs'
 import { hands } from './rules/hands.mjs'
 import { holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
@@ -494,6 +495,7 @@ function drop(id) {
   body.dropped(id)
   driven.dropped(id)
   minds.drop(id)
+  builds.dropped(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
@@ -613,7 +615,9 @@ does.set('show', hand.show)
 // Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
-const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { core: () => core, folk, living: (id) => alive.get(id)?.pose?.at ?? null, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
+// What rules have built (rules/built.mjs, the BUILD lane): cells a rule put into the world, and what each replaced, so that they can be taken out again. Its edits are done as an ask's are: echoed, put into the core, and what they left unheld let fall.
+const builds = built({ core: () => core, folk, lives: () => [...alive.values()].map((a) => a.pose?.at), footing, stand, tell, busy: () => !!swapping, apply: (echo) => { parentPort.postMessage({ echo }); edit(echo.edit) }, settle: (at) => { told(at ? core.bodies_release(at[0], at[1], at[2], 0) : 0, true); nudged = true } })
+const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { builds, core: () => core, folk, living: (id) => alive.get(id)?.pose?.at ?? null, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
@@ -721,7 +725,7 @@ parentPort.on('message', (said) => {
   // A question, answered at once: what a cell is made of, and how high the ground's rule puts the land there.
   if (at) return parentPort.postMessage({ id, kind: core.world_kind(at[0], at[1], at[2]), ground: core.ground_at(at[0], at[2]) })
   // What was done before this process began: the edits only, with nothing thrown and nothing let fall.
-  if (replay) return edit(replay)
+  if (replay) { if (said.built) builds.replayed(said.built, replay); return edit(replay) }
   // A thing picked up or put down: the ask is made whole here (its edit, what the hand carries), or said why not.
   // A hand that is full puts down what it holds, at its owner's feet, before it takes another: nobody is told no.
   if (ask.hold !== undefined && grasp.of(ask.by)) lay({ by: ask.by, put: true })

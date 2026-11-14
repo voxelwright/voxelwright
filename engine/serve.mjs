@@ -468,7 +468,7 @@ function open(of) {
       const kind = all.readUInt32LE(at), size = all.readUInt32LE(at + 8)
       if (at + 12 + size > all.length) break
       const k = kept(kind, all.subarray(at + 12, at + 12 + size))
-      if (k) { if (k.edit) thread.postMessage({ replay: k.edit }); if (k.ask) note(k.ask, log.length); log.push(frame(kind, log.length, k.payload)) }
+      if (k) { if (k.edit) thread.postMessage({ replay: k.edit, built: k.ask?.built }); if (k.ask) note(k.ask, log.length); log.push(frame(kind, log.length, k.payload)) }
       at += 12 + size
     }
   }
@@ -577,7 +577,7 @@ function open(of) {
       const ready = await new Promise((resolve) => { waiting.set(first, resolve); thread.postMessage({ swap: join(root, 'page', 'core.wasm'), id: first }) })
       if (ready.ready.error) return { edits: 0, error: ready.ready.error, all: Number((performance.now() - began).toFixed(1)) }
       let edits = 0
-      for (const f of log) { const k = kept(f.readUInt32LE(0), f.subarray(12)); if (k?.edit) { thread.postMessage({ replay: k.edit }); edits++ } }
+      for (const f of log) { const k = kept(f.readUInt32LE(0), f.subarray(12)); if (k?.edit) { thread.postMessage({ replay: k.edit, built: k.ask?.built }); edits++ } }
       for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, name: t.record.name, controls: t.record.controls, rows: rowsOf(t) } })
       const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ swapped: true, id: n }) })
       return { edits, ...m.swapped, all: Number((performance.now() - began).toFixed(1)) }
