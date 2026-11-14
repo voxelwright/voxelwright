@@ -853,7 +853,7 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
             // Open hillside: gold where it is dry on the ridges, olive in the folds, paler in drifts.
             let dryness = coast_fold(x, z) + (noise(x, z, 900, 94) - 0.5) * 0.6 + (unit(x >> 2, z >> 2, 95) - 0.5) * 0.25;
             let fade = ease(-7000.0, -5200.0, off);
-            if unit(x >> 3, z >> 3, 96) < fade {
+            if drift(x, z, 96) < fade {
                 return kind(GRASS, if dryness > 0.62 { colour(4, 8) } else if dryness > 0.4 { colour(5, 8) } else { colour(6, 9) });
             }
         }
@@ -882,7 +882,7 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
             return kind(GRASS, colour(8, 6));
         }
     }
-    if d > 0.0 && unit(x >> 3, z >> 3, 43) < d * 1.4 {
+    if d > 0.0 && drift(x, z, 43) < d * 1.4 {
         if d > 0.5 && steep() > 0.7 {
             // The walls of the tables: beds of rock a few metres thick, red and paler, one over another.
             let bed = (g + (noise(x, z, 2600, 67) * 60.0) as i32).div_euclid(28);
@@ -910,7 +910,7 @@ fn country(x: i32, z: i32, g: i32) -> Kind {
     if w > 0.0 {
         // The planet's dry lands: thin dry grass at their edges, then bare ground, red earth in some countries
         // and pale sand in others, in drifts. Its cold lands short of the snow: brown moor.
-        let (a, chance) = (arid(x, z), unit(x >> 3, z >> 3, 43));
+        let (a, chance) = (arid(x, z), drift(x, z, 43));
         if chance < ease(0.35, 0.9, a) * w * 1.4 {
             let tone = (noise(x, z, 2400, 44) * 3.0 + unit(x >> 2, z >> 2, 46) * 1.2) as usize;
             return kind(SAND, if red(x, z) { colour(1, [8, 8, 9, 5][tone.min(3)]) } else { colour(3, [7, 7, 8, 2][tone.min(3)]) });
@@ -1269,6 +1269,13 @@ fn grove(x: i32, z: i32, g: i32) -> Option<f32> {
         return None;
     }
     Some(noise(x, z, 3400, 97) * 0.7 + noise(x, z, 900, 98) * 0.3)
+}
+
+/// A chance from 0 to 1 that drifts over a couple of metres and is ragged at a hand's width. One kind of ground
+/// thins into another by it in blotches with torn edges: by squares of 80 cm it read as a chessboard (#163).
+fn drift(x: i32, z: i32, seed: u32) -> f32 {
+    let v = noise(x, z, 23, seed) * 0.5 + noise(x, z, 7, seed.wrapping_add(1000)) * 0.36 + unit(x >> 1, z >> 1, seed) * 0.14;
+    ((v - 0.5) * 1.7 + 0.5).clamp(0.0, 1.0)
 }
 
 /// What the grass country is covered with: under the woods a dark floor with fallen leaves; by the water dark wet

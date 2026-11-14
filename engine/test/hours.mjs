@@ -39,8 +39,9 @@ try {
   await page.evaluate(() => Object.assign(globalThis.engine.pose, { x: 6100, z: 407, y: globalThis.engine.ground(6100, 407) + 30, yaw: Math.PI / 2, pitch: -0.25 }))
   await at(22)
   const plain = await look()
-  // With the lamps' light on it the plain was 19% of full and 0.15% of it bright.
-  check(plain.bright < 0.0005 && plain.mean < 0.14, `at night over the plain nothing is lit: ${percent(plain.bright)} of the picture is bright, ${percent(plain.mean)} of full on the whole`)
+  // With the lamps' light on it the plain was 19% of full. (A night to see by, #163: the moon on pale ground is
+  // 0.1% of the picture bright and 11.6% of full, so it is the whole that tells lamps from none.)
+  check(plain.bright < 0.002 && plain.mean < 0.14, `at night over the plain nothing is lit: ${percent(plain.bright)} of the picture is bright, ${percent(plain.mean)} of full on the whole`)
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, p), here)
 
   await at(null)

@@ -234,7 +234,7 @@ async function main() {
     march.light(sun, day, low)
     // Full day is 1, dusk and night 0.
     const noon = day * (1 - low)
-    grade = [1.25 - 0.35 * noon, 0.35 - 0.25 * noon]
+    grade = [1.25 - 0.2 * noon, 0.35 - 0.1 * noon]
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)

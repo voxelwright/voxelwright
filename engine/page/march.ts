@@ -36,10 +36,10 @@ export function materials(): Float32Array<ArrayBuffer> {
     ['#000000', 0, 1, 0, 0],
     ['#6b5440', 0.9, 0.95, 0, 0], // earth
     ['#7d7a76', 0.8, 0.9, 0, 0], // rock
-    ['#5f8a3c', 1.0, 0.95, 0, 0], // grass
+    ['#5f8a3c', 0.7, 0.95, 0, 0], // grass
     ['#d9c79a', 0.6, 0.95, 0, 0], // sand
     ['#2f6f86', 0.15, 0.06, 0.9, 0], // water
-    ['#5a5b60', 0.7, 0.92, 0, 0], // asphalt
+    ['#4c4e54', 0.35, 0.92, 0, 0], // asphalt
     ['#a9a69f', 0.5, 0.85, 0, 0], // concrete
     ['#a4553d', 0.9, 0.9, 0, 0], // brick
     ['#cfc6b4', 0.3, 0.9, 0, 0], // plaster
@@ -190,6 +190,13 @@ fn hash3i(c: vec3i, seed: u32) -> f32 {
   h = (h ^ (h >> 12u)) * 0x297a2d39u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
+// A number for a place on a face that changes smoothly from one whole place to the next.
+fn soft(p: vec2f, seed: u32) -> f32 {
+  let i = vec2i(floor(p));
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash3i(vec3i(i.x, i.y, 0), seed), hash3i(vec3i(i.x + 1, i.y, 0), seed), u.x), mix(hash3i(vec3i(i.x, i.y + 1, 0), seed), hash3i(vec3i(i.x + 1, i.y + 1, 0), seed), u.x), u.y);
+}
 // cell: the finest cell the face is of. n: which way the face looks. fine: 1 where a cell is drawn as a cell, 0 in the coarse copies.
 fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> vec3f {
   let stuff = kind & 15u;
@@ -207,13 +214,15 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
   if (abs(n.x) > 0.5) { along = cell.z; across = cell.x; }
   var up = cell.y;
   if (!wall) { up = cell.z; across = cell.y; }
-  // Stains and wear, the size of a door.
-  let worn = hash3i(vec3i(cell.x >> 4u, cell.y >> 4u, cell.z >> 4u), 3u) - 0.5;
   // Where on the face, 0 to 1 across the cell: along it and up it.
   var fa = q.x;
   var fu = q.y;
   if (abs(n.x) > 0.5) { fa = q.z; }
   if (!wall) { fu = q.z; }
+  // Stains and wear, the size of a door, with no edge to them: squares of it read as a chessboard on grass and
+  // as patched paint on a wall. Each wall has its own, by how deep in the block it stands.
+  let on = vec2f(f32(along), f32(up)) + vec2f(fa, fu) * fine;
+  let worn = (soft(on / 16.0 + vec2f(f32(across >> 3u) * 7.3, 0.0), 3u) - 0.5) * 1.5;
   // Lines finer than a cell show where a cell is some pixels wide, and grain where it is more.
   let lines = clamp((sharp - 2.0) / 4.0, 0.0, 1.0) * fine;
   let grain = clamp((sharp - 4.0) / 6.0, 0.0, 1.0) * fine;
@@ -265,9 +274,19 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
     let shingle = vec3i((cell.x + (cell.z & 1)) >> 1u, cell.y, cell.z);
     v = 1.0 + (hash3i(shingle, 7u) - 0.5) * 0.3 * fine + worn * 0.1 + speck * 0.1 * grain;
   } else if (stuff == 6u || stuff == 1u || stuff == 3u) {
-    // Road, earth and grass: patches.
-    v += worn * 0.12 + speck * select(0.16, 0.26, stuff == 3u) * grain + select(0.0, 0.2, stuff == 6u && speck > 0.44) * grain;
-    if (stuff == 3u) { base = mix(base, vec3f(0.42, 0.4, 0.12), clamp(worn + 0.2, 0.0, 0.35)); }
+    if (stuff == 6u) {
+      // Road: rolled flat and dark, a fine grit in it with a pale stone here and there, worn paler in long patches.
+      v += worn * 0.18 + speck * 0.09 * grain + select(0.0, 0.12, speck > 0.46) * grain;
+    } else if (stuff == 1u) {
+      v += worn * 0.14 + speck * 0.16 * grain;
+    } else {
+      // Grass: swells of it gone dry and yellow, hollows of it deep, each drifting into the next; near, blades in
+      // tufts, some of them pale and some dark.
+      let tuft = soft(on / 5.0, 31u) - 0.5;
+      base = mix(base, vec3f(0.42, 0.4, 0.12), clamp(worn * 0.55 + tuft * 0.25 + 0.14, 0.0, 0.4));
+      v += tuft * 0.22 + speck * 0.24 * grain;
+      if (speck > 0.3) { base = mix(base, vec3f(0.5, 0.52, 0.16), grain * 0.5); }
+    }
   }
   if (stuff == 13u) { v += speck * 0.24 * grain; }
   if (stuff == 2u || stuff == 4u) { v += speck * 0.1 * grain; }
@@ -1355,13 +1374,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const hour = (night: Colour, noon: Colour, dusk: Colour) => mix(night, mix(noon, dusk, low), day)
     const [sx, , sz] = sunMaps.s, flat = Math.hypot(sx, sz) || 1, white: Colour = [1, 1, 1], dark: Colour = [0.03, 0.045, 0.085], cloudy: Colour = [0.035, 0.045, 0.075]
     // Rain: the sun is behind cloud, the sky and its fill go grey, the clouds darken.
-    const some = 0.1 + 0.9 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, rain * by)
+    const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, rain * by)
     f.set([
-      ...times(mix(times([0.45, 0.58, 0.9], 0.11), times(mix([1, 0.93, 0.82], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * rain), day * (1 - 0.5 * low) * (1 - 0.6 * rain),
-      ...wet(times(mix([0.24, 0.33, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
-      ...wet(hour([0.006, 0.01, 0.03], [0.11, 0.3, 0.7], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
-      ...wet(hour(dark, [0.66, 0.79, 0.93], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - rain),
-      ...wet(hour(dark, [0.66, 0.79, 0.93], [1.25, 0.5, 0.1])), sx / flat,
+      ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * rain), day * (1 - 0.5 * low) * (1 - 0.6 * rain),
+      ...wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
+      ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
+      ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - rain),
+      ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,
       ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * rain), sz / flat,
       ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
       // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
