@@ -13,6 +13,8 @@
   #tools button { border: 0; border-radius: 8px; padding: 6px 10px 6px 8px; background: transparent; color: #cfd6df; font: 600 12px -apple-system, system-ui, sans-serif; white-space: nowrap; touch-action: manipulation; }
   #tools button i { font-style: normal; font-weight: 400; opacity: 0.55; margin-right: 6px; }
   #tools button.on { background: #e8ecf1; color: #10141a; }
+  /* The round button is a thumb's: with a mouse a click on the picture does what it does (#367). */
+  @media (hover: hover) and (pointer: fine) { #boom { display: none; } }
   #boom { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); width: 76px; height: 76px; border-radius: 50%; border: 0; background: rgba(210, 70, 40, 0.85); color: #fff; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   /* The layer over the picture (hud.ts). It takes no touch or click itself: only what is in it that is for pressing. */
   #over { position: fixed; inset: 0; pointer-events: none; }
@@ -47,7 +49,8 @@
   #given button { width: 24px; height: 24px; border: 0; border-radius: 50%; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 14px/1 -apple-system, system-ui, sans-serif; }
   #notices { position: absolute; left: 50%; top: max(44px, calc(env(safe-area-inset-top) + 34px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(520px, 86vw); }
   #notices p { margin: 0; padding: 6px 12px; border-radius: 8px; background: rgba(12, 16, 22, 0.72); overflow-wrap: anywhere; }
-  #card { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
+  /* Top left, under the line that says how the page is doing: at the top right it lay under the Portal and Realms buttons (#367). */
+  #card { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(max(12px, env(safe-area-inset-top)) + 46px); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card kbd, #cues kbd { display: inline-block; min-width: 14px; margin-right: 8px; padding: 0 5px; border-radius: 4px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 11px/18px ui-monospace, monospace; text-align: center; }

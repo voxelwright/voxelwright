@@ -281,7 +281,8 @@ on foot as they do flying.
   it goes) or someone at a page (their page gets them on; on foot, their body is taken up and set down again when
   they get off). A page that gets on or off by itself says so (`POST /world/drive {by, id, on}`). Rules hear `ride`,
   `world.things` says `riders`, and everyone sees a rider sitting where the thing is: the world's process carries
-  them ten times a second, so at speed a rider is drawn up to half a metre behind.
+  them ten times a second, so at speed a rider is drawn up to half a metre behind. Whoever rides from a page is drawn on
+  that page in their seat where the thing is that frame (`alive.rider`): from behind, a kart went with nobody in it.
 - **Where a thrown thing lands**: the rule that threw it hears `landed` the first time it meets the world and no
   body (`{at, speed, met, from, tag}`; `tag` is the word it gave `world.throw`), from the core's `STRUCK` record
   against the world. And a rule breaks and burns: `world.blast({at, radius, spark})` and `world.ignite({at, radius})`,

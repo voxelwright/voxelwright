@@ -66,7 +66,7 @@ export function controlsOf(value: unknown): Controls | null {
 
 /** A thing to bring to life: its cells (one kind each, laid out x, then z, then y), size and low corner in the world's cells, how it moves and how it is driven. */
 export interface Making { name: string; cells: Int32Array; size: [number, number, number]; low: [number, number, number]; motor: Motor; controls?: keyof typeof SCHEMES; take?: boolean }
-export interface Thing extends Making { id: number; alive: boolean; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number] }
+export interface Thing extends Making { id: number; alive: boolean; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number] }
 
 export interface Living {
   /** Brings a thing to life. Resolves when the solver has made it; its id is 0 if it could not. */
@@ -77,6 +77,8 @@ export interface Living {
   frame(dt: number): boolean
   /** Gets on a thing, or off (null). */
   mount(thing: Thing | null): void
+  /** Where whoever rides from this page sits now and which way they face (cells; 0 is north), as the world's process places every rider (rules/things.mjs `carry`): in the thing's first seat, or its middle. Null when nobody rides. */
+  readonly rider: { at: [number, number, number]; yaw: number } | null
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
   drive(thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
   readonly things: Thing[]
@@ -165,7 +167,7 @@ export function living(o: {
     if (was >= 0) { const old = things[was]; old.alive = false; things.splice(was, 1); if (riding === old) mount(null) }
     const record = o.made?.().all.get(ref), controls = controlsOf(record?.controls)
     if (!body || !record || !controls) return
-    const b = record.box, thing: Thing = { id: body, ref, alive: true, name: record.name, cells: new Int32Array(0), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]], low: [b[0], b[1], b[2]], motor: controls.motor, controls: controls.scheme }
+    const b = record.box, thing: Thing = { id: body, ref, alive: true, name: record.name, cells: new Int32Array(0), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]], low: [b[0], b[1], b[2]], motor: controls.motor, controls: controls.scheme, seat: controls.seats?.[0] && controls.size ? [controls.seats[0][0] - controls.size[0] / 2, controls.seats[0][1] - controls.size[1] / 2, controls.seats[0][2] - controls.size[2] / 2] : undefined }
     things.push(thing)
     hoped.get(ref)?.(thing)
     hoped.delete(ref)
@@ -219,6 +221,12 @@ export function living(o: {
   return {
     things, struck, where, mount,
     get riding() { return riding },
+    get rider() {
+      const at = riding && where(riding)
+      if (!riding || !at) return null
+      const off = turned(at.rot, riding.seat ?? [0, -3, 0])
+      return { at: [at.at[0] + off[0], at.at[1] + off[1], at.at[2] + off[2]] as [number, number, number], yaw: Math.atan2(at.front[0], -at.front[2]) }
+    },
     get near() { return near },
     spawn: (making) => new Promise((done) => {
       if (o.world) {

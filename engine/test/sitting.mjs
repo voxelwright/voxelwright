@@ -48,9 +48,10 @@ const recorder = () => {
   }
 }
 
-const done = await turn()
 // --quiet: both of this machine's turns on the GPU are taken, so that no other thread's check draws meanwhile and the GPU's times are this page's own. For short runs only: the others wait.
+// The second turn is asked for first: once this process holds one of its own, asking again answers at once with none.
 const both = has('quiet') ? await turn({ mine: false }) : () => {}
+const done = await turn()
 const world = join(out, `world-${Date.now()}.log`)
 const server = await serve('/dev/null', alone ? [] : ['--world', world, '--realms', join(out, `realms-${Date.now()}`)])
 const post = (path, body) => fetch(server.url + path, { method: 'POST', body: JSON.stringify(body) }).then((r) => r.json().catch(() => ({})))

@@ -22,7 +22,8 @@ import { person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
-import { people, townsfolk } from './people.ts'
+import { people, townsfolk, type Person } from './people.ts'
+import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
@@ -531,6 +532,10 @@ async function main() {
   const shadow = far ? new Worker('/page/mover.ts', { type: 'module' }) : null
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
+  // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
+  // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.
+  const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
+  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
   controls.always('KeyB', () => { me.walk(!me.on); return true })
   // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is
   // everyone's but those a rule spares, who move as they always did while all else slows.

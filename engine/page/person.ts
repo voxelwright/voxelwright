@@ -116,7 +116,8 @@ export function person(o: {
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
   let downUntil = 0, lying = 0
   let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
-  const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed, name: o.name }
+  // Nobody's own name is written over their own back: it stood in the middle of the picture the whole time (#367). Others see it over them (presence.ts).
+  const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed }
   // What a rule gave the figure (`world.person`: a look, a move): as presence.ts has it for everyone else's. A new
   // move takes over from the one before, and none brings it to rest from whatever it was in. A move begins when this
   // page hears of it: by the world's clock a strike of half a second told a little late began part way through.

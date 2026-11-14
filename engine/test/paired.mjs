@@ -29,7 +29,8 @@ const serveFrom = async (dir) => {
   })
   return { url: `http://127.0.0.1:${port}`, stop: () => server.kill() }
 }
-const done = await turn(), both = await turn({ mine: false })
+// The second turn is asked for first: once this process holds one of its own, asking again answers at once with none.
+const both = await turn({ mine: false }), done = await turn()
 const mine = await serveFrom(here), other = arg('other', '') ? await serveFrom(arg('other', '')) : null
 const browser = await chromium.launch(CHROME)
 const ways = { A: { url: (other ?? mine).url, query: arg('a', '') }, B: { url: mine.url, query: arg('b', '') } }
