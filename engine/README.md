@@ -537,8 +537,8 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   history (each kept edit says whose build it is, and is read just before it goes in). Put back: every cell that is
   still what the build made it. Left: what was broken since, what another build holds, and the columns someone at a
   page stands in. A build is whole or not at all: refused in words (and heard as `built` with `failed`) if a part
-  is not the form's, if it is over 600,000 cells, 45,000 rows or 3,000 cells from `at`, if someone at a page or
-  something that lives is in or right over a cell it changes, or if it would change another build's cells. A rule has 16
+  is not the form's, if it is over 1,000,000 cells, 60,000 rows or 3,000 cells from `at`, if someone at a page or
+  something that lives is in or right over a cell it changes, or if it would change another rule's build (laid over the rule's own earlier build, the cells pass to the later one, with what was there before either). A rule has 16
   builds and a world 64. Asked for again as it is, nothing is done, so a rule builds on every `start`; with other
   parts, the old is taken away first (a gate opens). Actors and seats standing there are stood again on what is
   there. Form decided by trial (November 14, Opus 5.5, four real runs): shapes against boxes alone (the nearest a
@@ -571,6 +571,24 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   them to say where a realm is). The core gained `top_at` (the ground's top by the land's rule, no sector made) and
   lost a fault: a sector all of one kind, asked for after 4,096 others, was dropped as it was stored and the read
   of it failed (`bodies.rs` `store`; a core test holds it).
+- **A place from words** (`make/realm.mjs`, `test/place.mjs`). A realm asked for from the bar gets ground of its own
+  and is built there. The idea (the quick model's) now says where the realm belongs, `place: {land, room}`: a
+  street, sand, grass, a shore, high ground, open country, and how far the place reaches. The maker finds that
+  ground from the land's own rule (`plugins/ground` `find`, with this build's core: 40 to 970 ms; a shore of sand
+  before any other), makes the realm with `arrive` on dry ground at the place's edge looking at its middle, and
+  tells whoever writes the rules where the middle is, how the land lies, where the sea is and where people arrive,
+  with "build nothing tall between there and the middle". The rule builds the place on `start` with `world.build`.
+  A realm whose idea names no place is made as before. Real runs, November 14 (Sonnet 5.5 for the idea and the
+  first rules, as the bar does it; five realms, 13 model replies): a boxing match (a ring with ropes and stands of
+  fans in a yard of the town, ready 170 s after Enter, second asking); a kart racer (a circuit, a grid of karts and
+  a stand on the plain 4.5 km east, 256 s, first asking); Normandy (a first try on a grass shore took three
+  askings and 563 s; with a beach preferred, landing craft in the surf, obstacles, bunkers and gunners on a bluff,
+  377 s, first asking); Sonoma (a fenced circuit, cars on a grid, pit crews and two grandstands of people, 376 s,
+  first asking). A realm took 83 to 300 s before: a place costs about one to four minutes more, nearly all of it the
+  model writing a longer rule. Pictures: `~/.village/engine/build/unit3-a-place-from-words.png`. What the models
+  still could not build: a hollow room that is safe to walk into (a bunker to storm); water where there is none;
+  a part of a build that can be driven through or hidden at once (item boxes); a build that says when it is
+  touched; lights. And around the place: nothing moves someone at a page to a spot in it.
 - **Not there**: a rule hears nothing of blows or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.

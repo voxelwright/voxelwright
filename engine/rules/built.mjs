@@ -37,12 +37,50 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
   /** By `rule/id`: {rule, id, sum, rows (what it made: x0, x1, y, z, kind), was (the same cells as they were), box, at (by "y|z": its runs of x), cells}. */
   const builds = new Map()
   const key = (rule, id) => `${rule}/${id}`
-  const index = (b) => { b.at = new Map(); for (let i = 0; i < b.rows.length; i += 5) { const k = `${b.rows[i + 2]}|${b.rows[i + 3]}`, list = b.at.get(k); if (list) list.push(b.rows[i], b.rows[i + 1]); else b.at.set(k, [b.rows[i], b.rows[i + 1]]) } }
+  /** A build's rows by "y|z": where in `rows` each begins. */
+  const index = (b) => { b.at = new Map(); for (let i = 0; i < b.rows.length; i += 5) { const k = `${b.rows[i + 2]}|${b.rows[i + 3]}`, list = b.at.get(k); if (list) list.push(i); else b.at.set(k, [i]) } }
   const grow = (box, x0, x1, y, z) => { if (x0 < box[0]) box[0] = x0; if (y < box[1]) box[1] = y; if (z < box[2]) box[2] = z; if (x1 > box[3]) box[3] = x1; if (y + 1 > box[4]) box[4] = y + 1; if (z + 1 > box[5]) box[5] = z + 1 }
   const boxOf = (rows) => { const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]; for (let i = 0; i < rows.length; i += 5) grow(box, rows[i], rows[i + 1], rows[i + 2], rows[i + 3]); return box }
   const meet = (a, b) => a[0] < b[3] && b[0] < a[3] && a[1] < b[4] && b[1] < a[4] && a[2] < b[5] && b[2] < a[5]
   /** Whether a build holds a cell. */
-  const holds = (b, x, y, z) => { const list = b.at.get(`${y}|${z}`); if (list) for (let i = 0; i < list.length; i += 2) if (x >= list[i] && x < list[i + 1]) return true; return false }
+  const holds = (b, x, y, z) => { const list = b.at.get(`${y}|${z}`); if (list) for (const i of list) if (x >= b.rows[i] && x < b.rows[i + 1]) return true; return false }
+  /**
+   * A later build of the same rule is laid over cells an earlier one holds (a turf top on a cliff, a line painted
+   * on a track): the cells pass to the later build, with what the earlier one remembered was there before. Each
+   * cell has one build to put it back, and whichever is taken away, what comes back is the world as it was before
+   * either. `made` and `was` are the later build's rows as read from the world; answers them with that memory.
+   */
+  function adopt(rule, self, made, was) {
+    const box = boxOf(made), others = [...builds.values()].filter((o) => o !== self && o.rule === rule && meet(o.box, box))
+    if (!others.length) return [made, was]
+    const outMade = [], outWas = []
+    for (let i = 0; i < made.length; i += 5) {
+      const x0 = made[i], x1 = made[i + 1], y = made[i + 2], z = made[i + 3], kind = made[i + 4], key = `${y}|${z}`, taken = []
+      for (const o of others) {
+        const list = o.at.get(key)
+        if (!list) continue
+        for (const r of [...list]) {
+          const a = o.rows[r], b = o.rows[r + 1], lo = Math.max(a, x0), hi = Math.min(b, x1)
+          if (lo >= hi) continue
+          taken.push([lo, hi, o.was[r + 4]])
+          // The earlier build keeps what lies to either side of what it gave up.
+          o.rows[r + 1] = lo; o.was[r + 1] = lo
+          if (hi < b) { list.push(o.rows.length); o.rows.push(hi, b, y, z, o.rows[r + 4]); o.was.push(hi, b, y, z, o.was[r + 4]) }
+          o.cells -= hi - lo
+        }
+      }
+      if (!taken.length) { outMade.push(x0, x1, y, z, kind); outWas.push(x0, x1, y, z, was[i + 4]); continue }
+      taken.sort((p, q) => p[0] - q[0])
+      let at = x0
+      for (const [lo, hi, old] of taken) {
+        if (lo > at) { outMade.push(at, lo, y, z, kind); outWas.push(at, lo, y, z, was[i + 4]) }
+        outMade.push(lo, hi, y, z, kind); outWas.push(lo, hi, y, z, old)
+        at = hi
+      }
+      if (at < x1) { outMade.push(at, x1, y, z, kind); outWas.push(at, x1, y, z, was[i + 4]) }
+    }
+    return [outMade, outWas]
+  }
 
   /** Rows as they are in the world now, cell by cell: only the cells that are not already `kind` (those need no change, and are nobody's). Answers [made, was], rows of the same cells. */
   function changed(rows) {
@@ -146,7 +184,7 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
     }
     builds.delete(key(b.rule, b.id))
     // Something is always said, so that a world started again knows the build is gone: with nothing to put back, one cell as it is.
-    if (!back.length) back.push(b.rows[0], b.rows[0] + 1, b.rows[2], b.rows[3], c.world_kind(b.rows[0], b.rows[2], b.rows[3]))
+    if (!back.length) back.push(b.box[0], b.box[0] + 1, b.box[1], b.box[2], c.world_kind(b.box[0], b.box[1], b.box[2]))
     send(b.rule, tiles(back), () => ({ rule: b.rule, id: b.id, gone: true }))
     restand(b.box)
     return { put, left }
@@ -170,17 +208,18 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
         const who = reaches(stood, rows[i], rows[i + 1], rows[i + 2], rows[i + 3])
         if (who) return { error: `${who.who} is in the way at ${who.box[0] + ROUND}, ${who.box[2] + ROUND}: nothing is built into or from under someone. Build beside them, or when they have moved (world.people says where everyone is)` }
       }
-      // Not over cells another build holds: each cell has one build to put it back.
+      // Not over cells another rule's build holds: what one rule built is not another's to change.
       for (const o of builds.values()) {
-        if (o === old || !meet(o.box, box)) continue
+        if (o.rule === rule || !meet(o.box, box)) continue
         for (let i = 0; i < rows.length; i += 5) {
           const list = o.at.get(`${rows[i + 2]}|${rows[i + 3]}`)
-          if (list) for (let k = 0; k < list.length; k += 2) if (rows[i] < list[k + 1] && rows[i + 1] > list[k]) return { error: `it would change cells of build "${o.id}"${o.rule === rule ? '' : ' (another rule\'s)'} at ${Math.max(rows[i], list[k])}, ${rows[i + 2]}, ${rows[i + 3]}: put both in one build (a later part replaces an earlier one), or build beside or on top of it` }
+          if (list) for (const r of list) if (rows[i] < o.rows[r + 1] && rows[i + 1] > o.rows[r]) return { error: `it would change cells of build "${o.id}", another rule's, at ${Math.max(rows[i], o.rows[r])}, ${rows[i + 2]}, ${rows[i + 3]}: build beside or on top of it` }
         }
       }
       if (old) take(old)
-      const [made, was] = changed(rows)
-      if (!made.length) return { cells: 0, rows: 0, box, edits: 0 }
+      const read = changed(rows)
+      if (!read[0].length) return { cells: 0, rows: 0, box, edits: 0 }
+      const [made, was] = adopt(rule, null, read[0], read[1])
       const b = { rule, id, sum, rows: made, was, box: boxOf(made), cells: 0 }
       for (let i = 0; i < made.length; i += 5) b.cells += made[i + 1] - made[i]
       index(b)
@@ -204,7 +243,7 @@ export function built({ core, apply, settle, folk, lives, footing, stand, tell, 
       if (tag.gone) { builds.delete(k); return }
       let b = builds.get(k)
       if (!b || tag.k === 0 || b.sum !== tag.sum) builds.set(k, b = { rule: tag.rule, id: tag.id, sum: tag.sum, rows: [], was: [], box: [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], cells: 0, at: new Map() })
-      const [made, was] = changed(Array.prototype.slice.call(words, 2))
+      const [made, was] = adopt(tag.rule, b, ...changed(Array.prototype.slice.call(words, 2)))
       for (let i = 0; i < made.length; i += 5) { b.rows.push(made[i], made[i + 1], made[i + 2], made[i + 3], made[i + 4]); b.was.push(was[i], was[i + 1], was[i + 2], was[i + 3], was[i + 4]); b.cells += made[i + 1] - made[i]; grow(b.box, made[i], made[i + 1], made[i + 2], made[i + 3]) }
       index(b)
     },

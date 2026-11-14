@@ -31,9 +31,9 @@ export const BUILDS_A_RULE = 16, BUILDS_A_WORLD = 64, PARTS_MOST = 200
 /** How far from `at` a part may reach (cells, each way), how far under and over the ground there, and the most points in a line. */
 export const REACH = 3000, DEEP = 200, HIGH = 600, POINTS_MOST = 64
 /** The most a build may be: cells changed (each is read and remembered), rows of cells (each is kept with the world and sent to every page), and rows worked while laying it. */
-export const CELLS_MOST = 600_000, ROWS_MOST = 45_000, WORK_MOST = 1_200_000
+export const CELLS_MOST = 1_000_000, ROWS_MOST = 60_000, WORK_MOST = 1_600_000
 /** The most builds that change something a rule may ask for in a minute, and the most cells. */
-export const BUILDS_A_MINUTE = 12, CELLS_A_MINUTE = 1_500_000
+export const BUILDS_A_MINUTE = 12, CELLS_A_MINUTE = 3_000_000
 /** How far down a level part that starts on the ground is carried to meet ground that falls away under it. */
 const FOOT = 60
 const FALLS = { '+x': [1, 0], '-x': [-1, 0], '+z': [0, 1], '-z': [0, -1] }

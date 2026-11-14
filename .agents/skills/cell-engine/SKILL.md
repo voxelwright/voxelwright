@@ -2749,3 +2749,22 @@ rule out puts back what they replaced. What cost time, and what to keep:
   deep the sea (now told: the bed's height); a way to take someone to a far place (a realm's `arrive` does it for
   a realm; inside one, nothing does); a build that can be driven through.
 
+## A place from words (#264, `make/realm.mjs`; November 14)
+
+- **The model that imagines a realm cannot know the planet; the engine can.** So the idea names a kind of land and
+  a size (`place: {land, room}`), and code finds the ground (`plugins/ground` `find` with a core of its own: a new
+  realm has no edits, so the land's rule is the whole truth) and hands the rule writer coordinates, the rise, where
+  the sea is and where people arrive. Every rule written that way built at its place on the first run.
+- **Say where people arrive and what they should see.** The first kart realm put its grandstand between the
+  arrival and the track: one arrived facing the back of a black wall. Told "nothing tall between there and the
+  middle", the next raceway put its stands either side of the way in.
+- **Ground under 30 cm is awash**: a first Normandy arrived standing in the surf (`ground_at >= 0` is not dry).
+- **A beach is a shore of sand.** "shore" alone found a grass bank 40 m from the water and a model built its beach
+  on turf; asked for sand first, the same ask gave landing craft in the surf.
+- **Models build in several builds that overlap** (a cliff, then its turf top). Refusing that cost an asking (60 s
+  and more): a rule's later build now takes over the cells of its earlier one, with what was there before either,
+  and only another rule's build is refused. The ledger does the same when it reads the history back.
+- **A place roughly doubles the writing**: Sonnet took 100 to 395 s for a realm's first rule with a place (it was
+  54 to 140 s without). The cap of 600,000 cells was met by the first bluff asked for (898,662); it is a million.
+- **The picture tool opens a realm** with `node test/shot.mjs --realm <id>`.
+

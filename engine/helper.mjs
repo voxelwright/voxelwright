@@ -220,16 +220,16 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         if (!idea) return end(400, { why: 'say what the realm is: {idea}' })
         if (busy) return end(429, { why: 'one thing at a time: something is being made' })
         busy = true
-        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, questions: r.questions }) } finally { busy = false }
+        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, place: r.place, questions: r.questions }) } finally { busy = false }
       }
       if (url.pathname === '/realm') {
-        // A realm made on the world's server and its rules written into it. {name, about, look, answers, by}
+        // A realm made on the world's server and its rules written into it. {name, about, look, place, answers, by}
         const answers = Array.isArray(body?.answers) ? body.answers.slice(0, 3).map((a) => ({ ask: text(a?.ask, 80), answer: text(a?.answer, 60) })).filter((a) => a.ask && a.answer) : []
         if (!text(body?.name, 40)) return end(400, { why: 'a realm has a name: {name, about}' })
         return stream(async (line, tell) => {
           say(`asked by ${text(body.by, 24) || 'someone'} for a realm: ${text(body.name, 40)}`)
           // Its rules are written quickly first, so the realm can be stepped into; the fuller ones follow and are put under the same id.
-          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
+          const r = await makeRealm({ server, name: body.name, about: text(body.about, 4000) || text(body.name, 40), look: body.look, place: body.place, answers, by: text(body.by, 24) || 'someone', model, first: quick === model ? undefined : quick, cannot, say: tell })
           void r.better?.then((b) => say(`  the fuller rules of ${r.name}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`))
           say(`  ${r.state}${r.why ? `: ${r.why}` : ''}`)
           line({ stage: 'done', state: r.state, why: r.why, realm: r.realm, rule: r.rule, name: r.name, cannot: r.cannot, rough: r.rough, ms: r.ms, tries: r.tries, more: !!r.better })

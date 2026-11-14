@@ -80,14 +80,14 @@ export function* surveying(c, [x, z], within, n = 9) {
 }
 
 /** Whether a place is the kind of ground asked for, by its own column alone (quick: asked of tens of thousands). For a shore, which way the water lies. */
-function is(c, land, x, z) {
+function is(c, land, x, z, of) {
   const g = c.ground_at(x, z), wet = g < SEA
   if (land === 'water') return wet
   if (wet) return false
   if (land === 'high') return g > 3000
   if (land === 'shore') {
     // Low ground in open country with the sea within 60 m of it one way and land the other.
-    if (g > 80 || c.paving_at(x, z) % 8 !== 0) return false
+    if (g > 80 || c.paving_at(x, z) % 8 !== 0 || (of && topOf(c, x, z) !== of)) return false
     // Open water, not a river: under the sea's level all the way out for 300 m one way, with land behind.
     const wet = (k, far) => { const a = k * Math.PI / 4; return c.ground_at(Math.round(x + Math.sin(a) * far), Math.round(z - Math.cos(a) * far)) < SEA - 10 }
     let best = false, most = 0
@@ -110,14 +110,14 @@ function is(c, land, x, z) {
 /**
  * The nearest place to `near` that is a kind of ground, with room: nothing standing and no water within `room`
  * cells of it (a shore has water on one side), and the ground rising no more than `flat` cells across it.
- * Looked for ring by ring outwards. Answers {at: [x, y, z], far, room, rise, of, town, water: {to, far}} or null.
+ * Looked for ring by ring outwards. `of` asks for a shore whose ground is of one material ("sand": a beach). Answers {at: [x, y, z], far, room, rise, of, town, water: {to, far}} or null.
  */
 export function find(c, want) {
   const search = finding(c, want)
   for (;;) { const step = search.next(); if (step.done) return step.value }
 }
 /** `find`, a little at a time: it yields between places looked at closely, so whoever runs it may do other work between (the world's process does). */
-export function* finding(c, { land, near, room = 300, flat, within = 200_000 }) {
+export function* finding(c, { land, near, room = 300, flat, within = 200_000, of }) {
   const base = Math.max(300, Math.min(1500, room)), most = flat ?? Math.max(10, Math.round(room / (land === 'high' || land === 'rock' ? 1 : land === 'shore' ? 3 : 6)))
   let tries = 0, looks = 0
   const close = function* (x, z, shore) {
@@ -148,7 +148,7 @@ export function* finding(c, { land, near, room = 300, flat, within = 200_000 }) 
     for (let k = 0; k < n; k++) {
       if (++tries > TRIES) return null
       if (tries % 400 === 0) yield
-      const a = (k / n) * Math.PI * 2 + turn, x = Math.round(near[0] + Math.sin(a) * r), z = Math.round(near[1] - Math.cos(a) * r), ok = is(c, land, x, z)
+      const a = (k / n) * Math.PI * 2 + turn, x = Math.round(near[0] + Math.sin(a) * r), z = Math.round(near[1] - Math.cos(a) * r), ok = is(c, land, x, z, of)
       if (!ok) continue
       if (++looks > CLOSE_LOOKS) return null
       yield

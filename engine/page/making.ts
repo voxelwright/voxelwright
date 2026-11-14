@@ -93,7 +93,7 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const cue = hud.cue(`${plan.name}: making the realm`, () => [at[0], at[1] + 22, at[2]])
     const each = (stage: Stage) => { for (const one of told) one(stage, ask); if (stage.stage === 'realm') cue.text = `${plan.name}: writing its rules`; else if (stage.stage === 'trying') cue.text = `${plan.name}: trying them out` }
     each({ stage: 'place', at, facing: 'south' })
-    const done = await asker.realm({ name: plan.name, about: plan.about, look: plan.look, answers }, each)
+    const done = await asker.realm({ name: plan.name, about: plan.about, look: plan.look, place: plan.place, answers }, each)
     cue.remove()
     if (done.state !== 'there' || !done.realm) { hud.notice(`Not made: ${(done.why ?? '').split(/: |\. /)[0].slice(0, 80)}`, 7000); return done }
     lacked(done)

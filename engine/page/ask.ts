@@ -66,9 +66,9 @@ export interface Asker {
    */
   rule(wish: string, how?: { change?: string }, each?: (stage: Stage) => void): Promise<Done>
   /** An idea for a realm, fleshed out by the asker's own model before anything is built: what it is about, how it looks, and a few questions where the idea leaves a choice open. Null if it could not be. */
-  imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; questions: { ask: string; options: string[] }[] } | null>
+  imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
-  realm(spec: { name: string; about: string; look?: unknown; answers?: { ask: string; answer: string }[] }, each?: (stage: Stage) => void): Promise<Done>
+  realm(spec: { name: string; about: string; look?: unknown; place?: unknown; answers?: { ask: string; answer: string }[] }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made or waiting. */
   readonly busy: number
   /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */

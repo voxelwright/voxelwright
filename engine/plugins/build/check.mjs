@@ -100,17 +100,23 @@ try {
   await say('build me a hut')
   const hut = await told('mender', 'of the hut', (e) => e.build === 'hut')
   check(/Pat is in the way/.test(hut.failed ?? '') && (await at(P[0] - 8, g + 5, P[1] + 192)).material === 0, `nothing is built where someone at a page stands, not even the part clear of them: "${(hut.failed ?? '').slice(0, 60)}"`)
+  // A rule's later build laid over its earlier one takes those cells as its own; another rule's build may not.
   await say('a slab over the path')
   const slab = await told('mender', 'of the slab', (e) => e.build === 'slab')
-  check(/cells of build "path"/.test(slab.failed ?? ''), `nor over another build's cells: "${(slab.failed ?? '').slice(0, 70)}"`)
+  check(slab.cells > 100 && (await at(P[0], (await at(P[0], 0, P[1] + 30)).ground, P[1] + 30)).material === 7, `a rule lays a later build over its own earlier one (${slab.cells} cells of concrete across the path)`)
+  await w.rule('rival', `on('start', (world) => world.build('mine', { at: [${P}], parts: [['box', 'brick', 'own', -5, -3, 20, 5, 3, 40]] }))\non('built', (world, e) => { world.keep.heard = [e] })`)
+  const rival = await told('rival', 'of its build', (e) => e.build === 'mine')
+  check(/another rule's/.test(rival.failed ?? ''), `another rule may not: "${(rival.failed ?? '').slice(0, 70)}"`)
+  await w.post('ask', { by: 'wren', unrule: 'rival' })
   for (const [word, why] of [['wrong material', /"cheese" is not a material/], ['wrong colour', /"puce" is not a colour/], ['wrong shape', /"dome" is not a shape/], ['wrong far', /within 3000 of at/], ['wrong cells', /cells and may be|too much to lay at once/], ['wrong rows', /rows of cells and may be/], ['wrong kind', /is not a material/], ['wrong points', /two points or more/], ['no parts', /parts is a list/], ['nowhere', /needs at/]]) {
     await say(word)
     const how = await until(`refused: ${word}`, async () => { const r = await w.how('mender'); return why.test(r.error) && r })
     check(how.running, `"${word}" is refused in words and the rule goes on: ${how.error.slice(0, 80)}`)
   }
-  check((await edits()).length === first.length, 'none of what was refused changed a cell')
+  const slabbed = (await edits()).filter((e) => e.built.id !== 'slab').length
+  check(slabbed === first.length, 'none of what was refused changed a cell')
   await say('a slab beside it')
-  const beside = await told('mender', 'of the slab beside', (e) => e.build === 'slab' && !e.failed)
+  const beside = await told('mender', 'of the slab beside', (e) => e.build === 'slab' && !e.failed && e.at[2] !== P[1])
   check(beside.cells > 300, `the same build asked for where it may be is built (${beside.cells} cells)`)
 
   // ── The carpenter: a platform people stand on, rails that hang, and a gate that opens by building it again.
@@ -141,7 +147,7 @@ try {
   const gone = await told('mender', 'that the path is gone', (e) => e.build === 'path' && e.cleared)
   await say('strike the stage')
   const struck = await told('carpenter', 'that the stage is gone', (e) => e.build === 'stage' && e.cleared)
-  check(gone.back > 3000 && gone.left === 0, `taken up after a restart, every cell of the path is put back as it was (${gone.back}, none left)`)
+  check(gone.back > 3000 && gone.left === 0, `taken up after a restart, every cell the path still held is put back as it was (${gone.back}, none left)`)
   check(struck.left > 0 && struck.back > 0, `what a blast broke is left as the blast left it (${struck.left} cells), the rest is taken away (${struck.back})`)
   // The slab beside the path is still there: taking the rule out takes it.
   await w.post('ask', { by: 'wren', unrule: 'mender' })
