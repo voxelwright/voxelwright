@@ -310,3 +310,13 @@ whether the mix is right. The owner chose recorded foley over synthesised wood a
   own choice, not measured.
 
 Refresh when a phone has played it, when the core reports impacts, or when a check's numbers move.
+
+## In a realm that is not home, and a patch from the guide (November 14)
+
+- `test/inrealm.mjs` runs a rule's bell and its music in a made realm reached by stepping: neither is heard at
+  home, both are there after the step, the place's own comes back on stepping home, and both return on stepping back.
+- A real run (`make/rules.mjs`, Opus 5.5) asked for a glass harmonica and a kettle, which no kept sound fits. The
+  model wrote patches of its own from the guide's short form (rubbed cup; blown hollow with air, rising each tick)
+  and the world took them first ask. Kept in `~/.village/engine/sound/rules/glass-harmonica.js`. Not measured, not heard.
+- A sound stays where it began and a held one cannot be changed while it lasts; the guide now says so. A motor on a
+  moving thing is a short held sound made again each tick: it steps. A sound that follows its actor is not built.

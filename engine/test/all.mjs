@@ -34,6 +34,7 @@ const checks = [
   ['hands', 'node', ['test/hands.mjs'], true],
   ['sounded', 'node', ['test/sounded.mjs'], true],
   ['tuned', 'node', ['test/tuned.mjs'], true],
+  ['inrealm', 'node', ['test/inrealm.mjs'], true],
   ['aims', 'node', ['test/aims.mjs'], true],
   ['skips', 'node', ['test/skips.mjs'], true],
   ['hours', 'node', ['test/hours.mjs'], true],
