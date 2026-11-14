@@ -734,7 +734,20 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
 - **What comes back** is a pull request like any other. Nothing a session writes is loaded by any game until it is
   merged to main and the game is told to look (`node plug.mjs --port N --at <its checkout>`).
 - **Written down**: who asked is kept with each line (`by`, in `~/.village/engine/cannot.jsonl`); what was sent, to
-  which thread and branch, in `~/.village/engine/workshop/sent.jsonl`.
+  which thread and branch, and where it got to, in `~/.village/engine/workshop/sent.jsonl`.
+- **Whose gaps.** Whoever's machine wrote the rule (the owner's, a friend's, an agent's) also tells the realm's
+  server what could not be done (`POST /world/gap`), and the server keeps it beside the realm's file with who
+  asked (`GET /gaps`). The owner's card lists this machine's own and the server's together; the same line from
+  several asks is one gap, with how many times it was met and by whom.
+- **Where a sent gap is**, on its card: a session building it; its pull request open; merged; in the game; asked
+  again. The helper follows each every half minute (`gh pr list --head <its branch>`). When the pull request is
+  merged it has the game look at its plugins again (and with `--workshop-checkout <the game's checkout>` first
+  brings that checkout's plugins to main, as `node plug.mjs --at` does).
+- **Asked again by itself.** Under the brief is one box, ticked unless the owner unticks it: "when it is in the
+  game, ask again for ...". That yes is given once, with the sending. When the plugin is in, each rule that ran
+  into the gap (up to three, in the realm and under the id they were written) is asked for again in the asker's
+  own words by this helper's model, and put again under its id: it keeps its actors and what it kept. What came
+  of it is on the card. A rule that is no longer there is not asked for.
 - **The loop, closed once** (November 13; times from what was written down: `cannot.jsonl`, `sent.jsonl`, the pull
   request). On a game on port 5805 that was never started again, a page open throughout. Asked for "a game of tag
   ... show who is it and where the game is played": the rule was running 72 s later and its maker said it could not
@@ -761,9 +774,9 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
   page plugin has no door to draw with: that door is the next thing the form needs.
 - `node test/workshop.mjs` checks all of it with something standing in for T3 Code, and the command itself with a
   script that writes down how it was run.
-- **Not there**: what a friend's own helper could not do is written on the friend's machine and does not reach the
-  owner's list (it would be told to the realm's server and kept there with who asked). The card does not yet say
-  when a session's pull request is open or merged. A realm is not asked again by itself when its gap is closed.
+- **Not there**: merging a session's pull request is still someone's own act (the lane's lead or the owner), by
+  design: it is the one step that lets code in. A gap met only in a realm nobody has an id and a place for (an ask
+  from before November 14) can be sent but not asked again.
 
 ## Checks and tools
 

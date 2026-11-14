@@ -4,14 +4,26 @@
 //
 // A chip in the corner says how many things are waiting. Open, each is a card: what was asked, by whom, and what
 // could not be done. "Send to the workshop" does not send: it shows the brief the session would be given, whole,
-// to be read. Only "Start the session" under the brief sends it, and what is sent is that brief.
+// to be read. Only "Start the session" under the brief sends it, and what is sent is that brief. A card that was
+// sent says where it has got to: a session building, a pull request open, merged, in the game, asked again.
 //
 // Every word of a card and of a brief is put as text: a wish, a name or a model's line with markup in it is
 // letters on the screen. Without a helper on this machine there is no chip: someone playing from elsewhere sees nothing of this.
 import type { Asker } from './ask.ts'
 import type { Hud } from './hud.ts'
 
-interface Gap { id: string; at: string; by: string; wish: string; rule: string; line: string; sent: { thread: string; link: string; at: string } | null }
+interface Sent { state: 'started' | 'open' | 'merged' | 'in' | 'asked' | 'closed'; thread?: string; pr?: number; url?: string; plugins?: string[]; again?: unknown[]; asked?: { rule: string; realm: string; state: string; name: string; why: string }[] }
+interface Gap { id: string; at: string; by: string; wish: string; rule: string; line: string; count: number; askers: { by: string }[]; sent: Sent | null }
+/** Where a gap that was sent has got to, in words. Every word of it is put as text. */
+const where = (s: Sent): string => {
+  const pr = s.pr ? `pull request ${s.pr}` : 'its pull request', what = s.plugins?.length ? s.plugins.join(', ') : 'the plugin'
+  if (s.state === 'started') return 'A session is building it. Its pull request comes next.'
+  if (s.state === 'open') return `The session has opened ${pr}. It is loaded by no game until it is merged.`
+  if (s.state === 'closed') return `${pr[0].toUpperCase()}${pr.slice(1)} was closed without being merged.`
+  if (s.state === 'merged') return `${pr[0].toUpperCase()}${pr.slice(1)} is merged. The game takes ${what} in next.`
+  if (s.state === 'in') return `${what} is in the game${s.again?.length ? ': asking again for what wanted it.' : '. Ask again for what wanted it.'}`
+  return `${what} is in the game, and what wanted it was asked again: ${(s.asked ?? []).map((a) => (a.state === 'there' ? `${a.name || a.rule} was written again` : `${a.rule} was not (${a.why || a.state})`)).join('; ')}.`
+}
 export interface Workshop {
   /** Asks the helper again what is waiting. Resolves to how many are not yet sent. */
   refresh(): Promise<number>
@@ -36,7 +48,10 @@ const STYLE = `
 [data-panel="workshop"] .gap { border-top: 1px solid #ffffff1a; padding: 11px 0 }
 [data-panel="workshop"] .gap .line { margin: 0 0 4px }
 [data-panel="workshop"] .gap .from { margin: 0 0 8px; color: #aab3bd; font-size: 12.5px; overflow-wrap: anywhere }
-[data-panel="workshop"] .gap .sent { color: #8fd19e; font-size: 13px }
+[data-panel="workshop"] .gap .sent { color: #8fd19e; font-size: 13px; margin: 0 }
+[data-panel="workshop"] .gap .sent.closed { color: #f0a8a0 }
+[data-panel="workshop"] .again { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 10px; font-size: 13px; color: #d7dde3; pointer-events: auto; cursor: pointer }
+[data-panel="workshop"] .again input { margin-top: 3px }
 [data-panel="workshop"] pre { margin: 10px 0; padding: 11px; max-height: 30vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: #0b0d10; border-radius: 9px; font: 12px/1.45 ui-monospace, Menlo, monospace; color: #d7dde3 }
 [data-panel="workshop"] .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap }
 [data-panel="workshop"] .why { color: #f0a8a0; font-size: 13px }
@@ -55,7 +70,7 @@ export function workshop(over: Hud, asker: Asker): Workshop {
   list.hidden = true
   let gaps: Gap[] = [], open = false
   /** The brief being read, if one is: for which gap, its token, its words, and what came of sending it. */
-  let reading: { gap: string; brief: string; text: string; busy: boolean; why: string } | null = null
+  let reading: { gap: string; brief: string; text: string; busy: boolean; why: string; wanted: { by: string; name: string; realm: string }[]; again: boolean } | null = null
   const waiting = () => gaps.filter((g) => !g.sent).length
   const draw = () => {
     panel.hidden = !gaps.length && !open
@@ -66,15 +81,25 @@ export function workshop(over: Hud, asker: Asker): Workshop {
     if (!gaps.length) list.append(el('p', 'about', 'Nothing is waiting. When a rule is written and something was missing, it shows here.'))
     for (const g of gaps) {
       const card = el('div', 'gap')
-      card.append(el('p', 'line', g.line), el('p', 'from', `${g.by} asked for: ${g.wish}`))
-      if (g.sent) card.append(el('p', 'sent', `Sent to the workshop${g.sent.thread ? ` (thread ${g.sent.thread.replace(/^.*:/, '').slice(0, 8)})` : ''}. Its pull request comes next.`))
+      const others = [...new Set(g.askers.map((a) => a.by))].filter((by) => by !== g.by)
+      card.append(el('p', 'line', g.line), el('p', 'from', `${g.by} asked for: ${g.wish}${g.count > 1 ? ` (met ${g.count} times${others.length ? `, also by ${others.join(', ')}` : ''})` : ''}`))
+      if (g.sent) card.append(el('p', `sent ${g.sent.state}`, where(g.sent)))
       else if (reading?.gap === g.id) {
         const r = reading, row = el('div', 'row'), go = el('button', 'go', r.busy ? 'Starting…' : 'Start the session'), no = el('button', '', 'Not now')
         go.disabled = r.busy
         go.addEventListener('click', () => void send())
         no.addEventListener('click', () => { reading = null; draw() })
         row.append(go, no)
-        card.append(el('p', 'from', 'This is all the session will be told. Read it, then start it.'), el('pre', '', r.text), row)
+        card.append(el('p', 'from', 'This is all the session will be told. Read it, then start it.'), el('pre', '', r.text))
+        // The one yes to asking again: given here, with the sending, and not asked for a second time.
+        if (r.wanted.length) {
+          const label = el('label', 'again'), box = document.createElement('input')
+          box.type = 'checkbox'; box.checked = r.again
+          box.addEventListener('change', () => { r.again = box.checked })
+          label.append(box, ` When it is in the game, ask again for ${r.wanted.map((a) => `${a.name || 'the rule'} (${a.by})`).join(', ')}, with my own model`)
+          card.append(label)
+        }
+        card.append(row)
         if (r.why) card.append(el('p', 'why', r.why))
       } else {
         const b = el('button', '', 'Send to the workshop')
@@ -93,7 +118,7 @@ export function workshop(over: Hud, asker: Asker): Workshop {
   /** The brief for a gap, asked of the helper and shown: nothing is sent. */
   const read = async (g: Gap) => {
     const r = await asker.call('/workshop/brief', { gap: g.id })
-    if (r?.ok && typeof r.value.brief === 'string' && typeof r.value.text === 'string') reading = { gap: g.id, brief: r.value.brief, text: r.value.text, busy: false, why: '' }
+    if (r?.ok && typeof r.value.brief === 'string' && typeof r.value.text === 'string') reading = { gap: g.id, brief: r.value.brief, text: r.value.text, busy: false, why: '', wanted: Array.isArray(r.value.again) ? r.value.again as { by: string; name: string; realm: string }[] : [], again: true }
     else over.notice(typeof r?.value.why === 'string' ? `The workshop: ${r.value.why}` : 'The helper on this machine could not be reached', 6000)
     draw()
   }
@@ -103,7 +128,7 @@ export function workshop(over: Hud, asker: Asker): Workshop {
     if (!r || r.busy) return
     r.busy = true; r.why = ''
     draw()
-    const sent = await asker.call('/workshop/send', { brief: r.brief })
+    const sent = await asker.call('/workshop/send', { brief: r.brief, again: r.again && r.wanted.length > 0 })
     if (sent?.ok) { reading = null; over.notice('A development session has been started in T3 Code', 7000); await refresh() }
     else { r.busy = false; r.why = typeof sent?.value.why === 'string' ? sent.value.why : 'The helper on this machine could not be reached'; draw() }
   }

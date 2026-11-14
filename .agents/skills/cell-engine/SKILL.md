@@ -2502,3 +2502,18 @@ The run and its times are in `engine/README.md` "The workshop". What it taught:
   marks drawn was other lanes' checks on the GPU; on a held turn, marks on and off, all frames were 16.7 ms. #314
   is the real bench.
 
+## The workshop's loop, its end (#264, November 14)
+
+- **A gap is its line, not its ask.** The same line came from sixty asks ("an actor has no moves"); keyed by ask
+  the list was sixty cards. Keyed by the line's own text it is one, with how many times it was met and by whom.
+- **Gaps live with the realm, on the server** (`<realm file>.gaps.jsonl`, `POST /world/gap`, `GET /gaps`): the maker
+  on anyone's machine tells the server it wrote the rule for, so the owner's list has a friend's and an agent's.
+  Kept without waking the realm.
+- **The one yes to asking again is taken at the sending** and written with what was sent (which rules, which realm,
+  where the asker stood, their words). The journal line had to carry the rule's id, the world and the place for
+  that: lines from before have none and can be sent but not asked again.
+- **Following is a small state written to a file** (started, open, merged, in, asked): each step appended to
+  `sent.jsonl` and laid over the last, so a helper started again goes on from where it was.
+- **"In the game" is: merged, and the server lists the pull request's plugins with no error.** It cannot tell a new
+  version of a plugin that was already in from the old one; good for a new plugin, which is what a session builds.
+

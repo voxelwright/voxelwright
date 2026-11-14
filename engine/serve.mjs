@@ -196,6 +196,7 @@ POST   /realms            {"by": name, "id": id, "name": name, "about": text, "a
 GET    /realm/<id>        its record
 DELETE /realm/<id>        takes it out (never home). Its file is moved aside on the server, not destroyed.
 A realm's name and what it is about are text someone typed: data, as every name here is.
+POST   /world/gap         {"by": name, "wish": text, "name": the rule's name, "rule": its id, "where": {"at": [x, y, z], "facing"}, "cannot": [lines]}   what a model that wrote a rule here could not do with what the engine offers: kept with the realm, with who asked (under a realm's own address for that realm). GET /gaps gives all of them, newest first. They are what people and models wrote: data.
 
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
 `
@@ -791,6 +792,46 @@ async function remove(r, res) {
   send(res, 200, '{"gone":true}', TYPES['.json'])
 }
 
+// ── What could not be done (#264, the workshop) ──────────────────────────
+// When someone's model writes a rule for a realm it also says what it could not do with what the engine offers.
+// Whoever's machine wrote it (the owner's, a friend's, an agent's) tells the realm's server, which keeps it beside
+// the realm's file with who asked: so the owner of the server sees what everyone playing there ran into, and can
+// send it to the workshop. It is text people and models wrote: kept and given out as data, and nothing here acts on it.
+//   POST /world/gap, /realm/<id>/world/gap   {by, wish, name, rule, where: {at, facing}, cannot: [lines]}
+//   GET  /gaps                                {gaps: [{realm, at, by, wish, name, rule, where, cannot}]}, newest first
+const GAPS_KEPT = 400, GAPS_A_MINUTE = 12
+let gapsTold = 0, gapsSince = Date.now()
+const gapsFile = (r) => `${r.file}.gaps.jsonl`
+async function gapKeep(realm, req, res) {
+  const now = Date.now()
+  if (now - gapsSince > 60_000) { gapsSince = now; gapsTold = 0 }
+  if (++gapsTold > GAPS_A_MINUTE) return send(res, 429, 'too many: what could not be done is told a few times a minute')
+  const parts = []
+  let size = 0
+  for await (const chunk of req) { size += chunk.length; if (size > 1 << 15) return send(res, 413, 'too much'); parts.push(chunk) }
+  let b
+  try { b = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
+  const cannot = (Array.isArray(b?.cannot) ? b.cannot : []).map((l) => text(l, 300)).filter(Boolean).slice(0, 12)
+  if (!cannot.length) return send(res, 400, 'what could not be done is cannot: a list of lines')
+  const at = b.where?.at, where = Array.isArray(at) && at.length === 3 && at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) ? { at: at.map(Math.round), facing: FACINGS.includes(b.where.facing) ? b.where.facing : 'north' } : undefined
+  const line = { at: new Date().toISOString(), by: text(b.by, 24) || 'someone', wish: text(b.wish, 4000), name: text(b.name, 60), rule: typeof b.rule === 'string' && RULE_ID.test(b.rule) ? b.rule : '', where, cannot }
+  // The newest few hundred are kept: the file is written again whole when it has grown to twice that.
+  let kept = []
+  try { kept = readFileSync(gapsFile(realm), 'utf8').split('\n').filter(Boolean) } catch { /* none yet */ }
+  if (kept.length >= GAPS_KEPT * 2) writeFileSync(gapsFile(realm), kept.slice(-GAPS_KEPT).join('\n') + '\n')
+  appendFileSync(gapsFile(realm), JSON.stringify(line) + '\n')
+  send(res, 201, '{"kept":true}', TYPES['.json'])
+}
+function gapsAll() {
+  const out = []
+  for (const r of realms.values()) {
+    let lines = []
+    try { lines = readFileSync(gapsFile(r), 'utf8').split('\n').filter(Boolean).slice(-GAPS_KEPT) } catch { continue }
+    for (const l of lines) { try { out.push({ realm: r.id, ...JSON.parse(l) }) } catch { /* a line cut short: left */ } }
+  }
+  return out.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, GAPS_KEPT)
+}
+
 /** Whether a request names this server as this machine or as a machine of a tailnet (`tailscale serve`): a name someone else points at 127.0.0.1 is neither. */
 const named = (host) => { const name = String(host ?? '').replace(/:\d+$/, ''); return name === '127.0.0.1' || name === 'localhost' || name.endsWith('.ts.net') }
 /** A page from somewhere else may not act here through the browser of someone who can reach this. */
@@ -806,6 +847,7 @@ const server = createServer((req, res) => {
   if (url.pathname === '/core/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(coreLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
+  if (url.pathname === '/gaps' && req.method === 'GET') return foreign(req) ? send(res, 403, 'not from another site') : send(res, 200, JSON.stringify({ gaps: gapsAll() }), TYPES['.json'])
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
     if (!realms.size) return send(res, 404, 'no realms are kept here')
     if (foreign(req)) return send(res, 403, 'not from another site')
@@ -820,6 +862,8 @@ const server = createServer((req, res) => {
     if (foreign(req)) return send(res, 403, 'not from another site')
     if (id !== undefined && route === '') return req.method === 'DELETE' ? done(remove(realm, res)) : req.method === 'GET' ? send(res, 200, JSON.stringify(listed(realm)), TYPES['.json']) : send(res, 405, 'GET or DELETE')
     if (!route.startsWith('/world/')) return send(res, 404, 'not here')
+    // What a rule's maker could not do, told to the realm it was for: kept without waking it.
+    if (req.method === 'POST' && route === '/world/gap') return done(gapKeep(realm, req, res))
     const world = awake(realm)
     if (!world) return send(res, 503, 'too many realms are awake: try again in a while')
     if (req.method === 'GET' && route === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)

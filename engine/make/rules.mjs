@@ -216,8 +216,12 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
     if (!best) return { ...out, state: 'refused', why }
     const { rule } = best
     // What it could not do is kept, whatever comes of the rule: it is the engine's to-do list.
-    if (rule.cannot.length) { await mkdir(dirname(cannot), { recursive: true }); await appendFile(cannot, JSON.stringify({ at: new Date().toISOString(), by, wish, name: rule.name, model: out.model, cannot: rule.cannot }) + '\n') }
     const id = change ?? `${rule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'rule'}-${Math.random().toString(36).slice(2, 6)}`
+    if (rule.cannot.length) {
+      await mkdir(dirname(cannot), { recursive: true }); await appendFile(cannot, JSON.stringify({ at: new Date().toISOString(), by, wish, name: rule.name, rule: id, world, where, model: out.model, cannot: rule.cannot }) + '\n')
+      // And told to the world it was for (#264, the workshop): whoever keeps that server sees what everyone there ran into, with who asked.
+      await fetch(`${world}/world/gap`, { method: 'POST', body: JSON.stringify({ by, wish, name: rule.name, rule: id, where, cannot: rule.cannot }) }).catch(() => {})
+    }
     // Changed by someone else while this was being written (a power asked for, say): theirs stands, this one is let go.
     if (unless !== undefined) { const now = await fetch(`${world}/world/rules?id=${encodeURIComponent(id)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null); if (!now || now.source !== unless) return { ...out, state: 'refused', why: 'the rule was changed meanwhile: the change stands', name: rule.name, cannot: rule.cannot } }
     say('putting it into the world', { stage: 'putting', name: rule.name })
