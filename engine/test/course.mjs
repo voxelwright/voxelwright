@@ -31,10 +31,14 @@ try {
   await post('join', { by: 'steward', at: [704, 4104] })
   check((await post('ask', { by: 'tester', rule: { id: 'sender', name: 'Someone who sends karts', source: RULE } })).asked, 'a rule that gives its things somewhere to go is taken')
   await wait(1200)
+  // A kerb two cells high across the street on its way: a kart goes over it.
+  const g0 = Math.round((await (await fetch(`${server.url}/world/at?x=840&y=0&z=4074`)).json()).ground), kerb = []
+  for (let y = g0; y < g0 + 2; y++) for (let z = 4058; z < 4096; z++) kerb.push(840, 843, y, z, 7)
+  await post('ask', { by: 'tester', edit: [1, kerb.length / 5, ...kerb], release: [841, g0 + 10, 4074] })
   // A course of three places: the world steers, the rule hears it arrive.
   await post('say', { by: 'steward', text: 'errand' })
   const came = await says((t) => /a@/.test(t.arrived))
-  check(!!came && Math.hypot(came.a.x - 1040, came.a.z - 4072) < 30 && came.a.up && came.a.to === '-', `given a course of three places, the kart is steered along it by the world and the rule hears it arrive (${came?.arrived.trim()}; it stands at ${came?.a.x}, ${came?.a.z})`)
+  check(!!came && Math.hypot(came.a.x - 1040, came.a.z - 4072) < 30 && came.a.up && came.a.to === '-', `given a course of three places with a kerb two cells high across it, the kart goes over the kerb, is steered along the course by the world, and the rule hears it arrive (${came?.arrived.trim()}; it stands at ${came?.a.x}, ${came?.a.z})`)
   await post('say', { by: 'steward', text: 'away' })
   await says((t) => !t.a)
   // A kart standing on the way, where there is room to pass (the crossing): gone round, not run into.
