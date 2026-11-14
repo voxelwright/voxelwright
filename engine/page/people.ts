@@ -54,8 +54,8 @@ export interface Person {
 export interface Doing { move: Move; t: number; aim?: readonly [number, number, number] }
 
 /** Floats a box: where its middle is, a number of its own; half its size, how big its cells are; two of its three axes with the height of the feet and what it is made as; its colour. */
-const EACH = 20
-const MOST = 12_000
+export const EACH = 24
+const MOST = 24_000
 /** What a box is made as: cloth is knit, skin is smooth, leather shines a little. */
 const CLOTH = 0, SKIN = 1, LEATHER = 2, HAIR = 3
 
@@ -78,10 +78,13 @@ struct Out {
   @builtin(position) pos: vec4f,
   @location(0) q: vec3f,
   @location(1) @interpolate(flat) n: vec3f,
-  @location(2) @interpolate(flat) facing: vec3f,
+  @location(2) @interpolate(flat) c0: vec3f,
   @location(3) seen: vec3f,
   @location(4) @interpolate(flat) colour: vec4f,
   @location(5) @interpolate(flat) more: vec4f,
+  @location(6) @interpolate(flat) c1: vec3f,
+  @location(7) @interpolate(flat) half: vec3f,
+  @location(8) @interpolate(flat) form: vec4f,
 }
 const NEAR = 1.0;
 const FAR = 100000.0;
@@ -89,7 +92,7 @@ fn project(world: vec3f) -> vec4f {
   let d = dot(world, u.forward);
   return vec4f(dot(world, u.right) / (u.tanHalf * u.aspect), dot(world, u.up) / u.tanHalf, FAR / (FAR - NEAR) * (d - NEAR), d);
 }
-@vertex fn vs(@builtin(vertex_index) v: u32, @location(0) mid: vec4f, @location(1) half: vec4f, @location(2) c0: vec4f, @location(3) c1: vec4f, @location(4) colour: vec4f) -> Out {
+@vertex fn vs(@builtin(vertex_index) v: u32, @location(0) mid: vec4f, @location(1) half: vec4f, @location(2) c0: vec4f, @location(3) c1: vec4f, @location(4) colour: vec4f, @location(5) form: vec4f) -> Out {
   let face = v / 6u;
   let corner = array<vec2f, 6>(vec2f(0, 0), vec2f(1, 0), vec2f(1, 1), vec2f(0, 0), vec2f(1, 1), vec2f(0, 1))[v % 6u] * 2.0 - 1.0;
   let axis = face >> 1u;
@@ -97,19 +100,29 @@ fn project(world: vec3f) -> vec4f {
   var p = vec3f(0.0);
   var n = vec3f(0.0);
   if (axis == 0u) { p = vec3f(side, corner.x, corner.y * side); n = vec3f(side, 0.0, 0.0); }
-  else if (axis == 1u) { p = vec3f(corner.x * side, side, corner.y); n = vec3f(0.0, side, 0.0); }
+  else if (axis == 1u) { p = vec3f(corner.x, side, -corner.y * side); n = vec3f(0.0, side, 0.0); }
   else { p = vec3f(corner.x, corner.y * side, side); n = vec3f(0.0, 0.0, side); }
-  let turned = mat3x3f(c0.xyz, c1.xyz, cross(c0.xyz, c1.xyz));
-  let world = mid.xyz + turned * (p * half.xyz) - u.eye;
+  // What is drawn is the hull of the shape: a box narrowed at whichever end the shape is.
+  let narrow = select(form.y, form.x, p.y > 0.0);
+  // A shape's hull is half a cell bigger each way, so that no cell of it is cut by the hull.
+  // How many pixels wide one of its cells is from here: under one, a shape is drawn as its hull alone.
+  let sharp = half.w / (max(length(mid.xyz - u.eye), 1.0) * g.pixel);
+  let carved = colour.a > 0.0 && sharp > 0.9;
+  let hull = vec3f(p.x * narrow, p.y, p.z * narrow) * half.xyz + p * select(0.0, half.w * 0.5, carved);
+  let c2 = cross(c0.xyz, c1.xyz);
+  let world = mid.xyz + c0.xyz * hull.x + c1.xyz * hull.y + c2 * hull.z - u.eye;
   var out: Out;
   out.pos = project(world);
-  out.q = (p + 1.0) * half.xyz;
+  out.q = hull;
   out.n = n;
-  out.facing = turned * n;
   out.seen = world;
-  out.colour = colour;
+  out.colour = vec4f(colour.rgb, select(0.0, colour.a, carved));
   // The cells' size, a number of the box's own, how high the feet are, what it is made as.
   out.more = vec4f(half.w, mid.w, c0.w, c1.w);
+  out.c0 = c0.xyz;
+  out.c1 = c1.xyz;
+  out.half = half.xyz;
+  out.form = form;
   return out;
 }
 fn hash3(c: vec3f) -> f32 {
@@ -129,43 +142,102 @@ fn lamplight(at: vec3f, n: vec3f, feet: f32) -> f32 {
   }
   return pool;
 }
-@fragment fn fs(in: Out) -> @location(0) vec4f {
-  let size = in.more.x;
+// Whether a cell (its middle, from the shape's middle) is of the shape: a box whose cross-section is rounded by
+// \`e\` (2 an ellipse, 4 a soft square, more a box), narrowed towards an end (top, bottom) and rounded off at
+// each end over a share of its length (caps).
+fn field(c: vec3f, half: vec3f, form: vec4f, e: f32) -> f32 {
+  let v = clamp(c.y / half.y, -1.0, 1.0);
+  var r = mix(form.y, form.x, v * 0.5 + 0.5);
+  let top = form.z;
+  let low = form.w;
+  if (v > 1.0 - top) { let k = (v - 1.0 + top) / top; r *= sqrt(max(1.0 - k * k, 0.0)); }
+  if (v < low - 1.0) { let k = (low - 1.0 - v) / low; r *= sqrt(max(1.0 - k * k, 0.0)); }
+  let a = abs(c.xz) / max(half.xz * r, vec2f(0.0001));
+  return pow(a.x, e) + pow(a.y, e);
+}
+struct Lit { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
+@fragment fn fs(in: Out) -> Lit {
   let made = u32(in.more.w);
   let far = max(length(in.seen), 1.0);
+  let rd = in.seen / far;
+  let e = in.colour.a;
+  let c2 = cross(in.c0, in.c1);
+  var size = in.more.x;
   // How many pixels wide one of its cells is: under a few, the cells are not drawn, only their colour.
   let sharp = size / (far * g.pixel);
-  let inside = in.q - in.n * (0.5 * size);
+  var n = in.n;
+  var at = in.q;
+  var gone = 0.0;
+  var round = vec3f(0.0);
+  if (e > 0.0) {
+    // A shape: the ray goes start cell to cell through the box until it meets one that is of the shape.
+    let ld = vec3f(dot(rd, in.c0), dot(rd, in.c1), dot(rd, c2));
+    let dir = select(ld, vec3f(0.00001), abs(ld) < vec3f(0.00001));
+    let start = in.q + dir * (size * 0.002);
+    // The cells are counted from the box's corner: a shape so many cells across ends on a cell's face.
+    let low = start + in.half;
+    var cell = floor(low / size);
+    let way = sign(dir);
+    let each = size / abs(dir);
+    var next = ((cell + max(way, vec3f(0.0))) * size - low) / dir;
+    var met = false;
+    for (var k = 0; k < 72; k++) {
+      let mid = (cell + 0.5) * size - in.half;
+      if (any(abs(mid) > in.half + size)) { break; }
+      if (field(mid, in.half, in.form, e) <= 1.0) { met = true; break; }
+      if (next.x < next.y && next.x < next.z) { gone = next.x; next.x += each.x; cell.x += way.x; n = vec3f(-way.x, 0.0, 0.0); }
+      else if (next.y < next.z) { gone = next.y; next.y += each.y; cell.y += way.y; n = vec3f(0.0, -way.y, 0.0); }
+      else { gone = next.z; next.z += each.z; cell.z += way.z; n = vec3f(0.0, 0.0, -way.z); }
+    }
+    if (!met) { discard; }
+    at = start + dir * gone;
+    // Lit a little as the shape itself would be, not only as the cell's face is: the steps of a round limb then
+    // read as one limb.
+    let mid = (cell + 0.5) * size - in.half;
+    let d = size * 0.5;
+    let slope = vec3f(
+      field(mid + vec3f(d, 0.0, 0.0), in.half, in.form, e) - field(mid - vec3f(d, 0.0, 0.0), in.half, in.form, e),
+      field(mid + vec3f(0.0, d, 0.0), in.half, in.form, e) - field(mid - vec3f(0.0, d, 0.0), in.half, in.form, e),
+      field(mid + vec3f(0.0, 0.0, d), in.half, in.form, e) - field(mid - vec3f(0.0, 0.0, d), in.half, in.form, e));
+    let long = length(slope);
+    if (long > 0.0001 && long < 1000.0) { round = slope / long; }
+  }
+  let seen = in.seen + rd * gone;
+  let inside = at + in.half - n * (0.5 * size);
   let cell = floor(inside / size);
   let own = hash3(cell + vec3f(in.more.y * 91.0, in.more.y * 17.0, 3.0));
   var albedo = in.colour.rgb;
   // Each cell a shade of its own, and a seam between it and the next: knit. Skin is one piece.
-  let wander = select(0.16, 0.05, made == ${SKIN}u);
+  let wander = select(0.13, 0.04, made == ${SKIN}u);
   albedo *= 1.0 + wander * (own - 0.5) * clamp(sharp * 0.6, 0.0, 1.0);
-  let f = fract(in.q / size);
-  let edge = min(f, 1.0 - f) + abs(in.n);
+  let f = fract((at + in.half) / size);
+  let edge = min(f, 1.0 - f) + abs(n);
   let seam = 1.0 - smoothstep(0.0, 0.1, min(edge.x, min(edge.y, edge.z)));
-  albedo *= 1.0 - seam * select(0.22, 0.07, made == ${SKIN}u) * clamp(sharp / 5.0 - 0.4, 0.0, 1.0);
-  let n = normalize(in.facing);
-  let rd = in.seen / far;
-  var direct = max(dot(n, g.sun), 0.0);
+  albedo *= 1.0 - seam * select(0.1, 0.04, made == ${SKIN}u) * clamp(sharp / 5.0 - 0.4, 0.0, 1.0);
+  let soft = normalize(n + round * 1.2);
+  let facing = normalize(in.c0 * soft.x + in.c1 * soft.y + c2 * soft.z);
+  var direct = max(dot(facing, g.sun), 0.0);
   if (direct > 0.0) {
-    let sunny = sunlit(in.seen + u.eye, n, 0u);
+    let sunny = sunlit(seen + u.eye, facing, 0u);
     if (sunny >= 0.0) { direct *= sunny; }
   }
   // A body shades itself a little towards the feet and where it faces down.
-  let open = clamp(0.62 + 0.03 * (in.seen.y + u.eye.y - in.more.z) + 0.2 * n.y, 0.45, 1.0);
+  let open = clamp(0.62 + 0.03 * (seen.y + u.eye.y - in.more.z) + 0.2 * facing.y, 0.45, 1.0);
   let rough = select(0.95, 0.5, made == ${LEATHER}u);
-  var col = shade(albedo, n, rd, g.sun, direct, open, rough, 0.0);
+  var col = shade(albedo, facing, rd, g.sun, direct, open, rough, 0.0);
   if (g.weather.z > 0.0 && u.lamps > 0.0) {
-    let at = in.seen + u.eye;
-    col += albedo * vec3f(1.0, 0.78, 0.48) * min(lamplight(at, n, in.more.z), 1.3) * g.weather.z * 1.5;
-    // And what comes from windows and signs all round: without it a street at night is cut-outs.
+    let lampAt = seen + u.eye;
+    col += albedo * vec3f(1.0, 0.78, 0.48) * min(lamplight(lampAt, facing, in.more.z), 1.3) * g.weather.z * 1.5;
+    // And what comes start windows and signs all round: without it a street at night is cut-outs.
     col += albedo * vec3f(0.9, 0.8, 0.7) * 0.06 * g.weather.z;
   }
   // Wet cloth is darker, and shines a little towards the light.
   col *= 1.0 - 0.18 * g.weather.y * select(1.0, 0.0, made == ${SKIN}u);
-  return vec4f(tone(col), 1.0);
+  var lit: Lit;
+  lit.colour = vec4f(tone(col), 1.0);
+  let deep = max(dot(seen, u.forward), NEAR);
+  lit.depth = FAR / (FAR - NEAR) * (1.0 - NEAR / deep);
+  return lit;
 }
 
 // The shadow a figure lays on the ground: a patch from the feet away from the sun, as long as the sun is low,
@@ -250,6 +322,8 @@ const tint = (hex: string): V3 => [0, 1, 2].map((c) => (parseInt(hex.slice(1 + c
 const COATS = OWN.coats.map(tint), LEGS = OWN.legs.map(tint), SKINS = OWN.skins.map(tint), HAIRS = OWN.hairs.map(tint), BRIGHT = OWN.bright.map(tint)
 const EYE: V3 = [0.012, 0.01, 0.01]
 const SHOES = OWN.shoes.map(tint)
+/** What shows under an open jacket or at a coat's neck, a belt and its buckle. */
+const UNDER = ['#d8d4c8', '#b9b2a2', '#8fa3b5', '#3b3f45', '#6b2f2c', '#2f4a44', '#c2bfb4'].map(tint), BELT: V3 = tint('#241a12'), BUCKLE: V3 = tint('#b8a468')
 
 const pick = <T>(from: readonly T[], seed: number, ask: number): T => from[Math.floor(chance(seed, ask) * from.length)]
 
@@ -274,12 +348,13 @@ const roll = (f: Frame, by: number) => {
   for (let a = 0; a < 3; a++) { const x = f[a], y = f[3 + a]; f[a] = x * c - y * s; f[3 + a] = y * c + x * s }
 }
 
+const T = new Float64Array(12), AX = new Float64Array(12)
 const ROOT = new Float64Array(12), HIP = new Float64Array(12), LEG = new Float64Array(12), SHIN = new Float64Array(12), FOOT = new Float64Array(12)
 const CHEST = new Float64Array(12), HEAD = new Float64Array(12), ARM = new Float64Array(12), FORE = new Float64Array(12), HELD = new Float64Array(12)
 /** How long a pair of steps is, in cells: the feet then stay where they are put. */
 export const STRIDE = 14.4
-/** The cells a figure is made of: half the world's. */
-const CELL = 0.5
+/** The cells a figure is made of: a quarter of the world's (2.5 cm). */
+const CELL = 0.25
 const THIGH = 4.5, CALF = 4, SOLE = 0.5
 
 /** Where each joint is in a pose (moves.ts CHANNELS). */
@@ -296,9 +371,10 @@ const NO_EXTRAS: Extra[] = []
 
 /**
  * Writes a person's boxes into `out` from float `at`, places taken from `anchor`. Returns the float after the last.
- * `far` leaves out what cannot be seen from a way off (hands, neck, feet's own boxes).
+ * `far` leaves out what cannot be seen from where it is looked at: 1 what is lost across a room (the whites of the eyes), 2 what is lost across a street (a thumb, buttons, ears), 3 or true what is lost from far off (hands, a face, a neck).
  */
-export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far = false): number {
+export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far: boolean | number = false): number {
+  const level = far === true ? 3 : far === false ? 0 : far
   const s = p.seed
   // Build: how tall, how broad.
   const chosen = p.look, tinted = (hex: string | undefined, or: V3): V3 => (hex ? tint(hex) : or)
@@ -306,7 +382,8 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   const coat = tinted(chosen?.coat, pick(COATS, s, 3)), skin = tinted(chosen?.skin, pick(SKINS, s, 5)), hair = tinted(chosen?.hair, pick(HAIRS, s, 6)), shoe = tinted(chosen?.shoes, pick(SHOES, s, 7))
   let legs = tinted(chosen?.legs, pick(LEGS, s, 4)), hands = skin
   const bright = pick(BRIGHT, s, 8)
-  let long = chance(s, 9) < 0.45, hairstyle = Math.floor(chance(s, 10) * 5), scarf = chance(s, 11) < 0.3, bag = Math.floor(chance(s, 12) * 4)
+  let long = chance(s, 9) < 0.45, hairstyle = Math.floor(chance(s, 10) * 5), scarf = chance(s, 11) < 0.3, bag = Math.floor(chance(s, 12) * 4), plain = false, suit = false
+  const beard = chance(s, 43) < 0.16 && (hairstyle === 1 || hairstyle === 2)
   // What is worn and carried by name is boxes on parts of the body, and now and then a change to the figure itself.
   let extras = NO_EXTRAS
   const roles: Record<string, V3> = { coat, legs, skin, hair, shoes: shoe }
@@ -319,7 +396,8 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     if (set?.legs === 'coat') legs = coat
     if (set?.hands === 'own') hands = tint(w.own)
     if (set?.hair) hairstyle = set.hair === 'bald' ? -1 : set.hair === 'short' ? 1 : 3
-    if (set?.plain) { scarf = false; bag = 0; if (hairstyle === 0) hairstyle = 1 }
+    if (set?.plain) { scarf = false; bag = 0; plain = true; if (hairstyle === 0) hairstyle = 1 }
+    if (set?.lapels) suit = true
     put(w)
   }
   if (typeof chosen?.carry === 'string') { const c = named(CARRIED, chosen.carry); if (c) put(c) } else if (chosen?.carry) for (const b of chosen.carry) (extras === NO_EXTRAS ? (extras = []) : extras).push(b)
@@ -330,18 +408,25 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   const stride = (p.stride ?? 0) * Math.PI * 2
   const feet = p.at[1]
   let n = at
-  const box = (f: Frame, x: number, y: number, z: number, w: number, h: number, d: number, colour: V3, made: number) => {
+  /**
+   * A shape in a part's frame: a box of cells, its cross-section rounded by `e` (2 an ellipse, 4 a soft square; 0 a
+   * plain box), narrowed to `top` or `low` of its width at that end, and rounded off over `capT` and `capB` of
+   * its length at each end. A limb is two of these that end round on the joint between them.
+   */
+  const shape = (f: Frame, x: number, y: number, z: number, w: number, h: number, d: number, colour: V3, made: number, e = 0, top = 1, low = 1, capT = 0, capB = 0) => {
     if (n + EACH > out.length) return
     for (let a = 0; a < 3; a++) out[n + a] = f[9 + a] + f[a] * x + f[3 + a] * y + f[6 + a] * z - anchor[a]
     out[n + 3] = (s % 9973) / 9973
     out[n + 4] = w / 2; out[n + 5] = h / 2; out[n + 6] = d / 2; out[n + 7] = CELL
     out[n + 8] = f[0]; out[n + 9] = f[1]; out[n + 10] = f[2]; out[n + 11] = feet - anchor[1]
     out[n + 12] = f[3]; out[n + 13] = f[4]; out[n + 14] = f[5]; out[n + 15] = made
-    out[n + 16] = colour[0]; out[n + 17] = colour[1]; out[n + 18] = colour[2]; out[n + 19] = 1
+    out[n + 16] = colour[0]; out[n + 17] = colour[1]; out[n + 18] = colour[2]; out[n + 19] = e
+    out[n + 20] = top; out[n + 21] = low; out[n + 22] = capT; out[n + 23] = capB
     n += EACH
   }
+  const box = (f: Frame, x: number, y: number, z: number, w: number, h: number, d: number, colour: V3, made: number) => shape(f, x, y, z, w, h, d, colour, made)
   /** The boxes worn or carried on a part, drawn in that part's frame (a hand's from the hand, down the forearm). */
-  const wornOn = (part: Part, f: Frame, dy = 0) => { for (const b of extras) if (b.on === part) box(f, b.at[0], b.at[1] + dy, b.at[2], b.size[0], b.size[1], b.size[2], roles[b.colour] ?? tint(b.colour), b.shiny ? LEATHER : CLOTH) }
+  const wornOn = (part: Part, f: Frame, dy = 0, wider = 1) => { for (const b of extras) if (b.on === part) { const r = b.form; shape(f, b.at[0] * wider, b.at[1] + dy, b.at[2], b.size[0] * (b.size[0] > 2 ? wider : 1), b.size[1], b.size[2], roles[b.colour] ?? tint(b.colour), b.shiny ? LEATHER : CLOTH, r?.[0], r?.[1], r?.[2], r?.[3], r?.[4]) } }
 
   // ── The pose: what each joint would be doing anyway, then whatever move is laid over it. ──
   const P = POSE
@@ -419,65 +504,139 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * Math.sin(time * 0.6 + s) * 0.012
   child(HIP, ROOT, 0, hipHigh, 0)
   roll(HIP, sway)
+  // How much of it is drawn: all of it near, less across a street, the least from far off.
+  const close = level === 0, near = level <= 1, fine = level <= 2
+  const shade = (c: V3, by: number): V3 => [c[0] * by, c[1] * by, c[2] * by]
+  // What the figure's own number says of its build and how it is dressed besides: broad in the shoulder or the hip,
+  // a jacket open over something, a jumper, or a shirt tucked in.
+  const wide = chance(s, 41), shoulders = 1.05 - 0.1 * wide, hips = 0.95 + 0.12 * wide
+  const waist = 0.8 + 0.16 * chance(s, 42) ** 2
+  const top = long ? 0 : suit ? 5 : plain ? 1 : 2 + Math.floor(chance(s, 40) * 3)
+  const under = pick(UNDER, s, 44)
   for (const side of [-1, 1]) {
     const leg = side < 0 ? left : right
-    child(LEG, HIP, side * 1.0 * broad, 0, 0)
+    child(LEG, HIP, side * 0.95 * broad * hips, 0, 0)
     pitch(LEG, leg.swing)
-    box(LEG, 0, -THIGH * tall / 2, 0, 1.5, THIGH * tall + 0.3, 1.75, legs, CLOTH)
+    // A thigh ends round at the hip and at the knee, and a shin begins round there: bent, the knee is whole.
+    shape(LEG, 0, -THIGH * tall / 2 + 0.05, 0, 1.75, THIGH * tall + 1.1, 1.9, legs, CLOTH, 2.6, 1, 0.82, 0.2, 0.2)
     child(SHIN, LEG, 0, -THIGH * tall, 0)
     pitch(SHIN, -leg.knee)
-    box(SHIN, 0, -CALF * tall / 2, 0.1, 1.25, CALF * tall, 1.4, legs, CLOTH)
+    shape(SHIN, 0, -CALF * tall / 2 + 0.3, 0.08, 1.45, CALF * tall + 0.6, 1.55, legs, CLOTH, 2.6, 1, 0.8, 0.3, 0)
     child(FOOT, SHIN, 0, -CALF * tall, 0)
     // The foot lies level on the ground, and points down a little as it leaves it.
     pitch(FOOT, leg.knee - leg.swing - walking * 0.35 * Math.max(0, Math.cos(stride + (side < 0 ? 0 : Math.PI) + 1.5)))
-    box(FOOT, 0, -SOLE / 2 + 0.05, -0.6, 1.25, 0.75, 2.75, shoe, LEATHER)
+    // A shoe is long the way the foot points: its shape is told along that (right, ahead, up).
+    AX.set(FOOT)
+    for (let a = 0; a < 3; a++) { AX[3 + a] = -FOOT[6 + a]; AX[6 + a] = FOOT[3 + a] }
+    shape(AX, 0, 0.62, -0.08, 1.3, 2.8, 0.85, shoe, LEATHER, 3, 0.8, 0.95, 0.3, 0.12)
+    if (fine) box(FOOT, 0, -0.5, -0.62, 1.36, 0.14, 2.84, shade(shoe, 0.5), LEATHER)
   }
-  // The trunk: hips, then the chest.
-  box(HIP, 0, 0.5, 0, 3.5 * broad, 1.75, 2, long ? coat : legs, CLOTH)
+  // The trunk: hips, then the chest, narrower at the waist and round over the shoulders.
+  shape(HIP, 0, 0.45, 0, 3.55 * broad * hips, 2, 2, long ? coat : legs, CLOTH, 3.5, 0.94, 1, 0, 0.3)
   child(CHEST, HIP, 0, 1.2, 0)
   // (A frame turned about its right by a positive angle tips its top back: a hanging limb swings forward, a chest leans back.)
   pitch(CHEST, -P[J.lean])
   roll(CHEST, -sway * 1.6 + P[J.tilt])
   turn(CHEST, P[J.twist])
-  const breath = Math.sin(time * 1.3 + s) * 0.05
-  box(CHEST, 0, 2.3, 0, 3.75 * broad, 4.75, 2.25 + breath, coat, CLOTH)
-  box(CHEST, 0, 4.3, 0, 4.5 * broad, 1.25, 2.4, coat, CLOTH)
+  const across = 3.8 * broad * shoulders
+  shape(CHEST, 0, 2.4, 0, across, 5, 2.25, coat, CLOTH, 4, 1, waist, 0.16, 0)
   if (long) {
-    // A long coat hangs to the knee and opens a little as the legs move.
-    box(HIP, 0, -1.9, 0.1, 3.75 * broad, 4.25 * (1 - sit * 0.6), 2.4 + walking * 0.5, coat, CLOTH)
+    // A long coat hangs to the knee and opens a little as the legs move; its collar stands, its front is buttoned.
+    shape(HIP, 0, -1.9, 0.08, 4.05 * broad * hips, 4.3 * (1 - sit * 0.6), 2.6 + walking * 0.5, coat, CLOTH, 6, 0.92, 1, 0, 0)
+    if (fine) {
+      box(HIP, 0, -1.7, -1.36 - walking * 0.25, 0.12, 3.6 * (1 - sit * 0.6), 0.1, shade(coat, 0.55), CLOTH)
+      for (const lapel of [-1, 1]) { child(T, CHEST, lapel * 0.62, 4.0, -1.24); roll(T, lapel * 0.42); box(T, 0, 0, 0, 0.7, 1.9, 0.14, shade(coat, 0.82), CLOTH) }
+      box(CHEST, 0, 4.55, -1.16, 0.75, 0.9, 0.1, under, CLOTH)
+      if (near) for (let k = 0; k < 3; k++) box(CHEST, 0.45, 2.7 - k * 1.05, -1.25, 0.25, 0.25, 0.1, shade(coat, 0.45), LEATHER)
+      box(HIP, 0, 1.15, 0, 3.6 * broad * waist + 0.25, 0.4, 2.5, shade(coat, 0.7), CLOTH)
+    }
+  } else if (top === 2) {
+    // A jacket open over what is under it, its hem below the belt.
+    shape(HIP, 0, 0.75, 0, 3.7 * broad * hips, 1.5, 2.25, coat, CLOTH, 4, 0.96, 1, 0, 0)
+    if (fine) {
+      box(CHEST, 0, 2.3, -1.16, 1.0, 4.7, 0.1, under, CLOTH)
+      box(HIP, 0, 0.75, -1.16, 1.0, 1.5, 0.1, under, CLOTH)
+      for (const lapel of [-1, 1]) { child(T, CHEST, lapel * 0.78, 4.25, -1.24); roll(T, lapel * 0.3); box(T, 0, 0, 0, 0.6, 1.3, 0.12, shade(coat, 0.8), CLOTH) }
+    }
+  } else if (top === 5) {
+    // A suit's jacket: its hem over the hips, lapels down to the button, the shirt between them.
+    shape(HIP, 0, 0.75, 0, 3.7 * broad * hips, 1.5, 2.25, coat, CLOTH, 4, 0.96, 1, 0, 0)
+    if (fine) {
+      for (const lapel of [-1, 1]) { child(T, CHEST, lapel * 0.66, 3.95, -1.2); roll(T, lapel * 0.36); box(T, 0, 0, 0, 0.55, 2.1, 0.14, shade(coat, 1.35), CLOTH) }
+      if (near) for (let k = 0; k < 2; k++) box(CHEST, 0, 2.3 - k * 0.9, -1.2, 0.25, 0.25, 0.1, shade(coat, 0.5), LEATHER)
+      box(HIP, 0, 0.5, -1.16, 0.1, 1, 0.1, shade(coat, 0.5), CLOTH)
+    }
+  } else if (top === 3) {
+    // A jumper: a band at the hem, another at the neck.
+    shape(HIP, 0, 0.95, 0, 3.65 * broad * hips, 1.1, 2.25, coat, CLOTH, 4, 1, 1, 0, 0)
+    if (fine) { box(HIP, 0, 0.55, 0, 3.7 * broad * hips, 0.4, 2.36, shade(coat, 0.78), CLOTH); shape(CHEST, 0, 4.95, 0, 1.7, 0.5, 1.7, shade(coat, 0.78), CLOTH, 2.2) }
+  } else if (top === 4 && fine) {
+    // A shirt tucked in: a belt and its buckle, a collar, buttons.
+    box(HIP, 0, 1.2, 0, 3.5 * broad * waist + 0.3, 0.4, 2.3, BELT, LEATHER)
+    if (near) box(HIP, 0, 1.2, -1.18, 0.5, 0.4, 0.1, BUCKLE, LEATHER)
+    for (const wing of [-1, 1]) { child(T, CHEST, wing * 0.5, 4.75, -1.15); roll(T, wing * -0.5); box(T, 0, 0, 0, 0.8, 0.45, 0.14, shade(coat, 1.15), CLOTH) }
+    if (near) for (let k = 0; k < 4; k++) box(CHEST, 0, 3.9 - k * 0.95, -1.22, 0.2, 0.2, 0.08, shade(coat, 0.6), LEATHER)
   }
-  if (scarf) box(CHEST, 0, 5.1, -0.1, 2.5, 1, 2.6, bright, CLOTH)
+  if (scarf) {
+    shape(CHEST, 0, 5.1, -0.05, 2.55, 1.05, 2.6, bright, CLOTH, 3, 1, 1, 0.4, 0.4)
+    if (fine) box(CHEST, 0.6, 3.75, -1.3, 0.75, 2.4, 0.3, bright, CLOTH)
+  }
   if (bag === 1) {
-    // A pack on the back.
-    box(CHEST, 0, 2.6, 1.8, 2.75, 3.75, 1.4, pick(LEGS, s, 13), CLOTH)
-  } else if (bag === 2 && !far) {
+    // A pack on the back, its straps over the shoulders.
+    shape(CHEST, 0, 2.6, 1.85, 2.75, 3.75, 1.5, pick(LEGS, s, 13), CLOTH, 4, 0.9, 1, 0.25, 0.1)
+    if (fine) {
+      box(CHEST, 0, 1.9, 2.62, 1.9, 1.5, 0.2, shade(pick(LEGS, s, 13), 0.7), CLOTH)
+      for (const strap of [-1, 1]) { box(CHEST, strap * 1.15 * broad, 3.3, -1.24, 0.4, 3.2, 0.1, shade(pick(LEGS, s, 13), 0.7), CLOTH); box(CHEST, strap * 1.15 * broad, 4.98, 0.2, 0.4, 0.12, 2.9, shade(pick(LEGS, s, 13), 0.7), CLOTH) }
+    }
+  } else if (bag === 2 && fine) {
     // A bag at the hip, its strap across the chest.
-    box(HIP, 2.1 * broad, 0.2, 0.1, 0.9, 2.5, 3, pick(BRIGHT, s, 14), LEATHER)
+    shape(HIP, 2.15 * broad * hips, 0.2, 0.1, 0.95, 2.5, 3, pick(BRIGHT, s, 14), LEATHER, 5, 1, 1, 0, 0.2)
+    box(HIP, 2.68 * broad * hips, 0.9, 0.1, 0.1, 1.1, 3.05, shade(pick(BRIGHT, s, 14), 0.7), LEATHER)
+    for (const face of [-1, 1]) { child(T, CHEST, 0.15, 2.9, face * 1.24); roll(T, -0.62 * face); box(T, 0, 0, 0, 0.35, 5.9, 0.1, shade(pick(BRIGHT, s, 14), 0.6), LEATHER) }
   }
-  if (extras !== NO_EXTRAS) { wornOn('hip', HIP); wornOn('chest', CHEST) }
-  // The head: a neck, a face, hair.
+  // What is worn on the trunk is as broad as the trunk is (it was told for a body of the usual breadth).
+  if (extras !== NO_EXTRAS) { wornOn('hip', HIP, 0, Math.max(1, broad * hips)); wornOn('chest', CHEST, 0, Math.max(1, across / 3.7)) }
+  // The head: a neck, a skull narrower at the jaw, a face, ears, hair.
   child(HEAD, CHEST, 0, 4.9, 0)
   turn(HEAD, P[J.turn])
   pitch(HEAD, -P[J.nod])
-  if (!far) box(HEAD, 0, 0.3, 0, 1.2, 0.9, 1.2, skin, SKIN)
-  box(HEAD, 0, 1.75, -0.05, 1.75, 2.25, 2, skin, SKIN)
-  if (!far) {
-    // Eyes and a nose: two dark cells and a ridge are what make it a face from across a street.
-    const shadow: V3 = [skin[0] * 0.55, skin[1] * 0.5, skin[2] * 0.48]
-    box(HEAD, 0.42, 1.95, -1.06, 0.3, 0.25, 0.1, EYE, LEATHER)
-    box(HEAD, -0.42, 1.95, -1.06, 0.3, 0.25, 0.1, EYE, LEATHER)
-    box(HEAD, 0, 1.6, -1.12, 0.3, 0.6, 0.25, shadow, SKIN)
-    box(HEAD, 0, 1.05, -1.06, 0.7, 0.12, 0.1, shadow, SKIN)
+  if (fine) shape(HEAD, 0, 0.3, 0.05, 1.15, 1.1, 1.2, skin, SKIN, 2)
+  shape(HEAD, 0, 1.75, -0.05, 1.75, 2.25, 2, skin, SKIN, 4, 1, 0.86, 0.3, 0)
+  if (fine) {
+    // Brows, eyes with their whites, a nose that stands out, a mouth: what makes it a face from across a street.
+    const shadow: V3 = [skin[0] * 0.62, skin[1] * 0.55, skin[2] * 0.52], brow = hairstyle < 0 ? shade(hair, 0.6) : shade(hair, 0.75)
+    for (const eye of [-1, 1]) {
+      box(HEAD, eye * 0.42, 1.95, -1.08, 0.25, 0.25, 0.1, EYE, LEATHER)
+      if (near) box(HEAD, eye * 0.47, 2.2, -1.08, 0.6, 0.1, 0.12, brow, HAIR)
+      if (near) box(HEAD, eye * 0.93, 1.75, 0, 0.16, 0.6, 0.45, skin, SKIN)
+    }
+    box(HEAD, 0, 1.58, -1.17, 0.3, 0.7, 0.26, shade(skin, 0.9), SKIN)
+    box(HEAD, 0, 1.08, -1.04, 0.75, 0.12, 0.1, shadow, SKIN)
+    
+  }
+  if (beard && hairstyle !== 0 && fine) {
+    shape(HEAD, 0, 0.98, -0.2, 1.85, 0.95, 1.8, hair, HAIR, 3.2, 1, 0.82, 0, 0.3)
+    box(HEAD, 0, 1.25, -1.06, 0.95, 0.16, 0.1, hair, HAIR)
   }
   if (hairstyle === 0) {
-    // A hat: a knitted cap pulled down.
-    box(HEAD, 0, 2.55, 0, 2, 1, 2.25, bright, CLOTH)
+    // A knitted cap pulled down: a dome, and its band turned up.
+    shape(HEAD, 0, 2.75, 0, 2, 1, 2.25, bright, CLOTH, 3, 1, 1, 0.8, 0)
+    if (fine) shape(HEAD, 0, 2.5, 0, 2.25, 0.5, 2.5, shade(bright, 0.8), CLOTH, 3.2)
   } else if (hairstyle > 0) {
-    box(HEAD, 0, 2.75, 0.1, 2, 0.6, 2.25, hair, HAIR)
-    box(HEAD, 0, 2.55, -0.95, 2, 0.5, 0.3, hair, HAIR)
-    box(HEAD, 0, 1.95, 0.95, 2, 1.75, 0.5, hair, HAIR)
-    if (hairstyle >= 3) box(HEAD, 0, 0.9, 1.0, 2, 2.4, 0.6, hair, HAIR)
-    if (hairstyle === 2 && !far) { box(HEAD, 0.95, 2.1, 0.2, 0.3, 1.2, 1.4, hair, HAIR); box(HEAD, -0.95, 2.1, 0.2, 0.3, 1.2, 1.4, hair, HAIR) }
+    // Hair: a cap of it over the crown and down the back of the head, and what each cut adds.
+    shape(HEAD, 0, 2.7, 0.1, 2, 0.75, 2.25, hair, HAIR, 3, 1, 1, 0.65, 0)
+    shape(HEAD, 0, 1.75, 0.75, 2, 1.75, 1, hair, HAIR, 3.4, 1, 0.9, 0.2, 0.3)
+    if (fine) for (const lock of [-1, 1]) box(HEAD, lock * 0.93, 2.15, 0.25, 0.2, 0.5, 1.1, hair, HAIR)
+    if (hairstyle === 2 && fine) { box(HEAD, 0.35, 2.5, -1.0, 1.2, 0.3, 0.25, hair, HAIR); for (const lock of [-1, 1]) box(HEAD, lock * 0.94, 1.9, 0.3, 0.25, 1, 1.25, hair, HAIR) }
+    if (hairstyle === 3) {
+      // Long, to the shoulders, and down beside the face.
+      shape(HEAD, 0, 0.75, 0.9, 2.1, 2.7, 0.8, hair, HAIR, 3.4, 1, 0.85, 0.1, 0.35)
+      if (fine) for (const lock of [-1, 1]) shape(HEAD, lock * 0.95, 1.45, 0.1, 0.4, 2.3, 1.3, hair, HAIR, 3, 1, 0.7, 0.1, 0.4)
+    } else if (hairstyle === 4) {
+      // Tied back: a knot behind the crown, a fringe.
+      shape(HEAD, 0, 2.35, 1.35, 1.05, 1.05, 1.05, hair, HAIR, 2, 1, 1, 0.5, 0.5)
+      if (fine) box(HEAD, 0.3, 2.5, -1.0, 1.3, 0.3, 0.25, hair, HAIR)
+    }
   }
   if (extras !== NO_EXTRAS) wornOn('head', HEAD)
   // Arms: each lifts, goes out from the body and bends as the pose says; one that aims lies straight along the
@@ -486,7 +645,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     const holds = side > 0 && (p.umbrella || reading > 0)
     let lift = P[side < 0 ? J.liftL : J.liftR], bend = P[side < 0 ? J.bendL : J.bendR], out = P[side < 0 ? J.outL : J.outR], round = 0
     const aims = P[side < 0 ? J.aimL : J.aimR]
-    child(ARM, CHEST, side * (2.25 * broad + 0.5), 4.6, 0)
+    child(ARM, CHEST, side * (2.05 * broad * shoulders + 0.5), 4.4, 0)
     if (aims > 0) {
       // Which way the thing is from this shoulder, in the chest's own frame: to the right, up, ahead. With nothing to aim at, straight ahead.
       let rightward = -side * 0.12, up = 0, ahead = 1
@@ -496,27 +655,29 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
       bend += (0.05 - bend) * aims; out *= 1 - aims
     }
     turn(ARM, round)
-    roll(ARM, side * (0.05 + out))
+    roll(ARM, side * (0.06 + out))
     pitch(ARM, lift)
-    box(ARM, 0, -1.7, 0, 1.25, 3.6, 1.4, coat, CLOTH)
+    // An upper arm is round at the shoulder and the elbow, a forearm narrows to the wrist.
+    shape(ARM, 0, -1.75, 0, 1.32, 3.8, 1.5, coat, CLOTH, 2.6, 1, 0.88, 0.36, 0.18)
     child(FORE, ARM, 0, -3.4, 0)
     pitch(FORE, bend)
-    box(FORE, 0, -1.5, 0, 1.1, 3.2, 1.2, coat, CLOTH)
-    if (!far) box(FORE, 0, -3.5, 0, 0.9, 1, 1, hands, SKIN)
+    shape(FORE, 0, -1.3, 0, 1.24, 3.7, 1.34, coat, CLOTH, 2.6, 1, 0.8, 0.28, 0)
+    if (fine) {
+      // A hand: a palm that narrows to the fingers, and a thumb.
+      shape(FORE, 0, -3.6, -0.05, 0.55, 1.2, 0.95, hands, SKIN, 3, 1, 0.8, 0, 0.4)
+      if (near) box(FORE, -side * 0.05, -3.45, -0.6, 0.3, 0.55, 0.3, hands, SKIN)
+    }
     if (extras !== NO_EXTRAS) wornOn(side > 0 ? 'handR' : 'handL', FORE, -3.5)
     if (side > 0 && extras !== NO_EXTRAS) wornOn('gripR', FORE, -3.5)
     if (holds && p.umbrella) {
-      // The shaft stands upright whatever the arm does, and the canopy is eight-sided as near as boxes go.
+      // The shaft stands upright whatever the arm does, and the canopy is a shallow dome with its ribs' ends.
       child(HELD, FORE, 0, -3.5, 0)
       for (let a = 0; a < 3; a++) { HELD[a] = ROOT[a]; HELD[3 + a] = a === 1 ? 1 : 0; HELD[6 + a] = ROOT[6 + a] }
-      const dark = pick(COATS, s, 15), top = chance(s, 16) < 0.35 ? bright : dark
+      const dark = pick(COATS, s, 15), canopy = chance(s, 16) < 0.35 ? bright : dark
       box(HELD, 0, 4.2, 0, 0.3, 10, 0.3, SHOES[0], LEATHER)
-      box(HELD, 0, 8.6, 0, 11, 0.5, 5, top, CLOTH)
-      box(HELD, 0, 8.6, 0, 5, 0.5, 11, top, CLOTH)
-      box(HELD, 0, 8.9, 0, 8.5, 0.6, 8.5, top, CLOTH)
-      box(HELD, 0, 9.3, 0, 4.5, 0.5, 4.5, top, CLOTH)
-      box(HELD, 0, 9.8, 0, 0.3, 0.8, 0.3, SHOES[0], LEATHER)
-    } else if (holds && !far) {
+      shape(HELD, 0, 9.1, 0, 11.5, 1.6, 11.5, canopy, CLOTH, 2, 0.35, 1, 0.5, 0)
+      box(HELD, 0, 10.1, 0, 0.3, 0.8, 0.3, SHOES[0], LEATHER)
+    } else if (holds && fine) {
       box(FORE, 0, -3.9, -0.5, 0.75, 1.5, 0.2, SHOES[0], LEATHER)
     }
   }
@@ -536,15 +697,15 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const layout = device.createPipelineLayout({
     bindGroupLayouts: [
       device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] }),
-      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] }),
+      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] }),
     ],
   })
   const floats = (n: number, from: number): GPUVertexAttribute[] => Array.from({ length: n }, (_, i) => ({ shaderLocation: i, offset: from + i * 16, format: 'float32x4' as const }))
   const bodies = await device.createRenderPipelineAsync({
     label: 'people', layout,
-    vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: EACH * 4, stepMode: 'instance', attributes: floats(5, 0) }] },
+    vertex: { module, entryPoint: 'vs', buffers: [{ arrayStride: EACH * 4, stepMode: 'instance', attributes: floats(6, 0) }] },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
-    primitive: { topology: 'triangle-list', cullMode: 'none' },
+    primitive: { topology: 'triangle-list', cullMode: 'back' },
     depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'less' },
   })
   const shadows = await device.createRenderPipelineAsync({
@@ -639,7 +800,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         const ahead = dx * view.forward[0] + dy * view.forward[1] + dz * view.forward[2], off = Math.hypot(dx, dy, dz)
         // Out of sight behind the eye, or too far to be a pixel.
         if (ahead < -30 || off > 4000) continue
-        n = figure(p, packed, n, anchor, off > 450)
+        n = figure(p, packed, n, anchor, off > 450 ? 3 : off > 220 ? 2 : off > 60 ? 1 : 0)
         count++
         if (p.name && off < 900 && off > 6 && named < SLOTS[0] * SLOTS[1]) {
           // Over the head, the size letters should be on the screen: no smaller than can be read, no bigger than a hand.

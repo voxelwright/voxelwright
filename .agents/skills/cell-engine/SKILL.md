@@ -971,11 +971,23 @@ never cells of the town (the town's sum is untouched) and the rays never see one
   `pieces.ts` (twelve pieces each, a buffer, a bind group and a draw call apiece, standing still) cost this thread
   3.3 ms a frame; the same 250 walking, as 5,600 boxes in one instanced draw, cost 0.60 ms (60: 0.17, 500: 1.14).
   Frames held 16.7 ms throughout. Pieces can only be the palette's colours, too.
-- **A figure is about 22 boxes of cells half the world's size** (5 cm), jointed at hip, knee, shoulder, elbow and
-  neck, 17.5 cells tall and nearly eight heads high. `figure()` is the one place that says what a person looks like:
-  build, coat, hair, bag, scarf and umbrella all come of one seed. The hip's height is worked out from the legs'
-  angles, so a foot is always on the ground and the body rises and falls as it walks. A pair of steps is 14.4 cells
-  (`STRIDE`): whoever moves a figure gives distance over that as `stride`, and the feet do not slide.
+- **A figure is shapes of cells a quarter of the world's size** (2.5 cm; #371, November 14), jointed at hip, knee,
+  shoulder, elbow and neck, 17.5 cells tall. Each part is one instance: a box, and in it a shape the fragment
+  shader carves cell by cell (`field` in `people.ts`: a cross-section rounded by `e`, narrowed towards an end,
+  rounded off at each end). A limb is two shapes that end round on the joint between them, so a bent knee is whole.
+  The ray walks the box's cells from its corner (so a shape a whole number of cells across ends on a cell's face) and
+  the hit writes its own depth. The hull drawn is the box narrowed as the shape is and half a cell bigger each way:
+  cut tighter, the hull sliced cells and the cut faces showed as streaks. A cell's face is lit a little as the
+  shape itself would be (the field's slope), or a tapered limb is stripes. Where a cell is under a pixel the hull is
+  drawn alone: decided in the vertex stage for the whole instance, or a far hull hid the thin boxes worn on it. The
+  face and what is worn (lapels, buttons, glasses) stay plain boxes. About 45 instances near, 20 far, in four levels
+  by distance (6 m, 22 m, 45 m). `figure()` is still the one place that says what a person looks like: build, coat,
+  hair, bag, scarf and umbrella all come of one seed. The hip's height is worked out from the legs' angles, so a
+  foot is always on the ground and the body rises and falls as it walks. A pair of steps is 14.4 cells (`STRIDE`):
+  whoever moves a figure gives distance over that as `stride`, and the feet do not slide. `test/lineup.mjs` takes
+  the same six people in eleven poses from five eyes: run on two commits, its pictures are the pairs a change is
+  judged by. Cost on the GPU, paired and turn about at 1280 x 720: a street of 150 the same as the boxes were (about
+  1 ms, inside the noise); forty people within four metres filling the picture 2.3 ms against 0.4.
 - **Lit as the world is**: `shade` and `tone` from `march.ts`, the sun through `sunlit`, and the street lamps from
   the town's nine places a block (a third copy of that list, after `city.rs` and `march.ts` `lit`; still no check
   that they agree). Without the lamps and a little fill a wet night made them cut-outs. Skin is given darker than it

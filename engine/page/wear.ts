@@ -11,9 +11,9 @@ export const PARTS = ['head', 'chest', 'hip', 'handR', 'handL'] as const
 /** And one only the engine gives (held.ts): the right hand gripping a thing picked up. Its boxes are told from the fist with -z up out of it, and a figure that has any bends that elbow so the forearm lies level. No rule's look may name it. */
 export type Part = (typeof PARTS)[number] | 'gripR'
 /** A box on a part: where its middle is from the part's own origin and how big it is (cells: 10 cm), and its colour: "#rrggbb", or one of the figure's own (coat, legs, skin, hair, shoes), or "own" for the colour given with the thing's name. */
-export interface Extra { on: Part; at: [number, number, number]; size: [number, number, number]; colour: string; shiny?: boolean }
+export interface Extra { on: Part; at: [number, number, number]; size: [number, number, number]; colour: string; shiny?: boolean; /** Only on the things with names here, never from a rule: the box is a shape (people.ts `shape`): how round across, how narrow at the top and the bottom, how far each end is rounded off. */ form?: readonly [number, number, number, number, number] }
 /** A thing with a name: its boxes, the colour "own" means unless one is given, and what it changes of the figure itself. */
-interface Thing { boxes: Extra[]; own?: string; set?: { long?: boolean; legs?: 'coat'; hands?: 'own'; hair?: 'bald' | 'short' | 'long'; plain?: boolean } }
+interface Thing { boxes: Extra[]; own?: string; set?: { long?: boolean; legs?: 'coat'; hands?: 'own'; hair?: 'bald' | 'short' | 'long'; plain?: boolean; /** A jacket cut as a suit's is: lapels, a hem, buttons. */ lapels?: boolean } }
 
 export interface Look {
   coat?: string; legs?: string; hair?: string; skin?: string; shoes?: string
@@ -51,28 +51,30 @@ export function ownLook(seed: number): { look: Look; tall: number; broad: number
   return { look: { coat: own(OWN.coats, seed, 3), legs: own(OWN.legs, seed, 4), skin: own(OWN.skins, seed, 5), hair: own(OWN.hairs, seed, 6), shoes: own(OWN.shoes, seed, 7), wear }, tall: Number((0.93 + 0.12 * chance(seed, 1)).toFixed(3)), broad: Number((0.9 + 0.22 * chance(seed, 2)).toFixed(3)) }
 }
 
-const box = (on: Part, at: [number, number, number], size: [number, number, number], colour = 'own', shiny = false): Extra => ({ on, at, size, colour, shiny })
+const box = (on: Part, at: [number, number, number], size: [number, number, number], colour = 'own', shiny = false, form?: Extra['form']): Extra => ({ on, at, size, colour, shiny, ...(form ? { form } : {}) })
+/** Shapes: a dome, a round slab, a soft box. */
+const DOME = [3, 1, 1, 0.8, 0] as const, DISC = [2.5, 1, 1, 0, 0] as const, SOFT = [4, 1, 1, 0, 0] as const
 /** A head is 1.75 wide, its face at z -1.05, its crown at y 2.9, eyes at y 1.95. A chest's front is at z -1.13, shoulders at y 4.9. */
 export const WORN: Record<string, Thing> = {
-  glasses: { own: '#0b0b0d', boxes: [box('head', [0, 1.95, -1.1], [1.95, 0.45, 0.16], 'own', true), box('head', [0.98, 1.98, -0.45], [0.1, 0.2, 1.3], 'own', true), box('head', [-0.98, 1.98, -0.45], [0.1, 0.2, 1.3], 'own', true)] },
-  hat: { own: '#2a2622', boxes: [box('head', [0, 2.95, 0], [3.2, 0.22, 3.3]), box('head', [0, 3.5, 0], [2.15, 0.95, 2.35])] },
-  cap: { own: '#1f2a3d', boxes: [box('head', [0, 2.82, 0.05], [2.1, 0.8, 2.35]), box('head', [0, 2.52, -1.55], [1.7, 0.16, 0.95])] },
-  beanie: { own: '#a03a2e', boxes: [box('head', [0, 2.6, 0.02], [2.05, 1.05, 2.3])] },
-  helmet: { own: '#4a5240', boxes: [box('head', [0, 2.8, 0.08], [2.4, 1.2, 2.6], 'own', true), box('head', [0, 2.05, 0.5], [2.4, 0.8, 1.7], 'own', true)] },
+  glasses: { own: '#0b0b0d', boxes: [box('head', [0.48, 1.95, -1.12], [0.75, 0.45, 0.14], 'own', true), box('head', [-0.48, 1.95, -1.12], [0.75, 0.45, 0.14], 'own', true), box('head', [0, 2.05, -1.12], [0.3, 0.12, 0.12], 'own', true), box('head', [0.95, 2.02, -0.45], [0.1, 0.14, 1.3], 'own', true), box('head', [-0.95, 2.02, -0.45], [0.1, 0.14, 1.3], 'own', true)] },
+  hat: { own: '#2a2622', boxes: [box('head', [0, 2.95, 0], [3.25, 0.25, 3.25], 'own', false, DISC), box('head', [0, 3.5, 0], [2.25, 1, 2.25], 'own', false, [3, 0.88, 1, 0.3, 0]), box('head', [0, 3.2, 0], [2.3, 0.3, 2.3], '#141416', false, [3, 1, 1, 0, 0])] },
+  cap: { own: '#1f2a3d', boxes: [box('head', [0, 2.8, 0.05], [2, 0.75, 2.25], 'own', false, DOME), box('head', [0, 2.52, -1.5], [1.75, 0.16, 1], 'own', false, DISC)] },
+  beanie: { own: '#a03a2e', boxes: [box('head', [0, 2.75, 0.02], [2, 1, 2.25], 'own', false, DOME), box('head', [0, 2.5, 0.02], [2.25, 0.5, 2.5], 'own', false, [3.2, 1, 1, 0, 0])] },
+  helmet: { own: '#4a5240', boxes: [box('head', [0, 2.8, 0.08], [2.5, 1.25, 2.5], 'own', true, DOME), box('head', [0, 2.05, 0.5], [2.5, 0.75, 1.75], 'own', true, SOFT)] },
   mask: { own: '#d8dde0', boxes: [box('head', [0, 1.2, -1.08], [1.6, 0.95, 0.14])] },
   shirt: { own: '#e2dfd6', boxes: [box('chest', [0, 4.15, -1.17], [1.35, 1.5, 0.1])] },
   tie: { own: '#7a1c1c', boxes: [box('chest', [0, 4.55, -1.24], [0.6, 0.5, 0.14]), box('chest', [0, 3.2, -1.22], [0.5, 2.3, 0.1])] },
-  suit: { own: '#e2dfd6', set: { long: false, legs: 'coat', plain: true }, boxes: [box('chest', [0, 4.15, -1.17], [1.35, 1.5, 0.1])] },
+  suit: { own: '#e2dfd6', set: { long: false, legs: 'coat', plain: true, lapels: true }, boxes: [box('chest', [0, 4.15, -1.17], [1.35, 1.5, 0.1])] },
   uniform: { own: '#17191c', set: { long: false, legs: 'coat', plain: true }, boxes: [box('hip', [0, 1.3, 0], [3.9, 0.5, 2.3], 'own', true), box('chest', [1.95, 5.0, 0], [1.2, 0.16, 1.5]), box('chest', [-1.95, 5.0, 0], [1.2, 0.16, 1.5])] },
   coat: { set: { long: true }, boxes: [] },
   jacket: { set: { long: false }, boxes: [] },
   plain: { set: { plain: true }, boxes: [] },
   gloves: { own: '#141416', set: { hands: 'own' }, boxes: [] },
-  scarf: { own: '#b8862a', boxes: [box('chest', [0, 5.1, -0.1], [2.5, 1, 2.6])] },
-  pack: { own: '#3a3128', boxes: [box('chest', [0, 2.6, 1.8], [2.75, 3.75, 1.4])] },
+  scarf: { own: '#b8862a', boxes: [box('chest', [0, 5.1, -0.05], [2.5, 1, 2.5], 'own', false, [3, 1, 1, 0.4, 0.4]), box('chest', [0.6, 3.75, -1.3], [0.75, 2.4, 0.3])] },
+  pack: { own: '#3a3128', boxes: [box('chest', [0, 2.6, 1.85], [2.75, 3.75, 1.5], 'own', false, [4, 0.9, 1, 0.25, 0.1]), box('chest', [1.15, 3.3, -1.2], [0.4, 3.2, 0.1]), box('chest', [-1.15, 3.3, -1.2], [0.4, 3.2, 0.1])] },
   satchel: { own: '#b8862a', boxes: [box('hip', [2.1, 0.2, 0.1], [0.9, 2.5, 3], 'own', true)] },
   apron: { own: '#e2dfd6', boxes: [box('chest', [0, 2.0, -1.2], [3.0, 3.7, 0.12]), box('hip', [0, -0.7, -1.12], [3.0, 2.7, 0.12])] },
-  vest: { own: '#c8d42a', boxes: [box('chest', [0, 2.5, 0], [3.95, 3.7, 2.45]), box('chest', [0, 2.2, 0], [4.0, 0.4, 2.5], '#c8ccd0')] },
+  vest: { own: '#c8d42a', boxes: [box('chest', [0, 2.5, 0], [4, 3.75, 2.5], 'own', false, SOFT), box('chest', [0, 2.2, 0], [4.1, 0.4, 2.6], '#c8ccd0', false, SOFT)] },
   badge: { own: '#c9a23a', boxes: [box('chest', [1.0, 3.9, -1.18], [0.6, 0.7, 0.1], 'own', true)] },
   bald: { set: { hair: 'bald' }, boxes: [] },
   'short-hair': { set: { hair: 'short' }, boxes: [] },

@@ -29,12 +29,12 @@ const open = async (name, x, z, walks) => {
 }
 /** How a page draws someone: what it was given of them, and where the middle of their figure's boxes is from their feet. */
 const drawn = (page, name) => page.evaluate(async (name) => {
-  const e = globalThis.engine, { figure } = await import('/page/people.ts')
+  const e = globalThis.engine, { figure, EACH } = await import('/page/people.ts')
   const view = { eye: [e.pose.x * 10, e.pose.y * 10, e.pose.z * 10], forward: [0, 0, -1], right: [1, 0, 0], up: [0, 1, 0], tanHalf: 1 }
   for (const from of e.folk.from) for (const p of from(view, performance.now() / 1000)) {
     if (name ? p.name !== name : p.name) continue
-    const boxes = new Float32Array(20 * 200), n = figure(p, boxes, 0, p.at) / 20, mid = [0, 0, 0]
-    for (let b = 0; b < n; b++) for (let a = 0; a < 3; a++) mid[a] += boxes[b * 20 + a] / n
+    const boxes = new Float32Array(EACH * 300), n = figure(p, boxes, 0, p.at) / EACH, mid = [0, 0, 0]
+    for (let b = 0; b < n; b++) for (let a = 0; a < 3; a++) mid[a] += boxes[b * EACH + a] / n
     return { frame: p.frame ?? null, at: [...p.at], mid }
   }
   return null
