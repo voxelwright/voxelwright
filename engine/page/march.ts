@@ -1186,8 +1186,9 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
     let glows = g.weather.z > 0.0 && (hit.kind & 15u) == 11u && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(hit.cell * i32(1u << hit.level)) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u);
     // Road and paving that are wet mirror too: a film of water everywhere, puddles where it gathers.
     var mirror = m.mirror;
-    // Polished by a spell (kinds.rs POLISHED): it mirrors, whatever it is made of.
-    if ((hit.kind & 64u) != 0u) { mirror = max(mirror, 0.62); }
+    // Polished by a spell (kinds.rs POLISHED, bit 7): it mirrors, whatever it is made of. Bit 6 is the mark of a
+    // finer cell (the march sets it itself): read here, every finer cell was a mirror.
+    if ((hit.kind & 128u) != 0u) { mirror = max(mirror, 0.62); }
     if (g.weather.y > 0.0 && ((hit.kind & 15u) == 6u || (hit.kind & 15u) == 7u) && hit.n.y > 0.5) {
       let place = vec2f((hit.cell * i32(1u << hit.level)).xz);
       mirror = g.weather.y * (0.45 + 0.5 * smoothstep(0.42, 0.6, noise2(place * 0.023)));

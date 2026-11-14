@@ -63,8 +63,9 @@ pub const fn charged(kind: Kind) -> bool {
 }
 
 /// A cell that is polished (a spell's "make it shiny", #246): it mirrors and glints. A look only: it weighs, breaks,
-/// bears and burns as its material does. Bit 7 is still free.
-pub const POLISHED: Kind = 64;
+/// bears and burns as its material does. Bit 7: bit 6 is the mark of finer cells, which no edit may carry (scratch.rs
+/// `plain`), and while both were 64 a polish was taken off every cell it was put on. No bit of the low byte is free now.
+pub const POLISHED: Kind = 128;
 
 /// How far a blast reaches into each material, in sixteenths of its own radius: what a thing
 /// is made of decides how it breaks. Glass is brittle and goes far beyond the hole, masonry

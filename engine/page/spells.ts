@@ -10,7 +10,7 @@
 //             kind of each cell that changes, for everyone, and it stays.
 //   material  the cells become another material, keeping their colour: an edit of rows. Real: steel does not burn
 //             and barely breaks, glass shatters, wood burns, and what they weigh and bear changes with them.
-//   polish    bit 6 of the kind (kinds.rs POLISHED). A look only: the cells mirror and glint, and weigh, break
+//   polish    bit 7 of the kind (kinds.rs POLISHED). A look only: the cells mirror and glint, and weigh, break
 //             and burn as before.
 //   size      the thing's cells are made again larger or smaller from where it stands: an edit of rows. Real
 //             cells; what is in the way is left, and what then has nothing under it falls by the world's rule.
@@ -60,8 +60,8 @@ export function known(text: string, library: readonly Spell[] = LIBRARY): Spell 
 
 /** The most rows one edit may hold (serve.mjs EDIT_MOST: 16,384 numbers, five a row and two to say how many). */
 export const ROWS_MOST = 3276
-/** Bit 6 of a kind: polished (kinds.rs). */
-export const POLISHED = 64
+/** Bit 7 of a kind: polished (kinds.rs). Bit 6 is the mark of finer cells, which the core takes off every edit. */
+export const POLISHED = 128
 
 /**
  * Cells as edits of rows: runs along x of one kind, sorted as the core reads them. One edit when they fit one (and so

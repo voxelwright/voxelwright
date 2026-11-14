@@ -1847,7 +1847,11 @@ What cost time, beyond what `engine/README.md` "Making" says:
 - **A change is one edit of rows**, whole or not at all: at most 3,276 rows. A car is 334 rows to recolour and 1,556
   to double; a tree 1,384; a house wall that runs along z is thousands (6,473 for one part) and is refused. Kinds
   are rewritten keeping bits 4 and 5. The release is asked at a cell of air over the thing.
-- **Bit 6 of a kind is POLISHED** (`kinds.rs`, read in `march.ts` where `mirror` is set): a look only. Bit 7 is free.
+- **Bit 7 of a kind is POLISHED** (`kinds.rs`, read in `march.ts` where `mirror` is set): a look only. It was bit 6
+  for a day, the same bit the finer cells (#259) took as their mark in a PR that merged beside it: the core takes
+  that mark off every edit (`scratch::plain`), so a polish never reached a cell, and the march, which sets the mark
+  on every finer cell, drew them all as mirrors. Two lanes claimed one bit in the same hour: say on the issue which
+  bit you take before you take it. No bit of a kind's low byte is free now.
 - **Real and not**: colour and material are the cells' kinds (a steel tree does not burn: checked). Size is real
   cells; a doubled car sheds a few bodies where its weight is more than its wheels bear. Shiny is a look. Liquid
   and soft are not built: flowing water is a depth field fed only by a yard's tank, and nothing gives.

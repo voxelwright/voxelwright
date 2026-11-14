@@ -49,7 +49,7 @@ try {
         const k = e.wand.kind(t.cells[i * 3], t.cells[i * 3 + 1], t.cells[i * 3 + 2])
         colours[k >> 8] = (colours[k >> 8] ?? 0) + 1
         stuff[k & 15] = (stuff[k & 15] ?? 0) + 1
-        if (k & 64) polished++
+        if (k & 128) polished++
         if ((k & 15) === (t.kinds[i] & 15)) same++
       }
       return { colours, stuff, polished, same, last: e.magic.last }
