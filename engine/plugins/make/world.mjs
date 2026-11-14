@@ -1,12 +1,12 @@
 // A thing made from a rule (#264, the making lane #244; asked for by "conjure any weapon", a hot dog handed over,
-// item boxes that can be seen). `world.make({wish, for, at})`: a rule asks for a thing by words, for someone who is
+// item boxes that can be seen). `world.make({wish, for, at, hold})`: a rule asks for a thing by words, for someone who is
 // there. The world never runs a model, and neither does this: the wish is told to that person's own page, which
 // asks their own helper for it as if they had typed it (the same checks, the same wait covered at the place, and a
 // thing made before is made at once from what their helper kept). So a thing is only ever made for the person it
 // is for, on their own machine, by their own model: a rule cannot spend anyone else's.
 //
 // Every field is a stranger's: what is wrong is left and said to the rule.
-const FIELDS = ['do', 'id', 'wish', 'for', 'at']
+const FIELDS = ['do', 'id', 'wish', 'for', 'at', 'hold']
 /** How far from the one it is for a thing may be asked for, in cells; and how many one person's page is asked for in a minute. */
 const REACH = 300, A_MINUTE = 6
 
@@ -34,7 +34,10 @@ export default ({ folk, text, stand, pages }) => {
         const times = (asked.get(p.by) ?? []).filter((t) => now - t < 60_000)
         if (times.length >= A_MINUTE) return wrong(`at most ${A_MINUTE} things a minute are asked for one person`)
         asked.set(p.by, [...times, now])
-        pages.once({ for: p.by, wish, at, rule: rule.id })
+        // Into the hand (#246): the page of the one it is for picks it up as soon as it stands, as if they had (rules/holding.mjs).
+        // The rule hears `held`, with the thing's id, as it does of anything picked up.
+        if (w.hold !== undefined && typeof w.hold !== 'boolean') return wrong('hold is true to have the thing put in their hand when it is made')
+        pages.once({ for: p.by, wish, at, rule: rule.id, ...(w.hold === true ? { hold: true } : {}) })
       },
     },
   }

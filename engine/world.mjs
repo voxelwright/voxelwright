@@ -703,6 +703,8 @@ parentPort.on('message', (said) => {
   // What was done before this process began: the edits only, with nothing thrown and nothing let fall.
   if (replay) return edit(replay)
   // A thing picked up or put down: the ask is made whole here (its edit, what the hand carries), or said why not.
+  // A hand that is full puts down what it holds, at its owner's feet, before it takes another: nobody is told no.
+  if (ask.hold !== undefined && grasp.of(ask.by)) lay({ by: ask.by, put: true })
   if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why } }) }
   parentPort.postMessage({ echo: ask })
   // A rule put in or taken out, or what the realm is called: kept as every ask is, and nothing of the cells' to do.

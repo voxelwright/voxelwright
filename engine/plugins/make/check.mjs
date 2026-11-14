@@ -12,7 +12,7 @@ const wanted = () => w.said.filter((m) => m.plugin === 'make' && 'once' in m).ma
 const here = (by, at) => w.post('here', { by, name: by, at, yaw: 0 })
 try {
   const guide = guideFor(await (await fetch(`${w.url}/world/`)).text())
-  check(guide.includes('world.make({wish, for, at})') && guide.includes('own model'), 'the guide says what a rule may ask to be made, and whose model makes it')
+  check(guide.includes('world.make({wish, for, at, hold})') && guide.includes('own model'), 'the guide says what a rule may ask to be made, and whose model makes it')
   const g = (await w.get('at?x=700&y=0&z=4060')).ground
   // Two people at pages, and one in a seat.
   await here('ada', [700, g + 18, 4060]); await here('ben', [760, g + 18, 4060])

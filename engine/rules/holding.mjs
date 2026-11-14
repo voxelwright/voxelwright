@@ -83,7 +83,6 @@ export function holding({ folk, kind, hear, seen, want }) {
     hold(ask, rows) {
       const p = folk.get(ask.by)
       if (!p) return 'nobody of that name has a body here'
-      if (held.has(ask.by)) return 'that hand is full: put down what it holds first'
       if (!rows?.length) return 'that thing has no cells to pick up'
       const box = boxOf(rows), gone = []
       for (let i = 0; i < rows.length; i += 5) gone.push(rows[i], rows[i + 1], rows[i + 2], rows[i + 3], 0)
@@ -120,7 +119,6 @@ export function holding({ folk, kind, hear, seen, want }) {
     give(rule, w, _now, wrong) {
       if (typeof w.id !== 'string' || !folk.has(w.id) || folk.get(w.id).rule) return wrong('who a thing is given to is an id of world.people: someone at a page or in a seat')
       if (typeof w.thing !== 'string' || w.thing.length > 64) return wrong('what is given is thing: the id of a made thing')
-      if (held.has(w.id)) return wrong(`${w.id} already holds something: world.take(id) first`)
       want({ hold: { by: w.id, id: w.thing } })
     },
     /** `world.take(person)`: what they hold is put down at their feet. */

@@ -135,7 +135,7 @@ A thing someone asked a model of their own for is cells like any others, and the
 GET  /world/things        every record, without cells
 GET  /world/things?id=    one record with cells: rows of five whole numbers, x0, x1 (not filled), y, z, kind
 POST /world/ask           {"by": name, "edit": [1, rows, ...], "release": [x, y, z], "thing": {id, name, wish, at, size, facing}}   a thing and its cells, together (409 if the id is taken)
-                          {"by": name, "hold": id}   pick up a made thing: its cells leave the world and it is in your right hand (one thing at a time; not a thing that lives)
+                          {"by": name, "hold": id}   pick up a made thing: its cells leave the world and it is in your right hand (one thing at a time: a hand that is full puts down what it held, at your feet; not a thing that lives)
                           {"by": name, "put": true, "at": [x, y, z]}   put down what you hold, there (or at your feet with no at): it stands on what is there, and nothing of the world is written over
                           {"by": name, "thing": {"id": id, "sounds": ...}}   sets parts, behaviour, controls, seats or sounds of a thing that is there (each at most ${16384} bytes of JSON), or at and facing when it has come to rest somewhere else. Every change is kept and told to every page that joins: it is not for where a moving thing is from moment to moment
                           {"by": name, "gone": id}   forgets a thing's record; its cells are left as they are (empty them with an edit)
