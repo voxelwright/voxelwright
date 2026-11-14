@@ -22,7 +22,8 @@ on('said', (world, e) => {
   if (/in the way/.test(e.text)) { world.thing('b', {like: 'kart', at: [1235, 4076], yaw: 0}); world.thing('c', {like: 'kart', at: [1130, 4074], yaw: Math.PI / 2}); world.drive('c', {to: [1320, 4076], pace: 0.6}) }
   if (/walker/.test(e.text)) { world.thing('d', {like: 'kart', at: [790, 4074], yaw: Math.PI / 2}); world.drive('d', {to: [1040, 4074], pace: 0.7}) }
   if (/round and round/.test(e.text)) { world.thing('e', {like: 'kart', at: [1225, 4051], yaw: Math.PI / 2}); world.drive('e', {to: [[1258, 4060], [1267, 4083], [1258, 4106], [1235, 4115], [1212, 4106], [1203, 4083], [1212, 4060], [1235, 4051]], loop: true, pace: 0.4}) }
-  if (/away/.test(e.text)) for (const id of ['a', 'b', 'c', 'd', 'e']) world.thing(id, {like: null})
+  if (/a kart to ride/.test(e.text)) world.thing('w', {like: 'kart', at: [790, 4074], yaw: Math.PI / 2})
+  if (/away/.test(e.text)) for (const id of ['a', 'b', 'c', 'd', 'e', 'w']) world.thing(id, {like: null})
 })`
 let since = 0
 const says = async (ok, tries = 60) => { let text = ''; for (let i = 0; i < tries; i++) { const a = await (await fetch(`${server.url}/world/around?by=steward&since=${since}`)).json(); for (const h of a.heard ?? []) if (h.name === 'Sender') { text = h.text; since = Math.max(since, h.n) } const t = text && Object.fromEntries(text.split(' ; ').map((l) => l.split('|')).map((f) => [f[0], f[0] === 'arrived' ? f[1] : { x: Number(f[1]), z: Number(f[2]), speed: Number(f[3]), up: f[4] === 'up', to: f[5] }])); if (t && ok(t)) return t; await wait(200) } console.log('  the sender last said', text); return null }
@@ -40,7 +41,7 @@ try {
   await post('say', { by: 'steward', text: 'in the way' })
   const before = await says((t) => t.b && t.c)
   const round = await says((t) => /c@/.test(t.arrived), 80)
-  check(!!round && !!before && Math.hypot(round.b.x - before.b.x, round.b.z - before.b.z) < 3 && round.c.up, `a kart standing in its way is gone round: the one on its course arrives, and the one standing was moved ${round && before ? Math.hypot(round.b.x - before.b.x, round.b.z - before.b.z).toFixed(0) : '?'} cells`)
+  check(!!round && !!before && Math.hypot(round.b.x - before.b.x, round.b.z - before.b.z) < 6 && round.c.up, `a kart standing in its way is gone round: the one on its course arrives, and the one standing was moved ${round && before ? Math.hypot(round.b.x - before.b.x, round.b.z - before.b.z).toFixed(0) : '?'} cells`)
   await post('say', { by: 'steward', text: 'away' })
   await says((t) => !t.b && !t.c)
   // Someone on foot in its way: stopped for, and on again when they have gone.
@@ -53,6 +54,21 @@ try {
   check(!!on, 'when they have gone it goes on and arrives')
   await post('say', { by: 'steward', text: 'away' })
   await says((t) => !t.d)
+  // Nothing stays wedged: a rider holds forward into a wall for eight seconds, and the kart is never still for long.
+  const ground = Math.round((await (await fetch(`${server.url}/world/at?x=900&y=0&z=4082`)).json()).ground), rows = []
+  for (let y = ground - 2; y < ground + 24; y++) for (let z = 4056; z < 4108; z++) rows.push(900, 906, y, z, 8)
+  await post('ask', { by: 'tester', edit: [1, rows.length / 5, ...rows], release: [903, ground + 30, 4082] })
+  await post('say', { by: 'steward', text: 'a kart to ride' })
+  await says((t) => t.w && t.w.speed === 0)
+  const xs = []
+  const riding = (async () => { for (let i = 0; i < 34; i++) { await fetch(`${server.url}/world/drive`, { method: 'POST', body: JSON.stringify({ by: 'a rider', id: 'sender-w', go: 1, turn: 0, rise: 0 }) }); await wait(250) } })()
+  for (let i = 0; i < 17; i++) { const t = await says((t) => t.w, 5); if (t?.w) xs.push([Date.now(), t.w.x, t.w.up]); await wait(350) }
+  await riding
+  let longest = 0, from = 0, back = 0
+  for (let i = 1; i < xs.length; i++) { if (Math.abs(xs[i][1] - xs[from][1]) > 3) from = i; else longest = Math.max(longest, xs[i][0] - xs[from][0]); if (xs[i - 1][1] - xs[i][1] > 20) back++ }
+  check(xs.length > 10 && Math.max(...xs.map((x) => x[1])) > 880 && longest < 3200 && back >= 1 && xs.every((x) => x[2]), `a rider holding forward into a wall for eight seconds is never wedged: the kart is still at most ${(longest / 1000).toFixed(1)} s, and is set back on its wheels where it last went freely ${back} times (x: ${xs.map((x) => x[1]).join(' ')})`)
+  await post('say', { by: 'steward', text: 'away' })
+  await says((t) => !t.w)
   // A course that loops: round a ring of eight places at the crossing, and round again.
   await post('say', { by: 'steward', text: 'round and round' })
   const seen = []

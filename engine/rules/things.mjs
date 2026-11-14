@@ -31,6 +31,10 @@
 // slows behind one it is closing on, and stops for a person on foot. The rule sets the course and the pace; it
 // does not steer. What a person rides is the person's: a course waits while they drive.
 //
+// And nothing on wheels stays wedged. A thing that is asked to go, by a rider or a rule, and makes no way for a
+// second and a half (on a kerb, against a wall, pinned by another, on its roof) is set back on its wheels where
+// it last went freely, facing as it did then: what a racing game does, and fair to the one driving.
+//
 // Other racers, a landing craft, a getaway car are a rule driving living things: nothing here knows those words.
 
 import { KEPT } from './kept.mjs'
@@ -40,6 +44,8 @@ const MADE_MOST = 16
 /** How many lines and places a rule may have, and the longest a line and the widest a place (cells). */
 const LINES_MOST = 32, LINE_LONG = 4000
 /** The most places a course has, how near a place counts as reached (cells), how far ahead a thing looks for what is in its way and how wide (cells). */
+/** How long a thing asked to go may make no way before it is set back where it last went freely (ms), how little counts as no way (cells), and how fast counts as going freely (cells a second). */
+const WEDGED = 1500, NO_WAY = 5, FREELY = 25
 const COURSE_MOST = 64, REACHED = 22, AHEAD = 90, ABREAST = 17
 /** The motor's numbers a rule may set on a thing it brought, each a least and a most (cells and seconds; `tough` is the speed lost in one step that breaks it), and the longest a change may be for (seconds). */
 const TUNE = { tough: [10, 2000], top: [0, 400], power: [0, 400], grip: [0.05, 3], steer: [0, 1.5], jump: [0, 300] }, FOR_MOST = 600
@@ -73,6 +79,8 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
   /** A thing's motor as it now is: as it was made, then what was set for good, then each change for a while. */
   const motorOf = (id) => { const a = alive.get(id), t = tuned.get(id); return a && { ...a.controls.motor, ...(t?.set ?? {}), ...Object.assign({}, ...(t?.timed ?? []).map((c) => c.keys)) } }
   const tune = (id) => { const a = alive.get(id); if (a) retune(a, motorOf(id)) }
+  /** By thing on wheels: where it last went freely (a short trail), and where and since when it has made no way though asked to go. */
+  const going = new Map()
   /** By thing: the rule that holds it still, and where. */
   const stilled = new Map()
   /** A rule's lines and places, by `rule/id`: {rule, id, from, to} or {rule, id, at, within}. And where everything was when last looked at, by thing or person. */
@@ -260,6 +268,19 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         if (!s.at) { s.at = [...a.pose.at]; s.rot = [...a.pose.rot]; continue }
         // Let fall to where it rests, then kept there: only a thing that has gone along the ground is put back.
         if (Math.hypot(a.pose.at[0] - s.at[0], a.pose.at[2] - s.at[2]) > 0.3) place(a, [s.at[0], a.pose.at[1], s.at[2]], s.rot)
+      }
+      // Nothing on wheels stays wedged: asked to go and making no way, it is set back where it last went freely.
+      for (const [id, a] of alive) {
+        if (!a.pose || !a.controls.motor.feet.length || stilled.has(id)) { going.delete(id); continue }
+        const g = going.get(id) ?? going.set(id, { trail: [], at: null, since: now }).get(id), h = held.get(id)
+        const asked = now - (a.ridden ?? -Infinity) < 700 ? a.asked ?? 0 : h && !h.course ? h.go : 0, up = turned(a.pose.rot, [0, 1, 0])[1]
+        if (Math.abs(a.speed ?? 0) > FREELY && up > 0.8) { g.trail.push({ at: [...a.pose.at], rot: [...a.pose.rot], t: now }); while (g.trail.length > 1 && now - g.trail[1].t > 900) g.trail.shift() }
+        if (Math.abs(asked) < 0.3 || !g.at || Math.hypot(a.pose.at[0] - g.at[0], a.pose.at[2] - g.at[2]) > NO_WAY) { g.at = [...a.pose.at]; g.since = now; continue }
+        if (now - g.since < WEDGED) continue
+        // Back where it was going freely the best part of a second before, lifted a little, level, facing as it faced; with nowhere remembered, lifted where it is and levelled.
+        const back = g.trail[0], f = turned((back ?? a.pose).rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), half = Math.atan2(-f[2], f[0]) / 2
+        place(a, back ? [back.at[0], back.at[1] + 3, back.at[2]] : [a.pose.at[0], a.pose.at[1] + 6, a.pose.at[2]], [0, Math.sin(half), 0, Math.cos(half)])
+        g.at = null; g.since = now; g.trail = back ? [back] : []
       }
       // A change for a while that has run out: the thing's numbers go back.
       for (const [id, t] of tuned) {

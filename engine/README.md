@@ -321,6 +321,10 @@ on foot as they do flying.
   asked to go and makes no way. The rule hears `arrived`. What a person drives is theirs: a course waits. The
   world knows other things and people, not the street: kerbs and parked cars are met and backed out of. Checked
   by `test/course.mjs` (no page).
+- **Nothing on wheels stays wedged**: a thing asked to go, by a rider at a page or a rule, that makes no way for
+  1.5 s is set back on its wheels where it last went freely (a trail kept while it goes faster than 2.5 m/s),
+  lifted a little, level, facing as it faced (`rules/things.mjs` `watch`). A person held W against a kerb for
+  eight seconds with another kart on them; now the longest still is 1.5 s. In `test/course.mjs`.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

@@ -711,7 +711,7 @@ parentPort.on('message', (said) => {
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive?.on !== undefined) return driven.rides(drive.by, drive.id, drive.on, Date.now())
   if (drive && driven.held(drive.id)) return
-  if (drive) { const a = alive.get(drive.id); if (a) a.ridden = Date.now(); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
+  if (drive) { const a = alive.get(drive.id); if (a) { a.ridden = Date.now(); a.asked = drive.go } if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false, text(revive.name ?? '', 40))
   // Someone has joined: where everything is is said once more, for what sleeps says nothing by itself.
