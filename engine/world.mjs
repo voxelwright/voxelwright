@@ -335,7 +335,7 @@ function goingBack(p, now) {
   return false
 }
 /** What is to be kept of the rules' people over a restart (the server writes it beside the world's file): each rule's actors as they stand. */
-const actorsKept = () => { const out = {}; for (const p of folk.values()) if (p.rule && p.rule !== '~') (out[p.rule] ??= []).push({ id: p.short, name: p.name, at: p.at, yaw: p.yaw, pace: p.pace, look: p.look, goal: p.goal, was: p.was, home: p.home }); return out }
+const actorsKept = () => { const out = {}; for (const p of folk.values()) if (p.rule && p.rule !== '~') (out[p.rule] ??= []).push({ id: p.short, name: p.name, at: p.at, yaw: p.yaw, pace: p.pace, look: p.look, goal: p.goal, was: p.was, home: p.home, ...(p.move?.stays ? { move: { name: p.move.name, keys: p.move.data, aim: p.move.aim } } : {}) }); return out }
 /** A rule's actors as they were kept, put back before the rule starts again. What was kept is read as anything from outside is. */
 function actorsBack(ruleId, actors, now) {
   const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
@@ -344,12 +344,34 @@ function actorsBack(ruleId, actors, now) {
     const was = Number.isInteger(a.was) && three(a.home) && !taken.has(a.was) ? a.was : undefined
     const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: typeof a.name === 'string' ? text(a.name, 24) : a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(140, a.pace)) } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
     if (a.look && typeof a.look === 'object') p.look = lookOf(a.look)
+    // A move it was held in (sitting, aiming, going round and round): it is in it still, at its end.
+    const move = a.move && typeof a.move === 'object' ? moveOf(typeof a.move.name === 'string' ? a.move.name : a.move.keys) : null
+    if (move && (move.hold || move.loop)) p.move = { n: 1, since: now - lengthOf(move) * 1000, ...(typeof a.move.name === 'string' ? { name: a.move.name } : { data: move }), long: lengthOf(move), stays: true, aim: three(a.move.aim) ? a.move.aim : undefined }
     folk.set(p.by, p)
     if (was !== undefined) taken.set(was, p)
     tell(p)
   }
 }
 
+/** The middle of someone, for aiming at: lower when they are on the ground. */
+const middle = (p, now) => [Math.round(p.at[0] * 10) / 10, Math.round(p.at[1]) + (p.down > now ? 3 : 10), Math.round(p.at[2] * 10) / 10]
+/** A body whose move is aimed turns to what it is aimed at while the move lasts, and its aim goes with whoever it is aimed at. Says whether anything changed. */
+function turned(p, now) {
+  const m = p.move
+  if (!m?.aim || !(m.stays || now - m.since < m.long * 1000)) return false
+  let changed = false
+  if (m.aimAt) {
+    const them = folk.get(m.aimAt)
+    if (!them) m.aimAt = undefined
+    else { const at = middle(them, now); if (Math.hypot(at[0] - m.aim[0], at[1] - m.aim[1], at[2] - m.aim[2]) > 1) { m.aim = at; changed = true } }
+  }
+  // Standing, the whole body faces it. Walking, it faces where it goes, and the page turns chest and head (people.ts).
+  if (!p.goal && p.down <= now) {
+    const dx = m.aim[0] - p.at[0], dz = m.aim[2] - p.at[2]
+    if (Math.hypot(dx, dz) > 3) { const yaw = Math.atan2(dx, -dz); let by = yaw - p.yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; if (Math.abs(by) > 0.03) { p.yaw = yaw; changed = true } }
+  }
+  return changed
+}
 /** What is in a body's way at a place, for the telling: the first thing from the knees up, or a drop. */
 const inTheWay = (x, y, z) => { for (let k = 0; k < TALL; k++) { const kind = core.world_kind(Math.round(x), Math.round(y) + CLIMB + k, Math.round(z)); if (kind) return `${MATERIALS[kind & 15]} in the way` } return 'a drop too far to step down' }
 /** How bodies get about: round what is in the way, after or away from someone, and who is near whom (about.mjs). */
@@ -366,7 +388,8 @@ setInterval(() => {
     if (!p.seat) continue
     if (p.back && goingBack(p, now)) continue
     // A tenth of a second of its going: straight, or round what is in its way, or after whoever it follows (about.mjs).
-    if (getting.step(p, now, ticks)) { tell(p); p.told = now
+    const aimed = turned(p, now)
+    if (getting.step(p, now, ticks) || aimed) { tell(p); p.told = now
     } else if (now - p.told > 1000) { if (p.stopped.startsWith('knocked') && p.down <= now) p.stopped = ''; tell(p); p.told = now }
   }
   // Who has come near whom, and into what: the rules that asked are told.
@@ -476,7 +499,14 @@ does.set('actor', (rule, w, now, wrong) => {
     if (w.move === null) p.move = undefined
     else { const move = moveOf(w.move); if (move) p.move = { n: (p.move?.n ?? 0) + 1, since: now, ...(typeof w.move === 'string' ? { name: w.move } : { data: move }), long: lengthOf(move), stays: !!(move.loop || move.hold), aim: p.move?.aim }; else wrong(typeof w.move === 'string' ? `"${w.move.slice(0, 24)}" is not a move with a name: the guide lists them, or send keys` : 'a move is a name, or {keys: [{t, ...joints}], loop, hold}') }
   }
-  if (w.aim !== undefined && p.move) { if (w.aim === null) p.move.aim = undefined; else if (Array.isArray(w.aim) && w.aim.length === 3 && w.aim.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) p.move.aim = w.aim.map((v) => Math.round(v * 10) / 10); else wrong('what a move is aimed at is aim: [x, y, z], or null') }
+  // What the move is aimed at: a place, or someone (an id from world.people), who is then followed by it. The body turns to it while the move lasts.
+  if (w.aim !== undefined && p.move) {
+    const them = typeof w.aim === 'string' ? folk.get(`${rule.id}/${w.aim}`) ?? folk.get(w.aim) : undefined
+    if (w.aim === null) { p.move.aim = undefined; p.move.aimAt = undefined }
+    else if (them && them !== p) { p.move.aimAt = them.by; p.move.aim = middle(them, now) }
+    else if (Array.isArray(w.aim) && w.aim.length === 3 && w.aim.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) { p.move.aim = w.aim.map((v) => Math.round(v * 10) / 10); p.move.aimAt = undefined }
+    else wrong(typeof w.aim === 'string' ? `aim: nobody called "${w.aim.slice(0, 24)}" has a body here (world.people says who has)` : 'what a move is aimed at is aim: [x, y, z], or the id of someone in world.people, or null')
+  }
   if (w.say !== undefined) {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
@@ -524,7 +554,7 @@ function obey(rule, wants, now) {
 }
 // What is to be kept of the rules over a restart: said to the server when it has changed, every two seconds at most.
 let keptLast = ''
-setInterval(() => { const actors = actorsKept(), out = {}; for (const [id, keep] of ruled.keeps()) out[id] = { keep, actors: actors[id] ?? [] }; const json = JSON.stringify(out); if (json !== keptLast) { keptLast = json; parentPort.postMessage({ kept: json }) } }, 2000)
+setInterval(() => { const actors = actorsKept(), out = {}; for (const [id, keep] of ruled.keeps()) out[id] = { keep, actors: actors[id] ?? [], marks: getting.kept(id) }; const json = JSON.stringify(out); if (json !== keptLast) { keptLast = json; parentPort.postMessage({ kept: json }) } }, 2000)
 /** How many actors a rule has. */
 const actorsOf = (id) => { let n = 0; for (const p of folk.values()) if (p.rule === id) n++; return n }
 // Twice a second, while anyone is there to see: a world with nobody in it asks nothing of its rules.
@@ -551,7 +581,7 @@ parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, r
   if (act) return parentPort.postMessage({ id, error: hand.act(act) })
   // How the rules are doing; and a rule the world had when it last stopped, put in again as it starts.
   if (how) return parentPort.postMessage({ id, rules: ruled.doing(actorsOf) })
-  if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
+  if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); getting.back(rule.id, kept?.marks); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive) { const a = alive.get(drive.id); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }

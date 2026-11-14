@@ -365,17 +365,29 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   // One arm holds an umbrella up, or a phone before the face.
   if (p.umbrella) { P[J.liftR] = 0.25 + flinch * 1.5; P[J.bendR] = 1.75 }
   else if (reading > 0) { P[J.liftR] = P[J.liftR] * (1 - reading) + reading * 0.35; P[J.bendR] = P[J.bendR] * (1 - reading) + reading * 1.85 }
-  let aim = p.move?.aim
+  let aim = p.move?.aim, going = false
   if (p.move) {
     const was = p.was, give = was ? smooth(p.move.t / GIVE) : 1
     if (was && give < 1) {
       // The move before gives way to this one: each joint goes from where that had it to where this has it.
       POSE_WAS.set(P)
       play(was.move, was.t, POSE_WAS)
-      play(p.move.move, p.move.t, P)
+      going = play(p.move.move, p.move.t, P)
       for (let c = 0; c < P.length; c++) P[c] = POSE_WAS[c] + (P[c] - POSE_WAS[c]) * give
       aim ??= was.aim
-    } else play(p.move.move, p.move.t, P)
+    } else going = play(p.move.move, p.move.t, P)
+  }
+  // A move that is aimed turns the body to what it is aimed at: the chest as far as a chest turns, the head the rest.
+  // (Whoever moves the body turns its feet when it stands; walking, it faces where it goes and this is all of it.)
+  if (aim && going) {
+    const dx = aim[0] - p.at[0], dz = aim[2] - p.at[2]
+    if (Math.hypot(dx, dz) > 3) {
+      let by = Math.atan2(dx, -dz) - p.yaw
+      by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2
+      const w = smooth(p.move!.t / 0.2), chest = Math.max(-1, Math.min(1, by))
+      P[J.twist] += chest * w
+      P[J.turn] = Math.max(-0.9, Math.min(0.9, by - chest)) * w
+    }
   }
 
   // ── The body, built from the pose. ──

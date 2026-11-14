@@ -205,5 +205,13 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     inside.clear()
     for (const k of now) inside.add(k)
   }
-  return { step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way }
+  /** A rule's marked places, to be kept over a restart; and put back as they were kept (read as anything from outside is). */
+  const kept = (id) => { const mine = marks.get(id); return mine?.size ? Object.fromEntries(mine) : undefined }
+  const back = (id, from) => {
+    if (!from || typeof from !== 'object') return
+    const mine = new Map()
+    for (const [name, m] of Object.entries(from).slice(0, MARKS_MOST)) if (/^[a-z0-9][a-z0-9-]{0,23}$/.test(name) && Array.isArray(m?.at) && m.at.length === 2 && m.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30) && Number.isFinite(m.within) && m.within > 0) mine.set(name, { at: [m.at[0], m.at[1]], within: Math.min(MARK_WITHIN_MOST, m.within) })
+    if (mine.size) marks.set(id, mine)
+  }
+  return { step, mark, nearness, dropped: (id) => { marks.delete(id) }, stats, way, kept, back }
 }

@@ -2269,3 +2269,15 @@ lanes' checks on the one GPU, so GPU times are within a millisecond or two).
 - **A helper on `world` must not share a name with something a rule can do.** The interpreter lays every `does`
   name over `world` after the helpers: `world.person(id)` was silently the bodies lane's `person` and returned
   nothing. It is `world.who`.
+
+## A body turns to what its move is aimed at; held moves and marks are kept (#218, November 14)
+
+- **`aim` may be someone** (an id from `world.people`): the world's process moves the aim with them, to their
+  middle (lower when they are down), and tells pages when it has moved a cell.
+- **Who turns what**: the world's process turns a standing body's feet to the aim while the move lasts
+  (`world.mjs` `turned`); a walking body faces where it goes, and the page turns the chest as far as a chest turns
+  (a radian) and the head the rest (`figure`, after the move is laid on). An aiming arm was already solved from
+  the chest, so it stays on the target either way.
+- **Kept over a restart**: a move that holds or loops (the actor is put back at the move's end, so someone sitting
+  is sitting, not sitting down again) and a rule's marked places, in the same file as its actors. A move that
+  ends by itself is not kept.

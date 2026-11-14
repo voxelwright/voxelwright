@@ -13,7 +13,7 @@ if (out) mkdirSync(out, { recursive: true })
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
 const file = join(mkdtempSync(join(tmpdir(), 'engine-about-')), 'world.log')
-const server = await serve('/dev/null', ['--world', file])
+let server = await serve('/dev/null', ['--world', file])
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const send = async (path, init) => { for (;;) { const r = await fetch(`${server.url}/world/${path}`, init); if (r.status === 429) { await wait(400); continue } return r.ok ? r.json() : { refused: r.status, why: await r.text() } } }
 const post = (path, body) => send(path, { method: 'POST', body: JSON.stringify(body) })
@@ -35,13 +35,14 @@ on('start', (world) => {
 })
 on('near', (world, e) => {
   if (e.actor === 'porter') world.actor('porter', { say: (e.left ? 'Goodbye, ' : 'Good day, ') + e.name + '.', move: e.left ? null : 'wave' })
-  if (e.place === 'door') world.actor('porter', { say: e.name + (e.left ? ' has left the door' : ' is at the door') })
+  if (e.place) world.actor('porter', { say: e.name + (e.left ? ' has left the ' : ' is at the ') + e.place })
 })
 on('said', (world, e) => {
   if (/across/i.test(e.text)) world.actor('porter', { to: [854, 4122] })
   if (/into the house/i.test(e.text)) world.actor('porter', { to: [854, 3960] })
   if (/come with me/i.test(e.text)) world.actor('porter', { follow: e.by, keep: 20, pace: 22 })
   if (/stay/i.test(e.text)) world.actor('porter', { follow: null })
+  if (/mark this/i.test(e.text)) world.mark('spot', { at: e.at, within: 20 })
   if (/shoo/i.test(e.text)) world.actor('cat', { flee: e.by, keep: 120, pace: 30 })
   if (/after the moon/i.test(e.text)) world.actor('porter', { follow: 'the-moon' })
   if (/what stopped/i.test(e.text)) { const p = world.people.find((p) => p.mine && p.id === 'porter'); world.actor('porter', { say: p.stopped ? 'Stopped: ' + p.stopped : 'Nothing stopped me.' }) }
@@ -93,6 +94,18 @@ try {
   await say('go after the moon')
   await until('the rule is told nobody is called that', async () => /nobody called "the-moon"/.test((await how('street'))?.error ?? ''))
   check(true, 'following someone who is not there is refused, and says so')
+  // A place marked while the world ran is marked still when it is started again (the rule's start does not mark it).
+  const spot = (await send('me?by=wren')).you.at
+  await say('mark this spot')
+  await until('told of the spot', () => heard(/^wren is at the spot$/))
+  await wait(2600)
+  server.stop()
+  await wait(400)
+  server = await serve('/dev/null', ['--world', file])
+  await post('join', { by: 'wren', at: [spot[0] + 80, spot[2]] })
+  await until('the rule is back', async () => (await how('street'))?.actors === 2)
+  await walk([spot[0], spot[2]])
+  check(await until('at the spot again', () => heard(/^wren is at the spot$/)), 'started again, the world has the place the rule marked: walking into it is told')
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }
