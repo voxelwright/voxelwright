@@ -2021,3 +2021,44 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
 - **Not there**: a held move is not kept over a restart (the actor stands). Nobody sits *on* anything: a seat is
   wherever the rule put the body. Fingers, faces and feet do nothing. An aiming body does not turn its head or its
   feet to the target: the rule faces it.
+
+## Stepping between realms with no loading (#264, `page/realms.ts`, `link.ts`, `world.ts` `swap`; November 13)
+
+- **Two realms are one planet**, so a sector that no edit of either reaches is the same in both. `World.swap`
+  forgets one world's edits, takes the other's, and marks only the sectors that either reaches; they are shown as
+  they were until made again. A step in place made 15 to 17 sectors (28 to 49 ms to everything made); the same
+  step done by dropping everything would make ten thousand.
+- **The other realm is made ready while the page is still in this one.** `link.ready(base)` opens the second
+  stream and holds its frames, parsed, until its "now" frame; `link.go(between)` then hangs up the first and says
+  everything held in one turn of the page, before any sector is asked for. Hearing edits after forgetting, with
+  frames between, would have made every touched column twice and drawn a picture that is neither realm. Reading a
+  history of 630 edits took 1 to 11 ms and going over 25 to 30 ms. This is the seam the portal uses: ready when the
+  window opens, go when one walks through.
+- **Each lane hears of the old world's end in words it already knows**, so none of their files changed: the link
+  says `body 0` for every living thing and `gone` for everyone there; the page says `gone` for every made thing
+  (`made.heard`), destroys bodies on their way and lying, and empties what waits to be put.
+- **The page's own core kept the old world too**: the wand tells this thread's core of every edit (`world_edit`),
+  and its `world_kind` answers the wand, hearing and the residents. Nothing emptied it, so the core got
+  `world_forget` (the instance's bodies and ground dropped). Found by grep for `world_edit`, not by a failing check.
+  The same held for the core a person's own body walks in (`person.ts`, a mover of its own fed every edit, which
+  landed on main while this was written): on a step the body is taken up, that core is told `forget` (`mover.ts`),
+  and the body is set down again on arriving, so it stands on the realm it is in.
+- **An answer for a sector could be an older ask's.** A sector being made when an edit reached it was set to
+  missing and asked again, and `take` took whichever answer came first by the slot's state alone. Each slot now
+  remembers the number of its last ask (`Level.asked`). A swap makes this common; it was there before.
+- **The far step is sector making and nothing else**: 10,300 sectors 900 m away took 2.1 to 3.3 s to be all made
+  with six workers (3.5 s with four, 2.1 with eight: it is the workers' time), and 1.1 to 1.4 s until every box was
+  whole over half its width, which is a picture with nothing missing. Reading, waking and going over are under
+  50 ms together. So a portal hides it only by having the other place made before one steps.
+- **A realm's look**: `hour` and `rain` go through `setHour` and `march.rain`; `grade` stands in place of the
+  hour's; `tint` is a multiply at the end of the last pass, whose uniform block grew from 16 to 32 bytes for every
+  pass that shares it. The marcher's shader was not touched. The bench before was on a quiet GPU (street 19.4,
+  24.4, 33.4 ms; high and far already 11 to 34% over the kept baseline on main, before this); the run after was
+  beside other lanes' checks (fixed work 1.8 to 2.5 ms against 1.44) and says nothing either way.
+- **A check of mine was wrong three ways**: walls at a fixed height were under the ground (the land slopes: ask
+  `ground`), a place 900 m east was not a like street (blocks repeat every 1280 cells: 9660 is home's 700), and a
+  rule put while its world was busy with 300 asks was stopped as "over 10 s to start" (the rules' clock counts the
+  world's own busy time; said on #264).
+- **Not there**: a second world held on the page (the portal's experiment); the page's figure stays five seconds
+  in the realm left; the helper is bound to one world, so things are made only in the realm the page was opened in.
+

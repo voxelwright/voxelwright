@@ -402,8 +402,28 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
   done in another, start on need, rest when idle, kept over a restart, taken out, refusals.
 - **Making a realm from words** is the maker lane's: its seam on the server is `POST /realms` (a name is enough;
   then rules and things go in through `/realm/<id>/world/ask`).
-- **Not there yet**: a page steps between realms only by loading again with another `?realm=` (next), and `arrive`
-  and `look` are kept and told but no page applies them yet (next).
+- **A page steps between realms with no loading** (`page/realms.ts`): `engine.realms.step('a-grey-dawn')` from
+  the console (the portal and its keys are next), `engine.realms.list()` for what there is. The line to the world
+  (`page/link.ts`) opens the other realm's stream and holds it while the page goes on in this one (`ready`), then
+  goes over at once (`go`): living things, bodies, made things and people of the old world are put away, the
+  sectors that either world's edits reach are made again and no others (`world.ts` `swap`: both are one planet),
+  one arrives where the realm says, and the address then says `?realm=`. `/city?realm=id` loaded straight
+  arrives there too.
+- **A realm's look is shown on arrival and whenever it is changed**: its hour and rain as the keys would set them,
+  its `grade` in place of the hour's own, its `tint` multiplying the finished picture (`page/glow.ts`). A realm
+  that says nothing of its look is shown as the page was opened.
+- **What a step costs** (M1 Pro, 1280 x 720, `node test/step.mjs`): reading a realm's history of 630 edits 1 to
+  11 ms (a sleeping realm the same: its history is read from the file, its process wakes beside), going over 25
+  to 30 ms. Then the sectors: a step in place makes 15 to 17 of them, 28 to 49 ms in all; a step 900 m away makes
+  10,300, with a picture of the place that has nothing missing after 1.1 to 1.4 s and everything sharp after 2.1
+  to 3.3 s (six workers; 3.5 s with four, 2.1 with eight). That far step is the loading a portal must hide, by
+  making the other place before one steps.
+- `node test/step.mjs` checks it in the real page: no navigation, the stream, edits, made things, a living thing
+  ridden as the step is taken, people and a rule's actor, the look, the arrival, asks landing only where the page
+  is, a body on foot standing on the cells of the realm it is in, and back.
+- **Not there yet**: the portal, its keys and the wheel (next). The helper makes things only in the realm the page
+  was opened in (it is started for one world), and the ask bar says so elsewhere. The realm left behind shows the
+  page's figure for five seconds more. Sound follows the stream but its change is not checked by itself.
 
 ## Checks and tools
 

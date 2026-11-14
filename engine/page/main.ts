@@ -14,6 +14,7 @@ import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
 import { space } from './space.ts'
 import { link } from './link.ts'
+import { realms, type Pose } from './realms.ts'
 import { car, living } from './living.ts'
 import { person } from './person.ts'
 import { puffs } from './puffs.ts'
@@ -64,7 +65,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
@@ -218,6 +219,10 @@ async function main() {
   if (query.has('hour')) setHour(Number(query.get('hour')))
   // `?rain=1` or the R key: rain.
   march.rain = Number(query.get('rain') ?? 0)
+  // A realm's own look (#264, realms.ts): its hour and rain are set as the keys would set them; its grade stands in
+  // place of the hour's and its tint multiplies the finished picture (glow.ts), until the page is in another realm.
+  const ownLook = { hour, rain: march.rain }
+  const realmLook: { grade: [number, number] | null; tint: [number, number, number] } = { grade: null, tint: [1, 1, 1] }
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
   own.keys.set('KeyH', () => { flags ^= HEAT })
   own.keys.set('KeyR', () => { march.rain = march.rain > 0 ? 0 : 1 })
@@ -291,7 +296,7 @@ async function main() {
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : grade, march.under || pose.y > SPACE ? 0 : 1 - march.day)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
     device.queue.submit([encoder.finish()])
     lap('draw')
@@ -497,8 +502,37 @@ async function main() {
     // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
     if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
     if (!wishes.known) return over.notice('To make things, run node helper.mjs on your machine and open the address it prints', 9000)
+    // The helper makes things in the one world it was started for (#264): the realm this page was loaded in.
+    if (realm && realm.here !== realm.first) return over.notice('Things are made in the realm this page was opened in: the helper was started for that one', 9000)
     void wish(ask)
   }
+  // ── Realms (#264) ───────────────────────────────────────────────────────
+  // Stepping from the world this page is in to another that the server keeps, with no loading (realms.ts). `leave`
+  // is everything this file holds of a world: bodies on their way and lying, cells waiting to be put, fire and
+  // water, the made things' records, the edits the sectors and this thread's core were told of.
+  const began: Pose = { ...pose }
+  let afoot = false
+  const realm = far ? realms({
+    far, began,
+    leave: () => {
+      // On foot, the body is taken up first: its own core is about to forget the world it stands on, and it is set down again on arriving.
+      afoot = me.on
+      if (afoot) me.walk(false)
+      shadow?.postMessage({ forget: true })
+      for (const piece of moving.values()) piece.destroy()
+      for (const l of lying) l.piece.destroy()
+      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+      heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
+      for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
+      // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
+      spoiled.push(...world.swap([]))
+      core.world_forget()
+    },
+    place: (to) => { Object.assign(pose, to); if (afoot) { afoot = false; me.walk(true) } },
+    arrival: (a) => ({ x: a.at[0] / M, y: (a.at.length === 3 ? a.at[1] : core.feet_at(a.at[0], a.at[a.at.length - 1])) / M + 1.65, z: a.at[a.at.length - 1] / M, yaw: a.yaw, pitch: a.pitch }),
+    look: (l) => { setHour(l?.hour !== undefined ? l.hour : ownLook.hour); march.rain = l?.rain ?? ownLook.rain; realmLook.grade = l?.grade ?? null; realmLook.tint = l?.tint ?? [1, 1, 1] },
+    made: () => ({ shown: far.live && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2)), near: far.live && world.levels.slice(0, 3).every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] === l.grid[a])) && world.stats.stale === 0, whole: far.live && world.stats.wanted === 0 && world.stats.stale === 0, sectors: world.stats.made, edits: world.done().length }),
+  }) : null
   if (far) far.onecho = (echo, live) => {
     if (echo.blast || echo.edit) asked.push(echo.by === far.me)
     made.heard(echo, live)
@@ -796,6 +830,8 @@ async function main() {
     const x = Math.round(pose.x * M) + 60, z = Math.round(pose.z * M) + 4
     await alive.spawn(car([x, core.ground_at(x, z) + 5, z]))
   })()
+  // Realms (#264), on a line of their own.
+  Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me })
 

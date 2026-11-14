@@ -275,6 +275,13 @@ pub extern "C" fn world_edit(after: i32) {
     })
 }
 
+/// Forgets everything done to the world and everything that moves in it: the instance is as it began. For a page that
+/// leaves one world for another (#264): the other's edits are then told with `world_edit`.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_forget() {
+    INSTANCE.with_borrow_mut(|i| i.bodies = None)
+}
+
 /// A blast at a point, of the solver's own doing: the edit is made here (do not also tell it with `world_edit`),
 /// what it empties comes out as lumps, and what it leaves unheld comes loose. `after` is how many of the solver's own
 /// edits the blast's maker had heard of; under zero puts it last. `spark` (not zero) lets it set alight what can

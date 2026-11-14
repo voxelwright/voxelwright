@@ -48,6 +48,7 @@ const checks = [
   ['realms', 'node', ['test/realms.mjs'], false],
   ['taken', 'node', ['test/taken.mjs'], true],
   ['moves', 'node', ['test/moves.mjs'], true],
+  ['step', 'node', ['test/step.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['rulewrite', 'node', ['test/rulewrite.mjs'], false],

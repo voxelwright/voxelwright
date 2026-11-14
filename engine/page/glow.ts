@@ -8,7 +8,7 @@ const CODE = /* wgsl */ `
 @group(0) @binding(0) var picture: texture_2d<f32>;
 @group(0) @binding(1) var smooth_: sampler;
 @group(0) @binding(2) var spread: texture_2d<f32>;
-struct U { step: vec2f, strength: f32, pad: f32 }
+struct U { step: vec2f, strength: f32, pad: f32, tint: vec4f }
 @group(0) @binding(3) var<uniform> u: U;
 struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
 @vertex fn vs(@builtin(vertex_index) i: u32) -> Out {
@@ -61,7 +61,8 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   c = clamp(c, vec3f(0.0), vec3f(1.0));
   c = mix(vec3f(dot(c, vec3f(0.3, 0.59, 0.11))), c, u.step.x);
   c = mix(c, c * c * (3.0 - 2.0 * c), u.step.y);
-  return vec4f(c, 1.0);
+  // A realm's own tint (#264), over the graded picture: white leaves it as it is.
+  return vec4f(c * u.tint.rgb, 1.0);
 }
 `
 
@@ -97,8 +98,8 @@ fn chance(c: vec2i) -> f32 {
 }
 `
 
-/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for. Returns the pass to call each frame. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number) => void> {
+/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by. Returns the pass to call each frame. */
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number]) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -124,8 +125,8 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
   const rainBlock = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const rainBind = device.createBindGroup({ layout: wet, entries: [{ binding: 0, resource: { buffer: rainBlock } }] })
   const block = (step: readonly [number, number], strength = 0) => {
-    const b = device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-    device.queue.writeBuffer(b, 0, new Float32Array([step[0], step[1], strength, 0]))
+    const b = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    device.queue.writeBuffer(b, 0, new Float32Array([step[0], step[1], strength, 0, 1, 1, 1, 1]))
     return b
   }
   // What is kept for the picture as it now is: two quarter-size textures and the four passes' bindings. The picture
@@ -153,10 +154,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     p.draw(3)
     p.end()
   }
-  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0) => {
+  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1]) => {
     const k = keep(from)
     device.queue.writeBuffer(k.blocks[0], 0, new Float32Array([1 / from.size[0], 1 / from.size[1], night, 0]))
-    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, 0]))
+    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, 0, tint[0], tint[1], tint[2], 1]))
     pass(encoder, bright, k.binds[0], k.views[0])
     // Twice over: the looks are close together, and once is too narrow a glow.
     for (let twice = 0; twice < 2; twice++) {

@@ -72,6 +72,8 @@ class Level {
   /** Where each slot's tree is in the pool and how long, or -1. */
   at: Int32Array
   size: Int32Array
+  /** The number of the ask each slot was last sent to be made by: an answer to an older one is not taken. */
+  asked: Int32Array
   /** How high each slot's contents reach in its sector, in cells: 0 for air, 64 for a full one. */
   high: Uint8Array
   /**
@@ -97,6 +99,7 @@ class Level {
     this.key = new Int32Array(slots * 3)
     this.at = new Int32Array(slots).fill(-1)
     this.size = new Int32Array(slots)
+    this.asked = new Int32Array(slots)
     this.high = new Uint8Array(slots)
     this.top = new Uint32Array(slots + (slots / 64) * 2 + grid[0] * grid[2] + (grid[0] * grid[2]) / 16)
   }
@@ -186,12 +189,32 @@ export class World {
   /** Something was done to the world. Every sector it reaches is made again; the old one is shown until then. */
   edit(e: Edit) {
     this.edits.push(e)
+    this.touch(e, true)
+  }
+
+  /**
+   * This becomes another world (#264): everything done to this one is forgotten, and `edits` (what was done to the
+   * other, in order) are what has been done. Both are worlds of one planet by one rule, so a sector that no edit of
+   * either reaches is the same in both and stays as it is: only those that one of them reaches are made again.
+   * Returns what was forgotten.
+   */
+  swap(edits: readonly Edit[]): readonly Edit[] {
+    const old = this.edits
+    this.edits = []
+    this.reach = []
+    for (const e of old) this.touch(e, false)
+    for (const e of edits) this.edit(e)
+    return old
+  }
+
+  /** Every sector an edit reaches is to be made again; `keep` also lists the edit under each column it reaches. */
+  private touch(e: Edit, keep: boolean) {
     for (const level of this.levels) {
       const size = SIDE << level.index
       const lo = [e.box[0], e.box[1], e.box[2]].map((v) => Math.floor(v / size))
       const hi = [e.box[3] - 1, e.box[4] - 1, e.box[5] - 1].map((v) => Math.floor(v / size))
       const columns = this.reach[level.index] ??= new Map()
-      for (let sz = lo[2]; sz <= hi[2]; sz++) for (let sx = lo[0]; sx <= hi[0]; sx++) {
+      if (keep) for (let sz = lo[2]; sz <= hi[2]; sz++) for (let sx = lo[0]; sx <= hi[0]; sx++) {
         const key = column(sx, sz), list = columns.get(key)
         if (list) list.push(e); else columns.set(key, [e])
       }
@@ -285,6 +308,8 @@ export class World {
           const slot = level.slot(ask.sx, sy, ask.sz)
           if (level.state[slot] === QUEUED) { level.state[slot] = FLYING; any = true }
           else if (level.state[slot] === STALE) { level.state[slot] = STALE_FLYING; any = true }
+          else continue
+          level.asked[slot] = this.nextId
         }
         if (!any) continue
         const reach = this.reach[ask.level]?.get(column(ask.sx, ask.sz)) ?? []
@@ -330,7 +355,8 @@ export class World {
       if (!level.holds(answer.sx, sy, answer.sz)) continue
       const slot = level.slot(answer.sx, sy, answer.sz)
       const state = level.state[slot]
-      if (state !== FLYING && state !== STALE_FLYING) continue
+      // Asked for again since (an edit reached it while it was being made, or the world became another): this answer is of what it was.
+      if ((state !== FLYING && state !== STALE_FLYING) || level.asked[slot] !== answer.id) continue
       if (level.at[slot] >= 0) { this.pool.give(level.at[slot], level.size[slot]); level.at[slot] = -1; level.size[slot] = 0 }
       level.state[slot] = READY
       if (n === 0) { level.show(slot, 0, 0); continue }

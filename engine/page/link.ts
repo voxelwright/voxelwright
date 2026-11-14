@@ -11,7 +11,20 @@ export interface Echo { by: string; blast?: [number, number, number]; radius?: n
   /** A made thing's record (things.ts): whole, with the edit that is its cells, or an id and the fields a lane changed. */
   thing?: Partial<Omit<Thing, 'cells' | 'box'>> & { id: string }
   /** A made thing that is no more, by its id. */
-  gone?: string }
+  gone?: string
+  /** What the realm says of itself, or a change to that (#264): only what is given. */
+  realm?: Partial<Realm> }
+/** What a realm is (serve.mjs `recorded`): its name, what it is about in the words of whoever asked for it, where one arrives and how it looks. All of it is data someone sent. */
+export interface Realm {
+  name: string
+  about: string
+  /** Where one's feet are set down (the world's finest cells; without a height, on the ground there) and how one faces, radians. */
+  arrive?: { at: [number, number] | [number, number, number]; yaw: number; pitch: number }
+  /** What a page shows there: the hour (null: the sun where it always stood), rain 0 to 1, the last pass's colour and contrast in place of the hour's own, and what the finished picture is multiplied by. */
+  look?: { hour?: number | null; rain?: number; grade?: [number, number]; tint?: [number, number, number] }
+}
+/** A realm's record after a change to it, as the server makes it (serve.mjs `changed`). */
+const changed = (record: Realm, change: Partial<Realm>): Realm => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })
 /** What of a figure may be chosen (people.ts `figure`); whatever is left out comes of who they are. */
 export type { Look } from './wear.ts'
 import type { Look } from './wear.ts'
@@ -56,6 +69,25 @@ export interface Link {
   clock(): number
   /** This page's name in the world: an echo `by` it is its own. */
   readonly me: string
+  /** Where the world this line is to is kept: `/world` is home, `/realm/<id>/world` another realm. */
+  readonly base: string
+  /** What the realm says of itself, as far as has been read. */
+  readonly realm: Realm
+  /** The realm's record: once when all that was kept has been read, and again whenever someone changes it. */
+  onrealm: ((realm: Realm) => void) | null
+  /**
+   * Makes ready to be in another world (#264): opens its stream and holds what it says, this page still being in
+   * the one it is in. Resolves when all that was kept there has been read, with what that realm is. Asked again for
+   * another, the one made ready before is let go.
+   */
+  ready(base: string): Promise<Realm>
+  /**
+   * Leaves this world for the one made ready, at once: the old stream is hung up on, living things and people of
+   * the old world are said to be gone (as the world would say it), `between` is called for the page to put away
+   * what else it holds of the old world, and everything held of the other is said in order, as what was done before
+   * this page joined. False if none is ready.
+   */
+  go(between: () => void): boolean
   /** Whether all that was kept before this page joined has been read. */
   readonly live: boolean
 }
@@ -68,11 +100,20 @@ export function link(base = '/world'): Link {
   /** What is offered, as last said, and who hears it. */
   let offers: Offer[] = [], hears: ((offers: Offer[]) => void) | null = null
   let shown: Shown[] = [], sees: ((shown: Shown[]) => void) | null = null
+  /** What this realm says of itself, and what of this world must be said to be gone when it is left: who is there, which things live. */
+  let realm: Realm = { name: '', about: '' }
+  const there = new Map<string, Someone>(), alive = new Set<string>()
+  /** The stream being read, and one made ready beside it: what it has said so far, and whether all that was kept has come. */
+  interface Line { base: string; stop: AbortController; held: { kind: number; data: unknown }[] | null; realm: Realm; whole: boolean }
+  let line: Line, next: Line | null = null
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
-    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null,
+    onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null, onrealm: null,
+    get base() { return base },
+    ready: () => Promise.reject(new Error('not yet')), go: () => false,
+    get realm() { return realm },
     get onshown() { return sees },
     set onshown(f: ((shown: Shown[]) => void) | null) { sees = f; f?.(shown) },
     pick(rule, id, pick) { void fetch(`${base}/pick`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, pick }) }).catch(() => {}) },
@@ -93,39 +134,89 @@ export function link(base = '/world'): Link {
       void fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify(body) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }) }, (e) => self.onerror?.({ message: String(e) }))
     },
   }
-  void (async () => {
-    const response = await fetch(`${base}/stream?from=0`)
-    if (!response.ok || !response.body) throw new Error(`no shared world here (${response.status})`)
-    const reader = response.body.getReader()
-    let held = new Uint8Array(0)
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) throw new Error('the world hung up')
-      const joined = new Uint8Array(held.length + value.length)
-      joined.set(held); joined.set(value, held.length)
-      held = joined
-      let at = 0
-      for (;;) {
-        if (held.length - at < 12) break
-        const head = new DataView(held.buffer, held.byteOffset + at, 12), kind = head.getUint32(0, true), size = head.getUint32(8, true)
-        if (held.length - at < 12 + size) break
-        const payload = held.slice(at + 12, at + 12 + size)
-        at += 12 + size
-        if (kind === NOW) { live = true; if (size >= 8) behind = new Float64Array(payload.buffer, 0, 1)[0] - Date.now() }
-        else if (kind === SAID) self.onsaid?.(JSON.parse(new TextDecoder().decode(payload)))
-        else if (kind === ECHO) self.onecho?.(JSON.parse(new TextDecoder().decode(payload)) as Echo, live)
-        else if (kind === SHOWN) { shown = JSON.parse(new TextDecoder().decode(payload)) as Shown[]; self.onshown?.(shown) }
-        else if (kind === OFFERS) { offers = JSON.parse(new TextDecoder().decode(payload)) as Offer[]; self.onoffers?.(offers) }
-        else if (kind === LIVING) self.onliving?.(JSON.parse(new TextDecoder().decode(payload)))
-        else if (kind === SOUND) { if (live) self.onsound?.(JSON.parse(new TextDecoder().decode(payload))) }
-        else if (kind === HERE) { const who = JSON.parse(new TextDecoder().decode(payload)); if (who.by !== self.me) self.onhere?.(who) }
-        else if (kind === LOG || kind === STATE) {
-          const words = new Uint32Array(payload.buffer, 0, payload.length / 4)
-          self.onmessage?.({ data: { words: words.slice(4), ms: 0, bodies: words[0], tried: 0, burning: words[1], flowing: words[2] !== 0, released: words[3] !== 0 } })
-        }
-      }
-      held = held.slice(at)
+  const text = new TextDecoder()
+  /** A frame, read: JSON for what is JSON, the core's words for the rest. */
+  const read = (kind: number, payload: Uint8Array<ArrayBuffer>): unknown => kind === NOW ? (payload.length >= 8 ? new Float64Array(payload.buffer, 0, 1)[0] : 0) : kind === LOG || kind === STATE ? new Uint32Array(payload.buffer, 0, payload.length / 4) : JSON.parse(text.decode(payload))
+  /** A frame of the world this page is in, said to the page. */
+  const say = (kind: number, data: unknown) => {
+    if (kind === NOW) { live = true; if (data) behind = (data as number) - Date.now(); self.onrealm?.(realm) }
+    else if (kind === SAID) self.onsaid?.(data as Parameters<NonNullable<Link['onsaid']>>[0])
+    else if (kind === ECHO) {
+      const echo = data as Echo
+      if (echo.realm) { realm = changed(realm, echo.realm); if (live) self.onrealm?.(realm) }
+      self.onecho?.(echo, live)
     }
-  })().catch((e) => self.onerror?.({ message: String(e) }))
+    else if (kind === SHOWN) { shown = data as Shown[]; self.onshown?.(shown) }
+    else if (kind === OFFERS) { offers = data as Offer[]; self.onoffers?.(offers) }
+    else if (kind === SOUND) { if (live) self.onsound?.(data as Parameters<NonNullable<Link['onsound']>>[0]) }
+    else if (kind === LIVING) { const l = data as { thing: string; body: number }; if (l.body) alive.add(l.thing); else alive.delete(l.thing); self.onliving?.(l) }
+    else if (kind === HERE) { const who = data as Someone; if (who.by === self.me) return; if (who.gone) there.delete(who.by); else there.set(who.by, who); self.onhere?.(who) }
+    else if (kind === LOG || kind === STATE) {
+      const words = data as Uint32Array<ArrayBuffer>
+      self.onmessage?.({ data: { words: words.slice(4), ms: 0, bodies: words[0], tried: 0, burning: words[1], flowing: words[2] !== 0, released: words[3] !== 0 } })
+    }
+  }
+  /** Reads a world's stream from its start: each frame is said to the page, or held while the page is in another world. `whole` is called when all that was kept has come. */
+  const open = (at: string, whole?: (l: Line) => void): Line => {
+    const l: Line = { base: at, stop: new AbortController(), held: whole ? [] : null, realm: { name: '', about: '' }, whole: false }
+    void (async () => {
+      const response = await fetch(`${at}/stream?from=0`, { signal: l.stop.signal })
+      if (!response.ok || !response.body) throw new Error(`no shared world here (${response.status})`)
+      const reader = response.body.getReader()
+      let held = new Uint8Array(0)
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) throw new Error('the world hung up')
+        const joined = new Uint8Array(held.length + value.length)
+        joined.set(held); joined.set(value, held.length)
+        held = joined
+        let from = 0
+        for (;;) {
+          if (held.length - from < 12) break
+          const head = new DataView(held.buffer, held.byteOffset + from, 12), kind = head.getUint32(0, true), size = head.getUint32(8, true)
+          if (held.length - from < 12 + size) break
+          const data = read(kind, held.slice(from + 12, from + 12 + size))
+          from += 12 + size
+          if (l.stop.signal.aborted) return
+          if (!l.held) { say(kind, data); continue }
+          // Held for a page that is elsewhere: where things were a moment ago is of no use later, the rest is.
+          // A sound is heard when it is made or not at all.
+          if (kind === SOUND) continue
+          if (kind === STATE || kind === HERE) { if (l.whole) { const last = l.held.findLastIndex((h) => h.kind === kind && (kind === STATE || (h.data as Someone).by === (data as Someone).by)); if (last >= 0) l.held.splice(last, 1) } else continue }
+          if (kind === ECHO && (data as Echo).realm) l.realm = changed(l.realm, (data as Echo).realm!)
+          l.held.push({ kind, data })
+          if (kind === NOW) { l.whole = true; whole?.(l) }
+        }
+        held = held.slice(from)
+      }
+    })().catch((e) => { if (!l.stop.signal.aborted) self.onerror?.({ message: String(e) }) })
+    return l
+  }
+  line = open(base)
+  self.ready = (at) => new Promise((resolve) => {
+    next?.stop.abort()
+    next = open(at, (l) => resolve(l.realm))
+  })
+  self.go = (between) => {
+    const to = next
+    if (!to?.whole || !to.held) return false
+    next = null
+    line.stop.abort()
+    // What lives and who is there, of the world left behind, are gone from this page: said as the world says it.
+    for (const thing of alive) self.onliving?.({ thing, body: 0 })
+    alive.clear()
+    between()
+    for (const who of there.values()) self.onhere?.({ ...who, gone: true })
+    there.clear()
+    line = to; base = to.base; live = false; realm = { name: '', about: '' }
+    // What the old world showed and offered is no longer shown or offered: the other says its own.
+    shown = []; self.onshown?.(shown)
+    offers = []; self.onoffers?.(offers)
+    // All that was held, in order: what came before "now" is what was done before this page joined.
+    const held = to.held
+    to.held = null
+    for (const h of held) say(h.kind, h.data)
+    return true
+  }
   return self
 }
