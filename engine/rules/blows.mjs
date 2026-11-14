@@ -64,6 +64,8 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
     thrown.set(body, { rule, from: thrower.by, t: now, hit: new Set(), tag, thing: g.thing, called: g.called })
     return ''
   }
+  /** Someone was struck: which way it pushed them (a unit way in the world's axes) and when, said with where they are for a second and a half, for whoever draws them to reel by (#371). */
+  const reel = (p, way, now) => { const long = Math.hypot(...way); p.struck = { t: now, way: long > 0 ? way.map((v) => Number((v / long).toFixed(2))) : [0, 0, 0] }; tell(p) }
   /** A person as a rule names them: an actor of its own by the id it gave, anyone else by their name in the world. */
   const find = (rule, id) => (typeof id === 'string' ? folk.get(`${rule.id}/${id}`) ?? folk.get(id) : undefined)
 
@@ -148,6 +150,8 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
           const by = from ? { kind: 'thrown', rule: from.rule, ...(thrower ? { from: who(thrower) } : {}), material: MATERIALS[kind & 15], ...(from.thing ? { thing: from.thing, called: from.called } : {}), ...(from.tag ? { tag: from.tag } : {}) } : living ? { kind: 'thing', id: living } : { kind: 'loose', material: MATERIALS[kind & 15] }
           const where = [f[at + 2], f[at + 3], f[at + 4]]
           const e = { whom: who(p), by, speed: Math.round(f[at + 5]), push: Math.round(f[at + 6]), at: where.map(Math.round), up: Math.max(0, Math.min(1, (where[1] - p.at[1]) / BOX[1])) }
+          // Away from where it touched them, along the ground.
+          reel(p, [p.at[0] - where[0], 0, p.at[2] - where[2]], now)
           // A thing someone held and threw, striking a body the world moves (an actor, a seat), puts it on the ground as a
           // hard push does: a sword thrown at someone is not shrugged off because their rule has no word for it.
           if (from?.thing && (p.rule || p.seat) && e.speed >= 30) { p.down = now + 2500; p.goal = null; tell(p) }
@@ -244,8 +248,9 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
       if (!three(w.to) || !w.to.some((v) => v !== 0) || typeof w.speed !== 'number' || !(w.speed > 0 && w.speed <= PUSH_MOST)) return wrong(`a push is along a way, to: [dx, dy, dz], at a speed up to ${PUSH_MOST} cells a second`)
       const long = Math.hypot(...w.to), v = w.to.map((d) => Math.round((d / long) * w.speed * 10) / 10)
       // Someone at a page is moved by their own page; a body the world walks is put on the ground by a hard push.
-      if (!p.rule && !p.seat) return post({ blow: { by: p.by, push: v } })
-      if (w.speed >= 30) { p.down = now + 2500; p.goal = null; tell(p) }
+      if (w.speed >= 30 && (p.rule || p.seat)) { p.down = now + 2500; p.goal = null }
+      reel(p, w.to, now)
+      if (!p.rule && !p.seat) post({ blow: { by: p.by, push: v } })
     },
     /** `world.down(id, {for})`: someone is on the ground for so many seconds; none gets them up. */
     down(rule, w, now, wrong) {
