@@ -870,6 +870,7 @@ pub const BROKE: u32 = 6; // id: the body is no more, and the pieces it broke in
 pub const FLOW: u32 = 8; // water that flows, as heights over a window of columns (water.rs `tell`)
 pub const STRUCK: u32 = 10; // what struck what (living.rs `Struck`): a, b or 0 for the world, where (3 floats), closing speed, push, a's kind, b's kind, flags
 pub const LIVE: u32 = 11; // for each living thing awake: id, speed along its front (float), feet on the ground, how many touches it had in the last step, what it is told (go, turn, rise as floats), flags (1 aloft)
+pub const FIGURE: u32 = 12; // someone's body is born (living.rs `figure`): id, size (3), middle of mass (3 floats). It is in MOVES as every body is, and is drawn by whoever draws people
 pub const BURST: u32 = 9; // where (3, as floats), radius: a blast the solver set off itself (something went up), for its fire and smoke
 
 pub struct Bodies {
@@ -1514,7 +1515,7 @@ impl Bodies {
                 }
                 // A living thing that is told to go ploughs through loose rubble, from standing too: a car that broke a wall sat on the heap
                 // with its belly caught on it, and could go neither on nor back.
-                if self.list[i].live.as_ref().is_some_and(|live| live.going()) && ploughed.len() < 48 && rubble(self.ground.kind(cell[0], cell[1], cell[2])) {
+                if self.list[i].live.as_ref().is_some_and(|live| live.going() && !live.figure) && ploughed.len() < 48 && rubble(self.ground.kind(cell[0], cell[1], cell[2])) {
                     ploughed.push(cell);
                     continue;
                 }
@@ -1688,7 +1689,7 @@ impl Bodies {
             for t in &self.touches {
                 let body = &self.list[t.a];
                 // A living thing may stand on a pavement for an hour: its weight alone breaks nothing, only a blow.
-                if t.b == NONE && body.count >= 60 && t.pushed > HARD && (body.live.is_none() || t.closing < -15.0) && worst.as_ref().is_none_or(|w| t.pushed > w.1) {
+                if t.b == NONE && body.count >= 60 && t.pushed > HARD && body.live.as_ref().is_none_or(|live| t.closing < -15.0 && !live.figure) && worst.as_ref().is_none_or(|w| t.pushed > w.1) {
                     let p = sub(add(body.pos, t.ra), scale(t.n, 0.5));
                     worst = Some(([p[0].floor() as i32, p[1].floor() as i32, p[2].floor() as i32], t.pushed, body.id, body.live.is_some().then_some((add(body.pos, t.ra), t.n))));
                 }
@@ -1720,7 +1721,7 @@ impl Bodies {
                 live.jolt = live.jolt.max(knock);
             }
             let b = &self.list[i];
-            if b.count >= WHOLE && !b.asleep && knock > takes && self.list.len() < MOST {
+            if b.count >= WHOLE && !b.asleep && knock > takes && self.list.len() < MOST && !b.live.as_ref().is_some_and(|live| live.figure) {
                 let whole = self.list.swap_remove(i);
                 self.broke(whole.id, met);
                 self.shatter(whole);

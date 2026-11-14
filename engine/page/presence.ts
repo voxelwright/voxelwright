@@ -13,7 +13,7 @@ import { STRIDE } from './people.ts'
 interface Other { who: Someone; shown: [number, number, number]; yaw: number; stride: number; walking: number; down: number; flinch: number; heard: number; says: string; until: number }
 
 /** A number of its own for a name, so that a name always looks the same person. */
-const seedOf = (name: string) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h | 0 }
+export const seedOf = (name: string) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h | 0 }
 
 export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void } {
   const asked = new URLSearchParams(location.search).get('name')

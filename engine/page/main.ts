@@ -15,12 +15,13 @@ import { flowing } from './water.ts'
 import { space } from './space.ts'
 import { link } from './link.ts'
 import { car, living } from './living.ts'
+import { person } from './person.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk } from './people.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
-import { presence } from './presence.ts'
+import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
@@ -255,7 +256,7 @@ async function main() {
     if (frames % 120 === 119) { screenMs = Math.max(4, shortest); shortest = Infinity }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
-    if (!alive.frame(dt)) walk(dt)
+    if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     steer(Math.max(1000 / 60, screenMs))
     const v = view(), to = fit()
     staff.frame(v)
@@ -342,7 +343,7 @@ async function main() {
   let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
   let flames = new Float32Array(0)
-  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit); staff.changed(edit) }
+  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -372,6 +373,7 @@ async function main() {
     if (answer.failed) { report.notes.push(`moving failed: ${answer.failed}`); return }
     const told = read(answer.words)
     alive.heard(answer, told)
+    if (!far) me.heard(answer, told)
     for (const { runs, box } of told.edits) {
       heard++
       // Cells put back wait a moment for others near them: a heap comes down as hundreds of bodies, and the town
@@ -469,7 +471,16 @@ async function main() {
     if (seen) { smoke.blast(at, radius); shocks.push({ at, radius, t: folkClock.now() }); ears?.blast(at, radius) }
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
-  const others = far ? presence(far, folk, over, () => ({ at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw }), takenOff) : null
+  // On foot a person is where their feet are, facing the way their body does; flying, where their eye is.
+  const others = far ? presence(far, folk, over, () => { const f = me.feet; return f ? { at: [f.at[0], f.at[1] + 16.5, f.at[2]], yaw: f.yaw } : { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw } }, takenOff) : null
+  // A person's own body (#264, person.ts): B gets down onto the feet and back up to fly; `?walk=1` starts on foot.
+  // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
+  // is told every edit, so that the body walks on the world as it is.
+  const shadow = far ? new Worker('/page/mover.ts', { type: 'module' }) : null
+  const me = person({ send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
+  if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
+  controls.always('KeyB', () => { me.walk(!me.on); return true })
+  if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
   const wishes = asker(() => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }, () => others?.name ?? 'someone')
@@ -782,7 +793,7 @@ async function main() {
     await alive.spawn(car([x, core.ground_at(x, z) + 5, z]))
   })()
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

@@ -422,6 +422,36 @@ pub extern "C" fn living_place(id: u32, x: f32, y: f32, z: f32, qx: f32, qy: f32
     INSTANCE.with_borrow_mut(|i| moving(i).place(id, [x, y, z], [qx, qy, qz, qw]) as u32)
 }
 
+/// Makes someone's body (bodies/living.rs `figure`): a box so wide, tall and deep with its low corner at a place.
+/// Returns how many words tell it, at `bodies_words`; `living_last` is its id. Give it a motor with `living_motor`.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_figure(x: i32, y: i32, z: i32, wide: u32, tall: u32, deep: u32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.figure([wide as usize, tall as usize, deep as usize], [x, y, z]);
+        b.out.len()
+    })
+}
+
+/// Tells what goes on legs how to go: the way it faces (radians: its front at cos, 0, sin), forward and to its
+/// right from -1 to 1, up and down for what flies, and whether to jump. Held for a second. Returns 1 if it is there.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_walk(id: u32, heading: f32, go: f32, side: f32, rise: f32, jump: i32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).walk(id, heading, go, side, rise, jump != 0) as u32)
+}
+
+/// Takes a living thing out of the world at once, leaving nothing. Returns how many words tell it, at `bodies_words`.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_vanish(id: u32) -> usize {
+    INSTANCE.with_borrow_mut(|i| {
+        let b = moving(i);
+        b.out.clear();
+        b.vanish(id);
+        b.out.len()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

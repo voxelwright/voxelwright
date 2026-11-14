@@ -59,6 +59,11 @@ pub struct Live {
     pub go: f32,
     pub turn: f32,
     pub rise: f32,
+    /// To its right and left, for what walks on legs: a person steps sideways, a car does not.
+    pub side: f32,
+    /// Whether it is a figure: someone's body. It is drawn by whoever draws people, not as cells; nothing breaks
+    /// it into pieces, and it breaks nothing by landing.
+    pub figure: bool,
     /// A jump still to take, and how much of a roll is still to turn (radians).
     hop: bool,
     rolling: f32,
@@ -84,7 +89,7 @@ impl Live {
     pub fn new() -> Live {
         Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
-            go: 0.0, turn: 0.0, rise: 0.0, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, was: [0.0; 3], jolt: 0.0,
+            go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, was: [0.0; 3], jolt: 0.0,
         }
     }
 
@@ -111,12 +116,12 @@ impl Live {
 
     /// Whether it is being told to go somewhere.
     pub(super) fn going(&self) -> bool {
-        self.heard < HOLD && (self.go != 0.0 || self.rise != 0.0)
+        self.heard < HOLD && (self.go != 0.0 || self.rise != 0.0 || self.side != 0.0)
     }
 
     /// Whether it is told nothing and has nothing left to do.
     fn idle(&self) -> bool {
-        (self.heard >= HOLD || (self.go == 0.0 && self.turn == 0.0 && self.rise == 0.0)) && !self.hop && self.rolling == 0.0
+        (self.heard >= HOLD || (self.go == 0.0 && self.turn == 0.0 && self.rise == 0.0 && self.side == 0.0)) && !self.hop && self.rolling == 0.0
     }
 }
 
@@ -171,6 +176,16 @@ impl Live {
         self.heard += h;
         let told = self.heard < HOLD;
         let (go, turning, rise) = if told { (self.go, self.turn, self.rise) } else { (0.0, 0.0, 0.0) };
+        let side = if told { self.side } else { 0.0 };
+        // What goes on legs (feet that do not steer) is taken to the speed it is told, forward and sideways, the
+        // way it means to face: a person turns on the spot and steps aside.
+        let legs = self.steer == 0.0 && self.upright > 0.0 && !self.feet.is_empty();
+        let stride = {
+            let (ahead, right) = ([self.heading.cos(), 0.0, self.heading.sin()], [-self.heading.sin(), 0.0, self.heading.cos()]);
+            let want = add(scale(ahead, go), scale(right, side));
+            let long = dot(want, want).sqrt().max(1.0);
+            scale(want, self.top / long)
+        };
         let mass = 1.0 / b.inv_mass;
         let up = [0.0, 1.0, 0.0];
         let front = turn(b.rot, FRONTS[self.front as usize]);
@@ -201,6 +216,18 @@ impl Live {
             // middle: pushed at the road itself, a car at 12 m/s went onto two wheels in a turn.
             let foot_at = add(r, scale(down, far));
             let at = sub(foot_at, scale(down, dot(foot_at, down) * 0.7));
+            if legs {
+                // At the height of its middle: a person who stops does not pitch over their own feet.
+                let at = sub(foot_at, scale(down, dot(foot_at, down)));
+                let v = b.speed_at(at);
+                let more = [stride[0] - v[0], 0.0, stride[2] - v[2]];
+                let long = dot(more, more).sqrt();
+                let most = (self.power * mass / n * h).min(self.grip * press * h * 4.0);
+                if long > 1e-4 {
+                    kick(b, at, scale(more, (long * mass / n).min(most) / long));
+                }
+                continue;
+            }
             let (wheel, across) = if foot.steers { (add(scale(flat, cos), scale(right, sin)), sub(scale(right, cos), scale(flat, sin))) } else { (flat, right) };
             let (most, share) = (self.grip * press * h, mass / n);
             let slip = dot(b.speed_at(at), across);
@@ -283,11 +310,22 @@ impl Live {
             }
             b.vel = add(b.vel, more);
         }
+        // In the air what goes on legs can still be steered a little.
+        if legs && self.on == 0 && !(flies && self.aloft) && (go != 0.0 || side != 0.0) {
+            let more = [stride[0] - b.vel[0], 0.0, stride[2] - b.vel[2]];
+            let (long, most) = (dot(more, more).sqrt(), self.power * 0.2 * h);
+            b.vel = add(b.vel, scale(more, most.min(long) / long.max(1e-4)));
+        }
         if self.hop {
             self.hop = false;
             if self.jump > 0.0 && touching && !(flies && self.aloft) {
-                let way = if self.upright > 0.0 { ahead } else { flat };
-                b.vel = add(scale(way, go * self.top), [0.0, b.vel[1].max(0.0) + self.jump, 0.0]);
+                if legs {
+                    // A jump on legs keeps the speed it had along the ground.
+                    b.vel[1] = b.vel[1].max(0.0) + self.jump;
+                } else {
+                    let way = if self.upright > 0.0 { ahead } else { flat };
+                    b.vel = add(scale(way, go * self.top), [0.0, b.vel[1].max(0.0) + self.jump, 0.0]);
+                }
             }
         }
     }
@@ -479,6 +517,57 @@ impl Bodies {
         (b.pos, b.rot, b.vel, b.spin, b.asleep) = (pos, rot.map(|v| v / long), [0.0; 3], [0.0; 3], false);
         let front = turn(b.rot, FRONTS[b.live.as_ref().unwrap().front as usize]);
         b.live.as_mut().unwrap().heading = front[2].atan2(front[0]);
+        true
+    }
+
+    /// Someone's body (#264): a living thing that is a plain box of cells nobody draws, so wide, so tall and so deep,
+    /// with its low corner at a place. It is moved as any living thing is, by its motor and what it is told
+    /// (`walk`); the figure is drawn at it by whoever draws people. Returns its id.
+    pub fn figure(&mut self, size: [usize; 3], low: [i32; 3]) -> u32 {
+        self.spawned = 0;
+        if size.iter().any(|&s| s == 0 || s > 32) {
+            return 0;
+        }
+        let mut body = Body::new(self.next, vec![crate::kinds::kind(crate::kinds::WOOD, crate::kinds::OWN); size[0] * size[1] * size[2]], size, low);
+        self.next += 1;
+        let mut live = Live::new();
+        live.figure = true;
+        body.live = Some(Box::new(live));
+        let mut words = vec![body.id, size[0] as u32, size[1] as u32, size[2] as u32];
+        words.extend(body.com.iter().map(|v| v.to_bits()));
+        self.record(FIGURE, &words);
+        self.list.push(body);
+        self.spawned = self.next - 1;
+        self.spawned
+    }
+
+    /// Tells what goes on legs where to face and how to go: `heading` is the way it faces (its front at cos, 0,
+    /// sin of it), go and side from -1 to 1 forward and to its right, rise up and down for what flies, and
+    /// whether to jump. Held for a second, as `drive` is.
+    pub fn walk(&mut self, id: u32, heading: f32, go: f32, side: f32, rise: f32, jump: bool) -> bool {
+        let Some(b) = self.living(id) else { return false };
+        let live = b.live.as_mut().unwrap();
+        let clean = |v: f32| if v.is_finite() { v.clamp(-1.0, 1.0) } else { 0.0 };
+        (live.go, live.side, live.rise, live.turn) = (clean(go), clean(side), clean(rise), 0.0);
+        let turned = heading.is_finite() && (heading - live.heading).abs() > 1e-3;
+        if heading.is_finite() {
+            live.heading = heading;
+        }
+        live.heard = 0.0;
+        live.hop |= jump;
+        if !live.idle() || turned {
+            live.quiet = 0.0;
+            b.asleep = false;
+        }
+        true
+    }
+
+    /// Takes a living thing out of the world at once, leaving nothing: someone's body when they go.
+    pub fn vanish(&mut self, id: u32) -> bool {
+        let Some(at) = self.list.iter().position(|b| b.id == id && b.live.is_some()) else { return false };
+        let body = self.list.swap_remove(at);
+        // Told as a body that is no more, with nothing born of it.
+        self.record(BROKE, &[body.id]);
         true
     }
 
@@ -792,6 +881,89 @@ pub mod tests {
         // Told nothing, it sleeps where it hangs.
         run(&mut bodies, 3.0, id, [0.0; 3]);
         assert!(the(&bodies, id).asleep);
+    }
+
+    /// Someone's body as the page and the world make it: 0.4 m wide, 1.4 m of box on a leg that reaches 0.6 m
+    /// down, so that the whole stands 1.76 m. Walks at 1.4 m/s by these numbers, runs at 4.5 if told the whole way.
+    pub const PERSON: [usize; 3] = [4, 14, 3];
+    pub fn person(bodies: &mut Bodies, low: [i32; 3], top: f32) -> u32 {
+        let id = bodies.figure(PERSON, low);
+        assert!(bodies.motor(id, &[0.0, 1.5, 300.0, top, 0.0, 0.0, 0.0, 30.0, 8.0, 38.0, 2000.0, 2.0, 0.5, 1.5, 6.0, 0.0, 1.0]));
+        id
+    }
+
+    #[test]
+    fn a_person_walks_up_the_street_steps_aside_jumps_and_is_stopped_by_a_wall() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let id = person(&mut bodies, [X, ground + 5, Z + 9], 45.0);
+        let walk = |bodies: &mut Bodies, seconds: f32, heading: f32, go: f32, side: f32| {
+            for _ in 0..(seconds * 60.0) as usize {
+                bodies.walk(id, heading, go, side, 0.0, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / 60.0);
+            }
+        };
+        walk(&mut bodies, 2.0, 0.0, 0.0, 0.0);
+        let stood = the(&bodies, id);
+        let feet = stood.pos[1] - stood.com[1] - 3.6;
+        assert!(stood.asleep && tipped(stood) < 3.0, "it stands, upright, and sleeps");
+        assert!((feet - (ground as f32 + 1.0)).abs() < 1.2, "with its feet on the street: {feet} over {ground}");
+        // Up the street, which rises a cell at a time: three seconds at 4.5 m/s.
+        let from = the(&bodies, id).pos;
+        walk(&mut bodies, 3.0, 0.0, 1.0, 0.0);
+        let went = sub(the(&bodies, id).pos, from);
+        eprintln!("walked {went:?}, speed {:?}", the(&bodies, id).vel);
+        assert!(went[0] > 110.0 && went[0] < 140.0 && went[2].abs() < 3.0, "it ran up the street at its pace: {went:?}");
+        assert!(went[1] > 3.0, "and up the steps of the road with it");
+        // Sideways, facing the same way.
+        let from = the(&bodies, id).pos;
+        walk(&mut bodies, 1.0, 0.0, 0.0, 1.0);
+        let went = sub(the(&bodies, id).pos, from);
+        assert!(went[2] > 30.0 && tipped(the(&bodies, id)) < 6.0, "it stepped to its right: {went:?}");
+        // Stops when told nothing.
+        walk(&mut bodies, 2.5, 0.0, 0.0, 0.0);
+        assert!(the(&bodies, id).asleep, "told nothing it stands still: {:?} spin {:?}", the(&bodies, id).vel, the(&bodies, id).spin);
+        // A jump: off the ground and down again.
+        let was = the(&bodies, id).pos[1];
+        bodies.walk(id, 0.0, 0.0, 0.0, 0.0, true);
+        let mut high = 0.0f32;
+        for _ in 0..90 {
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            high = high.max(the(&bodies, id).pos[1] - was);
+        }
+        assert!(high > 5.0 && (the(&bodies, id).pos[1] - was).abs() < 1.0, "it jumped {high} cells and came down");
+        // A wall across its way stops it, and breaks nothing.
+        let at = the(&bodies, id).pos;
+        let wall = at[0] as i32 + 40;
+        let runs: Vec<Run> = (ground - 2..ground + 60).flat_map(|y| (at[2] as i32 - 30..at[2] as i32 + 30).map(move |z| Run { x0: wall, x1: wall + 2, y, z, kind: kind(BRICK, OWN) })).collect();
+        bodies.ground.push(Edit::Runs(runs), false, None);
+        walk(&mut bodies, 3.0, 0.0, 1.0, 0.0);
+        let b = the(&bodies, id);
+        assert!(b.pos[0] < wall as f32 && b.pos[0] > wall as f32 - 6.0, "the wall stops it: at {} before {wall}", b.pos[0]);
+        assert_eq!(bodies.crushes, 0, "and it breaks nothing");
+        // Off a drop it falls, and lands on its feet.
+        assert!(bodies.vanish(id) && !bodies.list.iter().any(|b| b.id == id), "and it can be taken out of the world");
+    }
+
+    #[test]
+    fn a_person_is_thrown_by_a_ball_and_a_car_and_is_whole() {
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let id = person(&mut bodies, [X + 100, ground + 5, Z + 9], 45.0);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        let at = the(&bodies, id).pos;
+        bodies.throw_ball([at[0], at[1], at[2] + 40.0], [0.0, 0.0, -300.0], 2, kind(STEEL, OWN));
+        let out = run(&mut bodies, 1.0, id, [0.0; 3]);
+        assert!(records(&out, STRUCK).iter().any(|s| s[1] == id || s[0] == id), "a ball that hits a person is told as a blow");
+        assert!(sub(the(&bodies, id).pos, at)[2] < -1.0, "and moves them: {:?}", sub(the(&bodies, id).pos, at));
+        // A car driven into them.
+        let other = person(&mut bodies, [X + 120, ground + 5, Z + 7], 45.0);
+        let c = car(&mut bodies, [X, ground + 6, Z]);
+        let out = run(&mut bodies, 3.0, c, [1.0, 0.0, 0.0]);
+        assert!(records(&out, STRUCK).iter().any(|s| (s[0] == c && s[1] == other) || (s[0] == other && s[1] == c)), "a car that hits a person is told too");
+        assert!(bodies.list.iter().any(|b| b.id == other && b.live.is_some()), "and the person is still one body");
     }
 
     #[test]

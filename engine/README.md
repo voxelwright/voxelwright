@@ -234,6 +234,29 @@ Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z
 To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
 `node live.mjs` run after each merge so that the link serves main and not a working tree.
 
+## A person's body (#264)
+
+B gets the eye down onto its feet where it is, and back up to fly; `/city?walk=1` starts on foot. W A S D walk the
+way the eye looks, Shift runs (4.5 m/s; a walk is 1.4), Space jumps, V puts the eye in the head or behind the
+shoulder. On a phone the left thumb walks, and runs when pushed right over. The body is a living thing of the core's
+(`bodies/living.rs` `figure`, `page/person.ts`): a box on a leg that is a spring, so it takes the road's steps and
+kerbs, is stopped by what is built, stands on rubble, falls, and is thrown by what hits it. Tools and the wand work
+on foot as they do flying.
+
+- **Who moves it: the page**, in a core of its own. Told through the world's process, a living thing is seen to move
+  30 ms later on this machine (32 ms through the tailnet's own address), and the owner's phone was 127 to 429 ms away
+  by the tailnet's relay when it was measured: every step a quarter of a second late. So in a shared world the page
+  keeps a second core that is told every edit the world tells of, walks its body there, and says where its feet are
+  ten times a second, as it always said where its eye was. Others see the figure walk; a rule has the feet in
+  `world.people`. What strikes the body is the world's process's to judge (the next unit).
+- `node test/person.mjs [--out dir]`: alone (down, walk, run, the road's steps, jump, aside, stopped by brick that it
+  does not break, the eye in the head, flying again), a phone's thumb, and a shared world (stopped by what someone
+  built since, a seat told where the feet are, a rule whose actor follows them).
+- **Not there**: the body meets the world's cells and, alone, the page's other bodies; in a shared world it does not
+  yet meet falling things or cars, and nobody can strike it. The eye behind goes through walls. Running and jumping
+  are a walk's pose, quicker (the people lane's to draw). It cannot get on a living thing while on foot other than
+  by E as before.
+
 ## Rules (#264)
 
 What the people of a world do, and what a game in it is, is text: a script that someone or their model wrote, put
@@ -373,7 +396,7 @@ Checks from different threads share one GPU, so whatever opens a browser takes a
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/spells.mjs` (known spells with no model: pink, shiny, steel that does not burn, twice as large, a fireball seen on its way, a change too big for one edit done as several), `test/hands.mjs` (what a realm's rule offers becomes keys, buttons and wand entries; the rule hears who did which and whether the aim met a person, an actor or cells; what it shows is a line, meters, a score and a choice on the screen, as text), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
+(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/person.mjs` (a person's own body: walks, runs, jumps, is stopped by what is built, seen by others and by a rule where its feet are), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.

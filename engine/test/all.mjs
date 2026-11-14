@@ -42,6 +42,7 @@ const checks = [
   ['people', 'node', ['test/people.mjs'], true],
   ['living', 'node', ['test/living.mjs'], true],
   ['driven', 'node', ['test/driven.mjs'], true],
+  ['person', 'node', ['test/person.mjs'], true],
   ['rules', 'node', ['test/rules.mjs'], true],
   ['realms', 'node', ['test/realms.mjs'], false],
   ['taken', 'node', ['test/taken.mjs'], true],

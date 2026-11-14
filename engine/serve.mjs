@@ -137,7 +137,7 @@ A rule is a script (JavaScript) that says what the people of this world do and w
   on('said',  (world, e) => {})   someone at a page or in a seat spoke: e = {by, name, text, at: [x, y, z]}
   on('tick',  (world, e) => {})   twice a second while anyone is in the world: e = {dt}
 world.now      seconds
-world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", mine, at: [x, y, z], yaw, walking, down}. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it
+world.people   everyone with a body (at most ${256}): {id, name, kind: "page" | "seat" | "actor", mine, at: [x, y, z], yaw, walking, down}. An actor of this rule has mine: true and the id the rule gave it, and stopped (why its walk ended) when something stopped it. For someone at a page, at is where their feet are: on what they stand on when they walk (they run at up to 45 cells a second and jump 8), in the air under their eye when they fly
 world.near(at, cells)   those of world.people within so many cells of [x, z] or [x, y, z], along the ground
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near}. id is the same from one call to the next; near is how far the nearest person is. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
 world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON

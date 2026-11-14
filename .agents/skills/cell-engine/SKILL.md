@@ -1963,3 +1963,25 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
 - **Not there**: a resident's phone or umbrella is not carried over to the actor; a taken resident who was mid
   stride stops dead (an actor stands until told to walk); residents that stand on paved lots can be taken only
   where the world process has already found their places.
+
+## A person's body (#264, `bodies/living.rs` `figure`, `page/person.ts`; November 13)
+
+- **It is a living thing**: a box of 4 by 14 by 3 cells on one leg (a foot that does not steer, reach 6), kept
+  upright, nobody draws its cells (`FIGURE`, record 12, in place of `BORN`). What goes on legs is taken to the speed
+  it is told, forward and sideways, by a push at the height of its middle: pushed where the foot meets the ground,
+  one who stopped pitched over and bobbed for 0.75 s. A figure never shatters, crushes nothing by landing and does
+  not plough rubble. So blows, walls, kerbs, rubble and falling came from the solver as it was.
+- **Who moves it was decided by a measurement**, not an argument: `POST /world/drive` to the stream showing the
+  thing moved is 30 ms in the middle on loopback, 32 ms through `tailscale serve`; `tailscale ping` to the owner's
+  phone was 127 to 429 ms by relay (no direct path that hour), the Ally 14 to 18. Moved by the world's process a
+  phone's every step is a quarter of a second late. So the page moves its own body: alone in the mover's core, in a
+  shared world in a second mover worker that is told every edit (`main.ts` `change`), and reports its feet through
+  `here`. The second core has the world's cells and nothing that moves.
+- **`here` is feet plus 16.5 cells** while on foot (the world takes 16.5 off what a page says), and the facing is
+  the body's, so `world.people` and what a seat is told have the feet. Others' pages make it walk from how fast it
+  moves (`presence.ts`: 3 to 60 cells a second is a walk).
+- **The eye**: behind is 3.2 m back, 0.6 m over and 0.5 m to the right of the head, so that the aim is not behind
+  one's own head; in the head the body faces where the eye looks and steps aside. The height is eased (a kerb is no
+  jolt). Behind, the eye passes through walls: not built.
+- **The check's street**: cars are parked a metre to the right of the lane at x 760 to 900; step left, not right.
+
