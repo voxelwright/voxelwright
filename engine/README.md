@@ -454,7 +454,12 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
 - `node test/step.mjs` checks it in the real page: no navigation, the stream, edits, made things, a living thing
   ridden as the step is taken, people and a rule's actor, the look, the arrival, asks landing only where the page
   is, a body on foot standing on the cells of the realm it is in, and back.
-- **Not there yet**: the portal, its keys and the wheel (next). The helper makes things only in the realm the page
+- **The portal, as an experiment** (`page/portal.ts`, from the console; no key yet): `await engine.portal.open(id,
+  {at: [x, y, z], yaw, size: [wide, high], to: [x, y, z]})` stands a window in this world that shows the other
+  realm live, from an eye as far from `to` as this eye is from the window. Walk through it (or `engine.portal
+  .step()`) and the page is in the other realm, the window leading back. `node test/portal.mjs --out dir` measures
+  it and keeps pictures; the numbers are in the cell-engine skill, "The portal".
+- **Not there yet**: a key that opens and closes the portal, and the wheel that picks a realm (next). The helper makes things only in the realm the page
   was opened in (it is started for one world), and the ask bar says so elsewhere. The realm left behind shows the
   page's figure for five seconds more. Sound follows the stream but its change is not checked by itself.
 

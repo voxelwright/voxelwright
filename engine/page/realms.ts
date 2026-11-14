@@ -19,17 +19,19 @@ export interface Realms {
   readonly first: string
   /** Every realm the server keeps. */
   list(): Promise<Listed[]>
-  /** Steps into a realm, by its id, with no loading of the page: to `at` if given, else where the realm says one arrives, else where this page began. Resolves when everything there is made, with how long it took. */
-  step(id: string, at?: Pose): Promise<Stepped>
+  /** Steps into a realm, by its id, with no loading of the page: to `at` if given, else where the realm says one arrives, else where this page began. `trade` is for a world that already holds the other realm's sectors (the portal): it is called to put them in place of this world's, and then none are made. Resolves when everything there is made, with how long it took. */
+  step(id: string, at?: Pose, trade?: () => void): Promise<Stepped>
 }
 
 const HOME = 'home'
-const baseOf = (id: string) => (id === HOME ? '/world' : `/realm/${encodeURIComponent(id)}/world`)
+export const baseOf = (id: string) => (id === HOME ? '/world' : `/realm/${encodeURIComponent(id)}/world`)
 
 export function realms(o: {
   far: Link
   /** Puts away what the page holds of the world it is leaving, and makes its sectors ready to be another's: called at the moment of the step. */
-  leave(): void
+  leave(trade?: () => void): void
+  /** Called when everything held of the other world has been said. */
+  came(): void
   /** Puts the eye somewhere. */
   place(at: Pose): void
   /** Where a realm's arrival is, as a pose: its feet on the ground there, its eyes over them. */
@@ -56,13 +58,14 @@ export function realms(o: {
     get here() { return here },
     first,
     list: () => fetch('/realms').then((r) => r.json()).then((all: { realms: Listed[] }) => all.realms),
-    async step(id, to) {
+    async step(id, to, trade) {
       const began = performance.now(), before = o.made().sectors
       const realm = await o.far.ready(baseOf(id))
       const ready = performance.now() - began
       // From here to the first picture nothing waits on anything: the page is in the other world when this returns.
       arrived = true
-      o.far.go(o.leave)
+      o.far.go(() => o.leave(trade))
+      o.came()
       here = id
       o.place(to ?? (realm.arrive ? o.arrival(realm.arrive) : o.began))
       // The address says where the page is, so that loaded again it is there.

@@ -94,6 +94,10 @@ export interface Link {
    * this page joined. False if none is ready.
    */
   go(between: () => void): boolean
+  /** What the world made ready has said so far, in order: its asks as echoes and the core's words (for whoever shows that world before the page is in it). Empty when none is ready. */
+  held(): { echo?: Echo; words?: Uint32Array<ArrayBuffer> }[]
+  /** Each thing the world made ready says after all that was kept, as it says it. */
+  onheld: ((frame: { echo?: Echo; words?: Uint32Array<ArrayBuffer> }) => void) | null
   /** Whether all that was kept before this page joined has been read. */
   readonly live: boolean
 }
@@ -115,13 +119,15 @@ export function link(base = '/world'): Link {
   /** The stream being read, and one made ready beside it: what it has said so far, and whether all that was kept has come. */
   interface Line { base: string; stop: AbortController; held: { kind: number; data: unknown }[] | null; realm: Realm; whole: boolean }
   let line: Line, next: Line | null = null
+  /** What the one made ready is, once all that was kept of it has been read. */
+  let nextIs: Promise<Realm> | null = null
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
     me: Math.random().toString(36).slice(2, 10),
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onsound: null, onbodies: null, onrealm: null,
     get base() { return base },
-    ready: () => Promise.reject(new Error('not yet')), go: () => false,
+    ready: () => Promise.reject(new Error('not yet')), go: () => false, held: () => [], onheld: null,
     get realm() { return realm },
     get onplugged() { return plugged },
     set onplugged(f: ((m: Plugged) => void) | null) { plugged = f; if (f) for (const m of plugs.values()) f(m) },
@@ -200,21 +206,26 @@ export function link(base = '/world'): Link {
           if (kind === ECHO && (data as Echo).realm) l.realm = changed(l.realm, (data as Echo).realm!)
           l.held.push({ kind, data })
           if (kind === NOW) { l.whole = true; whole?.(l) }
+          else if (l.whole && l === next && (kind === ECHO || kind === LOG)) self.onheld?.(framed(kind, data))
         }
         held = held.slice(from)
       }
     })().catch((e) => { if (!l.stop.signal.aborted) self.onerror?.({ message: String(e) }) })
     return l
   }
+  const framed = (kind: number, data: unknown) => (kind === ECHO ? { echo: data as Echo } : { words: (data as Uint32Array<ArrayBuffer>).slice(4) })
+  self.held = () => (next?.held ?? []).filter((h) => h.kind === ECHO || h.kind === LOG).map((h) => framed(h.kind, h.data))
   line = open(base)
-  self.ready = (at) => new Promise((resolve) => {
+  self.ready = (at) => {
+    // Asked again for the one already held, it is the one held: nothing it has said since is lost.
+    if (next && next.base === at && nextIs) return nextIs.then(() => next?.base === at ? next.realm : self.ready(at))
     next?.stop.abort()
-    next = open(at, (l) => resolve(l.realm))
-  })
+    return nextIs = new Promise((resolve) => { next = open(at, (l) => resolve(l.realm)) })
+  }
   self.go = (between) => {
     const to = next
     if (!to?.whole || !to.held) return false
-    next = null
+    next = null; nextIs = null
     line.stop.abort()
     // What lives and who is there, of the world left behind, are gone from this page: said as the world says it.
     for (const thing of alive) self.onliving?.({ thing, body: 0 })

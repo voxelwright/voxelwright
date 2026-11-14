@@ -1272,7 +1272,9 @@ const SUN_TILES_A_FRAME = 8
 
 export interface Marcher {
   /** Draws the world into `to`, and how far off each pixel's thing is into its depth. */
-  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites): void
+  draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number]): void
+  /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
+  rebind(): void
   /** Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands. `ready` is whether the world is made enough to draw them from. */
   tend(encoder: GPUCommandEncoder, view: View, ready: boolean): void
   /** The sun's maps: an edit must spoil the tiles it touches. */
@@ -1308,13 +1310,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
-  const bind = device.createBindGroup({
+  const binding = () => device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }],
   })
+  let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
   const sunPipeline = await device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  const sunBind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }] })
+  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }] })
+  let sunBind = sunBinding()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
@@ -1443,7 +1447,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         pass.end()
       })
     },
-    draw(encoder, to, view, flags, time, timing) {
+    rebind() { bind = binding(); sunBind = sunBinding() },
+    draw(encoder, to, view, flags, time, timing, only) {
       tell(view, to.size, flags, time)
       const pass = encoder.beginRenderPass({
         colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
@@ -1452,6 +1457,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bind)
+      if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)
       pass.end()
     },

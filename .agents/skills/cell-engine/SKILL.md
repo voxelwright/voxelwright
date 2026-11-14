@@ -2193,3 +2193,53 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
   while this was being built, and a voice for home alone would have left every made realm mute. Asking a realm
   anything wakes it and keeps it awake, so only realms with a page reading them are voiced; an agent alone in a
   realm (a seat, no page) gets no answers there yet.
+
+## The portal: an experiment, measured (#264, `page/portal.ts`, `world.ts` `trade`; November 13)
+
+Another realm seen live through a window standing in this one, and walked into. Built the cheapest way that could
+be measured; `node test/portal.mjs` prints all of this (M1 Pro, Chrome, 1280 x 720 at full scale, beside other
+lanes' checks on the one GPU, so GPU times are within a millisecond or two).
+
+- **How it is held.** A second `World` like the page's own (the same boxes and pool), made round the place the
+  window leads to, with the other realm's edits: `link.ready` holds that realm's stream, `link.held()` gives what
+  it has said and `onheld` what it says from then on, so the window is live. It holds 142 MB of trees in 18,432
+  sectors, and takes of the GPU's memory 256 MB for its pool and boxes, 36 MB for a second set of sun maps and 7 MB
+  for the window's picture and depth (28 MB at 2560 x 1440): 300 MB more than the page had.
+- **How it is drawn.** A second marcher for that world, into a picture of its own, only in the pixels the window
+  covers (`draw`'s `only`, a scissor); then a quad at the window, depth-tested against what this world's march
+  left, takes that picture pixel for pixel. A parked car in front of the window hides it; people are drawn after.
+  The other realm's hour lights its marcher and its tint multiplies the window's pixels.
+- **What drawing costs** (ms a frame at the GPU's own pace; this world's march alone 7.2, the other world's whole
+  picture, dusk in rain, 18.9): a window over 10% of the picture adds 4.3, over 25% 7.9, over 50% 12.9, all of it
+  18.5. At half the pixels each way it adds 2.1, 3.6, 5.1 and 7.1. With the window 6% of the picture the page
+  held 60 frames a second. At 2560 x 1440 with the page's scale fixed at 1 (its own march 24.3 ms, so 30 frames a
+  second before any window) the window adds 12.5, 21, 35 and 53 at full size and 4.8, 8.1, 8.3 and 18 at half: at
+  that size the window is to be drawn at half size, or follow the scale the page steers by.
+- **One march that changes worlds at the window was measured, not built**: at best it saves the part of this
+  world's march that the window hides, which is 1.1 ms at 10%, 1.7 at 25%, 3.2 at 50% (this world's march with
+  those pixels left out). Halving the window's pixels saves more than that and leaves the marcher's shader alone.
+  So: a second marcher, at reduced size when the window is large.
+- **Stepping through is a trade, not a copy and not a making.** `World.trade` exchanges everything two worlds
+  hold (levels, pool, the two GPU buffers, edits) and each marcher binds again (`rebind`). Walked through: 1 ms
+  to read (the stream is the one the window already holds), 18 to 22 ms to go over, everything made 45 to 125 ms
+  after (0 to 200 sectors at the edges, from the walking itself), the longest frame 33 ms at 1280 x 720 (83 ms
+  once; 83 to 100 ms at 2560 x 1440 with the scale fixed, where a frame was 33 ms to begin with). The same step
+  without the window was 2.1 to 3.3 s. Brick put down in the other realm while the step is taken is there on arriving.
+  The world left behind is at once the one behind the window: it leads back with 0 to 40 sectors to make.
+- **The opening is the loading.** Making the other place from nothing: a picture with nothing missing after 1.5 s
+  and all of it after 3.6 s with six workers (3.8 s and 7.8 s with three), 7 to 410 ms once for the second store
+  and its marcher's shader. The page's own frames do not suffer for it: while it opened with six workers the
+  longest frame was 17 ms (50 ms at 2560 x 1440, 95 in 100 within 33). A window that takes a second and a half to
+  open, showing the place sharpen behind it, hides all of it; opened again later it is made already.
+- **Faults met.** The step asked for the other realm's stream afresh, hanging up the one the window's world was
+  fed from: an edit made there meanwhile reached the page's cores and not the traded sectors. `ready` now answers
+  with the stream it holds. During the step the window still pointed the old way for a few frames, so the world behind it
+  was made round a place that is neither realm's and then all made again (8 s): the window is turned round in the
+  same turn as the trade. After a trade both marchers' sun maps are of the wrong world and are drawn again
+  (`spoilAll`): shadows are traced meanwhile and the page fell to 35 to 52 frames a second for some seconds in the
+  dusk realm (whose own march is 19 ms). Trading the sun maps with the worlds is the fix, not done.
+- **Not built**: a key and the wheel; people, living things, water and fire of the other realm in the window
+  (only its cells are seen); a window that turns (the other world is seen unrotated); sound through it; a phone,
+  where a second 128 MB pool may not fit (a smaller second world cannot be traded: it would be made on stepping).
+  Two streams are held at once, of the six connections a browser gives a server over HTTP/1.1.
+

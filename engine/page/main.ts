@@ -15,6 +15,7 @@ import { flowing } from './water.ts'
 import { space } from './space.ts'
 import { link } from './link.ts'
 import { realms, type Pose } from './realms.ts'
+import { portal } from './portal.ts'
 import { car, living } from './living.ts'
 import { person } from './person.ts'
 import { puffs } from './puffs.ts'
@@ -197,8 +198,9 @@ async function main() {
   if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => hour ?? 11, () => march.rain, () => folkClock.now(), shocks, takenOff))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
-  const setHour = (h: number | null) => {
-    hour = h === null ? null : ((h % 24) + 24) % 24
+  /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
+  const sunOf = (h: number | null) => {
+    const hour = h === null ? null : ((h % 24) + 24) % 24
     let sun: [number, number, number] = [0.52, 0.62, 0.59], day = 1, low = 0
     if (hour !== null) {
       const a = ((hour - 6) / 12) * Math.PI, east = [0.8, 0, 0.6], top = [-0.27, 0.9, 0.36]
@@ -209,6 +211,13 @@ async function main() {
       // By night the moon's light, from a fixed place; by day the sun's, never from under the ground.
       sun = day === 0 ? [0.45, 0.7, -0.55] : [at[0], Math.max(at[1], 0.06), at[2]]
     }
+    return { sun, day, low }
+  }
+  /** What the portal draws each frame, once there is one (#264, portal.ts). */
+  let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number) => void) | null = null
+  const setHour = (h: number | null) => {
+    hour = h === null ? null : ((h % 24) + 24) % 24
+    const { sun, day, low } = sunOf(hour)
     march.light(sun, day, low)
     // Full day is 1, dusk and night 0.
     const noon = day * (1 - low)
@@ -292,6 +301,7 @@ async function main() {
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
+      portalDraw?.(encoder, to, v, (now - started) / 1000)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
@@ -351,7 +361,9 @@ async function main() {
   let running = false
   /** Where it burns, as the mover last said: some of the burning cells. */
   let flames = new Float32Array(0)
-  const change = (edit: Edit) => { world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words) }
+  /** While a step is taken into a world whose sectors are already held (#264, the portal): they were made with these very edits. */
+  let adopted = false
+  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -520,7 +532,7 @@ async function main() {
   let afoot = false
   const realm = far ? realms({
     far, began,
-    leave: () => {
+    leave: (trade) => {
       // On foot, the body is taken up first: its own core is about to forget the world it stands on, and it is set down again on arriving.
       afoot = me.on
       if (afoot) me.walk(false)
@@ -531,9 +543,10 @@ async function main() {
       heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
       for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
       // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
-      spoiled.push(...world.swap([]))
+      if (trade) { trade(); adopted = true } else spoiled.push(...world.swap([]))
       core.world_forget()
     },
+    came: () => { adopted = false },
     place: (to) => { Object.assign(pose, to); if (afoot) { afoot = false; me.walk(true) } },
     arrival: (a) => ({ x: a.at[0] / M, y: (a.at.length === 3 ? a.at[1] : core.feet_at(a.at[0], a.at[a.at.length - 1])) / M + 1.65, z: a.at[a.at.length - 1] / M, yaw: a.yaw, pitch: a.pitch }),
     look: (l) => { setHour(l?.hour !== undefined ? l.hour : ownLook.hour); march.rain = l?.rain ?? ownLook.rain; realmLook.grade = l?.grade ?? null; realmLook.tint = l?.tint ?? [1, 1, 1] },
@@ -844,6 +857,11 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo })
+  // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
+  // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
+  const gate = far && realm ? await portal({ gpu, far, realms: realm, world, march, pose, make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }), marcher: (w) => marcher(device, gpu.format, w), light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) }, pause: (on) => { paused = on } }).catch((e: unknown) => { console.warn(`no portal: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  portalDraw = gate ? (encoder, to, v, time) => { gate.walk(); gate.draw(encoder, to, v, flags, time) } : null
+  Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })
 
   if (flying) {
     // The flight is long and nobody touches the screen: ask that it stay on.

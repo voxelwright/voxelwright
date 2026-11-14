@@ -148,10 +148,10 @@ export interface WorldStats {
 }
 
 export class World {
-  readonly levels: Level[]
-  readonly pool: Pool
-  readonly poolBuffer: GPUBuffer
-  readonly topBuffer: GPUBuffer
+  levels: Level[]
+  pool: Pool
+  poolBuffer: GPUBuffer
+  topBuffer: GPUBuffer
   /** Words a level takes in the top buffer. */
   readonly stride: number
   private workers: { worker: Worker; busy: number }[] = []
@@ -205,6 +205,27 @@ export class World {
     for (const e of old) this.touch(e, false)
     for (const e of edits) this.edit(e)
     return old
+  }
+
+  /**
+   * This world and another change places (#264, the portal): what each holds of sectors, on the GPU and here, and
+   * what was done to each. Both must have been made alike (the same boxes and pool). Nothing is copied: whoever
+   * draws either binds its buffers again (march.ts `rebind`). Sectors that were being made are asked for again.
+   */
+  trade(other: World) {
+    for (const key of ['levels', 'pool', 'poolBuffer', 'topBuffer', 'edits', 'reach'] as const) { const mine = this[key]; (this as Record<string, unknown>)[key] = other[key]; (other as unknown as Record<string, unknown>)[key] = mine }
+    for (const world of [this, other]) {
+      for (const level of world.levels) {
+        for (let i = 0; i < level.state.length; i++) {
+          if (level.state[i] === FLYING || level.state[i] === QUEUED) level.state[i] = MISSING
+          else if (level.state[i] === STALE_FLYING) level.state[i] = STALE
+          level.asked[i] = 0
+        }
+        level.dirty = true
+      }
+      world.plan = true
+      world.moved = world.levels.map((l) => l.index)
+    }
   }
 
   /** Every sector an edit reaches is to be made again; `keep` also lists the edit under each column it reaches. */
