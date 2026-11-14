@@ -105,8 +105,24 @@ so the binary's own additions are about 640 tokens.
 
 ## Limits and what is not verified
 
-- One reply per process: each wish pays the binary's start (about 1.7 s). A warm process with
-  `--input-format stream-json` was not tried.
+- One reply per process: each wish pays the binary's start (about 1.7 s), unless the process is started ahead (below).
+
+## Started ahead, read as it comes, and thinking (#264, `engine/mind/model.mjs`; November 13, 2026; 2.1.325)
+
+- **Started ahead.** With `--input-format stream-json` the binary starts and waits for a line of JSON on stdin; it
+  writes `init` only when the message comes. Asked 3.5 s or 75 s after it was started, Sonnet's first word came
+  0.6 to 0.7 s after the message (cold: 0.8 to 2.5 s). Ending stdin after the one message ends the process after its
+  reply. A waiting process is 235 to 270 MB.
+- **Read as it comes.** `--include-partial-messages` adds `{type: "stream_event", event: {type:
+  "content_block_delta", delta: {type: "text_delta", text}}}` lines. `init` comes before any of them, so the guard
+  (no tools, no servers) can be applied before a word is passed on.
+- **Thinking cannot be turned off for Haiku 5.5.** It thinks before four replies in five (`thinking_delta` events
+  with empty text, 160 to 270 tokens under `usage.output_tokens_details.thinking_tokens`, about 1.5 s). Tried, each
+  with runs that still thought: `MAX_THINKING_TOKENS=0`, `CLAUDE_CODE_DISABLE_THINKING=1`,
+  `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1`, `--effort low`, `--settings '{"alwaysThinkingEnabled":false}'`. Telling
+  it in the system prompt not to think cut it to one reply in four, and its answers got worse. Sonnet 5.5 did not
+  think in 28 short replies with none of those set.
+- `--model claude-haiku-4-5` fails to run.
 - Whether the email line can be removed by a setting was not found, not proved impossible.
 - Only macOS with a subscription login was run. API-key logins and other platforms were not.
 - Refresh when the binary's major or minor version changes: run `node test/make.mjs`, one real

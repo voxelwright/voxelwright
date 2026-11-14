@@ -1,10 +1,14 @@
 // The model that voices people (#264): the owner's own Claude Code, on their own machine and subscription, one
 // process for one reply. As the maker's (make/model.mjs) it has no tools, no servers, no settings, no session and an
-// empty folder; why each flag: .agents/skills/claude-code-headless/SKILL.md. Two things differ, both for speed:
+// empty folder; why each flag: .agents/skills/claude-code-headless/SKILL.md. Three things differ, all for speed
+// (measured on an M1 Pro, November 13, 2026; the numbers are in the cell-engine skill):
 //   - its words are read as they come (`--include-partial-messages`), so the first sentence can be said at once;
-//   - a process can be started before it is wanted (`warm`): the binary takes about 1.7 s to start and then waits
-//     for its one message on stdin, so the wait is paid before anyone speaks. Each still answers once and ends:
-//     no two people of a world ever share a context.
+//   - a process is started before it is wanted (`warm`): the binary takes about 1.7 s to start and then waits for
+//     its one message on stdin, so that wait is paid before anyone speaks. Each still answers once and ends: no two
+//     people of a world ever share a context;
+//   - it is Sonnet, not Haiku. Haiku 5.5 thinks before about four replies in five (some 250 hidden tokens, 1.5 s)
+//     and no flag or setting stops it; Sonnet 5.5 never did. Started ahead, Sonnet's first word comes in 0.6 s and
+//     Haiku's in 2.0 s.
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,13 +23,15 @@ const WAITS_MOST = 10 * 60_000
  * @param system  what every reply is told first (the same for all, so it is read from the provider's cache)
  * @param warm    how many processes are kept started and waiting
  * @param limit   how long one reply may take (ms) before it is stopped
+ * @param more    further flags for the binary, and `set` further variables of its environment: for measuring
  * @returns `reply(prompt, heard)` resolves to { text, model, ms, first, cost, tokens } or throws; `heard(soFar)` is
  *          called with the reply so far as it comes. `close()` ends what waits.
  */
-export function mind({ system, model = 'haiku', binary = 'claude', warm = 0, limit = 30_000 }) {
+export function mind({ system, model = 'sonnet', binary = 'claude', warm = 0, limit = 30_000, more = [], set = {} }) {
   const env = Object.fromEntries(ENV.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]))
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
-  const args = ['-p', '--model', model, '--system-prompt', system, '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages']
+  Object.assign(env, set)
+  const args = ['-p', '--model', model, '--system-prompt', system, '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', ...more]
   /** Processes started and not yet asked anything. */
   const waiting = []
   let closed = false
@@ -74,7 +80,8 @@ export function mind({ system, model = 'haiku', binary = 'claude', warm = 0, lim
       if (init.tools?.length || init.mcp_servers?.length) throw new Error('the model was started with tools or servers: its reply is not used')
       if (code !== 0 || result.is_error || result.subtype !== 'success' || typeof result.result !== 'string') throw new Error(`the model's run failed (${result.subtype}): ${String(result.result ?? result.errors ?? '').slice(0, 200)}`)
       const u = result.usage ?? {}
-      return { text: result.result, model: init.model, ms: Date.now() - began, first, warmed, cost: result.total_cost_usd ?? 0, tokens: { in: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), cached: u.cache_read_input_tokens ?? 0, out: u.output_tokens ?? 0 } }
+      const thought = u.output_tokens_details?.thinking_tokens ?? 0
+      return { text: result.result, model: init.model, ms: Date.now() - began, first, warmed, cost: result.total_cost_usd ?? 0, tokens: { in: (u.input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0), cached: u.cache_read_input_tokens ?? 0, out: u.output_tokens ?? 0, thought } }
     },
     close() { closed = true; for (const p of waiting.splice(0)) void p.then((one) => { clearTimeout(one.stale); one.child.kill('SIGTERM') }) },
   }

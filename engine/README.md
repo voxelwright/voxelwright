@@ -519,7 +519,7 @@ answer comes from a model on the machine of someone who is there, and the rule h
 
 ```sh
 node serve.mjs --port 5795 --world ~/.village/engine/talk/try.log
-node helper.mjs --world http://127.0.0.1:5795 --port 5796      # voices the world's people with your own Claude Code (Haiku); --no-voice turns it off
+node helper.mjs --world http://127.0.0.1:5795 --port 5796      # voices the world's people with your own Claude Code (Sonnet); --no-voice turns it off
 ```
 
 ```js
@@ -546,17 +546,29 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   reading it, found by asking `GET /realms` every two seconds; a realm nobody is in is left alone, so that it can
   rest. One count of what is spent covers them all.
 - **What it spends.** A rule may have eight actors thinking at once and ask forty times a minute; the helper
-  answers at most forty a minute (`--voice-most`) and three at once, whatever a world asks for.
+  answers at most forty a minute (`--voice-most`) and three at once, whatever a world asks for. One answer is about
+  1,400 tokens in (800 of them read from the provider's cache: the fixed text and what the binary adds) and 90 out;
+  six exchanges, an ordinary minute of talk, are about 8,400 in and 530 out, $0.02 as the binary counts it (on a
+  subscription it is usage, not a charge).
+- **How fast** (M1 Pro, November 13, real runs through a running world, from a person's words to the actor's):
+  **first words 0.92 s in the middle (0.78 to 1.24 over eight), the rule told at 1.3 s.** What earned it
+  (`mind/model.mjs`): two processes of the binary wait started (`--voice-warm`; 250 MB each), which takes the 1.7 s
+  start out of every answer; the reply is read as it comes and the first sentence said at once; and the voice is
+  Sonnet (`--voice`), because Haiku 5.5 thinks before four replies in five (first word 2.0 s started ahead, 2.8 s
+  cold) and nothing turns that off, while Sonnet 5.5 never thought (first word 0.62 s started ahead, twelve of
+  twelve). So a smaller model for small talk did not earn its place. Answers are not kept for the same question
+  asked again: it would save under a second and make people say the same words twice.
 - **What was typed is something heard.** The model is given one fixed text of the engine's own (`SYSTEM` in
   `mind/form.mjs`); who the actor is, what they heard and the notes come as quoted data under labels, a rule's
   words as much as a person's. The reply is read as `SAY:` words, a line of `===`, and `key: value` notes: anything
   before `SAY:` is never said. Sixteen cases (ordinary talk, questions about what the world is, twelve typed
-  attempts to break the person or fill in a note) are kept with a real model's replies in `test/mind-kept.json`;
+  attempts to break the person or fill in a note) are kept with a real model's replies in `test/mind-kept.json`
+  (Sonnet's; Haiku's held too);
   `node test/mind.mjs --real` asks them again (sixteen short replies on your subscription).
 - **Limits.** The binary puts the account's email address and the date in every model's context and no flag takes
   them out. The model is told the person knows neither, and a reply with anything shaped like an address is
   refused twice (helper and world), but a model talked into spelling an address out in words would not be caught,
-  and asked the date one reply gave the real one. Fine for one person and their own helper; before strangers share
+  and asked the date one of Haiku's replies gave the real one. Fine for one person and their own helper; before strangers share
   a voice it needs a model run without that context.
 - `node test/mind.mjs` checks it with no model: the kept replies, replies written to be wrong, and the real server
   with a stand-in model (nobody voicing, a voice, early words, caps, a second helper, a forged answer, a helper

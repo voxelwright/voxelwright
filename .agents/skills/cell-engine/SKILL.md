@@ -2163,9 +2163,27 @@ What a plugin is and how to write one is in `engine/README.md` "Engine plugins".
   `--settings '{"alwaysThinkingEnabled":false}'` each still gave runs with 160 to 265 hidden thinking tokens (about
   two runs in three). A reply with no thinking is 60 to 90 output tokens and 1.1 to 1.4 s from a cold start; with
   it, 300 to 500 tokens and 2.2 to 4.0 s. It is the largest part of the wait.
-- **A process started ahead answers fast**: with `--input-format stream-json` the binary starts, waits for its one
-  message on stdin, and then gave the first word 0.35 s and the whole of a short reply 0.54 s after the message
-  (one run, no thinking). `mind({warm})` does it; it is off until measured properly.
+- **Measured, first word / first sentence / whole reply, median and worst** (M1 Pro, November 13, `mind/model.mjs`
+  alone, the six ordinary cases in turn; "ahead" is a process started 3.5 s before it is asked):
+  | | first word | first sentence | whole | thought first |
+  | --- | --- | --- | --- | --- |
+  | Haiku 5.5, cold (6) | 2.83 s (3.32) | 2.89 (3.33) | 3.17 (3.77) | 5 of 6 |
+  | Haiku 5.5, ahead (6) | 1.96 (2.68) | 1.99 (2.88) | 2.71 (3.04) | 6 of 6 |
+  | Haiku 5.5, ahead, told not to think (12) | 0.78 to 1.31 (1.90) | 0.91 to 1.42 (2.00) | 1.44 to 1.95 (3.11) | 3 of 12 |
+  | Sonnet 5.5, cold (16) | 0.8 to 2.5 | | 1.4 to 3.6 | 0 of 16 |
+  | Sonnet 5.5, ahead (12) | 0.62 (0.93) | 0.87 (1.27) | 1.48 to 1.71 (2.49) | 0 of 12 |
+  Through a running world with the real helper (Sonnet, two ahead, eight exchanges three seconds apart): first words
+  heard 0.92 s after the person spoke (0.78 to 1.24), the rule told at 1.30 s (1.15 to 1.33). `claude-haiku-4-5` is
+  not a model this binary will run.
+- **Started ahead is the binary waiting on stdin**: `--input-format stream-json`, and it sits until its one message
+  comes; `init` is written only then. Left 75 s it answered as fast (first word 0.72 s). Each waits at 235 to 270
+  MB; one is ended and started again after ten minutes. One reply a process: a session would be faster still but
+  would put one person's talk in another's context.
+- **Haiku without thinking read a note wrong**: told not to think, it answered "does the speaker doubt the world
+  is real" with no after "have you felt none of this is real" in one run of two. Sonnet said yes in three of three.
+- **Tokens**: a Sonnet answer is 600 in, 790 read from cache, 90 out ($0.0034 as the binary counts it); Haiku's is
+  360 in, 1,040 cached, 310 to 350 out of which 230 to 270 are thinking.
+- **Not kept: answers to the same question.** It would make the second answer instant and the same words.
 - **What cost time in the check**: a rule's actors may say eight things a second, so a line said in the same
   second as a crowd's was dropped and looked like a missing answer; and kept words said by two actors were counted
   as one actor's.

@@ -17,10 +17,11 @@ import { mind } from './model.mjs'
  * @param world     the world it voices
  * @param model     `(prompt, heard) => Promise<{text}>`: stands in for the real one in checks
  * @param most      the most answers a minute
+ * @param name      which model answers, and `warm` how many of its processes are kept started ahead (model.mjs says why Sonnet, and why ahead)
  * @param together  the most at once
  * @returns { close(), counts }: counts are how many were answered, failed and turned away
  */
-export function voice({ world, model, name = 'haiku', binary = 'claude', warm = 0, most = 40, together = 3, say = () => {}, shared }) {
+export function voice({ world, model, name = 'sonnet', binary = 'claude', warm = 2, most = 40, together = 3, say = () => {}, shared }) {
   const own = model || shared ? null : mind({ system: SYSTEM, model: name, binary, warm })
   const reply = shared?.reply ?? model ?? own.reply
   // What is spent is counted once for everything a helper voices: `shared` is that count, when there is more than one world.
@@ -73,7 +74,7 @@ export function voice({ world, model, name = 'haiku', binary = 'claude', warm = 
  * a page reading it (a realm nobody is in is left to rest: asking it anything would keep it awake). One model and
  * one count of what is spent for all of them. `server` is the server's own address, with no realm in it.
  */
-export function voices({ server, model, name = 'haiku', binary = 'claude', warm = 0, most = 40, together = 3, say = () => {} }) {
+export function voices({ server, model, name = 'sonnet', binary = 'claude', warm = 2, most = 40, together = 3, say = () => {} }) {
   const own = model ? null : mind({ system: SYSTEM, model: name, binary, warm })
   const shared = { reply: model ?? own.reply, counts: { answered: 0, failed: 0, refused: 0, tokens: { in: 0, cached: 0, out: 0 } }, busy: 0, since: Date.now(), count: 0, queue: [] }
   const all = new Map([['', voice({ world: server, most, together, say, shared })]])
