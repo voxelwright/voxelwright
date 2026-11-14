@@ -681,7 +681,7 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
 - `node test/portal.mjs --out dir --clip` checks all of it in the real page with real keys, and keeps pictures and
   a film; `--bench` prints the GPU's time for a window of each size.
 - **The wheel** (`page/wheel.ts`): **Tab** (or the Realms button) shows the realms the server keeps round a ring,
-  home first, each by its name and the last picture this browser had of it (kept small every five seconds while
+  home first, then the newest, each by its name, when it was made, and the last picture this browser had of it (kept small every five seconds while
   the page is there; a realm never seen has a colour from its look). The one the portal's key leads to is marked,
   and where you are says "here". A number, a click, or the arrows and Enter pick one: it becomes the selected realm
   and a window opens to it at once, in place of any that is open. The last entry (0) is a new realm: it opens the

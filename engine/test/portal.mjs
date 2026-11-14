@@ -36,6 +36,8 @@ try {
   for (let i = 0; i < 200; i++) { const x = 9560 + (i % 20) * 11 + ((i % 20) >= 10 ? 60 : -60), z = 3996 + Math.floor(i / 20) * 5; if (await post('/realm/dusk/world/ask', { by: 'check', edit: [0, x, D + 1, z, 2, i % 3 ? 8 : 7], release: [x, D + 1, z] }) === 429) { await wait(1000); i-- } }
   await wait(2500)
   await post('/realm/dusk/world/ask', { by: 'check', rule: { id: 'greeter', name: 'Someone', source: 'on("start", (world) => world.actor("guide", {name: "Odile", at: [9672, 4052]}))\non("tick", (world) => { if (!world.people.some((p) => p.mine)) world.actor("guide", {name: "Odile", at: [9672, 4052]}) })' } })
+  // And a rule there that gives everyone at a page a faster pace and a coat: what a realm of powers does.
+  await post('/realm/dusk/world/ask', { by: 'check', rule: { id: 'powers', name: 'Powers', source: 'on("tick", (world) => { for (const p of world.people) if (p.kind === "page") world.person(p.id, {pace: 60, look: {coat: "#101010"}}) })' } })
   check(await post('/realm/dusk/world/join', { by: 'bo', at: [9650, 4050] }) === 200 && await post('/realm/dusk/world/join', { by: 'nia', at: [9662, 4100] }) === 200, 'two people have seats in the other realm: one past where one arrives, one three metres short of it')
   // They stay: a seat nobody asks anything of goes after three minutes.
   const keep = setInterval(() => { void get('/realm/dusk/world/me?by=bo').catch(() => {}); void get('/realm/dusk/world/me?by=nia').catch(() => {}) }, 20_000)
@@ -48,13 +50,14 @@ try {
   await page.waitForFunction(() => globalThis.engine?.portal, null, { timeout: 90_000 })
   await still(page, { limit: 90_000 })
   await page.evaluate(() => { globalThis.sameDocument = true; globalThis.engine.realms.selected = 'dusk' })
-  const state = () => page.evaluate(() => { const e = globalThis.engine, p = e.portal; return { ...p.state, gate: p.gate && { at: p.gate.at, to: p.gate.to }, to: p.to, realm: e.realms.here, afoot: e.me.on, feet: e.me.feet?.at ?? null, hour: e.look().hour, rain: e.rain, others: e.others, same: globalThis.sameDocument === true, undrawn: e.march.sun.undrawn, scale: p.stats.scale, share: p.stats.share, fps: Math.round(1000 / e.frameMs) } })
+  const state = () => page.evaluate(() => { const e = globalThis.engine, p = e.portal; return { ...p.state, gate: p.gate && { at: p.gate.at, to: p.gate.to }, to: p.to, realm: e.realms.here, afoot: e.me.on, feet: e.me.feet?.at ?? null, hour: e.look().hour, rain: e.rain, fly: e.me.can.fly ?? 0, pace: e.me.can.pace ?? 0, coat: e.me.limbs.look?.coat ?? '', others: e.others, same: globalThis.sameDocument === true, undrawn: e.march.sun.undrawn, scale: p.stats.scale, share: p.stats.share, fps: Math.round(1000 / e.frameMs) } })
   const gaps = () => page.evaluate(() => { globalThis.gaps = []; let last = performance.now(); const tick = (now) => { globalThis.gaps.push(now - last); last = now; if (globalThis.gaps.length < 3000) requestAnimationFrame(tick) }; requestAnimationFrame(tick) })
   const worst = () => page.evaluate(() => { const g = globalThis.gaps.slice().sort((a, b) => a - b); globalThis.gaps.length = 3000; return { worst: g.at(-1) ?? 0, p95: g[Math.floor(g.length * 0.95)] ?? 0, frames: g.length } })
   // On foot in the home street, facing up it.
   await page.evaluate(() => globalThis.engine.me.walk(true))
   await page.waitForFunction(() => { const f = globalThis.engine.me.feet; return f && f.speed < 1 }, null, { timeout: 15_000 })
   await page.waitForTimeout(600)
+  await page.evaluate(() => { globalThis.ownPace = globalThis.engine.me.can.pace ?? 0 })
   if (out) await page.screenshot({ path: join(out, 'play-1-before.png') })
 
   const run = async () => {
@@ -89,6 +92,7 @@ try {
     await page.waitForFunction(() => globalThis.engine.portal.stats.steps.length >= 1 && globalThis.engine.portal.gate, null, { timeout: 30_000 })
     await page.waitForTimeout(900)
     await page.keyboard.up('KeyW')
+    await page.waitForFunction(() => globalThis.engine.me.limbs.look?.coat, null, { timeout: 10_000 }).catch(() => {})
     const through = await page.evaluate(() => globalThis.engine.portal.stats.steps.at(-1)), stepGaps = await worst(), there = await state()
     check(there.realm === 'dusk' && there.same && there.afoot && Math.abs(there.hour - 17.6) < 1e-6 && there.to === 'home', `walked through, the person is in the other realm on their feet, the page not loaded again, and the window leads back (${JSON.stringify({ realm: there.realm, afoot: there.afoot, to: there.to })})`)
     check(there.feet && Math.abs(there.feet[0] - 9660) < 20 && there.feet[2] < 4070, `they are just past where the realm says one arrives, as far past the window there as they were here (feet at ${there.feet?.map(Math.round)})`)
@@ -107,6 +111,10 @@ try {
     await page.waitForTimeout(900)
     await page.keyboard.up('KeyW')
     const back = await page.evaluate(() => globalThis.engine.portal.stats.steps.at(-1)), backGaps = await worst(), home = await state()
+    const own = await page.evaluate(() => globalThis.ownPace)
+    await page.waitForTimeout(1500)
+    const homeLater = await state()
+    check(there.pace === 60 && there.coat === '#101010' && home.pace === own && home.coat === '' && homeLater.pace === own && homeLater.coat === '', `what the realm's rule gave the body (pace ${there.pace}, a coat ${there.coat}) is the realm's: walked back home the body is its own (pace ${home.pace}, coat "${home.coat}"), and still 1.5 s later (pace ${homeLater.pace}, coat "${homeLater.coat}")`)
     check(home.rain === 0 && there.rain === 0.3, `in the other realm it rained, and back at home it does not (${there.rain}, then ${home.rain})`)
     check(home.realm === 'home' && home.hour === null && home.afoot && home.to === 'dusk' && home.same, `turned round and walked back through the same window, they are at home on their feet (${JSON.stringify({ realm: home.realm, afoot: home.afoot, to: home.to })})`)
     console.log(`  the step back: everything made after ${back.whole.toFixed(0)} ms (${back.sectors} sectors); the longest frame ${backGaps.worst.toFixed(0)} ms, 95 in 100 within ${backGaps.p95.toFixed(0)} ms; ${home.fps} frames a second after`)

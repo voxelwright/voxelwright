@@ -14,7 +14,7 @@
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { Worker } from 'node:worker_threads'
 import { stripTypeScriptTypes } from 'node:module'
@@ -217,7 +217,7 @@ A realm's hour (look.hour) is the hour of the day in it for everyone: the town's
 
 REALMS
 This server keeps more than one world. Each is a realm: the same planet, with its own file of what was done there, its own rules and people, a place where one arrives and a look of its own. Everything above is of home. The same is asked of any other realm under its own address: /realm/<id>/world/at, /realm/<id>/world/ask and so on. A realm's process starts when someone asks it something and stops when nobody has for a while: nothing done to it is lost by that, but bodies in seats, actors and what rules kept are.
-GET    /realms            {home, realms: [{id, name, about, arrive, look, home, awake, pages}]}
+GET    /realms            {home, realms: [{id, name, about, arrive, look, home, awake, pages, made}]}   made is when it was made (ms since 1970)
 POST   /realms            {"by": name, "id": id, "name": name, "about": text, "arrive": {"at": [x, z] or [x, y, z], "yaw": radians, "pitch": radians}, "look": {"hour": 0 to 24 or null, "rain": 0 to 1, "grade": [colour 0 to 2, contrast 0 to 1], "tint": [r, g, b] each 0 to 2}, "director": true or false}   makes a realm (201, its record). Only name is needed; id comes of the name if left out. arrive is where one's feet are set down (cells; without y, on the ground there). look is what a page shows on arriving: the hour, rain, and the last pass's grade and tint.
 GET    /realm/<id>        its record
 DELETE /realm/<id>        takes it out (never home). Its file is moved aside on the server, not destroyed.
@@ -816,7 +816,9 @@ function awake(r) {
   }
   return r.world = open(r)
 }
-const listed = (r) => ({ id: r.id, ...r.record, home: r.id === HOME, awake: !!r.world, pages: r.world?.readers ?? 0 })
+/** When a realm was made: when its file was (ms), asked once. Two realms of one name are told apart by it. */
+const madeAt = (r) => { if (r.made === undefined) { try { r.made = Math.round(statSync(r.file).birthtimeMs) } catch { r.made = 0 } } return r.made }
+const listed = (r) => ({ id: r.id, ...r.record, home: r.id === HOME, awake: !!r.world, pages: r.world?.readers ?? 0, made: madeAt(r) })
 /** Makes a realm: a file whose first line says what it is. Its process starts when someone goes there. */
 async function found(req, res) {
   const parts = []

@@ -28,6 +28,7 @@ const STYLE = `
 [data-panel="wheel"] button.at, [data-panel="wheel"] button:hover { transform: scale(1.14); border-color: #fff }
 [data-panel="wheel"] button.selected { border-color: #ffd98a; box-shadow: 0 0 0 3px rgba(255, 217, 138, .35) }
 [data-panel="wheel"] button .name { position: absolute; left: 50%; top: 104%; transform: translateX(-50%); white-space: nowrap; max-width: 180%; overflow: hidden; text-overflow: ellipsis; text-shadow: 0 1px 3px #000; font-weight: 600 }
+[data-panel="wheel"] button .when { position: absolute; left: 50%; top: calc(104% + 1.35em); transform: translateX(-50%); white-space: nowrap; font-size: 12px; opacity: .75; text-shadow: 0 1px 3px #000; font-weight: 500 }
 [data-panel="wheel"] button .key { position: absolute; left: -6px; top: -6px; width: 22px; height: 22px; line-height: 22px; border-radius: 50%; background: rgba(0, 0, 0, .7); font-size: 12px }
 [data-panel="wheel"] button .here { position: absolute; right: -4px; top: -4px; padding: 1px 6px; border-radius: 9px; background: #ffd98a; color: #1b1b1b; font-size: 11px; font-weight: 700 }
 [data-panel="wheel"] button.new { background: rgba(255, 255, 255, .12); font-size: 34px; line-height: 1 }
@@ -38,6 +39,8 @@ const STYLE = `
 [data-panel="wheel"] .middle span { display: block; opacity: .85; max-height: 5.2em; overflow: hidden }
 [data-panel="wheel"] .middle i { display: block; margin-top: 8px; opacity: .6; font-style: normal; font-size: 12px }
 `
+/** When something was, as a person would say it: the time of day if it was today, else the day too. Two realms of one name are told apart by it, under each name. */
+const ago = (at: number) => { const d = new Date(at), time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); return d.toDateString() === new Date().toDateString() ? `today ${time}` : `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })}, ${time}` }
 /** The most realms round the ring: nine have a number key; the tenth place is the new one's. */
 const MOST = 9
 
@@ -95,6 +98,7 @@ export function wheel(o: {
     const name = document.createElement('b'), about = document.createElement('span'), how = document.createElement('i')
     name.textContent = r ? r.name || (r.home ? 'Home' : r.id) : 'A new realm'
     about.textContent = r ? r.about || (r.home ? 'Where you start.' : '') : 'Say what it is, and it is made.'
+    if (r && !r.home && r.made) about.textContent = `${about.textContent ? `${about.textContent} ` : ''}(made ${ago(r.made)})`
     how.textContent = r ? (r.id === o.realms.here ? 'You are here' : 'Enter or a click opens a portal to it') : 'Enter or a click starts it'
     middle.append(name, about, how)
   }
@@ -108,8 +112,8 @@ export function wheel(o: {
   }
   const show = async () => {
     try { listed = await o.realms.list() } catch { return o.hud.notice('The realms could not be listed', 4000) }
-    // Home first, then the selected one, then the rest as the server lists them.
-    const order = [...listed].sort((a, b) => Number(b.home) - Number(a.home) || Number(b.id === o.realms.selected) - Number(a.id === o.realms.selected)).slice(0, MOST)
+    // Home first, then the selected one, then the rest, the newest made first.
+    const order = [...listed].sort((a, b) => Number(b.home) - Number(a.home) || Number(b.id === o.realms.selected) - Number(a.id === o.realms.selected) || (b.made ?? 0) - (a.made ?? 0)).slice(0, MOST)
     entries = [...order.map((r) => r.id), '+']
     ring.replaceChildren(middle)
     entries.forEach((id, i) => {
@@ -120,6 +124,7 @@ export function wheel(o: {
       name.className = 'name'; key.className = 'key'
       name.textContent = r ? r.name || (r.home ? 'Home' : r.id) : 'New realm'
       key.textContent = r ? String(i + 1) : '0'
+      if (r && !r.home && r.made) { const when = document.createElement('span'); when.className = 'when'; when.textContent = ago(r.made); b.append(when) }
       if (r) {
         const picture = shot(r.id)
         if (picture) b.style.backgroundImage = `url("${picture}")`

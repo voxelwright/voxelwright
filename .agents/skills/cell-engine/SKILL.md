@@ -2768,3 +2768,16 @@ rule out puts back what they replaced. What cost time, and what to keep:
   54 to 140 s without). The cap of 600,000 cells was met by the first bluff asked for (898,662); it is a million.
 - **The picture tool opens a realm** with `node test/shot.mjs --realm <id>`.
 
+## A realm's gifts end at its door; realms of one name (#264, `link.ts` `go`, `wheel.ts`; November 14)
+
+- **What a rule gives a person's body is the realm's.** Walking home through the window, the body kept the
+  realm's numbers and coat (`world.person`: pace, fly, cling, a look) for as long as the page was open: a world
+  tells a page of bodies when something changes or the page joins, and home's stream had been joined while the
+  page was elsewhere and had nothing to say. `link.go` now says bodies are as they are by themselves (`onbodies`
+  with nothing in it: no abilities, no look, no seat, the world's pace 1) before it says what the other world
+  holds, so a realm that gives something gives it again on stepping in. `realms.step` alone did not show it (that
+  stream is joined at the step); only the portal did. Checked both ways (`test/portal.mjs`, `test/step.mjs`).
+- **Realms of one name** are told apart on the wheel by when each was made, under the name ("today 21:14", or
+  the day too), and in the middle beside what it is about; the newest stand first after home and the selected
+  one. The server says it (`made`: the file's birth, asked once). Made in the same minute they still read alike.
+

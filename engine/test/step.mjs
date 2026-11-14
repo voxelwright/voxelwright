@@ -28,6 +28,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const thing = (id, x, y, z) => ({ by: 'check', edit: [1, 3, x, x + 6, y, z, 8, x, x + 6, y + 1, z, 8, x, x + 6, y + 2, z, 8], release: [x, y, z], thing: { id, name: id, wish: 'a low wall', at: [x + 3, y, z], size: [6, 3, 1], facing: 'south' } })
 /** The height of the first cell of air over the land at a place: the land slopes. */
 const over = async (x, z) => (await get(`/world/at?x=${x}&y=0&z=${z}`)).ground + 1
+/** A rule that gives everyone at a page things their body can do and a coat: what a realm of powers does. */
+const POWERS = { id: 'powers', name: 'Powers', source: 'on("tick", (world) => { for (const p of world.people) if (p.kind === "page") world.person(p.id, {fly: 1, pace: 80, look: {coat: "#101010"}}) })' }
 const RULE = { id: 'greeter', name: 'Someone', source: 'on("start", (world) => world.actor("guide", {name: "Odile", at: [9670, 4009]}))\non("tick", (world) => { if (!world.people.some((p) => p.mine)) world.actor("guide", {name: "Odile", at: [9670, 4009]}) })' }
 // Something standing in for the asker's helper: it answers the page as a helper would and keeps what it was asked.
 const asked = []
@@ -101,6 +103,23 @@ try {
   await page.evaluate(() => globalThis.engine.ask({ wish: 'a bench' }))
   const wishes = asked.filter((a) => a.wish === 'a bench')
   check(wishes.length === 2 && wishes[0].realm === undefined && wishes[1].realm === 'dawn', `a thing asked for at home names no realm; asked for after the step it names the realm the page is in (${wishes.map((w) => w.realm ?? 'home').join(', ')})`)
+  // What a rule of this realm gives a person's body is the realm's: it ends at its door, both ways, and is given again on coming back.
+  const body = () => page.evaluate(() => { const m = globalThis.engine.me; return { fly: m.can.fly ?? 0, pace: m.can.pace ?? 0, coat: m.limbs.look?.coat ?? '' } })
+  const own = await body()
+  await post('/realm/dawn/world/ask', { by: 'check', rule: POWERS })
+  await page.waitForFunction(() => globalThis.engine.me.can.fly === 1 && globalThis.engine.me.limbs.look?.coat, null, { timeout: 30_000 }).catch(() => {})
+  const given = await body()
+  check(given.fly === 1 && given.pace === 80 && given.coat === '#101010', `in a realm whose rule gives people the air, a pace and a coat, the page's own body has them (${JSON.stringify(given)})`)
+  await page.evaluate(() => globalThis.engine.realms.step('home', { x: 70, y: 17, z: 412, yaw: 0, pitch: -0.2 }))
+  const atOnce = await body()
+  await page.waitForTimeout(2500)
+  const later2 = await body()
+  check(atOnce.fly === 0 && atOnce.pace === own.pace && atOnce.coat === '' && later2.fly === 0 && later2.pace === own.pace && later2.coat === '', `stepped home, the body is its own again at once and stays so (${JSON.stringify(atOnce)}, ${JSON.stringify(later2)} after 2.5 s)`)
+  await page.evaluate(() => globalThis.engine.realms.step('dawn'))
+  await page.waitForFunction(() => globalThis.engine.me.can.fly === 1 && globalThis.engine.me.limbs.look?.coat, null, { timeout: 15_000 }).catch(() => {})
+  const again2 = await body()
+  check(again2.fly === 1 && again2.coat === '#101010', `and stepping in again it has what the realm gives (${JSON.stringify(again2)})`)
+  await post('/realm/dawn/world/ask', { by: 'check', unrule: 'powers' })
   // What it asks now is done there and nowhere else.
   await page.evaluate((y) => globalThis.engine.set([9700, y + 3, 4070], 3, 8), P)
   await wait(800)

@@ -257,6 +257,10 @@ export function link(base = '/world'): Link {
     // What the old world showed and offered is no longer shown or offered: the other says its own.
     shown = []; self.onshown?.(shown)
     offers = []; self.onoffers?.(offers)
+    // What a rule of the old world gave people's bodies (what they can do, a look, a seat, the world's pace) is that
+    // world's and ends at its door: bodies are as they are by themselves until the other world says otherwise, which
+    // a world with nothing to say never does.
+    self.onbodies?.({ clock: { rate: 1, spare: [] }, can: {}, figure: {}, seat: {} })
     for (const name of plugs.keys()) if (name) plugged?.({ plugin: name, gone: true })
     plugs.clear()
     // All that was held, in order: what came before "now" is what was done before this page joined.

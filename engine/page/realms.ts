@@ -6,7 +6,7 @@
 import type { Link, Realm } from './link.ts'
 
 /** A realm as the server lists it. */
-export interface Listed extends Realm { id: string; home: boolean; awake: boolean; pages: number }
+export interface Listed extends Realm { id: string; home: boolean; awake: boolean; pages: number; /** When it was made, ms since 1970 (0 if the server cannot say). */ made?: number }
 /** Where the eye is and how it faces: metres and radians, as the page keeps it. */
 export interface Pose { x: number; y: number; z: number; yaw: number; pitch: number }
 /** How long a step took, ms from the asking: until the other realm's kept history had been read (`ready`: with the page still in the world it was in), until the picture was of it with the three nearest boxes whole (`near`), and until everything was made (`whole`). And how many sectors were made for it. */

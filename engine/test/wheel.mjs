@@ -35,6 +35,8 @@ const browser = await chrome()
 try {
   // Two realms beside home; one of them has a name that would be markup if it were not shown as text.
   await post('/realms', { by: 'check', id: 'dusk', name: 'Dusk in the east', about: 'the east end, late', arrive: { at: [9660, 4070] }, look: { hour: 17.6, tint: [0.8, 1, 0.84] } })
+  // Two realms of one name: told apart by when each was made.
+  await post('/realms', { by: 'check', id: 'dusk-2', name: 'Dusk in the east', about: 'the same again', arrive: { at: [9660, 4070] } })
   await post('/realms', { by: 'check', id: 'odd', name: '<img src=x onerror=window.pwned=1>', about: '<b>bold</b>', arrive: { at: [3260, 4070] }, look: { hour: 22 } })
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
   const page = await context.newPage()
@@ -50,10 +52,12 @@ try {
 
   await page.keyboard.press('Tab')
   await page.waitForFunction(() => globalThis.engine.wheel.open, null, { timeout: 5000 })
-  const shown = await page.evaluate(() => { const p = document.querySelector('[data-panel="wheel"]'); return { entries: globalThis.engine.wheel.entries, names: [...p.querySelectorAll('button .name')].map((n) => n.textContent), pictured: [...p.querySelectorAll('button')].map((b) => !!b.style.backgroundImage), here: p.querySelector('button .here')?.parentElement.querySelector('.name').textContent, images: p.querySelectorAll('img').length, bold: p.querySelectorAll('b b').length, pwned: globalThis.pwned === 1, visible: getComputedStyle(p).display } })
-  check(shown.visible === 'flex' && shown.entries.join() === 'home,dusk,odd,+' && shown.names[0] === 'Home' && shown.names[1] === 'Dusk in the east' && shown.names[3] === 'New realm', `Tab shows the wheel: home, the server's realms by name, and a new one (${shown.names.join(' | ')})`)
+  const shown = await page.evaluate(() => { const p = document.querySelector('[data-panel="wheel"]'); return { entries: globalThis.engine.wheel.entries, names: [...p.querySelectorAll('button .name')].map((n) => n.textContent), whens: [...p.querySelectorAll('button')].map((b) => b.querySelector('.when')?.textContent ?? ''), pictured: [...p.querySelectorAll('button')].map((b) => !!b.style.backgroundImage), here: p.querySelector('button .here')?.parentElement.querySelector('.name').textContent, images: p.querySelectorAll('img').length, bold: p.querySelectorAll('b b').length, pwned: globalThis.pwned === 1, visible: getComputedStyle(p).display } })
+  check(shown.visible === 'flex' && shown.entries[0] === 'home' && shown.entries.at(-1) === '+' && [...shown.entries].sort().join() === '+,dusk,dusk-2,home,odd' && shown.names[0] === 'Home' && shown.names[shown.entries.indexOf('dusk')] === 'Dusk in the east' && shown.names.at(-1) === 'New realm', `Tab shows the wheel: home, the server's realms by name, and a new one (${shown.names.join(' | ')})`)
+  const twins = [shown.entries.indexOf('dusk'), shown.entries.indexOf('dusk-2')]
+  check(shown.names[twins[0]] === shown.names[twins[1]] && twins.every((i) => /\d{1,2}:\d\d/.test(shown.whens[i])) && shown.whens[0] === '', `two realms of one name each say when they were made, under the name (${twins.map((i) => shown.whens[i]).join(' | ')}); home says none`)
   check(shown.here === 'Home' && shown.pictured[0] && !shown.pictured[1], 'home is marked as where one is and has its last picture; a realm never seen has a colour of its own')
-  check(shown.images === 0 && shown.bold === 0 && !shown.pwned && shown.names[2].startsWith('<img'), 'a name that would be markup is shown as the text it is')
+  check(shown.images === 0 && shown.bold === 0 && !shown.pwned && shown.names[shown.entries.indexOf('odd')].startsWith('<img'), 'a name that would be markup is shown as the text it is')
   if (out) await page.screenshot({ path: join(out, 'wheel.png') })
   // Escape puts it away and nothing is picked.
   await page.keyboard.press('Escape')
@@ -62,7 +66,7 @@ try {
   // A number picks: the realm is selected and a window opens to it.
   await page.keyboard.press('Tab')
   await page.waitForFunction(() => globalThis.engine.wheel.open, null, { timeout: 5000 })
-  await page.keyboard.press('Digit2')
+  await page.keyboard.press(`Digit${(await page.evaluate(() => globalThis.engine.wheel.entries.indexOf('dusk'))) + 1}`)
   await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.to === 'dusk', null, { timeout: 15_000 })
   check(await page.evaluate(() => !globalThis.engine.wheel.open && globalThis.engine.realms.selected === 'dusk'), 'its number picks a realm: it is the selected one, and a window opens to it')
   await page.waitForFunction(() => globalThis.engine.portal.state.passable, null, { timeout: 60_000 })
