@@ -506,7 +506,7 @@ async function main() {
   }
   // Others in a shared world: each person and agent is drawn as the one figure, their name over it (presence.ts).
   // On foot a person is where their feet are, facing the way their body does; flying, where their eye is.
-  const others = far ? presence(far, folk, over, () => { const f = me.feet; return f ? { at: [f.at[0], f.at[1] + 16.5, f.at[2]], yaw: f.yaw } : { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw } }, takenOff) : null
+  const others = far ? presence(far, folk, over, () => { const f = me.feet; return f ? { at: [f.at[0], f.at[1] + 16.5, f.at[2]], yaw: f.yaw, frame: f.frame } : { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw } }, takenOff) : null
   // A person's own body (#264, person.ts): B gets down onto the feet and back up to fly; `?walk=1` starts on foot.
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.

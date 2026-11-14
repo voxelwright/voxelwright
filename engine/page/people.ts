@@ -17,6 +17,8 @@ export interface Person {
   at: readonly [number, number, number]
   /** Which way they face: 0 is north (-z), a quarter turn is east. */
   yaw: number
+  /** The turn from their own upright to the world's (x, y, z, w), about the feet: someone whose down is not the world's stands on a wall by it. Left alone they stand as the world does. */
+  frame?: readonly [number, number, number, number]
   /** Who they are to look at: build, clothes and colours all come of this number. */
   seed: number
   /** What was chosen for them in place of what the number gives (a rule's actor, #264). */
@@ -404,10 +406,13 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   ROOT.fill(0)
   ROOT[0] = Math.cos(p.yaw); ROOT[2] = Math.sin(p.yaw); ROOT[4] = 1; ROOT[6] = -Math.sin(p.yaw); ROOT[8] = Math.cos(p.yaw)
   ROOT[9] = p.at[0]; ROOT[10] = p.at[1]; ROOT[11] = p.at[2]
+  // By its own up: the whole figure is turned about the feet, and all that hangs from the root turns with it.
+  if (p.frame && Math.abs(p.frame[3]) < 0.99999) { const [x, y, z, w] = p.frame; for (let a = 0; a < 9; a += 3) { const vx = ROOT[a], vy = ROOT[a + 1], vz = ROOT[a + 2], tx = 2 * (y * vz - z * vy), ty = 2 * (z * vx - x * vz), tz = 2 * (x * vy - y * vx); ROOT[a] = vx + w * tx + (y * tz - z * ty); ROOT[a + 1] = vy + w * ty + (z * tx - x * tz); ROOT[a + 2] = vz + w * tz + (x * ty - y * tx) } }
   if (lie !== 0) {
-    // Onto the back (or the front), about the heels; lying, the body is on the ground.
+    // Onto the back (or the front), about the heels; lying, the body is on what it stands on.
+    const rise = Math.abs(lie) * 1.3
+    ROOT[9] += ROOT[3] * rise; ROOT[10] += ROOT[4] * rise; ROOT[11] += ROOT[5] * rise
     pitch(ROOT, lie * Math.PI / 2)
-    ROOT[10] += Math.abs(lie) * 1.3
   }
   const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * Math.sin(time * 0.6 + s) * 0.012
   child(HIP, ROOT, 0, hipHigh, 0)
@@ -637,7 +642,8 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
           // Over the head, the size letters should be on the screen: no smaller than can be read, no bigger than a hand.
           const w = write(p.name, p.says ?? ''), o = named++ * 12
           const high = to.size[1] / (2 * view.tanHalf * Math.max(ahead, 1)), tall = Math.max(to.size[1] * 0.034, Math.min(to.size[1] * 0.05, 2.4 * high)) * (w.tall / 44) / high
-          board[o] = p.at[0] - anchor[0]; board[o + 1] = p.at[1] + (p.umbrella ? 29 : 19.5) * (1 - (p.down ?? 0) * 0.8) - anchor[1]; board[o + 2] = p.at[2] - anchor[2]
+          const lift = (p.umbrella ? 29 : 19.5) * (1 - (p.down ?? 0) * 0.8), q = p.frame, ux = q ? 2 * (q[0] * q[1] - q[3] * q[2]) : 0, uy = q ? 1 - 2 * (q[0] * q[0] + q[2] * q[2]) : 1, uz = q ? 2 * (q[1] * q[2] + q[3] * q[0]) : 0
+          board[o] = p.at[0] + ux * lift - anchor[0]; board[o + 1] = p.at[1] + uy * lift - anchor[1]; board[o + 2] = p.at[2] + uz * lift - anchor[2]
           board[o + 3] = Math.min(1, (900 - off) / 200)
           board[o + 4] = tall * w.wide / w.tall; board[o + 5] = tall
           const sx = (w.slot % SLOTS[0]) * SLOT[0], sy = Math.floor(w.slot / SLOTS[0]) * SLOT[1], W = SLOT[0] * SLOTS[0], H = SLOT[1] * SLOTS[1]

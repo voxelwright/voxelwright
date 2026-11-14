@@ -205,7 +205,7 @@ const doing = (p, now) => {
   if (whole) { p.move.told = p.move.n; p.move.toldAt = now }
   return { move: { n: p.move.n, since: p.move.since, ...(p.move.name ? { name: p.move.name } : whole ? { keys: p.move.data } : {}), ...(p.move.aim ? { aim: p.move.aim } : {}) } }
 }
-const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
+const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -652,7 +652,7 @@ parentPort.on('message', (said) => {
     const old = folk.get(here.by)
     if (old?.seat) return
     const p = old ?? { by: here.by, seat: false, goal: null, down: 0, flinch: 0 }
-    Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, last: Date.now() })
+    Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, frame: here.frame, last: Date.now() })
     folk.set(here.by, p)
     return tell(p)
   }

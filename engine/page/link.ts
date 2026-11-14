@@ -33,7 +33,7 @@ export type { Look } from './wear.ts'
 import type { Look } from './wear.ts'
 import type { Move } from './moves.ts'
 /** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
-export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number; /** What it is doing with its limbs (moves.ts): which setting of it this is, when it began on the world's clock (ms), a name or keys, and what it is aimed at. The world's process has checked it. */ move?: { n: number; since: number; name?: string; keys?: Move; aim?: [number, number, number] }; /** An actor that was asked to think and has not answered yet (#264). */ thinking?: boolean }
+export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** The turn from their own upright to the world's (x, y, z, w), about the feet, when their down is not the world's. */ frame?: [number, number, number, number]; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number; /** What it is doing with its limbs (moves.ts): which setting of it this is, when it began on the world's clock (ms), a name or keys, and what it is aimed at. The world's process has checked it. */ move?: { n: number; since: number; name?: string; keys?: Move; aim?: [number, number, number] }; /** An actor that was asked to think and has not answered yet (#264). */ thinking?: boolean }
 /** Something a rule offers people to do (rules/hands.mjs): a word to show, held or tapped, aimed or not, the key it would like, and who it is for (null: everyone). */
 export interface Offer { rule: string; id: string; word: string; hold: boolean; aim: boolean; key: string; to: string[] | null }
 /** Something a rule shows people (rules/hands.mjs): a line, meters (how full, 0 to 1), a score, picks to choose from, and who it is for (null: everyone). All of it is text a rule wrote: to be put as text. */
@@ -69,7 +69,7 @@ export interface Link {
   /** An ask in the world's own words (`GET /world/` says which): a thing with its cells, a change to a thing's fields. Resolves to whether it was taken. */
   ask(body: Record<string, unknown>): Promise<boolean>
   /** Says where this page's eye is (the world's finest cells) and which way it faces, under a name others see. */
-  here(at: readonly [number, number, number], yaw: number, name?: string): void
+  here(at: readonly [number, number, number], yaw: number, name?: string, frame?: readonly [number, number, number, number]): void
   /** Where someone else in the world is, when the world says. */
   onhere: ((who: Someone) => void) | null
   /** Says something as this page's body (a name for it, then the words): everyone near hears. */
@@ -146,7 +146,7 @@ export function link(base = '/world'): Link {
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
     drive(id, go, turn, rise, once) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
-    here(at, yaw, name) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw }) }).catch(() => {}) },
+    here(at, yaw, name, frame) { void fetch(`${base}/here`, { method: 'POST', body: JSON.stringify({ by: self.me, name, at, yaw, frame }) }).catch(() => {}) },
     // A page's body is its own to place, so the world has it as a page's; to speak it takes a seat's voice under the page's name.
     say(name, text) { void fetch(`${base}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` }) }, () => {}) },
     clock: () => (Date.now() + behind) / 1000,

@@ -58,7 +58,7 @@ export interface Me {
   /** An edit of the world, for a core of the body's own (a shared world): it walks on what is there now. */
   edit(words: Int32Array): void
   /** Where the feet are (cells) and which way the body faces (0 north, a quarter turn east), or null in the air as an eye. */
-  readonly feet: { at: [number, number, number]; yaw: number; speed: number } | null
+  readonly feet: { at: [number, number, number]; yaw: number; speed: number; /** The turn from its own upright to the world's, when its down is not the world's. */ frame?: [number, number, number, number] } | null
   /** What the body can do; set (any of the numbers) to change it. */
   can: Partial<Can>
   /** What a rule gave the figure: a look, and a move (`world.person`). In the console: `engine.me.limbs = {move: {n: 1, name: 'strike'}}`. */
@@ -118,13 +118,13 @@ export function person(o: {
   }
   const part = (d: Under, now: number): Doing => ({ move: d.move, t: now - d.since, aim: d.aim })
   o.folk.from.push((_view, seconds) => {
-    // In the head nobody sees their own figure; and on a wall the figure cannot yet be drawn leaning (the people lane's to give).
+    // In the head nobody sees their own figure; on a wall the eye is in the head (below). The figure itself stands by its own up.
     if (!on || !at || view === 'head' || tilted()) return []
-    const now = performance.now() / 1000
-    Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
+    const now = performance.now() / 1000, d = turned(frame, [0, -(com[1] + LEG), 0])
+    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
     return [shown]
   })
-  const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed } }
+  const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed, frame: tilted() ? frame : undefined } }
   const walk = (to: boolean) => {
     if (to === on) return
     on = to
@@ -228,7 +228,7 @@ export function person(o: {
         eyeY += (want - eyeY) * (Math.abs(want - eyeY) > 30 || !level ? 1 : 1 - Math.exp(-dt * 14))
         const head = level ? [f.at[0], eyeY, f.at[2]] : [f.at[0] + up[0] * EYES, f.at[1] + up[1] * EYES, f.at[2] + up[2] * EYES]
         // Behind: back from the head, over it, and a little to the right, so that what is aimed at is not behind one's own head.
-        // On a wall the eye is in the head: the figure cannot yet be drawn leaning.
+        // On a wall the eye is in the head: behind and above, it would be inside the wall or the ground as often as not (nothing keeps the eye out of what is solid).
         const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
         o.pose.x = (head[0] + up[0] * over - look[0] * back + right[0] * aside) / M
         o.pose.y = (head[1] + up[1] * over - look[1] * back + right[1] * aside) / M

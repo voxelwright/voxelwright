@@ -2582,3 +2582,22 @@ named what the checks had not looked at. What was wrong, and what it taught:
 - **A body that has just been set down is still settling for a few seconds**: the check read its feet 3 cells low
   after 1.5 s. Wait 4 s before comparing heights.
 
+## A figure stands by its body's own up (#218, November 13)
+
+- **A person has a `frame`** (`page/people.ts` `Person.frame`): the turn from its own upright to the world's, a
+  quaternion (x, y, z, w), about the feet. `figure` turns the root's three axes by it after the yaw, so everything
+  that hangs from the root (limbs, clothes, what is carried, a move) turns with it; lying down lifts along the
+  body's own up; the name is over the head along it.
+- **It is the bodies lane's own number**: the core says each living body's frame (`told.live[].frame`), `person.ts`
+  gives it with the feet (`me.feet.frame`, only when it is a turn), the page says it with where it is (`/world/here`
+  `frame`), the world's process keeps it on the body and tells everyone (`here` frames, `Someone.frame`), and
+  `presence.ts` hands it to the figure. The server makes it a unit turn; one that is no turn is left out. Anything
+  in `folk` with a `frame` is told with it, so an actor or a seat that is given one is drawn by it too.
+- **Checked** with two real pages and a rule that is no game (`test/upright.mjs`): the west made down, one falls
+  onto a wall's face, the other is told her up (1, 0, 0) and draws the middle of her figure 10.8 cells out from
+  the wall and 0.2 over her feet.
+- **Not done**: on a wall one's own eye stays in the head (the bodies lane's choice stands): behind and above,
+  it is inside the wall or the ground as often as not, since nothing keeps the eye out of what is solid. The
+  frame snaps for others (ten times a second), it is not eased. A glance and an aim are still worked out in the
+  world's axes. Seen on the way: a person standing still sleeps, and a rule that turns their down does nothing
+  until they take a step.

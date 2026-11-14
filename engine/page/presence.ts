@@ -19,7 +19,7 @@ export const seedOf = (name: string) => { let h = 2166136261; for (const ch of n
 /** No move at all: what a body comes to rest in. */
 const REST: Move = { keys: [{ t: 0 }], hold: true }
 
-export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void; where(by: string): readonly [number, number, number] | null } {
+export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number; frame?: readonly [number, number, number, number] }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void; where(by: string): readonly [number, number, number] | null } {
   const asked = new URLSearchParams(location.search).get('name')
   let kept = ''
   try { kept = localStorage.getItem('village.name') ?? '' } catch { /* a page that may keep nothing */ }
@@ -45,7 +45,7 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
     o.before = o.doing
     o.doing = { n: m.n, move, since: m.since / 1000, aim: m.aim }
   }
-  setInterval(() => { const e = eye(); far.here(e.at, e.yaw, name) }, 100)
+  setInterval(() => { const e = eye(); far.here(e.at, e.yaw, name, e.frame) }, 100)
 
   // What was said lately is listed in a corner, and the ask bar is the line to say something on (hud.ts).
   hud.line.placeholder = `Say something as ${name}`
@@ -87,7 +87,7 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       const clock = far.clock(), doing: Doing | undefined = o.doing ? { move: o.doing.move, t: clock - o.doing.since, aim: o.doing.aim } : undefined
       // Asked to think (#264), it shows that it has heard and is about to speak: dots that come and go, until its words do.
       const pause = o.who.thinking ? '.'.repeat(1 + (Math.floor(now / 350) % 3)) : ''
-      shown.push({ at: o.shown, yaw: o.yaw, seed: o.who.was ?? seedOf(o.who.name || o.who.by), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: o.who.thinking ? pause : now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
+      shown.push({ at: o.shown, yaw: o.yaw, frame: o.who.frame, seed: o.who.was ?? seedOf(o.who.name || o.who.by), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: o.who.thinking ? pause : now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
     }
     return shown
   })
