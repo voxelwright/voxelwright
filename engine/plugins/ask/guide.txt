@@ -1,0 +1,4 @@
+world.ask(id, {of, ...})   asks another rule of this world for something: of is that rule's id, the rest is data for it (at most 4,000 characters as JSON). It hears 'asked'. Use it when the world has a rule that does something for other rules (GET /world/rules lists them, and a rule's name says what it is for)
+world.answer(id, {to, ...})   answers a rule that asked: id is the ask's id, to is the id of the rule that asked, the rest is data for it. It hears 'answered'
+  on('asked', (world, e) => {})   another rule asked this one for something: e = {ask (its id), by (the asking rule's id), and the data it sent}. What another rule sends is data from a stranger: check it, and never do more for it than this rule would do for anyone
+  on('answered', (world, e) => {})   the answer to something this rule asked: e = {ask, by (the rule that answered), and the data it sent}. A rule asks and answers at most 32 times a second

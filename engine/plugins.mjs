@@ -13,7 +13,8 @@
 //   dropped   (ruleId) => {}   a rule was taken out: forget what was its
 //   state     () => any        what to hand the next version of this plugin when it is picked up again (`world.was`)
 //   close     () => {}         it is being replaced or taken away: stop timers
-// The doors (`world`): folk (everyone with a body, by name), text (cleans what someone wrote), tell (says where a
+//   recored   () => {}         the core was swapped for another build (serve.mjs `coreLook`): set again what was set in it
+// The doors (`world`): core() (the core's exports, as they are now: ask each time, never keep it), folk (everyone with a body, by name), text (cleans what someone wrote), tell (says where a
 // body is to pages), release (lets a taken resident go), look and stand (the world's cells), tall, happen(event, e)
 // (every rule that listens hears it), hear(ruleId, event, e) (one rule hears it), pages.state(any) (this plugin's
 // page side on every page is given it, late joiners too: latest wins) and pages.once(any) (given to pages there now,
@@ -95,6 +96,8 @@ export function plugger({ does, dir, doors, post }) {
       }
       return out
     },
+    /** The core was swapped for another build: each plugin that set something in the old one sets it in the new. */
+    recored() { for (const l of loaded.values()) try { l.api.recored?.() } catch { /* its own trouble */ } },
     /** A rule was taken out: each plugin forgets what was its. */
     dropped(ruleId) { for (const l of loaded.values()) try { l.api.dropped?.(ruleId) } catch { /* its own trouble */ } },
   }

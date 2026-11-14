@@ -53,6 +53,7 @@ const checks = [
   ['realms', 'node', ['test/realms.mjs'], false],
   ['plugged', 'node', ['test/plugged.mjs'], false],
   ['plugins', 'node', ['test/plugins.mjs'], true],
+  ['swap', 'node', ['test/swap.mjs'], true],
   ['taken', 'node', ['test/taken.mjs'], true],
   ['moves', 'node', ['test/moves.mjs'], true],
   ['step', 'node', ['test/step.mjs'], true],

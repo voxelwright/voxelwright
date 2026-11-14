@@ -49,6 +49,8 @@ export function plugins(far: Link): Plugins {
     })
   }
   far.onplugged = (m: Plugged) => {
+    // The core was built again and the world's process has taken it: this page takes it too (main.ts `recore`).
+    if ('core' in m) { if (/^[0-9a-f]+$/.test(m.core)) void (globalThis as unknown as { engine: { recore(url: string): Promise<number> } }).engine.recore(`/page/core.wasm?v=${m.core}`).then((ms) => { took['the core'] = ms }, (e) => { errors['the core'] = String(e) }); return }
     if ('list' in m) {
       for (const name of [...all.keys()]) if (!m.list.some((p) => p.name === name)) { close(name); all.delete(name) }
       for (const p of m.list) if (/^[a-z0-9-]+$/.test(p.name) && /^[0-9a-f]+$/.test(p.v)) bring(p.name, p.v)

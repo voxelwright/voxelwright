@@ -228,6 +228,20 @@ export class World {
     }
   }
 
+  /**
+   * The core has been built again (#264, the workshop): every worker takes the module at `url`, and every sector is
+   * made again by it. What was made before is shown until its like comes back, so the picture is never empty.
+   */
+  recore(url: string) {
+    for (const w of this.workers) w.worker.postMessage({ core: url })
+    for (const level of this.levels) for (let slot = 0; slot < level.state.length; slot++) {
+      if (level.state[slot] === READY) level.state[slot] = STALE
+      else if (level.state[slot] === FLYING) level.state[slot] = MISSING
+      else if (level.state[slot] === STALE_FLYING) level.state[slot] = STALE
+    }
+    this.plan = true
+  }
+
   /** Every sector an edit reaches is to be made again; `keep` also lists the edit under each column it reaches. */
   private touch(e: Edit, keep: boolean) {
     for (const level of this.levels) {

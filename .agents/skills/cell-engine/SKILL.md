@@ -2281,3 +2281,41 @@ lanes' checks on the one GPU, so GPU times are within a millisecond or two).
 - **Kept over a restart**: a move that holds or loops (the actor is put back at the move's end, so someone sitting
   is sitting, not sitting down again) and a rule's marked places, in the same file as its actors. A move that
   ends by itself is not kept.
+
+## The core and the shader swapped while the game runs (#264, November 13, the workshop)
+
+The owner asked whether the core and the marcher's shader really could not be plugged in. Both can. Tried, timed,
+and on main: `engine/README.md` "Engine plugins" has the numbers. What was learned:
+
+- **A core is a module and the world is its edits.** The world's process holds nothing of the core's between calls
+  (it asks for an address, then reads), so `let core` and a new `WebAssembly.instantiate` is the whole swap; the
+  server sends the kept edits again exactly as when a world starts. 2 to 4 ms. While the module starts, everything
+  said to the process is held and done in order after (`swapping.held`): an edit that arrived in that gap would
+  otherwise be lost with the old core.
+- **On the page the core was handed round as an object and as bare functions** (`ground: core.ground_at`), so
+  swapping the variable would have left old functions in a dozen closures. The page's core is now a handle whose
+  functions forward to whichever module is in: one line where it is made, nothing where it is used.
+- **Remaking the world is cheap to start and takes 3 to 4 s to finish**, and nothing is missing meanwhile: every
+  ready sector is marked stale, which the page already knows how to redraw behind the picture. A check that waits
+  for "nothing stale" must first wait for something to be stale: stats are a frame behind (my first timing said 0 s).
+- **What is lost is what a restart loses**: loose bodies, fire, moving water. To carry them across the new core
+  would have to be told them: bodies as the stream's own state records put back with their speeds (the core has no
+  call to take a body with a velocity), fire and water as the cells alight or flowing. Not built.
+- **Not swapped**: a person's own body on foot (`shadow`, a mover with a core of its own) and the lone page's
+  mover. They would take the same message a sector worker takes, and then need the body made again in the new core.
+- **A test that changes `page/core.wasm` must put it back in `finally`** (`test/swap.mjs` appends a custom section,
+  which makes it another file to everyone and the same module to WebAssembly). The real proof was done once by
+  hand: a change to `city.rs`, built, taken by a running game, pictures in `~/.village/engine/workshop/`.
+- **A script that builds with `execFileSync` and then fetches** met `ECONNRESET`: the server had closed the
+  connection it was keeping while the script was blocked for 15 s. It looked like the server dying on the second
+  swap and cost half an hour. Ask twice, or do not block.
+- **The shader**: `createRenderPipelineAsync` with the old pipeline drawing until the new one resolves; bind groups
+  made from `layout: 'auto'` belong to their pipeline and must all be made again (the sun map's tiles too). The
+  possibility was never the risk; a frame's cost is, and only `test/bench.mjs` says.
+- **Which of the core's tables can be data** turns on one question: does any cell's place depend on it? If not
+  (weight, what bears what, what burns), each core may have its own and a plugin may set it. If so (how a blast
+  bites, the town, the land), every core on every page must agree and the history must say when it changed.
+- **Squashing with `git reset --soft origin/main` deleted two lanes' merged work** (PR 282): worktrees share
+  `origin/main`, another lane's fetch had moved it, and the commit that followed un-did what lay between. Squash
+  onto `git merge-base HEAD origin/main`, and read `git diff --stat origin/main...HEAD` before every merge.
+

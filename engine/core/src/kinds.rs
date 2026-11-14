@@ -135,7 +135,8 @@ pub const fn join_carries(a: u8, b: u8) -> u32 {
 }
 
 /// How heavy a cell of this material is, against one of water: what a body weighs and how hard it is to turn.
-pub const fn weighs(material: u8) -> f32 {
+/// These are the numbers the engine starts with: `weighs` is what is so now.
+const fn weighs_own(material: u8) -> f32 {
     match material {
         STEEL => 7.8,
         ROCK => 2.6,
@@ -147,6 +148,38 @@ pub const fn weighs(material: u8) -> f32 {
         LEAVES => 0.15,
         _ => 1.0,
     }
+}
+
+const WEIGHS_OWN: [f32; MATERIALS as usize] = {
+    let mut table = [0.0; MATERIALS as usize];
+    let mut m = 0;
+    while m < MATERIALS as usize {
+        table[m] = weighs_own(m as u8);
+        m += 1;
+    }
+    table
+};
+thread_local! {
+    /// What each material weighs now (#264): a table, not a rule of the build, so that whoever runs the core may
+    /// change it while it runs (`set_weighs`). The first of the kernel's tables to be data; the others above
+    /// (`gives`, `spans`, `carries`, `burns`) could follow the same way. Only what moves bodies reads it: no cell of
+    /// the world is where it is because of it, so two cores with different tables still hold the same world.
+    static WEIGHS: std::cell::Cell<[f32; MATERIALS as usize]> = const { std::cell::Cell::new(WEIGHS_OWN) };
+}
+/// How heavy a cell of this material is, against one of water: what a body weighs and how hard it is to turn.
+pub fn weighs(material: u8) -> f32 {
+    WEIGHS.with(|w| w.get()[(material % MATERIALS) as usize])
+}
+/// Sets what a material weighs, from a twentieth of water to fifty times it; anything else (0, a negative, not a
+/// number) puts back the engine's own. Returns what it weighs now. A body already made keeps the mass it was made with.
+pub fn set_weighs(material: u8, value: f32) -> f32 {
+    let at = (material % MATERIALS) as usize;
+    WEIGHS.with(|w| {
+        let mut table = w.get();
+        table[at] = if value.is_finite() && value > 0.0 { value.clamp(0.05, 50.0) } else { WEIGHS_OWN[at] };
+        w.set(table);
+        table[at]
+    })
 }
 
 /// How hard a knock a body of this material takes before it breaks: a change of speed, cells a second. A brick
@@ -198,5 +231,21 @@ pub const fn leans(material: u8) -> f32 {
         WOOD | LEAVES => 4.0,
         CONCRETE => 2.0,
         _ => 1.0,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_a_material_weighs_can_be_set_and_put_back() {
+        assert_eq!(weighs(STEEL), 7.8);
+        assert_eq!(set_weighs(STEEL, 0.5), 0.5);
+        assert_eq!(weighs(STEEL), 0.5);
+        assert_eq!(weighs(WOOD), 0.6);
+        assert_eq!(set_weighs(STEEL, 1.0e9), 50.0);
+        assert_eq!(set_weighs(STEEL, f32::NAN), 7.8);
+        assert_eq!(set_weighs(STEEL, 0.0), 7.8);
     }
 }

@@ -492,7 +492,7 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   - `world.mjs`, one file: `export default (world) => ({ does: { name(rule, want, now, wrong) {} }, dropped(ruleId) {}, state() {}, close() {} })`.
     `does` is what a rule may ask for (`world.<name>({...})` in a rule arrives as `want`: check every field as a
     stranger's). `world` is the doors it is given: `folk` (everyone with a body), `text`, `tell` (a body, to pages),
-    `release`, `look`, `stand`, `tall`, `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
+    `release`, `look`, `stand`, `tall`, `core()` (the core's exports as they are now: ask each time), `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
     (one rule hears it), `pages.state(v)` and `pages.once(v)` (to its page side), and `was` (what the version before
     handed on through `state()`).
   - `page.ts`, if a page needs anything: `export default ({ engine, link }) => ({ state(v) {}, once(v) {}, close() {} })`.
@@ -524,10 +524,47 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   lines to `guide.txt`; take its `does.set` and its lines out of `world.mjs` and `GUIDE`; if it tells pages
   something, send it with `pages.state` or `pages.once` and read it in `page.ts` in place of a frame kind of its
   own. If it needs a door that is not there, add it to `doors` in `world.mjs` and to the list above.
+- **The core is swapped the same way** (`POST /core/look`, after `npm run core`). The server sees that
+  `page/core.wasm` is another file; each world's process starts the new module, is sent the world's kept edits again
+  and goes on (people, actors, rules and what they keep are the process's own and are untouched); each page is told
+  through the stream, starts the new module on its own thread and in its workers, and makes every sector again
+  behind the picture. Plugins are then looked at again, so one that needed something the old core did not have
+  comes in. Measured (M1 Pro, `node test/swap.mjs`, and once with a real change to the Rust, built): the world's
+  side 2 to 4 ms with 409 edits sent again; the page's own thread 3 to 5 ms; all 18,432 sectors made again in 3.3
+  to 4.1 s with the old ones shown meanwhile and no frame over 17 ms. The build itself (11 to 16 s) is whoever
+  built it's wait, not the player's. **Lost at a swap**, as at a restart: bodies in the air, fire, water on the
+  move. Living things get up where they last slept. **Not swapped**: the core a person's own body walks in
+  (`shadow` in `main.ts`) and, in a world that is not shared, the mover's: they go on with the old build until the
+  page is loaded again.
+- **The marcher's shader is made again while it draws**: `engine.march.reshade((wgsl) => changed)`. The new
+  pipelines are built in the background and take over between two frames; one that does not compile throws and
+  the old one goes on. Measured: the text compiles in 8 to 9 ms; a changed shader is drawing 1.3 s after it was
+  asked for (31 ms when the browser has built that text before); frames meanwhile 16.7 ms, one of 33 ms in three
+  runs. What a change costs a frame is not known until it is measured: `node test/bench.mjs` before and after,
+  and a change that costs more than it is worth is not let in (additions to the march have cost 8 to 17% before).
+  There is no form yet for two plugins that each change the shader: each change starts from the engine's text.
+- **A table of the core as data**: what a material weighs was a `match` in `kinds.rs`; it is a table the core is
+  told (`material_weighs`), and `plugins/matter` lets a rule set it (`world.matter({of: "steel", weighs: 0.5})`)
+  with no build. It could be data because nothing decides where a cell is by it: two cores with different tables
+  hold the same world. `spans`, `carries`, `burns` and `breaks_at` are the same kind and could follow. `gives` and
+  `crumbles` (how a blast bites) and everything in `city.rs` and `land.rs` are not: every core, on every page,
+  works the same hole and the same town out of them, so changing one changes what was done before unless the
+  change is itself kept in the world's history.
+- **A rule as a library for rules** (`plugins/ask`): `world.ask(id, {of: ruleId, ...})` is heard by another rule
+  as `asked`, and its `world.answer` comes back as `answered`: 8 ms there and back, 0.24 ms a call. This is how
+  something new for rules can come from anyone and load as a rule does: it is a rule, in a box, with a rule's
+  doors and budget. What fits in one: whatever can be worked out from what rules are already told and done with a
+  rule's own actors, shows and sounds (a referee, a tally, a way round a house found with looks, at 32 looks a
+  second). What does not: anything that needs a new door (cells, bodies, pages, the core), or to run every frame.
+  Those are engine plugins, and engine plugins are trusted code from main.
+- **A page side from someone else** would run in a visitor's browser, so it would not be imported into the page
+  as these are: it would go in a worker or a frame of another origin, given only messages (its `state` and
+  `once`) and a canvas or a few named calls to draw with. Not built: every page side today is the engine's own.
 - **Not there**: a plugin cannot add an address to the server (a route) or a word to the box a rule runs in
   (`world.near` is the box's); a page side cannot yet say anything back to its world side but through what is
-  there (`act`, `pick`, an ask); modules replaced stay in memory until the process ends (a few KB each). Whether
-  the core and the marcher's shader can be swapped the same way is being tried next: see #264.
+  there (`act`, `pick`, an ask); modules replaced stay in memory until the process ends (a few KB each; a core,
+  the size of its memory).
+
 ## People who answer (#264)
 
 A rule can ask one of its actors to think: to answer what was said to them as a person of that world would. The

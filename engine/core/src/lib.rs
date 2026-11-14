@@ -111,6 +111,13 @@ thread_local! {
     static INSTANCE: RefCell<Instance> = RefCell::new(Instance { scratch: Scratch::new(), tree: Vec::new(), edits: Vec::new(), out: [0; 4], merged: Vec::new(), bodies: None, finer: Vec::new(), finer_of: None });
 }
 
+/// What a cell of a material weighs against water, set from outside while the core runs (#264: a kernel table as
+/// data). 0 or less puts back the engine's own. Returns what it weighs now.
+#[unsafe(no_mangle)]
+pub extern "C" fn material_weighs(material: u32, value: f32) -> f32 {
+    kinds::set_weighs((material & 255) as u8, value)
+}
+
 /// Room for edits of `words` whole numbers (see `read_edits`); write them at the address returned. They stay for every call until asked for again.
 #[unsafe(no_mangle)]
 pub extern "C" fn edits_room(words: usize) -> *mut i32 {

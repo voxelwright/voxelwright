@@ -36,7 +36,7 @@ export interface Offer { rule: string; id: string; word: string; hold: boolean; 
 /** Something a rule shows people (rules/hands.mjs): a line, meters (how full, 0 to 1), a score, picks to choose from, and who it is for (null: everyone). All of it is text a rule wrote: to be put as text. */
 export interface Shown { rule: string; id: string; line: string; meters: { label: string; full: number; colour: string }[]; score: { label: string; value: string } | null; choice: { id: string; word: string }[] | null; to: string[] | null }
 /** What the world says of the engine's plugins (serve.mjs, frame 11): the page sides there are, or something for one of them. */
-export type Plugged = { list: { name: string; v: string }[] } | { plugin: string; state: unknown } | { plugin: string; once: unknown } | { plugin: string; gone: true }
+export type Plugged = { list: { name: string; v: string }[] } | { plugin: string; state: unknown } | { plugin: string; once: unknown } | { plugin: string; gone: true } | { core: string }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null
@@ -204,7 +204,7 @@ export function link(base = '/world'): Link {
           // Held for a page that is elsewhere: where things were a moment ago is of no use later, the rest is.
           // A sound is heard when it is made or not at all.
           if (kind === SOUND) continue
-          if (kind === PLUGGED && 'once' in (data as Plugged)) continue
+          if (kind === PLUGGED && ('once' in (data as Plugged) || 'core' in (data as Plugged))) continue
           if (kind === STATE || kind === HERE) { if (l.whole) { const last = l.held.findLastIndex((h) => h.kind === kind && (kind === STATE || (h.data as Someone).by === (data as Someone).by)); if (last >= 0) l.held.splice(last, 1) } else continue }
           if (kind === ECHO && (data as Echo).realm) l.realm = changed(l.realm, (data as Echo).realm!)
           l.held.push({ kind, data })

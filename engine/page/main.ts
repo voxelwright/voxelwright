@@ -67,7 +67,11 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  const core = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
+  // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
+  let inner = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as Core
+  const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
   const grid = numbers('grid', phone ? [8, 8, 8] : [16, 8, 16]) as [number, number, number]
@@ -786,6 +790,16 @@ async function main() {
   if (far) far.onsound = (s) => ears?.sounded(s)
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
+  // The core built again and taken while the page runs (#264): this thread's own, then the workers', and every
+  // sector is made again behind the picture. Answers how long this thread's part took. Not carried across: a
+  // body on foot in a shared world (its own core, `shadow`) and, alone, whatever is loose (the mover's core).
+  const recore = async (url: string) => {
+    const began = performance.now()
+    inner = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
+    world.recore(url)
+    return performance.now() - began
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { recore })
   // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so.
   if (far) Object.assign((globalThis as unknown as { engine: object }).engine, { plugins: plugins(far) })
   // People (#218): which residents a rule of the world has taken off their rounds.

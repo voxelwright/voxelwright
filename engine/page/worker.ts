@@ -49,9 +49,12 @@ interface Core {
 const EARTH = 1
 const SIDE = 64
 
-const ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
+let ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
+  // The core built again (#264, world.ts `recore`): what is asked for from here on is made by the new one.
+  const anew = (e.data as unknown as { core?: string }).core
+  if (anew) { ready = WebAssembly.instantiateStreaming(fetch(anew), {}).then((r) => r.instance.exports as unknown as Core); return }
   const core = await ready, ask = e.data, t0 = performance.now()
   const size = SIDE << ask.level
   // The core's memory moves when it grows: ask for an address first, then look at the memory.

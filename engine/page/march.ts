@@ -1275,6 +1275,13 @@ export interface Marcher {
   draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
+  /**
+   * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
+   * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
+   * and the one that was drawing goes on. Answers how long the text took to compile and how long it all took, ms.
+   * What it does to a frame's cost is not known until it is measured: `node test/bench.mjs` before and after.
+   */
+  reshade(change: (wgsl: string) => string): Promise<{ compiled: number; ms: number }>
   /** Draws a few tiles of the sun's maps as they stand for this view. Once a frame, before `draw`, in the same commands. `ready` is whether the world is made enough to draw them from. */
   tend(encoder: GPUCommandEncoder, view: View, ready: boolean): void
   /** The sun's maps: an edit must spoil the tiles it touches. */
@@ -1305,7 +1312,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The sun stands in the south-west, two fifths of the way up.
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
-  const pipeline = await device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
+  // The two pipelines of a shader module. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
+  const marching = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
+  const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
+  let pipeline = await marching(module)
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
@@ -1316,7 +1326,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   })
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
-  const sunPipeline = await device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
+  let sunPipeline = await sunning(module)
   const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }] })
   let sunBind = sunBinding()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
@@ -1448,6 +1458,14 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
+    async reshade(change) {
+      const began = performance.now(), next = await shader(device, 'march', change(code(world)))
+      const compiled = performance.now() - began, [a, b] = await Promise.all([marching(next), sunning(next)])
+      // Between two frames: the pipelines, and everything bound by their layouts.
+      pipeline = a; sunPipeline = b; bind = binding(); sunBind = sunBinding()
+      for (const t of sunTiles) t.bind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: t.buffer } }] })
+      return { compiled, ms: performance.now() - began }
+    },
     draw(encoder, to, view, flags, time, timing, only) {
       tell(view, to.size, flags, time)
       const pass = encoder.beginRenderPass({

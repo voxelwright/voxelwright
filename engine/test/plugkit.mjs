@@ -35,6 +35,9 @@ export async function world(more = []) {
     }
   }
   void listen()
+  // The world's process takes its plugins in as it starts: a check begins when they are in (or said not to be).
+  const settled = () => until('the plugins are in', async () => (await send('/plugins')).plugins.every((p) => !p.world || p.does.length || p.error))
+  await settled()
   return {
     get url() { return server.url }, file, check, failures, get, post, send, said,
     rule: (id, source) => post('ask', { by: 'tester', rule: { id, name: id, source } }),
@@ -42,7 +45,7 @@ export async function world(more = []) {
     /** Tells the server to look at its plugins again. */
     look: () => send('/plugins/look', { method: 'POST' }),
     /** Stops the server and starts it again on the same world. */
-    async again() { server.stop(); await wait(300); server = await serve('/dev/null', ['--world', file, ...more]); void listen() },
+    async again() { server.stop(); await wait(300); server = await serve('/dev/null', ['--world', file, ...more]); void listen(); await settled() },
     finish(name) { server.stop(); if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) } console.log(`${name}: ok`); process.exit(0) },
   }
 }

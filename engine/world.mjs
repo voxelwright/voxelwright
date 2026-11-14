@@ -30,7 +30,9 @@ import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
 
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.core), {})
-const core = instance.exports
+// The core may be swapped for a newer build while this process runs (`swap`, below): everything here asks `core` for
+// what it needs at the moment it needs it, and keeps nothing of the core's memory from one call to the next.
+let core = instance.exports
 /** The core's records (bodies.rs): which are log and which are state. */
 const STATE = new Set([5, 7, 8, 10, 11])   // 10 what struck what and 11 how living things are doing (#245): heard as they happen, never kept
 
@@ -539,7 +541,7 @@ does.set('sound', noise.sound)
 // Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
-const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { folk, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
+const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { core: () => core, folk, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
@@ -561,6 +563,8 @@ const actorsOf = (id) => { let n = 0; for (const p of folk.values()) if (p.rule 
 setInterval(() => { for (const p of folk.values()) if (!p.rule) return happen('tick', { dt: 0.5 }) }, 500)
 
 let nudged = false
+/** While the core is being swapped: what was said meanwhile, to be done in order when the new one is in. And the swap just done, until the server is told of it. */
+let swapping = null, resumed = null
 /** The first thing down each column of a rectangle of the ground, looked for from a height: how high it is (or null) and what it is. One question in place of a look a column. */
 function tops([x0, z0, x1, z1], from) {
   const high = [], kinds = []
@@ -572,7 +576,26 @@ function tops([x0, z0, x1, z1], from) {
   }
   return { high, kinds }
 }
-parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought }) => {
+parentPort.on('message', (said) => {
+  const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped } = said
+  // The core swapped for another build (#264, the workshop): a new module of the same file is started, and from then
+  // everything said to this process waits its turn (the server sends the world's edits again, as when a world
+  // starts, and then `swapped`). What is in the old core and in no file is lost with it: bodies in the air, fire,
+  // water on the move. Living things get up where they last slept (the server sends `revive`). People, actors, rules
+  // and what they keep are this process's own and are untouched.
+  if (swap) {
+    const began = performance.now()
+    swapping = { held: [], began }
+    alive.clear()
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => {
+      const { held } = swapping, was = swapping
+      swapping = null; resumed = was
+      for (const m of held) parentPort.emit('message', m)
+    })
+    return
+  }
+  if (swapping) { swapping.held.push(said); return }
+  if (swapped) { const was = resumed; resumed = null; nudged = true; plug.recored(); return parentPort.postMessage({ id, swapped: { instantiate: Number((was?.ms ?? 0).toFixed(1)), ms: Number((performance.now() - (was?.began ?? performance.now())).toFixed(1)), error: was?.error ?? '' } }) }
   if (plugins) { plugging = plugging.then(() => plug.load(plugins)).then((plugged) => parentPort.postMessage({ id, plugged }), (e) => parentPort.postMessage({ id, plugged: [], error: String(e) })); return }
   // What a helper answered for an actor that was asked to think.
   if (thought) return minds.answer(thought)

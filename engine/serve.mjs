@@ -12,6 +12,7 @@
 // "The realms" below says how.
 //
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
+import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
@@ -92,7 +93,7 @@ async function report(req, res) {
 //  12 bodies  what people's bodies can do and how fast the world goes, as JSON: {clock: {rate, spare}, can: {by: {pace, jump, climb, fly, fall}}}. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
 //  10 sound   a sound a rule made (rules/sound.mjs), as JSON: {at, like | patch, force, size, hz, gap, for, reach}. For whoever reads now; not kept.
-//  11 plugged what of the engine's plugins a page is to have (plugins.mjs), as JSON: {list: [{name, v}]} (the page sides there are: a page imports /plugins/<name>/page.ts?v=<v> for each that is new to it), {plugin, state} (given to that plugin's page side; the latest is said to each reader as it joins), {plugin, once} (the same, kept for nobody) or {plugin, gone}.
+//  11 plugged what of the engine's plugins a page is to have (plugins.mjs), as JSON: {list: [{name, v}]} (the page sides there are: a page imports /plugins/<name>/page.ts?v=<v> for each that is new to it), {plugin, state} (given to that plugin's page side; the latest is said to each reader as it joins), {plugin, once} (the same, kept for nobody) or {plugin, gone}; and {core: v} when the core has been built again and the world's process has taken it: a page takes /page/core.wasm?v=<v> the same way.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
 const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11, BODIES = 12, BLOW = 13
@@ -208,9 +209,23 @@ const pluginsDir = arg('plugins', join(root, 'plugins'))
 let plugins = pluginsFound(pluginsDir)
 /** By name, how each plugin's world side last went in a world's process: {v (the version that is in), does, ms, error}. */
 const plugged = new Map()
-const guide = () => GUIDE.replace('%PLUGINS%', plugins.filter((p) => p.guide && !p.error && !plugged.get(p.name)?.error).map((p) => `${p.guide}\n`).join(''))
+const guide = () => GUIDE.replace('%PLUGINS%', plugins.filter((p) => p.guide && !p.error && (p.world ? plugged.has(p.name) && !plugged.get(p.name).error : true)).map((p) => `${p.guide}\n`).join(''))
 const pluggedList = () => frame(PLUGGED, 0, Buffer.from(JSON.stringify({ list: plugins.filter((p) => p.page && !p.error).map((p) => ({ name: p.name, v: p.page })) })))
 const pluginsNow = () => plugins.map((p) => ({ name: p.name, world: p.world, page: p.page, does: plugged.get(p.name)?.does ?? [], error: p.error || plugged.get(p.name)?.error || '' }))
+/** The core each world's process runs, by the hash of its file when the server started or last swapped it. */
+let coreIs = ''
+const coreOnDisk = () => createHash('sha256').update(readFileSync(join(root, 'page', 'core.wasm'))).digest('hex').slice(0, 12)
+/** Has every world that is awake take the core as it is on disk now, if it has changed (a realm that wakes later starts with it anyway). */
+async function coreLook() {
+  const now = coreOnDisk()
+  if (now === coreIs) return { core: now, changed: false, worlds: [] }
+  const worlds = []
+  for (const r of realms.values()) if (r.world) { worlds.push({ realm: r.id, ...(await r.world.swap()) }); r.world.plugged({ core: now }) }
+  coreIs = now
+  // A plugin that needed something the old core did not have is tried again.
+  const plugs = await pluginsLook()
+  return { core: now, changed: true, worlds, plugins: plugs.plugins }
+}
 /** Reads the folder again and has every world that is awake, and every page, take what changed. Answers what is there now and how long each part took. */
 async function pluginsLook() {
   const began = performance.now()
@@ -504,6 +519,18 @@ function open(of) {
     },
     guide: (res) => send(res, 200, guide()),
     plug,
+    /** Says something of plugins or the core to every page reading now. */
+    plugged: (m) => { const f = frame(PLUGGED, 0, Buffer.from(JSON.stringify(m))); for (const r of readers) r.write(f) },
+    /** Has the world's process take the core as it now is on disk, while it runs (world.mjs `swap`): the edits kept are sent again, living things get up where they slept. Answers how long each part took. */
+    async swap() {
+      const began = performance.now(), n = questions++
+      thread.postMessage({ swap: join(root, 'page', 'core.wasm') })
+      let edits = 0
+      for (const f of log) { const k = kept(f.readUInt32LE(0), f.subarray(12)); if (k?.edit) { thread.postMessage({ replay: k.edit }); edits++ } }
+      for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, controls: t.record.controls, rows: rowsOf(t) } })
+      const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ swapped: true, id: n }) })
+      return { edits, ...m.swapped, all: Number((performance.now() - began).toFixed(1)) }
+    },
     /** What a cell is, asked of the world itself. */
     async at(url, res) {
       const at = ['x', 'y', 'z'].map((k) => Number(url.searchParams.get(k)))
@@ -762,6 +789,8 @@ const server = createServer((req, res) => {
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
   // The engine's plugins: what is there, and (told to look) what is on disk now. Nothing is sent in: there is nothing to send.
   if (url.pathname === '/plugins' && req.method === 'GET') return send(res, 200, JSON.stringify({ plugins: pluginsNow() }), TYPES['.json'])
+  // The core, built again (npm run core): every world's process takes the new one while it runs. Nothing is sent in.
+  if (url.pathname === '/core/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(coreLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
@@ -812,4 +841,5 @@ const server = createServer((req, res) => {
   const path = url.pathname === '/' || url.pathname === '/city' ? 'page/index.html' : url.pathname === '/probe' ? 'probe/index.html' : url.pathname
   done(file(res, path, String(req.headers.host ?? '').replace(/:\d+$/, '')))
 })
+try { coreIs = coreOnDisk() } catch { /* no core built: nothing serves a world anyway */ }
 server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${server.address().port}/ (reports kept in ${reports})`))
