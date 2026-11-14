@@ -224,7 +224,7 @@ async function main() {
     return { sun, day, low }
   }
   /** What the portal draws each frame, once there is one (#264, portal.ts). */
-  let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number) => void) | null = null
+  let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number, timing?: GPURenderPassTimestampWrites) => void) | null = null
   /** The passes the engine's plugins add to a frame (plugins.ts). */
   const pluginDraws = pluginPasses()
   const setHour = (h: number | null) => {
@@ -256,14 +256,16 @@ async function main() {
   own.keys.set('KeyM', () => { flags ^= MIRRORS })
   own.keys.set('KeyK', () => { march.maps = !march.maps })
 
-  // The GPU's own time for the march, where the device can say.
+  // The GPU's own time for the march, where the device can say: the page's own march, and the march of the world
+  // seen through an open window (#367). The picture's size is steered by their sum: by the page's own alone, a window
+  // open cost a second march the steer knew nothing of, and the page ran at 30 frames a second beside it.
   const clock = gpu.canTime ? {
-    set: device.createQuerySet({ type: 'timestamp', count: 2 }),
-    resolved: device.createBuffer({ size: 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
-    read: device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
+    set: device.createQuerySet({ type: 'timestamp', count: 4 }),
+    resolved: device.createBuffer({ size: 32, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC }),
+    read: device.createBuffer({ size: 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }),
     busy: false,
   } : null
-  let gpuMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
+  let gpuMs = 0, windowMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
   // The screen's own rate: the shortest gap between frames seen lately.
   let screenMs = 16.7, shortest = Infinity
 
@@ -318,7 +320,7 @@ async function main() {
       planet.draw(encoder, to, v, pose.y / 1000, [(pose.x - 70) / 1000, (pose.z - 407) / 1000], march.sun.s, march.day, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
     } else {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
-      portalDraw?.(encoder, to, v, (now - started) / 1000)
+      portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
@@ -329,17 +331,20 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
-    if (timed) { encoder.resolveQuerySet(clock.set, 0, 2, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 16) }
+    if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
     lap('draw')
     over.frame(project)
     if (timed) {
       clock.busy = true
       void clock.read.mapAsync(GPUMapMode.READ).then(() => {
-        const [a, b] = new BigUint64Array(clock.read.getMappedRange().slice(0))
+        // A query nothing wrote this frame (no window drawn) reads as nothing.
+        const [a, b, c, d] = new BigUint64Array(clock.read.getMappedRange().slice(0))
         clock.read.unmap()
         clock.busy = false
-        if (b > a) gpuMs += (Number(b - a) / 1e6 - gpuMs) * 0.1
+        const through = d > c ? Number(d - c) / 1e6 : 0
+        windowMs += (through - windowMs) * 0.1
+        if (b > a) gpuMs += (Number(b - a) / 1e6 + through - gpuMs) * 0.1
       })
     }
     if (++frames % 15 === 0) {
@@ -826,7 +831,7 @@ async function main() {
   })
 
   // For the checks, and for looking round from the console.
-  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
+  Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
@@ -984,7 +989,7 @@ async function main() {
     buttons.append(button, realmsButton)
     Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring, enterRealm: (id: string) => enterRealm(id) })
   }
-  portalDraw = gate ? (encoder, to, v, time) => { gate.walk(); gate.draw(encoder, to, v, flags, time) } : null
+  portalDraw = gate ? (encoder, to, v, time, timing) => { gate.walk(); gate.draw(encoder, to, v, flags, time, timing) } : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { portal: gate })
 
   if (flying) {

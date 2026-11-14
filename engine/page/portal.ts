@@ -344,7 +344,7 @@ export async function portal(o: {
       setTimeout(() => { if (mine === asked && !gate) { o.far.release(); o.far.onheld = null; theirs.clear(); taken.clear(); stats.released = true } }, LET_GO)
     },
     /** A frame: the other world is kept made round where this eye would be in it, and drawn into the window's pixels with whoever is there. Called after the page's own march into `to`. */
-    draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number) {
+    draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites) {
       const now = performance.now(), dt = Math.min(0.1, (now - lastFrame) / 1000)
       lastFrame = now
       if (!gate || !other || !march2) return
@@ -370,7 +370,7 @@ export async function portal(o: {
         // The other world's looks begin at the window, where it stands there: its land may rise between that eye and the window.
         const a = across(gate), away = Math.sign((view.eye[0] - gate.at[0]) * -a[2] + (view.eye[2] - gate.at[2]) * a[0]) || 1, n: [number, number, number] = [a[2] * away, 0, -a[0] * away]
         way = [n[0], n[2]]
-        march2.draw(encoder, target, v2, flags, time, undefined, only, [n[0], n[1], n[2], n[0] * gate.to[0] + n[2] * gate.to[2]])
+        march2.draw(encoder, target, v2, flags, time, timing, only, [n[0], n[1], n[2], n[0] * gate.to[0] + n[2] * gate.to[2]])
         folk2?.draw(encoder, target, v2, time)
       }
       pane(encoder, to, view, picture.bind, open, veil, time)

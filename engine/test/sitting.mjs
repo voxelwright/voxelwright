@@ -38,7 +38,7 @@ const recorder = () => {
     if (turning) e.pose.yaw += turning * Math.min(0.05, gap / 1000)
     const feet = e.me.feet, s = e.world.stats
     if (n < N) rows.set([now, gap, cpu, label, feet ? feet.at[0] : NaN, feet ? feet.at[1] : NaN, feet ? feet.at[2] : NaN, e.pose.x * 10, e.pose.y * 10, e.pose.z * 10, e.pose.yaw, e.scale], n++ * F)
-    if (gap > 25) long.push({ at: now, label: names[label], gap, cpu, laps: { ...e.laps }, wanted: s.wanted, stale: s.stale, scale: e.scale, gpu: e.gpuMs, portal: e.portal?.state ? { ...e.portal.state } : undefined, realm: e.realms?.here })
+    if (gap > 25) long.push({ at: now, label: names[label], gap, cpu, laps: { ...e.laps }, wanted: s.wanted, stale: s.stale, scale: e.scale, gpu: e.gpuMs, through: e.windowMs, portal: e.portal?.state ? { ...e.portal.state } : undefined, realm: e.realms?.here })
   })
   globalThis.sitting = {
     mark(name) { label = names.push(name) - 1 },
@@ -49,8 +49,11 @@ const recorder = () => {
 }
 
 const done = await turn()
+// --quiet: both of this machine's turns on the GPU are taken, so that no other thread's check draws meanwhile and the GPU's times are this page's own. For short runs only: the others wait.
+const both = has('quiet') ? await turn({ mine: false }) : () => {}
 const world = join(out, `world-${Date.now()}.log`)
-const server = await serve('/dev/null', alone ? [] : ['--world', world])
+const server = await serve('/dev/null', alone ? [] : ['--world', world, '--realms', join(out, `realms-${Date.now()}`)])
+const post = (path, body) => fetch(server.url + path, { method: 'POST', body: JSON.stringify(body) }).then((r) => r.json().catch(() => ({})))
 const browser = await chromium.launch(CHROME)
 const context = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 2 })
 const page = await context.newPage()
@@ -137,6 +140,48 @@ parts.body = async () => {
   writeFileSync(join(out, 'body-kerb-wall.json'), JSON.stringify(t))
 }
 
+// A window to another realm opened with P, walked through, walked about in, and walked back through.
+parts.portal = async () => {
+  await post('/realms', { by: 'sitting', id: 'dusk', name: 'Dusk in the east', about: 'the east end, late', arrive: { at: [9660, 4070] }, look: { hour: 17.6, rain: 0.3 } })
+  await down(70, 412.5, 0)
+  await page.evaluate(() => { globalThis.engine.realms.selected = 'dusk' })
+  await mark('portal-opening'); await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 })
+  await mark('portal-open'); await wait(3000)
+  await shot('portal-open')
+  const face = () => page.evaluate(() => { const e = globalThis.engine, g = e.portal.gate.at, f = e.me.feet.at; e.pose.yaw = Math.atan2(g[0] - f[0], -(g[2] - f[2])) })
+  await face()
+  await mark('portal-through'); await page.keyboard.down('KeyW')
+  await page.waitForFunction(() => globalThis.engine.realms.here === 'dusk', null, { timeout: 30_000 })
+  await wait(1500)
+  await mark('there'); await wait(2500); await page.keyboard.up('KeyW')
+  await turnBy(1.5, 2100)
+  await shot('portal-there')
+  await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.state.passable, null, { timeout: 30_000 })
+  await face()
+  await mark('portal-back'); await page.keyboard.down('KeyW')
+  await page.waitForFunction(() => globalThis.engine.realms.here === 'home', null, { timeout: 30_000 })
+  await wait(2000); await page.keyboard.up('KeyW')
+  await mark('portal-closing'); await page.keyboard.press('KeyP'); await wait(3000)
+  line(`the steps through: ${JSON.stringify(await page.evaluate(() => globalThis.engine.portal.stats.steps))}`.slice(0, 400))
+}
+// A kart a rule brings: got on, driven up the street with turns, got off.
+parts.ride = async () => {
+  await post('/world/ask', { by: 'sitting', rule: { id: 'karts', name: 'A kart for whoever asks', source: `on('said', (world, e) => { if (/a kart for me/.test(e.text)) { world.thing('k', {like: 'kart', at: [e.at[0] + 30, e.at[2]], yaw: Math.PI / 2, colour: 2}); world.seat(e.by, {on: 'k'}) } })` } })
+  await down(76, 408.3)
+  await wait(1000)
+  await mark('ride-on'); await page.evaluate(() => globalThis.engine.say('a kart for me'))
+  await page.waitForFunction(() => globalThis.engine.alive.riding, null, { timeout: 10_000 }).catch(() => line('never got on the kart'))
+  await wait(1000)
+  await shot('ride-on')
+  await mark('ride-go'); await keys(['KeyW'], 5000)
+  await mark('ride-turn'); await page.keyboard.down('KeyW'); await keys(['KeyD'], 1200); await keys(['KeyA'], 2400); await keys(['KeyD'], 1200); await page.keyboard.up('KeyW')
+  await shot('ride-turn')
+  await mark('ride-stop'); await wait(2000)
+  await mark('ride-off'); await page.keyboard.press('KeyE'); await wait(2500)
+  await shot('ride-off')
+}
+
 const all = { rows: [], long: [], names: null, F: 12 }
 for (const name of wanted) {
   if (!parts[name]) { console.log(`no part called ${name}`); continue }
@@ -145,7 +190,7 @@ for (const name of wanted) {
   const got = await page.evaluate(() => globalThis.sitting.take())
   all.rows.push(...got.rows); all.long.push(...got.long); all.names = got.names; all.F = got.F
 }
-await browser.close(); server.stop(); done()
+await browser.close(); server.stop(); done(); both()
 
 // What it was like, by what was being done.
 const F = all.F, by = new Map()
@@ -170,7 +215,7 @@ const worst = [...all.long].sort((a, b) => b.gap - a.gap).slice(0, 25)
 console.log(`\nframes over 25 ms: ${all.long.length}; over 33.4 ms: ${all.long.filter((l) => l.gap > 33.4).length}. The longest:`)
 for (const l of worst) {
   const top = Object.entries(l.laps).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, v]) => `${k} ${v.toFixed(1)}`).join(', ')
-  console.log(`  ${l.gap.toFixed(0).padStart(4)} ms in ${l.label.padEnd(12)} inside the frame ${l.cpu.toFixed(1)} ms (${top}); making ${l.wanted}, stale ${l.stale}, picture ${l.scale.toFixed(2)}, march ${l.gpu.toFixed(1)} ms${l.portal ? `, portal ${JSON.stringify(l.portal)}` : ''}`)
+  console.log(`  ${l.gap.toFixed(0).padStart(4)} ms in ${l.label.padEnd(12)} inside the frame ${l.cpu.toFixed(1)} ms (${top}); making ${l.wanted}, stale ${l.stale}, picture ${l.scale.toFixed(2)}, march ${l.gpu.toFixed(1)} ms${l.through ? ` (${l.through.toFixed(1)} of it through a window)` : ''}${l.portal ? `, portal ${JSON.stringify(l.portal)}` : ''}`)
 }
 writeFileSync(join(out, `sitting-${Date.now()}.json`), JSON.stringify(all))
 if (errors.length) console.log(`page errors:\n  ${errors.join('\n  ')}`)
