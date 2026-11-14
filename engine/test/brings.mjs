@@ -15,13 +15,16 @@ const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 const post = async (path, body) => { for (;;) { const r = await fetch(`${server.url}/world/${path}`, { method: 'POST', body: JSON.stringify(body) }); if (r.status === 429) { await wait(300); continue } return r.json().catch(() => ({})) } }
 const how = async () => JSON.stringify((await (await fetch(`${server.url}/world/rules`)).json()).find((r) => r.id === 'marshal'))
-const RULE = `on('start', (world) => { world.actor('marshal', {name: 'Marshal', at: [700, 4100]}); world.actor('ann', {name: 'Ann', at: [704, 4100]}); world.actor('bo', {name: 'Bo', at: [708, 4100]}); world.actor('cy', {name: 'Cy', at: [712, 4100]}) })
+const RULE = `on('start', (world) => { world.actor('marshal', {name: 'Marshal', at: [700, 4100]}); world.actor('ann', {name: 'Ann', at: [704, 4100]}); world.actor('bo', {name: 'Bo', at: [708, 4100]}); world.actor('cy', {name: 'Cy', at: [712, 4100]}); world.actor('clerk', {name: 'Clerk', at: [700, 4106]}) })
+on('crossed', (world, e) => { world.keep.n = (world.keep.n || 0) + 1; world.actor('clerk', {say: world.keep.n + ' crossed ' + e.line + ' ' + (e.own || e.thing || e.who) + ' ' + e.way + ' ' + e.speed + ' ' + e.when + ' ' + (e.riders || []).join('+')}) })
 on('tick', (world) => { world.actor('marshal', {say: world.things.map((t) => [t.own || t.id, t.name, t.at.join(' '), t.yaw, t.speed, t.upright ? 'up' : 'over', t.seats, (t.riders || []).join('+')].join('|')).join(' ; ') || 'nothing'}) })
 on('said', (world, e) => {
   if (/set out/.test(e.text)) { world.thing('k1', {like: 'kart', at: [790, 4072], yaw: Math.PI / 2, colour: 0}); world.thing('c1', {like: 'car', at: [790, 4094], yaw: Math.PI / 2}); world.thing('b1', {like: 'broom', at: [740, 4076], yaw: -Math.PI / 2}) }
   if (/mount/.test(e.text)) { world.seat('ann', {on: 'k1'}); world.seat('bo', {on: 'c1'}); world.seat('cy', {on: 'c1'}); world.seat('marshal', {on: 'c1'}) }
   if (/up/.test(e.text)) world.drive('b1', {rise: 1})
   if (/along/.test(e.text)) world.drive('b1', {rise: 0, go: 0.5})
+  if (/line up/.test(e.text)) { world.drive('k1', {hold: true}); world.line('finish', {from: [830, 4050], to: [830, 4100]}); world.line('pit', {at: [880, 4072], within: 15}) }
+  if (/release/.test(e.text)) world.drive('k1', {hold: false})
   if (/go/.test(e.text)) { world.drive('k1', {go: 1}); world.drive('c1', {go: 1}) }
   if (/stop/.test(e.text)) { world.drive('k1', {go: 0}); world.drive('c1', {go: 0}) }
   if (/a tank/.test(e.text)) world.thing('t1', {like: 'tank', at: [700, 4083]})
@@ -53,12 +56,24 @@ try {
   const people = (await (await fetch(`${server.url}/world/around?by=steward`)).json()).people
   const bo = people.find((p) => p.name === 'Bo'), cy = people.find((p) => p.name === 'Cy')
   check(!!bo && !!cy && bo.far !== cy.far, 'the two in the car sit in seats of their own, not in each other')
-  // Sent off: both go east, with their riders.
+  // A fair start: the kart is held still whoever drives it, while the car goes; let go, it goes.
+  await post('say', { by: 'steward', text: 'line up' })
+  await wait(700)
   await post('say', { by: 'steward', text: 'go' })
-  await wait(1600)
+  for (let i = 0; i < 5; i++) { await fetch(`${server.url}/world/drive`, { method: 'POST', body: JSON.stringify({ by: 'a script', id: 'marshal-k1', go: 1, turn: 0, rise: 0 }) }); await wait(300) }
+  const heldStill = await says((t) => t.k1 && t.c1 && t.c1.at[0] - out.c1.at[0] > 30)
+  check(!!heldStill && Math.abs(heldStill.k1.at[0] - out.k1.at[0]) < 3 && heldStill.k1.speed === 0, `held still by the rule, the kart does not move for the rule's own word or a rider's (${heldStill ? (heldStill.k1.at[0] - out.k1.at[0]).toFixed(0) : '?'} cells), while the car goes ${heldStill ? ((heldStill.c1.at[0] - out.c1.at[0]) / 10).toFixed(1) : '?'} m`)
+  // Let go, it races over the line and through the place: the rule hears each, which way, how fast and when.
+  const crossings = []
+  const clerk = async (n, tries = 60) => { let from = 0; for (let i = 0; i < tries && !n(); i++) { const a = await (await fetch(`${server.url}/world/around?by=steward&since=${from}`)).json(); for (const h of a.heard ?? []) { from = Math.max(from, h.n); const m = h.name === 'Clerk' && /^(\d+) crossed (\S+) (\S+) (\S+) (\d+) ([\d.]+) (\S*)$/.exec(h.text); if (m && !crossings.some((c) => c.n === m[1])) crossings.push({ n: m[1], line: m[2], what: m[3], way: m[4], speed: Number(m[5]), when: Number(m[6]), riders: m[7] }) } await wait(200) } }
+  await post('say', { by: 'steward', text: 'release' })
+  await clerk(() => crossings.some((c) => c.line === 'pit' && c.way === 'out'))
   await post('say', { by: 'steward', text: 'stop' })
-  const went = await says((t) => t.k1 && t.c1 && t.k1.speed === 0 && t.c1.speed === 0 && t.k1.at[0] > 820)
-  check(!!went && went.k1.at[0] - out.k1.at[0] > 30 && went.c1.at[0] - out.c1.at[0] > 30 && went.k1.up && went.c1.up, `said "go", the rule drives them: the kart ${went ? ((went.k1.at[0] - out.k1.at[0]) / 10).toFixed(1) : '?'} m east and the car ${went ? ((went.c1.at[0] - out.c1.at[0]) / 10).toFixed(1) : '?'} m east, upright`)
+  const fin = crossings.find((c) => c.line === 'finish' && c.what === 'k1'), into = crossings.find((c) => c.line === 'pit' && c.way === 'in'), outOf = crossings.find((c) => c.line === 'pit' && c.way === 'out')
+  check(!!fin && fin.speed > 20 && fin.riders === 'ann' && (fin.way === '1' || fin.way === '-1'), `let go, it crosses the line and the rule hears it: its own id, which way (${fin?.way}), ${fin?.speed} cells a second, with its rider, at ${fin?.when} s`)
+  check(!!into && !!outOf && outOf.when > into.when && into.when > (fin?.when ?? Infinity), `and into a place and out of it again, in that order (in at ${into?.when}, out at ${outOf?.when})`)
+  const went = await says((t) => t.k1 && t.c1 && t.k1.speed === 0 && t.c1.speed === 0, 40)
+  check(!!went && went.k1.at[0] - out.k1.at[0] > 60 && went.k1.up && went.c1.up, `both went east upright with their riders (the kart ${went ? ((went.k1.at[0] - out.k1.at[0]) / 10).toFixed(1) : '?'} m)`)
   // What is not in the kept set is refused; what the rule brought it takes away.
   await post('say', { by: 'steward', text: 'a tank' })
   await wait(900)

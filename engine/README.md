@@ -299,6 +299,11 @@ on foot as they do flying.
   brought. A thing's `controls` may say `seats` (and `size`): riders sit each in their own, and one too many is
   refused. A rider has no ghost while seated (it stood inside the kart and shoved it). Checked by
   `test/brings.mjs` (no page) and the kart in `test/drives.mjs`.
+- **A race run fairly**: `world.drive(id, {hold: true})` holds a living thing still whoever drives it (the world's
+  process puts it back and drops a rider's word), and `world.line(id, {from, to})` or `{at, within}` is a line or a
+  place the rule hears `crossed`: by which thing or person, which way, where, how fast, and `when` to the
+  hundredth of a second, worked back along the tenth-of-a-second step it was crossed in. Laps, a finish and a
+  checkpoint are the rule's own numbers. In `test/brings.mjs`.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

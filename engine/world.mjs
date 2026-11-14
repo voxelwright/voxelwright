@@ -402,6 +402,7 @@ setInterval(() => {
   rests(now)
   if (ticks % 10 === 0) blow.sweep(now)
   if (driven.step(now)) nudged = true
+  driven.watch(now)
   driven.carry(now)
   for (const p of folk.values()) {
     if (!p.rule && now - p.last > (p.seat ? SEAT_STAYS : PAGE_STAYS) * 1000) { folk.delete(p.by); p.gone = true; if (p.seat) tell(p); lay(grasp.left(p)); continue }
@@ -474,6 +475,8 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => c
     if (a && Number.isFinite(yaw)) { const half = (Math.PI / 2 - yaw) / 2; core.living_place(a.body, mid[0], mid[1], mid[2], 0, Math.sin(half), 0, Math.cos(half)); nudged = true }
     return !!a
   },
+  place: (a, at, rot) => { core.living_place(a.body, at[0], at[1], at[2], rot[0], rot[1], rot[2], rot[3]); nudged = true },
+  hear: (rule, event, e) => ruled.happen(event, e, rule),
   take: (id) => {
     const a = alive.get(id)
     if (!a) return
@@ -607,6 +610,7 @@ does.set('clock', body.clock)
 does.set('drive', driven.drive)
 does.set('seat', driven.seat)
 does.set('thing', driven.thing)
+does.set('line', driven.line)
 does.set('offer', hand.offer)
 /** A place the rule marks: it hears `near` when a person comes into it or goes out. */
 does.set('mark', getting.mark)
@@ -704,6 +708,7 @@ parentPort.on('message', (said) => {
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive?.on !== undefined) return driven.rides(drive.by, drive.id, drive.on, Date.now())
+  if (drive && driven.held(drive.id)) return
   if (drive) { const a = alive.get(drive.id); if (a) a.ridden = Date.now(); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false, text(revive.name ?? '', 40))

@@ -14,12 +14,20 @@
 // a kart, a car, a broom), set down where it says, facing as it says, in a colour; there at once, with
 // no model. It is the rule's to take away again, and goes when the rule does.
 //
+// And what a fair start and a finish need. A rule holds a thing still whoever drives it (`world.drive(id, {hold:
+// true})`: it stands where it is and nobody's hands move it, a rider's from a page neither), and it draws lines
+// and places (`world.line`) and hears `crossed` when a living thing or a person goes over one or in or out of
+// one: which, which way, where, how fast, and when to the hundredth of a second (worked back along the step it
+// was crossed in). Laps, a finish and a checkpoint are then the rule's own numbers.
+//
 // Other racers, a landing craft, a getaway car are a rule driving living things: nothing here knows those words.
 
 import { KEPT } from './kept.mjs'
 
 /** How many living things a rule may have brought into the world at once. */
 const MADE_MOST = 16
+/** How many lines and places a rule may have, and the longest a line and the widest a place (cells). */
+const LINES_MOST = 32, LINE_LONG = 4000
 /** How near someone a living thing must be for a rule to be told of it (cells), how many it is told of, and how many one rule drives. */
 const NEAR = 1500, TOLD_MOST = 32, DRIVEN_MOST = 32
 /** Which way a thing's front points in its own cells, by its motor's `front`. */
@@ -40,8 +48,29 @@ const axis = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, 
  * @param changed  who a rule has seated at a page has changed: their pages are to be told
  * @param bring  brings a kept thing to life: ({id, rule, thing, low, yaw}) => whether it lives
  * @param take   takes a living thing out of the world, by its id
+ * @param place  puts a living thing at a place, turned so, and still: (thing, at, rot)
+ * @param hear   one rule hears something: (rule id, event, e)
  */
-export function things({ alive, folk, drive, tell, happen, stand, changed, bring, take }) {
+export function things({ alive, folk, drive, tell, happen, stand, changed, bring, take, place, hear }) {
+  /** By thing: the rule that holds it still, and where. */
+  const stilled = new Map()
+  /** A rule's lines and places, by `rule/id`: {rule, id, from, to} or {rule, id, at, within}. And where everything was when last looked at, by thing or person. */
+  const lines = new Map(), was = new Map()
+  const pair = (a) => Array.isArray(a) && (a.length === 2 || a.length === 3) && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
+  const flat = (a) => [a[0], a[a.length - 1]]
+  /** How far along a step from p to q something went over a line or a place's edge (0 to 1) and which way, or null. */
+  const over = (l, p, q) => {
+    if (l.at) {
+      const dp = Math.hypot(p[0] - l.at[0], p[1] - l.at[1]), dq = Math.hypot(q[0] - l.at[0], q[1] - l.at[1])
+      if ((dp <= l.within) === (dq <= l.within)) return null
+      return { t: dp === dq ? 0 : Math.max(0, Math.min(1, (l.within - dp) / (dq - dp))), way: dq <= l.within ? 'in' : 'out' }
+    }
+    // Which side of the line each end of the step is on, and where along the line the step meets it.
+    const d = [l.to[0] - l.from[0], l.to[1] - l.from[1]], sp = d[0] * (p[1] - l.from[1]) - d[1] * (p[0] - l.from[0]), sq = d[0] * (q[1] - l.from[1]) - d[1] * (q[0] - l.from[0])
+    if ((sp > 0) === (sq > 0) || sp === sq) return null
+    const t = sp / (sp - sq), x = p[0] + (q[0] - p[0]) * t, z = p[1] + (q[1] - p[1]) * t, along = ((x - l.from[0]) * d[0] + (z - l.from[1]) * d[1]) / (d[0] * d[0] + d[1] * d[1])
+    return along < 0 || along > 1 ? null : { t, way: sq > 0 ? 1 : -1 }
+  }
   /** By thing: the rule that brought it into the world. */
   const made = new Map()
   /** A living thing by the id a rule gives: the world's own, or the rule's own word for one it made. */
@@ -87,7 +116,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         const mine = held.get(id)?.rule === rule
         if (far > NEAR && !mine) continue
         const f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), up = turned(a.pose.rot, [0, 1, 0])
-        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
+        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(stilled.has(id) ? { held: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
       }
       return out.sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0) || (a.near ?? Infinity) - (b.near ?? Infinity)).slice(0, TOLD_MOST)
     },
@@ -97,7 +126,16 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
       if (!a) return wrong('world.drive is for a living thing: an id of world.things')
       const was = held.get(id)
       if (was && was.rule !== rule.id) return wrong('that living thing is another rule\'s to drive')
-      if (w.free === true) { if (was) { held.delete(id); drive(a, 0, 0, 0, false) } return }
+      if (w.free === true) { if (was) { held.delete(id); drive(a, 0, 0, 0, false) } if (stilled.get(id)?.rule === rule.id) stilled.delete(id); return }
+      // Held still, whoever drives it; let go again with hold: false. Only the rule that holds it lets it go.
+      if (w.hold !== undefined) {
+        const s = stilled.get(id)
+        if (s && s.rule !== rule.id) return wrong('that living thing is held still by another rule')
+        if (w.hold === true) { if (!s && a.pose) stilled.set(id, { rule: rule.id, at: [...a.pose.at], rot: [...a.pose.rot] }); else if (!s) stilled.set(id, { rule: rule.id, at: null, rot: null }) }
+        else if (w.hold === false) stilled.delete(id)
+        else return wrong('whether a thing is held still is hold: true or false')
+        if (w.go === undefined && w.turn === undefined && w.rise === undefined && w.jump === undefined) return
+      }
       if (!was && [...held.values()].filter((h) => h.rule === rule.id).length >= DRIVEN_MOST) return wrong(`a rule drives at most ${DRIVEN_MOST} living things at once`)
       const h = { rule: rule.id, go: axis(w.go ?? was?.go), turn: axis(w.turn ?? was?.turn), rise: axis(w.rise ?? was?.rise), jump: w.jump === true, said: 0 }
       held.set(id, h)
@@ -108,7 +146,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
       for (const [id, h] of held) {
         const a = alive.get(id)
         if (!a) { held.delete(id); continue }
-        if (now - h.said < 250 || now - (a.ridden ?? -Infinity) < 1000) continue
+        if (now - h.said < 250 || now - (a.ridden ?? -Infinity) < 1000 || stilled.has(id)) continue
         h.said = now
         // One that sleeps and is asked nothing is left asleep.
         if (!h.go && !h.turn && !h.rise && !h.jump && !a.awake) continue
@@ -118,6 +156,50 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
       }
       return any
     },
+    /** `world.line(id, {from, to})` or `world.line(id, {at, within})`: a line or a place the rule hears things and people cross; from: null takes it away. */
+    line(rule, w, now, wrong) {
+      if (typeof w.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(w.id)) return wrong('a line has an id of the rule\'s own: lower-case letters, digits and dashes, up to 24')
+      const key = `${rule.id}/${w.id}`
+      if (w.from === null || w.at === null) { lines.delete(key); return }
+      if (!lines.has(key) && [...lines.values()].filter((l) => l.rule === rule.id).length >= LINES_MOST) return wrong(`a rule has at most ${LINES_MOST} lines and places`)
+      if (pair(w.from) && pair(w.to)) {
+        const from = flat(w.from), to = flat(w.to), long = Math.hypot(to[0] - from[0], to[1] - from[1])
+        if (!(long >= 1 && long <= LINE_LONG)) return wrong(`a line is from one place to another, 1 to ${LINE_LONG} cells long`)
+        lines.set(key, { rule: rule.id, id: w.id, from, to })
+      } else if (pair(w.at) && Number.isFinite(w.within) && w.within >= 1 && w.within <= LINE_LONG) lines.set(key, { rule: rule.id, id: w.id, at: flat(w.at), within: w.within })
+      else wrong(`a line is {from: [x, z], to: [x, z]}, or a place {at: [x, z], within: 1 to ${LINE_LONG}}`)
+    },
+    /** Ten times a second: what is held still stands where it was held, and whatever went over a line since the last look is told to the line's rule. */
+    watch(now) {
+      for (const [id, s] of stilled) {
+        const a = alive.get(id)
+        if (!a) { stilled.delete(id); continue }
+        if (!a.pose) continue
+        if (!s.at) { s.at = [...a.pose.at]; s.rot = [...a.pose.rot]; continue }
+        // Let fall to where it rests, then kept there: only a thing that has gone along the ground is put back.
+        if (Math.hypot(a.pose.at[0] - s.at[0], a.pose.at[2] - s.at[2]) > 0.3) place(a, [s.at[0], a.pose.at[1], s.at[2]], s.rot)
+      }
+      if (!lines.size) { if (was.size) was.clear(); return }
+      const seen = new Set()
+      const look = (key, at, e) => {
+        seen.add(key)
+        const p = was.get(key), q = [at[0], at[2]]
+        was.set(key, { at: q, t: now })
+        if (!p || now - p.t > 1000) return
+        for (const l of lines.values()) {
+          const o = over(l, p.at, q)
+          if (!o) continue
+          const dt = (now - p.t) / 1000, x = p.at[0] + (q[0] - p.at[0]) * o.t, z = p.at[1] + (q[1] - p.at[1]) * o.t
+          hear(l.rule, 'crossed', { line: l.id, ...e(l.rule), way: o.way, at: [Math.round(x), Math.round(at[1]), Math.round(z)], speed: Math.round(Math.hypot(q[0] - p.at[0], q[1] - p.at[1]) / Math.max(dt, 0.001)), when: Number(((p.t + (now - p.t) * o.t) / 1000).toFixed(2)) })
+        }
+      }
+      for (const [id, a] of alive) if (a.pose) look(`t:${id}`, a.pose.at, (rule) => ({ thing: id, ...(made.get(id) === rule ? { own: id.slice(rule.length + 1) } : {}), ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}) }))
+      // People too, on foot: one who rides is told with what they ride.
+      for (const p of folk.values()) if (p.rule !== '~' && !p.riding) look(`p:${p.by}`, p.at, (rule) => ({ who: idOf(p, rule), name: p.name }))
+      for (const key of was.keys()) if (!seen.has(key)) was.delete(key)
+    },
+    /** Whether a thing is held still: then nobody's hands move it. */
+    held: (id) => stilled.has(id),
     /** `world.thing(id, {like, at, yaw, colour})`: brings one of the kept living things into the world; like: null takes it away. */
     thing(rule, w, now, wrong) {
       if (typeof w.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,15}$/.test(w.id)) return wrong('a thing a rule brings has an id of its own: lower-case letters, digits and dashes, up to 16')
@@ -174,6 +256,8 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
     dropped(rule) {
       for (const [id, h] of held) if (h.rule === rule) { held.delete(id); const a = alive.get(id); if (a) drive(a, 0, 0, 0, false) }
       for (const [id, r] of [...made]) if (r === rule) { made.delete(id); take(id) }
+      for (const [id, s] of [...stilled]) if (s.rule === rule) stilled.delete(id)
+      for (const [key, l] of [...lines]) if (l.rule === rule) lines.delete(key)
       let any = false
       for (const [by, s] of [...seats]) if (s.rule === rule) { ride(by, null, rule, Date.now()); any = true }
       if (any) changed()
