@@ -1228,6 +1228,26 @@ pub mod tests {
         assert!(bodies.vanish(id) && !bodies.list.iter().any(|b| b.id == id), "and it can be taken out of the world");
     }
 
+    /// Whatever the frames (#367): told to run for two seconds in calls of a sixtieth, a thirtieth and a fifteenth
+    /// of a second, a person gets as far. Held to three steps a call it got three quarters and three eighths as far.
+    #[test]
+    fn a_person_runs_as_far_whatever_the_frames() {
+        let ground = city::ground(X, Z);
+        let far = |per: f32| {
+            let mut bodies = Bodies::new();
+            let id = person(&mut bodies, [X, ground + 5, Z + 9], 45.0);
+            for k in 0..(4.0 * per) as usize {
+                bodies.walk(id, 0.0, if k as f32 >= 2.0 * per { 1.0 } else { 0.0 }, 0.0, 0.0, false);
+                bodies.out.clear();
+                bodies.advance(1.0 / per);
+            }
+            the(&bodies, id).pos[0] - X as f32
+        };
+        let (sixty, thirty, fifteen) = (far(60.0), far(30.0), far(15.0));
+        eprintln!("ran {sixty} at 60 a second, {thirty} at 30, {fifteen} at 15");
+        assert!(sixty > 75.0 && (thirty / sixty - 1.0).abs() < 0.06 && (fifteen / sixty - 1.0).abs() < 0.1, "as far at any pace of frames: {sixty}, {thirty}, {fifteen}");
+    }
+
     #[test]
     fn a_person_is_thrown_by_a_ball_and_a_car_and_is_whole() {
         let ground = city::ground(X, Z);

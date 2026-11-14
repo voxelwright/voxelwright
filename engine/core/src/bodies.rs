@@ -36,6 +36,9 @@ const LUMP_POINTS: usize = 36;
 const SMALL: usize = 160;
 /// The most steps one call takes: when the solver cannot keep up, things move slower, they do not pile up work.
 const STEPS: f32 = 3.0;
+/// With no more bodies awake than `MANY`, a call takes as many steps as a tenth of a second holds.
+const FEW_STEPS: f32 = 12.0;
+const MANY: usize = 48;
 /// How still, for how long, before a body is cells again.
 const STILL_SPEED: f32 = 4.0;
 const STILL_SPIN: f32 = 0.35;
@@ -1432,7 +1435,11 @@ impl Bodies {
 
     /// Moves every body on by `dt` seconds, in whole steps; what is left over is owed to the next call.
     pub fn advance(&mut self, dt: f32) {
-        self.owed = (self.owed + dt).min(STEP * STEPS);
+        // With few bodies awake a step costs next to nothing, and a call is given all the time it is owed up to a tenth
+        // of a second (#367): held to three steps, a frame of 33 ms moved everything on by 25, so at thirty frames a
+        // second a person walked at three quarters of their pace, and at twenty at half.
+        let most = if self.list.iter().filter(|b| !b.asleep).take(MANY + 1).count() > MANY { STEPS } else { FEW_STEPS };
+        self.owed = (self.owed + dt).min(STEP * most);
         self.steps = 0;
         self.tried = 0;
         self.paired = 0;

@@ -25,13 +25,15 @@ const alone = has('alone')
 const recorder = () => {
   const N = 120_000, F = 13
   const rows = new Float32Array(N * F), long = [], names = ['start']
-  let n = 0, label = 0, last = 0, turning = 0
+  let n = 0, label = 0, last = 0, turning = 0, burn = 0
   // Whether the eye is in something that stands (all but water and leaves), or within a cell of it sideways: the picture's near edge then cuts into it.
   const solid = (e, x, y, z) => { const k = e.kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
   const inside = (e) => { const x = e.pose.x * 10, y = e.pose.y * 10, z = e.pose.z * 10; return solid(e, x, y, z) ? 2 : solid(e, x + 1, y, z) || solid(e, x - 1, y, z) || solid(e, x, y, z + 1) || solid(e, x, y, z - 1) || solid(e, x, y - 1, z) ? 1 : 0 }
   const raf = globalThis.requestAnimationFrame.bind(globalThis)
   globalThis.requestAnimationFrame = (f) => raf((now) => {
     const t0 = performance.now()
+    // Frames made slow on purpose (`slow`): the thread is kept busy so long before each.
+    if (burn && f.name === 'frame') while (performance.now() - t0 < burn) { /* busy */ }
     f(now)
     const e = globalThis.engine
     // Only the page's own frame (it reads `engine.laps` as it goes): other callbacks are not frames of the picture.
@@ -46,6 +48,7 @@ const recorder = () => {
   globalThis.sitting = {
     mark(name) { label = names.push(name) - 1 },
     turn(rate) { turning = rate },
+    slow(ms) { burn = ms },
     peek(name) { const at = names.lastIndexOf(name), got = []; for (let i = 0; i < n; i++) if (rows[i * F + 3] === at) got.push([rows[i * F] / 1000, rows[i * F + 4], rows[i * F + 5], rows[i * F + 6], rows[i * F + 7], rows[i * F + 8], rows[i * F + 9], rows[i * F + 12]]); return got },
     take() { const got = { rows: Array.from(rows.subarray(0, n * F)), long: long.splice(0), names: [...names], F }; n = 0; return got },
   }
@@ -186,6 +189,19 @@ parts.ride = async () => {
   await shot('ride-off')
 }
 
+// Slow frames: the same run with the page's thread kept busy 30 and 60 ms a frame. The body should get as far.
+parts.slow = async () => {
+  for (const ms of [0, 30, 60]) {
+    await down()
+    await page.evaluate((ms) => globalThis.sitting.slow(ms), ms)
+    await wait(500)
+    await mark(`run-busy-${ms}`); await keys(['ShiftLeft', 'KeyW'], 4000)
+    await page.evaluate(() => globalThis.sitting.slow(0))
+    const t = await traced(`run-busy-${ms}`)
+    line(`kept busy ${ms} ms a frame (${(t.length / 4).toFixed(0)} frames a second), a four-second run goes ${(Math.hypot(t.at(-1)[1] - t[0][1], t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m`)
+    await wait(800)
+  }
+}
 // The eye: with one's back to a house front and the head turned all the way round, on foot and then in a kart.
 parts.eye = async () => {
   const said = async (name) => { const t = await traced(name), eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0); line(`${name}: the eye was in something that stands for ${t.filter((r) => r[7] === 2).length} of ${t.length} frames and within a cell of it for ${t.filter((r) => r[7] === 1).length}; its biggest move in one frame ${Math.max(...eye).toFixed(1)} cells`) }

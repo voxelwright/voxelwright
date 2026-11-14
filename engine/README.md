@@ -248,6 +248,10 @@ shoulder. On a phone the left thumb walks, and runs when pushed right over. The 
 kerbs, is stopped by what is built and goes along a wall it meets at a slant (its body hardly rubs: it stopped dead at any wall met within 35 degrees of square), stands on rubble, falls, and is thrown by what hits it. Tools and the wand work
 on foot as they do flying.
 
+- **It goes at its pace whatever the frames** (#367): a call to the core moved bodies on by 25 ms at most, so on a
+  page drawing 33 frames a second a four-second run went 12.7 m of its 17.6, and at 18 frames 7.1 m. With few bodies
+  awake (48 or fewer) a call now takes all the time it is owed up to a tenth of a second; with many it is still held
+  to three steps, so a town coming down slows and does not pile up work.
 - **Who moves it: the page**, in a core of its own. Told through the world's process, a living thing is seen to move
   30 ms later on this machine (32 ms through the tailnet's own address), and the owner's phone was 127 to 429 ms away
   by the tailnet's relay when it was measured: every step a quarter of a second late. So in a shared world the page
@@ -1063,7 +1067,7 @@ node test/core-time.mjs --rows 45000                             # what a sector
 node test/read.mjs            # what devices have reported
 node live.mjs                 # after a merge: the owner's link serves main from a checkout of its own
 node test/shared.mjs --suite  # before a change to the solver or to how a shared world is carried: blast, falls, tools and water run in a shared world
-node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
+node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow [--quiet]   # a sitting (#367): someone plays the real page and every frame is written down: the long frames by what was being done, what the page spent inside each (`engine.laps`), how even the going is
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march (#367): A and B measured turn about, seconds apart, only while the GPU is quiet; `--other dir` for A from another checkout; alone it is A against A
 ```
 

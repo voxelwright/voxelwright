@@ -115,7 +115,7 @@ export function person(o: {
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
   let downUntil = 0, lying = 0
-  let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
+  let waiting = false, owed = 0, since = 0, awake = true, leave: (() => void) | null = null
   // Nobody's own name is written over their own back: it stood in the middle of the picture the whole time (#367). Others see it over them (presence.ts).
   const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed }
   // What a rule gave the figure (`world.person`: a look, a move): as presence.ts has it for everyone else's. A new
@@ -222,7 +222,10 @@ export function person(o: {
       if (ask && o.own) {
         // Its own core: asked for a step each frame while anything of it moves, and not again before it has answered.
         // A jump asked while the last step is still out waits for the next: taken as sent, it was lost.
-        if (!waiting && (moving || awake || since < 1)) { waiting = true; o.send({ walk: ask, tick: Math.min(dt, 0.05) * clock }); jump = false }
+        // The step is all the time since the last one asked (up to a tenth of a second), not this frame's alone (#367):
+        // a frame that came while a step was out gave its time to nobody, and the body walked slower than its pace.
+        owed = Math.min(owed + dt, 0.1)
+        if (!waiting) { if (moving || awake || since < 1) { waiting = true; o.send({ walk: ask, tick: owed * clock }); jump = false } owed = 0 }
         if (moving) since = 0
       } else if (ask && (moving || since > 0.25)) { o.send({ walk: ask }); if (moving) o.wake(); since = 0; jump = false }
       if (at) {
