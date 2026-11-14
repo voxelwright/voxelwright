@@ -81,7 +81,7 @@ export function rules({ people, residents = () => [], things = () => [], does, o
       else rule.strikes = Math.max(0, rule.strikes - MENDS)
       // What it keeps is its own, and only so much of it: more than that and it keeps what it had.
       if (wants.keep && typeof wants.keep === 'object' && !Array.isArray(wants.keep)) { if (JSON.stringify(wants.keep).length <= KEEP_MOST) rule.keep = wants.keep; else rule.error = `what the rule keeps is over ${KEEP_MOST} characters: it keeps what it had` }
-      if (!rule.stopped) obey(rule, wants.out)
+      if (!rule.stopped) obey(rule, wants.out, event)
     }
     send(rule)
   }
@@ -108,9 +108,9 @@ export function rules({ people, residents = () => [], things = () => [], does, o
     /** A rule is taken out. */
     drop(id) { const rule = all.get(id); if (!rule) return; rule.replaced = true; rule.owed = null; void rule.thread?.terminate(); all.delete(id) },
     /** Something happened: every rule that listens for it (or the one rule `only`, if it does) is sent it, when it is free. A tick is not kept for a rule still at work on the last one. */
-    happen(event, e, only) {
+    happen(event, e, only, but) {
       for (const rule of all.values()) {
-        if (only !== undefined && rule.id !== only) continue
+        if ((only !== undefined && rule.id !== only) || (but !== undefined && rule.id === but)) continue
         if (rule.stopped || (rule.listens && !rule.listens.has(event))) continue
         if (event === 'tick' && (rule.at?.event === 'tick' || rule.waiting.some((w) => w.event === 'tick'))) continue
         if (rule.waiting.length >= WAITING_MOST) { rule.waiting.shift(); rule.error = `more than ${WAITING_MOST} things waited for the rule: the oldest was left out` }

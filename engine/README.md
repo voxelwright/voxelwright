@@ -843,6 +843,15 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   1.03 s in the middle (0.90 to 1.04 over eight): the rule knows sooner than after an answer (1.3 s), later than
   an answer's first words (0.92 s). About 1,200 tokens in and 25 out, against 1,400 and 90 for an answer. It is
   counted with a rule's thoughts and by the same voice; a third process waits started for it (280 MB).
+- **A rule can follow what the world's people say** (`on('spoke')`): when an actor of any rule has finished
+  saying something, every rule that listens is told who (`rule`, `id`, `name`, `mine`), the words (a whole answer
+  once, when it is done), to whom (`to`, when it was answering someone) and where. It claims nothing: the engine's
+  rule for talk stands back for `thought`, not for `spoke`, so a rule beside a realm's own can pace on "they have
+  said it" and leave people answering. Actors are still never heard as `said`. **What stops a loop:** what an
+  actor says while its rule is answering a `spoke` is heard by everyone near and told to no rule, so two rules that
+  answer every actor they hear answer once and stop (checked: three things said, then quiet). A rule that saves
+  what it heard and speaks later on `tick` is not stopped by that, only by what a rule's actors may say a second
+  and think a minute. What a rule shows (`world.show`) is not told to other rules.
 - **They know where they live.** With every thought the model is told what the realm is called and is about
   (its record, as it is now), as the world the person lives in: its streets, year and manners colour what they
   say, and what its maker wrote of a secret or of what is to come stays unknown to them. Real Sonnet in a realm

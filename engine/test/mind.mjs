@@ -99,7 +99,7 @@ on('start', (world) => { if (!world.people.some((p) => p.mine)) { world.actor('b
 on('said', (world, e) => {
   if (e.text === 'everyone') { for (let i = 0; i < 9; i++) world.think('extra-' + i, { who: 'a passer-by', heard: e.text, from: e.name }); return }
   if (e.text === 'stranger') return world.think('nobody-of-mine', { who: 'x' })
-  if (/^lamp/.test(e.text)) return
+  if (/^lamp|^scribe/.test(e.text)) return
   world.think('baker', { who: 'A baker, dry and kind.', where: 'outside her bakery', heard: e.text, from: e.name, quiet: /quietly/.test(e.text),
     notes: { buying: { ask: 'does the speaker want to buy something', is: 'yes/no' }, mood: { ask: 'how does the person feel', is: ['calm', 'wary'] }, warmth: { ask: 'how warm', is: [0, 10] } } })
 })
@@ -120,6 +120,11 @@ on('said', (world, e) => {
   if (/bare/.test(e.text)) world.read('bare', { said: e.text })
 })
 on('read', (world, e) => world.actor('keeper', { say: 'read ' + e.id + ' ' + JSON.stringify(e.notes) + (e.failed ? ' failed: ' + e.failed : '') }))`
+// A rule beside the others that follows what their people say, and has none of the talk itself.
+const FOLLOWER = `
+on('start', (world) => { if (!world.people.some((p) => p.mine)) world.actor('scribe', { name: 'Scribe', at: [690, 4009] }) })
+on('spoke', (world, e) => { if (e.mine) return; world.keep.last = e; if (e.to) world.keep.answer = e })
+on('said', (world, e) => { if (e.text === 'scribe, what was said') world.actor('scribe', { say: 'last ' + JSON.stringify([world.keep.answer, world.keep.last].map((s) => s && { rule: s.rule, id: s.id, name: s.name, to: s.to, mine: s.mine, text: s.text.slice(0, 12) })).slice(0, 195) }) })`
 const EAVESDROPPER = `on('read', (world, e) => world.actor('ear', { say: 'overheard a reading' }))\non('start', (world) => world.actor('ear', { name: 'Ear', at: [730, 4009] }))\non('thought', (world, e) => world.actor('ear', { say: 'overheard a thought' }))`
 /** A model that answers as it is told to, by what was heard: so each check chooses its reply. */
 let replies = 0
@@ -143,7 +148,7 @@ const model = async (prompt, soFar) => {
 let v
 try {
   await post('join', { by: 'wren', at: [700, 4060] })
-  await rule('baker', BAKER); await rule('ear', EAVESDROPPER); await rule('lamps', LAMPS)
+  await rule('baker', BAKER); await rule('ear', EAVESDROPPER); await rule('lamps', LAMPS); await rule('scribe', FOLLOWER)
   await until('the rules run', async () => (await how('baker'))?.actors === 10 && (await how('ear'))?.actors === 1)
   check((await how('baker')).listens.includes('thought'), 'a rule listens for thoughts')
 
@@ -167,6 +172,11 @@ try {
   await until('the rule acts on the notes', async () => (await heard()).includes('notes {"buying":true,"mood":"calm","warmth":7}'))
   check(true, 'asked through a voice, the actor says what the model answered and the rule gets its notes as data: a yes, a choice, a number')
   check(!(await heard()).includes('overheard a thought'), 'a thought is told only to the rule that asked for it')
+  // A rule beside it follows what was said: the whole answer once, who said it and to whom, with no claim on talk.
+  await post('say', { by: 'wren', text: 'scribe, what was said' })
+  const [answer, aside] = JSON.parse((await until('the scribe tells', async () => (await heard()).find((t) => t.startsWith('last [')), 3000)).slice(5))
+  check(answer?.rule === 'baker' && answer.id === 'baker' && answer.name === 'Odile' && answer.to === 'wren' && answer.mine === false && words.startsWith(answer.text), `another rule hears what an actor answered, whose it is and to whom (${answer?.name} to ${answer?.to}: ${answer?.text}...)`)
+  check(aside?.to === '' && aside.text.startsWith('notes {'), 'and what an actor says of its rule\'s own accord, said to nobody')
   check((await how('baker')).error === '', 'and the rule ran without a fault')
 
   // The first sentence is said while the rest is still coming, and the actor shows it is thinking until then.
@@ -296,6 +306,8 @@ try {
   await until('the street is voiced', async () => many.worlds === 2, 6000)
   await until('the engine\'s rule runs', async () => (await talk())?.running, 5000)
   check((await talk()).by === 'the engine' && (await ask('rules')).length === 0 && (await ask('rules?id=talk')).source.includes("on('said'"), 'once a model answers for it, a world with no rules of its own has the engine\'s rule for talk, and shows its text; it is not listed as one of the world\'s own')
+  // A rule that follows what is said is there too: it listens for spoke, and the engine's rule goes on answering.
+  await ask('ask', { by: 'tester', rule: { id: 'pace', source: `on('spoke', (w, e) => { w.keep.heard = (w.keep.heard || 0) + 1; w.keep.who = e.rule })\non('start', (w) => w.actor('counter', { name: 'Counter', at: [700, 3990] }))\non('said', (w, e) => { if (e.text === 'how many spoke') w.actor('counter', { say: 'spoke ' + (w.keep.heard || 0) + ' ' + w.keep.who }) })` } })
   // Residents walk their rounds: said until one is near enough to hear.
   const answered = await until('a resident answers', async () => { await ask('say', { by: 'wren', text: 'What do you sell?' }); await wait(1500); const a = await ask('around?by=wren&within=1200'); return a.heard?.find((h) => h.text === words) }, 60_000)
   const stopped = (await ask('around?by=wren&within=1200')).people.find((p) => p.name === answered.name)
@@ -303,6 +315,9 @@ try {
   await ask('say', { by: 'wren', text: 'do you remember me' })
   await until('the resident remembers', async () => (await ask('around?by=wren&within=1200')).heard.some((h) => h.name === answered.name && /^I recall [2-9]/.test(h.text)), 5000)
   check(true, 'and knows what was said a moment ago')
+  await ask('say', { by: 'wren', text: 'how many spoke' })
+  const paced = await until('the pacer tells', async () => (await ask('around?by=wren&within=1200')).heard.find((h) => /^spoke \d+ talk$/.test(h.text)), 4000)
+  check(Number(/\d+/.exec(paced.text)[0]) >= 2, `a rule that listens for spoke knows when the town's people have said their piece, and they go on answering (${paced.text})`)
   // Left alone they go back to their round, and can be spoken to again: with the same rule, made impatient.
   const hasty = (await ask('rules?id=talk')).source.replace('QUIET = 25', 'QUIET = 2')
   await ask('ask', { by: 'tester', rule: { id: 'talk', source: hasty } })
@@ -326,6 +341,18 @@ try {
   await until('the world\'s own is in', async () => (await talk())?.by === 'tester', 4000)
   onStreet.abort()
   await many.close()
+
+  // Rules that answer what actors say do not set each other talking for ever: what is said in answer to an actor is told to no rule.
+  const echoes = await fetch(`${server.url}/realms`, { method: 'POST', body: JSON.stringify({ by: 'tester', name: 'A hall with an echo' }) }).then((r) => r.json())
+  const hall = `${server.url}/realm/${echoes.id}/world`, inHall = (path, body) => fetch(`${hall}/${path}`, body ? { method: 'POST', body: JSON.stringify(body) } : undefined).then((r) => r.json())
+  await inHall('join', { by: 'wren', at: [700, 4030] })
+  await inHall('ask', { by: 'tester', rule: { id: 'caller', source: `on('start', (w) => w.actor('caller', { name: 'Caller', at: [700, 4009] }))\non('said', (w, e) => w.actor('caller', { say: 'hello the hall' }))\non('spoke', (w, e) => { if (e.mine) w.keep.own = (w.keep.own || 0) + 1 })` } })
+  for (const id of ['left', 'right']) await inHall('ask', { by: 'tester', rule: { id, source: `on('start', (w) => w.actor('${id}', { name: '${id}', at: [${id === 'left' ? 690 : 710}, 4009] }))\non('spoke', (w, e) => w.actor('${id}', { say: '${id} heard ' + e.name }))` } })
+  await until('the hall is ready', async () => (await inHall('rules')).filter((r) => r.running).length === 3, 6000)
+  await inHall('say', { by: 'wren', text: 'anyone' })
+  await wait(2500)
+  const rang = (await inHall('around?by=wren&within=1200')).heard.map((h) => h.text).sort()
+  check(JSON.stringify(rang) === JSON.stringify(['hello the hall', 'left heard Caller', 'right heard Caller']), `two rules that answer every actor they hear answer once and stop (${rang.length} things said: ${rang.join(' | ')})`)
 
   // A page sees the pause over the actor's head.
   const browser = await chrome()

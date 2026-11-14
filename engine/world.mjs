@@ -488,7 +488,7 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => c
     parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     nudged = true
   } })
-const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? '') } : null) })
+const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants, event) => { during = event; try { obey(rule, wants, Date.now()) } finally { during = '' } }, voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? '') } : null) })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
 /** A rule is taken out, and its actors go with it. */
@@ -511,13 +511,28 @@ function drop(id) {
  * the guide in serve.mjs: a rule is told the names with every call, so nothing in the interpreter changes.
  */
 const does = new Map()
-/** A body says words: everyone near hears, and it is not told to rules (one rule's actors cannot set another's talking for ever). */
+/** What the rule whose answer is being done now was answering: the name of what it heard, or '' when nothing of a rule's is being done. */
+let during = ''
+/**
+ * A rule's actor has finished saying something: rules that listen for `spoke` are told, the actor's own rule too
+ * (`mine`). It is not `said`: a rule that answers what people say does not hear actors, so nothing that only
+ * listens for people can be set talking by another rule's people. And what stops two rules that do listen from
+ * answering each other for ever: what an actor says while its rule is answering a `spoke` (`echo`) is heard by
+ * everyone near and told to no rule. So talk between rules' actors goes one deep and stops.
+ */
+function spoke(p, words, to, echo) {
+  if (echo || !p.rule || p.rule === '~') return
+  const e = { by: p.by, rule: p.rule, id: p.short, name: p.name || 'Someone', text: words, to, at: p.at.map(Math.round) }
+  ruled.happen('spoke', { ...e, mine: true }, p.rule)
+  ruled.happen('spoke', { ...e, mine: false }, undefined, p.rule)
+}
+/** A body says words: everyone near hears. Rules are not told here: `spoke` does that, once for a whole answer. */
 const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name || 'Someone', text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
 /** What this world is called and is about, as the server last said (it keeps the realm's record): for the people of it who are asked to think. */
 let realmIs = null
 /** The hour of the day here (#264): the realm's own, if it says one; else eleven, which is what a page has the town's residents out by when nothing says. A page in this world goes by the same, so a rule takes only residents that every page draws. */
 const HOUR = 11, hourNow = () => (typeof realmIs?.hour === 'number' ? realmIs.hour : HOUR)
-const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen, realm: () => realmIs })
+const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen, spoke, answering: () => during, realm: () => realmIs })
 setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */
 does.set('actor', (rule, w, now, wrong) => {
@@ -579,8 +594,8 @@ does.set('actor', (rule, w, now, wrong) => {
   if (w.say !== undefined) {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
-    // What an actor says is heard by everyone near, and is not told to rules: one rule's actors cannot set another's talking for ever.
-    if (words && ++rule.says <= SAYS_A_SECOND) utter(p, words, now)
+    // What an actor says is heard by everyone near, and told to rules as `spoke`, never as `said` (see `spoke`).
+    if (words && ++rule.says <= SAYS_A_SECOND) { utter(p, words, now); spoke(p, words, '', during === 'spoke') }
   }
   tell(p); p.told = now
 })

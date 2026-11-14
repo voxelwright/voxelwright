@@ -25,9 +25,10 @@ const READ_ID = /^[a-z0-9][a-z0-9-]{0,23}$/
  * @param show    tells pages how a body is (it thinks, it has stopped thinking)
  * @param hand    hands an ask to the server, for whoever voices the world
  * @param happen  tells one rule that something happened
+ * @param spoke   tells rules that an actor has finished saying something: (body, words, to whom, echo); `answering` is what the rule now being done was answering
  * @param realm   what this world is called and is about, in its maker's words: {name, about}, or null
  */
-export function thinking({ actor, say, show, hand, happen, realm = () => null }) {
+export function thinking({ actor, say, show, hand, happen, realm = () => null, spoke = () => {}, answering = () => '' }) {
   /** Asks in flight, by number: whose, for which actor, what notes were wanted, and what has been said of the answer so far. */
   const asks = new Map()
   let n = 0
@@ -53,6 +54,8 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
     if (ask.reads) return happen('read', { id: ask.id, from: ask.from, said: ask.heard, ms: Date.now() - ask.since, notes: e.notes, ...(e.failed ? { failed: e.failed } : {}) }, ask.rule)
     const p = actor(ask.rule, ask.id)
     if (p?.asked === ask.n) { p.asked = 0; if (p.thinking) { p.thinking = false; show(p) } }
+    // What it said aloud, all of it at once, is told to the rules that follow what actors say.
+    if (p && ask.said && !ask.quiet) spoke(p, ask.said, ask.from, ask.echo)
     // An actor that has gone, or a rule taken out, is told nothing.
     if (p) happen('thought', { id: ask.id, from: ask.from, heard: ask.heard, ms: Date.now() - ask.since, ...e }, ask.rule)
   }
@@ -80,7 +83,7 @@ export function thinking({ actor, say, show, hand, happen, realm = () => null })
       let together = 0
       for (const a of asks.values()) if (a.rule === rule.id) together++
       if (together >= TOGETHER_MOST || ++rule.thinks.count > A_MINUTE_MOST) return wrong(`a rule may have ${TOGETHER_MOST} actors thinking at once and ask for ${A_MINUTE_MOST} thoughts a minute`)
-      const ask = { n: ++n, rule: rule.id, id: w.id, want, from: text(w.from, 24), heard: text(w.heard, HEARD_MOST), quiet: w.quiet === true, since: now, said: '' }
+      const ask = { n: ++n, rule: rule.id, id: w.id, want, from: text(w.from, 24), heard: text(w.heard, HEARD_MOST), quiet: w.quiet === true, echo: answering() === 'spoke', since: now, said: '' }
       asks.set(ask.n, ask)
       p.asked = ask.n; p.thinking = true; show(p)
       // What was said before: what the world remembers of this actor's talk, unless the rule says what it was (before: [] and they remember nothing).
