@@ -9,6 +9,7 @@
 // away by the tailnet's relay at that hour, so every step would come a quarter of a second late. So the page moves
 // its own body against the world as it knows it (a core fed every edit the world tells of) and says where its feet
 // are, as it always said where its eye was; the world's process is the judge of what that body is struck by.
+import type { Extra } from './wear.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import { numbers, type Motor } from './living.ts'
@@ -66,6 +67,8 @@ export interface Me {
   can: Partial<Can>
   /** What a rule gave the figure: a look, and a move (`world.person`). In the console: `engine.me.limbs = {move: {n: 1, name: 'strike'}}`. */
   limbs: Limbs
+  /** What its right hand carries (#246, held.ts): boxes on the hand, over whatever a rule's look carries. Undefined for an empty hand. */
+  carry: Extra[] | undefined
   /** The figure as it is drawn (people.ts), whether or not it is in view. */
   readonly figure: Person
   /** How far behind the head the eye is now (cells): all the way, or as far as there is room. */
@@ -118,7 +121,7 @@ export function person(o: {
   // move takes over from the one before, and none brings it to rest from whatever it was in. A move begins when this
   // page hears of it: by the world's clock a strike of half a second told a little late began part way through.
   type Under = { n: number; move: Move; since: number; aim?: [number, number, number] }
-  let limbs: Limbs = {}, doing: Under | null = null, before: Under | null = null
+  let limbs: Limbs = {}, doing: Under | null = null, before: Under | null = null, carry: Extra[] | undefined
   const moved = () => {
     const m = limbs.move, now = performance.now() / 1000
     if (!m) { if (doing && doing.move !== REST) { before = doing; doing = { n: -1, move: REST, since: now } } return }
@@ -133,7 +136,7 @@ export function person(o: {
     // In the head nobody sees their own figure; on a wall the eye is in the head (below). The figure itself stands by its own up.
     if (!on || !at || view === 'head' || tilted() || backNow < NEAR) return []
     const now = performance.now() / 1000, d = turned(frame, [0, -(com[1] + LEG), 0])
-    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
+    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: carry ? { ...(limbs.look ?? {}), carry } : limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
     return [shown]
   })
   const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed, frame: tilted() ? frame : undefined } }
@@ -165,6 +168,8 @@ export function person(o: {
     get view() { return view },
     set view(v) { view = v },
     get feet() { return on ? feet() : null },
+    get carry() { return carry },
+    set carry(c) { carry = c },
     get limbs() { return limbs },
     set limbs(l) { limbs = l; moved() },
     get figure() { return shown },

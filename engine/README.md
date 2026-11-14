@@ -460,6 +460,10 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   and `world.take(person)`. Whoever leaves puts theirs down where they stood; a world started again stands a held
   thing where it was taken from. From a page of your own: `engine.hands.take(id)`, `engine.hands.put(at?)`.
   `node test/hold.mjs` checks all of it with a lantern and someone who minds it.
+- **The holder's own view** (`page/held.ts`). With the eye in the head (V), or flying as an eye with no body, the
+  thing itself is drawn before the eye from its own cells: low and to the right, its near end a hand's reach off,
+  its longest way pointing where they look. With the eye behind their own figure, the figure carries it as
+  everyone else sees it. A thing over 1.4 m is drawn smaller, as in a figure's hand.
 - **Throwing what is held.** `world.throw({from, to or at, speed, tag, held: true})` throws what `from` holds in place
   of a ball: the thing leaves the hand as a body of its own cells (a living thing made of them, pushed and let go
   of at once), strikes and may break as anything thrown does, and lies as cells where it stops. Every rule hears

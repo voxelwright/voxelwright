@@ -5,42 +5,9 @@
 // give someone a thing and take it from them.
 //
 // A thing is one person's at a time, and a person holds one thing. Whoever leaves puts theirs down where they stood.
-import { materials, palette } from '../page/march.ts'
+import { boxOf, inHand } from '../page/held.ts'
 
-/** The most boxes a hand's thing is shown as, and how long (cells) the longest thing in a hand is drawn: longer is drawn smaller. */
-const BOXES = 8, LONG = 14
-const paints = palette(), stuffs = materials()
-/** A kind's colour as the screen has it: #rrggbb. */
-const hex = (kind) => { const c = kind >> 8 ? paints.subarray((kind >> 8) * 4, (kind >> 8) * 4 + 3) : stuffs.subarray((kind & 15) * 8, (kind & 15) * 8 + 3); return '#' + [...c].map((v) => Math.round(255 * Math.max(0, Math.min(1, v)) ** (1 / 2.2)).toString(16).padStart(2, '0')).join('') }
-/** The box round rows of cells (x0, x1, y, z, kind each): [x0, y0, z0, x1, y1, z1], the high corner not filled. */
-export const boxOf = (rows) => { const b = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]; for (let i = 0; i < rows.length; i += 5) { b[0] = Math.min(b[0], rows[i]); b[3] = Math.max(b[3], rows[i + 1]); b[1] = Math.min(b[1], rows[i + 2]); b[4] = Math.max(b[4], rows[i + 2] + 1); b[2] = Math.min(b[2], rows[i + 3]); b[5] = Math.max(b[5], rows[i + 3] + 1) } return b }
-
-/**
- * A thing's cells as what a hand carries: up to eight boxes told from the hand, its longest way laid out past the
- * fingers (a figure's -y), each a slice of it in the colour most of that slice is. Drawn at its own size up to
- * 1.4 m long, smaller beyond.
- */
-export function inHand(rows) {
-  const b = boxOf(rows), size = [b[3] - b[0], b[4] - b[1], b[5] - b[2]]
-  const long = size.indexOf(Math.max(...size)), others = [0, 1, 2].filter((a) => a !== long)
-  // Of the other two, the one that was up stays across the palm's up (a figure's z), if either was.
-  const up = others.includes(1) ? 1 : others[1], side = others.find((a) => a !== up)
-  const scale = Math.min(1, LONG / size[long]), n = Math.max(1, Math.min(BOXES, Math.ceil(size[long] / 2)))
-  const slices = Array.from({ length: n }, () => ({ lo: [Infinity, Infinity], hi: [-Infinity, -Infinity], kinds: new Map() }))
-  for (let i = 0; i < rows.length; i += 5) for (let x = rows[i]; x < rows[i + 1]; x++) {
-    const c = [x, rows[i + 2], rows[i + 3]], s = slices[Math.min(n - 1, Math.floor(((c[long] - b[long]) / size[long]) * n))]
-    s.lo[0] = Math.min(s.lo[0], c[side]); s.hi[0] = Math.max(s.hi[0], c[side] + 1); s.lo[1] = Math.min(s.lo[1], c[up]); s.hi[1] = Math.max(s.hi[1], c[up] + 1)
-    s.kinds.set(rows[i + 4], (s.kinds.get(rows[i + 4]) ?? 0) + 1)
-  }
-  const out = [], each = (size[long] / n) * scale, mid = [(b[side] + b[side + 3]) / 2, (b[up] + b[up + 3]) / 2]
-  slices.forEach((s, k) => {
-    if (!s.kinds.size) return
-    const kind = [...s.kinds].sort((p, q) => q[1] - p[1])[0][0], round = (v) => Number(v.toFixed(2))
-    // A hand's width behind the palm, the rest out past the fingers.
-    out.push({ on: 'handR', at: [round(((s.lo[0] + s.hi[0]) / 2 - mid[0]) * scale), round(1.5 - (k + 0.5) * each), round(-((s.lo[1] + s.hi[1]) / 2 - mid[1]) * scale)], size: [round(Math.max(0.2, (s.hi[0] - s.lo[0]) * scale)), round(Math.max(0.2, each)), round(Math.max(0.2, (s.hi[1] - s.lo[1]) * scale))], colour: hex(kind), shiny: (kind & 15) === 12 || (kind & 15) === 11 })
-  })
-  return out
-}
+export { boxOf, inHand }
 
 /**
  * @param folk   everyone with a body, by name: {by, name, at (feet), rule?}

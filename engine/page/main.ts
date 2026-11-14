@@ -31,6 +31,7 @@ import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
+import { before as beforeEye, block, inHand as carried } from './held.ts'
 import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
@@ -293,6 +294,7 @@ async function main() {
     ears?.frame(v.eye, pose.yaw, dt)
     magic.step(dt)
     grip.frame()
+    ownHold(v)
     lap('steer')
     fallOn(dt)
     lap('fallOn')
@@ -853,6 +855,25 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { takenOff })
   // The wand's spells, on a line of their own (#246).
   Object.assign((globalThis as unknown as { engine: object }).engine, { hands: grip, magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
+
+  // What this page's person holds, as they see it themselves (#246, held.ts). With a figure of their own in view
+  // (the eye behind), the figure carries it as everyone's does. With the eye in the head, or flying as an eye with
+  // no body, the thing itself is drawn before the eye: low and to the right, pointing where they look.
+  let inView: { id: string; piece: Piece; size: [number, number, number] } | null = null
+  const ownHold = (v: View) => {
+    const h = grip.holding
+    if (h?.id !== inView?.id || (h && !me.carry)) {
+      inView?.piece.destroy()
+      inView = null
+      me.carry = h ? carried(h.cells) : undefined
+      if (h) { const b = block(h.cells), born = thing(b.kinds, b.size); born.com = [b.size[0] / 2, b.size[1] / 2, b.size[2] / 2]; inView = { id: h.id, piece: falling.add(born), size: b.size } }
+    }
+    if (!inView) return
+    // Behind one's own figure it is in the figure's hand: the thing before the eye is put out of sight (no cell of it has any size).
+    const own = me.feet !== null && me.view === 'behind'
+    Object.assign(inView.piece, own ? { cell: 0 } : beforeEye(v, inView.size))
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { held: { get shown() { return inView && inView.piece.cell > 0 ? { id: inView.id, pos: inView.piece.pos, rot: inView.piece.rot, cell: inView.piece.cell } : null } } })
 
   // A thing of finer cells stood beside the world (#259, fine.ts): cells as base64 of 16-bit kinds, its size, where
   // the middle of its foot is (the world's cells), how many of its cells make one of the world's, a turn about y.
