@@ -30,6 +30,7 @@ import { read } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
 import { plugins } from './plugins.ts'
+import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
@@ -798,6 +799,8 @@ async function main() {
     return performance.now() - began
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { recore })
+  // The workshop (#264, workshop.ts): what the engine could not do yet, and sending it to a development session.
+  Object.assign((globalThis as unknown as { engine: object }).engine, { workshop: workshop(over, wishes) })
   // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so.
   if (far) Object.assign((globalThis as unknown as { engine: object }).engine, { plugins: plugins(far) })
   // People (#218): which residents a rule of the world has taken off their rounds.

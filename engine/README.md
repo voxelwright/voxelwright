@@ -640,6 +640,41 @@ on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, 
   Also: an actor asked again is shown what was said before; in a world with no rules a resident stops and
   answers, nobody is stopped while no model answers, and the engine's rule stands back, is taken out, is replaced.
 
+## The workshop (#264)
+
+When a model writes a rule it also says what it could not do with what the engine offers. From inside the game, the
+owner of the machine can send one of those to a development session, which builds the missing engine plugin and
+opens a pull request.
+
+```sh
+node helper.mjs --world http://127.0.0.1:5801      # as for making things; open the address it prints
+# in the game: the "Workshop" chip, top right, counts what is waiting. Open it, pick one, read the brief, start the session.
+```
+
+- **What starts a session**: T3 Code's own command, `t3 thread start --worktree origin/main --branch <b> --title <t>
+  <project> -`, with the brief on its input (`~/.t3/bin/t3`, written there by the T3 Code app; found by asking it
+  for `--help`). It reaches the running T3 Code and answers with the thread's id. The session works in a worktree of
+  its own, made by T3 Code from `origin/main`.
+- **Who may**: the helper's own door (this machine's name, the world's own page, the secret), and only the door of
+  the machine itself. By the tailnet's door the workshop answers nobody, the helper's own person included. A page
+  with no helper on its machine shows no chip.
+- **Two steps, and what is read is what is sent.** "Send to the workshop" asks the helper for the brief and shows
+  all of it; nothing has started. "Start the session" sends that brief, by a token the helper gave with it. A gap
+  is sent once.
+- **Whose words are whose.** The brief's instructions are `workshop/route.mjs`'s own, the same every time: the
+  plugin form, the checks to run, the ports, "open a PR, do not merge". What a player typed and what a model said
+  are four quoted lines under a line that says they are data, cleaned of line ends and of the quote's own marks.
+  The session's title and branch come of the gap's id. Nothing a person or a model wrote is in the command.
+- **What comes back** is a pull request like any other. Nothing a session writes is loaded by any game until it is
+  merged to main and the game is told to look (`node plug.mjs --port N --at <its checkout>`).
+- **Written down**: who asked is kept with each line (`by`, in `~/.village/engine/cannot.jsonl`); what was sent, to
+  which thread and branch, in `~/.village/engine/workshop/sent.jsonl`.
+- `node test/workshop.mjs` checks all of it with something standing in for T3 Code, and the command itself with a
+  script that writes down how it was run.
+- **Not there**: what a friend's own helper could not do is written on the friend's machine and does not reach the
+  owner's list (it would be told to the realm's server and kept there with who asked). The card does not yet say
+  when a session's pull request is open or merged. A realm is not asked again by itself when its gap is closed.
+
 ## Checks and tools
 
 ```sh

@@ -195,7 +195,7 @@ export async function write({ wish, world, where, change, by = 'maker', model = 
     if (!best) return { ...out, state: 'refused', why }
     const { rule } = best
     // What it could not do is kept, whatever comes of the rule: it is the engine's to-do list.
-    if (rule.cannot.length) { await mkdir(dirname(cannot), { recursive: true }); await appendFile(cannot, JSON.stringify({ at: new Date().toISOString(), wish, name: rule.name, model: out.model, cannot: rule.cannot }) + '\n') }
+    if (rule.cannot.length) { await mkdir(dirname(cannot), { recursive: true }); await appendFile(cannot, JSON.stringify({ at: new Date().toISOString(), by, wish, name: rule.name, model: out.model, cannot: rule.cannot }) + '\n') }
     const id = change ?? `${rule.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 16) || 'rule'}-${Math.random().toString(36).slice(2, 6)}`
     say('putting it into the world', { stage: 'putting', name: rule.name })
     const res = await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, rule: { id, name: rule.name, source: rule.source } }) })

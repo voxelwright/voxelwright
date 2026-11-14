@@ -71,6 +71,8 @@ export interface Asker {
   realm(spec: { name: string; about: string; look?: unknown; answers?: { ask: string; answer: string }[] }, each?: (stage: Stage) => void): Promise<Done>
   /** How many asks are being made or waiting. */
   readonly busy: number
+  /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */
+  call(path: string, body?: unknown): Promise<{ ok: boolean; value: Record<string, unknown> } | null>
   /**
    * What an ask with no target of its own is aimed at, if anything says (the wand's: it sets this while it aims).
    * Null, or a function that returns undefined: what is ahead of the eye.
@@ -117,6 +119,10 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   const self: Asker = {
     aim: null,
     get busy() { return busy },
+    async call(path, body) {
+      if (!helper) return null
+      try { const r = await fetch(`${helper.url}${path}`, body === undefined ? { headers: headers() } : { method: 'POST', headers: headers(), body: JSON.stringify(body) }); return { ok: r.ok, value: await r.json() } } catch { return null }
+    },
     get known() { return helper !== null },
     async hello() {
       if (!helper) return false

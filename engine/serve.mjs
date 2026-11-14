@@ -463,7 +463,8 @@ function open(of) {
     for (const r of readers) r.write(list)
     return m.plugged
   }
-  void plug()
+  /** The first load of the plugins: the guide is not given out before it is done, or a model would be handed a guide without their lines. */
+  const plugging = plug()
   for (const rule of rules.values()) thread.postMessage({ rule, kept: peopleKept[rule.id] })
   /** Which body of the core each living thing is now, by the thing's id: told to every page as it joins. */
   const living = new Map()
@@ -521,7 +522,7 @@ function open(of) {
       minds.close()
       await thread.terminate()
     },
-    guide: (res) => send(res, 200, guide()),
+    guide: async (res) => { await plugging; send(res, 200, guide()) },
     plug,
     /** Says something of plugins or the core to every page reading now. */
     plugged: (m) => { const f = frame(PLUGGED, 0, Buffer.from(JSON.stringify(m))); for (const r of readers) r.write(f) },
@@ -837,7 +838,7 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
     if (req.method === 'GET' && route === '/world/minds') return world.minds(url, res)
     if (req.method === 'POST' && route === '/world/mind') return done(world.mind(req, res))
-    if (req.method === 'GET' && route === '/world/') return world.guide(res)
+    if (req.method === 'GET' && route === '/world/') return done(world.guide(res))
     return send(res, 404, 'not here')
   }
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')

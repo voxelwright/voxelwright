@@ -2340,3 +2340,24 @@ and on main: `engine/README.md` "Engine plugins" has the numbers. What was learn
   `origin/main`, another lane's fetch had moved it, and the commit that followed un-did what lay between. Squash
   onto `git merge-base HEAD origin/main`, and read `git diff --stat origin/main...HEAD` before every merge.
 
+## The workshop: a development session started from the game (#264, `workshop/route.mjs`, `page/workshop.ts`; November 13)
+
+How it is used is in `engine/README.md` "The workshop". What was learned:
+
+- **T3 Code has a door for this, and it is found by asking.** The app writes `~/.t3/bin/t3`; `t3 --help` lists
+  `thread start | send | show | list`. `t3 thread list --project <path> --json` reaches the running app in 1.9 s
+  and is read-only: the cheap way to see that the door is open. Nothing of T3 Code's own files was read. (The app
+  also declares a `t3code://` address; it was not needed.)
+- **A session's brief is the one place a player's words and a model's words meet an agent with a shell.** So the
+  instructions are fixed text in the route, and the wish, the rule's name and the could-not line are four quoted
+  lines, each cleaned of line ends and of the quote's marks, under a sentence that says they are data. The title
+  and the branch come of a hash. The command is run with `execFile` and the brief on its input. The check sends a
+  line written to close the quote and give orders, and reads back what the command was run with.
+- **Two briefs for one gap was a hole.** A brief composed and not sent stayed good after another for the same gap
+  was sent: two sessions for one gap. A send now drops every brief for its gap and refuses a gap already sent. The
+  check found it, not the reading.
+- **Owner only is the door, not a name.** The helper already tells its own door from the tailnet's by which
+  listener a request came in on, which a request cannot say for itself. The workshop answers on the first only.
+- **The server's guide waited on nothing**: for a quarter of a second after a world started it lacked its plugins'
+  lines. `GET /world/` now waits for the first load.
+

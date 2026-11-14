@@ -12,6 +12,7 @@
 //   --voice sonnet     which of your models answers for the people of the world when a rule asks one to think (#264, mind/voice.mjs);
 //                      --no-voice and nobody is voiced from this machine (nor with --reply: no model is run then); --voice-most 40 is the most answers a minute;
 //                      --voice-warm 2 is how many of its processes wait started, so that an answer does not wait for one to start
+//   --workshop-project dir --t3 file    the workshop (workshop/route.mjs): which T3 Code project a development session is started in, and T3 Code's command
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
 // Who may ask. It starts a model on your subscription, so it answers only: a request to this machine's own name
@@ -46,6 +47,7 @@ import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
 import { imagine, realm as makeRealm } from './make/realm.mjs'
 import { write as writeRule } from './make/rules.mjs'
+import { workshop } from './workshop/route.mjs'
 import { towards } from './make/place.mjs'
 import { voices as voicing } from './mind/voice.mjs'
 
@@ -110,7 +112,7 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, cannot, voice = null }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, cannot, voice = null , shop: shopWith = {} }) {
   /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
   const shelf = kept ? library(kept) : null
   world = world.replace(/\/$/, '')
@@ -126,6 +128,8 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
   if (reach && !only) throw new Error('to be reached from the tailnet the helper must be told whose it is: --only <your tailnet login>')
   const far = reach ? new URL(reach).host : null
   let busy = false
+  /** The workshop's door (workshop/route.mjs): reads the same list of what could not be done that the rules' maker writes. */
+  const shop = workshop({ journal: cannot, say, ...shopWith })
   /** Things made that no place would take, kept a while for the asker to say where: by a token only this helper and that page know. */
   const holds = new Map()
   /** Says how an ask ended. What the model said is not passed on: the page gets what was made of it, and the world its cells. */
@@ -159,6 +163,8 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
     if (!same(req.headers['x-village-secret'] ?? '', secret)) return end(401, { why: 'the secret is not right: open the address the helper printed' })
     const url = new URL(req.url ?? '/', 'http://x')
     if (req.method === 'GET' && url.pathname === '/hello') return end(200, { helper: 1, world, busy })
+    // The workshop (#264, workshop/route.mjs): what the engine could not do, sent to a development session. This machine's own door only.
+    if (url.pathname.startsWith('/workshop/')) return void shop(door, req, url, end).catch((e) => { say(`  the workshop failed: ${e.message}`); if (!res.headersSent) end(500, { why: 'the workshop failed' }) })
     if (req.method !== 'POST' || !['/ask', '/put', '/rule', '/imagine', '/realm'].includes(url.pathname)) return end(404, { why: 'not here' })
     void (async () => {
       const parts = []
@@ -292,7 +298,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') || canned ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), cannot: flag('cannot'), shop: { ...(flag('workshop-project') ? { project: flag('workshop-project') } : {}), ...(flag('t3') ? { t3: flag('t3') } : {}) }, journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') || canned ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
   if (h.voiced) console.log(`it also answers for the people of that world when a rule asks one to think, with your own Claude Code (${flag('voice') ?? 'sonnet'}), at most ${Number(flag('voice-most') ?? 40)} answers a minute: --no-voice turns that off`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)

@@ -54,6 +54,7 @@ const checks = [
   ['plugged', 'node', ['test/plugged.mjs'], false],
   ['plugins', 'node', ['test/plugins.mjs'], true],
   ['swap', 'node', ['test/swap.mjs'], true],
+  ['workshop', 'node', ['test/workshop.mjs'], true],
   ['taken', 'node', ['test/taken.mjs'], true],
   ['moves', 'node', ['test/moves.mjs'], true],
   ['step', 'node', ['test/step.mjs'], true],
