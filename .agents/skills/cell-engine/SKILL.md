@@ -2632,3 +2632,35 @@ named what the checks had not looked at. What was wrong, and what it taught:
 - **A plugin's page side that draws uses `engine.draws`** (`page/plugins.ts` `passes`), not a wrap of someone
   else's draw: the name `engine.passes` was already taken on the page, which a plugin finds out only when it loads.
 
+
+## Actors that get about as a person can (#218, November 13)
+
+- **Same names, same ranges, another mover.** `world.actor(id, {jump, climb, fly, fall})` (and `pace`, now to
+  400) are a person's numbers (`rules/bodies.mjs` `CAN`, exported so there is one list). A person at a page is a
+  living body in the core, moved by its page; an actor is a body the world's process moves (`about.mjs`), so the
+  numbers are read there as what a way may be made of, not as a motor's. With none set an actor walks as before.
+- **Climb** is in `stand`: with the hands, up a wall as high as it climbs (the search pays the height, so a street
+  is taken while there is one). Walking the way, a rise over hands' reach is gone up a pace at a time (`p.scales`)
+  with the body's frame turned a quarter back (#322), so it is drawn standing on the wall's face.
+- **Jump** is an edge of the search: where a step fails or is a long step down, the nearest place straight on that
+  it can land on, no higher than it jumps, within its span (its pace for as long as the jump keeps it up:
+  `pace * 2 * sqrt(2 * jump / (98 * fall))`), with nothing in the air between. A place leapt to is marked in the way
+  (`[x, z, y]`); the leap is an arc over time (`p.leap`). Two things found by the check: the floor of a gap is a
+  landing too, so the far side must be looked for first; and a jumper walking straight just stepped off the roof
+  (a drop of under three metres is a step down), so one that jumps looks for a way before a long step down.
+- **Fly** is no search: straight to the place (`to: [x, y, z]` in the air, or over `[x, z]` and down onto it;
+  following, to their height), level when straight is into what is below, up when something is in the way. It
+  leans into its going by the frame; still, it is upright and stays. No longer able to fly, it falls (`p.falls`)
+  at the world's pull times `fall`.
+- **Told**: `aloft` in `here` (pages do not swing its legs), `can` and `aloft` in `world.people` for a rule's own.
+  Kept over a restart with the actor (`can`, and where in the air it is).
+- **Bodies stay apart in the air too**: a flyer sent down onto where someone stands stays over them and says who
+  (`blocked` at the height it is coming down to: `gather` only knows who is within a body's height); a leap does
+  not land where somebody stands; a flyer measures how far off the one it follows is with the height, so it goes
+  up after one who rises.
+- **Cost**, at the most the guide allows (pace 400, jump 300, climb 100000): a search of all 900 places took 29 ms
+  with climb and 49 ms with jump alone (leaps are tried where steps fail), and the world answered within 40 ms.
+- **Not done**: one that falls (fly taken away) lands where it lands, on somebody or not; a body placed in the
+  air by a restart mid-leap falls from there; `down` and `cling` as numbers for an actor; a flyer finds no way round a ceiling (it rises, and
+  stops if it cannot); a leap does not look at who stands where it lands; nothing new for a seat (`/world/walk`
+  only walks); a climb is one face, not round an overhang. `node test/able.mjs`.

@@ -13,7 +13,7 @@
 // What a rule set goes back to how it was when the rule is taken out.
 
 /** What a body can do, each a least and a most: cells and seconds. */
-const CAN = { pace: [0, 400], jump: [0, 300], climb: [0, 100000], fly: [0, 400], fall: [0, 3] }
+export const CAN = { pace: [0, 400], jump: [0, 300], climb: [0, 100000], fly: [0, 400], fall: [0, 3] }
 /** The slowest and the fastest the world's clock goes, and the most people a rule may spare from it. */
 const SLOWEST = 0.05, FASTEST = 4, SPARED_MOST = 64
 

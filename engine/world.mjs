@@ -23,7 +23,7 @@ import { residents, whereabouts } from './page/residents.ts'
 import { lookOf, ownLook } from './page/wear.ts'
 import { plugger } from './plugins.mjs'
 import { blows } from './rules/blows.mjs'
-import { bodies } from './rules/bodies.mjs'
+import { bodies, CAN } from './rules/bodies.mjs'
 import { hands } from './rules/hands.mjs'
 import { holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
@@ -209,7 +209,7 @@ const doing = (p, now) => {
 }
 /** Who holds what (rules/holding.mjs): set where the rules are, below. What a hand carries is part of how its figure looks. */
 let grasp = null
-const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(grasp?.carried(p.by) ? { look: { ...(p.look ?? {}), carry: grasp.carried(p.by) } } : p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
+const tell = (p) => { blow.seen(p); parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal && !p.aloft ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.frame ? { frame: p.frame } : {}), ...(p.aloft ? { aloft: true } : {}), ...(grasp?.carried(p.by) ? { look: { ...(p.look ?? {}), carry: grasp.carried(p.by) } } : p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } }) }
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -346,14 +346,16 @@ function goingBack(p, now) {
   return false
 }
 /** What is to be kept of the rules' people over a restart (the server writes it beside the world's file): each rule's actors as they stand. */
-const actorsKept = () => { const out = {}; for (const p of folk.values()) if (p.rule && p.rule !== '~') (out[p.rule] ??= []).push({ id: p.short, name: p.name, at: p.at, yaw: p.yaw, pace: p.pace, look: p.look, goal: p.goal, was: p.was, home: p.home, ...(p.move?.stays ? { move: { name: p.move.name, keys: p.move.data, aim: p.move.aim } } : {}) }); return out }
+/** What a kept actor could do, read back: only the numbers a body has, each within its range. */
+const canKept = (c) => { if (!c || typeof c !== 'object') return null; const out = {}; for (const k of ['jump', 'climb', 'fly', 'fall']) if (Number.isFinite(c[k])) out[k] = Math.max(CAN[k][0], Math.min(CAN[k][1], c[k])); return Object.keys(out).length ? out : null }
+const actorsKept = () => { const out = {}; for (const p of folk.values()) if (p.rule && p.rule !== '~') (out[p.rule] ??= []).push({ id: p.short, name: p.name, at: p.at, yaw: p.yaw, pace: p.pace, can: p.can, aloft: p.aloft || undefined, look: p.look, goal: p.goal, was: p.was, home: p.home, ...(p.move?.stays ? { move: { name: p.move.name, keys: p.move.data, aim: p.move.aim } } : {}) }); return out }
 /** A rule's actors as they were kept, put back before the rule starts again. What was kept is read as anything from outside is. */
 function actorsBack(ruleId, actors, now) {
   const three = (a) => Array.isArray(a) && a.length === 3 && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
   for (const a of Array.isArray(actors) ? actors.slice(0, 64) : []) {
     if (!a || typeof a.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,23}$/.test(a.id) || !three(a.at) || !Number.isFinite(a.yaw)) continue
     const was = Number.isInteger(a.was) && three(a.home) && !taken.has(a.was) ? a.was : undefined
-    const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: typeof a.name === 'string' ? text(a.name, 24) : a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(140, a.pace)) } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
+    const p = { by: `${ruleId}/${a.id}`, short: a.id, rule: ruleId, name: typeof a.name === 'string' ? text(a.name, 24) : a.id, seat: true, at: [...a.at], yaw: a.yaw, goal: Array.isArray(a.goal) && a.goal.length === 2 && a.goal.every(Number.isFinite) ? a.goal : null, stopped: '', down: 0, flinch: 0, last: now, told: 0, ...(Number.isFinite(a.pace) ? { pace: Math.max(0, Math.min(PACE_MOST, a.pace)) } : {}), ...(canKept(a.can) ? { can: canKept(a.can) } : {}), ...(a.aloft === true ? { aloft: true } : {}), ...(was !== undefined ? { was, home: [...a.home], stride: 0 } : {}) }
     if (a.look && typeof a.look === 'object') p.look = lookOf(a.look)
     // A move it was held in (sitting, aiming, going round and round): it is in it still, at its end.
     const move = a.move && typeof a.move === 'object' ? moveOf(typeof a.move.name === 'string' ? a.move.name : a.move.keys) : null
@@ -441,14 +443,14 @@ const ACTOR_ID = /^[a-z0-9][a-z0-9-]{0,23}$/, COLOUR = /^#[0-9a-f]{6}$/
 /** The most actors a rule may have, the most it may want done in one answer, the most people it is told of. */
 const ACTORS_MOST = 64, WANTS_MOST = 64, PEOPLE_MOST = 256
 /** The fastest an actor may go, cells a second (a walk is 13), and the most a rule's actors may say a second. */
-const PACE_MOST = 140, SAYS_A_SECOND = 8
+const PACE_MOST = CAN.pace[1], SAYS_A_SECOND = 8
 const pair = (a) => Array.isArray(a) && (a.length === 2 || a.length === 3) && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
 /** Who is there, as a rule is told it: its own actors by the names it gave them, anyone else by the name the world knows them by. */
 function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(grasp?.of(p.by) ? { holds: grasp.of(p.by) } : {}), ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(grasp?.of(p.by) ? { holds: grasp.of(p.by) } : {}), ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.can ? { can: { ...p.can } } : {}), ...(p.aloft ? { aloft: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
@@ -510,15 +512,23 @@ does.set('actor', (rule, w, now, wrong) => {
       if (mine >= ACTORS_MOST) { wrong(`a rule may have ${ACTORS_MOST} actors`); return }
       p = { by, short: id, rule: rule.id, name: id, seat: true, at: [x, feet, z], yaw: Math.PI, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0 }
       folk.set(by, p)
-    } else { p.at = [x, feet, z]; p.goal = null; p.path = undefined; p.stopped = '' }
+    } else { p.at = [x, feet, z]; p.goal = null; p.path = undefined; p.stopped = ''; p.leap = p.scales = p.falls = p.frame = undefined; p.aloft = false }
   }
   // A name is shown over the head; null (or nothing) is no name shown, as a resident has none.
   if (w.name !== undefined) p.name = w.name === null ? '' : text(w.name, 24)
-  if (w.pace !== undefined) { if (Number.isFinite(w.pace)) p.pace = Math.max(0, Math.min(PACE_MOST, w.pace)); else wrong('a pace is a number of cells a second') }
+  if (w.pace !== undefined) { if (Number.isFinite(w.pace)) p.pace = Math.max(0, Math.min(PACE_MOST, w.pace)); else if (w.pace === null) p.pace = undefined; else wrong('a pace is a number of cells a second') }
+  // What else its body can do, by the names and ranges a person's has (rules/bodies.mjs): about.mjs moves it by them.
+  for (const k of ['jump', 'climb', 'fly', 'fall']) {
+    if (w[k] === undefined) continue
+    if (w[k] === null) { if (p.can) { delete p.can[k]; if (!Object.keys(p.can).length) p.can = undefined } }
+    else if (Number.isFinite(w[k])) (p.can ??= {})[k] = Math.max(CAN[k][0], Math.min(CAN[k][1], w[k]))
+    else wrong(`${k} is a number, or null to put it back`)
+    p.path = undefined; p.noWay = undefined
+  }
   if (w.to !== undefined) {
     p.follow = undefined
     if (w.to === null) { p.goal = null; p.path = undefined }
-    else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.stopped = ''; if (p.pathTo && Math.hypot(p.goal[0] - p.pathTo[0], p.goal[1] - p.pathTo[1]) > 8) p.path = undefined } else wrong('where to go is to: [x, z], or null to stop')
+    else if (pair(w.to)) { p.goal = [w.to[0], w.to[w.to.length - 1]]; p.goalY = w.to.length === 3 ? w.to[1] : undefined; p.noWay = undefined; p.stopped = ''; if (p.pathTo && Math.hypot(p.goal[0] - p.pathTo[0], p.goal[1] - p.pathTo[1]) > 8) p.path = undefined } else wrong('where to go is to: [x, z] (or [x, y, z] for one that flies), or null to stop')
   }
   // After someone, or away from them, until told otherwise: whoever world.people names (this rule's own actors by the names it gave them).
   for (const flee of [false, true]) {

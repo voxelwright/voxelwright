@@ -6,12 +6,19 @@
 // hears `near` when a person comes within an actor's reach or into a place it marked, so it need not look
 // every tick.
 //
+// And a body gets about as a person can, by the numbers a rule gives it (`can`: the names and ranges a person's
+// have, rules/bodies.mjs): `climb` cells of wall it goes up, on the wall's face by its own up; `jump` how high it
+// leaps, and with its pace and `fall` how wide a gap; `fly` how fast it goes through the air. One that can jump,
+// climb or fly comes down from any height. With none of them it is as it was: it walks.
+//
 // For world.mjs, which owns the bodies (`folk`) and says what a cell is.
 
 /** How far apart the standing places a way is searched over are (cells), and how many may be looked at in one search: about a tenth of a second of the world's one thread at the very most. */
 const GRID = 4, LOOKED_MOST = 900
 /** How high a body gets up onto something with its hands (cells: a car's bonnet, a wall to the waist), and how long that takes (ms). */
 const HANDS = 10, CLIMB_MS = 550
+/** How far up a wall and down a drop is looked for a place to stand, for a body that climbs or comes down (cells), and the world's pull (cells a second, each second). */
+const FAR_UP = 600, PULL = 98
 /** How long a way that was not found is not looked for again (ms), and how often a body following someone looks again. */
 const NO_WAY_FOR = 3000, AGAIN_AFTER = 700
 /** The furthest an actor's reach and a marked place may go (cells), and the most places a rule may mark. */
@@ -49,19 +56,34 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     }
     return [x, z]
   }
-  /** Where feet come to rest in a column, as `footing` says; or, with the hands, on top of something up to waist-high there. `[feet, climbed]` or null. */
+  // ── What the body being moved can do (set for each step, as `crowd` is) ──
+  const NOTHING = {}
+  let able = NOTHING, going = PACE, mover = null
+  const mind = (p) => { able = p.can ?? NOTHING; going = p.pace ?? PACE; mover = p }
+  /** Whether a body has room at a place: nothing solid from its feet to its head. */
+  const clear = (x, y, z) => { x = Math.round(x); y = Math.round(y); z = Math.round(z); for (let k = 0; k < tall; k++) if (kind(x, y + k, z)) return false; return true }
+  /**
+   * Where feet come to rest in a column, as `footing` says; or, with the hands, on top of something up to
+   * waist-high there; or, for one that climbs, up a wall as high as it climbs; or, for one that jumps, climbs or
+   * flies, down a drop of any height. `[feet, climbed]` or null.
+   */
   const stand = (x, y, z) => {
     const feet = footing(x, y, z)
     if (feet !== null) return [feet, false]
     x = Math.round(x); y = Math.round(y); z = Math.round(z)
-    for (let up = 3; up <= HANDS; up++) {
+    const high = Math.max(HANDS, Math.min(FAR_UP, able.climb ?? 0))
+    for (let up = 3; up <= high; up++) {
       if (!kind(x, y + up - 1, z)) continue
       let room = true
       for (let k = 0; k < tall && room; k++) room = !kind(x, y + up + k, z)
       if (room) return [y + up, true]
     }
+    // Nothing to get up onto: a drop, then. It is stepped off by one who comes down from any height.
+    if ((able.jump || able.climb || able.fly) && clear(x, y, z)) for (let down = 1; down <= FAR_UP; down++) if (kind(x, y - down, z)) return [y - down + 1, false]
     return null
   }
+  /** How far a body leaps along the ground: its pace for as long as its jump keeps it in the air. */
+  const span = () => going * 2 * Math.sqrt(2 * (able.jump ?? 0) / (PULL * Math.max(0.05, able.fall ?? 1)))
   /** Whether a body can go straight from a place to another, a cell at a time, without its hands; and the height it arrives at. */
   const straight = (from, to, most = 60) => {
     const dx = to[0] - from[0], dz = to[1] - from[2], far = Math.hypot(dx, dz)
@@ -87,7 +109,28 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
       let y = n.y, cost = 0
       const steps = di && dj ? Math.round(GRID * 1.414) : GRID
       for (let s = 1; s <= steps; s++) { const x = x0 + (n.i + di * s / steps) * GRID, z = z0 + (n.j + dj * s / steps) * GRID, at = stand(x, y, z); if (!at || pressed(x0 + (n.i + di * (s - 1) / steps) * GRID, z0 + (n.j + dj * (s - 1) / steps) * GRID, x, z, APART + 1)) return null; y = at[0]; cost += at[1] ? 30 : 0 }
-      return { y, cost: cost + (di && dj ? GRID * 1.414 : GRID) }
+      // Up a wall or down a drop costs its height, so that a street is taken while there is one.
+      return { y, cost: cost + (di && dj ? GRID * 1.414 : GRID) + Math.abs(y - n.y) }
+    }
+    // A leap from a place, straight on: the nearest place further that way it can land on (no higher than it jumps), with nothing in the air between.
+    const leap = (n, di, dj) => {
+      const each = di && dj ? GRID * 1.414 : GRID, most = Math.min(60, Math.floor(span() / each))
+      let low = null
+      for (let by = 2; by <= most; by++) {
+        const x = x0 + (n.i + di * by) * GRID, z = z0 + (n.j + dj * by) * GRID
+        let y = null
+        for (let up = Math.round(able.jump); up >= -FAR_UP && y === null; up--) { if (!kind(x, n.y + up - 1, z)) continue; if (clear(x, n.y + up, z)) y = n.y + up; else break }
+        // (Not where somebody stands.)
+        if (y === null || blocked(x, z, mover, y)) continue
+        // The air between, at the height of the higher end and a little over.
+        const over = Math.max(n.y, y) + 2
+        for (let s = 1; s < by * GRID; s++) if (!clear(x0 + (n.i + di * s / GRID) * GRID, over, z0 + (n.j + dj * s / GRID) * GRID)) return low
+        const found = { by, y, cost: by * each * 1.2 + Math.abs(y - n.y) }
+        // The floor of the gap is a place to land too, but the far side is looked for first.
+        if (y < n.y - HANDS) { low ??= found; continue }
+        return found
+      }
+      return low
     }
     while (open.length && looked < LOOKED_MOST) {
       let at = 0
@@ -103,6 +146,15 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
         const k = key(n.i + di, n.j + dj), old = seen.get(k)
         if (old?.shut) continue
         const e = edge(n, di, dj)
+        // No step that way, or only a long way down. One that jumps may leap it: over a gap to the next place it can land.
+        if (able.jump && (!e || n.y - e.y > HANDS)) leapt: {
+          const l = leap(n, di, dj)
+          if (!l) break leapt
+          const lk = key(n.i + di * l.by, n.j + dj * l.by), was = seen.get(lk), lg = n.g + l.cost
+          if (was?.shut || (was && was.g <= lg) || Math.abs(n.i + di * l.by) > 500 || Math.abs(n.j + dj * l.by) > 500) break leapt
+          const over = { i: n.i + di * l.by, j: n.j + dj * l.by, y: l.y, g: lg, f: lg + 1.3 * h(n.i + di * l.by, n.j + dj * l.by), back: n, shut: false, leapt: true }
+          seen.set(lk, over); open.push(over)
+        }
         if (!e) continue
         const g = n.g + e.cost
         if (old && old.g <= g) continue
@@ -114,7 +166,8 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     way.spent = looked
     if (h(best.i, best.j) > h(0, 0) - GRID * 2) return null
     const out = []
-    for (let n = best; n.back; n = n.back) out.unshift([x0 + n.i * GRID, z0 + n.j * GRID])
+    // A place that is leapt to says so, and how high it is.
+    for (let n = best; n.back; n = n.back) out.unshift(n.leapt ? [x0 + n.i * GRID, z0 + n.j * GRID, n.y] : [x0 + n.i * GRID, z0 + n.j * GRID])
     // The end itself, if the last place has it in a straight line.
     const last = out[out.length - 1], lastY = best.y
     if (Math.hypot(to[0] - last[0], to[1] - last[1]) <= GRID * 1.5 && straight([last[0], lastY, last[1]], to, GRID * 2) !== null) out.push([to[0], to[1]])
@@ -129,7 +182,8 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
   function towards(p, now) {
     const f = p.follow, them = folk.get(f.by)
     if (!them) { p.follow = undefined; p.goal = null; p.path = undefined; p.stopped = 'whoever it followed is gone'; return }
-    const dx = them.at[0] - p.at[0], dz = them.at[2] - p.at[2], far = Math.hypot(dx, dz) || 1
+    // One that flies follows through the air: how far off they are is measured with the height.
+    const flies = !!p.can?.fly, dx = them.at[0] - p.at[0], dy = flies ? them.at[1] - p.at[1] : 0, dz = them.at[2] - p.at[2], far = Math.hypot(dx, dy, dz) || 1
     let goal = null
     // Following: up to `keep` cells of them, and no nearer. Keeping away: off along the line from them until `keep` cells lie between.
     // (Never nearer than two bodies can stand.)
@@ -139,7 +193,7 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
     if (!goal) { if (p.goal) { p.goal = null; p.path = undefined } if (!f.flee) p.yaw = Math.atan2(dx, -dz); return }
     // The way it was on is good while they have not gone far from where it led.
     if (p.path && p.pathTo && Math.hypot(goal[0] - p.pathTo[0], goal[1] - p.pathTo[1]) > 16 && now - (p.pathAt ?? 0) > AGAIN_AFTER) p.path = undefined
-    p.goal = goal; p.stopped = ''
+    p.goal = goal; p.goalY = flies && !f.flee ? them.at[1] - dy / far * keep : undefined; p.stopped = ''
   }
 
   /**
@@ -148,12 +202,40 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
    */
   function step(p, now, tick) {
     if (p.follow) towards(p, now)
-    if (!p.goal || p.down > now || (p.climbs ?? 0) > now) return false
+    if (p.down > now || (p.climbs ?? 0) > now) return false
+    mind(p)
+    const dt = 0.1 * (rate?.() ?? 1)
+    // In the air: a leap is an arc from where it left to where it lands.
+    if (p.leap) {
+      const l = p.leap, t = Math.min(1, (l.t += dt) / l.long)
+      p.at = [l.from[0] + (l.to[0] - l.from[0]) * t, l.from[1] + (l.to[1] - l.from[1]) * t + 4 * l.high * t * (1 - t), l.from[2] + (l.to[2] - l.from[2]) * t]
+      if (t >= 1) { p.at = [...l.to]; p.leap = undefined; p.aloft = false }
+      return true
+    }
+    // Up a wall's face, by its own up: its feet on the wall, its head out from it.
+    if (p.scales) {
+      const c = p.scales
+      p.at = [p.at[0], Math.min(c.y, p.at[1] + going * dt), p.at[2]]
+      if (p.at[1] >= c.y) { p.at = [c.x, c.y, c.z]; p.scales = undefined; p.frame = undefined }
+      return true
+    }
+    // Stepped off a height: it falls, as slowly as `fall` says.
+    if (p.falls) {
+      const f = p.falls
+      f.speed += PULL * Math.max(0.05, able.fall ?? 1) * dt
+      p.at = [p.at[0], Math.max(f.y, p.at[1] - f.speed * dt), p.at[2]]
+      if (p.at[1] <= f.y) { p.falls = undefined; p.aloft = false }
+      return true
+    }
+    if (able.fly) return flight(p, dt)
+    // One that flew and no longer does, with nothing under it, comes down.
+    if (p.aloft) { p.frame = undefined; let y = Math.round(p.at[1]); while (y > p.at[1] - FAR_UP && !kind(Math.round(p.at[0]), y - 1, Math.round(p.at[2]))) y--; p.falls = { y, speed: 0 }; return true }
+    if (!p.goal) return false
     gather(p, 90 + (p.pace ?? PACE))
     // By the world's clock, which a rule may slow or quicken (rules/bodies.mjs).
     for (let left = (p.pace ?? PACE) / 10 * (rate?.() ?? 1); left > 0 && p.goal;) {
       // A way's next place is cut out when the one after can be walked to straight: the body does not zigzag a grid.
-      if (p.path?.length > 1 && straight(p.at, p.path[1], 48) !== null) p.path.shift()
+      if (p.path?.length > 1 && p.path[0].length < 3 && p.path[1].length < 3 && straight(p.at, p.path[1], 48) !== null) p.path.shift()
       const to = p.path?.length ? p.path[0] : p.goal
       const dx = to[0] - p.at[0], dz = to[1] - p.at[2], far = Math.hypot(dx, dz), stride = Math.min(far, left, PACE / 10)
       left -= stride
@@ -166,14 +248,30 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
         if (p.short_of) { p.stopped = p.short_of; p.short_of = undefined; p.goal = null; break }
         continue
       }
+      // The next place of its way is leapt to: off it goes, for as long as its pace takes to cross.
+      if (p.path?.length && to.length === 3) {
+        const rise = to[2] - p.at[1], long = Math.max(0.3, far / going)
+        p.leap = { from: [...p.at], to: [to[0], to[2], to[1]], t: 0, long, high: Math.max(3, Math.min(able.jump ?? 7, far / 3), rise > 0 ? rise * 0.4 + 2 : 0) }
+        p.yaw = Math.atan2(dx, -dz); p.aloft = true; p.pressed = 0
+        p.move = { n: (p.move?.n ?? 0) + 1, since: now, name: 'jump', long: Math.max(0.6, long), stays: false }
+        p.path.shift(); if (!p.path.length) { p.path = undefined; if (Math.hypot(p.goal[0] - to[0], p.goal[1] - to[1]) < GRID * 1.5) p.goal = null }
+        break
+      }
       const x = p.at[0] + dx / far * stride, z = p.at[2] + dz / far * stride
       // On a way it may use its hands; walking straight it does not, and looks for a way when its feet are stopped.
       const who = crowd.length ? pressed(p.at[0], p.at[2], x, z) : null
-      const feet = p.path || who ? null : footing(x, p.at[1], z), at = who ? null : p.path ? stand(x, p.at[1], z) : feet === null ? null : [feet, false]
+      const feet = p.path || who ? null : footing(x, p.at[1], z)
+      // (One that jumps does not just walk off a long step down: it looks for a way, which may be a leap.)
+      const at = who ? null : p.path ? stand(x, p.at[1], z) : feet === null || (able.jump && p.at[1] - feet > HANDS) ? null : [feet, false]
       // Someone stands where it was going: it stops short of them, and says who.
       if (who && Math.hypot(p.goal[0] - who.at[0], p.goal[1] - who.at[2]) < APART + 2) { p.stopped = `${who.name || 'someone'} is standing where you were going: stopped beside them`; p.goal = null; p.path = undefined; break }
       if (at) {
-        p.at = [x, at[0], z]; p.yaw = Math.atan2(dx, -dz); p.pressed = 0
+        p.yaw = Math.atan2(dx, -dz); p.pressed = 0
+        // A wall higher than hands reach: up its face, a pace at a time, turned so that the wall is its floor.
+        if (at[0] - p.at[1] > HANDS) { p.scales = { x, y: at[0], z }; p.frame = lean(p.yaw, -Math.PI / 2); break }
+        // A drop deeper than a step down: off the edge, and it falls.
+        if (p.at[1] - at[0] > 30) { p.at = [x, p.at[1], z]; p.falls = { y: at[0], speed: 0 }; p.aloft = true; break }
+        p.at = [x, at[0], z]
         // Up onto something with the hands: a moment's climb, and it looks like one.
         if (at[1]) { p.climbs = now + CLIMB_MS; p.move = { n: (p.move?.n ?? 0) + 1, since: now, name: 'climb', long: 0.7, stays: false }; break }
         continue
@@ -202,6 +300,47 @@ export function about({ folk, footing, kind, tall, pace: PACE, say, hear, rate }
       break
     }
     return true
+  }
+
+  /** A turn (x, y, z, w) that leans a body forward by so much, the way it faces. */
+  const lean = (yaw, by) => [-Math.cos(yaw) * Math.sin(by / 2), 0, -Math.sin(yaw) * Math.sin(by / 2), Math.cos(by / 2)]
+  /**
+   * A tenth of a second of flying: straight through the air to where it is going (a place with a height, or over
+   * a place on the ground and then down onto it); over what is in the way, by rising. Still, it stays where it is.
+   */
+  function flight(p, dt) {
+    const under = () => kind(Math.round(p.at[0]), Math.round(p.at[1]) - 1, Math.round(p.at[2])) !== 0
+    p.aloft = !under()
+    if (!p.goal) { if (p.frame) { p.frame = undefined; return true } return false }
+    gather(p, 90 + able.fly)
+    let moved = false
+    for (let left = able.fly * dt; left > 0;) {
+      const dx = p.goal[0] - p.at[0], dz = p.goal[1] - p.at[2], flat = Math.hypot(dx, dz), stride = Math.min(left, 1)
+      left -= stride
+      // Over a place on the ground: down onto it.
+      if (p.goalY === undefined && flat < 0.7) {
+        if (under()) { p.goal = null; p.aloft = false; break }
+        // Somebody stands under it: it does not come down into them. It stays over them, and says who.
+        const on = blocked(p.at[0], p.at[2], p, p.at[1] - stride)
+        if (on) { p.stopped = `${on.name || 'someone'} is standing where you were going: stopped over them`; p.goal = null; break }
+        p.at = [p.at[0], p.at[1] - stride, p.at[2]]; moved = true; continue
+      }
+      const dy = p.goalY === undefined ? 0 : p.goalY - p.at[1], far = Math.hypot(dx, dy, dz)
+      if (far < 0.7) { p.goal = null; break }
+      const step = Math.min(stride, far), next = [p.at[0] + dx / far * step, p.at[1] + dy / far * step, p.at[2] + dz / far * step]
+      const level = flat > 0.01 ? [p.at[0] + dx / flat * step, p.at[1], p.at[2] + dz / flat * step] : null
+      const who = pressed(p.at[0], p.at[2], next[0], next[2])
+      if (who && Math.hypot(p.goal[0] - who.at[0], p.goal[1] - who.at[2]) < APART + 2) { p.stopped = `${who.name || 'someone'} is where you were going: stopped beside them`; p.goal = null; break }
+      // Straight; or level, when straight is into what is below; or up, over what is in the way.
+      const to = !who && clear(...next) ? next : !who && level && clear(...level) ? level : clear(p.at[0], p.at[1] + step, p.at[2]) ? [p.at[0], p.at[1] + step, p.at[2]] : null
+      if (!to) { p.stopped = `${say(next[0], next[1], next[2])}, and no way over it: ${Math.round(far)} cells short of where you were going`; p.goal = null; break }
+      if (flat > 0.01) p.yaw = Math.atan2(dx, -dz)
+      p.at = to; moved = true
+    }
+    p.aloft = !under()
+    // Going along, it leans into the way it goes; hanging in the air or landed, it is upright.
+    p.frame = p.goal && p.aloft && Math.hypot(p.goal[0] - p.at[0], p.goal[1] - p.at[2]) > 6 ? lean(p.yaw, 1.15) : undefined
+    return moved || !p.goal
   }
 
   // ── Near ──

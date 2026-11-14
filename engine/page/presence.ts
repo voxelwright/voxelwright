@@ -79,8 +79,8 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       o.pace += (pace - o.pace) * Math.min(1, dt * 6)
       // A runner's stride is longer than a walker's: the feet stay where they are put at any pace.
       o.stride += moved / strideAt(o.pace)
-      // It walks when it is moving along the ground at about a walk, whoever moves it. A body the world moves may run (a rule's actor, to 14 m/s); a page faster than a walk is flying.
-      o.walking += ((pace > 3 && pace < (o.who.seat ? 160 : 60) ? 1 : 0) - o.walking) * Math.min(1, dt * 8)
+      // It walks when it is moving along the ground at about a walk, whoever moves it. A body the world moves may run (a rule's actor, to 40 m/s) and is not walking while it is in the air; a page faster than a walk is flying.
+      o.walking += ((pace > 3 && pace < (o.who.seat ? 420 : 60) && !o.who.aloft ? 1 : 0) - o.walking) * Math.min(1, dt * 8)
       o.down += ((o.who.down ? 1 : 0) - o.down) * Math.min(1, dt * (o.who.down ? 7 : 2.2))
       o.flinch += ((o.who.flinch ? 1 : 0) - o.flinch) * Math.min(1, dt * (o.who.flinch ? 14 : 3))
       moved_(o)

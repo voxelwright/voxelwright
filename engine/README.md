@@ -358,7 +358,9 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   house (no way) 900 places in 27 ms, and not looked for again for three seconds. `node test/about.mjs`. Bodies the world moves do not
   pass through a person or each other: they go round, stop beside whoever stands at the goal and say who
   (`stopped`), and are placed a step aside when a place is taken. `node test/apart.mjs`. Someone whose down is not the world's
-  (on a wall) is drawn standing by their own up on everyone's page: `node test/upright.mjs`.
+  (on a wall) is drawn standing by their own up on everyone's page: `node test/upright.mjs`. An actor takes the numbers
+  a person takes (`world.actor(id, {jump, climb, fly, fall})`): it goes up a wall's face, leaps from a roof to the
+  next, flies to a place in the air or after someone, and comes down from any height. `node test/able.mjs`.
 - **A rule can take a resident of the town as its own** (#218). `world.residents` is who of the town's own people
   is within 32 m of someone, by ids that stay the same; `world.actor(id, {take: residentId})` makes that one the
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
