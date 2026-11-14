@@ -272,6 +272,11 @@ on foot as they do flying.
   (`here`); the person's own page, which draws its own figure, is told with the numbers (frame 12, `figure`) and
   starts the move when it hears. A move is how a body looks: it strikes nobody. Taken out, the rule's look and
   move go. In the console, alone: `engine.me.limbs = {move: {n: 1, name: 'kick'}, look: {wear: ['coat']}}`.
+- **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
+  that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
+  at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is
+  not drawn in its way. For this the page's own thread's core is told of every edit (`tellCore` in `main.ts`), so
+  `world_kind` there answers for what was built and broken too. `engine.me.back` says how far back the eye is.
 - **A slowed world, tried**: with the clock at a quarter and the one who asked spared, she walks at 1.4 m/s as she
   did while the other page's person walks at 0.33, and what falls, drives, burns and flows goes at a quarter with its
   dust. The eye still turns freely for everyone. Not slowed: the town's residents (they go by the wall clock, the

@@ -378,7 +378,10 @@ async function main() {
   let flames = new Float32Array(0)
   /** While a step is taken into a world whose sectors are already held (#264, the portal): they were made with these very edits. */
   let adopted = false
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words) }
+  // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
+  // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
+  const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
+  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -515,7 +518,7 @@ async function main() {
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
   const shadow = far ? new Worker('/page/mover.ts', { type: 'module' }) : null
-  const me = person({ send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
+  const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
   controls.always('KeyB', () => { me.walk(!me.on); return true })
   // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is

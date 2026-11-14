@@ -38,6 +38,9 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
 const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
+/** How near what stands the eye behind comes (cells), and how near its own head before its figure is in its way and is not drawn. */
+const CLEAR = 3, NEAR = 9
+
 /** No move at all: what a body comes to rest in. */
 const REST: Move = { keys: [{ t: 0 }], hold: true }
 
@@ -65,6 +68,8 @@ export interface Me {
   limbs: Limbs
   /** The figure as it is drawn (people.ts), whether or not it is in view. */
   readonly figure: Person
+  /** How far behind the head the eye is now (cells): all the way, or as far as there is room. */
+  readonly back: number
   /** A blow: so much speed given to the body at once (cells a second). Nothing if it is not on its feet. */
   push(speed: readonly [number, number, number]): void
   /** Puts the body on the ground for so many seconds: it does not walk meanwhile. None gets it up. */
@@ -80,6 +85,8 @@ export function person(o: {
   wake(): void
   /** Whether the core is the body's own, so that this asks it for steps itself. */
   own: boolean
+  /** What a cell of the world is made of (0: nothing), as this page has it: for keeping the eye out of what stands. */
+  kind?: (x: number, y: number, z: number) => number
   input: Input
   hud: Hud
   /** The eye: metres, and which way it looks. */
@@ -97,6 +104,11 @@ export function person(o: {
   const tilted = () => Math.abs(frame[3]) < 0.9999
   // Where the body is as the core last said (its middle of mass), and where the eye's height has got to.
   let at: [number, number, number] | null = null, com = [2, 7, 1.5], eyeY = 0
+  // The eye behind: how far back it is of what it would be (0 to 1). Something in the way brings it in at once; it
+  // goes out again slowly, so that passing a lamp post is not a lurch there and back.
+  let room = 1, backNow = 0
+  /** What the eye cannot be in or see through: all that stands but water and leaves. */
+  const stands = (x: number, y: number, z: number) => { const k = (o.kind?.(Math.floor(x), Math.floor(y), Math.floor(z)) ?? 0) & 15; return k !== 0 && k !== 5 && k !== 13 }
   // Which way it faces (the core's heading: its front at cos, 0, sin), a jump still to ask, and its walk for the drawing.
   let heading = 0, jump = false, stride = 0, speed = 0, walking = 0
   let downUntil = 0, lying = 0
@@ -119,7 +131,7 @@ export function person(o: {
   const part = (d: Under, now: number): Doing => ({ move: d.move, t: now - d.since, aim: d.aim })
   o.folk.from.push((_view, seconds) => {
     // In the head nobody sees their own figure; on a wall the eye is in the head (below). The figure itself stands by its own up.
-    if (!on || !at || view === 'head' || tilted()) return []
+    if (!on || !at || view === 'head' || tilted() || backNow < NEAR) return []
     const now = performance.now() / 1000, d = turned(frame, [0, -(com[1] + LEG), 0])
     Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
     return [shown]
@@ -156,6 +168,7 @@ export function person(o: {
     get limbs() { return limbs },
     set limbs(l) { limbs = l; moved() },
     get figure() { return shown },
+    get back() { return backNow },
     get can() { return can },
     set can(c) { const next = { ...AS_IT_IS, ...c }; if (JSON.stringify(next) === JSON.stringify(can)) return; can = next; tellCan() },
     push(speed) { if (id) { o.send({ kick: { id, speed: [speed[0], speed[1], speed[2]] } }); o.wake(); awake = true } },
@@ -230,9 +243,20 @@ export function person(o: {
         // Behind: back from the head, over it, and a little to the right, so that what is aimed at is not behind one's own head.
         // On a wall the eye is in the head: behind and above, it would be inside the wall or the ground as often as not (nothing keeps the eye out of what is solid).
         const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
-        o.pose.x = (head[0] + up[0] * over - look[0] * back + right[0] * aside) / M
-        o.pose.y = (head[1] + up[1] * over - look[1] * back + right[1] * aside) / M
-        o.pose.z = (head[2] + up[2] * over - look[2] * back + right[2] * aside) / M
+        const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
+        // Not through a wall: from the head out to where the eye would be (and a little past, for the picture's near
+        // edge), the first thing that stands is as far as it goes, less that little. With no room at all it is in the head.
+        let free = 1
+        if (far > 0) for (let s = 1; s <= far + CLEAR; s += 0.5) if (stands(head[0] + off[0] / far * s, head[1] + off[1] / far * s, head[2] + off[2] / far * s)) { free = Math.max(0, s - CLEAR) / far; break }
+        // And nothing stands close beside where that leaves it: a wall met at a slant was a cell from the eye, and the
+        // picture's near edge cut into it.
+        const tight = (r: number) => { const x = head[0] + off[0] * r, y = head[1] + off[1] * r, z = head[2] + off[2] * r; return stands(x + 2, y, z) || stands(x - 2, y, z) || stands(x, y + 2, z) || stands(x, y - 2, z) || stands(x, y, z + 2) || stands(x, y, z - 2) }
+        while (free > 0 && far > 0 && tight(free)) free = Math.max(0, free - 1 / far)
+        room = free < room ? free : Math.min(free, room + dt * 1.5)
+        backNow = inHead ? 0 : far * room
+        o.pose.x = (head[0] + off[0] * room) / M
+        o.pose.y = (head[1] + off[1] * room) / M
+        o.pose.z = (head[2] + off[2] * room) / M
       }
       return true
     },

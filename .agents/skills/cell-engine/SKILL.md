@@ -2011,6 +2011,11 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
 - Round an edge the body needs up-speed and way on given to it: carried speed alone works at a run and fails at a
   walk (rose one cell, fell, climbed again, for ever). The page check walks; the native test ran. Test both paces.
 - A ray that starts inside the standing world says 0: a look for the next face must want `far > 0`.
+- The page's own thread's core knew the town but no edits (those went to the mover only), so `core.world_kind` on the
+  page said air where a wall had been built. It is told every edit now (`tellCore`, in `change`); anything on the page
+  that must answer in the same frame (the eye behind a person) asks it, not the mover.
+- A line from the head to the eye is not enough to keep the eye out of a wall: met at a slant, the wall was under a cell
+  from the eye and the near edge of the picture cut into it. Ask round the eye as well.
 
 ## Moves and looks as data (#218 for #264, November 13)
 

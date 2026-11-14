@@ -150,6 +150,33 @@ try {
   for (let i = 0; i < 40 && !(wim && Math.hypot(wim.at[0] - hers.at[0], wim.at[2] - hers.at[2]) < 30); i++) { await ada.waitForTimeout(500); wim = (await (await fetch(`${server.url}/world/around?by=watcher`)).json()).people.find((p) => p.name === 'Wim') }
   check(wim && Math.hypot(wim.at[0] - hers.at[0], wim.at[2] - hers.at[2]) < 30, `a rule finds her by her feet: its actor has walked up to her (${wim ? (Math.hypot(wim.at[0] - hers.at[0], wim.at[2] - hers.at[2]) / 10).toFixed(1) : '?'} m off)`)
   if (out) await ben.screenshot({ path: join(out, 'followed.png') })
+  // ── The eye behind does not pass through walls ──
+  const walled = await open('')
+  await down(walled)
+  await walled.waitForFunction(() => globalThis.engine.me.feet, null, { timeout: 10_000 })
+  await settled(walled)
+  await walled.waitForTimeout(600)
+  const open_ = await walled.evaluate(() => globalThis.engine.me.back)
+  // A ball of brick 2.8 m across, 1.4 m behind her head (she looks east; the eye behind is to her west).
+  const face = await walled.evaluate(() => { const e = globalThis.engine, f = e.me.feet.at; e.set([Math.round(f[0]) - 28, Math.round(f[1]) + 14, Math.round(f[2])], 14, 8); return Math.round(f[0]) - 28 + 14 })
+  await walled.waitForTimeout(700)
+  const eyeNow = () => walled.evaluate(() => { const e = globalThis.engine, p = e.pose, at = [p.x * 10, p.y * 10, p.z * 10]; return { at, back: e.me.back, kind: e.kind ? 0 : 0, feet: e.me.feet.at, drawn: e.folk.from.flatMap((f) => f(e.view(), 0)).some((q) => q === e.me.figure) } })
+  const shut = await eyeNow()
+  if (out) await walled.screenshot({ path: join(out, 'eye-wall.png') })
+  const off = Math.hypot(shut.at[0] - (face - 14), shut.at[1] - (shut.feet[1] + 14), shut.at[2] - shut.feet[2]) - 14
+  check(open_ > 30 && off > 1 && shut.back > 4 && shut.back < 25, `with a ball of brick ${((shut.feet[0] - face) / 10).toFixed(1)} m behind her the eye behind stays this side of it (${(shut.back / 10).toFixed(1)} m back, ${(off / 10).toFixed(2)} m off the brick; ${(open_ / 10).toFixed(1)} m back in the open)`)
+  // Backed right up to it, there is no room behind: the eye is in her head and her own figure is not in its way.
+  await walled.evaluate(() => { globalThis.engine.pose.yaw = Math.PI / 2 })
+  await walled.keyboard.down('KeyS'); await walled.waitForTimeout(1500); await walled.keyboard.up('KeyS')
+  await walled.waitForTimeout(400)
+  const against = await eyeNow()
+  if (!(against.at[0] > face + 1 && against.back < 9 && !against.drawn)) console.log('  against:', JSON.stringify(against), 'face', face)
+  check(against.at[0] > face + 1 && against.back < 9 && !against.drawn, `backed up against it (${((against.feet[0] - face) / 10).toFixed(1)} m off) the eye is at her head (${(against.back / 10).toFixed(1)} m back) and her own figure is not drawn in its way`)
+  // Away from it, the eye goes back out.
+  await walled.keyboard.down('ShiftLeft'); await walled.keyboard.down('KeyW'); await walled.waitForTimeout(1800); await walled.keyboard.up('KeyW'); await walled.keyboard.up('ShiftLeft')
+  await walled.waitForTimeout(1200)
+  const away = await eyeNow()
+  check(away.back > 30 && away.drawn, `run clear of it, the eye is behind her again (${(away.back / 10).toFixed(1)} m back) and she is drawn`)
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }
