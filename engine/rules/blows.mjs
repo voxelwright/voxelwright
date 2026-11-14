@@ -59,7 +59,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
     told(born)
     core.living_kick(body, dir[0] * speed, dir[1] * speed, dir[2] * speed)
     core.living_end(body)
-    thrown.set(body, { rule, from: thrower.by, t: now, hit: new Set(), tag })
+    thrown.set(body, { rule, from: thrower.by, t: now, hit: new Set(), tag, thing: g.thing, called: g.called })
     return ''
   }
   /** A person as a rule names them: an actor of its own by the id it gave, anyone else by their name in the world. */
@@ -136,7 +136,7 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
           thrown.get(other)?.hit.add(hit)
           const from = thrown.get(other), living = thing(other), kind = words[at + (hit === a ? 8 : 7)]
           const thrower = from?.from && folk.get(from.from)
-          const by = from ? { kind: 'thrown', rule: from.rule, ...(thrower ? { from: who(thrower) } : {}), material: MATERIALS[kind & 15] } : living ? { kind: 'thing', id: living } : { kind: 'loose', material: MATERIALS[kind & 15] }
+          const by = from ? { kind: 'thrown', rule: from.rule, ...(thrower ? { from: who(thrower) } : {}), material: MATERIALS[kind & 15], ...(from.thing ? { thing: from.thing, called: from.called } : {}), ...(from.tag ? { tag: from.tag } : {}) } : living ? { kind: 'thing', id: living } : { kind: 'loose', material: MATERIALS[kind & 15] }
           const where = [f[at + 2], f[at + 3], f[at + 4]]
           const e = { whom: who(p), by, speed: Math.round(f[at + 5]), push: Math.round(f[at + 6]), at: where.map(Math.round), up: Math.max(0, Math.min(1, (where[1] - p.at[1]) / BOX[1])) }
           // An actor's own rule hears of it with the id it gave; everyone hears of a person or a seat.

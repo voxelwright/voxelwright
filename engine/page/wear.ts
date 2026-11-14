@@ -8,7 +8,8 @@ import { chance } from './residents.ts'
 
 /** The parts of a body a box can be on: it turns with that part. The hands' boxes are told from the hand, with -y along the forearm and out past the fingers. */
 export const PARTS = ['head', 'chest', 'hip', 'handR', 'handL'] as const
-export type Part = (typeof PARTS)[number]
+/** And one only the engine gives (held.ts): the right hand gripping a thing picked up. Its boxes are told from the fist with -z up out of it, and a figure that has any bends that elbow so the forearm lies level. No rule's look may name it. */
+export type Part = (typeof PARTS)[number] | 'gripR'
 /** A box on a part: where its middle is from the part's own origin and how big it is (cells: 10 cm), and its colour: "#rrggbb", or one of the figure's own (coat, legs, skin, hair, shoes), or "own" for the colour given with the thing's name. */
 export interface Extra { on: Part; at: [number, number, number]; size: [number, number, number]; colour: string; shiny?: boolean }
 /** A thing with a name: its boxes, the colour "own" means unless one is given, and what it changes of the figure itself. */
@@ -99,7 +100,7 @@ function boxes(from: unknown, most: number, hand: boolean): Extra[] {
   const out: Extra[] = []
   for (const b of Array.isArray(from) ? from.slice(0, most) : []) {
     if (!b || typeof b !== 'object') continue
-    const e = b as Extra, on = hand ? 'handR' : PARTS.includes(e.on) ? e.on : null, at = three(e.at, -14, 14), size = three(e.size, 0.1, 14)
+    const e = b as Extra, on = hand ? 'handR' : (PARTS as readonly string[]).includes(e.on) ? e.on : null, at = three(e.at, -14, 14), size = three(e.size, 0.1, 14)
     const colour = typeof e.colour === 'string' && (COLOUR.test(e.colour.toLowerCase()) || ROLES.includes(e.colour)) ? e.colour.toLowerCase() : null
     if (on && at && size && colour) out.push({ on, at, size, colour, shiny: e.shiny === true })
   }

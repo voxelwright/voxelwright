@@ -107,6 +107,15 @@ try {
   await post('act', { by: 'wren', rule: 'stall', id: 'buy', from: [eyes[0], eyes[1], 3960], to: [0, 0, 1] })
   await wait(600)
   check(!(await heard('wren')).some((t) => t.startsWith('Pretzel 2')), 'through a house front the keeper is not met')
+  // At arm's length the one in front is met though the eye's line passes beside them: an eye behind the shoulder, looking past the keeper.
+  await post('walk', { by: 'wren', to: [keeper.at[0], keeper.at[2] + 14] })
+  const close = await until('wren stands by the keeper', async () => { const y = (await get('me?by=wren')).you; return !y.walking && Math.hypot(y.at[0] - keeper.at[0], y.at[2] - keeper.at[2]) < 22 ? y : null }, 20_000)
+  const sold = (await heard('wren')).filter((t) => t.startsWith('Pretzel')).length
+  await post('act', { by: 'wren', rule: 'stall', id: 'buy', from: [close.at[0] + 9, close.at[1] + 22, close.at[2] + 32], to: [0, -0.1, -1] })
+  const near = await until('the keeper sells at arm\'s length', async () => (await heard('wren')).filter((t) => t.startsWith('Pretzel'))[sold])
+  check(Number(/(\d+) cells off/.exec(near)[1]) <= 22, `at arm's length the one in front is met though the eye's line passes beside them, and how far is told from the person, not the eye (${near})`)
+  await post('walk', { by: 'wren', to: [me.at[0], me.at[2]] })
+  await until('wren is back', async () => { const y = (await get('me?by=wren')).you; return !y.walking && Math.hypot(y.at[0] - me.at[0], y.at[2] - me.at[2]) < 6 }, 20_000)
 
   // Held, and for one person alone.
   await post('say', { by: 'robin', text: 'may I wave?' })

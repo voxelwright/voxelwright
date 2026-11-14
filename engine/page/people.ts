@@ -366,6 +366,8 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   P[J.nod] = reading * 0.45 + flinch * 0.4
   // One arm holds an umbrella up, or a phone before the face.
   if (p.umbrella) { P[J.liftR] = 0.25 + flinch * 1.5; P[J.bendR] = 1.75 }
+  // A hand that grips a thing picked up (held.ts) carries it up: the elbow bent, the forearm level, so the thing stands out of the fist where it is seen.
+  else if (extras.some((b) => b.on === 'gripR')) { P[J.liftR] = 0.12 + P[J.liftR] * 0.25; P[J.bendR] = 1.45 + running * 0.2 + flinch * 0.4 }
   else if (reading > 0) { P[J.liftR] = P[J.liftR] * (1 - reading) + reading * 0.35; P[J.bendR] = P[J.bendR] * (1 - reading) + reading * 1.85 }
   let aim = p.move?.aim, going = false
   if (p.move) {
@@ -502,6 +504,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     box(FORE, 0, -1.5, 0, 1.1, 3.2, 1.2, coat, CLOTH)
     if (!far) box(FORE, 0, -3.5, 0, 0.9, 1, 1, hands, SKIN)
     if (extras !== NO_EXTRAS) wornOn(side > 0 ? 'handR' : 'handL', FORE, -3.5)
+    if (side > 0 && extras !== NO_EXTRAS) wornOn('gripR', FORE, -3.5)
     if (holds && p.umbrella) {
       // The shaft stands upright whatever the arm does, and the canopy is eight-sided as near as boxes go.
       child(HELD, FORE, 0, -3.5, 0)

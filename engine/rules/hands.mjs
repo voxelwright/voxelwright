@@ -12,11 +12,13 @@
 
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/, KEY = /^Key[A-Z]$/
 /** Keys that move the body or belong to the page whatever a realm offers. */
-const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG', 'KeyT'])
+const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG', 'KeyT', 'KeyB', 'KeyP'])
 /** The most a rule may offer, the most people one offer may be for, and the most a person may do a second. */
 const OFFERS_MOST = 16, FOR_MOST = 64, ACTS_A_SECOND = 30
 /** How far round its middle a body is met by an aim, cells. */
 const GIRTH = 4
+/** Arm's length, cells: someone this near and in front of the one who does a thing is who it is done at, whatever the eye's own line passes. */
+const ARM = 26
 /** The most a rule may show at once, the most meters and picks in one of them, and how long a line, a label and a pick's word may be. */
 const SHOWS_MOST = 8, METERS_MOST = 4, PICKS_MOST = 6, LINE_MOST = 80, LABEL_MOST = 24
 const COLOUR = /^#[0-9a-f]{6}$/
@@ -124,6 +126,8 @@ export function hands({ folk, tall, look, text, tell, hear, using = () => undefi
     }
     return best
   }
+  /** How far a place is from someone, chest to chest, cells. */
+  const near = (p, at) => Math.hypot(at[0] - p.at[0], at[1] - p.at[1], at[2] - p.at[2])
   return {
     offer,
     /** A rule is gone: so is what it offered. */
@@ -164,6 +168,25 @@ export function hands({ folk, tall, look, text, tell, hear, using = () => undefi
       const e = { by: m.by, name: p.name, action: o.id, phase, at: p.at.map(Math.round), from: m.from.map((v) => Number(v.toFixed(1))), to: m.to.map((v) => Number(v.toFixed(3))) }
       // Aimed or not, the rule is told what was ahead: a wave has someone it was at.
       e.met = meets(m.from, m.to, p, o.rule)
+      // The eye may be behind its person's shoulder, and its line passes beside whoever stands right in front of them:
+      // a blow at under a metre met the street beyond. So with nobody met within arm's length, the nearest body that
+      // near, in front of them and on their level, is who was met.
+      // Not for a look steeply up or down, which is at the sky or the ground; nor through a wall.
+      const flat = Math.hypot(m.to[0], m.to[2])
+      if (flat > 0.7 * Math.hypot(...m.to) && !(e.met && e.met.kind !== 'cells' && near(p, e.met.at) <= ARM)) {
+        let best = null, least = ARM
+        for (const q of folk.values()) {
+          if (q === p || q.gone) continue
+          const dx = q.at[0] - p.at[0], dz = q.at[2] - p.at[2], far = Math.hypot(dx, dz)
+          if (far > least || Math.abs(q.at[1] - p.at[1]) > tall || (far > 3 && (dx * m.to[0] + dz * m.to[2]) / (far * flat) < 0.4)) continue
+          const chest = [p.at[0], p.at[1] + tall * 0.7, p.at[2]], wall = look(chest, [dx / (far || 1), (q.at[1] - p.at[1]) / (far || 1), dz / (far || 1)])
+          if (wall.at && wall.far < far - 1) continue
+          least = far; best = q
+        }
+        if (best) e.met = { kind: best.rule ? 'actor' : best.seat ? 'seat' : 'page', id: best.rule === o.rule ? best.short : best.by, name: best.name, mine: best.rule === o.rule, at: best.at.map(Math.round), far: Math.round(least), up: 0.7 }
+      }
+      // How far off a body is is told from the one who did it, not from an eye that may be three metres behind them.
+      if (e.met && e.met.kind !== 'cells') e.met.far = Math.round(near(p, e.met.at))
       // What was in the hand when it was done: the thing used.
       const inHand = using(m.by)
       if (inHand) e.using = inHand

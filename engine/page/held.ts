@@ -15,26 +15,39 @@ export const boxOf = (rows: ArrayLike<number>): number[] => { const b = [Infinit
 /** Which way a thing is longest (0 x, 1 y, 2 z), which of the other two was up (y, if it is one of them), and the third. */
 const ways = (size: number[]) => { const long = size.indexOf(Math.max(...size)), others = [0, 1, 2].filter((a) => a !== long), up = others.includes(1) ? 1 : others[1]; return { long, up, side: others.find((a) => a !== up)! } }
 
+/** What a grip is not made of: steel, glass and lamp are a blade, a head, a lens, a flame. */
+const HARD = new Set([11, 12, 15])
+
 /**
- * A thing's cells as what a hand carries: up to eight boxes told from the hand, its longest way laid out past the
- * fingers (a figure's -y), each a slice of it in the colour most of that slice is. Drawn at its own size up to
+ * A thing's cells as what a hand carries: up to eight boxes told from the hand, each a slice of its longest way in
+ * the colour most of that slice is. It is held by one end and stands up out of the fist, as a sword, a torch or a
+ * bat is carried (boxes on 'gripR', wear.ts: a figure that has any bends that elbow, so the forearm lies level and the
+ * hand's -z is up), so it is seen from behind, over the shoulder, and by anyone else. The end in the fist is the one that is
+ * less of a blade: of its two outer thirds, the one with less steel, glass and lamp. Drawn at its own size up to
  * 1.4 m long, smaller beyond.
  */
 export function inHand(rows: ArrayLike<number>): Extra[] {
   const b = boxOf(rows), size = [b[3] - b[0], b[4] - b[1], b[5] - b[2]], { long, up, side } = ways(size)
   const scale = Math.min(1, LONG / size[long]), n = Math.max(1, Math.min(BOXES, Math.ceil(size[long] / 2)))
   const slices = Array.from({ length: n }, () => ({ lo: [Infinity, Infinity], hi: [-Infinity, -Infinity], kinds: new Map<number, number>() }))
+  // How much of each end is hard: [cells, hard cells] of the low third and of the high third.
+  const ends = [[0, 0], [0, 0]]
   for (let i = 0; i < rows.length; i += 5) for (let x = rows[i]; x < rows[i + 1]; x++) {
-    const c = [x, rows[i + 2], rows[i + 3]], s = slices[Math.min(n - 1, Math.floor(((c[long] - b[long]) / size[long]) * n))]
+    const c = [x, rows[i + 2], rows[i + 3]], along = (c[long] - b[long]) / size[long], s = slices[Math.min(n - 1, Math.floor(along * n))]
     s.lo[0] = Math.min(s.lo[0], c[side]); s.hi[0] = Math.max(s.hi[0], c[side] + 1); s.lo[1] = Math.min(s.lo[1], c[up]); s.hi[1] = Math.max(s.hi[1], c[up] + 1)
     s.kinds.set(rows[i + 4], (s.kinds.get(rows[i + 4]) ?? 0) + 1)
+    const end = along < 1 / 3 ? ends[0] : along >= 2 / 3 ? ends[1] : null
+    if (end) { end[0]++; if (HARD.has(rows[i + 4] & 15)) end[1]++ }
   }
+  // Held by the high end if that is the less hard one; a thing that stood upright and is alike at both ends is held by its foot.
+  const share = (e: number[]) => (e[0] ? e[1] / e[0] : 1), flip = share(ends[1]) < share(ends[0])
+  if (flip) slices.reverse()
   const out: Extra[] = [], each = (size[long] / n) * scale, mid = [(b[side] + b[side + 3]) / 2, (b[up] + b[up + 3]) / 2], round = (v: number) => Number(v.toFixed(2))
   slices.forEach((s, k) => {
     if (!s.kinds.size) return
     const kind = [...s.kinds].sort((p, q) => q[1] - p[1])[0][0]
-    // A hand's width behind the palm, the rest out past the fingers.
-    out.push({ on: 'handR', at: [round(((s.lo[0] + s.hi[0]) / 2 - mid[0]) * scale), round(1.5 - (k + 0.5) * each), round(-((s.lo[1] + s.hi[1]) / 2 - mid[1]) * scale)], size: [round(Math.max(0.2, (s.hi[0] - s.lo[0]) * scale)), round(Math.max(0.2, each)), round(Math.max(0.2, (s.hi[1] - s.lo[1]) * scale))], colour: hex(kind), shiny: (kind & 15) === 12 || (kind & 15) === 11 })
+    // A hand's width of it under the fist, the rest standing out of it.
+    out.push({ on: 'gripR', at: [round(((s.lo[0] + s.hi[0]) / 2 - mid[0]) * scale), round(-((s.lo[1] + s.hi[1]) / 2 - mid[1]) * scale), round(1 - (k + 0.5) * each)], size: [round(Math.max(0.2, (s.hi[0] - s.lo[0]) * scale)), round(Math.max(0.2, (s.hi[1] - s.lo[1]) * scale)), round(Math.max(0.2, each))], colour: hex(kind), shiny: (kind & 15) === 12 || (kind & 15) === 11 })
   })
   return out
 }

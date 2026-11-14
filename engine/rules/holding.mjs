@@ -87,7 +87,7 @@ export function holding({ folk, kind, hear, seen, want }) {
       held.delete(by)
       if (p) seen(p)
       hear('thrown', { by, name: p?.name ?? by, thing: h.thing, called: h.name, at: (p?.at ?? [0, 0, 0]).map(Math.round) })
-      return { thing: h.thing, rows: h.rows }
+      return { thing: h.thing, called: h.name, rows: h.rows }
     },
     /** Someone is gone: what they held is to be put down where they stood. Returns the ask for it, or nothing. */
     left: (p) => (held.has(p.by) ? { by: p.by, put: held.get(p.by).thing, at: p.at.map(Math.round) } : null),
