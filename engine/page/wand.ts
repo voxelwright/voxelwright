@@ -49,8 +49,9 @@ export interface Wand {
   area: [number, number, number]
   /** What is aimed at now, or null (the sky, or nothing yet). */
   readonly target: Target | null
-  /** The spell in hand, by name: what a click casts. Shown before the aim. */
-  label: string
+  /** What a cast may be: the spell in hand, and whatever a realm offers that is aimed. The wheel turns through them while a point is aimed at; `power` is the one a click casts, and its name is shown before the aim. */
+  powers: readonly { name: string }[]
+  power: number
   /** What it says of the aim, as the bar shows it. */
   readonly says: string
   /** Every edit the page applies, in order: the wand reads the world as it stands. */
@@ -297,6 +298,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
   /** The thing gathered, the cell and share it was gathered for, and the gathering still going on. */
   let thing: Extract<Target, { how: 'thing' }> | null = null, chosen = new Set<number>(), wanted: { cell: Cell; normal: Cell; share: Share } | null = null
   let going: ReturnType<typeof gather> | null = null
+  let powers: readonly { name: string }[] = [], power = 0
   let looking = false, flash = 0, lastFrame = performance.now(), note = ''
   const waiting: (() => void)[] = []
   const pack = (x: number, y: number, z: number) => x + (y + 2048) * 1048576 + z * 4294967296
@@ -396,7 +398,10 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
     get target() { return target() },
     get says() { return says() },
     oncast: null,
-    label: '',
+    get powers() { return powers },
+    set powers(v: readonly { name: string }[]) { const was = powers[power]?.name; powers = v; power = Math.max(0, v.findIndex((p) => p.name === was)) },
+    get power() { return power },
+    set power(v: number) { if (powers.length) power = ((Math.round(v) % powers.length) + powers.length) % powers.length },
     changed(edit) {
       const room = core.edits_room(edit.words.length)
       new Int32Array(core.memory.buffer, room, edit.words.length).set(edit.words)
@@ -448,6 +453,8 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
   const panel = (() => {
     const root = over.panel('wand'), told = document.createElement('div'), row = document.createElement('div'), take = document.createElement('button')
     told.className = 'says'; row.className = 'row'
+    // On a phone there is no wheel: a touch on the line turns to the next thing a cast may be.
+    told.addEventListener('click', () => { self.power = power + 1 })
     const q = document.createElement('i'); q.textContent = 'Q'
     take.append(q, 'Wand'); take.setAttribute('aria-label', 'Take the wand in hand, or put it away')
     take.addEventListener('click', () => { self.held = !held; take.blur() })
@@ -468,7 +475,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
         for (const b of [smaller, bigger]) b.hidden = mode !== 'area'
         gap.hidden = mode === 'point'
       },
-      tell() { const text = `${self.label ? `${self.label} · ` : ''}${says()}`; if (text !== last) told.textContent = last = text },
+      tell() { const text = `${powers[power] ? `${powers[power].name} · ` : ''}${says()}`; if (text !== last) told.textContent = last = text },
     }
   })()
   /** An area made bigger or smaller, all three ways together; `only` picks one way (0 across, 1 deep, 2 high). */
@@ -491,7 +498,8 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
     use() { self.cast(); return true },
     // The wheel sizes an area (with Shift its height alone, with Alt its depth alone) and turns through whole, part and side of a thing.
     wheel(deltaY: number) {
-      if (mode === 'point') return false
+      // A point: the wheel turns through what a cast may be, when there is more than one.
+      if (mode === 'point') { if (powers.length < 2) return false; self.power = power + (deltaY < 0 ? -1 : 1); return true }
       const up = deltaY < 0, shift = keys.held('ShiftLeft') || keys.held('ShiftRight'), alt = keys.held('AltLeft') || keys.held('AltRight')
       if (mode === 'area') resize(up ? 1.12 : 1 / 1.12, shift ? 2 : alt ? 1 : undefined)
       else self.share = SHARES[(SHARES.indexOf(share) + (up ? 1 : SHARES.length - 1)) % SHARES.length]

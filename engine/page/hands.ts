@@ -1,0 +1,85 @@
+// What a realm puts in a person's hands (#264, the HANDS lane): the page's side. The world's rules offer things to
+// do (rules/hands.mjs); here each becomes a key and a button, a phone's to touch, and an aimed one an entry the
+// wand's wheel turns to. Nothing here knows what any of them means: an offer is an id, a word to show and how it
+// is done (tapped or held), and doing one tells the world who did it and which way their eyes looked. What the
+// aim met is the world's to find, not the page's: it knows where everyone stands.
+//
+// The word of an offer is text a rule wrote (and a rule is text someone or their model wrote): it is shown as
+// text, never as markup.
+import type { Hud } from './hud.ts'
+import type { Input } from './input.ts'
+import type { Link, Offer } from './link.ts'
+
+/** An offer as this page has it: with the key it is on. */
+export interface Offered extends Offer { code: string }
+export interface Hands {
+  /** What is offered to this page, each with its key. */
+  readonly offered: readonly Offered[]
+  /** Does one: a tap, or a hold's going down or coming up. */
+  do(offer: Offer, phase?: 'down' | 'up'): void
+  /** Once a frame: a held key that has come up is let go. */
+  frame(): void
+  /** Told whenever what is offered changes. */
+  onchange: (() => void) | null
+}
+
+/** Keys the page gives to offers that asked for none, in order. */
+const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyG', 'KeyV', 'KeyB', 'KeyT', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyP', 'KeyJ', 'KeyN']
+
+export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { from: readonly [number, number, number]; to: readonly [number, number, number] }): Hands {
+  let offered: Offered[] = []
+  /** Holds that are down, by rule and id: a key's, or a finger's. */
+  const down = new Map<string, { offer: Offered; key: boolean }>()
+  const panel = over.panel('offers')
+  const name = (o: Offer) => `${o.rule}/${o.id}`
+  const send = (o: Offer, phase: 'down' | 'up') => { const a = aim(); far?.act(o.rule, o.id, phase, a.from, a.to) }
+  const press = (o: Offered, key: boolean) => { if (down.has(name(o))) return; down.set(name(o), { offer: o, key }); send(o, 'down'); draw() }
+  const lift = (o: Offer) => { if (!down.delete(name(o))) return; send(o, 'up'); draw() }
+  const draw = () => {
+    panel.replaceChildren(...offered.map((o) => {
+      const b = document.createElement('button'), k = document.createElement('kbd')
+      k.textContent = o.code.slice(3)
+      b.append(k, o.word)
+      b.classList.toggle('on', down.has(name(o)))
+      b.setAttribute('aria-label', o.word)
+      if (o.hold) {
+        // Held for as long as the finger or the button is down, wherever it then goes.
+        b.addEventListener('pointerdown', (e) => { e.preventDefault(); b.setPointerCapture(e.pointerId); press(o, false) })
+        for (const end of ['pointerup', 'pointercancel', 'lostpointercapture'] as const) b.addEventListener(end, () => lift(o))
+      } else b.addEventListener('click', () => { send(o, 'down'); b.blur() })
+      return b
+    }))
+    panel.hidden = offered.length === 0
+  }
+  const self: Hands = {
+    get offered() { return offered },
+    onchange: null,
+    do(o, phase) { if (phase === 'up') lift(o); else if (o.hold) { const mine = offered.find((x) => name(x) === name(o)); if (mine) press(mine, false) } else send(o, 'down') },
+    frame() { for (const { offer, key } of [...down.values()]) if (key && !keys.held(offer.code)) lift(offer) },
+  }
+  if (far) far.onoffers = (all) => {
+    // Those for everyone or for this page; each on the key it asked for if that is free, or the next of the page's own.
+    const mine = all.filter((o) => o.to === null || o.to.includes(far.me)), taken = new Set<string>()
+    const next: Offered[] = []
+    for (const o of mine) if (o.key && !taken.has(o.key)) { taken.add(o.key); next.push({ ...o, code: o.key }) } else next.push({ ...o, code: '' })
+    for (const o of next) if (!o.code) { o.code = POOL.find((k) => !taken.has(k)) ?? ''; taken.add(o.code) }
+    // A hold whose offer is gone is let go of without a word: there is nobody to tell.
+    for (const key of [...down.keys()]) if (!next.some((o) => name(o) === key)) down.delete(key)
+    offered = next.filter((o) => o.code)
+    draw()
+    self.onchange?.()
+  }
+  // A key that is offered is the realm's while it is: under the wand's keys, over the page's own.
+  keys.push({
+    name: 'offered',
+    key(code, e) {
+      const o = offered.find((x) => x.code === code)
+      if (!o) return false
+      if (e.repeat) return true
+      if (o.hold) press(o, true); else send(o, 'down')
+      return true
+    },
+  })
+  draw()
+  return self
+}

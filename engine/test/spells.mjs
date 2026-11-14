@@ -112,7 +112,7 @@ try {
   await page.keyboard.type('make it red')
   await page.keyboard.press('Enter')
   await page.waitForTimeout(500)
-  const red = await page.evaluate(() => ({ last: globalThis.engine.magic.last, label: globalThis.engine.wand.label }))
+  const red = await page.evaluate(() => ({ last: globalThis.engine.magic.last, label: globalThis.engine.wand.powers[globalThis.engine.wand.power]?.name }))
   check(red.last?.spell === 'Make it red' && red.last.cells > 0 && red.label === 'Make it red', `typed with the wand in hand, a spell is cast and stays in hand (${red.last?.spell}, ${red.last?.cells} cells)`)
 } catch (e) {
   check(false, `the check ran to its end (${e.message.split('\n')[0]})`)

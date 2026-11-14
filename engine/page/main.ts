@@ -25,6 +25,7 @@ import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
 import { read } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
+import { hands } from './hands.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { flight } from './flight.ts'
@@ -258,6 +259,7 @@ async function main() {
     staff.frame(v)
     ears?.frame(v.eye, pose.yaw, dt)
     magic.step(dt)
+    grip.frame()
     lap('steer')
     fallOn(dt)
     lap('fallOn')
@@ -681,17 +683,28 @@ async function main() {
     ball: smoke.ball, flash: smoke.glint,
   })
   let inHand: Spell = LIBRARY[0]
-  staff.label = inHand.name
+  // What a realm's rules offer to do (hands.ts): keys and buttons, and the aimed ones entries of the wand's wheel
+  // beside the spell in hand.
+  const grip = hands(far, controls, over, () => { const v = view(); return { from: v.eye, to: v.forward } })
+  const casts = () => { staff.powers = [{ name: inHand.name }, ...grip.offered.filter((o) => o.aim).map((o) => ({ name: o.word, offer: o }))] }
+  grip.onchange = casts
+  casts()
   /** Casts a spell at a target, and says why not if it could not be. */
   const spell = (which: Spell, target: Aim | null) => { const why = magic.cast(which, target, view()); if (why) over.notice(why); return why }
-  staff.oncast = (target) => { spell(inHand, target) }
+  staff.oncast = (target) => {
+    const offer = (staff.powers[staff.power] as { offer?: (typeof grip.offered)[number] } | undefined)?.offer
+    if (!offer) { spell(inHand, target); return }
+    grip.do(offer)
+    if (offer.hold) grip.do(offer, 'up')
+  }
   // Words alone that call a known spell are taken before they are a wish; anything else is the making lane's wish.
   over.line.take((ask) => {
     if (!staff.held) return false
     const called = ask.wish && !ask.picture && !ask.link ? known(ask.wish) : null
     if (!called) return false
     inHand = called
-    staff.label = called.name
+    casts()
+    staff.power = 0
     staff.cast()
     return true
   })
@@ -700,7 +713,7 @@ async function main() {
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, get gpuMs() { return gpuMs }, get cpuMs() { return cpuMs }, off, spent, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   // The wand's spells, on a line of their own (#246).
-  Object.assign((globalThis as unknown as { engine: object }).engine, { magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { hands: grip, magic, spell: (words: string, target: Aim | null = staff.target) => { const s = known(words); return s ? spell(s, target) : 'not a known spell' } })
 
   // A thing of finer cells stood beside the world (#259, fine.ts): cells as base64 of 16-bit kinds, its size, where
   // the middle of its foot is (the world's cells), how many of its cells make one of the world's, a turn about y.

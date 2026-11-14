@@ -85,9 +85,10 @@ export function rules({ people, does, obey }) {
     },
     /** A rule is taken out. */
     drop(id) { const rule = all.get(id); if (!rule) return; rule.replaced = true; clearTimeout(rule.timer); void rule.thread?.terminate(); all.delete(id) },
-    /** Something happened: every rule that listens for it is sent it, when it is free. A tick is not kept for a rule still at work on the last one. */
-    happen(event, e) {
+    /** Something happened: every rule that listens for it (or the one rule `only`, if it does) is sent it, when it is free. A tick is not kept for a rule still at work on the last one. */
+    happen(event, e, only) {
       for (const rule of all.values()) {
+        if (only !== undefined && rule.id !== only) continue
         if (rule.stopped || (rule.listens && !rule.listens.has(event))) continue
         if (event === 'tick' && (rule.at?.event === 'tick' || rule.waiting.some((w) => w.event === 'tick'))) continue
         if (rule.waiting.length >= WAITING_MOST) { rule.waiting.shift(); rule.error = `more than ${WAITING_MOST} things waited for the rule: the oldest was left out` }
