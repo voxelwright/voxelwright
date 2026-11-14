@@ -2018,6 +2018,13 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
 - The page's own thread's core knew the town but no edits (those went to the mover only), so `core.world_kind` on the
   page said air where a wall had been built. It is told every edit now (`tellCore`, in `change`); anything on the page
   that must answer in the same frame (the eye behind a person) asks it, not the mover.
+- A rule's call is `world.name(id, {fields})` and answers nothing: a second argument that is not an object is lost
+  (`world.seat(id, thing)` seated nobody; `world.drive(id, null)` was no change). What a rule must know comes in
+  what it is told (`world.people[i].sees`), with a helper in `rules/box.mjs` to read it (`world.sees`).
+- The world's process brings a thing in by emitting an ask to itself (`parentPort.emit('message', {ask})`): it must
+  carry what the server adds to an ask that comes through it, `box` above all, or pages drop the record silently.
+- A person's ghost inside what they ride shoves it: a kart went sideways off the street. Riders have none.
+- Two living things set down overlapping drag each other; it looked like a kart driving backwards.
 - A line from the head to the eye is not enough to keep the eye out of a wall: met at a slant, the wall was under a cell
   from the eye and the near edge of the picture cut into it. Ask round the eye as well.
 

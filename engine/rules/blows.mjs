@@ -69,7 +69,8 @@ export function blows({ core, folk, tell, post, told, happen, hear, thing, blast
   /** Someone was told of: their ghost is put where they stand, or goes with them. */
   function seen(p, now = Date.now()) {
     let ghost = ghosts.get(p.by)
-    if (p.gone) { if (ghost) { core.living_vanish(ghost); ghosts.delete(p.by); whose.delete(ghost); going.delete(p.by) } return }
+    // One who rides has no ghost: it would stand inside what they ride and shove it about (a kart went sideways off the street).
+    if (p.gone || p.riding) { if (ghost) { core.living_vanish(ghost); ghosts.delete(p.by); whose.delete(ghost); going.delete(p.by) } return }
     // How fast they are going, from the last telling to this: no faster than anything goes here, and nothing for a jump from place to place.
     const was = going.get(p.by), dt = was ? (now - was.t) / 1000 : 0
     const v = was && dt > 0.02 && dt < 0.5 ? p.at.map((c, a) => (c - was.at[a]) / dt) : [0, 0, 0], fast = Math.hypot(...v)

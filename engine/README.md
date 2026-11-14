@@ -292,6 +292,13 @@ on foot as they do flying.
   they stand (glass and water are seen through, leaves hide), and in front of the one who looks or within 2.5 m
   (`rules/sight.mjs`). Worked out for pairs with a person at a page or in a seat, at most every 0.4 s: with one
   person and 64 actors in sight that is at most about 115,000 cells asked. Checked by `test/sees.mjs` (no page).
+- **A rule brings a living thing**: `world.thing(id, {like, at, yaw, colour})` sets down one of a small kept set
+  (`rules/kept.mjs`: a kart, a car, a broom; cells, motor, scheme and seats as data) at once, with no model. The
+  world's process asks for it as anyone asks for a made thing (its record and cells in one ask of its own), so it
+  is in the world's file and every page has it. `{like: null}` takes it away; a rule taken out takes all it
+  brought. A thing's `controls` may say `seats` (and `size`): riders sit each in their own, and one too many is
+  refused. A rider has no ghost while seated (it stood inside the kart and shoved it). Checked by
+  `test/brings.mjs` (no page) and the kart in `test/drives.mjs`.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

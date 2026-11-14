@@ -10,8 +10,16 @@
 // where the thing goes, sitting; or someone at a page, whose page gets them on as if they had asked. A page that
 // gets on or off by itself says so. Rules hear `ride` either way, and `world.things` says who is on what.
 //
+// And a rule brings a living thing into the world itself (`world.thing`): one of a small kept set (rules/kept.mjs:
+// a kart, a car, a broom), set down where it says, facing as it says, in a colour; there at once, with
+// no model. It is the rule's to take away again, and goes when the rule does.
+//
 // Other racers, a landing craft, a getaway car are a rule driving living things: nothing here knows those words.
 
+import { KEPT } from './kept.mjs'
+
+/** How many living things a rule may have brought into the world at once. */
+const MADE_MOST = 16
 /** How near someone a living thing must be for a rule to be told of it (cells), how many it is told of, and how many one rule drives. */
 const NEAR = 1500, TOLD_MOST = 32, DRIVEN_MOST = 32
 /** Which way a thing's front points in its own cells, by its motor's `front`. */
@@ -30,8 +38,14 @@ const axis = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, 
  * @param happen something happened that rules may hear
  * @param stand  the height of somewhere to stand at (x, z), or null
  * @param changed  who a rule has seated at a page has changed: their pages are to be told
+ * @param bring  brings a kept thing to life: ({id, rule, thing, low, yaw}) => whether it lives
+ * @param take   takes a living thing out of the world, by its id
  */
-export function things({ alive, folk, drive, tell, happen, stand, changed }) {
+export function things({ alive, folk, drive, tell, happen, stand, changed, bring, take }) {
+  /** By thing: the rule that brought it into the world. */
+  const made = new Map()
+  /** A living thing by the id a rule gives: the world's own, or the rule's own word for one it made. */
+  const find = (rule, id) => (typeof id === 'string' ? alive.get(id) ? id : alive.has(`${rule}-${id}`) ? `${rule}-${id}` : null : null)
   /** By person (the name the world knows them by): the thing they ride, and the rule that put them there, if one did. */
   const seats = new Map()
   const idOf = (p, rule) => (p.rule === rule ? p.short : p.by)
@@ -42,6 +56,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
       seats.delete(by)
       const a = alive.get(was.thing)
       if (p) {
+        p.riding = undefined
         if (p.move?.seat) p.move = undefined
         if (a?.pose && (p.rule || p.seat)) { const x = a.pose.at[0] + 14, z = a.pose.at[2]; p.at = [x, stand(Math.round(x), Math.round(z)) ?? a.pose.at[1], z] }
         tell(p)
@@ -49,10 +64,14 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
       }
     }
     if (thing && p && alive.has(thing) && seats.get(by)?.thing !== thing) {
-      seats.set(by, { thing, rule })
+      seats.set(by, { thing, rule, n: free(thing) })
+      p.riding = thing
       happen('ride', { by: p.by, name: p.name, thing, on: true })
     }
   }
+  /** The first seat of a thing that nobody is in, and whether there is one. */
+  const free = (thing) => { const taken = new Set([...seats.values()].filter((s) => s.thing === thing).map((s) => s.n)); let n = 0; while (taken.has(n)) n++; return n }
+  const room = (thing) => free(thing) < (alive.get(thing)?.controls.seats?.length ?? 1)
   /** Who is on a thing, as a rule is told them. */
   const riders = (thing, rule) => [...seats].filter(([, s]) => s.thing === thing).map(([by]) => folk.get(by)).filter(Boolean).map((p) => idOf(p, rule))
   /** By thing: the rule that drives it and what it asked. */
@@ -68,20 +87,20 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
         const mine = held.get(id)?.rule === rule
         if (far > NEAR && !mine) continue
         const f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), up = turned(a.pose.rot, [0, 1, 0])
-        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
+        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
       }
       return out.sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0) || (a.near ?? Infinity) - (b.near ?? Infinity)).slice(0, TOLD_MOST)
     },
     /** `world.drive(id, {go, turn, rise, jump})`: what a living thing is to do, until told otherwise; {free: true} lets it go. */
     drive(rule, w, now, wrong) {
-      const a = typeof w.id === 'string' ? alive.get(w.id) : null
+      const id = find(rule.id, w.id), a = id && alive.get(id)
       if (!a) return wrong('world.drive is for a living thing: an id of world.things')
-      const was = held.get(w.id)
+      const was = held.get(id)
       if (was && was.rule !== rule.id) return wrong('that living thing is another rule\'s to drive')
-      if (w.free === true) { if (was) { held.delete(w.id); drive(a, 0, 0, 0, false) } return }
+      if (w.free === true) { if (was) { held.delete(id); drive(a, 0, 0, 0, false) } return }
       if (!was && [...held.values()].filter((h) => h.rule === rule.id).length >= DRIVEN_MOST) return wrong(`a rule drives at most ${DRIVEN_MOST} living things at once`)
       const h = { rule: rule.id, go: axis(w.go ?? was?.go), turn: axis(w.turn ?? was?.turn), rise: axis(w.rise ?? was?.rise), jump: w.jump === true, said: 0 }
-      held.set(w.id, h)
+      held.set(id, h)
     },
     /** Four times a second: what each rule asked of its things is said to the core again, as a rider's hands would. */
     step(now) {
@@ -99,13 +118,33 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
       }
       return any
     },
+    /** `world.thing(id, {like, at, yaw, colour})`: brings one of the kept living things into the world; like: null takes it away. */
+    thing(rule, w, now, wrong) {
+      if (typeof w.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,15}$/.test(w.id)) return wrong('a thing a rule brings has an id of its own: lower-case letters, digits and dashes, up to 16')
+      const id = `${rule.id}-${w.id}`.slice(0, 40)
+      if (w.like === null) { if (made.get(id) === rule.id) { made.delete(id); held.delete(id); take(id) } return }
+      if (made.has(id) || alive.has(id)) return wrong(`"${w.id}" is in the world already: take it away first (like: null), or drive it where it is to be`)
+      if (typeof w.like !== 'string' || !Object.hasOwn(KEPT, w.like)) return wrong(`what a rule can bring is like one of: ${Object.keys(KEPT).join(', ')}`)
+      if (!Array.isArray(w.at) || w.at.length < 2 || w.at.length > 3 || !w.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) return wrong('where it is set down is at: [x, z]')
+      if (w.yaw !== undefined && !Number.isFinite(w.yaw)) return wrong('which way it faces is yaw, in radians (as world.things says it)')
+      if ([...made.values()].filter((r) => r === rule.id).length >= MADE_MOST) return wrong(`a rule has at most ${MADE_MOST} living things of its own in the world at once`)
+      let colour = 0
+      for (const ch of w.id) colour = (colour * 31 + ch.charCodeAt(0)) % 24
+      const kept = KEPT[w.like](Number.isInteger(w.colour) ? w.colour : colour)
+      const x = Math.round(w.at[0]), z = Math.round(w.at[w.at.length - 1]), y = stand(x, z)
+      if (y === null) return wrong('there is nowhere to stand it at that place')
+      if (!bring({ id, rule: rule.id, thing: kept, low: [x - (kept.size[0] >> 1), y + 1, z - (kept.size[2] >> 1)], yaw: w.yaw })) return wrong('it could not be brought to life there')
+      made.set(id, rule.id)
+    },
     /** `world.seat(who, {on: thing})`: puts someone on a living thing (an actor of this rule, or someone at a page); on: null gets them off. */
     seat(rule, w, now, wrong) {
       const p = typeof w.id === 'string' ? folk.get(`${rule.id}/${w.id}`) ?? folk.get(w.id) : null
       if (!p || (p.rule && p.rule !== rule.id) || p.rule === '~') return wrong('world.seat is for one of this rule\'s actors or someone at a page: an id of world.people')
       if (w.on === null) { ride(p.by, null, rule.id, now); if (!p.rule) changed(); return }
-      if (typeof w.on !== 'string' || !alive.has(w.on)) return wrong('what someone is seated on is on: a living thing (an id of world.things), or null to get them off')
-      ride(p.by, w.on, rule.id, now)
+      const on = find(rule.id, w.on)
+      if (!on) return wrong('what someone is seated on is on: a living thing (an id of world.things), or null to get them off')
+      if (seats.get(p.by)?.thing !== on && !room(on)) return wrong('there is no seat left on that')
+      ride(p.by, on, rule.id, now)
       if (!p.rule) changed()
     },
     /** A page says it has got on a thing, or off. */
@@ -118,10 +157,12 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
     carry(now) {
       for (const [by, s] of seats) {
         const p = folk.get(by), a = alive.get(s.thing)
-        if (!p || !a) { seats.delete(by); if (p) { if (p.move?.seat) p.move = undefined; tell(p); happen('ride', { by: p.by, name: p.name, thing: s.thing, on: false }) } if (p && !p.rule && s.rule) changed(); continue }
+        if (!p || !a) { seats.delete(by); if (p) { p.riding = undefined; if (p.move?.seat) p.move = undefined; tell(p); happen('ride', { by: p.by, name: p.name, thing: s.thing, on: false }) } if (p && !p.rule && s.rule) changed(); continue }
         if (!a.pose) continue
         const f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0])
-        const at = [a.pose.at[0], a.pose.at[1] - 3, a.pose.at[2]], yaw = Math.atan2(f[0], -f[2])
+        // Their own seat, if the thing says where its seats are (from its low corner, in its own cells: its middle is taken for where its weight is); else its middle.
+        const c = a.controls, seat = c.seats?.[s.n], off = seat && c.size ? turned(a.pose.rot, [seat[0] - c.size[0] / 2, seat[1] - c.size[1] / 2, seat[2] - c.size[2] / 2]) : [0, -3, 0]
+        const at = [a.pose.at[0] + off[0], a.pose.at[1] + off[1], a.pose.at[2] + off[2]], yaw = Math.atan2(f[0], -f[2])
         const moved = Math.hypot(at[0] - p.at[0], at[1] - p.at[1], at[2] - p.at[2]) > 0.05 || Math.abs(yaw - p.yaw) > 0.01
         if (!p.move?.seat) p.move = { n: (p.move?.n ?? 0) + 1, since: now, name: 'sit', long: 0.5, stays: true, seat: true }
         else if (!moved) continue
@@ -132,6 +173,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed }) {
     /** A rule is taken out: what it drove is let go, and whoever it seated at a page gets off. */
     dropped(rule) {
       for (const [id, h] of held) if (h.rule === rule) { held.delete(id); const a = alive.get(id); if (a) drive(a, 0, 0, 0, false) }
+      for (const [id, r] of [...made]) if (r === rule) { made.delete(id); take(id) }
       let any = false
       for (const [by, s] of [...seats]) if (s.rule === rule) { ride(by, null, rule, Date.now()); any = true }
       if (any) changed()

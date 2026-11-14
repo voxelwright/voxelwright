@@ -45,7 +45,7 @@ export const SCHEMES: Record<'drive' | 'fly' | 'hover' | 'ride', Scheme> = {
  * own process writes so that a world started again can stand it up there. Data from a page or a model: checked by
  * `controlsOf` before anything uses it.
  */
-export interface Controls { scheme: keyof typeof SCHEMES; motor: Motor; rest?: { at: [number, number, number]; rot: [number, number, number, number] } }
+export interface Controls { scheme: keyof typeof SCHEMES; motor: Motor; /** Where its riders sit, each where their feet are, in its own cells from its low corner; and its size in cells, to place them by. */ seats?: [number, number, number][]; size?: [number, number, number]; rest?: { at: [number, number, number]; rot: [number, number, number, number] } }
 const finite = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x))
 /** A record's `controls`, if it is one that can be used; else null. The core clamps every number of the motor. */
 export function controlsOf(value: unknown): Controls | null {
@@ -60,7 +60,8 @@ export function controlsOf(value: unknown): Controls | null {
   }
   const motor = { ...Object.fromEntries(plain.map((k) => [k, m[k]])), feet } as unknown as Motor
   const rest = c.rest && finite(c.rest.at, 3) && finite(c.rest.rot, 4) ? { at: [...c.rest.at] as [number, number, number], rot: [...c.rest.rot] as [number, number, number, number] } : undefined
-  return { scheme: c.scheme, motor, ...(rest ? { rest } : {}) }
+  const seats = Array.isArray(c.seats) && c.seats.length <= 8 && c.seats.every((s) => finite(s, 3)) && finite(c.size, 3) ? { seats: c.seats.map((s) => [s[0], s[1], s[2]] as [number, number, number]), size: [...c.size!] as [number, number, number] } : {}
+  return { scheme: c.scheme, motor, ...seats, ...(rest ? { rest } : {}) }
 }
 
 /** A thing to bring to life: its cells (one kind each, laid out x, then z, then y), size and low corner in the world's cells, how it moves and how it is driven. */

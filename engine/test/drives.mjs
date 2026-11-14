@@ -44,6 +44,7 @@ on('said', (world, e) => {
   if (/get in/.test(e.text)) world.seat(e.by, {on: t.id})
   if (/get out/.test(e.text)) world.seat(e.by, {on: null})
   if (/you drive/.test(e.text)) world.seat('valet', {on: t.id})
+  if (/a kart for me/.test(e.text)) { world.thing('k', {like: 'kart', at: [e.at[0] + 30, e.at[2]], yaw: Math.PI / 2, colour: 2}); world.seat(e.by, {on: 'k'}) }
   if (/ghost/.test(e.text)) world.drive('no-such-thing', {go: 1})
 })`
 try {
@@ -131,6 +132,21 @@ try {
   const riders = await valet((t) => t[7] === 'valet' && /Valet on/.test(t[8]))
   check(!!valetOn && !!valetWent && !!riders, `said "you drive", the rule's own actor sits in the car and goes with it as the rule drives (${valetWent ? (valetWent.off / 10).toFixed(2) : '?'} m from its middle after a drive; world.things says riders: ${riders?.[7]})`)
   await ada.evaluate(() => globalThis.engine.say('hold'))
+  // A thing the rule brings itself: a kart for whoever asks, set down beside them, and them in its seat.
+  await ada.evaluate(() => { const e = globalThis.engine; if (e.alive.riding) e.alive.mount(null) })
+  await ada.evaluate(() => { const e = globalThis.engine; e.me.walk(false); Object.assign(e.pose, { x: 70, y: e.ground(70, 407.4) + 1.7, z: 407.4, yaw: Math.PI / 2, pitch: -0.2 }); e.me.walk(true) })
+  await ada.waitForFunction(() => globalThis.engine.me.feet, null, { timeout: 10_000 })
+  await ada.waitForTimeout(1200)
+  await ada.evaluate(() => globalThis.engine.say('a kart for me'))
+  await ada.waitForFunction(() => globalThis.engine.alive.riding?.name === 'kart', null, { timeout: 8000 }).catch(() => {})
+  if (process.env.DEBUG) console.log('  page knows', JSON.stringify(await ada.evaluate(() => ({ things: globalThis.engine.alive.things.map((t) => [t.name, t.ref, t.id]), made: [...globalThis.engine.things.all.keys()], records: [...globalThis.engine.things.all.values()].map((r) => Object.keys(r).join(',')) }))))
+  const kart = await ada.evaluate(() => { const e = globalThis.engine, t = e.alive.riding, w = t && e.alive.where(t); return w ? { name: t.name, ref: t.ref, at: w.at, afoot: e.me.on } : null })
+  await ada.keyboard.down('KeyW'); await ada.waitForTimeout(1500); await ada.keyboard.up('KeyW')
+  const karted = await ada.evaluate(() => { const e = globalThis.engine, t = e.alive.riding, w = t && e.alive.where(t); return w ? w.at : null })
+  if (shots) { await ben.evaluate(([x, y, z]) => { const e = globalThis.engine; Object.assign(e.pose, { x: x / 10 + 0.5, y: y / 10 + 1.3, z: z / 10 + 2.6, yaw: -0.2, pitch: -0.35 }) }, karted ?? [700, 165, 4074]); await ben.waitForTimeout(1200); await ben.screenshot({ path: join(shots, 'kart.png') }) }
+  check(!!kart && kart.name === 'kart' && !kart.afoot && !!karted && karted[0] - kart.at[0] > 30, `said "a kart for me", the rule brings a kart beside her and seats her in it: her page has her on it (${kart?.ref}) and W drives it ${karted && kart ? ((karted[0] - kart.at[0]) / 10).toFixed(1) : '?'} m`)
+  await ada.keyboard.press('KeyE')
+  await ada.waitForTimeout(500)
   // What is not a living thing is refused, and the rule is told.
   await ada.evaluate(() => globalThis.engine.say('ghost'))
   await ada.waitForTimeout(1200)
