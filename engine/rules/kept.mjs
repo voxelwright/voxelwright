@@ -21,14 +21,14 @@ const wheels = (set, xs, zs, tall) => { for (const x0 of xs) for (const z of zs)
 const feet = (xs, zs, y, reach) => [[xs[0], zs[0], false], [xs[0], zs[1], false], [xs[1], zs[0], true], [xs[1], zs[1], true]].map(([x, z, front]) => ({ at: [x, y, z], reach, steers: front, drives: !front }))
 
 export const KEPT = {
-  /** A kart: 2.4 m long, low and open, one seat. Quick to turn, 14 m/s. */
+  /** A kart: 2.4 m long, low and open, one seat. Quick to turn, 14 m/s. It takes a bump: what stops it dead at its own top speed does not break it (a car's 120 did, on the first parked car). */
   kart(colour) {
     const size = [24, 7, 14], { cells, set } = grid(size), paint = kind(STEEL, hue(colour, 4))
     for (let x = 0; x < 24; x++) for (let z = 2; z < 12; z++) { set(x, 2, z, paint); if (x === 0 || x === 23 || z === 2 || z === 11) set(x, 3, z, paint) }
     for (let z = 3; z < 11; z++) { for (let y = 3; y < 7; y++) set(3, y, z, paint); set(19, 4, z, DARK) }
     for (const z of [4, 9]) set(23, 3, z, kind(LAMP))
     wheels(set, [2, 17], [0, 13], 5)
-    return { name: 'kart', size, cells, scheme: 'drive', seats: [[9, 3, 7]], motor: { front: 0, grip: 1.6, power: 70, top: 140, steer: 0.7, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 120, feet: feet([4, 19], [1, 13], 3, 5) } }
+    return { name: 'kart', size, cells, scheme: 'drive', seats: [[9, 3, 7]], motor: { front: 0, grip: 1.6, power: 70, top: 140, steer: 0.7, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 300, feet: feet([4, 19], [1, 13], 3, 5) } }
   },
   /** A car: 4.2 m, a cabin of glass, two seats. 20 m/s. */
   car(colour) {

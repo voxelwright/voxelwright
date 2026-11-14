@@ -304,6 +304,11 @@ on foot as they do flying.
   place the rule hears `crossed`: by which thing or person, which way, where, how fast, and `when` to the
   hundredth of a second, worked back along the tenth-of-a-second step it was crossed in. Laps, a finish and a
   checkpoint are the rule's own numbers. In `test/brings.mjs`.
+- **How much a thing takes is a number**: on a thing it brought a rule sets the motor's own numbers,
+  `world.thing(id, {tough, top, power, grip, steer, jump})`, for good or `for: seconds` (they go back by
+  themselves), and hears `broke` when one breaks. `tough` is the speed a thing can lose in one step and stay whole:
+  the kept kart is made 300 against a top of 140, so it takes a wall (a car's 120 broke it on the first parked
+  car). Weight is not a motor number: "heavier" is not there. Checked by `test/tough.mjs` (no page).
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

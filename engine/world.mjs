@@ -136,6 +136,7 @@ function heed(words) {
   for (const [id, a] of [...alive]) {
     if (broke.has(a.body)) {
       alive.delete(id)
+      driven.broke(id)
       parentPort.postMessage({ living: { thing: id, body: 0 } })
       parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     } else if (moved) {
@@ -477,6 +478,7 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => c
   },
   place: (a, at, rot) => { core.living_place(a.body, at[0], at[1], at[2], rot[0], rot[1], rot[2], rot[3]); nudged = true },
   hear: (rule, event, e) => ruled.happen(event, e, rule),
+  retune: (a, motor) => { const n = numbers(motor), room = core.edits_room(n.length); new Float32Array(core.memory.buffer, room, n.length).set(n); core.living_motor(a.body, n.length); nudged = true },
   take: (id) => {
     const a = alive.get(id)
     if (!a) return

@@ -20,6 +20,11 @@
 // one: which, which way, where, how fast, and when to the hundredth of a second (worked back along the step it
 // was crossed in). Laps, a finish and a checkpoint are then the rule's own numbers.
 //
+// And how much a thing takes, and how it goes, are numbers a rule sets on what it brought (`world.thing(id,
+// {tough, top, power, grip, steer, jump})`): the motor's own. A thing that loses more speed in one step than its
+// `tough` breaks (and its rule hears `broke`); one tough enough stops or glances off. With `for: seconds` the
+// numbers go back by themselves: something picked up that makes a kart faster, or slippery, for a while.
+//
 // Other racers, a landing craft, a getaway car are a rule driving living things: nothing here knows those words.
 
 import { KEPT } from './kept.mjs'
@@ -28,6 +33,8 @@ import { KEPT } from './kept.mjs'
 const MADE_MOST = 16
 /** How many lines and places a rule may have, and the longest a line and the widest a place (cells). */
 const LINES_MOST = 32, LINE_LONG = 4000
+/** The motor's numbers a rule may set on a thing it brought, each a least and a most (cells and seconds; `tough` is the speed lost in one step that breaks it), and the longest a change may be for (seconds). */
+const TUNE = { tough: [10, 2000], top: [0, 400], power: [0, 400], grip: [0.05, 3], steer: [0, 1.5], jump: [0, 300] }, FOR_MOST = 600
 /** How near someone a living thing must be for a rule to be told of it (cells), how many it is told of, and how many one rule drives. */
 const NEAR = 1500, TOLD_MOST = 32, DRIVEN_MOST = 32
 /** Which way a thing's front points in its own cells, by its motor's `front`. */
@@ -50,8 +57,14 @@ const axis = (v) => (typeof v === 'number' && Number.isFinite(v) ? Math.max(-1, 
  * @param take   takes a living thing out of the world, by its id
  * @param place  puts a living thing at a place, turned so, and still: (thing, at, rot)
  * @param hear   one rule hears something: (rule id, event, e)
+ * @param retune gives a living thing a motor of these numbers: (thing, motor)
  */
-export function things({ alive, folk, drive, tell, happen, stand, changed, bring, take, place, hear }) {
+export function things({ alive, folk, drive, tell, happen, stand, changed, bring, take, place, hear, retune }) {
+  /** By thing: the numbers its rule set on it for good, and those set for a while with when they end. */
+  const tuned = new Map()
+  /** A thing's motor as it now is: as it was made, then what was set for good, then each change for a while. */
+  const motorOf = (id) => { const a = alive.get(id), t = tuned.get(id); return a && { ...a.controls.motor, ...(t?.set ?? {}), ...Object.assign({}, ...(t?.timed ?? []).map((c) => c.keys)) } }
+  const tune = (id) => { const a = alive.get(id); if (a) retune(a, motorOf(id)) }
   /** By thing: the rule that holds it still, and where. */
   const stilled = new Map()
   /** A rule's lines and places, by `rule/id`: {rule, id, from, to} or {rule, id, at, within}. And where everything was when last looked at, by thing or person. */
@@ -116,7 +129,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         const mine = held.get(id)?.rule === rule
         if (far > NEAR && !mine) continue
         const f = turned(a.pose.rot, FRONTS[a.controls.motor.front] ?? FRONTS[0]), up = turned(a.pose.rot, [0, 1, 0])
-        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(stilled.has(id) ? { held: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
+        out.push({ id, name: a.name || '', scheme: a.controls.scheme, at: a.pose.at.map(Math.round), yaw: Number(Math.atan2(f[0], -f[2]).toFixed(2)), speed: Math.round(a.speed ?? 0), awake: !!a.awake, upright: up[1] > 0.5, ...(mine ? { mine: true } : held.has(id) ? { driven: true } : {}), ...(stilled.has(id) ? { held: true } : {}), ...(made.get(id) === rule ? { own: id.slice(rule.length + 1), ...Object.fromEntries(Object.keys(TUNE).map((k) => [k, motorOf(id)[k]])) } : {}), seats: a.controls.seats?.length ?? 1, ...(riders(id, rule).length ? { riders: riders(id, rule) } : {}), near: Number.isFinite(far) ? Math.round(far) : null })
       }
       return out.sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0) || (a.near ?? Infinity) - (b.near ?? Infinity)).slice(0, TOLD_MOST)
     },
@@ -179,6 +192,12 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
         // Let fall to where it rests, then kept there: only a thing that has gone along the ground is put back.
         if (Math.hypot(a.pose.at[0] - s.at[0], a.pose.at[2] - s.at[2]) > 0.3) place(a, [s.at[0], a.pose.at[1], s.at[2]], s.rot)
       }
+      // A change for a while that has run out: the thing's numbers go back.
+      for (const [id, t] of tuned) {
+        if (!alive.has(id)) { tuned.delete(id); continue }
+        const still = t.timed.filter((c) => c.until > now)
+        if (still.length !== t.timed.length) { t.timed = still; tune(id) }
+      }
       if (!lines.size) { if (was.size) was.clear(); return }
       const seen = new Set()
       const look = (key, at, e) => {
@@ -198,13 +217,32 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
       for (const p of folk.values()) if (p.rule !== '~' && !p.riding) look(`p:${p.by}`, p.at, (rule) => ({ who: idOf(p, rule), name: p.name }))
       for (const key of was.keys()) if (!seen.has(key)) was.delete(key)
     },
+    /** A living thing broke: the rule that brought it hears, and it is the rule's no longer. */
+    broke(id) { const rule = made.get(id); held.delete(id); stilled.delete(id); tuned.delete(id); if (rule) { made.delete(id); hear(rule, 'broke', { thing: id, own: id.slice(rule.length + 1) }) } },
     /** Whether a thing is held still: then nobody's hands move it. */
     held: (id) => stilled.has(id),
     /** `world.thing(id, {like, at, yaw, colour})`: brings one of the kept living things into the world; like: null takes it away. */
     thing(rule, w, now, wrong) {
       if (typeof w.id !== 'string' || !/^[a-z0-9][a-z0-9-]{0,15}$/.test(w.id)) return wrong('a thing a rule brings has an id of its own: lower-case letters, digits and dashes, up to 16')
       const id = `${rule.id}-${w.id}`.slice(0, 40)
-      if (w.like === null) { if (made.get(id) === rule.id) { made.delete(id); held.delete(id); take(id) } return }
+      if (w.like === null) { if (made.get(id) === rule.id) { made.delete(id); held.delete(id); tuned.delete(id); stilled.delete(id); take(id) } return }
+      // One it brought, given numbers: how much it takes and how it goes; null puts a number back as it was made.
+      if (made.get(id) === rule.id && alive.has(id) && w.like === undefined) {
+        const keys = {}, back = []
+        for (const [key, [least, most]] of Object.entries(TUNE)) {
+          if (w[key] === undefined) continue
+          if (w[key] === null) { back.push(key); continue }
+          if (typeof w[key] !== 'number' || !Number.isFinite(w[key]) || w[key] < least || w[key] > most) return wrong(`a thing's ${key} is a number from ${least} to ${most}`)
+          keys[key] = w[key]
+        }
+        if (!Object.keys(keys).length && !back.length) return wrong(`what a rule sets on a thing it brought is one of ${Object.keys(TUNE).join(', ')} (and for: seconds, to have it go back by itself)`)
+        if (w.for !== undefined && !(typeof w.for === 'number' && w.for > 0 && w.for <= FOR_MOST)) return wrong(`how long a change is for is seconds, up to ${FOR_MOST}`)
+        const t = tuned.get(id) ?? tuned.set(id, { set: {}, timed: [] }).get(id)
+        for (const key of back) { delete t.set[key]; for (const c of t.timed) delete c.keys[key] }
+        if (w.for !== undefined) { if (t.timed.length >= 8) t.timed.shift(); t.timed.push({ keys, until: now + w.for * 1000 }) } else Object.assign(t.set, keys)
+        return tune(id)
+      }
+      if (made.has(id) && !alive.has(id)) made.delete(id)
       if (made.has(id) || alive.has(id)) return wrong(`"${w.id}" is in the world already: take it away first (like: null), or drive it where it is to be`)
       if (typeof w.like !== 'string' || !Object.hasOwn(KEPT, w.like)) return wrong(`what a rule can bring is like one of: ${Object.keys(KEPT).join(', ')}`)
       if (!Array.isArray(w.at) || w.at.length < 2 || w.at.length > 3 || !w.at.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) return wrong('where it is set down is at: [x, z]')
@@ -255,7 +293,7 @@ export function things({ alive, folk, drive, tell, happen, stand, changed, bring
     /** A rule is taken out: what it drove is let go, and whoever it seated at a page gets off. */
     dropped(rule) {
       for (const [id, h] of held) if (h.rule === rule) { held.delete(id); const a = alive.get(id); if (a) drive(a, 0, 0, 0, false) }
-      for (const [id, r] of [...made]) if (r === rule) { made.delete(id); take(id) }
+      for (const [id, r] of [...made]) if (r === rule) { made.delete(id); tuned.delete(id); take(id) }
       for (const [id, s] of [...stilled]) if (s.rule === rule) stilled.delete(id)
       for (const [key, l] of [...lines]) if (l.rule === rule) lines.delete(key)
       let any = false
