@@ -220,6 +220,12 @@ try {
     const phone = await small.newPage()
     phone.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
     await phone.goto(`${server.url}/city?fly=0&shared=1&name=Bea&scale=0.5&people=0&at=70.05,${(me.at[1] + 16.5) / 10},402.6&look=0,-8`)
+    // A page's first words, said the moment it is up and before the world has heard where it is, are heard: the world
+    // refuses them (409) until it has, and they used to be lost without a word.
+    await phone.waitForFunction(() => globalThis.engine?.say, null, { timeout: 90_000 })
+    await phone.evaluate(() => globalThis.engine.say('tea for me'))
+    const first = await until('first words', async () => (await shown()).some((s) => s.line === 'How do you take it, Bea?'), 8000).then(() => true, () => false)
+    check(first, 'what a page says the moment it opens is heard')
     await phone.waitForFunction(() => globalThis.engine?.hands?.offered.length === 1, null, { timeout: 90_000 })
     await phone.waitForFunction(() => globalThis.engine.others >= 1)
     await phone.tap('[data-panel="offers"] button')

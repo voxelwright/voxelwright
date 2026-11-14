@@ -155,7 +155,9 @@ export function link(base = '/world'): Link {
       // A page that has only just opened, or just stepped into a realm, may speak before that world has heard where
       // it is (a page says so ten times a second): the world answers 409, and the first words were lost without a
       // word (found by the hands lane, November 14). They are said again for a few seconds before anything is given up.
-      const send = (tries: number): void => void fetch(`${base}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => {
+      // Said to the world they were said in: someone who has stepped on by then is not heard saying them in the next.
+      const to = base
+      const send = (tries: number): void => void fetch(`${to}/say`, { method: 'POST', body: JSON.stringify({ by: self.me, name, text }) }).then(async (r) => {
         if (r.status === 409 && tries > 0) { setTimeout(() => send(tries - 1), 300); return }
         if (!r.ok) self.onerror?.({ message: `not said: ${await r.text()}` })
       }, () => {})
