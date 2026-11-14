@@ -105,10 +105,14 @@ export function hud(input: Input): Hud {
     if (!starters.hidden && !starters.childElementCount) starters.replaceChildren(...self.starters.map((wish) => { const b = button('', `Start from: ${wish}`, wish); b.addEventListener('click', () => { line.value = wish; draw(); line.focus() }); return b }))
   }
   const drop = () => { if (picture) URL.revokeObjectURL(picture.shown); picture = null }
+  const takes = { say: null as ((text: string) => void) | null, ask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null }
   const self = {
     placeholder: '',
-    onsubmit: null as ((text: string) => void) | null,
-    onask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null,
+    // The bar is there as soon as anything takes what is typed: it is drawn again when either is given.
+    get onsubmit() { return takes.say },
+    set onsubmit(f: ((text: string) => void) | null) { takes.say = f; draw() },
+    get onask() { return takes.ask },
+    set onask(f: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null) { takes.ask = f; draw() },
     starters: [] as readonly string[],
     get open() { return leave !== null },
     show() {

@@ -35,7 +35,8 @@ async function once(url, resolve, deadline) {
   const to = found[0]
   return new Promise((done, fail) => {
     const req = (url.protocol === 'https:' ? https : http).request(url, {
-      method: 'GET', agent: false, timeout: Math.max(1, deadline - Date.now()),
+      // Stopped at the deadline however slowly it comes: `timeout` alone is only for a socket that says nothing.
+      method: 'GET', agent: false, timeout: Math.max(1, deadline - Date.now()), signal: AbortSignal.timeout(Math.max(1, deadline - Date.now())),
       // The address that was checked, and no other: the name is not looked up again.
       lookup: (_name, options, cb) => (options.all ? cb(null, [to]) : cb(null, to.address, to.family)),
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; link-reader)', Accept: 'text/html,image/png,image/jpeg,image/webp;q=0.9', 'Accept-Encoding': 'identity' },
@@ -71,13 +72,45 @@ async function get(link, resolve, deadline) {
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' }
 const plain = (s) => s.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (m, e) => (e[0] === '#' ? String.fromCodePoint(Math.min(0x10ffff, parseInt(e.slice(e[1] === 'x' || e[1] === 'X' ? 2 : 1), e[1] === 'x' || e[1] === 'X' ? 16 : 10) || 32)) : ENTITIES[e.toLowerCase()] ?? m)).replace(/[^\P{C}\n]|\p{Zl}|\p{Zp}/gu, ' ').replace(/[ \t]+/g, ' ').replace(/\s*\n\s*/g, '\n').trim()
-/** What a page says, as words: its title, how it describes itself, and its text without its markup, scripts or styles. And the picture it names as its own, if it does. */
+/** The most of a page that is read for its words. */
+const PAGE_MOST = 256 << 10
+/** What is not for reading in a page: everything from each of these tags' opening to its close. */
+const NOT_WORDS = ['script', 'style', 'noscript', 'svg', 'template', 'head', 'nav', 'footer', 'form']
+/** A new line where these end. */
+const BREAKS = new Set(['p', 'div', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'tr', 'br', 'section', 'article'])
+/**
+ * What a page says, as words: its title, how it describes itself, and its text without its markup, scripts or
+ * styles. And the picture it names as its own, if it does. The page is whatever someone linked: it is gone through
+ * once from end to end with plain searches, so no page, however it is written, takes more than a moment.
+ */
 export function words(html, base) {
-  const meta = (name) => { const m = new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, 'i').exec(html)?.[0]; return m ? plain(/content=["']([^"']*)["']/i.exec(m)?.[1] ?? '') : '' }
-  const title = meta('og:title') || plain(/<title[^>]*>([\s\S]*?)<\/title>/i.exec(html)?.[1] ?? ''), about = meta('og:description') || meta('description')
-  const body = plain(html.replace(/<(script|style|noscript|svg|template|head|nav|footer|form)\b[\s\S]*?<\/\1>/gi, ' ').replace(/<!--[\s\S]*?-->/g, ' ').replace(/<\/(p|div|h[1-6]|li|tr|br|section|article)>|<br\s*\/?>/gi, '\n').replace(/<[^>]*>/g, ' '))
-  const text = [title && `Title: ${title}`, about && `About: ${about}`, body].filter(Boolean).join('\n').slice(0, TEXT_MOST)
-  const image = meta('og:image')
+  html = html.slice(0, PAGE_MOST)
+  const low = html.toLowerCase()
+  // Its <meta> tags: each from its opening to the next >, at most 2,000 characters on.
+  const metas = new Map()
+  for (let at = low.indexOf('<meta'); at >= 0; at = low.indexOf('<meta', at + 5)) {
+    const end = html.indexOf('>', at), tag = html.slice(at, end < 0 ? at + 2000 : Math.min(end, at + 2000))
+    const name = /(?:property|name)=["']([a-z:_-]{1,40})["']/i.exec(tag)?.[1].toLowerCase(), content = /content=["']([^"']{0,2000})["']/i.exec(tag)?.[1]
+    if (name && content !== undefined && !metas.has(name)) metas.set(name, plain(content))
+  }
+  const from = low.indexOf('<title'), open = from < 0 ? -1 : low.indexOf('>', from), shut = open < 0 ? -1 : low.indexOf('</title', open)
+  const title = metas.get('og:title') || (shut < 0 ? '' : plain(html.slice(open + 1, Math.min(shut, open + 500)))), about = metas.get('og:description') || metas.get('description') || ''
+  // Its text: one pass over the tags. What lies inside a tag that is not for reading is skipped to that tag's close.
+  let body = ''
+  for (let at = 0; at < html.length;) {
+    const tag = html.indexOf('<', at)
+    body += html.slice(at, tag < 0 ? html.length : tag)
+    if (tag < 0) break
+    if (low.startsWith('<!--', tag)) { const end = low.indexOf('-->', tag + 4); at = end < 0 ? html.length : end + 3; continue }
+    const end = html.indexOf('>', tag)
+    if (end < 0) break
+    const name = /^<\/?([a-z0-9]{1,12})/.exec(low.slice(tag, tag + 14))?.[1] ?? ''
+    at = end + 1
+    if (NOT_WORDS.includes(name) && low[tag + 1] !== '/') { const close = low.indexOf(`</${name}`, at); at = close < 0 ? html.length : Math.max(at, low.indexOf('>', close) + 1 || html.length) }
+    body += BREAKS.has(name) ? '\n' : ' '
+  }
+  const text = [title && `Title: ${title}`, about && `About: ${about}`, plain(body)].filter(Boolean).join('\n').slice(0, TEXT_MOST)
+  const image = metas.get('og:image')
   return { text, image: image ? URL.parse(image, base)?.href : undefined }
 }
 

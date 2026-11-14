@@ -49,6 +49,22 @@ try {
   const pre = await raw('/ask', { method: 'OPTIONS', headers: { origin: world, 'access-control-request-method': 'POST' } })
   check(pre.status === 204 && pre.headers['access-control-allow-origin'] === world && /x-village-secret/.test(pre.headers['access-control-allow-headers']), 'the world\'s own page is told it may ask (the browser\'s question before a request, which carries no secret)')
   check((await raw('/ask', { method: 'OPTIONS', headers: { origin: 'http://evil.example' } })).status === 403, 'another site\'s page is not')
+  // Reached from a phone on the tailnet: by this machine's tailnet name, through `tailscale serve`, which says who asks.
+  const hp = await helper({ world, port: 0, model, journal: join(dir, 'made.jsonl'), kept: join(dir, 'library'), page: 'https://mac.tail.example:10161', reach: 'https://mac.tail.example:10162', only: 'owner@example.com' })
+  const rawTo = (port, path, headers) => new Promise((resolve, reject) => { const req = request({ host: '127.0.0.1', port, path, headers }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)) }); req.on('error', reject); req.end() })
+  const near = new URL(hp.url).port, door = hp.reachPort, farHost = { host: 'mac.tail.example:10162', 'x-village-secret': hp.secret }, owner = { 'tailscale-user-login': 'owner@example.com' }
+  check(await rawTo(door, '/hello', { ...farHost, ...owner }) === 200 && hp.link.startsWith('https://mac.tail.example:10161/city?shared=1#helper=https%3A%2F%2Fmac.tail.example%3A10162&secret='), 'by the tailnet\'s door, by its tailnet name, from the one person named, with the secret: answered; the address it prints is the tailnet one')
+  check(await rawTo(door, '/hello', farHost) === 403 && await rawTo(door, '/hello', { ...farHost, 'tailscale-user-login': 'guest@example.com' }) === 403, 'by that door with nobody named by the tailnet, or someone else: 403, secret and all')
+  // Someone else on the tailnet who calls themselves this machine (a Host of their choosing): the door they came by decides, not what they say.
+  check(await rawTo(door, '/hello', { host: `127.0.0.1:${near}`, 'x-village-secret': hp.secret, 'tailscale-user-login': 'guest@example.com' }) === 403 && await rawTo(door, '/hello', { host: 'localhost', 'x-village-secret': hp.secret }) === 403, 'by that door, saying it is this machine: 403')
+  check(await rawTo(near, '/hello', { ...farHost, ...owner }) === 403, 'by this machine\'s own door, saying it is the tailnet: 403')
+  check(await rawTo(door, '/hello', { ...farHost, ...owner, origin: 'https://other.tail.example:10161' }) === 403, 'from another page on the tailnet: 403')
+  let threw = ''
+  try { await helper({ world, port: 0, model, reach: 'https://mac.tail.example:10162' }) } catch (e) { threw = e.message }
+  check(/--only/.test(threw), 'it will not be reached from the tailnet without being told whose it is')
+  await hp.close()
+  const toWorld = (path, headers, method = 'GET') => new Promise((resolve, reject) => { const u = new URL(world); const req = request({ host: u.hostname, port: u.port, path, method, headers }, (res) => { res.resume(); res.on('end', () => resolve(res.statusCode)) }); req.on('error', reject); req.end(method === 'POST' ? '{}' : undefined) })
+  check(await toWorld('/world/things', { host: 'evil.example:5761' }) === 403 && await toWorld('/world/things', {}) === 200 && await toWorld('/report', { origin: 'https://evil.example' }, 'POST') === 403, 'the world\'s server too answers only by this machine\'s name or a tailnet one, and keeps no report from another site\'s page')
   check(asked === 0, 'none of that started a model')
 
   // ── The shape of an ask ──
@@ -95,7 +111,13 @@ try {
   await page.evaluate(() => { engine.pose.x += 4 })
   const anew = await page.evaluate(() => engine.ask({ wish: 'a tea crate', fresh: true }))
   check(anew.state === 'there' && asked === kept0 + 1, 'asked for anew, the model is asked')
-  await page.evaluate(() => { engine.pose.x -= 8 })
+  // A kept reply that can no longer be used is not a refusal: the model is asked.
+  const { readdirSync, readFileSync, writeFileSync } = await import('node:fs')
+  for (const f of readdirSync(join(dir, 'library'))) { const e = JSON.parse(readFileSync(join(dir, 'library', f), 'utf8')); writeFileSync(join(dir, 'library', f), JSON.stringify({ ...e, reply: 'no longer the form' })) }
+  await page.evaluate(() => { engine.pose.x += 4 })
+  const spoiled = await page.evaluate(() => engine.ask({ wish: 'a tea crate' }))
+  check(spoiled.state === 'there' && asked === kept0 + 2, 'what was kept and cannot be used any more: the model is asked, and the thing is made')
+  await page.evaluate(() => { engine.pose.x -= 12 })
   // A box to fill: the thing stands in its middle.
   const g1 = (await (await fetch(`${world}/world/at?x=640&y=0&z=4060`)).json()).ground
   const boxed = await raw('/ask', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'a tea crate', from, target: { box: [630, g1 + 1, 4050, 650, g1 + 21, 4070] } }) })
@@ -113,6 +135,7 @@ try {
   await page.waitForFunction((id) => engine.things.all.get(id).sounds, went.done.id, { timeout: 10_000 })
   check(await page.evaluate((id) => engine.things.all.get(id).seats[0].at[1] === 9 && engine.things.all.get(id).name === 'tea crate', went.done.id), 'and the page hears of the change')
 
+  check(await page.evaluate(() => { const r = document.querySelector('#ask-row').getBoundingClientRect(); return !document.querySelector('#ask').hidden && r.width > 200 && r.height > 20 }), 'the ask bar is there before anything is pressed (a phone has no Enter to bring it)')
   // ── The ask bar: a wish, and a picture pasted with it ──
   await page.keyboard.press('Enter')
   check(await page.evaluate(() => document.querySelector('#ask').classList.contains('open') && document.querySelector('#ask-which').textContent === 'Make' && document.querySelectorAll('#starters button').length === 4), 'Enter opens the ask bar, to make, with somewhere to start from')
@@ -130,7 +153,7 @@ try {
   await page.keyboard.press('Enter')
   await page.waitForFunction(() => engine.asker.busy === 0 && !document.querySelector('#ask').classList.contains('open'), null, { timeout: 20_000 })
   // The link's name does not resolve. There are words and a picture beside it, so the thing is made from those, and the page says so.
-  await page.waitForFunction((n) => engine.things.all.size === n, 5, { timeout: 20_000 })
+  await page.waitForFunction((n) => engine.things.all.size === n, 6, { timeout: 20_000 })
   check(asked === before + 1 && last.pictures?.length === 1, 'a link that cannot be read does not stop a wish that has words or a picture: it is made from those')
   // A link alone that cannot be read has nothing to go on: that is said, in a few words.
   await page.evaluate(() => { engine.pose.x += 5 })
@@ -157,7 +180,7 @@ try {
   await page.waitForSelector('#given img')
   await page.keyboard.type('a stool like this')
   await page.keyboard.press('Enter')
-  await page.waitForFunction((n) => engine.things.all.size === n, 6, { timeout: 20_000 })
+  await page.waitForFunction((n) => engine.things.all.size === n, 7, { timeout: 20_000 })
   const sent = last.pictures?.[0], bytes = sent ? Buffer.from(sent.data, 'base64') : Buffer.alloc(0)
   // A JPEG says how big it is after its SOF0 or SOF2 mark.
   let wide = 0
@@ -220,7 +243,7 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   server = await serve('/dev/null', ['--world', file])
   const back = await (await fetch(`${server.url}/world/things`)).json(), cellsBack = await (await fetch(`${server.url}/world/things?id=${went.done.id}`)).json()
-  check(back.length === 6 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
+  check(back.length === 7 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
   check((await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'x', gone: went.done.id }) })).status === 202, 'it can be forgotten')
   // The world does asks in its own time: it is gone when the world says so.
   for (let i = 0; i < 50 && (await (await fetch(`${server.url}/world/things`)).json()).some((t) => t.id === went.done.id); i++) await new Promise((r) => setTimeout(r, 100))

@@ -65,6 +65,8 @@ export interface Asker {
 }
 
 const KEPT = 'village.helper'
+/** Whether an address is this machine's own (plain, as a browser allows of loopback) or, over TLS, the host this page was served by. */
+const ours = (address: string) => { const u = URL.parse(address); return !!u && ((u.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(u.hostname)) || (u.protocol === 'https:' && u.hostname === location.hostname)) }
 
 /** `eye` says where this page's eye is and looks (the world's finest cells), `by` the name it goes by. */
 export function asker(eye: () => { eye: [number, number, number]; toward: [number, number, number] }, by: () => string): Asker {
@@ -73,10 +75,15 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   // Given in the address: kept, and taken out of the address so it is not left in the bar or passed on.
   const given = new URLSearchParams(location.hash.slice(1))
   if (given.get('helper') && given.get('secret')) {
-    helper = { url: given.get('helper')!.replace(/\/$/, ''), secret: given.get('secret')! }
-    try { localStorage.setItem(KEPT, JSON.stringify(helper)) } catch { /* the same */ }
+    // A helper is on this machine, or on the machine this page came from: an address that says otherwise (a link
+    // someone made, to have wishes and pictures sent to them) is not taken.
+    if (ours(given.get('helper')!)) {
+      helper = { url: given.get('helper')!.replace(/\/$/, ''), secret: given.get('secret')! }
+      try { localStorage.setItem(KEPT, JSON.stringify(helper)) } catch { /* the same */ }
+    }
     history.replaceState(null, '', location.pathname + location.search)
   }
+  if (helper && !ours(helper.url)) helper = null
   const headers = () => ({ 'Content-Type': 'application/json', 'X-Village-Secret': helper!.secret })
   const failed = (why: string): Done => ({ stage: 'done', state: 'refused', why })
   let last: Promise<unknown> = Promise.resolve(), busy = 0

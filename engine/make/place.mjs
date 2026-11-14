@@ -7,7 +7,14 @@ import { FACINGS, ROWS_MOST, footprint, rows } from './form.mjs'
 const json = async (res) => { if (!res.ok) throw new Error(`the world said ${res.status}: ${(await res.text()).slice(0, 120)}`); return res.json() }
 export const at = (world, [x, y, z]) => fetch(`${world}/world/at?x=${x}&y=${y}&z=${z}`).then(json)
 /** The first thing down every column of a rectangle, looked for from height `y`: { high, material }, a row of x for each z. */
-export const tops = (world, [x0, z0, x1, z1], y) => fetch(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`).then(json)
+export async function tops(world, [x0, z0, x1, z1], y) {
+  // The world gives so many columns a second to everyone together: told to wait, this waits and asks again.
+  for (let tries = 0; ; tries++) {
+    const res = await fetch(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`)
+    if (res.status !== 429 || tries === 40) return json(res)
+    await new Promise((r) => setTimeout(r, 300))
+  }
+}
 export const look = (world, [x, y, z], [dx, dy, dz]) => fetch(`${world}/world/look?x=${x}&y=${y}&z=${z}&dx=${dx}&dy=${dy}&dz=${dz}`).then(json)
 
 /** Many questions, a few at a time. */

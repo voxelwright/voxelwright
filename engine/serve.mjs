@@ -30,7 +30,7 @@ const BODY_MOST = 2 << 20
 
 const send = (res, code, body, type = 'text/plain; charset=utf-8') => { res.writeHead(code, { ...HEADERS, 'Content-Type': type }); res.end(body) }
 
-async function file(res, path) {
+async function file(res, path, host = '') {
   const rel = normalize(path).replace(/^[/\\]+/, '')
   if (rel.startsWith('..') || !OPEN.includes(rel.split(sep)[0]) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
   let body
@@ -38,6 +38,9 @@ async function file(res, path) {
   if (extname(rel) === '.ts') {
     try { body = stripTypeScriptTypes(body.toString('utf8')) } catch (e) { return send(res, 500, `${rel}: ${e.message}`) }
   }
+  // A page talks to this server and to a helper on this machine or on the host it came from, and to nothing else:
+  // a wish and a picture cannot be sent anywhere a made-up address says.
+  if (extname(rel) === '.html') { res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${host.endsWith('.ts.net') ? ` https://${host}:*` : ''}` }); return res.end(body) }
   send(res, 200, body, TYPES[extname(rel)])
 }
 
@@ -403,14 +406,19 @@ if (worldFile) {
   console.log(`a shared world is kept in ${worldFile} (${log.length} things done to it so far)`)
 }
 
+/** Whether a request names this server as this machine or as a machine of a tailnet (`tailscale serve`): a name someone else points at 127.0.0.1 is neither. */
+const named = (host) => { const name = String(host ?? '').replace(/:\d+$/, ''); return name === '127.0.0.1' || name === 'localhost' || name.endsWith('.ts.net') }
+/** A page from somewhere else may not act here through the browser of someone who can reach this. */
+const foreign = (req) => !!req.headers.origin && URL.parse(req.headers.origin)?.host !== req.headers.host
+let topsAsked = 0, topsSince = Date.now()
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
+  if (!named(req.headers.host)) return send(res, 403, 'not by that name')
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
-  if (req.method === 'POST' && url.pathname === '/report') return done(report(req, res))
+  if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
   if (url.pathname.startsWith('/world/')) {
     if (!world) return send(res, 404, 'no shared world is kept here')
-    // A page from somewhere else may not act here through the browser of someone who can reach this.
-    if (req.headers.origin && URL.parse(req.headers.origin)?.host !== req.headers.host) return send(res, 403, 'not from another site')
+    if (foreign(req)) return send(res, 403, 'not from another site')
     if (req.method === 'GET' && url.pathname === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
     if (req.method === 'POST' && url.pathname === '/world/ask') return done(world.ask(req, res))
     if (req.method === 'POST' && url.pathname === '/world/here') return done(world.here(req, res))
@@ -420,7 +428,13 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && (op === 'me' || op === 'around')) return done(world.seat(op, Object.fromEntries(url.searchParams), res))
     if (req.method === 'GET' && url.pathname === '/world/at') return done(world.at(url, res))
     if (req.method === 'GET' && url.pathname === '/world/look') return done(world.look(url, res))
-    if (req.method === 'GET' && url.pathname === '/world/tops') return done(world.tops(url, res))
+    if (req.method === 'GET' && url.pathname === '/world/tops') {
+      // The world answers one thing at a time: so many columns a second for everyone together, and no more.
+      const now = Date.now(), columns = Math.max(0, (Number(url.searchParams.get('x1')) - Number(url.searchParams.get('x0'))) * (Number(url.searchParams.get('z1')) - Number(url.searchParams.get('z0')))) || 0
+      if (now - topsSince > 1000) { topsSince = now; topsAsked = 0 }
+      if (columns <= TOPS_MOST && (topsAsked += columns) > TOPS_MOST * 2) return send(res, 429, 'too many columns asked after: wait a second')
+      return done(world.tops(url, res))
+    }
     if (req.method === 'GET' && url.pathname === '/world/things') return world.things(url, res)
     if (req.method === 'GET' && url.pathname === '/world/') return world.guide(res)
     return send(res, 404, 'not here')
@@ -429,6 +443,6 @@ const server = createServer((req, res) => {
   if (url.pathname === '/favicon.ico') return send(res, 204, '')
   // The address a phone is sent is the city, which measures itself; the probe keeps its own.
   const path = url.pathname === '/' || url.pathname === '/city' ? 'page/index.html' : url.pathname === '/probe' ? 'probe/index.html' : url.pathname
-  done(file(res, path))
+  done(file(res, path, String(req.headers.host ?? '').replace(/:\d+$/, '')))
 })
 server.listen(port, '127.0.0.1', () => console.log(`engine page on http://127.0.0.1:${server.address().port}/ (reports kept in ${reports})`))

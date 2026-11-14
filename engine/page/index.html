@@ -20,6 +20,8 @@
   #said { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 132px; max-width: min(420px, 70vw); padding: 6px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); white-space: pre-wrap; overflow-wrap: anywhere; }
   /* The ask bar: always there, quiet until it is opened. */
   #ask { position: absolute; left: 50%; bottom: calc(max(64px, env(safe-area-inset-bottom) + 58px) + var(--lift, 0px)); transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
+  /* By touch the round button is at the bar's height: the bar goes over it. */
+  @media (pointer: coarse) { #ask { bottom: calc(max(104px, env(safe-area-inset-bottom) + 100px) + var(--lift, 0px)); } }
   #ask-row { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 14px; background: rgba(12, 16, 22, 0.5); pointer-events: auto; transition: background 0.15s, box-shadow 0.15s; }
   #ask.open #ask-row { background: rgba(246, 245, 240, 0.97); box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35); }
   #line { flex: 1; min-width: 0; padding: 8px 8px; border: 0; outline: 0; background: transparent; color: #e8ecf1; font: 500 16px -apple-system, system-ui, sans-serif; user-select: text; -webkit-user-select: text; }

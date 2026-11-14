@@ -266,7 +266,8 @@ function tops([x0, z0, x1, z1], from) {
   const high = [], kinds = []
   for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
     let y = from, kind = 0
-    for (; y > from - LOOK && !(kind = core.world_kind(x, y, z)); y--);
+    // No further down than a tall thing and a slope under it: asked from far above, a column is not looked down for ever.
+    for (; y > from - 400 && !(kind = core.world_kind(x, y, z)); y--);
     high.push(kind ? y : null); kinds.push(kind)
   }
   return { high, kinds }

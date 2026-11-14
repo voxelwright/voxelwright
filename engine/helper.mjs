@@ -7,6 +7,7 @@
 //   --port 5762        where it listens, on this machine only
 //   --model opus       which of your models makes things
 //   --journal file     where what was made is written down (default ~/.village/engine/made.jsonl)
+//   --page URL --reach URL --only login [--reach-port 5763]    for a phone on the tailnet: see "From a phone" in engine/README.md
 //   --library dir      where what was made is kept, to be made again at once (default ~/.village/engine/library)
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
@@ -100,13 +101,21 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY }) {
   /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
   const shelf = kept ? library(kept) : null
   world = world.replace(/\/$/, '')
   const at = new URL(world), loopback = ['127.0.0.1', 'localhost'].includes(at.hostname)
   // The world's page may be open under either name of this machine.
-  const allowed = new Set([at.origin, ...(loopback ? [`${at.protocol}//127.0.0.1:${at.port}`, `${at.protocol}//localhost:${at.port}`] : []), ...origins])
+  const allowed = new Set([at.origin, ...(loopback ? [`${at.protocol}//127.0.0.1:${at.port}`, `${at.protocol}//localhost:${at.port}`] : []), ...origins, ...(page ? [new URL(page).origin] : [])])
+  // From another device (a phone on the tailnet): `page` is where the world's page is opened from there, `reach` the
+  // address the helper is reached by there. Both are this machine's own name on the tailnet, served by `tailscale
+  // serve` (tailnet only), which says who on the tailnet asks (Tailscale-User-Login). What comes that way comes in
+  // by a door of its own (`reachPort`, a second listener on this machine that `tailscale serve` is pointed at), and
+  // everything through that door must be from the one person named (`only`), beside the secret. Which door a
+  // request came by is not something the request can say for itself, as its Host is.
+  if (reach && !only) throw new Error('to be reached from the tailnet the helper must be told whose it is: --only <your tailnet login>')
+  const far = reach ? new URL(reach).host : null
   let busy = false
   /** Things made that no place would take, kept a while for the asker to say where: by a token only this helper and that page know. */
   const holds = new Map()
@@ -121,12 +130,16 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
     }
     line({ stage: 'done', state: r.state, why: r.why, id: r.id, name: r.name, at: r.origin, size: r.size, ms: r.ms, tries: r.tries, moved: r.moved, left: r.left, held })
   }
-  const server = createServer((req, res) => {
+  const answer = (door) => (req, res) => {
+    const server = door === 'far' ? farServer : nearServer
     const origin = req.headers.origin, cors = origin && allowed.has(origin) ? { 'Access-Control-Allow-Origin': origin, Vary: 'Origin', 'Cross-Origin-Resource-Policy': 'cross-origin' } : {}
     const end = (code, body) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...cors }); res.end(JSON.stringify(body)) }
     // Asked by this machine's own name, or not at all: a name someone else points here is not it.
-    const names = [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`, ...hosts]
+    // Asked by this machine's own name, or not at all: a name someone else points here is not it. By the tailnet's
+    // door the name is the tailnet one, and the tailnet's word for who asks must be the one person this is for.
+    const names = door === 'far' ? [far] : [`127.0.0.1:${server.address().port}`, `localhost:${server.address().port}`, ...hosts]
     if (!names.includes(req.headers.host)) return end(403, { why: 'not by that name' })
+    if (door === 'far' && req.headers['tailscale-user-login'] !== only) return end(403, { why: 'not from that person on the tailnet' })
     // A browser says which page asks. Only the world's own page may; what is not a browser says nothing and needs the secret all the same.
     if (origin !== undefined && !allowed.has(origin)) return end(403, { why: 'not from that page' })
     if (req.method === 'OPTIONS') {
@@ -192,8 +205,11 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
         const known = plain && !ask.fresh ? await shelf.find(ask.wish, apart, fieldKeys()) : null
         if (known) { say(`  made before as ${known.name}: no model is asked`); line({ stage: 'known', name: known.name }) }
         const from = known ? async () => ({ text: known.reply, model: `kept (${known.model})`, ms: 0, cost: 0 }) : model
-        const r = await make({ wish: ask.wish, picture, page, world, where, fill, facing, grow, by: ask.by, journal, model: from, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
-        if (plain && !known && r.reply && ['there', 'held'].includes(r.state)) await shelf.keep(ask.wish, apart, r.reply, { name: r.name, model: r.model, fields: fieldKeys() }).catch((e) => say(`  not kept: ${e.message}`))
+        const run = (how) => make({ wish: ask.wish, picture, page, world, where, fill, facing, grow, by: ask.by, journal, model: how, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+        let r = await run(from)
+        // What was kept could not be used after all (the form has moved on since): the model is asked, as if nothing had been kept.
+        if (known && r.state === 'refused') { say('  what was kept could not be used: asking the model'); r = await run(model) }
+        if (plain && r.reply && !r.model?.startsWith('kept (') && ['there', 'held'].includes(r.state)) await shelf.keep(ask.wish, apart, r.reply, { name: r.name, model: r.model, fields: fieldKeys() }).catch((e) => say(`  not kept: ${e.message}`))
         ended(r, line)
       } catch (e) {
         say(`  failed: ${e.message}`)
@@ -203,10 +219,14 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], sec
         res.end()
       }
     })()
-  })
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolve) })
+  }
+  const nearServer = createServer(answer('near')), farServer = reach ? createServer(answer('far')) : null
+  const listen = (server, at) => new Promise((resolve, reject) => { server.once('error', reject); server.listen(at, '127.0.0.1', resolve) })
+  await listen(nearServer, port)
+  if (farServer) await listen(farServer, reachPort)
+  const server = nearServer
   const url = `http://127.0.0.1:${server.address().port}`
-  return { url, secret, link: `${world}/city?shared=1#helper=${encodeURIComponent(url)}&secret=${secret}`, close: () => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve) }) }
+  return { url, secret, link: `${(page ?? world).replace(/\/$/, '')}/city?shared=1#helper=${encodeURIComponent((reach ?? url).replace(/\/$/, ''))}&secret=${secret}`, reachPort: farServer?.address().port, close: () => Promise.all([nearServer, farServer].filter(Boolean).map((one) => new Promise((resolve) => { one.closeAllConnections(); one.close(resolve) }))) }
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -215,7 +235,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', model, say: (s) => console.log(s) })
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, say: (s) => console.log(s) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)
 }

@@ -131,6 +131,22 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
 - **One ask** (`page/ask.ts`, the shape in `helper.mjs`): a wish and, when there is one, a picture, a link and a
   target (a point, a box, or a thing and its part), with where the asker's eye is. A thing aimed at is checked and answered "not yet".
   An ask made while another is being made waits its turn in the page. From the console: `engine.ask({ wish: 'a red phone box' })`.
+- **From a phone** on your tailnet (the model still runs on this machine):
+
+  ```sh
+  NAME=<this machine's tailnet name, as `tailscale status` gives it>
+  tailscale serve --bg --https=10161 http://127.0.0.1:5761      # the world's page, tailnet only
+  tailscale serve --bg --https=10162 http://127.0.0.1:5763      # the helper's door for the tailnet, tailnet only
+  node helper.mjs --world http://127.0.0.1:5761 --page https://$NAME:10161 --reach https://$NAME:10162 --only <your tailnet login>
+  ```
+
+  Open the address it prints on the phone (it carries the secret after `#`: send it to yourself, do not post it).
+  What comes from the tailnet comes in by a second listener (5763) and must be from the one tailnet login named,
+  by the tailnet name, from the world's own page, with the secret. The page takes a helper's address only if it
+  is this machine's or the page's own host, and is served with a policy that lets it talk to nowhere else. A
+  Sentinel pass (November 13) traced five things in this path, all fixed; `test/helper.mjs` holds a check for each.
+  Run from a phone-shaped Chrome page over the tailnet address; **not yet on a real iPhone**: whether its sheet
+  offers the library and the camera, whether `capture` opens the camera, and where the keyboard leaves the bar.
 - **A made thing has a record** the world keeps: `{id, name, wish, at, size, facing, by}` and whatever the lanes that
   own them put under `parts`, `behaviour`, `controls`, `seats`, `sounds`. It comes on the same ask as the thing's
   cells, is in the world's file, and reaches every page in the stream (`engine.things`). `GET /world/things`,
