@@ -249,8 +249,8 @@ function seat(m) {
     tell(p)
     return { you: state(p) }
   }
-  // A page's body may speak; everything else a body does here is a seat's.
-  if (!p || (!p.seat && m.op !== 'say')) return { error: 'nobody of that name has a body here: POST /world/join first' }
+  // A page's body may speak, and be told who and what is around it; everything else a body does here is a seat's.
+  if (!p || (!p.seat && !['say', 'around', 'me'].includes(m.op))) return { error: 'nobody of that name has a body here: POST /world/join first' }
   p.last = now
   if (m.op === 'leave') { folk.delete(m.by); p.gone = true; tell(p); lay(grasp.left(p)); return { left: true } }
   if (m.op === 'walk') {
