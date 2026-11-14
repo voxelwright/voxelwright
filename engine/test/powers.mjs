@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { chromium } from 'playwright'
 import { arg, CHROME, film, serve, still, turn } from './kit.mjs'
+import { NAMED } from '../page/moves.ts'
 
 const out = arg('out', '') && resolve(arg('out', ''))
 if (out) mkdirSync(out, { recursive: true })
@@ -46,8 +47,14 @@ const RULE = `on('said', (world, e) => {
   if (/slow/.test(e.text)) world.clock({rate: 0.25, spare: [e.by]})
   if (/hold fast/.test(e.text)) world.person(e.by, {cling: true})
   if (/westward/.test(e.text)) world.person(e.by, {down: [-1, 0, 0]})
+  if (/long coat/.test(e.text)) world.person(e.by, {look: {coat: '#15161a', legs: '#101114', wear: ['coat', 'glasses']}})
+  if (/kick/.test(e.text)) world.person(e.by, {move: 'kick'})
+  if (/duck/.test(e.text)) world.person(e.by, {move: 'duck'})
+  if (/bow/.test(e.text)) world.person(e.by, {move: {keys: [{t: 0.3, lean: 0.9}, {t: 0.9, lean: 0}]}})
+  if (/cartwheel/.test(e.text)) world.person(e.by, {move: 'cartwheel'})
+  if (/stand up/.test(e.text)) world.person(e.by, {move: null})
   if (/too much/.test(e.text)) world.person(e.by, {pace: 9999})
-  if (/as it was/.test(e.text)) { world.person(e.by, {pace: null, fall: null, jump: null, climb: null, fly: null, cling: null, down: null}); world.clock({rate: 1}) }
+  if (/as it was/.test(e.text)) { world.person(e.by, {pace: null, fall: null, jump: null, climb: null, fly: null, cling: null, down: null, look: null, move: null}); world.clock({rate: 1}) }
 })
 on('start', (world) => world.actor('post', {name: 'Someone standing', at: [700, 4009]}))
 on('tick', (world) => { if (!world.keep.tried) { world.keep.tried = true; world.person('post', {pace: 100}) } })`
@@ -146,10 +153,35 @@ try {
   await ada.waitForTimeout(1500)
   const how = (await rules()).find((r) => r.id === 'powers')
   check((await feet(ada)).can.pace === 45 && /pace is a number from 0 to 400/.test(JSON.stringify(how)), 'a pace out of range is refused, and the rule is told why')
+  // A look and a move for her own figure, as a rule gives its actors: on her page, which draws her, and on his.
+  const hers_ = () => ada.evaluate(() => { const p = globalThis.engine.me.figure; return { wear: p.look?.wear, coat: p.look?.coat, keys: p.move?.move.keys, hold: p.move?.move.hold, t: p.move?.t, was: !!p.was } })
+  const his_ = () => ben.evaluate(() => { const e = globalThis.engine, p = e.folk.from.flatMap((f) => f(e.view(), 0)).find((p) => p.name === 'Ada'); return p ? { wear: p.look?.wear, coat: p.look?.coat, keys: p.move?.move.keys, hold: p.move?.move.hold, t: p.move?.t } : null })
+  const both = async (what, ok) => { let a, b; for (let i = 0; i < 40; i++) { [a, b] = [await hers_(), await his_()]; if (ok(a) && b && ok(b)) return [a, b]; await ada.waitForTimeout(100) } console.log(`  never ${what}: hers`, JSON.stringify(a), 'his', JSON.stringify(b)); return null }
+  const kick = JSON.stringify(NAMED.kick.keys), duck = JSON.stringify(NAMED.duck.keys)
+  await ada.evaluate(() => globalThis.engine.say('long coat'))
+  const worn = await both('a coat', (f) => f.coat === '#15161a' && f.wear?.join() === 'coat,glasses')
+  check(!!worn, 'said "long coat", the rule gives her figure a dark coat and glasses: her own page draws her in them, and so does his')
+  await ada.evaluate(() => globalThis.engine.say('kick'))
+  const kicked = await both('a kick', (f) => JSON.stringify(f.keys) === kick)
+  if (out) { await ada.evaluate(() => { globalThis.engine.me.view = 'behind' }); await ada.waitForTimeout(60); await ada.screenshot({ path: join(out, 'coat-kick.png') }) }
+  check(!!worn && !!kicked && kicked[0].t < 1.5, `said "kick", her figure kicks in its coat, on her page from when it heard (${kicked ? kicked[0].t.toFixed(2) : '?'} s in) and on his`)
+  await ada.evaluate(() => globalThis.engine.say('duck'))
+  const ducked = await both('a duck', (f) => JSON.stringify(f.keys) === duck && f.hold === true)
+  check(!!ducked && (await hers_()).was, 'said "duck", she ducks and stays down, the duck taking over from the kick with no jump')
+  await ada.evaluate(() => globalThis.engine.say('bow'))
+  const bowed = await both('a bow', (f) => f.keys?.length === 2 && f.keys[0].lean === 0.9)
+  check(!!bowed, 'a move of the rule\'s own keys (a bow) is played on both pages')
+  await ada.evaluate(() => globalThis.engine.say('cartwheel'))
+  await ada.waitForTimeout(1200)
+  check(/cartwheel.{1,3} is not a move with a name/.test(JSON.stringify((await rules()).find((r) => r.id === 'powers'))) && (await hers_()).keys?.length === 2, 'a move there is not is refused, the rule is told, and she is as she was')
+  await ada.evaluate(() => globalThis.engine.say('stand up'))
+  const stood_ = await both('no move', (f) => !f.keys || (f.keys.length === 1 && f.keys[0].t === 0))
+  check(!!stood_ && stood_[0].coat === '#15161a', 'told no move, she comes to rest, still in her coat')
   // Taken out, everything it set goes back.
   await post('ask', { by: 'tester', unrule: 'powers' })
   await ada.waitForFunction(() => globalThis.engine.tempo.rate === 1 && globalThis.engine.me.clock === 1, null, { timeout: 5000 })
   check((await feet(ben)).tempo === 1, 'the rule taken out, the clock goes as it did, for everyone')
+  check(!!(await both('her own look', (f) => !f.coat && !f.wear)), 'and her figure is as it was, on her page and on his')
 } catch (e) {
   failures.push(String(e.stack ?? e))
 }

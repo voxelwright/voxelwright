@@ -518,7 +518,7 @@ async function main() {
   // everyone's but those a rule spares, who move as they always did while all else slows.
   // A blow on this page's own person (rules/blows.mjs): thrown the way it went, or put on the ground.
   if (far) far.onblow = (b) => { if (b.push) me.push(b.push); if (b.down !== undefined) me.down(b.down) }
-  if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {} }
+  if (far) far.onbodies = (b) => { tempo.rate = b.clock.rate; me.clock = b.clock.spare.includes(far.me) ? 1 : b.clock.rate; me.can = b.can[far.me] ?? {}; me.limbs = b.figure?.[far.me] ?? {} }
   if (query.get('walk') === '1') me.walk(true)
   if (far) folkClock.now = far.clock
   if (far) worldHour = () => far.realm.look?.hour ?? 11

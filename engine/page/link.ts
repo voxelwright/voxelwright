@@ -7,6 +7,9 @@ import type { Answer, Ask } from './mover.ts'
 import type { Thing } from './things.ts'
 
 /** An ask as the world did it: who asked, and what. An edit comes with the box of cells it can change, worked out by the server. */
+/** What a rule gave someone's figure: a look (wear.ts), and a move by its name or its keys, the `n`th it was given, with what it is aimed at. */
+export interface Limbs { look?: Look; move?: { n: number; name?: string; keys?: Move; aim?: [number, number, number] } }
+
 export interface Echo { by: string; blast?: [number, number, number]; radius?: number; spark?: boolean; ignite?: [number, number, number]; edit?: number[]; box?: [number, number, number, number, number, number]; release?: [number, number, number]
   /** A made thing's record (things.ts): whole, with the edit that is its cells, or an id and the fields a lane changed. */
   thing?: Partial<Omit<Thing, 'cells' | 'box'>> & { id: string }
@@ -50,7 +53,7 @@ export interface Link {
   /** A blow on this page's own person (#264, rules/blows.mjs): the speed it gives them (cells a second), or how long they are put on the ground (seconds). */
   onblow: ((blow: { by: string; push?: [number, number, number]; down?: number }) => void) | null
   /** What people's bodies can do, by whom (their name in the world), and how fast the world goes and who is spared that (#264, rules/bodies.mjs). Said as it changes and to each page as it joins. */
-  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>> & { down?: [number, number, number]; cling?: boolean }> }) => void) | null
+  onbodies: ((bodies: { clock: { rate: number; spare: string[] }; can: Record<string, Partial<Record<'pace' | 'jump' | 'climb' | 'fly' | 'fall', number>> & { down?: [number, number, number]; cling?: boolean }>; /** By person: the look and the move a rule gave their figure (people.ts, moves.ts). */ figure?: Record<string, Limbs> }) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */

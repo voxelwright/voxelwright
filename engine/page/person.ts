@@ -13,7 +13,9 @@ import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import { numbers, type Motor } from './living.ts'
 import type { Answer, Ask } from './mover.ts'
-import { STRIDE, type People, type Person } from './people.ts'
+import { runningAt, strideAt, type Doing, type People, type Person } from './people.ts'
+import { NAMED, type Move } from './moves.ts'
+import type { Limbs } from './link.ts'
 import type { Told } from './told.ts'
 
 /** How big someone's body is in cells (wide, tall, deep): a box 1.4 m tall on a leg that reaches 0.6 m down, 1.76 m in all. */
@@ -36,6 +38,9 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
 const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
+/** No move at all: what a body comes to rest in. */
+const REST: Move = { keys: [{ t: 0 }], hold: true }
+
 /** How high the eyes are over the feet, and what share of a run a walk is. */
 const EYES = 16.5, WALK = 0.32
 
@@ -56,6 +61,10 @@ export interface Me {
   readonly feet: { at: [number, number, number]; yaw: number; speed: number } | null
   /** What the body can do; set (any of the numbers) to change it. */
   can: Partial<Can>
+  /** What a rule gave the figure: a look, and a move (`world.person`). In the console: `engine.me.limbs = {move: {n: 1, name: 'strike'}}`. */
+  limbs: Limbs
+  /** The figure as it is drawn (people.ts), whether or not it is in view. */
+  readonly figure: Person
   /** A blow: so much speed given to the body at once (cells a second). Nothing if it is not on its feet. */
   push(speed: readonly [number, number, number]): void
   /** Puts the body on the ground for so many seconds: it does not walk meanwhile. None gets it up. */
@@ -93,10 +102,26 @@ export function person(o: {
   let downUntil = 0, lying = 0
   let waiting = false, since = 0, awake = true, leave: (() => void) | null = null
   const shown: Person = { at: [0, 0, 0], yaw: 0, seed: o.seed, name: o.name }
+  // What a rule gave the figure (`world.person`: a look, a move): as presence.ts has it for everyone else's. A new
+  // move takes over from the one before, and none brings it to rest from whatever it was in. A move begins when this
+  // page hears of it: by the world's clock a strike of half a second told a little late began part way through.
+  type Under = { n: number; move: Move; since: number; aim?: [number, number, number] }
+  let limbs: Limbs = {}, doing: Under | null = null, before: Under | null = null
+  const moved = () => {
+    const m = limbs.move, now = performance.now() / 1000
+    if (!m) { if (doing && doing.move !== REST) { before = doing; doing = { n: -1, move: REST, since: now } } return }
+    if (doing?.n === m.n) { doing.aim = m.aim; return }
+    const move = m.name ? NAMED[m.name] : m.keys
+    if (!move) return
+    before = doing
+    doing = { n: m.n, move, since: now, aim: m.aim }
+  }
+  const part = (d: Under, now: number): Doing => ({ move: d.move, t: now - d.since, aim: d.aim })
   o.folk.from.push((_view, seconds) => {
     // In the head nobody sees their own figure; and on a wall the figure cannot yet be drawn leaning (the people lane's to give).
     if (!on || !at || view === 'head' || tilted()) return []
-    Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, down: lying, time: seconds })
+    const now = performance.now() / 1000
+    Object.assign(shown, { at: [at[0], at[1] - com[1] - LEG, at[2]], yaw: heading + Math.PI / 2, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
     return [shown]
   })
   const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed } }
@@ -128,6 +153,9 @@ export function person(o: {
     get view() { return view },
     set view(v) { view = v },
     get feet() { return on ? feet() : null },
+    get limbs() { return limbs },
+    set limbs(l) { limbs = l; moved() },
+    get figure() { return shown },
     get can() { return can },
     set can(c) { const next = { ...AS_IT_IS, ...c }; if (JSON.stringify(next) === JSON.stringify(can)) return; can = next; tellCan() },
     push(speed) { if (id) { o.send({ kick: { id, speed: [speed[0], speed[1], speed[2]] } }); o.wake(); awake = true } },
@@ -183,7 +211,7 @@ export function person(o: {
         // How far along its own floor: a fall is not a walk, whichever way down is for it.
         const mine = turned(frame, [0, 1, 0]), d = [f.at[0] - was[0], f.at[1] - was[1], f.at[2] - was[2]], rise = d[0] * mine[0] + d[1] * mine[1] + d[2] * mine[2]
         const step = Math.hypot(d[0] - mine[0] * rise, d[1] - mine[1] * rise, d[2] - mine[2] * rise)
-        if (step < 20) { stride += step / STRIDE; speed += ((dt > 0 ? step / dt : 0) - speed) * Math.min(1, dt * 10) }
+        if (step < 20) { stride += step / strideAt(speed); speed += ((dt > 0 ? step / dt : 0) - speed) * Math.min(1, dt * 10) }
         walking += ((speed > 3 ? 1 : 0) - walking) * Math.min(1, dt * 8)
         shown.at = f.at
         // The eye: in the head, or behind and above it, the height eased so that a kerb is not a jolt.

@@ -405,6 +405,24 @@ setInterval(() => {
   getting.nearness()
 }, 100)
 
+/** What a body looks like and does with its limbs, as a rule gives it: for a rule's actor, and for someone at a page (rules/bodies.mjs). */
+function limbs(rule, p, w, now, wrong) {
+  if (w.look !== undefined) p.look = lookOf(w.look)
+  // What it does with its limbs: a move that has a name, or keys of the rule's own; null ends it. And what it is aimed at.
+  if (w.move !== undefined) {
+    if (w.move === null) p.move = undefined
+    else { const move = moveOf(w.move); if (move) p.move = { n: (p.move?.n ?? 0) + 1, since: now, ...(typeof w.move === 'string' ? { name: w.move } : { data: move }), long: lengthOf(move), stays: !!(move.loop || move.hold), aim: p.move?.aim }; else wrong(typeof w.move === 'string' ? `"${w.move.slice(0, 24)}" is not a move with a name: the guide lists them, or send keys` : 'a move is a name, or {keys: [{t, ...joints}], loop, hold}') }
+  }
+  // What the move is aimed at: a place, or someone (an id from world.people), who is then followed by it. The body turns to it while the move lasts.
+  if (w.aim !== undefined && p.move) {
+    const them = typeof w.aim === 'string' ? folk.get(`${rule.id}/${w.aim}`) ?? folk.get(w.aim) : undefined
+    if (w.aim === null) { p.move.aim = undefined; p.move.aimAt = undefined }
+    else if (them && them !== p) { p.move.aimAt = them.by; p.move.aim = middle(them, now) }
+    else if (Array.isArray(w.aim) && w.aim.length === 3 && w.aim.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) { p.move.aim = w.aim.map((v) => Math.round(v * 10) / 10); p.move.aimAt = undefined }
+    else wrong(typeof w.aim === 'string' ? `aim: nobody called "${w.aim.slice(0, 24)}" has a body here (world.people says who has)` : 'what a move is aimed at is aim: [x, y, z], or the id of someone in world.people, or null')
+  }
+}
+
 // ── Rules (#264) ─────────────────────────────────────────────────────────
 // A rule is text that someone, or a model of theirs, wrote: what the people of a world do, what a game in it is.
 // It is kept with the world as the ask that put it there. This process never runs a line of one: each has a
@@ -508,20 +526,7 @@ does.set('actor', (rule, w, now, wrong) => {
   // How near a person must come for the rule to hear of it (`near`); 0 or null: it does not.
   if (w.reach !== undefined) p.reach = Number.isFinite(w.reach) && w.reach > 0 ? Math.min(REACH_MOST, w.reach) : undefined
   if (w.face !== undefined) { if (pair(w.face)) { const dx = w.face[0] - p.at[0], dz = w.face[w.face.length - 1] - p.at[2]; if (dx || dz) p.yaw = Math.atan2(dx, -dz) } else wrong('what to face is face: [x, z]') }
-  if (w.look !== undefined) p.look = lookOf(w.look)
-  // What it does with its limbs: a move that has a name, or keys of the rule's own; null ends it. And what it is aimed at.
-  if (w.move !== undefined) {
-    if (w.move === null) p.move = undefined
-    else { const move = moveOf(w.move); if (move) p.move = { n: (p.move?.n ?? 0) + 1, since: now, ...(typeof w.move === 'string' ? { name: w.move } : { data: move }), long: lengthOf(move), stays: !!(move.loop || move.hold), aim: p.move?.aim }; else wrong(typeof w.move === 'string' ? `"${w.move.slice(0, 24)}" is not a move with a name: the guide lists them, or send keys` : 'a move is a name, or {keys: [{t, ...joints}], loop, hold}') }
-  }
-  // What the move is aimed at: a place, or someone (an id from world.people), who is then followed by it. The body turns to it while the move lasts.
-  if (w.aim !== undefined && p.move) {
-    const them = typeof w.aim === 'string' ? folk.get(`${rule.id}/${w.aim}`) ?? folk.get(w.aim) : undefined
-    if (w.aim === null) { p.move.aim = undefined; p.move.aimAt = undefined }
-    else if (them && them !== p) { p.move.aimAt = them.by; p.move.aim = middle(them, now) }
-    else if (Array.isArray(w.aim) && w.aim.length === 3 && w.aim.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)) { p.move.aim = w.aim.map((v) => Math.round(v * 10) / 10); p.move.aimAt = undefined }
-    else wrong(typeof w.aim === 'string' ? `aim: nobody called "${w.aim.slice(0, 24)}" has a body here (world.people says who has)` : 'what a move is aimed at is aim: [x, y, z], or the id of someone in world.people, or null')
-  }
+  limbs(rule, p, w, now, wrong)
   if (w.say !== undefined) {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
@@ -536,7 +541,7 @@ does.set('think', (rule, w, now, wrong) => minds.ask(rule, w, now, wrong))
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 // What a person's body can do, and how fast the world goes (rules/bodies.mjs).
-const body = bodies({ folk, tell: (m) => parentPort.postMessage(m) })
+const body = bodies({ folk, tell: (m) => parentPort.postMessage(m), limbs, shown: tell })
 does.set('person', body.person)
 // Blows (rules/blows.mjs): everyone's ghost in the core, what a rule hears of what meets them, and throwing, pushing and putting down.
 const blow = blows({ core, folk, tell, post: (m) => parentPort.postMessage(m), told: (n) => { told(n, false); nudged = true }, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule), thing: (bodyId) => { for (const [id, a] of alive) if (a.body === bodyId) return id } })

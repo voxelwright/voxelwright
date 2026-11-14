@@ -266,6 +266,12 @@ on foot as they do flying.
   over its top edge, onto the roof; over the far edge, down. The eye turns with them, in the head (what they stand
   on is the floor they see). `null` puts either back. Others still see the figure drawn upright (PEOPLE's to lean).
   In the console: `engine.me.can = {cling: true}`.
+- **A move and a look for someone at a page**: `world.person(id, {move, aim, look})` takes what `world.actor`
+  takes (the people lane's moves and looks as data, by one function in `world.mjs`): a rule makes a person's own
+  figure kick, duck or bow by keys of its own, and wear a long coat. Everyone sees it by the telling any body has
+  (`here`); the person's own page, which draws its own figure, is told with the numbers (frame 12, `figure`) and
+  starts the move when it hears. A move is how a body looks: it strikes nobody. Taken out, the rule's look and
+  move go. In the console, alone: `engine.me.limbs = {move: {n: 1, name: 'kick'}, look: {wear: ['coat']}}`.
 - **A slowed world, tried**: with the clock at a quarter and the one who asked spared, she walks at 1.4 m/s as she
   did while the other page's person walks at 0.33, and what falls, drives, burns and flows goes at a quarter with its
   dust. The eye still turns freely for everyone. Not slowed: the town's residents (they go by the wall clock, the
