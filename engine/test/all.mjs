@@ -22,6 +22,7 @@ const env = { ...process.env, ENGINE_KIT: JSON.stringify({ url: server.url, ws: 
 const checks = [
   ['core', 'cargo', ['test', '--release', '--quiet'], false, `${here}core`],
   ['types', 'npx', ['tsc', '--noEmit'], false],
+  ['whole', 'node', ['test/whole.mjs'], false],
   ['city', 'node', ['test/city.mjs'], true],
   ['blast', 'node', ['test/blast.mjs'], true],
   ['shadows', 'node', ['test/shadows.mjs'], true],
