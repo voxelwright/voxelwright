@@ -174,6 +174,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     // A power asked for in the asker's own words: for the realm's rule to hear. Where there are no rules, for a rule to be written.
     const power = /^\s*(i want to|i wanna|i wish to|i would like to|let me|make me|i can|i know|i am|i'm|slow|stop time|freeze|speed up)\b/i.test(text)
     if (power) return rules ? 'said' : /^\s*(i am|i'm|i know)\b/i.test(text) ? 'said' : 'rule'
+    // Asked of someone, not of a maker ("give me a sword", "I need guns", "I want a horse"): in a world with rules it is for the rules to hear and answer, in the hand if they will; a sword stood in the street by the page's own maker is not what was meant (seen November 14). Only plain making words go to the maker there.
+    if (rules && /^\s*(please\s+)?(give me|hand me|get me|bring me|i want|i need|i wish for|i would like|i'd like|can i have|could i have|may i have)\b/i.test(text)) return 'said'
     if (made) return 'thing'
     // Nothing plain: in a world with rules it is said; elsewhere talk is said and the rest is a thing, as the bar has always made.
     if (rules) return 'said'

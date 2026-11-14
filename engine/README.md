@@ -451,7 +451,7 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   that begin as talk does are said to whoever is there. In a world that has rules everything typed is said first,
   so that its rules hear a power asked for in the asker's own words ("I want to fly", "slow time"), and only words
   that plainly ask for a thing ("make a ...", "a red door") or for a change ("add ...", "change ...", "from now
-  on ...") go to a maker. Elsewhere anything else is a thing, as before; `thing:` or `rule:` before the words says which. What is asked for from a page in a realm is made in that
+  on ...") go to a maker; "give me a sword" and "I need guns" are asked of someone and are said there too. Elsewhere anything else is a thing, as before; `thing:` or `rule:` before the words says which. What is asked for from a page in a realm is made in that
   realm. An ask may be 4,000 characters; past that the asker is told. Real run, November 13 (Opus 5.5 for the
   rules, Sonnet 5.5 for the idea): the first realm of #264 from the bar, asked one question back after 7 s, ready 138 s
   after Enter, stepped into; inside, a resident answered "hello there" and another the question about the world;

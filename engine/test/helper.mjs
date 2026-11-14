@@ -273,8 +273,8 @@ try {
   // This world has a rule now, so what is typed is said first: a power asked for in one's own words is for the
   // world's rule to hear, and is never made as a thing. Words that plainly ask for a thing still make one.
   const madeBefore = await page.evaluate(() => engine.things.all.size), rulesBefore = rulesAsked
-  for (const words of ['I want to fly.', 'let me fly', 'slow time', 'I know kung fu']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter'); await page.waitForFunction((w) => document.querySelector('#said')?.textContent.includes(`Ada: ${w}`), words, { timeout: 5000 }) }
-  check(await page.evaluate((n) => engine.things.all.size === n && engine.asker.busy === 0 && !document.querySelector('#cues p'), madeBefore) && rulesAsked === rulesBefore, '"I want to fly", "let me fly", "slow time", "I know kung fu" are said for the world\'s rule to hear: nothing is made of them')
+  for (const words of ['I want to fly.', 'let me fly', 'slow time', 'I know kung fu', 'give me a sword', 'I need guns, lots of guns', 'can I have a horse']) { await page.keyboard.press('Enter'); await page.keyboard.type(words); await page.keyboard.press('Enter'); await page.waitForFunction((w) => document.querySelector('#said')?.textContent.includes(`Ada: ${w}`), words, { timeout: 5000 }) }
+  check(await page.evaluate((n) => engine.things.all.size === n && engine.asker.busy === 0 && !document.querySelector('#cues p'), madeBefore) && rulesAsked === rulesBefore, '"I want to fly", "let me fly", "slow time", "I know kung fu", "give me a sword", "I need guns, lots of guns", "can I have a horse" are said for the world\'s rule to hear: nothing is made of them')
   await page.evaluate(() => { engine.pose.x += 5 })
   await page.keyboard.press('Enter'); await page.keyboard.type('make a tea crate'); await page.keyboard.press('Enter')
   await page.waitForFunction((n) => engine.things.all.size === n + 1, madeBefore, { timeout: 30_000 })
