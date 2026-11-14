@@ -69,7 +69,7 @@ export interface Asker {
   imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
   realm(spec: { name: string; about: string; look?: unknown; place?: unknown; answers?: { ask: string; answer: string }[]; /** With a director, written for it once its first rules are in. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
-  /** How many asks are being made or waiting. */
+  /** How many asks are being made, written or waiting. */
   readonly busy: number
   /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */
   call(path: string, body?: unknown): Promise<{ ok: boolean; value: Record<string, unknown> } | null>
@@ -103,22 +103,24 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   const headers = () => ({ 'Content-Type': 'application/json', 'X-Village-Secret': helper!.secret })
   const failed = (why: string): Done => ({ stage: 'done', state: 'refused', why })
   let last: Promise<unknown> = Promise.resolve(), busy = 0
+  /** What is written (a rule, a realm, a director) waits its turn among what is written, and never holds up a thing: the helper has a lane for each. */
+  let lastWritten: Promise<unknown> = Promise.resolve(), written = 0
   /** The realm this page is in now, if it is not home (the address says, and is kept true as the page steps between realms, #264): what is asked for is made there. */
   const realmNow = () => new URLSearchParams(location.search).get('realm') ?? undefined
   /** One thing asked of the helper, in its turn after whatever was asked before. */
   const turn = async (path: string, what: { from?: { eye: [number, number, number]; toward: [number, number, number] } } & Record<string, unknown>, each: (stage: Stage) => void): Promise<Done> => {
-    const end = (done: Done) => { busy--; each(done); return done }
+    const end = (done: Done) => { written--; each(done); return done }
     const body = JSON.stringify(what)
-    if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
-    const before = last
+    if (written++) each({ stage: 'waiting', ahead: written - 1 })
+    const before = lastWritten
     let free!: () => void
-    last = new Promise<void>((r) => { free = r })
+    lastWritten = new Promise<void>((r) => { free = r })
     await before
     try { return await send(path, body, each, end, what.from ?? eye()) } finally { free() }
   }
   const self: Asker = {
     aim: null,
-    get busy() { return busy },
+    get busy() { return busy + written },
     async call(path, body) {
       if (!helper) return null
       try { const r = await fetch(`${helper.url}${path}`, body === undefined ? { headers: headers() } : { method: 'POST', headers: headers(), body: JSON.stringify(body) }); return { ok: r.ok, value: await r.json() } } catch { return null }

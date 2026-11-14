@@ -130,7 +130,10 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
   // request came by is not something the request can say for itself, as its Host is.
   if (reach && !only) throw new Error('to be reached from the tailnet the helper must be told whose it is: --only <your tailnet login>')
   const far = reach ? new URL(reach).host : null
-  let busy = false
+  // Two lanes (#264): a thing takes seconds and may be for someone's hand in the middle of a game; a rule, a realm or a
+  // director takes minutes in the writing. Each lane does one at a time, and neither waits on the other (seen November
+  // 14: a pistol reached the hand after 95 s, 80 of them behind a rule being changed). `busy` is the things' lane.
+  let busy = false, writing = false
   /** The workshop's door (workshop/route.mjs): reads the same list of what could not be done that the rules' maker writes. */
   const shop = workshop({
     journal: cannot, world, say,
@@ -139,10 +142,10 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
     again: async ({ wish, realm, change, where, by }) => {
       const at = realm && realm !== 'home' ? `${world}/realm/${realm}` : world
       if (!(await fetch(`${at}/world/rules?id=${encodeURIComponent(change)}`)).ok) return { state: 'refused', why: 'that rule is no longer there' }
-      for (let waited = 0; busy && waited < 150; waited++) await new Promise((r) => setTimeout(r, 2000))
-      if (busy) return { state: 'refused', why: 'the helper was busy making something' }
-      busy = true
-      try { return await writeRule({ wish, world: at, where, change, by, model, cannot, say: (words) => say(`  ${words}`) }) } finally { busy = false }
+      for (let waited = 0; writing && waited < 150; waited++) await new Promise((r) => setTimeout(r, 2000))
+      if (writing) return { state: 'refused', why: 'the helper was busy writing something' }
+      writing = true
+      try { return await writeRule({ wish, world: at, where, change, by, model, cannot, say: (words) => say(`  ${words}`) }) } finally { writing = false }
     },
     ...shopWith,
   })
@@ -192,11 +195,11 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
       if (body?.realm !== undefined && (typeof body.realm !== 'string' || !REALM.test(body.realm))) return end(400, { why: 'a realm is named by its id' })
       const server = world, here = url.pathname !== '/realm' && typeof body?.realm === 'string' ? `${world}/realm/${body.realm}` : world
       const stream = async (work) => {
-        if (busy) return end(429, { why: 'one thing at a time: something is being made' })
-        busy = true
+        if (writing) return end(429, { why: 'one at a time: something is being written' })
+        writing = true
         res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store', 'X-Accel-Buffering': 'no', ...cors })
         const line = (o) => res.write(JSON.stringify(o) + '\n')
-        try { await work(line, (words, stage) => { say(`  ${words}`); if (stage) line(stage) }) } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not do it' }) } finally { busy = false; res.end() }
+        try { await work(line, (words, stage) => { say(`  ${words}`); if (stage) line(stage) }) } catch (e) { say(`  failed: ${e.message}`); line({ stage: 'done', state: 'refused', why: 'the helper could not do it' }) } finally { writing = false; res.end() }
       }
       const place = (f) => (f && three(f.eye) && three(f.toward, 1e6) ? { at: [Math.round(f.eye[0]), Math.round(f.eye[1]) - 16, Math.round(f.eye[2])], facing: Math.abs(f.toward[0]) > Math.abs(f.toward[2]) ? (f.toward[0] > 0 ? 'east' : 'west') : f.toward[2] > 0 ? 'south' : 'north' } : null)
       if (url.pathname === '/rule') {
@@ -228,9 +231,9 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         // An idea for a realm, fleshed out before anything is built. {idea}
         const idea = text(body?.idea, 4000)
         if (!idea) return end(400, { why: 'say what the realm is: {idea}' })
-        if (busy) return end(429, { why: 'one thing at a time: something is being made' })
-        busy = true
-        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, place: r.place, questions: r.questions }) } finally { busy = false }
+        if (writing) return end(429, { why: 'one at a time: something is being written' })
+        writing = true
+        try { const r = await imagine({ idea, model: quick }); return r.why ? end(200, { why: r.why }) : end(200, { name: r.name, about: r.about, look: r.look, place: r.place, questions: r.questions }) } finally { writing = false }
       }
       if (url.pathname === '/realm') {
         // A realm made on the world's server and its rules written into it. {name, about, look, place, answers, by}

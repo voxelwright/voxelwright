@@ -296,6 +296,15 @@ try {
   const changed = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me fly', from, realm: realms[0].id }) })
   const afterChange = await (await fetch(`${world}/realm/${realms[0].id}/world/rules`)).json()
   check(JSON.parse(changed.text.trim().split('\n').at(-1)).rule === inRealm[0].id && afterChange.length === 2 && afterChange.some((r) => r.id === 'director') && last.prompt.includes('The rule as it stands') && last.prompt.includes('let me fly'), 'asked for a power in a realm, the realm\'s own rule is changed and put again under its id, with a director there beside it')
+  // Two lanes: while a rule is being written and tried (seconds here, minutes with a model), a thing is still made at once; a second thing to write is turned away.
+  let writingStill = true
+  const slow = raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me walk on walls', from, realm: realms[0].id }) }).then((r) => { writingStill = false; return r })
+  await new Promise((r) => setTimeout(r, 500))
+  const meanwhile = await raw('/ask', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'A tea crate, please', from, by: 'Ada', realm: realms[0].id }) })
+  const turned = await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me swim', from, realm: realms[0].id }) })
+  check(meanwhile.status === 200 && /"state":"(there|held)"/.test(meanwhile.text) && writingStill && turned.status === 429, `a thing asked for while a rule is being written is made without waiting for it (${(/"state":"(\w+)"/.exec(meanwhile.text.trim().split('\n').at(-1)) ?? [])[1]}); another thing to write waits its turn`)
+  check(JSON.parse((await slow).text.trim().split('\n').at(-1)).state === 'there', 'and the rule is written all the same')
+  await page.waitForFunction(() => engine.asker.busy === 0)
 
   // ── Keys have one owner ──
   const z0 = await page.evaluate(() => engine.pose.z)
