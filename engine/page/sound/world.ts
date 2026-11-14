@@ -11,7 +11,6 @@ import { LIKES } from './likes.ts'
 import { patch as readPatch, type Patch } from './patch.ts'
 import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
-import { MODES, MOODS, PACE, moodKey } from './music/compose.ts'
 import { played } from './things.ts'
 import type { Things } from '../things.ts'
 import type { Hud } from '../hud.ts'
@@ -107,16 +106,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
     const where = at as [number, number, number]
     for (let i = 0; i < Math.max(1, hz.length); i++) for (const p of patches) voice.play(p, { at: where, force: force * (0.94 + 0.12 * Math.random()), size, pitch: hz[i] ?? 0, dur, after: i * gap, reach })
   }
-  /** What the realm's music is like, if a rule has said: the mood's name and how much of it is in. */
-  let realm: { key: string; drive: number | null; now: boolean } | null = null
-  /** What a rule said the realm's music is like (rules/sound.mjs), or null for the place's own: read again as a stranger's. */
-  const tuned = (v: unknown) => {
-    const m = v as Record<string, unknown> | null
-    if (!m || typeof m !== 'object' || typeof m.like !== 'string' || !Object.hasOwn(MOODS, m.like)) { realm = null; return }
-    realm = { key: moodKey(m.like, num(m.pace, PACE[0], PACE[1], 0), typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : ''), drive: typeof m.drive === 'number' ? num(m.drive, 0, 1, 0) : null, now: m.now === true }
-  }
   return {
-    voice, blast, count, music, sounded, tuned,
+    voice, blast, count, music, sounded,
     get things() { return things },
     /** Which place's music is wanted now. */
     get place() { return place },
@@ -233,11 +224,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
         }
         const hour = scene.hour(), sort = scene.paving(Math.round(eye[0]), Math.round(eye[2])) & 7
         place = threat > 0.4 ? 'danger' : scene.making() ? 'making' : under || high > 2500 ? 'sea' : snow ? 'snow' : hour < 5.5 || hour > 20.5 ? 'night' : shore.level > 0.3 || sort < 2 ? 'coast' : 'town'
-        // A realm whose rule has said what its music is has that, whatever the place; one that has not keeps the place's.
-        if (realm) { place = realm.key; music.want(realm.key, realm.now); realm.now = false }
-        else music.want(place, place === 'danger')
-        music.drive = realm ? realm.drive : null
-        music.steady = !!realm
+        music.want(place, place === 'danger')
         music.tick()
       }
       voice.listen(eye, yaw)

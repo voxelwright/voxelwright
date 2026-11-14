@@ -19,9 +19,9 @@ import { controlsOf, numbers } from './page/living.ts'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
 import { lookOf } from './page/wear.ts'
+import { plugger } from './plugins.mjs'
 import { hands } from './rules/hands.mjs'
 import { sounding } from './rules/sound.mjs'
-import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
 
@@ -193,7 +193,7 @@ const doing = (p, now) => {
   if (whole) { p.move.told = p.move.n; p.move.toldAt = now }
   return { move: { n: p.move.n, since: p.move.since, ...(p.move.name ? { name: p.move.name } : whole ? { keys: p.move.data } : {}), ...(p.move.aim ? { aim: p.move.aim } : {}) } }
 }
-const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()), ...(p.thinking ? { thinking: true } : {}) } })
+const tell = (p) => parentPort.postMessage({ here: { by: p.by, name: p.name, at: p.at, yaw: p.yaw, walking: p.goal ? 1 : 0, down: p.down > Date.now(), flinch: p.flinch > Date.now(), seat: p.seat, gone: p.gone, ...(p.look ? { look: p.look } : {}), ...(p.was !== undefined ? { was: p.was, stride: p.stride } : {}), ...doing(p, Date.now()) } })
 const state = (p) => ({ name: p.name, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(3)), facing: COMPASS[((Math.round(p.yaw / (Math.PI / 4)) % 8) + 8) % 8], walking: !!p.goal, ...(p.goal ? { to: p.goal } : {}), ...(p.stopped ? { stopped: p.stopped } : {}), down: p.down > Date.now() })
 /** A blast near people: those close are knocked off their feet for a few seconds, those further off flinch. Nobody is hurt. */
 function shock(at, radius) {
@@ -255,7 +255,7 @@ function seat(m) {
     for (const o of folk.values()) {
       if (o === p) continue
       const dx = o.at[0] - p.at[0], dz = o.at[2] - p.at[2], far = Math.hypot(dx, dz, o.at[1] - p.at[1])
-      if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.thinking ? 'thinking' : o.goal ? 'walking' : 'standing' })
+      if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.goal ? 'walking' : 'standing' })
     }
     // The town's residents, by the same rule the pages draw them from. This process has no hour: it is noon to it.
     const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, 12, found, shocks, taken)
@@ -390,19 +390,19 @@ function people(id) {
   const now = Date.now(), out = []
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }
 const ruled = ruling({ people, residents: townTold, does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()) })
-/** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
-const happen = (event, e, only) => ruled.happen(event, e, only)
+/** Something happened that rules may listen for. */
+const happen = (event, e) => ruled.happen(event, e)
 /** A rule is taken out, and its actors go with it. */
 function drop(id) {
   ruled.drop(id)
   hand.dropped(id)
   noise.dropped(id)
-  minds.drop(id)
+  plug.dropped(id)
   // Its actors go with it; those who were residents go back to their rounds.
   for (const p of [...folk.values()]) if (p.rule === id) { if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } }
 }
@@ -413,10 +413,6 @@ function drop(id) {
  * the guide in serve.mjs: a rule is told the names with every call, so nothing in the interpreter changes.
  */
 const does = new Map()
-/** A body says words: everyone near hears, and it is not told to rules (one rule's actors cannot set another's talking for ever). */
-const utter = (p, words, now = Date.now()) => { const v = { n: ++spoken, by: p.by, name: p.name, text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
-const minds = thinking({ actor: (rule, id) => { const p = folk.get(`${rule}/${id}`); return p?.rule === rule ? p : undefined }, say: utter, show: (p) => tell(p), hand: (think) => parentPort.postMessage({ think }), happen })
-setInterval(() => minds.tidy(Date.now()), 1000)
 /** Makes an actor of the rule's, or changes one. */
 does.set('actor', (rule, w, now, wrong) => {
   const id = w.id
@@ -457,14 +453,11 @@ does.set('actor', (rule, w, now, wrong) => {
     const words = text(w.say, 200)
     if (now - rule.since > 1000) { rule.since = now; rule.says = 0 }
     // What an actor says is heard by everyone near, and is not told to rules: one rule's actors cannot set another's talking for ever.
-    if (words && ++rule.says <= SAYS_A_SECOND) utter(p, words, now)
+    if (words && ++rule.says <= SAYS_A_SECOND) { const v = { n: ++spoken, by, name: p.name, text: words, at: p.at.map(Math.round), t: now }; voices.push(v); if (voices.length > 400) voices.shift(); parentPort.postMessage({ said: v }) }
   }
   tell(p); p.told = now
 })
-/** An actor is asked to think (mind/think.mjs): what a model on someone's own machine makes of it comes back to the rule as `thought`. */
-does.set('think', (rule, w, now, wrong) => minds.ask(rule, w, now, wrong))
-/** An actor of the rule's leaves. */
-does.set('gone', (rule, w) => { const p = folk.get(`${rule.id}/${w.id}`); if (p?.rule !== rule.id) return; if (p.was !== undefined) release(p); else { folk.delete(p.by); p.gone = true; tell(p) } })
+// `world.gone(id)`, an actor of the rule's leaving, is a plugin (plugins/gone): the first of these moved into that form.
 // What a realm puts in a person's hands (rules/hands.mjs): things to do, and what the aim of one who does one met.
 const hand = hands({ folk, tall: TALL, look, text, tell: (m) => parentPort.postMessage(m), hear: (rule, event, e) => ruled.happen(event, e, rule) })
 does.set('offer', hand.offer)
@@ -472,7 +465,11 @@ does.set('show', hand.show)
 // What a realm sounds like (rules/sound.mjs): a sound at a place or on someone, for everyone near.
 const noise = sounding({ folk, tall: TALL, stand, tell: (m) => parentPort.postMessage(m) })
 does.set('sound', noise.sound)
-does.set('music', noise.music)
+// Engine plugins (plugins.mjs, the WORKSHOP lane): more that a rule can hear and do, each a folder under plugins/,
+// loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
+// what it may do with every call, and one started again must find what it used.
+const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { folk, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
+let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
 function obey(rule, wants, now) {
   const wrong = (what) => { rule.error = what }
@@ -504,15 +501,14 @@ function tops([x0, z0, x1, z1], from) {
   }
   return { high, kinds }
 }
-parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, thought }) => {
-  // What a helper answered for an actor that was asked to think.
-  if (thought) return minds.answer(thought)
+parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins }) => {
+  if (plugins) { plugging = plugging.then(() => plug.load(plugins)).then((plugged) => parentPort.postMessage({ id, plugged }), (e) => parentPort.postMessage({ id, plugged: [], error: String(e) })); return }
   if (pick) return parentPort.postMessage({ id, error: hand.pick(pick) })
   // Someone did something a rule offers: the rule hears it, with what their aim met.
   if (act) return parentPort.postMessage({ id, error: hand.act(act) })
   // How the rules are doing; and a rule the world had when it last stopped, put in again as it starts.
   if (how) return parentPort.postMessage({ id, rules: ruled.doing(actorsOf) })
-  if (rule) { actorsBack(rule.id, kept?.actors, Date.now()); return ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) }
+  if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
   if (drive) { const a = alive.get(drive.id); if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
@@ -537,7 +533,7 @@ parentPort.on('message', ({ ask, replay, at, look: line, id, seat: asks, here, r
   if (replay) return edit(replay)
   parentPort.postMessage({ echo: ask })
   // A rule put in or taken out, or what the realm is called: kept as every ask is, and nothing of the cells' to do.
-  if (ask.rule) return ruled.put(ask.rule, ruled.has(ask.rule.id) ? 'changed' : 'put')
+  if (ask.rule) return void plugging.then(() => ruled.put(ask.rule, ruled.has(ask.rule.id) ? 'changed' : 'put'))
   if (ask.unrule) return drop(ask.unrule)
   if (ask.realm) return
   if (ask.blast) shock(ask.blast, ask.radius)

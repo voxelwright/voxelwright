@@ -85,9 +85,7 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       o.flinch += ((o.who.flinch ? 1 : 0) - o.flinch) * Math.min(1, dt * (o.who.flinch ? 14 : 3))
       moved_(o)
       const clock = far.clock(), doing: Doing | undefined = o.doing ? { move: o.doing.move, t: clock - o.doing.since, aim: o.doing.aim } : undefined
-      // Asked to think (#264), it shows that it has heard and is about to speak: dots that come and go, until its words do.
-      const pause = o.who.thinking ? '.'.repeat(1 + (Math.floor(now / 350) % 3)) : ''
-      shown.push({ at: o.shown, yaw: o.yaw, seed: o.who.was ?? seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: o.who.thinking ? pause : now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
+      shown.push({ at: o.shown, yaw: o.yaw, seed: o.who.was ?? seedOf(o.who.name), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
     }
     return shown
   })

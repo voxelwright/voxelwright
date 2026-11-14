@@ -30,11 +30,13 @@ export type { Look } from './wear.ts'
 import type { Look } from './wear.ts'
 import type { Move } from './moves.ts'
 /** Someone in the world as the world tells of them: where their feet are, how they face, what they are doing. `seat` is a body the world moves for someone outside a page. */
-export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number; /** What it is doing with its limbs (moves.ts): which setting of it this is, when it began on the world's clock (ms), a name or keys, and what it is aimed at. The world's process has checked it. */ move?: { n: number; since: number; name?: string; keys?: Move; aim?: [number, number, number] }; /** An actor that was asked to think and has not answered yet (#264). */ thinking?: boolean }
+export interface Someone { by: string; name: string; at: [number, number, number]; yaw: number; walking: number; down: boolean; flinch: boolean; seat: boolean; gone?: boolean; /** What a rule chose of how its actor looks (#264): colours as #rrggbb, build against the usual. The world's process has checked it. */ look?: Look; /** Which of the town's residents this body was until a rule took it (#218): the rule's own number for them, and the step they were in. Pages leave that resident out of the town's rule meanwhile. */ was?: number; stride?: number; /** What it is doing with its limbs (moves.ts): which setting of it this is, when it began on the world's clock (ms), a name or keys, and what it is aimed at. The world's process has checked it. */ move?: { n: number; since: number; name?: string; keys?: Move; aim?: [number, number, number] } }
 /** Something a rule offers people to do (rules/hands.mjs): a word to show, held or tapped, aimed or not, the key it would like, and who it is for (null: everyone). */
 export interface Offer { rule: string; id: string; word: string; hold: boolean; aim: boolean; key: string; to: string[] | null }
 /** Something a rule shows people (rules/hands.mjs): a line, meters (how full, 0 to 1), a score, picks to choose from, and who it is for (null: everyone). All of it is text a rule wrote: to be put as text. */
 export interface Shown { rule: string; id: string; line: string; meters: { label: string; full: number; colour: string }[]; score: { label: string; value: string } | null; choice: { id: string; word: string }[] | null; to: string[] | null }
+/** What the world says of the engine's plugins (serve.mjs, frame 11): the page sides there are, or something for one of them. */
+export type Plugged = { list: { name: string; v: string }[] } | { plugin: string; state: unknown } | { plugin: string; once: unknown } | { plugin: string; gone: true }
 export interface Link {
   postMessage(ask: Ask & { box?: readonly number[] }): void
   onmessage: ((e: { data: Answer }) => void) | null
@@ -43,14 +45,14 @@ export interface Link {
   onecho: ((echo: Echo, live: boolean) => void) | null
   /** Which body a living thing is now (#245), by its thing's id; body 0 when it lives no more. Said as it changes and to each page as it joins. */
   onliving: ((living: { thing: string; body: number }) => void) | null
-  /** What the realm's music is like, if a rule has said (rules/sound.mjs), or null: as last said, told at once to whoever starts to listen. */
-  onmusic: ((music: unknown) => void) | null
   /** A sound a rule made (rules/sound.mjs): what it holds came through a rule, and is read again by whoever plays it. */
   onsound: ((sound: unknown) => void) | null
   /** What the world's rules offer people to do, all of it, whenever it changes (and as it stands, when this is set). */
   onoffers: ((offers: Offer[]) => void) | null
   /** What the world's rules show people, all of it, whenever it changes (and as it stands, when this is set). */
   onshown: ((shown: Shown[]) => void) | null
+  /** What of the engine's plugins this page is to have (plugins.ts): which page sides there are, and what each is given. Set, it is told what was said before. */
+  onplugged: ((m: Plugged) => void) | null
   /** Picks from a choice a rule shows. */
   pick(rule: string, id: string, pick: string): void
   /** Does something a rule offers: which, whether it goes down or comes up, where the eyes are and which way they look. */
@@ -94,7 +96,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, MUSIC = 11
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
 export function link(base = '/world'): Link {
@@ -102,14 +104,15 @@ export function link(base = '/world'): Link {
   /** What is offered, as last said, and who hears it. */
   let offers: Offer[] = [], hears: ((offers: Offer[]) => void) | null = null
   let shown: Shown[] = [], sees: ((shown: Shown[]) => void) | null = null
+  /** What was said of plugins, as last said: the list (under '') and each one's state. For whoever listens later, and to be taken back when this world is left. */
+  const plugs = new Map<string, Plugged>()
+  let plugged: ((m: Plugged) => void) | null = null
   /** What this realm says of itself, and what of this world must be said to be gone when it is left: who is there, which things live. */
   let realm: Realm = { name: '', about: '' }
   const there = new Map<string, Someone>(), alive = new Set<string>()
   /** The stream being read, and one made ready beside it: what it has said so far, and whether all that was kept has come. */
   interface Line { base: string; stop: AbortController; held: { kind: number; data: unknown }[] | null; realm: Realm; whole: boolean }
   let line: Line, next: Line | null = null
-  /** What the realm's music is like, as last said, and who is told. */
-  let music: unknown = null, tunes: ((music: unknown) => void) | null = null
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
@@ -118,13 +121,13 @@ export function link(base = '/world'): Link {
     get base() { return base },
     ready: () => Promise.reject(new Error('not yet')), go: () => false,
     get realm() { return realm },
+    get onplugged() { return plugged },
+    set onplugged(f: ((m: Plugged) => void) | null) { plugged = f; if (f) for (const m of plugs.values()) f(m) },
     get onshown() { return sees },
     set onshown(f: ((shown: Shown[]) => void) | null) { sees = f; f?.(shown) },
     pick(rule, id, pick) { void fetch(`${base}/pick`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, pick }) }).catch(() => {}) },
     get onoffers() { return hears },
     set onoffers(f: ((offers: Offer[]) => void) | null) { hears = f; f?.(offers) },
-    get onmusic() { return tunes },
-    set onmusic(f: ((music: unknown) => void) | null) { tunes = f; f?.(music) },
     act(rule, id, phase, from, to) { void fetch(`${base}/act`, { method: 'POST', body: JSON.stringify({ by: self.me, rule, id, phase, from, to }) }).catch(() => {}) },
     drive(id, go, turn, rise, once) { void fetch(`${base}/drive`, { method: 'POST', body: JSON.stringify({ by: self.me, id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' }) }).catch(() => {}) },
     ask: (body) => fetch(`${base}/ask`, { method: 'POST', body: JSON.stringify({ by: self.me, ...body }) }).then(async (r) => { if (!r.ok) self.onerror?.({ message: `the world refused: ${await r.text()}` }); return r.ok }, () => false),
@@ -154,8 +157,8 @@ export function link(base = '/world'): Link {
     }
     else if (kind === SHOWN) { shown = data as Shown[]; self.onshown?.(shown) }
     else if (kind === OFFERS) { offers = data as Offer[]; self.onoffers?.(offers) }
-    else if (kind === MUSIC) { music = data; self.onmusic?.(music) }
     else if (kind === SOUND) { if (live) self.onsound?.(data as Parameters<NonNullable<Link['onsound']>>[0]) }
+    else if (kind === PLUGGED) { const m = data as Plugged; if ('list' in m) plugs.set('', m); else if ('state' in m) plugs.set(m.plugin, m); else if ('gone' in m) plugs.delete(m.plugin); else if (!live) return; plugged?.(m) }
     else if (kind === LIVING) { const l = data as { thing: string; body: number }; if (l.body) alive.add(l.thing); else alive.delete(l.thing); self.onliving?.(l) }
     else if (kind === HERE) { const who = data as Someone; if (who.by === self.me) return; if (who.gone) there.delete(who.by); else there.set(who.by, who); self.onhere?.(who) }
     else if (kind === LOG || kind === STATE) {
@@ -189,6 +192,7 @@ export function link(base = '/world'): Link {
           // Held for a page that is elsewhere: where things were a moment ago is of no use later, the rest is.
           // A sound is heard when it is made or not at all.
           if (kind === SOUND) continue
+          if (kind === PLUGGED && 'once' in (data as Plugged)) continue
           if (kind === STATE || kind === HERE) { if (l.whole) { const last = l.held.findLastIndex((h) => h.kind === kind && (kind === STATE || (h.data as Someone).by === (data as Someone).by)); if (last >= 0) l.held.splice(last, 1) } else continue }
           if (kind === ECHO && (data as Echo).realm) l.realm = changed(l.realm, (data as Echo).realm!)
           l.held.push({ kind, data })
@@ -219,7 +223,8 @@ export function link(base = '/world'): Link {
     // What the old world showed and offered is no longer shown or offered: the other says its own.
     shown = []; self.onshown?.(shown)
     offers = []; self.onoffers?.(offers)
-    music = null; self.onmusic?.(music)
+    for (const name of plugs.keys()) if (name) plugged?.({ plugin: name, gone: true })
+    plugs.clear()
     // All that was held, in order: what came before "now" is what was done before this page joined.
     const held = to.held
     to.held = null

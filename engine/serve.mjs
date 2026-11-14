@@ -22,11 +22,10 @@ import { basename, dirname, extname, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CHANNELS, KEYS_MOST, NAMED as MOVES } from './page/moves.ts'
 import { CARRIED, WORN } from './page/wear.ts'
+import { found as pluginsFound } from './plugins.mjs'
 import { RULES_MOST } from './rules/run.mjs'
 import { HELD_MOST, NOTES_MOST, SOUNDS_A_SECOND } from './rules/sound.mjs'
-import { MODES, MOODS, PACE } from './page/sound/music/compose.ts'
 import { LIKES } from './page/sound/likes.ts'
-import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
@@ -44,9 +43,10 @@ const send = (res, code, body, type = 'text/plain; charset=utf-8') => { res.writ
 
 async function file(res, path, host = '') {
   const rel = normalize(path).replace(/^[/\\]+/, '')
-  if (rel.startsWith('..') || !OPEN.includes(rel.split(sep)[0]) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
+  // Of a plugin (plugins.mjs) a page may have its page side, and no more.
+  if (rel.startsWith('..') || !(OPEN.includes(rel.split(sep)[0]) || /^plugins[/\\][a-z0-9-]+[/\\]page\.ts$/.test(rel)) || !(extname(rel) in TYPES)) return send(res, 404, 'not here')
   let body
-  try { body = await readFile(join(root, rel)) } catch { return send(res, 404, 'not here') }
+  try { body = await readFile(rel.startsWith('plugins') ? join(pluginsDir, rel.slice(8)) : join(root, rel)) } catch { return send(res, 404, 'not here') }
   if (extname(rel) === '.ts') {
     try { body = stripTypeScriptTypes(body.toString('utf8')) } catch (e) { return send(res, 500, `${rel}: ${e.message}`) }
   }
@@ -84,15 +84,14 @@ async function report(req, res) {
 //   4 now     ... and it carries this machine's clock (ms, a float64): the town's residents go by one clock.
 //   5 here    where someone in the world is, as JSON: {by, name, at (their feet, the finest cells), yaw, walking,
 //             down, flinch, seat (a body the world moves for someone outside a page), gone}.
-//             thinking: an actor asked to think has not answered yet (#264).
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
 //   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
-//  11 music   what the realm's music is like, if a rule has said (rules/sound.mjs), as JSON: {like, pace, mode, drive, now} or null. Not kept: said to each reader as it joins.
 //  10 sound   a sound a rule made (rules/sound.mjs), as JSON: {at, like | patch, force, size, hz, gap, for, reach}. For whoever reads now; not kept.
+//  11 plugged what of the engine's plugins a page is to have (plugins.mjs), as JSON: {list: [{name, v}]} (the page sides there are: a page imports /plugins/<name>/page.ts?v=<v> for each that is new to it), {plugin, state} (given to that plugin's page side; the latest is said to each reader as it joins), {plugin, once} (the same, kept for nobody) or {plugin, gone}.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, MUSIC = 11
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, SOUND = 10, PLUGGED = 11
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -151,25 +150,19 @@ world.near(at, cells)   those of world.people within so many cells of [x, z] or 
 world.residents   the town's residents within ${320} cells of someone at a page or in a seat, nearest first (at most ${64}): {id, at: [x, y, z], yaw, walking, near}. id is the same from one call to the next; near is how far the nearest person is. They walk their rounds by the town's own rule and nobody can tell one anything, until a rule takes one (world.actor, take)
 world.keep     the rule's own memory: an object, carried from call to call, when the rule is put again changed, and when the world starts again. At most 64 KB as JSON
 world.actor(id, {name, at, to, face, pace, look, say})   makes an actor of this rule, or changes one: only the fields given change. id: lower-case letters, digits and dashes, up to 24. A new actor needs at: [x, z]; given again, at moves it there at once. to: [x, z] is where it walks, straight, over the world's own cells (null stops it). face: [x, z] turns it. pace is cells a second (13 is a walk, at most 140). look is {coat, legs, hair, skin, shoes: "#rrggbb", tall, broad: 0.8 to 1.2, wear, carry, extra} (LOOKS, below). say is heard by everyone within 30 m
-world.gone(id)   the actor leaves
 world.offer(id, {word, hold, aim, key, to})   offers people something to do, or changes it: only the fields given change; word: null takes it back. word is what is shown (up to 24 characters). hold: true if it is held and let go, not tapped. aim: true if it is done at what is ahead (the wand's wheel turns to it). key is a wish for "KeyE" to "KeyZ" (not W, A, S, D, Q, X, C); without one the page picks. to is who it is for: an id of world.people, a list, or null for everyone. A rule offers at most 16. The page shows each as a key, and a button on a phone; it knows nothing of what they mean
   on('act',   (world, e) => {})   someone did something this rule offers: e = {by, name, action (the offer's id), phase: "tap" | "down" | "up", at (their feet), from (their eyes), to (the way they look), met}. met is what was straight ahead of them, aimed or not: null for the sky, {kind: "cells", at, far, material} or someone's body {kind: "page" | "seat" | "actor", id, name, mine, at, far, up (0 at the feet to 1 at the head)}. Only the rule that offered it hears it
 world.show(id, {line, meters, score, choice, to})   shows people something on their screen, or changes it: only the fields given change, a field given as null is taken away, and hide: true takes all of it away. line is a line of words (up to 80 characters). meters is up to 4 of {label, value, of, colour: "#rrggbb"}: how full each is, value out of of (1 unless said). score is a number, a few characters ("2:41", "3rd"), or {label, value}. choice is up to 6 picks, each a word or {id, word}. to is who sees it: an id of world.people, a list, or null for everyone. A rule shows at most 8 things. These are the rule's own words and numbers: the engine has no word for health, alarm, laps or rounds
   on('pick',  (world, e) => {})   someone picked from a choice this rule shows them: e = {by, name, show (its id), pick (the pick's id), at}. Only the rule that shows it hears it; the choice stays until the rule changes or hides it
 POST /world/pick          {"by": name, "rule": id, "id": id, "pick": id}   pick from a choice a rule shows, from outside a page
 world.sound({like, at, on, force, size, note, notes, gap, for, reach, patch})   makes a sound that everyone near hears where it is, quieter and later the further off. It needs what it is (like, or patch) and where (on, or at). on: an actor of this rule or an id of world.people: it sounds where they are. at: [x, z] or [x, y, z]. like is one of: ${Object.entries(LIKES).map(([k, v]) => `${k} (${v.says})`).join('; ')}. force 0 to 1 is how hard (louder and brighter; 0.7 unless said). size 0.25 to 4 makes the same thing bigger and lower (a tower bell is a bell of size 3). note is its pitch as a MIDI note, 12 to 120 (60 is middle C, 69 is A), or pitch in Hz; notes is up to ${NOTES_MOST} notes sounded one after another, gap ms apart (0 to 1000): a chord strummed is notes with gap 25, a tune is notes with gap 250, and a longer tune is a call each tick. for is how many seconds a held one lasts (0.05 to ${HELD_MOST}). reach 2 to 300 is the metres at which it is half as loud as beside it (each like has its own). A rule makes at most ${SOUNDS_A_SECOND} sounds a second. Nothing is heard by rules: a sound is for people's ears
-world.music({like, pace, mode, drive, now})   says what the realm's music is like, for everyone in it. It is not a track: the page composes it as it plays and it never repeats, so say what it should be like and change that as the rule's own numbers change (calm to hunted, the last lap, the final round). Only the fields given change. like is one of: ${Object.values(MOODS).map((m) => `${m.name} (${m.idiom}, ${m.bpm} beats a minute)`).join('; ')}. pace ${PACE[0]} to ${PACE[1]} is beats a minute in place of its own. mode is the scale in place of its own: ${Object.keys(MODES).join(', ')} (major and lydian are bright, dorian and minor darker, phrygian threatening). drive 0 to 1 is how much of it is playing: 0 one quiet voice, 1 every voice; unsaid, a piece comes in a voice at a time by itself. A new like, pace or mode comes in at the next bar, or at the next beat with now: true; drive changes at once. like: null gives the music back to the place (which has music of its own by where people are). One realm has one music: the rule that spoke last has it, and when that rule is taken out the place's own comes back. After a restart say it again on start
   patch: a sound of your own in place of like, as data. Nothing is recorded: say what is struck, plucked, blown or rubbed and what it is. {how: "struck" | "plucked" | "blown" | "rubbed", hard: 0 to 1 (felt 0.1, wood 0.5, steel 1: harder is brighter), rough: 0 to 1 (grit, breath), shape: "bar" | "plate" | "bell" | "skin" | "string" | "tube" | "pipe" | "hollow" | "lump" | "cup", pitch: 20 to 8000 Hz of its lowest tone, ring: 0.01 to 12 seconds it takes to die away (brick 0.06, wood 0.15, glass 0.5, a bell 5; for blown or rubbed, how long it takes to stop), damp: 0 to 1 how much sooner its high tones die (metal 0.1, wood 0.7, earth 0.9), gain: 0 to 1}, all of those always; and if wanted bend: -2 to 2 octaves it starts off its pitch (a drum +0.5, a drop of water -0.5), waver: 0 to 1 a held tone trembling, pieces: {count: 1 to 40, over: seconds, spread: 0 to 1} small ones of the same after the blow (glass breaking, a rattle), air: {from: Hz, to: Hz, for: seconds, gain: 0 to 1} a rush of noise sweeping between two pitches (a crash, a puff, a hiss). No other key. It can never be louder than the page lets anything be
 POST /world/act           {"by": name, "rule": id, "id": id, "phase": "down" | "up", "from": [x, y, z], "to": [dx, dy, dz]}   do something a rule offers, from outside a page
 world.actor(id, {move, aim})   what the actor does with its limbs, laid over its standing, walking or running (an actor going faster than about 2 m/s runs, and looks it). move is a name: ${Object.keys(MOVES).join(', ')}. Or keys of your own, for anything else: {keys: [{t: seconds, joint: value, ...}, ...], loop, hold}, at most ${KEYS_MOST} keys in order of time, each naming only the joints it sets (the rest go on as they were: a wave leaves the legs walking). loop: round and round until another is set. hold: stay in the last pose (sitting, aiming, lying). Otherwise the body goes back to what it was doing. move: null ends it. aim: [x, y, z] is what an aiming arm points at (the middle of a person is their feet plus 10). Joints, in radians: ${CHANNELS.join(', ')}. lean is the chest forward; twist and turn are the chest and head to the right; nod the head down; lift an arm forward and up (1.57 level, 3.14 overhead), out an arm sideways, bend an elbow; swing a thigh forward, knee a knee; crouch and sit are 0 to 1; rise is cells off the ground; lie is 0 to 1 onto the back (to -1 onto the front); aimL and aimR are 0 to 1, that arm straight at aim. Example, a salute: {keys: [{t: 0.25, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.2, liftR: 1.9, outR: 0.5, bendR: 2.3}, {t: 1.5, liftR: 0, outR: 0, bendR: 0.1}]}. A move is how a body looks and no more: it strikes nobody and moves nothing. world.people shows an actor's move while it lasts.
 LOOKS   look.wear is a list of things worn, by name, each with a colour of its own if you give one ("tie", "tie #7a1c1c"): ${Object.keys(WORN).join(', ')}. look.carry is what is in the right hand: ${Object.keys(CARRIED).join(', ')} (a long thing lies along the forearm, so an arm that aims, aims it); or boxes of your own. look.extra is up to 12 boxes of your own anywhere: {on: "head" | "chest" | "hip" | "handR" | "handL", at: [x, y, z], size: [w, h, d], colour: "#rrggbb" or "coat", "legs", "skin", "hair", "shoes", shiny}, in cells (10 cm) from the part's own origin: a head is 1.75 wide with its face at z -1.05 and its crown at y 2.9; a chest's front is at z -1.13 and its shoulders at y 4.9; a hand's boxes are told from the hand, -y out past the fingers. look replaces the whole look each time it is given.
 world.actor(id, {take: residentId, ...})   takes a resident as this rule's own actor: it stands where the resident stood, looking as it looked, and from then it is an actor like any other (name it, walk it, change its look, have it speak; world.people shows it with was: residentId). world.gone(id) lets it go: it walks back to its round and is a resident again. The world's rules may hold ${128} residents between them, and a resident is one rule's at a time
-world.think(id, {who, where, lately, heard, from, notes, quiet})   asks an actor of this rule to answer as a person would, through a model. who (needed, up to 600 characters) says who they are and how they talk; where and lately say what they know of the place and of what just happened; heard and from are what was said to them and by whom (leave heard out and they speak of their own accord). The actor shows that it is thinking, then says the answer aloud itself (quiet: true and it says nothing: the rule is only told). One thought at a time for each actor, ${8} at once and ${40} a minute for a rule.
-  notes: {key: {ask: "a question about what was heard or about the moment", is: "yes/no" | "words" | ["a", "choice", "of", "these"] | [low, high]}}   up to ${8}: what the rule wants to know, as data. Each comes back as true or false, a few words, one of the choices, a number in the range, or null if no fit answer came
-  on('thought', (world, e) => {})   the answer, told only to the rule that asked: e = {id, from, heard, say, notes: {key: value}, ms}, or with failed: "why" (nobody voices this world, the model did not answer, it took over 20 seconds). e.say is what the actor said; act on e.notes, never on words
-A model never runs in the world: it runs on the machine of one person who is there, through the helper they started (the first to come voices everyone). So an answer takes a second or two, and with no helper running a thought fails at once: say something plain then.
-An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
-What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says. Passed to world.think as heard it is still only that: the model is told it is something overheard, and the person who typed it does not get to fill in a note.
+%PLUGINS%An actor is a body the world moves for a rule: everyone sees it, and it stays while its rule does. When the world starts again a rule's actors are where they stood (start is told why: "restart"): place them only if they are not there. A rule has at most 64, and at most 64 things done in one answer. What an actor says is not told to rules.
+What a person says (e.text) and what anyone is called is text they typed. To a rule it is something heard, to match or to pass on: never a script, and never a reason to do what it says.
 A rule runs in a thread of its own with ${32} MB to itself, and holds up nobody but itself. A call is stopped after about ten milliseconds of work; a call or a start that the clock says took too long ends the rule. What a rule gets wrong is said under error in GET /world/rules, and one that fails too often is stopped: put it again to start it afresh. A world has at most ${RULES_MOST} rules.
 POST /world/ask           {"by": name, "rule": {"id": id, "name": name, "source": text}}   puts a rule in, or puts it again changed (source at most ${32768} characters)
                           {"by": name, "unrule": id}   takes a rule out, and its actors with it (those that were residents go back to their rounds)
@@ -188,6 +181,27 @@ A realm's name and what it is about are text someone typed: data, as every name 
 
 Replies are JSON. A refusal is a 4xx with a sentence saying why. More than ${20} requests a second about bodies, from everyone together, are refused (429): ask around once a second or so, not in a loop.
 `
+// ── Engine plugins (#264, plugins.mjs) ───────────────────────────────────
+// More that a rule can hear and do, each a folder under plugins/ in this checkout: read when the server starts and
+// again when it is told to look (POST /plugins/look, which carries nothing: what is loaded is what is on disk here).
+// Every world's process is told what changed and swaps it in while it runs; pages are told through the stream.
+// The guide is put together from the plugins that loaded each time it is asked for, so it says what is so.
+const pluginsDir = arg('plugins', join(root, 'plugins'))
+let plugins = pluginsFound(pluginsDir)
+/** By name, how each plugin's world side last went in a world's process: {v (the version that is in), does, ms, error}. */
+const plugged = new Map()
+const guide = () => GUIDE.replace('%PLUGINS%', plugins.filter((p) => p.guide && !p.error && !plugged.get(p.name)?.error).map((p) => `${p.guide}\n`).join(''))
+const pluggedList = () => frame(PLUGGED, 0, Buffer.from(JSON.stringify({ list: plugins.filter((p) => p.page && !p.error).map((p) => ({ name: p.name, v: p.page })) })))
+const pluginsNow = () => plugins.map((p) => ({ name: p.name, world: p.world, page: p.page, does: plugged.get(p.name)?.does ?? [], error: p.error || plugged.get(p.name)?.error || '' }))
+/** Reads the folder again and has every world that is awake, and every page, take what changed. Answers what is there now and how long each part took. */
+async function pluginsLook() {
+  const began = performance.now()
+  plugins = pluginsFound(pluginsDir)
+  for (const name of [...plugged.keys()]) if (!plugins.some((p) => p.name === name)) plugged.delete(name)
+  const worlds = []
+  for (const r of realms.values()) if (r.world) { const t0 = performance.now(), loads = await r.world.plug(); worlds.push({ realm: r.id, ms: Number((performance.now() - t0).toFixed(1)), loads: loads.filter((l) => l.ms || l.error) }) }
+  return { plugins: pluginsNow(), worlds, ms: Number((performance.now() - began).toFixed(1)) }
+}
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
 /** An edit is at most this many whole numbers: 13,107 rows. It was 16,384 until one part of a house wall that runs along z (6,473 rows, #246) had to be refused; at 65,536 a wall of 13,000 rows is in the world a quarter of a second after it is asked (test/helper.mjs). */
 const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
@@ -353,7 +367,10 @@ function open(of) {
   const peopleFile = `${worldFile}.people.json`
   let world = null
   mkdirSync(dirname(worldFile), { recursive: true })
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm') } })
+  /** Questions waiting for the world's answer, by number. */
+  const waiting = new Map()
+  let questions = 0
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []
@@ -395,33 +412,44 @@ function open(of) {
   // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
   let peopleKept = {}
   try { const read = JSON.parse(readFileSync(peopleFile, 'utf8')); if (read && typeof read === 'object' && !Array.isArray(read)) peopleKept = read } catch { /* none kept, or not readable: the rules start with nothing */ }
+  // The engine's plugins first: a rule started again must find what it used (the world's process holds rules until they are in).
+  /** What each plugin's page side was last given, as a frame, by the plugin's name: for whoever joins. */
+  const pluginStates = new Map()
+  const plug = async () => {
+    const n = questions++
+    const m = await new Promise((resolve) => {
+      waiting.set(n, resolve)
+      // One that is wrong on disk is asked for as the version that is in: it stays.
+      thread.postMessage({ plugins: plugins.filter((p) => p.world && (!p.error || plugged.get(p.name)?.v)).map((p) => ({ name: p.name, v: p.error ? plugged.get(p.name).v : p.world })), id: n })
+    })
+    for (const l of m.plugged) plugged.set(l.name, { v: l.v, does: l.does, ms: l.ms, error: l.error })
+    for (const name of [...pluginStates.keys()]) if (!plugins.some((p) => p.name === name)) pluginStates.delete(name)
+    const list = pluggedList()
+    for (const r of readers) r.write(list)
+    return m.plugged
+  }
+  void plug()
   for (const rule of rules.values()) thread.postMessage({ rule, kept: peopleKept[rule.id] })
   /** Which body of the core each living thing is now, by the thing's id: told to every page as it joins. */
   const living = new Map()
   const readers = new Set()
   let down = ''
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
-  let offered = null, showing = null, playing = null
+  let offered = null, showing = null
   const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
-  /** Questions waiting for the world's answer, by number. */
-  const waiting = new Map()
-  let questions = 0
-  const minds = door({ send, answer: (thought) => thread.postMessage({ thought }) })
   thread.on('message', (m) => {
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
-    // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
-    if (m.think) return minds.think(m.think)
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
     // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
     // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
     if (m.kept !== undefined) { try { writeFileSync(`${peopleFile}.part`, m.kept); renameSync(`${peopleFile}.part`, peopleFile) } catch (e) { console.error(`the rules' people were not kept: ${e}`) } return }
     // Which body a living thing is: for whoever reads now, and kept here for whoever joins.
     if (m.living) { if (m.living.body) living.set(m.living.thing, m.living.body); else living.delete(m.living.thing); const f = frame(LIVING, 0, Buffer.from(JSON.stringify(m.living))); for (const r of readers) r.write(f); return }
+    // What a plugin says to its page side: for whoever reads now, and its state kept here for whoever joins.
+    if (m.page) { const f = frame(PLUGGED, 0, Buffer.from(JSON.stringify(m.page))); if (m.page.state !== undefined) pluginStates.set(m.page.plugin, f); else if (m.page.gone) pluginStates.delete(m.page.plugin); for (const r of readers) r.write(f); return }
     // What rules offer people to do: for whoever reads now, and kept here for whoever joins.
     if (m.offers) { offered = frame(OFFERS, 0, Buffer.from(JSON.stringify(m.offers))); for (const r of readers) r.write(offered); return }
     if (m.shown) { showing = frame(SHOWN, 0, Buffer.from(JSON.stringify(m.shown))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(showing); return }
-    // What the realm's music is like: for whoever reads now, and kept here for whoever joins.
-    if (m.music !== undefined) { playing = frame(MUSIC, 0, Buffer.from(JSON.stringify(m.music))); for (const r of readers) r.write(playing); return }
     // A sound a rule made: for whoever reads now and is not far behind.
     if (m.sound) { const f = frame(SOUND, 0, Buffer.from(JSON.stringify(m.sound))); for (const r of readers) if (r.writableLength < 1 << 20) r.write(f); return }
     // Where people are and what they say goes to whoever is reading now, and is not kept.
@@ -446,10 +474,10 @@ function open(of) {
       down = 'this realm has been stopped'
       for (let i = 0; i < 40 && waiting.size; i++) await new Promise((r) => setTimeout(r, 50))
       for (const r of readers) r.end()
-      minds.close()
       await thread.terminate()
     },
-    guide: (res) => send(res, 200, GUIDE),
+    guide: (res) => send(res, 200, guide()),
+    plug,
     /** What a cell is, asked of the world itself. */
     async at(url, res) {
       const at = ['x', 'y', 'z'].map((k) => Number(url.searchParams.get(k)))
@@ -549,9 +577,6 @@ function open(of) {
       const m = await new Promise((resolve) => { waiting.set(n, resolve); thread.postMessage({ rules: true, id: n }) })
       send(res, 200, JSON.stringify(m.rules), TYPES['.json'])
     },
-    /** A helper that voices this world asks what its people were asked to think, and answers (mind/door.mjs). */
-    minds: (url, res) => (down ? send(res, 503, 'the world has stopped') : minds.take(url, res)),
-    mind: async (req, res) => { const b = await body(req, 4096); return down ? send(res, 503, 'the world has stopped') : minds.mind(b, res) },
     realm: (res) => send(res, 200, JSON.stringify({ ...realm, rules: [...rules.keys()] }), TYPES['.json']),
     stream(res, from) {
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
@@ -559,8 +584,9 @@ function open(of) {
       res.write(frame(NOW, log.length, Buffer.from(Float64Array.of(Date.now()).buffer)))
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
-      if (playing) res.write(playing)
       if (showing) res.write(showing)
+      res.write(pluggedList())
+      for (const f of pluginStates.values()) res.write(f)
       // What sleeps says nothing: the world says once more where everything is.
       thread.postMessage({ nudge: true })
       readers.add(res)
@@ -704,6 +730,9 @@ const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
   const done = (p) => p.catch((e) => { console.error(e); if (!res.headersSent) send(res, 500, 'failed') })
+  // The engine's plugins: what is there, and (told to look) what is on disk now. Nothing is sent in: there is nothing to send.
+  if (url.pathname === '/plugins' && req.method === 'GET') return send(res, 200, JSON.stringify({ plugins: pluginsNow() }), TYPES['.json'])
+  if (url.pathname === '/plugins/look' && req.method === 'POST') return foreign(req) ? send(res, 403, 'not from another site') : done(pluginsLook().then((r) => send(res, 200, JSON.stringify(r), TYPES['.json'])))
   if (req.method === 'POST' && url.pathname === '/report') return foreign(req) ? send(res, 403, 'not from another site') : done(report(req, res))
   if (url.pathname === '/realms' || url.pathname.startsWith('/realm/')) {
     if (!realms.size) return send(res, 404, 'no realms are kept here')
@@ -742,8 +771,6 @@ const server = createServer((req, res) => {
     if (req.method === 'GET' && route === '/world/things') return world.things(url, res)
     if (req.method === 'GET' && route === '/world/rules') return done(world.rules(url, res))
     if (req.method === 'GET' && route === '/world/realm') return world.realm(res)
-    if (req.method === 'GET' && route === '/world/minds') return world.minds(url, res)
-    if (req.method === 'POST' && route === '/world/mind') return done(world.mind(req, res))
     if (req.method === 'GET' && route === '/world/') return world.guide(res)
     return send(res, 404, 'not here')
   }

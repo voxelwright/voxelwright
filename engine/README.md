@@ -359,15 +359,6 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   four seconds; what is wrong is left and said to the rule. `node test/sounded.mjs` checks it with a tower clock, a
   smith and his anvil, and a rule that sends what none should; a real page's sound is tapped and measured. Asked for
   a busker and a night watchman, a model wrote rules that play (November 14, both on the first asking).
-- **A realm's music** (the same files, and `page/sound/music/`). `world.music({like, pace, mode, drive, now})`: a
-  rule says what the realm's music is like and changes it as its own numbers change. It is a mood, not a track:
-  `like` is one of the seven kept moods, `pace` and `mode` put it at another speed and in another scale, `drive` is
-  how much of it is playing (at once), and the page composes it as it plays. A new mood comes in at the next bar, or
-  the next beat with `now`. `like: null` gives the music back to the place; so does taking the rule out. A realm
-  that says nothing keeps the place's own. `node test/tuned.mjs` checks it with a lighthouse whose music fills as the
-  rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
-  was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
-  follows how far her story is (November 14).
 - **Not there**: a rule hears nothing of blows, of someone coming near or of what a model made of what was
   said; it cannot change what a person's own body can do, throw anything or slow the
   clock. #264 says which of these come next.
@@ -434,55 +425,60 @@ Then `/city?realm=a-grey-dawn` is a page in that realm, as `/city?shared=1` is a
   was opened in (it is started for one world), and the ask bar says so elsewhere. The realm left behind shows the
   page's figure for five seconds more. Sound follows the stream but its change is not checked by itself.
 
-## People who answer (#264)
+## Engine plugins (#264)
 
-A rule can ask one of its actors to think: to answer what was said to them as a person of that world would. The
-answer comes from a model on the machine of someone who is there, and the rule hears it as data.
+A rule is text from anyone, run in a box. An engine plugin is the other kind: something new a rule can hear or do,
+written as the engine's own code, and picked up by a game while it runs. Nothing is started again and no page is
+loaded again.
 
 ```sh
-node serve.mjs --port 5795 --world ~/.village/engine/talk/try.log
-node helper.mjs --world http://127.0.0.1:5795 --port 5796      # voices the world's people with your own Claude Code (Haiku); --no-voice turns it off
+node serve.mjs --port 5801 --world ~/.village/engine/workshop/try.log   # a game; open /city?shared=1
+# ... add or change a folder under plugins/ ...
+node plug.mjs --port 5801                 # the running game looks again: says what rules can now do, and how long it took
+curl -s http://127.0.0.1:5801/plugins     # what is in, and why anything is not
+node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of its own: moves it to origin/main first
 ```
 
-```js
-on('said', (world, e) => world.think('odile', { who: 'A baker, dry and kind.', where: 'outside her bakery', heard: e.text, from: e.name,
-  notes: { doubts: { ask: 'does the speaker seem to doubt that the world is real', is: 'yes/no' } } }))
-on('thought', (world, e) => { if (e.notes.doubts) world.actor(e.id, { pace: 60, to: [760, 4009] }) })
-```
-
-- **What a rule asks** (`world.think`, `mind/think.mjs`): who the actor is, where they are and what happened
-  lately as the rule knows it, what they heard and from whom, and the notes it wants: each a question and a kind
-  (`"yes/no"`, `"words"`, a list of choices, `[low, high]`). The actor shows dots over its head, then says the
-  answer itself, the first sentence as soon as the model has written it.
-- **What it hears** (`on('thought')`, told only to the rule that asked): the words, and each note as a value of
-  its kind or null. The world's process checks both (`mind/form.mjs`): a note that is not of its kind is null,
-  words with an address or a tag in them are not said. A thought that fails (nobody voices the world, the model
-  failed, twenty seconds passed) is told with `failed`, within a second when no helper is running.
-- **Whose model.** The server never runs one. A helper asks the world what its people were asked
-  (`GET /world/minds`) and answers (`POST /world/mind`); `mind/door.mjs` hands each ask to one helper. **One helper
-  voices everyone in a world: the first that came, while it keeps asking; when it closes or goes quiet for ten
-  seconds, the next.** So in a world with several people, what anyone says near an actor goes to the model of
-  whoever's helper came first, on their subscription. The world asks nobody who they are, so it cannot yet prefer
-  a realm's owner.
-- **Every realm someone is in.** A helper voices home and each realm of its server that is awake with a page
-  reading it, found by asking `GET /realms` every two seconds; a realm nobody is in is left alone, so that it can
-  rest. One count of what is spent covers them all.
-- **What it spends.** A rule may have eight actors thinking at once and ask forty times a minute; the helper
-  answers at most forty a minute (`--voice-most`) and three at once, whatever a world asks for.
-- **What was typed is something heard.** The model is given one fixed text of the engine's own (`SYSTEM` in
-  `mind/form.mjs`); who the actor is, what they heard and the notes come as quoted data under labels, a rule's
-  words as much as a person's. The reply is read as `SAY:` words, a line of `===`, and `key: value` notes: anything
-  before `SAY:` is never said. Sixteen cases (ordinary talk, questions about what the world is, twelve typed
-  attempts to break the person or fill in a note) are kept with a real model's replies in `test/mind-kept.json`;
-  `node test/mind.mjs --real` asks them again (sixteen short replies on your subscription).
-- **Limits.** The binary puts the account's email address and the date in every model's context and no flag takes
-  them out. The model is told the person knows neither, and a reply with anything shaped like an address is
-  refused twice (helper and world), but a model talked into spelling an address out in words would not be caught,
-  and asked the date one reply gave the real one. Fine for one person and their own helper; before strangers share
-  a voice it needs a model run without that context.
-- `node test/mind.mjs` checks it with no model: the kept replies, replies written to be wrong, and the real server
-  with a stand-in model (nobody voicing, a voice, early words, caps, a second helper, a forged answer, a helper
-  that closes or goes quiet, dots on a page).
+- **A plugin is a folder**, `plugins/<name>/`:
+  - `world.mjs`, one file: `export default (world) => ({ does: { name(rule, want, now, wrong) {} }, dropped(ruleId) {}, state() {}, close() {} })`.
+    `does` is what a rule may ask for (`world.<name>({...})` in a rule arrives as `want`: check every field as a
+    stranger's). `world` is the doors it is given: `folk` (everyone with a body), `text`, `tell` (a body, to pages),
+    `release`, `look`, `stand`, `tall`, `happen(event, e)` (every rule that listens hears it), `hear(ruleId, event, e)`
+    (one rule hears it), `pages.state(v)` and `pages.once(v)` (to its page side), and `was` (what the version before
+    handed on through `state()`).
+  - `page.ts`, if a page needs anything: `export default ({ engine, link }) => ({ state(v) {}, once(v) {}, close() {} })`.
+    `state` is what is so (given again to a page that joins later and to a new version; `null` when the page steps to
+    another realm), `once` is something that happens now, `close` takes away whatever it put on the page.
+  - `guide.txt`: its lines of the guide. The guide (`GET /world/`) is put together from the plugins that loaded, each
+    time it is asked for, so a model writing rules is told of exactly what is there.
+  - `check.mjs`: its check, against the real server (`test/plugkit.mjs`). `node test/plugged.mjs` runs every
+    plugin's; one with no check or no guide fails.
+- **Where the code comes from.** The plugins folder of the checkout the server runs from, and nowhere else. `POST
+  /plugins/look` carries nothing: it has the server read that folder again. No request, no rule, no model's reply
+  and nothing a person types can become a plugin. For a game that others reach, the folder is a checkout of
+  `origin/main`, and `plug.mjs --at` moves it there only when plugins are all that changed.
+- **How it is picked up.** The server hashes each side's text. Each world's process imports what changed (the hash
+  makes the module new to Node), hands the old version's `state()` to the new one, and swaps the entries of `does`;
+  rules being started wait for a load that is under way. Pages are told through the stream (frame 11) and import
+  `/plugins/<name>/page.ts?v=<hash>`. A plugin that does not parse, takes a name that is taken, or imports a file
+  from its own folder is not let in: the version that was there goes on, `GET /plugins` says why, and the guide
+  leaves it out.
+- **Measured** (M1 Pro, `node test/plugins.mjs`, a page open and a rule running): told to look, a world's process
+  has two new plugins in 1.5 to 2.3 ms (0.3 to 1 ms each); the rule uses the new thing 70 ms after the folder landed
+  (that is the check saying a word to the rule); the page shows it at 72 ms, its import 12 ms. A changed plugin,
+  both sides, is in and shown 14 ms after the look.
+- **There now**: `plugins/look` (a rule asks what the world's cells put between two places, or round a place, and
+  hears `seen`), and `plugins/gone` (`world.gone`, moved out of `world.mjs` as the proof that the form carries what
+  the engine had).
+- **How a lane moves one of its own.** Make `plugins/<name>/world.mjs` return what its file's function returns
+  today under `does` (the doors are the ones `rules/hands.mjs` and `rules/sound.mjs` are given); move its guide
+  lines to `guide.txt`; take its `does.set` and its lines out of `world.mjs` and `GUIDE`; if it tells pages
+  something, send it with `pages.state` or `pages.once` and read it in `page.ts` in place of a frame kind of its
+  own. If it needs a door that is not there, add it to `doors` in `world.mjs` and to the list above.
+- **Not there**: a plugin cannot add an address to the server (a route) or a word to the box a rule runs in
+  (`world.near` is the box's); a page side cannot yet say anything back to its world side but through what is
+  there (`act`, `pick`, an ask); modules replaced stay in memory until the process ends (a few KB each). Whether
+  the core and the marcher's shader can be swapped the same way is being tried next: see #264.
 
 ## Checks and tools
 
@@ -506,7 +502,7 @@ Checks from different threads share one GPU, so whatever opens a browser takes a
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
 further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/spells.mjs` (known spells with no model: pink, shiny, steel that does not burn, twice as large, a fireball seen on its way, a change too big for one edit done as several), `test/hands.mjs` (what a realm's rule offers becomes keys, buttons and wand entries; the rule hears who did which and whether the aim met a person, an actor or cells; what it shows is a line, meters, a score and a choice on the screen, as text), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/mind.mjs` (people who answer: a rule's actor asked to think, the words and notes checked, who may answer, what a voice spends; kept replies, no model), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/sounded.mjs` (a rule makes a sound: a clock strikes, a smith hammers an anvil of the rule's own, rubbish is refused, a page hears each from where it is), `test/tuned.mjs` (a rule sets the realm's music and changes it with its own numbers; a page plays what was last said, at the pace asked), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/person.mjs` (a person's own body: walks, runs, jumps, is stopped by what is built, seen by others and by a rule where its feet are), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
+(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/sounded.mjs` (a rule makes a sound: a clock strikes, a smith hammers an anvil of the rule's own, rubbish is refused, a page hears each from where it is), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/person.mjs` (a person's own body: walks, runs, jumps, is stopped by what is built, seen by others and by a rule where its feet are), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.

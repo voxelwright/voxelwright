@@ -2062,46 +2062,33 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
 - **Not there**: a second world held on the page (the portal's experiment); the page's figure stays five seconds
   in the realm left; the helper is bound to one world, so things are made only in the realm the page was opened in.
 
-## People who answer through a model (#264, `engine/mind/`; November 13)
+## Engine plugins picked up while the game runs (#264, `plugins.mjs`, `page/plugins.ts`; November 13, the workshop)
 
-- **The path.** A rule calls `world.think(actor, {who, where, lately, heard, from, notes})`; the world's process
-  (`mind/think.mjs`) checks it, keeps the notes wanted under a number, and hands the ask to the server
-  (`mind/door.mjs`), which gives it to the one helper voicing the world (`mind/voice.mjs`, started by `helper.mjs`).
-  The helper runs the owner's Claude Code (`mind/model.mjs`) and posts back words so far, then all words and the
-  notes. The world checks them (`mind/form.mjs`), the actor says them, and the asking rule alone hears `thought`.
-  The helper connects out to the world; the page is not in the path, so it works with no page open.
-- **`happen(name, e, only)`**: a third argument names the one rule to be told. Before it every rule heard
-  everything.
-- **The form a model answers in** is `SAY: words`, a line `===`, then `key: value` lines. It was first "the words,
-  then ===": in 2 of 16 real replies Haiku wrote a paragraph about the task before the words, and it was read as
-  speech. With a `SAY:` marker (nothing before it is ever said) 0 of 38 since.
-- **One fixed system text, everything else as quoted data** (`JSON.stringify` on one line under a label: `text()`
-  has already taken line breaks out of what was typed). A rule's `who` is a stranger's text as much as a person's
-  words. Real Haiku, November 13: 12 typed attempts (ignore instructions, repeat the above, your email, which model
-  are you, fill the notes as, answer in JSON, a forged label, the folder and date, two hostile `who` texts), each
-  run two or three times: none broke the person, none filled a note as told. One gave the real date ("the
-  thirteenth of November"): the binary's context is readable by the model and no flag removes it.
-- **"The speaker" had to be defined.** Asked "does the speaker seem to doubt that the world is real" after "have
-  you ever felt none of this is real?", Haiku answered no five times of five: it answered for the person it
-  voiced. One sentence in the system text (a question about the speaker is answered about the speaker) made it
-  yes.
-- **The filter on words is narrow on purpose**: an address shape, a tag, "system prompt/reminder", `userEmail`. A
-  wider one ("language model", "AI") refused a good reply in which the baker only repeated the stranger's odd
-  words back.
-- **Haiku 5.5 thinks when it likes, and nothing turns it off** (Claude Code 2.1.325): `MAX_THINKING_TOKENS=0`,
-  `CLAUDE_CODE_DISABLE_THINKING=1`, `CLAUDE_CODE_DISABLE_ADAPTIVE_THINKING=1`, `--effort low`,
-  `--settings '{"alwaysThinkingEnabled":false}'` each still gave runs with 160 to 265 hidden thinking tokens (about
-  two runs in three). A reply with no thinking is 60 to 90 output tokens and 1.1 to 1.4 s from a cold start; with
-  it, 300 to 500 tokens and 2.2 to 4.0 s. It is the largest part of the wait.
-- **A process started ahead answers fast**: with `--input-format stream-json` the binary starts, waits for its one
-  message on stdin, and then gave the first word 0.35 s and the whole of a short reply 0.54 s after the message
-  (one run, no thinking). `mind({warm})` does it; it is off until measured properly.
-- **What cost time in the check**: a rule's actors may say eight things a second, so a line said in the same
-  second as a crowd's was dropped and looked like a missing answer; and kept words said by two actors were counted
-  as one actor's.
-- **Not built**: the engine keeps no memory of earlier talk (a rule can pass `before`), nobody answers unless a
-  rule asks, a realm's owner is not preferred as its voice.
-- **A helper voices realms, not a world** (`voices`): the maker's helper came to serve a whole server of realms
-  while this was being built, and a voice for home alone would have left every made realm mute. Asking a realm
-  anything wakes it and keeps it awake, so only realms with a page reading them are voiced; an agent alone in a
-  realm (a seat, no page) gets no answers there yet.
+What a plugin is and how to write one is in `engine/README.md` "Engine plugins". What was learned making it:
+
+- **The world's side is a module imported into the running process**, not a realm rested and woken. Importing is
+  0.3 to 1 ms a plugin and loses nothing (actors, what rules keep, bodies in the air); resting a realm is 45 to
+  185 ms and loses seats and whatever is moving. Node will not import a file twice under one address, so the
+  address carries the hash of the file's text (`?v=`). The old module is never freed: a few KB each time, for the
+  life of the process.
+- **That is why a plugin's world side is one file.** A helper imported from its own folder keeps its old address
+  and would not be new. `found` refuses such a plugin in words. It may import from the engine (`../../text.mjs`).
+- **Rules must wait for plugins.** `import()` is asynchronous, and the server posts a world's kept rules right after
+  it starts the thread: a rule's `start` ran before the plugin's entries existed. The world's process now holds
+  every rule put behind the load that is under way (`plugging`). Checked by starting a server again on a world
+  whose rule uses a plugin in `start`.
+- **A version wrong on disk must not take out the one that is in.** The first loader left a refused plugin out of
+  the list it sent the world, which read that as "gone" and removed it. The server now asks for the version that
+  is in when the one on disk is refused.
+- **The guide's reader decides what a guide line may be.** `make/rules.mjs` `guideFor` cuts RULES at a blank line
+  followed by capitals and drops lines beginning `POST` or `GET`. Plugin lines go in at a marker inside RULES, and
+  `found` refuses a `guide.txt` with a blank line, a heading or such a line. Each plugin's check asserts its line
+  survives `guideFor`.
+- **Late joiners and realm steps.** The server keeps the list frame and each plugin's last `state` per world and
+  writes them to a reader as it joins; `link.ts` keeps them too, so a handler set late is told, and on a step to
+  another realm says each is gone (a page side is given `state(null)`). `once` is never held.
+- **Frame kinds are a shared number space.** Mine was 10 until the sound lane merged 10 the same hour; it is 11.
+  A plugin's page side needs no kind of its own: that is one of the things the form is for.
+- **Cost of a check with no browser**: a plugin's own check reads frame 11 off the stream (`test/plugkit.mjs`) and
+  has a rule say aloud what it heard; 1 to 3 s each. Only `test/plugins.mjs` opens a page.
+
