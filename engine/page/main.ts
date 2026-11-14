@@ -61,6 +61,7 @@ const M = 10
 /** `?fine=1` or `2` (#259, an experiment): the world's finest cells are 5 or 2.5 cm, in one or two more boxes round the eye that hold the core's cells written out finer. Only the march knows: nothing else drawn or done is scaled. */
 const FINE = 1 << Number(query.get('fine') ?? 0)
 const { report, post } = reporter('city-4')
+if (query.get('status') === '1') document.body.classList.add('status')
 const flying = (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
 
 async function main() {
@@ -551,7 +552,7 @@ async function main() {
   // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
   // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.
   const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
-  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
+  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r) return []; /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */ if (Math.hypot(pose.x * M - r.at[0], pose.y * M - r.at[1] - 12, pose.z * M - r.at[2]) < 9) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
   controls.always('KeyB', () => { me.walk(!me.on); return true })
   // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is
   // everyone's but those a rule spares, who move as they always did while all else slows.

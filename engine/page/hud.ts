@@ -61,6 +61,7 @@ export interface Hud {
 export function hud(input: Input): Hud {
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, id: string) => { const e = document.createElement(tag); e.id = id; return e }
   const layer = el('div', 'over'), status = document.querySelector<HTMLElement>('#hud')!, bar = document.querySelector<HTMLElement>('#tools')!
+  let quiet: ReturnType<typeof setTimeout> | undefined
   const said = el('div', 'said'), notices = el('div', 'notices'), card = el('div', 'card'), cues = el('div', 'cues')
   const ask = el('div', 'ask'), starters = el('div', 'starters'), given = el('div', 'given'), row = el('div', 'ask-row'), line = el('input', 'line')
   const button = (id: string, label: string, text: string) => { const b = el('button', id); b.type = 'button'; b.textContent = text; b.setAttribute('aria-label', label); b.title = label; return b }
@@ -241,6 +242,10 @@ export function hud(input: Input): Hud {
       if (lines.length > 5) lines.shift()
       said.textContent = lines.join('\n')
       said.hidden = false
+      // What was said goes from the picture a quarter of a minute after the last of it (#367): it stayed for good,
+      // five lines from minutes ago over the corner of the picture. The next thing said shows the last five again.
+      clearTimeout(quiet)
+      quiet = setTimeout(() => { said.hidden = true }, 15_000)
     },
     notice,
     choose,
