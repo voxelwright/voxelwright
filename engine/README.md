@@ -287,6 +287,11 @@ on foot as they do flying.
   against the world. And a rule breaks and burns: `world.blast({at, radius, spark})` and `world.ignite({at, radius})`,
   by the calls an ask from anyone makes, with its caps (40 and 8 cells) and 4 and 8 a second a rule. What they break
   is in the world's log as any blast's is.
+- **Whether one body can see another**: each person a rule is told of says whom they see (`world.people[i].sees`),
+  and `world.sees(a, b)` asks it: within 60 m, a clear line from eyes to head or chest through the world's cells as
+  they stand (glass and water are seen through, leaves hide), and in front of the one who looks or within 2.5 m
+  (`rules/sight.mjs`). Worked out for pairs with a person at a page or in a seat, at most every 0.4 s: with one
+  person and 64 actors in sight that is at most about 115,000 cells asked. Checked by `test/sees.mjs` (no page).
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

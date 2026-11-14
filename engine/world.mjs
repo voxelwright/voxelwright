@@ -17,6 +17,7 @@ import { readFile } from 'node:fs/promises'
 import { parentPort, workerData } from 'node:worker_threads'
 import { controlsOf, numbers } from './page/living.ts'
 import { things as livingThings } from './rules/things.mjs'
+import { sight } from './rules/sight.mjs'
 import { about, REACH_MOST } from './about.mjs'
 import { lengthOf, moveOf } from './page/moves.ts'
 import { residents, whereabouts } from './page/residents.ts'
@@ -446,12 +447,16 @@ const ACTORS_MOST = 64, WANTS_MOST = 64, PEOPLE_MOST = 256
 /** The fastest an actor may go, cells a second (a walk is 13), and the most a rule's actors may say a second. */
 const PACE_MOST = CAN.pace[1], SAYS_A_SECOND = 8
 const pair = (a) => Array.isArray(a) && (a.length === 2 || a.length === 3) && a.every((v) => Number.isFinite(v) && Math.abs(v) < 2 ** 30)
+/** Who sees whom (rules/sight.mjs): a clear line through the world as it stands, and where each faces. */
+const eyes = sight({ folk, kind: (x, y, z) => core.world_kind(x, y, z) })
 /** Who is there, as a rule is told it: its own actors by the names it gave them, anyone else by the name the world knows them by. */
 function people(id) {
-  const now = Date.now(), out = []
+  const now = Date.now(), out = [], seen = eyes.now(now)
+  /** Whom someone sees, by the ids this rule knows them by. */
+  const sees = (p) => { const s = seen.get(p.by); return s ? { sees: [...s].map((by) => folk.get(by)).filter(Boolean).map((q) => (q.rule === id ? q.short : q.by)) } : {} }
   for (const p of folk.values()) {
     if (out.length >= PEOPLE_MOST) break
-    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...(grasp?.of(p.by) ? { holds: grasp.of(p.by) } : {}), ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.can ? { can: { ...p.can } } : {}), ...(p.aloft ? { aloft: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
+    out.push({ id: p.rule === id ? p.short : p.by, name: p.name, kind: p.rule ? 'actor' : p.seat ? 'seat' : 'page', mine: p.rule === id, at: p.at.map(Math.round), yaw: Number(p.yaw.toFixed(2)), walking: !!p.goal, down: p.down > now, ...sees(p), ...(grasp?.of(p.by) ? { holds: grasp.of(p.by) } : {}), ...(p.rule === id && p.stopped ? { stopped: p.stopped } : {}), ...(p.rule === id && p.follow ? { [p.follow.flee ? 'flees' : 'follows']: folk.get(p.follow.by)?.rule === id ? folk.get(p.follow.by).short : p.follow.by } : {}), ...(p.rule === id && p.thinking ? { thinking: true } : {}), ...(p.rule === id && p.can ? { can: { ...p.can } } : {}), ...(p.aloft ? { aloft: true } : {}), ...(p.rule === id && p.was !== undefined ? { was: residentId(p.was) } : {}), ...(p.rule === id && (p.look || p.was !== undefined) ? { look: p.look ?? looksOf(p.was).look } : {}), ...(p.rule ? {} : { person: true }), ...(p.move && (p.move.stays || now - p.move.since < p.move.long * 1000) ? { move: p.move.name ?? 'keys' } : {}) })
   }
   return out
 }

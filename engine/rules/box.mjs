@@ -47,6 +47,8 @@ const GUEST = `(() => {
       near: (at, within) => m.people.filter((p) => flat(p, at) <= within),
       // Anyone by their id; and whoever this is about (who spoke, who did something, who came near): theirs, or null.
       who: (id) => m.people.find((p) => p.id === id) || null,
+      // Whether one sees another now (ids of world.people): a clear line through the world, and where they face.
+      sees: (a, b) => { const p = m.people.find((p) => p.id === a); return !!(p && p.sees && p.sees.includes(b)) },
       them: m.e && typeof (m.e.by || m.e.who) === 'string' ? m.people.find((p) => p.id === (m.e.by || m.e.who)) || null : null,
     }
     // What may be asked for here, by name (the world says which): world.actor('guide', {...}), world.gone('guide').
