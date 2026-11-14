@@ -47,6 +47,7 @@ const checks = [
   ['taken', 'node', ['test/taken.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
   ['helper', 'node', ['test/helper.mjs'], true],
+  ['rulewrite', 'node', ['test/rulewrite.mjs'], false],
   ['sound', 'node', ['test/sound.mjs'], false],
   ['music', 'node', ['test/music.mjs'], false],
   ['heard', 'node', ['test/heard.mjs'], true],

@@ -270,6 +270,18 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   rule's actor where they stand, the same figure in the same step on every page; `world.gone(id)` lets them walk
   back to their round. So "the one you spoke to changes, and then the ones you pass" is a rule taking residents.
   The world's rules hold at most 128 between them. `node test/taken.mjs` checks it with two pages.
+- **A model writes one** (`make/rules.mjs`, the asker's own Claude Code on their own machine):
+  `node make/rules.mjs "a busker who plays when someone stops to listen" --world http://127.0.0.1:5741 --at 700,155,4060`.
+  The model is told what a rule can hear and do in the guide's own words, taken from the server each time, and
+  answers with the rule and with what it could not do with what the engine offers (kept in
+  `~/.village/engine/cannot.jsonl`: the engine's to-do list). Before the rule is put anywhere it is tried in a world
+  of its own (this build's server and world process, started for the trial): someone stands where the asker stands,
+  says things, walks about, the clock runs, and what that world says of the rule is read. One that does not start,
+  goes wrong, is slow or puts its people far from the asker is sent back with why, up to three times; after that
+  the one that ran best is put in and said to be rough. `--change id` changes a rule that is there: it keeps its
+  actors and what it kept. `node test/rulewrite.mjs` checks this with kept replies (no model). Real runs, November
+  13, Opus 5.5: seven asks that are not alike (a busker, a game of tag, and the five realms of #264), seven rules
+  that ran on the first asking, 41 to 121 s each.
 - **What a person types is something heard.** `e.text` and names reach a rule as text to match or to pass on.
 - Measured (M1 Pro): 0.4 ms a call for a rule with one actor; 1.5 ms for one that compares every pair of 66
   people; sixteen rules are running 0.2 s after they are asked for and take 18 MB each; with rules that never
