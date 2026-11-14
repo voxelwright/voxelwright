@@ -194,6 +194,9 @@ export function hud(input: Input): Hud {
   const notice = (text: string, ms = 4000) => {
     const n = document.createElement('p')
     n.textContent = text
+    // Under what a realm's rules show (page/hands.ts puts their cards where notices go): a notice over a card hid both (seen November 14).
+    const cards = panels.get('shown')
+    notices.style.top = cards && !cards.hidden && cards.offsetHeight ? `${cards.offsetTop + cards.offsetHeight + 6}px` : ''
     notices.append(n)
     setTimeout(() => n.remove(), ms)
   }

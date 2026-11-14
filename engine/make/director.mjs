@@ -67,7 +67,7 @@ export async function direct({ world, where, more, by = 'maker', model = (q) => 
   if (there && !more) { await on(); return { state: 'there', id: ID, name: 'The director', cannot: [], kept: true } }
   const r = there
     ? await write({ wish: more, world, where, change: ID, by, model, trial, cannot, say, beside: await beside(world), seconds: TRIED })
-    : await write({ wish: more ? `${WISH}\n\nWhoever asked for it adds: ${more}` : WISH, world, where, id: ID, by, model, first, trial, cannot, say, beside: await beside(world), seconds: TRIED })
+    : await write({ wish: more ? `${WISH}\n\nWhoever asked for it adds: ${more}` : WISH, world, where, id: ID, by, model, first, trial, cannot, say, beside: await beside(world), seconds: TRIED, steps: 2 })
   if (r.state === 'there') await on()
   return r
 }

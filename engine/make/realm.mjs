@@ -123,7 +123,7 @@ const idOf = (name) => `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace
  * about when the idea is. With one, the place is built before any rule is written and the realm can be stepped
  * into then (`say` is told { stage: 'placed', id, name, seconds }); the rules are written for a place that stands.
  */
-export async function realm({ server, name, about, look, place, plan, into, answers = [], by = 'maker', model, first, trial, cannot, say = () => {} }) {
+export async function realm({ server, name, about, look, place, plan, into, answers = [], by = 'maker', model, first, trial, cannot, say = () => {}, turn, grew, since }) {
   name = words(name, 40); about = words(about, WISH_MOST)
   if (!name) return { state: 'refused', why: 'a realm has a name' }
   const chosen = answers.map((a) => `${words(a.ask, 80)} ${words(a.answer, 60)}.`).join(' ')
@@ -153,7 +153,7 @@ export async function realm({ server, name, about, look, place, plan, into, answ
     } else fit = null
   }
   const wish = `The whole of a realm called "${name}": ${about}${chosen ? ` ${chosen}` : ''}${fit ? '' : ground ? `\n\n${placed(ground)}` : ''}`
-  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial: trial ?? own?.url, cannot, say, ...(fit ? { beside: standing(ground, fit, design.stands) } : {}) })
+  const r = await write({ wish, world, where: { at, facing: 'north' }, by, model, first, trial: trial ?? own?.url, cannot, say, ...(fit ? { beside: standing(ground, fit, design.stands) } : {}), ...(turn ? { turn: (work) => turn(world, work) } : {}), ...(grew ? { grew: (step) => grew(step, record.id) } : {}), ...(since ? { since: () => since(world) } : {}) })
   // The world the rules were tried in is kept until the fuller rule has been tried in it too.
   if (own) void Promise.resolve(r.better).finally(() => own.stop())
   if (r.state !== 'there') return { ...r, state: 'there', realm: record.id, name, ...(ground ? { site: ground } : {}), rough: `its rules could not be written: ${r.why}`, cannot: r.cannot ?? [] }

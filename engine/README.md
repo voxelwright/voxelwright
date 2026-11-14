@@ -462,10 +462,22 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   The changed rule is tried over the rule as it stood (the old one is put into the trial's world first), and one
   that does not hold is not put in: the game stays as it was. The player is shown what changed. "undo" in the bar
   puts the rule back as it was before (the world's own record keeps every version, read from `/world/stream`; no
-  model), and "undo" again brings the change back. Real run, November 14, on a copy of a 32,156 character game
+  model): the last change someone asked for, even if the game grew a step by itself after it. "undo" again
+  brings the change back. Real run, November 14, on a copy of a 32,156 character game
   with a place and a director beside it: the same change that had become a fourth rule that morning was 56 changed
   lines of the game's rule, in 117 s (Opus 5.5 asked twice, 82 s; two trials, 34 s). Written again whole it took
   400 s and three askings. A rule may now be 65,536 characters.
+- **A game that arrives sooner** (#365; `make/rules.mjs` `write` with `first`). The quick model's first rule is
+  put in, and the full model then makes it everything that was asked a step at a time: each step is a change as
+  above (edits, tried over the rule as it stands, not put in if it does not hold), what would be missed most
+  first, at most eight, until the model answers `COMPLETE`. Each step is told what the player has asked to have
+  changed meanwhile, and is put in by `growing`, so the world's record tells a step from a change someone asked for. A change the player asks for takes the next turn
+  between two steps (the helper keeps one line of turns for each world). Real run, November 14, the owner's Matrix
+  from the bar with a director: the place at 50 s from Enter (25 s in the run before), the first rule at 149 s,
+  steps in at 253, 353, 425, 488 and 628 s (the cap was five then, and the fifth still added things); someone standing in it was never put down and kept flight and their
+  cards through every arrival. Written again whole, the fuller rule came at 619 s (750 s that morning) and
+  replaced the game at once. The first rule's wait is the quick model: 60 to 78 s for about 180 lines, half of
+  it thinking, which `--effort` did not change (tried: default 71 s, medium 61 s, low 68 s).
 - **From the ask bar** (`page/making.ts`, the helper's `/rule`, `/imagine`, `/realm`). Words decide what is asked
   for. "Create a realm called harbour. You are the pilot. ..." is a realm: the asker chooses to be asked a few things first
   or not, the idea is fleshed out by their model (`make/realm.mjs`: what it is about, how it looks, at most three

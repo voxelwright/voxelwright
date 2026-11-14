@@ -321,6 +321,12 @@ try {
   check(edited.state === 'there' && edited.rule === inRealm[0].id && edited.changed === 'The one who waves is called Pip now.' && (await own()) === wasSource.replace("name: 'Pim'", "name: 'Pip'") && (await own()) !== wasSource && last.prompt.includes('THE FORM FOR A CHANGE') && last.prompt.includes('builds the place itself') && last.prompt.includes('the director') && (await (await fetch(`${dusk}/rules`)).json()).length === 3, 'a change asked in a realm is written as edits to its own rule, with the realm\'s other rules named beside it: the rest of the rule stays word for word, no rule is added, and the asker is told what changed')
   const undone = JSON.parse((await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ undo: true, from, realm: realms[0].id }) })).text.trim().split('\n').at(-1))
   check(undone.state === 'there' && undone.undone === true && (await own()) === wasSource && rulesAsked === editsBefore + 1, '"undo" puts the rule back as it was before the change, from the world\'s own record, with no model asked')
+  // The game grows a step by itself after someone's change: "undo" still takes back their change (the rule as it was just before it), not the step.
+  await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'From now on the one who waves is called Pip', from, realm: realms[0].id }) })
+  await fetch(`${dusk}/ask`, { method: 'POST', body: JSON.stringify({ by: 'growing', rule: { id: inRealm[0].id, name: 'grown', source: `${await own()}\n// a step` } }) })
+  for (let i = 0; i < 50 && !(await own()).endsWith('// a step'); i++) await new Promise((r) => setTimeout(r, 100))
+  await raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ undo: true, from, realm: realms[0].id }) })
+  check((await own()) === wasSource, 'with a step of the game growing put in after the change, "undo" takes back the change someone asked for, not the step')
   // Two lanes: while a rule is being written and tried (seconds here, minutes with a model), a thing is still made at once; a second thing to write is turned away.
   let writingStill = true
   const slow = raw('/rule', { method: 'POST', headers: secret, body: JSON.stringify({ wish: 'let me walk on walls', from, realm: realms[0].id }) }).then((r) => { writingStill = false; return r })

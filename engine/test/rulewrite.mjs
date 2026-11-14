@@ -82,18 +82,29 @@ try {
   check(heard.some((t) => /^heard [1-9]/.test(t)) && (await get('rules')).find((x) => x.id === made.id).actors === 1, `changed, it still has its one actor and what it kept (${heard.filter((t) => t.startsWith('heard')).join(', ')})`)
 
   // ── Quick first, fuller behind: something to play at once, and the better rule in its place when it is ready ──
-  const quick = kept(reply(WAVER, { name: 'A quick waver' })), fuller = kept(reply(WAVER.replace("'*waves* hello, '", "'*waves both arms* hello, '"), { name: 'A fuller waver' }))
-  const both = await write({ wish: 'someone who waves', world, where, model: fuller, first: quick, trial: trial.url, cannot })
+  // The fuller one comes as steps, each a change to the rule as it stands; asked whether anything is still missing, the model says when nothing is.
+  const stepped = (text) => { const seen = []; return Object.assign(async (q) => { seen.push(q); if (seen.length === 1 && text.then) await wait(2500); return { text: seen.length === 1 ? await text : 'COMPLETE', model: 'a kept reply', ms: 0, cost: 0 } }, { seen }) }
+  const quick = kept(reply(WAVER, { name: 'A quick waver' })), fuller = stepped("NAME: A fuller waver\nCHANGED: They wave with both arms now.\nCANNOT:\n- nothing\nEDITS:\n<<<<<<< OLD\n'*waves* hello, '\n=======\n'*waves both arms* hello, '\n>>>>>>> NEW\n")
+  const grown = []
+  const both = await write({ wish: 'someone who waves', world, where, model: fuller, first: quick, trial: trial.url, cannot, grew: (step) => grown.push(step) })
   check(both.state === 'there' && both.name === 'A quick waver' && quick.seen.length === 1 && both.better, 'with a quick model given, its rule is put in first and is what the asker gets')
   const then = await both.better
   const now = await get(`rules?id=${both.id}`)
-  check(then.state === 'there' && now.source.includes('both arms') && fuller.seen[0].prompt.includes('The rule as it stands') && (await get('rules')).find((x) => x.id === both.id).actors === 1, 'the fuller rule is asked for as a change of the quick one and put under the same id: its actor stays')
-  // Someone changes the quick rule while the fuller one is being written: their change stands.
-  const slow = Object.assign(async (q) => { await wait(2500); return { text: reply(WAVER.replace("'*waves* hello, '", "'*salutes* hello, '")), model: 'a kept reply', ms: 0, cost: 0 } }, {})
-  const raced = await write({ wish: 'someone who waves', world, where, model: slow, first: kept(reply(WAVER)), trial: trial.url, cannot })
-  await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'wren', rule: { id: raced.id, name: 'changed by hand', source: WAVER.replace("'*waves* hello, '", "'*nods* hello, '") } }) })
-  const lost = await raced.better
-  check(lost.state === 'refused' && /changed meanwhile/.test(lost.why) && (await get(`rules?id=${raced.id}`)).source.includes('*nods*'), 'a rule changed by someone while its fuller one was being written keeps their change')
+  check(then.state === 'there' && then.steps.length === 1 && now.source.includes("'*waves both arms* hello, '") && now.source.length === both.source.length + ' both arms'.length && fuller.seen.length === 2 && fuller.seen[0].prompt.includes('The rule as it stands') && fuller.seen[0].prompt.includes('step 1 of') && grown.map((g) => g.state).join() === 'there,complete' && grown[0].changed === 'They wave with both arms now.' && (await get('rules')).find((x) => x.id === both.id).actors === 1, 'it is made fuller a step at a time, each a few edits to the rule as it stands, put under the same id (its actor stays), until the model says nothing is missing')
+  // Someone changes the rule while a step is being written: their change stands, and the next step is written from it.
+  let racedId = ''
+  const slow = Object.assign(async (q) => {
+    slow.seen.push(q)
+    if (slow.seen.length > 1) return { text: 'COMPLETE', model: 'a kept reply', ms: 0, cost: 0 }
+    // While the model writes its step (from the rule as it stood when it was asked), someone puts the rule again, changed by hand.
+    await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'wren', rule: { id: racedId, name: 'changed by hand', source: WAVER.replace("'*waves* hello, '", "'*nods* hello, '") } }) })
+    await wait(1500)
+    return { text: reply(WAVER.replace("'*waves* hello, '", "'*salutes* hello, '")), model: 'a kept reply', ms: 0, cost: 0 }
+  }, { seen: [] })
+  const raced = await write({ wish: 'someone who waves', world, where, model: slow, first: kept(reply(WAVER)), trial: trial.url, cannot, turn: async (work) => { await wait(300); return work() } })
+  racedId = raced.id
+  await raced.better
+  check(slow.seen.length === 2 && slow.seen[1].prompt.includes('*nods*') && (await get(`rules?id=${raced.id}`)).source.includes('*nods*'), 'a rule changed by someone while a step was being written keeps their change, and the next step is written from it')
 } catch (e) { failures.push(`the check did not run to its end: ${e.stack ?? e}`) } finally {
   await trial.stop(); server.stop(); rmSync(dir, { recursive: true, force: true })
 }
