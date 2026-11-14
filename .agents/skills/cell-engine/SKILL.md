@@ -2476,3 +2476,29 @@ disagreed). Checked with plain requests (`test/realms.mjs`): a seat at the same 
 three in the morning and many at noon, and of noon's once an ask sets the hour. Not done: rain, which a page also
 gives the residents' rule and the world's process does not have.
 
+## The workshop's loop closed once (#264, November 13)
+
+The run and its times are in `engine/README.md` "The workshop". What it taught:
+
+- **`t3 thread start` needs `--provider` and `--model` when the project has no default**: it refuses with "the
+  project has no default model". The helper takes them as the owner's settings (`--workshop-provider claudeAgent
+  --workshop-model claude-opus-5-5`); the card showed T3 Code's refusal in words and nothing was started.
+- **The thread's id comes back as `mcp:<uuid>`**, and `t3_thread_read` / `t3_thread_wait` take it as it is.
+- **Main moves under a running game.** Between the game's start and the plugin's merge, 40 files that were not
+  plugins changed on main. `plug.mjs` used to refuse then; it now brings only `engine/plugins/` to main and says
+  what waits for a restart. A plugin that needs a door newer than the running server is refused by it in words.
+- **A builder given the form and one example builds to it.** The brief points at `plugins/look` and the README; the
+  session wrote world side, page side, guide line and a fifteen-step check in twelve minutes, touched nothing
+  outside its folder, and said what it could not do properly (no door for a page plugin to draw with).
+- **The diff before the merge is the review that matters for a session's PR**: four new files in one folder, no
+  line removed. Its check was run again here, not taken on its word.
+- **`test/kit.mjs` `turn` can fail with ENOENT** when two lanes take the same place between the `mkdir` and the
+  write of the pid. Run again.
+- **A plugin can be a wasm module of its own**: `rustc --target wasm32-unknown-unknown -C opt-level=3 --crate-type
+  cdylib`, no cargo, 0.5 s, 558 bytes; `#[link(wasm_import_module = "core")]` and the core's exported function passed
+  in the imports object links wasm to wasm. 64,000 calls of `world_kind`: 1.8 ms from it, 2.9 ms from JavaScript.
+  Tried in a scratch folder, not kept in the repository.
+- **A frame capped at 60 says whether a pass misses frames, not what it costs.** The run's "33 ms at the 99th" with
+  marks drawn was other lanes' checks on the GPU; on a held turn, marks on and off, all frames were 16.7 ms. #314
+  is the real bench.
+

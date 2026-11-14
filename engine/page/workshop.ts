@@ -67,7 +67,7 @@ export function workshop(over: Hud, asker: Asker): Workshop {
     for (const g of gaps) {
       const card = el('div', 'gap')
       card.append(el('p', 'line', g.line), el('p', 'from', `${g.by} asked for: ${g.wish}`))
-      if (g.sent) card.append(el('p', 'sent', `Sent to the workshop${g.sent.thread ? ` (thread ${g.sent.thread.slice(0, 8)})` : ''}. Its pull request comes next.`))
+      if (g.sent) card.append(el('p', 'sent', `Sent to the workshop${g.sent.thread ? ` (thread ${g.sent.thread.replace(/^.*:/, '').slice(0, 8)})` : ''}. Its pull request comes next.`))
       else if (reading?.gap === g.id) {
         const r = reading, row = el('div', 'row'), go = el('button', 'go', r.busy ? 'Starting…' : 'Start the session'), no = el('button', '', 'Not now')
         go.disabled = r.busy

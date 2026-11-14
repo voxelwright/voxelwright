@@ -529,7 +529,7 @@ node serve.mjs --port 5801 --world ~/.village/engine/workshop/try.log   # a game
 # ... add or change a folder under plugins/ ...
 node plug.mjs --port 5801                 # the running game looks again: says what rules can now do, and how long it took
 curl -s http://127.0.0.1:5801/plugins     # what is in, and why anything is not
-node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of its own: moves it to origin/main first
+node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of its own: brings it (or, if main changed more than plugins, its plugins folder) to origin/main first
 ```
 
 - **A plugin is a folder**, `plugins/<name>/`:
@@ -601,6 +601,12 @@ node plug.mjs --port 5801 --at <checkout> # for a game served from a checkout of
   rule's own actors, shows and sounds (a referee, a tally, a way round a house found with looks, at 32 looks a
   second). What does not: anything that needs a new door (cells, bodies, pages, the core), or to run every frame.
   Those are engine plugins, and engine plugins are trusted code from main.
+- **A plugin as a small wasm module of its own** (tried, not in the repository): thirteen lines of Rust built with
+  `rustc` alone in 0.5 s to 558 bytes, started in 0.45 ms with the core's own `world_kind` handed to it as an
+  import, wasm calling wasm. Asking the core for 64,000 cells took it 1.8 ms where the same loop in JavaScript took
+  2.9 ms. It reaches the world through the core's functions, not its memory: the memory's layout is the core's
+  own business and changes with every build. Such a module can call only what it is given, so it is a second way
+  for code from someone else to be let in, beside a rule: it would still need a clock on it (a thread of its own).
 - **A page side from someone else** would run in a visitor's browser, so it would not be imported into the page
   as these are: it would go in a worker or a frame of another origin, given only messages (its `state` and
   `once`) and a canvas or a few named calls to draw with. Not built: every page side today is the engine's own.
@@ -700,6 +706,7 @@ opens a pull request.
 
 ```sh
 node helper.mjs --world http://127.0.0.1:5801      # as for making things; open the address it prints
+#   --workshop-provider claudeAgent --workshop-model claude-opus-5-5   which model builds: needed when the project in T3 Code has no default
 # in the game: the "Workshop" chip, top right, counts what is waiting. Open it, pick one, read the brief, start the session.
 ```
 
@@ -721,6 +728,30 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
   merged to main and the game is told to look (`node plug.mjs --port N --at <its checkout>`).
 - **Written down**: who asked is kept with each line (`by`, in `~/.village/engine/cannot.jsonl`); what was sent, to
   which thread and branch, in `~/.village/engine/workshop/sent.jsonl`.
+- **The loop, closed once** (November 13; times from what was written down: `cannot.jsonl`, `sent.jsonl`, the pull
+  request). On a game on port 5805 that was never started again, a page open throughout. Asked for "a game of tag
+  ... show who is it and where the game is played": the rule was running 72 s later and its maker said it could not
+  "mark the play area on the ground itself" (the row "show ... a marked area on the ground" of #264's list). From
+  the card: the brief shown in 115 ms, a T3 Code thread running 2.5 s after "Start the session". The session (Opus,
+  a worktree of its own) opened its pull request 11 min 56 s later: `plugins/paint`, `world.paint`, rings and lines
+  laid on the ground by a pass of its own that walls and cars hide, with a check of fifteen steps. Its diff read
+  and its checks run again, then merged: 2 min 10 s. `node plug.mjs --port 5805 --at <the game's checkout>`: 1.06 s
+  (the fetch and checkout 966 ms, the server's look 26 ms, the world's process 0.4 ms, the page's import 3 ms).
+  Asked again in the same words: 48 s, and the rule draws a chalk court, a halfway line, a spot and a red ring
+  under whoever is it. From the first ask to that: 26 min 50 s, of which 9 min 54 s lay between the could-not line
+  and the session starting (T3 Code refused a project with no default model; the helper now names one). Pictures:
+  `~/.village/engine/workshop/unit3-*.png`.
+- **Who did what in that run.** The card was pressed by the lane's agent through a page it drove, on the lead's
+  word; the owner has not yet used it himself. The game's server was main's; the helper and `plug.mjs` ran from the
+  branch that fixed what the run found. It spent one twelve-minute Opus session and two rule asks of the owner's
+  subscription.
+- **What the paint pass costs**: on a held GPU turn, the same view, four marks drawn and then hidden, 1280 x 720
+  and 1440 x 900 at 2x: every frame 16.7 ms either way (358 of 358). So it misses no frame on the M1 Pro; what it
+  costs in milliseconds, and on a phone, is not measured (#314). During the run itself, with other lanes' checks
+  on the GPU, the 99th frame in a hundred was 33 ms: that was the GPU being shared.
+- **What the run showed is still rough**: asked again, the maker named two new gaps (words on the ground; a ring
+  that stays under a runner): the list feeds itself. The session hooked its pass into the wand's `draw` because a
+  page plugin has no door to draw with: that door is the next thing the form needs.
 - `node test/workshop.mjs` checks all of it with something standing in for T3 Code, and the command itself with a
   script that writes down how it was run.
 - **Not there**: what a friend's own helper could not do is written on the friend's machine and does not reach the

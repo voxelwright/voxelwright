@@ -82,11 +82,11 @@ try {
   const t3 = join(dir, 't3'), seen = join(dir, 'seen.json')
   writeFileSync(t3, `#!/usr/bin/env node\nlet text = ''\nprocess.stdin.on('data', (d) => { text += d }).on('end', () => { require('node:fs').writeFileSync(${JSON.stringify(seen)}, JSON.stringify({ args: process.argv.slice(2), text })); console.log(JSON.stringify({ threadId: '11111111-2222-4333-8444-555555555555', link: 'https://app.t3.codes/threads/x/y' })) })\n`)
   chmodSync(t3, 0o755)
-  const h2 = await helper({ world, port: 0, model: async () => { throw new Error('no model') }, journal: join(dir, 'made2.jsonl'), kept: join(dir, 'library2'), cannot: journal, voice: null, shop: { kept: join(dir, 'shop2'), project: '/somewhere/Village', t3 } })
+  const h2 = await helper({ world, port: 0, model: async () => { throw new Error('no model') }, journal: join(dir, 'made2.jsonl'), kept: join(dir, 'library2'), cannot: journal, voice: null, shop: { kept: join(dir, 'shop2'), project: '/somewhere/Village', t3, provider: 'claudeAgent', model: 'claude-opus-5-5' } })
   const mine2 = { host: `127.0.0.1:${new URL(h2.url).port}`, 'x-village-secret': h2.secret }, port2 = Number(new URL(h2.url).port)
   const nasty = (await raw(port2, '/workshop/gaps', mine2)).value.gaps[0], b2 = (await raw(port2, '/workshop/brief', mine2, { gap: nasty.id })).value
   const went = await raw(port2, '/workshop/send', mine2, { brief: b2.brief }), ran = JSON.parse(readFileSync(seen, 'utf8'))
-  check(went.status === 200 && went.value.thread === '11111111-2222-4333-8444-555555555555' && JSON.stringify(ran.args) === JSON.stringify(['thread', 'start', '--json', '--title', b2.title, '--worktree', 'origin/main', '--branch', b2.branch, '/somewhere/Village', '-']) && ran.text === b2.text, `T3 Code's command is run as: t3 ${ran.args.slice(0, 3).join(' ')} --title <fixed> --worktree origin/main --branch <fixed> <project> - ; the brief goes in on its input, and not a word of the wish or the model's line is in the command`)
+  check(went.status === 200 && went.value.thread === '11111111-2222-4333-8444-555555555555' && JSON.stringify(ran.args) === JSON.stringify(['thread', 'start', '--json', '--title', b2.title, '--worktree', 'origin/main', '--branch', b2.branch, '--provider', 'claudeAgent', '--model', 'claude-opus-5-5', '/somewhere/Village', '-']) && ran.text === b2.text, `T3 Code's command is run as: t3 ${ran.args.slice(0, 3).join(' ')} --title <fixed> --worktree origin/main --branch <fixed> <project> - ; the brief goes in on its input, and not a word of the wish or the model's line is in the command`)
   await h2.close()
 } catch (e) { failures.push(String(e?.stack ?? e)) }
 await browser.close().catch(() => {})

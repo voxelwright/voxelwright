@@ -66,10 +66,13 @@ Your branch is ${branch}, made from origin/main. One commit, subject "[#264] <wh
  * @param journal  where what models could not do is written down (make/rules.mjs CANNOT): one JSON line an ask
  * @param kept     where what was sent is written down
  * @param project  the T3 Code project a session is started in: a path inside it (unsaid: the checkout this repository's worktrees hang from)
+ * @param provider, model  which of T3 Code's providers and models a session runs on (`t3 thread start --provider --model`); unsaid, the project's own default, and T3 Code refuses if it has none
  * @param t3       T3 Code's own command (the door it offers for starting a thread from outside)
  * @param start    in place of T3 Code, for checks: ({title, branch, text, project}) => {thread, link}
  */
-export function workshop({ journal = CANNOT, kept = KEPT, project, t3 = join(homedir(), '.t3', 'bin', 't3'), start, say = () => {} }) {
+export function workshop({ journal = CANNOT, kept = KEPT, project, provider, model, t3 = join(homedir(), '.t3', 'bin', 't3'), start, say = () => {} }) {
+  // Which model builds: the owner's choice, said when the helper is started (or left to the project's own in T3 Code). Never anyone's words.
+  const which = provider && model && /^[A-Za-z0-9._-]{1,60}$/.test(provider) && /^[A-Za-z0-9._-]{1,60}$/.test(model) ? ['--provider', provider, '--model', model] : []
   const sentFile = join(kept, 'sent.jsonl')
   const lines = async (file) => { try { return (await readFile(file, 'utf8')).split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean) } catch { return [] } }
   /** The gaps, newest first: one for each line a model said it could not do. */
@@ -90,7 +93,7 @@ export function workshop({ journal = CANNOT, kept = KEPT, project, t3 = join(hom
   /** Starts a thread in T3 Code with the brief on its input. Nothing a person or a model wrote is in the command. */
   const viaT3 = async ({ title, branch, text, project: where }) => {
     const out = await new Promise((resolve, reject) => {
-      const child = execFile(t3, ['thread', 'start', '--json', '--title', title, '--worktree', 'origin/main', '--branch', branch, where, '-'], { timeout: 120_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => (e ? reject(new Error(`T3 Code did not start a thread: ${String(stderr || e.message).slice(0, 300)}`)) : resolve(stdout)))
+      const child = execFile(t3, ['thread', 'start', '--json', '--title', title, '--worktree', 'origin/main', '--branch', branch, ...which, where, '-'], { timeout: 120_000, maxBuffer: 1 << 20 }, (e, stdout, stderr) => (e ? reject(new Error(`T3 Code did not start a thread: ${String(stderr || e.message).slice(0, 300)}`)) : resolve(stdout)))
       child.stdin.end(text)
     })
     let v = null

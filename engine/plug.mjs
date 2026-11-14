@@ -5,8 +5,9 @@
 //                                                origin/main, if what main has since changed is plugins and no more
 //
 // What a game runs is what is on main: a plugin is merged first, and then this is run. If main has also changed
-// something that is not a plugin (the server, the world's process, the page, the core), the checkout is left where
-// it is and this says what needs the server started again (`node live.mjs` does that for the owner's link).
+// something that is not a plugin (the server, the world's process, the page), only the plugins folder is brought
+// to main and this says what waits for the server to be started again (`node live.mjs` does that for the owner's
+// link). A core built again is taken with `POST /core/look`.
 import { execFileSync } from 'node:child_process'
 
 const arg = (name) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : undefined }
@@ -18,8 +19,14 @@ if (at) {
   git('fetch', '-q', 'origin', 'main')
   const changed = git('diff', '--name-only', 'HEAD', 'origin/main').split('\n').filter(Boolean)
   const other = changed.filter((f) => !f.startsWith('engine/plugins/'))
-  if (other.length) { console.error(`main has changed more than plugins since ${git('log', '--oneline', '-1')}: the server must be started again for\n  ${other.slice(0, 20).join('\n  ')}${other.length > 20 ? `\n  and ${other.length - 20} more` : ''}`); process.exit(3) }
-  if (changed.length) { git('checkout', '-q', '--detach', 'origin/main'); console.log(`the checkout is at ${git('log', '--oneline', '-1')} (${changed.length} files of plugins changed, ${(performance.now() - began).toFixed(0)} ms)`) }
+  const plugins = changed.length - other.length
+  if (other.length) {
+    // Main has moved on in more than plugins: those wait for the server to be started again. The plugins are taken
+    // now, as main has them, into this checkout as it stands. One that needs something newer than the running
+    // server has is refused by it in words, and the version that was in goes on.
+    if (plugins) git('checkout', 'origin/main', '--', 'engine/plugins')
+    console.log(`main has also changed ${other.length} files that are not plugins (${other.slice(0, 4).join(', ')}${other.length > 4 ? ', ...' : ''}): those wait until the server is started again. ${plugins ? `The plugins are taken now (${plugins} files, ${(performance.now() - began).toFixed(0)} ms)` : 'No plugin has changed'}`)
+  } else if (changed.length) { git('checkout', '-q', '--detach', 'origin/main'); console.log(`the checkout is at ${git('log', '--oneline', '-1')} (${changed.length} files of plugins changed, ${(performance.now() - began).toFixed(0)} ms)`) }
   else console.log('main has nothing new for this checkout')
 }
 const t0 = performance.now(), res = await fetch(`http://127.0.0.1:${port}/plugins/look`, { method: 'POST' })
