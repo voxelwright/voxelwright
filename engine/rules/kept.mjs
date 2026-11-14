@@ -49,6 +49,12 @@ export const KEPT = {
     cells.fill(kind(WOOD))
     return { name: 'broom', size, cells, scheme: 'hover', seats: [[9, 0, 1]], motor: { front: 0, grip: 1, power: 120, top: 150, steer: 0, hover: 10, lift: 80, upright: 20, turns: 2, jump: 0, tough: 150, feet: [] } }
   },
+  /** A craft: an open steel hull 5 m by 2.4 m that rides half a metre over land and water alike and comes up a beach, six seats in two rows. 11 m/s. */
+  craft(colour) {
+    const size = [50, 9, 24], { cells, set } = grid(size), paint = kind(STEEL, hue(colour, 2))
+    for (let x = 0; x < 50; x++) for (let z = 0; z < 24; z++) { set(x, 0, z, paint); if (x === 0 || x === 49 || z === 0 || z === 23) for (let y = 1; y < (x === 49 ? 5 : 8); y++) set(x, y, z, paint) }
+    return { name: 'craft', size, cells, scheme: 'drive', seats: [[12, 1, 6], [12, 1, 17], [24, 1, 6], [24, 1, 17], [36, 1, 6], [36, 1, 17]], motor: { front: 0, grip: 1, power: 60, top: 110, steer: 0, hover: 5, lift: 0, upright: 30, turns: 1.2, jump: 0, tough: 400, feet: [] } }
+  },
 }
 
 /** The rows of a kept thing set down with its low corner at a place: x0, x1, y, z, kind. */

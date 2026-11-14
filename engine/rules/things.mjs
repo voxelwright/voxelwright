@@ -11,7 +11,7 @@
 // gets on or off by itself says so. Rules hear `ride` either way, and `world.things` says who is on what.
 //
 // And a rule brings a living thing into the world itself (`world.thing`): one of a small kept set (rules/kept.mjs:
-// a kart, a car, a broom), set down where it says, facing as it says, in a colour; there at once, with
+// a kart, a car, a broom, a craft), set down where it says, facing as it says, in a colour; there at once, with
 // no model. It is the rule's to take away again, and goes when the rule does.
 //
 // And what a fair start and a finish need. A rule holds a thing still whoever drives it (`world.drive(id, {hold:

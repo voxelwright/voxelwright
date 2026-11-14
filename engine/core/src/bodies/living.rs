@@ -239,6 +239,8 @@ impl Live {
         let told = self.heard < HOLD;
         let (go, turning, rise) = if told { (self.go, self.turn, self.rise) } else { (0.0, 0.0, 0.0) };
         let side = if told { self.side } else { 0.0 };
+        // What only rides over the ground and the water (it hovers and has no lift) cannot be told to rise: it is no aircraft.
+        let rise = if self.hover > 0.0 && self.lift == 0.0 { 0.0 } else { rise };
         // What goes on legs (feet that do not steer) is taken to the speed it is told, forward and sideways, the
         // way it means to face: a person turns on the spot and steps aside.
         let legs = self.steer == 0.0 && self.upright > 0.0 && !self.feet.is_empty();
@@ -343,7 +345,9 @@ impl Live {
                 self.rolled = if self.rolling > 0.0 { self.rolled + d } else { 0.0 };
             }
             // In the air it noses down as it goes and banks as it turns.
-            let (nose, bank) = if self.aloft { (-go * 0.18, turning * 0.3) } else { (0.0, 0.0) };
+            // What flies leans into its way; what only rides over the ground and the water (no lift) stays level: a hull that
+            // dipped its bow a sixth of a turn dug it into the beach.
+            let (nose, bank) = if self.aloft && self.lift > 0.0 { (-go * 0.18, turning * 0.3) } else { (0.0, 0.0) };
             let first = [about(1, 0.0), about(1, std::f32::consts::PI), about(1, std::f32::consts::FRAC_PI_2), about(1, -std::f32::consts::FRAC_PI_2)][self.front as usize];
             let want = qmul(qmul(qmul(about(1, -self.heading), about(2, nose)), about(0, bank + self.rolled)), first);
             let mut e = qmul(want, [-b.rot[0], -b.rot[1], -b.rot[2], b.rot[3]]);
@@ -367,7 +371,16 @@ impl Live {
             if self.hover > 0.0 && rise == 0.0 {
                 // Told nothing, near the ground, it settles at its height over it; far above, it stays where it is.
                 let under = b.com[1];
-                if let Some(far) = ray(ground, b.pos, w([0.0, -1.0, 0.0]), under + self.hover * 3.0) {
+                // The still sea is a plane and no cells (city.rs): what hovers rides its top as it rides the ground, so a
+                // hull crosses water and comes up a beach. (Without this it sank to the sea's floor and hung over that.)
+                let reach = under + self.hover * 3.0;
+                let sea = b.pos[1] - (crate::city::SEA + 1) as f32;
+                // The ground under its middle, or under its bow if that is nearer: a long hull met a rising beach with
+                // its bow while its middle was still well clear, and dug in.
+                let bow = add(b.pos, w(scale([self.heading.cos(), 0.0, self.heading.sin()], b.radius * 0.7 * if go < 0.0 { -1.0 } else { 1.0 })));
+                let land = match (ray(ground, b.pos, w([0.0, -1.0, 0.0]), reach), ray(ground, bow, w([0.0, -1.0, 0.0]), reach)) { (Some(m), Some(f)) => Some(m.min(f)), (m, f) => m.or(f) };
+                let far = if frame.is_none() && sea >= 0.0 && sea <= reach { Some(land.map_or(sea, |l| l.min(sea))) } else { land };
+                if let Some(far) = far {
                     climb = ((self.hover + under - far) * 4.0).clamp(-fastest, fastest);
                 }
             }
@@ -933,6 +946,66 @@ pub mod tests {
 
     pub fn the(bodies: &Bodies, id: u32) -> &Body {
         bodies.list.iter().find(|b| b.id == id).expect("the thing is still a body")
+    }
+
+    #[test]
+    fn a_hull_rides_the_street_and_the_sea() {
+        // An open steel hull 5 m by 2.4 m, as a craft would be: hover 5, no lift.
+        let size = [50usize, 9, 24];
+        let hull = |bodies: &mut Bodies, low: [i32; 3]| {
+            let mut cells = shell(size, kind(STEEL, OWN));
+            for z in 1..size[2] - 1 { for x in 1..size[0] - 1 { cells[x + size[0] * (z + size[2] * (size[1] - 1))] = 0; } }
+            let id = bodies.spawn(cells, size, low, false);
+            assert!(bodies.motor(id, &[0.0, 1.0, 60.0, 110.0, 0.0, 5.0, 0.0, 30.0, 1.2, 0.0, 400.0]));
+            id
+        };
+        let ground = city::ground(X, Z);
+        let mut bodies = Bodies::new();
+        let id = hull(&mut bodies, [X, ground + 12, Z - 12]);
+        run(&mut bodies, 3.0, id, [0.0; 3]);
+        let b = the(&bodies, id);
+        let over = b.pos[1] - b.com[1] - city::ground(b.pos[0] as i32, b.pos[2] as i32) as f32;
+        eprintln!("the hull over the street: {over:.1} (com {:?}), speed {:?}", b.com, b.vel);
+        let from = b.pos;
+        run(&mut bodies, 2.0, id, [1.0, 0.0, 0.0]);
+        let went = sub(the(&bodies, id).pos, from);
+        eprintln!("driven two seconds over the street it went {went:?}");
+        assert!((over - 5.0).abs() < 3.0 && went[0] > 80.0, "it rides half a metre over the street and goes along it: {over}, {went:?}");
+        // Out at sea: found by going west until the land is under the sea's level.
+        let mut x = X - 40_000;
+        while city::ground(x, Z) >= city::SEA - 20 && x > X - 200_000 { x -= 500; }
+        let floor = city::ground(x, Z);
+        let mut bodies = Bodies::new();
+        let id = hull(&mut bodies, [x, 14, Z - 12]);
+        run(&mut bodies, 3.0, id, [0.0; 3]);
+        let b = the(&bodies, id);
+        let over = b.pos[1] - b.com[1];
+        eprintln!("at sea (x {x}, the floor at {floor}): the hull's bottom {over:.1} over the water, speed {:?}", b.vel);
+        assert!(over > 2.0 && over < 8.0, "it rides the sea's top, not its floor: {over}");
+        let from = b.pos;
+        run(&mut bodies, 2.0, id, [1.0, 0.0, 0.0]);
+        let b = the(&bodies, id);
+        let went = sub(b.pos, from);
+        eprintln!("driven two seconds at sea it went {went:?}");
+        assert!(went[0] > 100.0 && (b.pos[1] - b.com[1]) > 2.0, "and goes over it: {went:?}");
+        // Up a beach: from the sea 30 m off the shore, east until it is over land.
+        // A beach, not a cliff: along the coast, the first place where the land comes up out of the sea gently.
+        let (mut shore, mut at) = (x, Z);
+        'found: for dz in 0..400 {
+            at = Z + dz * 500;
+            shore = x;
+            while city::ground(shore, at) < 0 { shore += 10; }
+            if city::ground(shore - 30, at) > -8 && (1..14).contains(&city::ground(shore + 100, at)) { break 'found; }
+        }
+        eprintln!("a beach at x {shore}, z {at}: the land from 60 cells out to 120 in: {:?}", (-6..=12).map(|k| city::ground(shore + k * 10, at)).collect::<Vec<_>>());
+        let mut bodies = Bodies::new();
+        let id = hull(&mut bodies, [shore - 300, 14, at - 12]);
+        run(&mut bodies, 1.0, id, [0.0; 3]);
+        run(&mut bodies, 8.0, id, [1.0, 0.0, 0.0]);
+        let b = the(&bodies, id);
+        let under = city::ground(b.pos[0] as i32, b.pos[2] as i32);
+        eprintln!("from the sea towards the shore at x {shore}: it is at {:?}, the land there at {under}, tipped {:.0}", b.pos, tipped(b));
+        assert!(b.pos[0] > shore as f32 + 60.0 && under > 0 && b.pos[1] - b.com[1] > under as f32 && tipped(b) < 30.0, "it comes up the beach onto the land, whole and upright");
     }
 
     #[test]

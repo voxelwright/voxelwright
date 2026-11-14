@@ -19,8 +19,10 @@ const RULE = `on('start', (world) => { world.actor('marshal', {name: 'Marshal', 
 on('crossed', (world, e) => { world.keep.n = (world.keep.n || 0) + 1; world.actor('clerk', {say: world.keep.n + ' crossed ' + e.line + ' ' + (e.own || e.thing || e.who) + ' ' + e.way + ' ' + e.speed + ' ' + e.when + ' ' + (e.riders || []).join('+')}) })
 on('tick', (world) => { world.actor('marshal', {say: world.things.map((t) => [t.own || t.id, t.name, t.at.join(' '), t.yaw, t.speed, t.upright ? 'up' : 'over', t.seats, (t.riders || []).join('+')].join('|')).join(' ; ') || 'nothing'}) })
 on('said', (world, e) => {
-  if (/set out/.test(e.text)) { world.thing('k1', {like: 'kart', at: [790, 4072], yaw: Math.PI / 2, colour: 0}); world.thing('c1', {like: 'car', at: [790, 4094], yaw: Math.PI / 2}); world.thing('b1', {like: 'broom', at: [740, 4076], yaw: -Math.PI / 2}) }
+  if (/set out/.test(e.text)) { world.thing('k1', {like: 'kart', at: [790, 4072], yaw: Math.PI / 2, colour: 0}); world.thing('c1', {like: 'car', at: [790, 4094], yaw: Math.PI / 2}); world.thing('b1', {like: 'broom', at: [740, 4076], yaw: -Math.PI / 2}); world.thing('h1', {like: 'craft', at: [715, 4094], yaw: -Math.PI / 2}) }
   if (/mount/.test(e.text)) { world.seat('ann', {on: 'k1'}); world.seat('bo', {on: 'c1'}); world.seat('cy', {on: 'c1'}); world.seat('marshal', {on: 'c1'}) }
+  if (/launch/.test(e.text)) world.drive('h1', {go: 1})
+  if (/beach it/.test(e.text)) world.drive('h1', {go: 0})
   if (/up/.test(e.text)) world.drive('b1', {rise: 1})
   if (/along/.test(e.text)) world.drive('b1', {rise: 0, go: 0.5})
   if (/line up/.test(e.text)) { world.drive('k1', {hold: true}); world.line('finish', {from: [830, 4050], to: [830, 4100]}); world.line('pit', {at: [880, 4072], within: 15}) }
@@ -37,10 +39,16 @@ try {
   check((await post('ask', { by: 'tester', rule: { id: 'marshal', name: 'A marshal', source: RULE } })).asked, 'a rule that brings living things is taken')
   await wait(1200)
   await post('say', { by: 'steward', text: 'set out' })
-  const out = await says((t) => t.k1 && t.c1 && t.b1 && Object.values(t).every((x) => x.speed === 0))
-  check(!!out && out.k1.name === 'kart' && out.c1.name === 'car' && out.k1.up && out.c1.up && out.k1.seats === 1 && out.c1.seats === 2, `said "set out", a kart, a car and a broom are in the world at once, by the rule's own ids, upright, with their seats (${out ? Object.entries(out).map(([k, v]) => `${k} ${v.name} ${v.seats}`).join(', ') : '?'})`)
+  const out = await says((t) => t.k1 && t.c1 && t.b1 && t.h1 && Object.values(t).every((x) => x.speed === 0))
+  check(!!out && out.k1.name === 'kart' && out.c1.name === 'car' && out.k1.up && out.c1.up && out.k1.seats === 1 && out.c1.seats === 2 && out.h1.seats === 6, `said "set out", a kart, a car, a broom and a craft are in the world at once, by the rule's own ids, upright, with their seats (${out ? Object.entries(out).map(([k, v]) => `${k} ${v.name} ${v.seats}`).join(', ') : '?'})`)
   const ground = Math.round((await (await fetch(`${server.url}/world/at?x=760&y=0&z=4078`)).json()).ground)
   check(!!out && Math.abs(out.k1.yaw - 1.57) < 0.1 && Math.abs(out.b1.yaw + 1.57) < 0.1 && Math.abs(out.k1.at[0] - 790) < 6 && Math.abs(out.k1.at[2] - 4072) < 6, `each stands where it was asked and faces as asked (the kart at ${out?.k1.at} facing ${out?.k1.yaw}, the broom facing ${out?.b1.yaw})`)
+  // The craft rides over the street as it would over water (the sea and a beach are in the core's own test), level.
+  await post('say', { by: 'steward', text: 'launch' })
+  await wait(1500)
+  await post('say', { by: 'steward', text: 'beach it' })
+  const rode = await says((t) => t.h1 && t.h1.speed === 0 && out.h1.at[0] - t.h1.at[0] > 40, 30)
+  check(!!rode && rode.h1.up, `the craft, sent off, rides ${rode ? ((out.h1.at[0] - rode.h1.at[0]) / 10).toFixed(1) : '?'} m west over the street, level`)
   // What flies: told to rise, the broom goes up; told to go, it goes the way it was set to face (west).
   await post('say', { by: 'steward', text: 'up' })
   await wait(1200)
@@ -77,7 +85,7 @@ try {
   // What is not in the kept set is refused; what the rule brought it takes away.
   await post('say', { by: 'steward', text: 'a tank' })
   await wait(900)
-  check(/like one of: kart, car, broom/.test(await how()), 'a thing that is not kept is refused, and the rule is told what is')
+  check(/like one of: kart, car, broom, craft/.test(await how()), 'a thing that is not kept is refused, and the rule is told what is')
   await post('say', { by: 'steward', text: 'clear the kart' })
   const cleared = await says((t) => !t.k1 && t.c1)
   const things = await (await fetch(`${server.url}/world/things`)).json().catch(() => null)

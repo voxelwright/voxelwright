@@ -309,6 +309,11 @@ on foot as they do flying.
   themselves), and hears `broke` when one breaks. `tough` is the speed a thing can lose in one step and stay whole:
   the kept kart is made 300 against a top of 140, so it takes a wall (a car's 120 broke it on the first parked
   car). Weight is not a motor number: "heavier" is not there. Checked by `test/tough.mjs` (no page).
+- **A thing that floats**: the still sea is a plane and no cells, so bodies fall through it. What hovers now rides
+  the sea's top as it rides the ground (`living.rs`, the hover's look down), looks under its bow as well as its
+  middle, and stays level when driven if it has no lift (it dipped its nose as a broom does and dug in). The kept
+  `craft` is that: an open hull, six seats, over water and up a beach. It hovers; it does not displace water: a
+  hull that sits in the sea and rocks would be buoyancy for every body, which the core does not have.
 - **The eye behind does not pass through walls**: from the head out to where the eye would ride, the first thing
   that stands (all but water and leaves) is as far as it goes, less 30 cm, with 20 cm clear round it; it comes in
   at once and goes out again over most of a second. With no room it is in the head, and the person's own figure is

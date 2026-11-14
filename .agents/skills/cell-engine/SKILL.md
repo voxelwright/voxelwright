@@ -2025,6 +2025,10 @@ How to use it is in `engine/README.md` "Realms" and in the guide (`GET /world/`,
   carry what the server adds to an ask that comes through it, `box` above all, or pages drop the record silently.
 - A person's ghost inside what they ride shoves it: a kart went sideways off the street. Riders have none.
 - Two living things set down overlapping drag each other; it looked like a kart driving backwards.
+- Anything aloft leaned its nose down a sixth of a turn when driven (right for a broom). A long hull dug its bow into
+  the street, a kerb, a beach, and "would not hover": it took a step-by-step trace at the shore to see `tipped 10`.
+  Only what has lift leans now. When a hovering thing drags, print its tilt before touching its numbers.
+- The sea is a plane, not cells: `ray` finds its floor. What must ride it asks for the plane itself (`city::SEA + 1`).
 - A line from the head to the eye is not enough to keep the eye out of a wall: met at a slant, the wall was under a cell
   from the eye and the near edge of the picture cut into it. Ask round the eye as well.
 
