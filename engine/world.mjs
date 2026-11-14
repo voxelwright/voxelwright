@@ -488,7 +488,7 @@ const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => c
     parentPort.postMessage({ echo: { by: 'the world', gone: id } })
     nudged = true
   } })
-const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced })
+const ruled = ruling({ people, residents: townTold, things: (id) => driven.near(id), does: () => [...does.keys()], obey: (rule, wants) => obey(rule, wants, Date.now()), voiced: () => voiced, realm: () => (realmIs ? { name: String(realmIs.name ?? ''), about: String(realmIs.about ?? '') } : null) })
 /** Something happened that rules may listen for: `only` names the one rule it is told to, when it is nobody else's to hear. */
 const happen = (event, e, only) => ruled.happen(event, e, only)
 /** A rule is taken out, and its actors go with it. */

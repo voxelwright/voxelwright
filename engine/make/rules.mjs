@@ -14,6 +14,7 @@
 // The model runs on the asker's machine, through their own binary. What it returns is text; it is run only by a
 // world, in a rule's own thread and interpreter (rules/box.mjs), never here.
 import { spawn } from 'node:child_process'
+import { randomBytes } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -100,6 +101,29 @@ export async function scratch() {
   return { url: `http://127.0.0.1:${port}`, stop: async () => { child.kill(); await rm(dir, { recursive: true, force: true }) } }
 }
 
+/**
+ * Someone to answer for the people of a trial's world, so that what a rule does once a thought or a reading comes
+ * back is tried too (without one, world.voiced is false there and that half of a rule is put in untried: seen
+ * November 14, a rule whose casting failed only once a model answered). No model: each note is answered with
+ * something of the kind asked for (yes and no by turns, the choices one after another, the middle of a range, a
+ * few words), and what is said aloud is a plain line. It shows that the rule takes an answer, not that it reads one well.
+ */
+function standIn(trial) {
+  const key = randomBytes(16).toString('hex'), stop = new AbortController()
+  let turn = 0
+  const fill = (want) => Object.fromEntries(Object.entries(want ?? {}).map(([k, { is }]) => [k, is === 'yes/no' ? turn++ % 2 === 0 : is === 'words' ? 'a brass key' : typeof is[0] === 'number' ? Math.round((is[0] + is[1]) / 2) : is[turn++ % is.length]]))
+  const post = (body) => fetch(`${trial}/world/mind`, { method: 'POST', body: JSON.stringify({ voice: key, ...body }) }).then(() => {}, () => {})
+  void (async () => {
+    while (!stop.signal.aborted) {
+      try {
+        const { asks = [] } = await (await fetch(`${trial}/world/minds?voice=${key}`, { signal: stop.signal })).json()
+        for (const { n, ask } of asks) await post({ n, notes: fill(ask.notes), ...(ask.reads ? {} : { say: 'All right. Tell me more.' }) })
+      } catch { await wait(200) }
+    }
+  })()
+  return async () => { stop.abort(); await post({ leave: true }) }
+}
+
 /** Things someone might say near a rule: ordinary ones, and words the rule itself looks for (what stands in its quotes and patterns). */
 function lines(source, wish) {
   const found = new Set()
@@ -119,11 +143,13 @@ export async function tried(trial, source, { wish, at, seconds = 4 }) {
   const send = async (path, init) => { for (;;) { const r = await fetch(`${trial}/world/${path}`, init); if (r.status === 429) { await wait(300); continue } return r.ok ? r.json() : { refused: r.status, why: (await r.text()).slice(0, 300) } } }
   const post = (path, body) => send(path, { method: 'POST', body: JSON.stringify(body) })
   const how = async () => (await send('rules')).find?.((r) => r.id === 'tried')
-  const id = 'tried'
+  const id = 'tried', leave = standIn(trial)
   try {
     // Someone stands where the asker stands, so that what the rule puts near the asker is near them.
     const joined = await post('join', { by: 'someone', at: [at[0], at[2]] })
     if (joined.refused) await post('join', { by: 'someone' })
+    // With a voice a world is given the engine's rule for talk: taken out here, so that who answers and who stands near is the tried rule's doing alone.
+    await post('ask', { by: 'trial', unrule: 'talk' })
     const put = await post('ask', { by: 'trial', rule: { id, name: 'tried', source } })
     if (put.refused) return { ok: false, why: `the world would not take it: ${put.why}`, did: {} }
     // Whether it starts at all: its text runs, and it says what it listens for.
@@ -153,6 +179,7 @@ export async function tried(trial, source, { wish, at, seconds = 4 }) {
   } finally {
     await post('ask', { by: 'trial', unrule: id }).catch(() => {})
     await post('leave', { by: 'someone' }).catch(() => {})
+    await leave()
   }
 }
 

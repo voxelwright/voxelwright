@@ -13,7 +13,7 @@ import { serve } from './kit.mjs'
 /** What a rule can do, as `world.<name>`; what it can hear, as `on('<name>'`; and what else the guide must still say. */
 const DOES = ['actor', 'gone', 'offer', 'show', 'sound', 'music', 'think', 'read', 'person', 'clock', 'throw', 'push', 'down', 'blast', 'ignite', 'drive', 'seat', 'thing', 'line', 'mark', 'look', 'matter', 'ask', 'answer', 'make', 'paint', 'give', 'take', 'build', 'ground']
 const HEARS = ['start', 'said', 'tick', 'act', 'pick', 'thought', 'read', 'near', 'struck', 'ride', 'landed', 'crossed', 'arrived', 'broke', 'held', 'put', 'thrown', 'built', 'ground']
-const SAYS = ['world.sees(a, b)', 'world.things', 'world.residents', 'world.people', 'world.keep', 'take:', 'follow', 'move', 'look.wear', '/realms', '/realm/<id>', '/world/rules', 'as: a sound that stays on someone', '/world/gap', 'world.actor(id, {jump, climb, fly, fall})', 'aloft: true']
+const SAYS = ['world.sees(a, b)', 'world.things', 'world.residents', 'world.people', 'world.keep', 'take:', 'follow', 'move', 'look.wear', '/realms', '/realm/<id>', '/world/rules', 'as: a sound that stays on someone', '/world/gap', 'world.actor(id, {jump, climb, fly, fall})', 'aloft: true', 'world.realm ']
 
 const server = await serve('/dev/null', ['--world', join(mkdtempSync(join(tmpdir(), 'engine-whole-')), 'world.log')])
 const failures = []
@@ -36,6 +36,12 @@ try {
   let told = null
   for (let i = 0; i < 80 && !told; i++) { await new Promise((r) => setTimeout(r, 250)); const a = await (await fetch(`${server.url}/world/around?by=listener`)).json(); told = a.people?.find((p) => / of \d+$/.test(p.name)) ?? null }
   check(told?.name === `${DOES.length} of ${DOES.length}`, `a rule is given every one of them to call (${told?.name ?? 'the rule never said'})`)
+  // A rule is told what its world is called and is about, as the realm's record says now.
+  await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'whole', realm: { name: 'Quay', about: 'a winter port' } }) })
+  await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'whole', rule: { id: 'where', source: `on('tick', (world) => world.actor('where', { at: [704, 4009], name: world.realm.name + ': ' + world.realm.about }))` } }) })
+  let where = null
+  for (let i = 0; i < 40 && !where; i++) { await new Promise((r) => setTimeout(r, 250)); const a = await (await fetch(`${server.url}/world/around?by=listener`)).json(); where = a.people?.find((p) => p.name === 'Quay: a winter port') ?? null }
+  check(!!where, 'a rule is told what its world is called and is about (world.realm)')
 } catch (e) { failures.push(String(e.stack ?? e)) }
 server.stop()
 if (failures.length) { console.error(`FAILED\n  ${failures.join('\n  ')}`); process.exit(1) }
