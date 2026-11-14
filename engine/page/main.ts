@@ -362,7 +362,9 @@ async function main() {
         const through = windowed && d > c ? Number(d - c) / 1e6 : 0
         windowMs += (through - windowMs) * 0.1
         // (The last one as it was is kept beside the smoothed: late frames are answered by what the march took just now.)
-        if (b > a) { marchMs = Number(b - a) / 1e6 + through; gpuMs += (marchMs - gpuMs) * 0.1 }
+        // Both marches as one stretch of the GPU's time, from where the page's own began to where the window's ended: added
+        // up, the two overlapped and were counted for more than they took.
+        if (b > a) { marchMs = windowed && d > a ? Number(d - a) / 1e6 : Number(b - a) / 1e6; gpuMs += (marchMs - gpuMs) * 0.1 }
       })
     }
     if (++frames % 15 === 0) {

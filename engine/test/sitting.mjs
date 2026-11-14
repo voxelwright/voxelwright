@@ -249,6 +249,25 @@ parts.air = async () => {
   for (const name of ['fly-up', 'fly-along', 'fly-down']) { t = await traced(name); eye = t.map((r, i) => i ? Math.hypot(r[4] - t[i - 1][4], r[5] - t[i - 1][5], r[6] - t[i - 1][6]) : 0); line(`${name}: feet went ${(Math.hypot(t.at(-1)[1] - t[0][1], t.at(-1)[3] - t[0][3]) / 10).toFixed(1)} m along, ${((t.at(-1)[2] - t[0][2]) / 10).toFixed(1)} m up; the eye's biggest move in a frame ${Math.max(...eye).toFixed(1)} cells; in something ${t.filter((r) => r[7] === 2).length} of ${t.length} frames`) }
   await page.evaluate(() => { globalThis.engine.me.can = {} })
 }
+// Beside an open window: through it, then turned to face it from the far side and stood there, the head turned a little each way.
+parts.window = async () => {
+  if (!made) await post('/realms', { by: 'sitting', id: 'dusk', name: 'Dusk in the east', about: 'the east end, late', arrive: { at: [9660, 4070] }, look: { hour: 17.6, rain: 0.3 } })
+  await down(70, 412.5, 0)
+  await page.evaluate((id) => { globalThis.engine.realms.selected = id }, other)
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 })
+  const face = () => page.evaluate(() => { const e = globalThis.engine, g = e.portal.gate.at, f = e.me.feet.at; e.pose.yaw = Math.atan2(g[0] - f[0], -(g[2] - f[2])) })
+  await face(); await page.keyboard.down('KeyW')
+  await page.waitForFunction((id) => globalThis.engine.realms.here === id, other, { timeout: 30_000 })
+  await wait(1200); await page.keyboard.up('KeyW')
+  await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.state.passable, null, { timeout: 30_000 })
+  await face(); await wait(1500)
+  await mark('window-faced'); await wait(6000); await turnBy(0.5, 2000); await turnBy(-0.5, 4000); await turnBy(0.5, 2000); await wait(4000)
+  line(`facing the window from the far side: the march ${await page.evaluate(() => { const e = globalThis.engine; return `${e.gpuMs.toFixed(1)} ms, ${e.windowMs.toFixed(1)} of it through the window, the picture at ${e.scale.toFixed(2)}, the window ${(e.portal.stats.share * 100).toFixed(0)}% of it drawn at ${e.portal.stats.scale}` })}`)
+  await shot('window-faced')
+  await page.keyboard.down('KeyW'); await page.waitForFunction(() => globalThis.engine.realms.here === 'home', null, { timeout: 20_000 }).catch(() => page.evaluate(() => globalThis.engine.realms.step('home'))); await page.keyboard.up('KeyW'); await wait(1500)
+  await page.keyboard.press('KeyP'); await wait(1500)
+}
 // The picture's size when the view is suddenly dear: the ground at one's feet looked at until the picture has grown, then the long street at once, as a turn of the head does.
 parts.steer = async () => {
   await down()
