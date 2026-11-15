@@ -33,7 +33,8 @@ export async function turn({ mine = true } = {}) {
         if (Number.isInteger(pid) ? !running(pid) : waited > 20) rmSync(place, { recursive: true, force: true })
         continue
       }
-      writeFileSync(holder, String(process.pid))
+      // (Between making the place and saying who has it, someone who took it for abandoned may clear it away: then it is not had, and is tried for again.)
+      try { writeFileSync(holder, String(process.pid)) } catch { continue }
       let held = true
       const back = () => { if (held) { held = false; rmSync(place, { recursive: true, force: true }); if (mine) delete process.env.ENGINE_TURN } }
       process.on('exit', back)
@@ -61,7 +62,8 @@ export async function quiet() {
         if (Number.isInteger(pid) && !running(pid)) rmSync(place, { recursive: true, force: true })
         continue
       }
-      writeFileSync(holder, String(process.pid))
+      // (Between making the place and saying who has it, someone who took it for abandoned may clear it away: then it is not had, and is tried for again.)
+      try { writeFileSync(holder, String(process.pid)) } catch { continue }
       let held = true
       const back = () => { if (held) { held = false; rmSync(place, { recursive: true, force: true }) } }
       process.on('exit', back)
