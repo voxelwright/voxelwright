@@ -304,7 +304,9 @@ on foot as they do flying.
   runs, how high it jumps, how high a wall it gets up when it goes on against it, how fast it flies, how much of the
   world's pull it feels), and `world.clock({rate, spare})` slows or quickens everything the world moves and everyone
   in it but those spared. "Walk up walls", "fly", "leap a street", "slow time" are a rule setting numbers; neither
-  the core nor the page has those words. The guide (`GET /world/`) says the ranges. In the console, alone:
+  the core nor the page has those words. In the air one who flies goes at their `fly` pace, Shift or not; on their
+  feet at their walk and run again (#366: in the air they went at a walk, and at their run with Shift). The guide
+  (`GET /world/`) says the ranges. In the console, alone:
   `engine.me.can = {climb: 100000, fall: 0.3}`, `engine.tempo.rate = 0.25`.
 - **Which way is down for a body** is two more of those numbers: `world.person(id, {down: [1, 0, 0]})` turns a
   person's own down to any way in the world's axes (they fall that way, stand on what they meet, run along it, and

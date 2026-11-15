@@ -112,7 +112,19 @@ try {
   await ada.waitForTimeout(1500)
   const hung = (await feet(ada)).at[1]
   check(up - low > 60 && Math.abs(hung - up) < 12, `said "wings", Space takes her ${((up - low) / 10).toFixed(1)} m up and let go she hangs there`)
+  // In the air W takes her at the pace the rule gave her wings, 8 m/s, with no Shift (#366: she went at a walk, 1.4 m/s, and ran with Shift).
+  await ada.keyboard.down('KeyW'); await ada.waitForTimeout(1500)
+  const flown = await feet(ada)
+  await ada.keyboard.up('KeyW')
+  check(flown.speed > 62, `with wings, W alone flies her at ${(flown.speed / 10).toFixed(1)} m/s`)
+  await ada.waitForTimeout(1000)
   await ada.keyboard.down('KeyC'); await ada.waitForTimeout(2500); await ada.keyboard.up('KeyC')
+  // Down on her feet again, W is a walk as it was.
+  await settled(ada)
+  await ada.keyboard.down('KeyW'); await ada.waitForTimeout(1500)
+  const walked = await feet(ada)
+  await ada.keyboard.up('KeyW')
+  check(walked.speed > 8 && walked.speed < 20, `landed, W walks her at ${(walked.speed / 10).toFixed(1)} m/s`)
   await say(ada, 'as it was', () => globalThis.engine.me.can.fly === 0)
   await ada.waitForTimeout(1500)
   await settled(ada)

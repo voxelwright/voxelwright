@@ -36,8 +36,15 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
 }
-/** The motor that does it: the jump's speed is what takes it that high under the pull it feels. */
-const motorOf = (can: Can): Motor => ({ ...ON_FOOT, top: can.pace, power: 300 * Math.max(1, can.pace / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly })
+/**
+ * The motor that does it: the jump's speed is what takes it that high under the pull it feels. Flying, it goes at
+ * its fly pace, which is also how fast it rises and sinks; on its feet at its run pace (#366: in the air it went at
+ * its run pace, and at a walk without Shift).
+ */
+const motorOf = (can: Can, flying: boolean): Motor => {
+  const top = flying ? can.fly : can.pace
+  return { ...ON_FOOT, top, power: 300 * Math.max(1, top / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly }
+}
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
 /** How near its own head the eye behind comes before its figure is in its way and is not drawn (cells). */
@@ -102,7 +109,10 @@ export function person(o: {
 }): Me {
   const M = 10
   let on = false, id = 0, asked = false, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
-  const tellCan = () => { if (id) o.send({ motor: { id, numbers: numbers(motorOf(can)) }, ways: { id, fall: can.fall, climb: can.climb }, down: { id, way: can.down ?? [0, 0, 0], cling: can.cling } }) }
+  // Whether the core last said the body is in the air, and whether its motor is the flying one: told again only when that changes.
+  let aloft = false, flyingMotor = false
+  const flying = () => can.fly > 0 && aloft
+  const tellCan = () => { if (id) { flyingMotor = flying(); o.send({ motor: { id, numbers: numbers(motorOf(can, flyingMotor)) }, ways: { id, fall: can.fall, climb: can.climb }, down: { id, way: can.down ?? [0, 0, 0], cling: can.cling } }) } }
   // Which way is up for the body as the core last said (the turn from its own upright to the world's), and the eye's, which follows it over a fifth of a second.
   let frame: Q = [0, 0, 0, 1], tilt: Q = [0, 0, 0, 1]
   const tilted = () => Math.abs(frame[3]) < 0.9999
@@ -150,7 +160,7 @@ export function person(o: {
       if (id) o.send({ vanish: id })
       // Up from where the body stood, the eye where the head was.
       if (at) { o.pose.x = at[0] / M; o.pose.z = at[2] / M; o.pose.y = (at[1] - com[1] - LEG + EYES) / M }
-      id = 0; at = null; asked = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
+      id = 0; at = null; asked = false; aloft = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
       return
     }
     // The body is made where the eye is, the eye in its head: from the air it falls to whatever is under it.
@@ -158,7 +168,8 @@ export function person(o: {
     heading = o.pose.yaw - Math.PI / 2
     eyeY = o.pose.y * M
     asked = true
-    o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can)) } })
+    aloft = false
+    o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can, false)) } })
     o.wake()
     // On foot the page's own keys still do what they did (tools, the wand); Space jumps and V changes where the eye rides.
     leave = o.input.push({ name: 'afoot', key: (code) => { if (code === 'Space') { jump = true; return true } if (code === 'KeyV') { view = view === 'behind' ? 'head' : 'behind'; return true } return false } })
@@ -189,7 +200,8 @@ export function person(o: {
       if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
       if (!id) return
       for (const m of told.moves) if (m.id === id) at = m.pos
-      for (const l of told.live) if (l.id === id) frame = l.frame
+      for (const l of told.live) if (l.id === id) { frame = l.frame; aloft = l.aloft }
+      if (flying() !== flyingMotor) o.send({ motor: { id, numbers: numbers(motorOf(can, flyingMotor = flying())) } })
     },
     frame(dt) {
       if (!on) return false
@@ -198,9 +210,10 @@ export function person(o: {
       o.pose.yaw += right
       o.pose.pitch = Math.max(-1.5, Math.min(1.5, o.pose.pitch + up))
       // Forward and to the right as the eye looks: the keys, or a phone's left thumb. Shift runs; a thumb pushed right over runs.
+      // Flying there is no walk: the keys go at the fly pace.
       const held = o.input.held, stick = o.input.stick
       let go = (held('KeyW') ? 1 : 0) - (held('KeyS') ? 1 : 0), side = (held('KeyD') ? 1 : 0) - (held('KeyA') ? 1 : 0)
-      const pace = held('ShiftLeft') || held('ShiftRight') ? 1 : WALK
+      const pace = flying() || held('ShiftLeft') || held('ShiftRight') ? 1 : WALK
       go = go * pace - stick[1]
       side = side * pace + stick[0]
       // On the ground it goes nowhere until it is up.
