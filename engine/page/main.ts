@@ -178,15 +178,17 @@ async function main() {
   let held = 0
   // A phone's GPU clock is not to be believed: the iPhone's read 0.01 to 10 ms for the same work from one second to the next.
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
-  // Frames in a row that came well late, and whether the picture's size has just been brought down for that.
+  // How many frames came well late just now.
   let lateRun = 0
   const steer = (budget: number, gap: number) => {
     if (fixed) return
     // A look turned from a cheap view to a dear one (#367): the march is suddenly several frames long, and coming down
     // 15% every 45 frames the picture took three seconds to fit again (60 frames dropped in one turn of the head, with
-    // the march at 50 ms). Two late frames in a row with the GPU's clock saying why bring it down at once to what fits.
-    lateRun = gap > budget * 1.4 ? lateRun + 1 : 0
-    if (lateRun >= 2 && clocked && marchMs > budget && scale > 0.3) {
+    // the march at 50 ms). Two late frames close together with the GPU's clock saying why bring it down at once to what fits.
+    // (Late frames close together, not only in a row: with a window come into view at once one frame in five was
+    // late for a second, never two running. Each late frame counts one and fades by a seventh a frame.)
+    lateRun = lateRun * 0.85 + (gap > budget * 1.4 ? 1 : 0)
+    if (lateRun >= 1.4 && clocked && marchMs > budget && scale > 0.3) {
       const fits = Math.round(Math.max(0.3, Math.min(scale - 0.05, scale * Math.sqrt((0.6 * budget) / marchMs))) * 20) / 20
       scale = fits; held = 20; lateRun = 0
       return
