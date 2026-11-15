@@ -19,7 +19,7 @@ const RULE = `on('start', (world) => { world.actor('marshal', {name: 'Marshal', 
 on('crossed', (world, e) => { world.keep.n = (world.keep.n || 0) + 1; world.actor('clerk', {say: world.keep.n + ' crossed ' + e.line + ' ' + (e.own || e.thing || e.who) + ' ' + e.way + ' ' + e.speed + ' ' + e.when + ' ' + (e.riders || []).join('+')}) })
 on('tick', (world) => { world.actor('marshal', {say: world.things.map((t) => [t.own || t.id, t.name, t.at.join(' '), t.yaw, t.speed, t.upright ? 'up' : 'over', t.seats, (t.riders || []).join('+')].join('|')).join(' ; ') || 'nothing'}) })
 on('said', (world, e) => {
-  if (/set out/.test(e.text)) { world.thing('k1', {like: 'kart', at: [790, 4072], yaw: Math.PI / 2, colour: 0}); world.thing('c1', {like: 'car', at: [790, 4094], yaw: Math.PI / 2}); world.thing('b1', {like: 'broom', at: [740, 4076], yaw: -Math.PI / 2}); world.thing('h1', {like: 'craft', at: [715, 4094], yaw: -Math.PI / 2}) }
+  if (/set out/.test(e.text)) { world.thing('k1', {like: 'kart', at: [790, 4072], yaw: Math.PI / 2, colour: 0}); world.thing('c1', {like: 'car', at: [790, 4094], yaw: Math.PI / 2}); world.thing('b1', {like: 'broom', at: [740, 4076], yaw: -Math.PI / 2}); world.thing('h1', {like: 'craft', at: [700, 4076], yaw: -Math.PI / 2}) }
   if (/mount/.test(e.text)) { world.seat('ann', {on: 'k1'}); world.seat('bo', {on: 'c1'}); world.seat('cy', {on: 'c1'}); world.seat('marshal', {on: 'c1'}) }
   if (/launch/.test(e.text)) world.drive('h1', {go: 1})
   if (/beach it/.test(e.text)) world.drive('h1', {go: 0})
@@ -44,12 +44,15 @@ try {
   check(!!out && out.k1.name === 'kart' && out.c1.name === 'car' && out.k1.up && out.c1.up && out.k1.seats === 1 && out.c1.seats === 2 && out.h1.seats === 6, `said "set out", a kart, a car, a broom and a craft are in the world at once, by the rule's own ids, upright, with their seats (${out ? Object.entries(out).map(([k, v]) => `${k} ${v.name} ${v.seats}`).join(', ') : '?'})`)
   const ground = Math.round((await (await fetch(`${server.url}/world/at?x=760&y=0&z=4078`)).json()).ground)
   check(!!out && Math.abs(out.k1.yaw - 1.57) < 0.1 && Math.abs(out.b1.yaw + 1.57) < 0.1 && Math.abs(out.k1.at[0] - 790) < 6 && Math.abs(out.k1.at[2] - 4072) < 6, `each stands where it was asked and faces as asked (the kart at ${out?.k1.at} facing ${out?.k1.yaw}, the broom facing ${out?.b1.yaw})`)
-  // The craft rides over the street as it would over water (the sea and a beach are in the core's own test), level.
+  // The craft rides over the street as it would over water (the sea and a beach are in the core's own test), level,
+  // and low: over the street, not up on something. It is set down in an open lane (#245): at [715, 4094] its hull
+  // stood over the rule's own actors and its path ran into a town car parked at x 644 to 686, z 4096 to 4112.
+  // It went its four metres only when it had been shoved up onto the actors and rode 1.4 m up, over the car.
   await post('say', { by: 'steward', text: 'launch' })
   await wait(1500)
   await post('say', { by: 'steward', text: 'beach it' })
   const rode = await says((t) => t.h1 && t.h1.speed === 0 && out.h1.at[0] - t.h1.at[0] > 40, 30)
-  check(!!rode && rode.h1.up, `the craft, sent off, rides ${rode ? ((out.h1.at[0] - rode.h1.at[0]) / 10).toFixed(1) : '?'} m west over the street, level`)
+  check(!!rode && rode.h1.up && rode.h1.at[1] <= out.h1.at[1] + 3, `the craft, sent off, rides ${rode ? ((out.h1.at[0] - rode.h1.at[0]) / 10).toFixed(1) : '?'} m west over the street, level (from ${out?.h1.at[1]} high to ${rode?.h1.at[1]})`)
   // What flies: told to rise, the broom goes up; told to go, it goes the way it was set to face (west).
   await post('say', { by: 'steward', text: 'up' })
   await wait(1200)
