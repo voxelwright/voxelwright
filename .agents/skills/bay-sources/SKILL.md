@@ -15,7 +15,8 @@ Rules that hold for all of it:
 - Raw data lives under `~/.village/engine/bay/raw/`, never in git. What is baked from it for the
   engine lives under `~/.village/engine/bay/packs/`.
 - Requests carry a generic client name (`village-engine`) and no email or personal detail.
-- A source that needs a key or an account is not used until the owner gives one. Nothing is signed up for.
+- A source that needs a key or an account is not used until the owner gives one or asks for it. Mapillary is the
+  one account so far (below). A key lives under `~/.village/engine/bay/keys/`, never in git, a page or a log.
 - The world holds real streets, names and addresses. It never says whose home a house is.
 
 ## Used in the first slice (no key, no share-alike)
@@ -49,6 +50,41 @@ source.
 | Mapterhorn, Mapzen terrain tiles | Ground height, about 30 m world-wide, finer where a country publishes it | `tiles.mapterhorn.com/z/x/y.webp`; `s3.amazonaws.com/elevation-tiles-prod/terrarium/z/x/y.png` | Each tile carries its sources' terms (mapterhorn.com/attribution). Far ground only. **fetched**; terms **memory** |
 | NOAA CUDEM (1/9 arc-second), USGS San Francisco Bay 1 m bathymetry (DOI 10.5066/P9TJTS8M, CC0) | The bay's floor | `noaa-nos-coastal-lidar-pds.s3.amazonaws.com/dem/NCEI_ninth_Topobathy_2014_8483/CA/` | U.S. government products. **memory** for both licences |
 
+## Mapillary: a token, given by the owner on November 15
+
+The owner asked for an account and a key. The account is on the owner's email (its name is in the lane's memory note), the application
+`village-engine` with READ only. The client token is in `~/.village/engine/bay/keys/mapillary.token` (mode 600, outside
+git); it is never printed, logged or put in a URL that is logged: send it as the header `Authorization: OAuth <token>`.
+Nobody holds the account's password; it is reset through the owner's email when wanted.
+
+- Holds: street photographs with their solved position and rotation (`computed_geometry`, `computed_rotation`,
+  camera model), panoramas, a 3D reconstruction per image (`sfm_cluster`, `mesh`), and what its detector found
+  (`map_features`: signs, poles, crossings). `https://graph.mapillary.com/images?bbox=W,S,E,N&limit=N&fields=...`
+  **fetched**: a box of 180 m by 150 m east of Washington Square answered 440 photographs, 317 of them panoramas,
+  295 from 2022. A box asked with `limit=2000`, or one too full, answers "Please reduce the amount of data": ask
+  small boxes (a zoom-14 tile's worth at most, less in a city).
+- Terms (mapillary.com/terms of February 15, 2024, and the API documentation, **read** through a lookup on
+  November 15; the limits came from a summary of the page, not its words):
+  - Content is "subject to the Creative Commons Share Alike (CC BY-SA) license, unless we indicate otherwise".
+    Serving images from our own server, or data "that Mapillary extracts from street-level images", is allowed
+    with "visibly displaying the Mapillary logo and linking back to the Mapillary homepage". The terms do not say
+    how the licence reaches what we derive ourselves (a wall's colour): treat it as share-alike, keep that layer
+    separable from the public-domain ones, and show "© Mapillary" with the link where it is used.
+  - An application must "materially supplement" Mapillary and not "merely redistribute Content", nor
+    "substantially replicate the functionality of Mapillary Services". A world of cells coloured from photos is
+    a supplement; a viewer of its photographs would not be.
+  - "data mining, robots or similar data gathering" not approved is banned: ask through the API only, a place at
+    a time as it is visited or baked, never a crawl of a region for its own sake. Nothing on caching or a time
+    limit was found.
+  - Limits: entity asks 60,000 a minute for the app, searches by box 10,000 a minute, tiles 50,000 a day. A box
+    "must be smaller than 0.01 degrees square".
+  - The token goes in the header for the API; the vector tiles take `?access_token=`. Only our server or a bake
+    holds it: a page asks our server.
+- The Earth world on Spawn uses it the same way: its `photos.js` ("the colour of a wall, from street photographs
+  (Mapillary: posed photos, CC BY-SA 4.0)"), `heights.js` ("from Mapillary's own 3D reconstructions") and the
+  map-feature tiles in `street.js`. Its players' browsers ask Spawn's server
+  (`/api/streetphoto/images?bbox=...`, seen in the guest session's traffic), which adds the key: "NO KEY IN THE BROWSER".
+
 ## Needs a key or an account: not used
 
 | Service | What decides it |
@@ -57,7 +93,6 @@ source.
 | Mapbox Satellite | Product Terms 1.6, 1.9: no tracing or deriving but for OSM or non-commercial vectors; no caching or storing. **read** (April 2025 terms) |
 | Esri World Imagery | "not intended to be used to export tiles for offline"; Esri Master Licence. Pixels may not be kept or served. **read** (item page) |
 | Cesium ion | "You may not copy, store, or redistribute any portion of Cesium Data Output". **read** |
-| Mapillary (street photographs, and heights from its 3D reconstructions) | The API needs a token. Images are CC BY-SA 4.0: what is derived from them is share-alike and must be credited. It is the one open source of wall colours and of signs. **read** Ask the owner for a token before using it; until then walls are made by programs. |
 | Bing or Azure Maps, Apple Look Around | Not read. **memory**: no. |
 
 ## How the Earth world on Spawn is put together (looked at November 15, as a guest)
