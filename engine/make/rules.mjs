@@ -174,18 +174,20 @@ export async function scratch() {
  */
 function standIn(trial) {
   const key = randomBytes(16).toString('hex'), stop = new AbortController()
-  let turn = 0
+  let turn = 0, answered = 0
   const fill = (want) => Object.fromEntries(Object.entries(want ?? {}).map(([k, { is }]) => [k, is === 'yes/no' ? turn++ % 2 === 0 : is === 'words' ? 'a brass key' : typeof is[0] === 'number' ? Math.round((is[0] + is[1]) / 2) : is[turn++ % is.length]]))
   const post = (body) => fetch(`${trial}/world/mind`, { method: 'POST', body: JSON.stringify({ voice: key, ...body }) }).then(() => {}, () => {})
   void (async () => {
     while (!stop.signal.aborted) {
       try {
         const { asks = [] } = await (await fetch(`${trial}/world/minds?voice=${key}`, { signal: stop.signal })).json()
-        for (const { n, ask } of asks) await post({ n, notes: fill(ask.notes), ...(ask.reads ? {} : { say: 'All right. Tell me more.' }) })
+        for (const { n, ask } of asks) { answered++; await post({ n, notes: fill(ask.notes), ...(ask.reads ? {} : { say: 'All right. Tell me more.' }) }) }
       } catch { await wait(200) }
     }
   })()
-  return async () => { stop.abort(); await post({ leave: true }) }
+  const leave = async () => { stop.abort(); await post({ leave: true }) }
+  // (A getter, not Object.assign: that would copy the count once, as it is now.)
+  return Object.defineProperty(leave, 'answered', { get: () => answered })
 }
 
 /** Things someone might say near a rule: ordinary ones, and words the rule itself looks for (what stands in its quotes and patterns). */
@@ -203,11 +205,11 @@ function lines(source, wish) {
  * went wrong in words the model can be told; `did` what the world saw the rule do (for the asker, and to compare
  * tries by).
  */
-export async function tried(trial, source, { wish, at, seconds = 4, before }) {
+export async function tried(trial, source, { wish, at, seconds = 4, before, asks = false }) {
   const send = async (path, init) => { for (;;) { const r = await fetch(`${trial}/world/${path}`, init); if (r.status === 429) { await wait(300); continue } return r.ok ? r.json() : { refused: r.status, why: (await r.text()).slice(0, 300) } } }
   const post = (path, body) => send(path, { method: 'POST', body: JSON.stringify(body) })
   const how = async () => (await send('rules')).find?.((r) => r.id === 'tried')
-  const id = 'tried', leave = standIn(trial)
+  const id = 'tried', leave = standIn(trial), began = Date.now()
   let spot = null, wasWrong = ''
   const be = () => (spot ? fetch(`${trial}/world/here`, { method: 'POST', body: JSON.stringify({ by: 'someone', name: 'someone', at: spot, yaw: Math.PI }) }).then(() => {}, () => {}) : undefined)
   /** The trial's person is put at a place: their eyes over the ground there. */
@@ -253,6 +255,9 @@ export async function tried(trial, source, { wish, at, seconds = 4, before }) {
     if (!end.running) return { ok: false, why: `it was stopped while it ran: ${end.error}`, did }
     // (What the world already said of the rule as it stood is not the change's doing.)
     if (end.error && end.error !== wasWrong) return { ok: false, why: `while it ran the world said: ${end.error}`, did }
+    // A rule that is to read the play and answer it (a director) has asked the trial's voice for something by now, or it never will in play either.
+    // (Not asked of a change: the stand-in cannot tell what the rule as it stood asked from what the changed one did.)
+    if (asks && !before && !leave.answered) return { ok: false, why: `in ${Math.round((Date.now() - began) / 1000)} s of someone arriving, saying things and walking about, it asked for no thought and no reading (world.think, world.read): it watched and did nothing. Make a first, small reading within twenty seconds of someone arriving`, did }
     if (end.worst > 60) return { ok: false, why: `one call took ${Math.round(end.worst)} ms: a handler must be quick (do less each time, or spread the work over ticks)`, did }
     // Does anyone answer? A rule that hears what is said and has people of its own is met as a player meets it:
     // the trial's person goes and stands two metres from the nearest of them and speaks, twice. If for twenty seconds
@@ -302,16 +307,17 @@ export async function tried(trial, source, { wish, at, seconds = 4, before }) {
  * returned resolves when the last step is done; `grew(step)` hears of each; `turn(work)` runs each step in its turn among whatever else changes this world's rules.
  * `id`: the id a new rule is put under, when it is to have one of its own (a realm's director). `beside`: more for the
  * model to read with the ask, which is not the asker's words and is not cut as they are (the realm's other rules). `seconds`: how long it is tried.
+ * `asks`: a new rule that does not ask the trial's voice for a thought or a reading while it is tried is sent back (a director).
  */
-export async function write({ wish, world, where, change, unless, by = 'maker', model = (q) => ask(q), first, trial, cannot = CANNOT, say = () => {}, id, beside, seconds, turn = (work) => work(), grew = () => {}, steps = STEPS, since = () => [] }) {
+export async function write({ wish, world, where, change, unless, by = 'maker', model = (q) => ask(q), first, trial, cannot = CANNOT, say = () => {}, id, beside, seconds, turn = (work) => work(), grew = () => {}, steps = STEPS, since = () => [], asks }) {
   // A quick model first, if one is given: its rule is put in and can be played while the fuller one is written
   // (a long rule took the full model 200 s and the quick one 54 s, November 13). The fuller one is asked for as a
   // change of the quick one, so it keeps its actors and what it kept, and is put under the same id when it has been
   // tried. `better` on what is returned resolves when that has happened, to what came of it.
   if (first && !change) {
     // The first is asked to be small: the quick model's reply is the wait before anything can be played, and its length is most of that wait (432 s for 459 lines, November 14).
-    const quick = await write({ wish, world, where, by, model: first, trial, cannot, say, id, beside: [beside, FIRST].filter(Boolean).join('\n\n'), seconds })
-    if (quick.state !== 'there') return write({ wish, world, where, by, model, trial, cannot, say, id, beside, seconds })
+    const quick = await write({ wish, world, where, by, model: first, trial, cannot, say, id, beside: [beside, FIRST].filter(Boolean).join('\n\n'), seconds, asks })
+    if (quick.state !== 'there') return write({ wish, world, where, by, model, trial, cannot, say, id, beside, seconds, asks })
     // The rest arrives as changes to the rule that is being played, a step at a time, what would be missed most
     // first (#365). Written again whole it took the full model 441 s in two askings (619 s from Enter, November 14)
     // and whoever was playing got a different game at once; a step is a few edits, tried over the rule as it
@@ -332,9 +338,9 @@ export async function write({ wish, world, where, change, unless, by = 'maker', 
     })().catch((e) => ({ state: 'refused', why: e.message }))
     return { ...quick, better }
   }
-  return writeOne({ wish, world, where, change, by, model, trial, cannot, say, unless, id, beside, seconds })
+  return writeOne({ wish, world, where, change, by, model, trial, cannot, say, unless, id, beside, seconds, asks })
 }
-async function writeOne({ wish, world, where, change, unless, by, model, trial, cannot, say = () => {}, id: named, beside, seconds, complete }) {
+async function writeOne({ wish, world, where, change, unless, by, model, trial, cannot, say = () => {}, id: named, beside, seconds, complete, asks }) {
   wish = String(wish).trim()
   if (!wish) return { state: 'refused', why: 'say what the rule is to do' }
   if (wish.length > WISH_MOST) { say(`the ask is ${wish.length} characters: only the first ${WISH_MOST} are read`, { stage: 'note', why: `that was long: only its first ${WISH_MOST} characters were read` }); wish = wish.slice(0, WISH_MOST) }
@@ -360,7 +366,7 @@ async function writeOne({ wish, world, where, change, unless, by, model, trial, 
         const rule = read(got.text, existing)
         say('trying it in a world of its own', { stage: 'trying', name: rule.name })
         const began = Date.now()
-        const t = await tried(trial ?? own.url, rule.source, { wish, at: where.at, seconds, before: existing })
+        const t = await tried(trial ?? own.url, rule.source, { wish, at: where.at, seconds, before: existing, asks })
         out.trial = (out.trial ?? 0) + Date.now() - began
         why = t.why
         // The best so far: one that worked, else the one the world saw do most before it went wrong.

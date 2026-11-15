@@ -59,6 +59,15 @@ try {
     const fixed = await write({ wish: 'someone who waves', world, where, model, trial: trial.url, cannot })
     check(fixed.state === 'there' && fixed.tries === 2 && told.test(model.seen[1].prompt) && !fixed.rough, `a rule that ${what} is not put in: the model is told (${(/did not work: (.{0,70})/.exec(model.seen[1].prompt) ?? [])[1]}...) and its second is`)
   }
+  // A rule that is to read the play and answer it (a director, written with asks): one that watches and asks nothing is sent back.
+  {
+    const READS = "on('tick', (world) => { if (world.voiced && !world.keep.asked) { world.keep.asked = 1; world.read('first', { said: 'someone has arrived', from: 'the notebook', listening: 'choosing what happens next', notes: { kind: { ask: 'what kind of beat', is: ['a stranger', 'a rival'] } } }) } })\non('read', (world, e) => { world.keep.kind = e.notes ? e.notes.kind : null })"
+    const WATCHES = "on('tick', (world) => { world.keep.seen = world.people.length })\non('said', (world, e) => { world.keep.last = e.text })"
+    const model = kept(reply(WATCHES), reply(READS))
+    const directed = await write({ wish: 'watch how people play', world, where, model, trial: trial.url, cannot, asks: true, seconds: 6 })
+    check(directed.state === 'there' && directed.tries === 2 && /asked for no thought and no reading/.test(model.seen[1].prompt) && !directed.rough, 'asked of a rule that is to read the play: one that only watches is sent back, told so, and one that asks for a reading is put in')
+    await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: directed.id }) })
+  }
   // Never right: the best that ran is put in, and said to be rough. Never even a rule: refused.
   const rough = await write({ wish: 'someone who waves', world, where, model: kept(reply(THROWS)), trial: trial.url, cannot })
   check(rough.state === 'there' && rough.tries === 3 && /world said|stopped/.test(rough.rough ?? ''), `asked three times and never right, the one that ran is put in and said to be rough (${rough.state}, ${(rough.rough ?? rough.why ?? '').slice(0, 60)})`)

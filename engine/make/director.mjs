@@ -19,7 +19,13 @@ const RULE_MOST = 14_000, RULES_MOST = 36_000
 /** How long a director is tried for (seconds): long enough for a first beat to be chosen and staged. */
 const TRIED = 24
 
-/** What is asked of the writer. It names no realm and no game: what the place is comes with it, as data. */
+/**
+ * What is asked of the writer. It names no realm and no game: what the place is comes with it, as data. It is the
+ * engine's text, not the asker's, and longer than an ask may be: it goes beside a one-line ask, where nothing is cut
+ * (sent as the ask, it was cut at 4,000 of its 4,659 characters, and its last three lines, the first reading among
+ * them, never reached the model, November 14).
+ */
+export const ASK = "Write this realm's director, as described below."
 export const WISH = `Write this realm's director: an unseen hand that watches how each person at a page plays, and keeps them engaged with a plot made for them. It is not the realm's game: the realm's other rules are that, and they are given below so you know what is already here. Add to them. Never copy, replace or undo what they do, and do not answer what they already answer.
 
 What a director does:
@@ -67,7 +73,8 @@ export async function direct({ world, where, more, by = 'maker', model = (q) => 
   if (there && !more) { await on(); return { state: 'there', id: ID, name: 'The director', cannot: [], kept: true } }
   const r = there
     ? await write({ wish: more, world, where, change: ID, by, model, trial, cannot, say, beside: await beside(world), seconds: TRIED })
-    : await write({ wish: more ? `${WISH}\n\nWhoever asked for it adds: ${more}` : WISH, world, where, id: ID, by, model, first, trial, cannot, say, beside: await beside(world), seconds: TRIED, steps: 2 })
+    // Tried as any rule is, and for one thing more: with someone arriving and speaking for that long, a director must have asked for a thought or a reading.
+    : await write({ wish: more ? `${ASK} Whoever asked for it adds: ${more}` : ASK, world, where, id: ID, by, model, first, trial, cannot, say, beside: `${WISH}\n\n${await beside(world)}`, seconds: TRIED, steps: 2, asks: true })
   if (r.state === 'there') await on()
   return r
 }

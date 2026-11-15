@@ -26,12 +26,14 @@ const CRATE = { name: 'tea crate', size: [10, 9, 8], parts: [
 let asked = 0, last = null
 // A kept rule (someone who waves when greeted) and a kept idea for a realm, for when rules and realms are asked for.
 const WAVER = "NAME: Someone who waves\nCANNOT:\n- Wave: an actor has no moves, so it says it waves.\nRULE:\n```js\non('start', (world) => { if (!world.people.some((p) => p.mine && p.id === 'waver')) world.actor('waver', { name: 'Pim', at: [700, 4010] }) })\non('said', (world, e) => { if (/hello|wave/i.test(e.text)) world.actor('waver', { face: e.at, say: '*waves* hello, ' + e.name }) })\n```"
+/** A director as a model might write one, small: it reads once when someone is there, as a director's trial asks of it. */
+const DIRECTS = "NAME: A director\nCANNOT:\nnothing\nRULE:\n```js\non('tick', (world) => { if (world.voiced && !world.keep.asked && world.people.some((p) => p.kind === 'page')) { world.keep.asked = 1; world.read('first', { said: 'someone has arrived', from: 'the notebook', listening: 'choosing what happens next', notes: { kind: { ask: 'what kind of beat', is: ['a stranger', 'a rival'] } } }) } })\non('read', (world, e) => { world.keep.kind = e.notes ? e.notes.kind : null })\n```"
 const DUSK = JSON.stringify({ name: 'dusk', about: 'A quiet street at dusk. Someone called Pim stands on the pavement and waves at whoever greets them.', look: { hour: 18.5, tint: [1.1, 0.95, 0.85] }, questions: [{ ask: 'Does Pim follow you?', options: ['Yes', 'No'] }] })
 let rulesAsked = 0, imagined = 0
 const model = async (q) => {
   // A change answered as a change is: a few exact edits to the rule as it stands, and a sentence for the player.
   if (q.system.startsWith('You write rules') && q.prompt.includes('is called Pip')) { rulesAsked++; last = q; return { text: "NAME: Someone who waves\nCHANGED: The one who waves is called Pip now.\nCANNOT:\n- nothing\nEDITS:\n<<<<<<< OLD\nname: 'Pim'\n=======\nname: 'Pip'\n>>>>>>> NEW\n", model: 'a kept reply', ms: 0, cost: 0 } }
-  if (q.system.startsWith('You write rules')) { rulesAsked++; last = q; return { text: WAVER, model: 'a kept reply', ms: 0, cost: 0 } }
+  if (q.system.startsWith('You write rules')) { rulesAsked++; last = q; return { text: q.prompt.includes("Write this realm's director, as described below.") ? DIRECTS : WAVER, model: 'a kept reply', ms: 0, cost: 0 } }
   // A realm's place is planned beside its idea (make/plan.mjs): here a plan nothing can be made of, so the realm is made as it was before there were places.
   if (q.system.startsWith('You design the PLACE')) return { text: '{}', model: 'a kept reply', ms: 0, cost: 0 }
   if (q.system.startsWith('Someone in a world made of small cubes')) { imagined++; return { text: DUSK, model: 'a kept reply', ms: 0, cost: 0 } }
@@ -253,7 +255,7 @@ try {
   const dusk = `${world}/realm/${realms[0].id}/world`
   let directed = null
   for (let i = 0; i < 600 && !directed?.director; i++) { directed = await (await fetch(`${dusk}/realm`)).json(); if (!directed.director) await new Promise((r) => setTimeout(r, 100)) }
-  check(directed?.director === true && directed.rules.includes('director') && rulesAsked === 3 && last.prompt.includes("Write this realm's director") && last.prompt.includes('The realm is called "dusk"') && last.prompt.includes('Its other rules:') && last.prompt.includes(`id ${inRealm[0].id}`), 'asked for with a director, the realm gets one: written with the realm and its own rule in front of the model, tried, put under the id director, and the record says so')
+  check(directed?.director === true && directed.rules.includes('director') && rulesAsked === 3 && last.prompt.includes("Write this realm's director") && last.prompt.includes('Keep each call quick') && last.prompt.includes('The realm is called "dusk"') && last.prompt.includes('Its other rules:') && last.prompt.includes(`id ${inRealm[0].id}`), 'asked for with a director, the realm gets one: written with the realm and its own rule in front of the model, tried, put under the id director, and the record says so')
   // Turned off and on from the bar, at any time: the record changes, and no model is asked. (This page is at home: so is what it turns.)
   const askedSoFar = rulesAsked
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'director', name: 'a director', source: "on('start', () => {})" } }) })
