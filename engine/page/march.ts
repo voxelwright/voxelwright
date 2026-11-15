@@ -94,6 +94,7 @@ struct Globals {
   // how bright the sun's own disc is.
   lightSun: vec4f, lightFill: vec4f, skyZenith: vec4f, skyHorizon: vec4f, skyHorizonSun: vec4f, cloudTint: vec4f, cloudTintSun: vec4f,
   // The weather: how hard it rains (0 to 1), how wet the ground is, and how far windows, lamps and signs are lit.
+  // Its last is how far the eye is in a room (Marcher.roofed), not the weather's: kept here for want of a slot.
   // Not to be read in sky(): each of three tries at it there (the clouds' cover, the stars twice) made the dry day
   // 8 to 10% dearer, though none of them runs by day.
   weather: vec4f,
@@ -155,12 +156,19 @@ export const SUNLIT = sunlitText(false)
 export const LIGHT = /* wgsl */ `
 // The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
 // and from the side away from the sun; less of the last two in corners (open: 1 in the open, 0 shut in).
+// With the eye in a room (g.weather.w, #163), the daylight the room is lit by too: let in at its doorway and windows
+// and thrown about off its sunlit floor and walls: warm as the sun is, weaker as it goes down, none at night.
+// Without it a room was lit as any shadow is, and a room of dark wood came out black by day.
+// How strong that is, against the sun straight on: dark wood reads at about 40 of 255 with it (10 without).
+const ROOM_LIGHT = 1.6;
 fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
   let above = 0.5 + 0.5 * n.y;
   let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
   let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
   let SUN_LIGHT = g.lightSun.rgb;
-  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + (skylight + bounce) * open);
+  // (Only where the sun does not fall: a street seen out of the doorway keeps its sunlit fronts as they were.)
+  let room = SUN_LIGHT * g.lightSun.a * g.weather.w * ROOM_LIGHT * (1.0 - smoothstep(0.0, 0.15, direct));
+  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + (skylight + bounce + room) * open);
   let hv = normalize(sun - rd);
   col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
   col += albedo * glow * 3.2;
@@ -1328,6 +1336,8 @@ export interface Marcher {
   rain: number
   /** Whether the eye is under the sea: what is in it is then lit as under water. */
   under: boolean
+  /** How far the eye is in a room, 0 to 1 (main.ts says): what is shaded is lit by the daylight a room lets in (shade). */
+  roofed: number
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
@@ -1384,7 +1394,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * rain), sz / flat,
       ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
       // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
-      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), 0,
+      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), roofed,
     ], 36 + MAX_LEVELS * 32)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
@@ -1431,7 +1441,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
-  let detail = 1, day = 1, low = 0, under = false, rain = 0
+  let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -1456,6 +1466,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     set rain(v: number) { rain = Math.max(0, Math.min(1, v)); colours() },
     get under() { return under },
     set under(v: boolean) { under = v },
+    get roofed() { return roofed },
+    set roofed(v: number) { if (v !== roofed) { roofed = v; colours() } },
     get detail() { return detail },
     set detail(v: number) { detail = v },
     get day() { return day },

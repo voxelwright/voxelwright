@@ -306,6 +306,38 @@ async function main() {
   /** The same parts for the frame now being drawn, or the last one drawn, each as it was and not smoothed: one long frame shows here and hardly at all in `spent` (#367). */
   const laps: Record<string, number> = {}
   const lap = (name: string) => { const t = performance.now(); laps[name] = t - mark; spent[name] = (spent[name] ?? 0) * 0.95 + (t - mark) * 0.05; mark = t }
+  // How far one is in a room (#163), for the daylight a room is lit by (march.ts shade): something over one's head within
+  // 8 m, something standing within 8 m on three of its four sides, and a metre each way either a wall or more cover.
+  // Leaves and water are not counted. The last test is what keeps an awning out: under one on the pavement the
+  // metre towards the street is open (swept over the start street at 1.5 to 2.5 m: none of the open air counted).
+  // Eased over a quarter of a second or so, as eyes take to a room; 0 or 1 once settled.
+  let roomed = 0
+  const stands = (x: number, y: number, z: number) => { const k = core.world_kind(x, y, z) & 15; return k !== 0 && k !== 5 && k !== 13 }
+  const covered = (x: number, y: number, z: number) => { for (let k = 1; k <= 80; k++) if (stands(x, y + k, z)) return true; return false }
+  const SIDES = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+  const inRoom = (): boolean => {
+    // Asked at one's own head when afoot: the eye behind it is often still in the doorway.
+    const f = me.feet, x = Math.floor(f ? f.at[0] : pose.x * M), y = Math.floor(f ? f.at[1] + 16.5 : pose.y * M), z = Math.floor(f ? f.at[2] : pose.z * M)
+    if (!covered(x, y, z)) return false
+    // A side stands if a wall is met along it, straight out or a metre to either hand: so a doorway and a window
+    // across from it in line with one do not open the room.
+    const side = (dx: number, dz: number) => { for (const o of [0, 10, -10]) for (let k = 1; k <= 80; k++) if (stands(x + dx * k - dz * o, y, z + dz * k + dx * o)) return true; return false }
+    let sides = 0
+    for (const [dx, dz] of SIDES) if (side(dx, dz)) sides++
+    if (sides < 3) return false
+    for (const [dx, dz] of SIDES) {
+      let k = 1
+      while (k <= 10 && !stands(x + dx * k, y, z + dz * k)) k++
+      if (k > 10 && !covered(x + dx * 10, y, z + dz * 10)) return false
+    }
+    return true
+  }
+  const roomedBy = (dt: number) => {
+    const to = pose.y < SPACE && inRoom() ? 1 : 0
+    roomed += (to - roomed) * Math.min(1, dt * 4)
+    if (Math.abs(to - roomed) < 0.01) roomed = to
+    return roomed
+  }
   const frame = (now: number) => {
     const began = mark = performance.now()
     const dt = Math.min(0.1, (now - last) / 1000)
@@ -320,6 +352,7 @@ async function main() {
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     steer(Math.max(1000 / 60, screenMs), gap)
     const v = view(), to = fit()
+    march.roofed = roomedBy(dt)
     staff.frame(v)
     ears?.frame(v.eye, pose.yaw, dt)
     magic.step(dt)
