@@ -114,6 +114,12 @@ try {
   await post('act', { by: 'wren', rule: 'stall', id: 'buy', from: [close.at[0] + 9, close.at[1] + 22, close.at[2] + 32], to: [0, -0.1, -1] })
   const near = await until('the keeper sells at arm\'s length', async () => (await heard('wren')).filter((t) => t.startsWith('Pretzel'))[sold])
   check(Number(/(\d+) cells off/.exec(near)[1]) <= 22, `at arm's length the one in front is met though the eye's line passes beside them, and how far is told from the person, not the eye (${near})`)
+  // But whoever the line did meet stands, however far: aimed past the keeper at robin, robin is met.
+  const eyes2 = [close.at[0] + 0.5, close.at[1] + 16.5, close.at[2] + 0.5]
+  await post('act', { by: 'wren', rule: 'stall', id: 'buy', from: eyes2, to: [robin.at[0] + 0.5 - eyes2[0], robin.at[1] + 9 - eyes2[1], robin.at[2] + 0.5 - eyes2[2]] })
+  const far = (await heard('wren')).filter((t) => t === 'Over here, wren: seat').length
+  await until('robin is met past the keeper', async () => (await heard('wren')).filter((t) => t === 'Over here, wren: seat').length > 0 && (await heard('wren')).at(-1) === 'Over here, wren: seat')
+  check(true, 'someone the line meets further off is met, not the one at arm\'s length beside it')
   await post('walk', { by: 'wren', to: [me.at[0], me.at[2]] })
   await until('wren is back', async () => { const y = (await get('me?by=wren')).you; return !y.walking && Math.hypot(y.at[0] - me.at[0], y.at[2] - me.at[2]) < 6 }, 20_000)
 

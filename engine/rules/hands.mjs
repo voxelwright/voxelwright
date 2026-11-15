@@ -169,11 +169,11 @@ export function hands({ folk, tall, look, text, tell, hear, using = () => undefi
       // Aimed or not, the rule is told what was ahead: a wave has someone it was at.
       e.met = meets(m.from, m.to, p, o.rule)
       // The eye may be behind its person's shoulder, and its line passes beside whoever stands right in front of them:
-      // a blow at under a metre met the street beyond. So with nobody met within arm's length, the nearest body that
-      // near, in front of them and on their level, is who was met.
+      // a blow at under a metre met the street beyond. So when the line met nobody at all, the nearest body within arm's
+      // length, in front of them and on their level, is who was met. Whoever the line did meet, however far, stands.
       // Not for a look steeply up or down, which is at the sky or the ground; nor through a wall.
       const flat = Math.hypot(m.to[0], m.to[2])
-      if (flat > 0.7 * Math.hypot(...m.to) && !(e.met && e.met.kind !== 'cells' && near(p, e.met.at) <= ARM)) {
+      if (flat > 0.7 * Math.hypot(...m.to) && !(e.met && e.met.kind !== 'cells')) {
         let best = null, least = ARM
         for (const q of folk.values()) {
           if (q === p || q.gone) continue

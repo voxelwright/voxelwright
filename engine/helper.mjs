@@ -58,6 +58,8 @@ import { towards } from './make/place.mjs'
 import { voices as voicing } from './mind/voice.mjs'
 
 /** A picture is at most this much base64: the page makes it small first (page/picture.ts). */
+/** What the maker is told of a thing that goes into a hand, after the wish. */
+const HAND = ' (to carry in one hand: only the thing itself, lying flat on the ground on its side, its grip at one end; no stand, rack, rock, base, sheath or case)'
 const WISH_MOST = 400, LINK_MOST = 2000, PICTURE_MOST = 4 << 20, BODY_MOST = PICTURE_MOST + (1 << 16)
 const PICTURES = ['image/png', 'image/jpeg', 'image/webp']
 /** A realm's id, as the world's server gives them. */
@@ -69,8 +71,8 @@ const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u00
 /** An ask with nothing in it but what one may hold, or (a string) why it is not one. */
 export function shaped(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'an ask is an object'
-  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh', 'realm'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
-  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true }
+  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh', 'realm', 'hand'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
+  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true, hand: body.hand === true }
   if (body.realm !== undefined) { if (typeof body.realm !== 'string' || !REALM.test(body.realm)) return 'a realm is named by its id'; ask.realm = body.realm }
   if (body.wish !== undefined && typeof body.wish !== 'string') return 'a wish is words'
   if (body.picture !== undefined) {
@@ -368,19 +370,23 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         }
         // A wish of words alone that was made before, or one close to it, is made from the reply kept then: no model.
         // (`fresh` asks for a new one all the same.) It is read, checked, stood and placed as any reply is.
+        // For a hand (#366, `hand: true`: a rule's world.make with hold): the maker is told what a hand needs, since its brief has everything stand and a
+        // sword came in a rock. That is said beside the wish and is no part of the words it is kept under, and what is made for a hand is kept apart
+        // from the standing thing of the same words (make/best.mjs reads the same suffix for the quick path).
+        const asked = ask.hand && ask.wish ? `${ask.wish}${HAND}` : ask.wish
         // A wish with no space to fill, where the helper has a model to write programs (`first`; #372, make/best.mjs):
         // made at once in cells as fine as the thing wants, from what was kept or by the quick model, and made better
         // behind that by the best one, which takes its place where it stands. The asker waits on the first only.
         if (first && !fill) {
-          const w = await wished({ wish: ask.wish, picture, page, fresh: ask.fresh, world: here, where, facing, by: ask.by, journal, first, best, shelf, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) }, told: line })
+          const w = await wished({ wish: asked, picture, page, fresh: ask.fresh, world: here, where, facing, by: ask.by, journal, first, best, shelf, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) }, told: line })
           void w.better?.then((b) => say(`  the better ${b.name ?? ask.wish}: ${b.state}${b.why ? ` (${b.why})` : ''}${b.ms ? ` in ${(b.ms / 1000).toFixed(0)} s` : ''}`), (e) => say(`  the better one failed: ${e.message}`))
           return ended(w.first, line)
         }
-        const apart = fill ? `${grow} ${fill.map((v) => Math.round(v / 16)).join('x')}` : '', plain = shelf && ask.wish && !picture && !page
+        const apart = `${ask.hand ? 'hand ' : ''}${fill ? `${grow} ${fill.map((v) => Math.round(v / 16)).join('x')}` : ''}`.trim(), plain = shelf && ask.wish && !picture && !page
         const found = plain && !ask.fresh ? await shelf.find(ask.wish, apart, fieldKeys()) : null, known = found && (found.form ?? 'parts') === 'parts' ? found : null
         if (known) { say(`  made before as ${known.name}: no model is asked`); line({ stage: 'known', name: known.name }) }
         const from = known ? async () => ({ text: known.reply, model: `kept (${known.model})`, ms: 0, cost: 0 }) : model
-        const run = (how) => make({ wish: ask.wish, picture, page, world: here, where, fill, facing, grow, by: ask.by, journal, model: how, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
+        const run = (how) => make({ wish: asked, picture, page, world: here, where, fill, facing, grow, by: ask.by, journal, model: how, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } })
         let r = await run(from)
         // What was kept could not be used after all (the form has moved on since): the model is asked, as if nothing had been kept.
         if (known && r.state === 'refused') { say('  what was kept could not be used: asking the model'); r = await run(model) }

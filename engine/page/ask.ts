@@ -19,6 +19,8 @@ export interface Ask {
   link?: string
   /** Make it anew, even if one like it was made before and is kept. */
   fresh?: boolean
+  /** It is for a hand (#366): the maker is told to make the thing alone, and it is kept apart from a standing thing of the same words. */
+  hand?: boolean
   /** Where or what it is for. Without one: what is ahead of the eye. */
   target?: Target
 }
