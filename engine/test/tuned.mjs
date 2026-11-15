@@ -147,12 +147,29 @@ try {
   await page.waitForFunction(() => globalThis.engine.ears.music.state.pace === 160, null, { timeout: 8000 }).catch(() => {})
   const faster = await now()
   check(faster.bpm === 160 && faster.mood === joined.mood && faster.layers === 4, `asked to go faster the piece playing goes faster (${faster.bpm} beats a minute ${(faster.t - full.t - 4.2).toFixed(1)} s after it was said), all its layers still in: it does not start again`)
+  // The lean eases over about two seconds, so six seconds in it has not quite reached an eighth down (140): it peaks at 141.
+  // A second rule leans on it for six seconds and never has it: the piece playing thins and slows, and comes back.
+  await rule('hand', `on('said', (world, e) => { if (/lower/.test(e.text)) world.music({ lean: -1, for: 6 }); if (/lift/.test(e.text)) world.music({ lean: 1, for: 6 }) })`)
+  await post('say', { by: 'ada', text: 'lower it' })
+  await page.waitForFunction(() => globalThis.engine.ears.music.state.pace <= 141 && globalThis.engine.ears.music.state.layers < 4, null, { timeout: 12_000 }).catch(() => {})
+  const leantDown = await now()
+  await page.waitForFunction(() => globalThis.engine.ears.music.state.pace === 160 && globalThis.engine.ears.music.state.layers === 4, null, { timeout: 30_000 }).catch(() => {})
+  const again = await now()
+  check(leantDown.bpm >= 140 && leantDown.bpm <= 141 && leantDown.layers < 4 && leantDown.mood === faster.mood && again.bpm === 160 && again.layers === 4 && again.mood === faster.mood, `a second rule leans the music down for six seconds: the piece playing goes to ${leantDown.bpm} beats a minute with ${leantDown.layers} of its layers, and ${(again.t - leantDown.t).toFixed(0)} s later is back at ${again.bpm} with all ${again.layers}, the same piece, the realm's rule never asked`)
   // The rule is taken out: the place's own music comes back.
   await post('ask', { by: 'tester', unrule: 'dance' })
   await page.waitForFunction(() => globalThis.engine.ears.place === 'town', null, { timeout: 8000 }).catch(() => {})
   await page.waitForFunction(() => globalThis.engine.ears.music.state.mood === 'town', null, { timeout: 30_000 }).catch(() => {})
   const back = await now()
   check(back.place === 'town' && back.mood === 'town' && back.bpm === 116, `the rule taken out, the place's own music comes back at the next bar (${back.mood}, ${back.bpm} beats a minute)`)
+  // With no rule's music at all, a lean lies on the place's own.
+  await post('say', { by: 'ada', text: 'lift it' })
+  await page.waitForFunction(() => globalThis.engine.ears.music.state.pace >= 130, null, { timeout: 12_000 }).catch(() => {})
+  const up = await now()
+  await page.waitForFunction(() => globalThis.engine.ears.music.state.pace === 116 && globalThis.engine.ears.lean === 0, null, { timeout: 30_000 }).catch(() => {})
+  const down = await now()
+  check(up.bpm >= 130 && up.mood === 'town' && down.bpm === 116 && down.mood === 'town', `leant up, the place's own music goes to ${up.bpm} beats a minute and comes back to ${down.bpm} by itself`)
+  await post('ask', { by: 'tester', unrule: 'hand' })
   // The lighthouse in a gale: alarm on the beat, not after the bar.
   await rule('light', LIGHT)
   await page.waitForFunction(() => globalThis.engine.ears.place === 'coast', null, { timeout: 10_000 }).catch(() => {})

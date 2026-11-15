@@ -620,6 +620,10 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
   was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
   follows how far her story is (November 14).
+  **A lean** (`world.music({lean, for})`): any rule pushes the music up or down for a while without having it,
+  on top of the realm's rule's music or the place's own (more or less of it in, up to an eighth faster or slower),
+  and it falls away by itself. Each rule has one; several are added and held to -1..1, so none is lost. Checked with
+  stage hands who lean by what is said to them, and on a page: the piece playing thins and slows and comes back.
 - **A rule builds** (`plugins/build`, `rules/built.mjs`). `world.build(id, {at, parts})` puts a place into the
   world's own cells: parts are shapes as data, in the engine's materials and colours (a made thing's: `make/form.mjs`).
   `box`, `room`, `wedge` and `steps` are level, measured from the ground at `at`; `line`, `loop`, `ring`, `disc` and `posts`

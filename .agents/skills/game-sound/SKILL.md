@@ -335,3 +335,13 @@ Refresh when a phone has played it, when the core reports impacts, or when a che
   lists it (`told.named`, once a second). Only the six nearest are sounded.
 - Not built: pitch bent by approach speed (velocity from shown positions is noisy; not tried), a held sound at a
   fixed place, occlusion. Measured in `test/follows.mjs` at the motor's own tone: the street's wind hides a wide band.
+
+## A lean on the music (November 14; `plugins/music`, `lean`)
+
+- `world.music({lean, for})`: any rule pushes the music's tension up or down for a while without having it. A model's
+  director said it could not nudge the music without taking it from the realm's own rule; this is the answer.
+- It lies on top of whatever the music is, the realm's rule's or the place's own: drive plus half the lean (0.5 where
+  the music builds by itself), pace times 1 plus an eighth of the lean. The page eases it over about two seconds.
+- Each rule has one lean, lasting 1 to 120 s (20 unless said). Leans of several rules are added and held to -1..1,
+  so two that agree push further, two that pull apart cancel, and none takes another's away. It goes with its rule.
+- Mode and mood are not leant on: a darker scale under tension is still the realm's rule's to say.

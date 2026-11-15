@@ -11,7 +11,7 @@ import { LIKES } from './likes.ts'
 import { toned, patch as readPatch, type Patch } from './patch.ts'
 import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
-import { MODES, MOODS, PACE, moodKey } from './music/compose.ts'
+import { MODES, MOODS, PACE, moodKey, resolve } from './music/compose.ts'
 import { played } from './things.ts'
 import { speak, type Way } from './voice.ts'
 import type { Things } from '../things.ts'
@@ -190,14 +190,19 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
   }
   /** What the realm's music is like, if a rule has said: the mood's name and how much of it is in. */
   let realm: { key: string; pace: number; drive: number | null; now: boolean } | null = null
+  /** How far rules lean on the music, -1 to 1 (plugins/music `lean`), and where it has got to: it is eased over a few seconds, up and back. */
+  let lean = 0, leaning = 0
   /** What a rule said the realm's music is like (plugins/music), or null for the place's own: read again as a stranger's. */
   const tuned = (v: unknown) => {
     const m = v as Record<string, unknown> | null
+    lean = m && typeof m === 'object' ? num(m.lean, -1, 1, 0) : 0
     if (!m || typeof m !== 'object' || typeof m.like !== 'string' || !Object.hasOwn(MOODS, m.like)) { realm = null; return }
     realm = { key: moodKey(m.like, 0, typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : ''), pace: num(m.pace, PACE[0], PACE[1], 0), drive: typeof m.drive === 'number' ? num(m.drive, 0, 1, 0) : null, now: m.now === true }
   }
   return {
     voice, blast, count, music, sounded, tuned, follows,
+    /** How far the music is leant on now, eased (-1 to 1). */
+    get lean() { return leaning },
     /** The sounds that follow someone now, for checks: which is on whom, whether it sounds, its pitch as it is. */
     get following() { return [...following].map(([key, f]) => ({ key, on: f.on, sounding: f.held ? f.ids.length > 0 : f.gain >= 0.004, hz: f.hzNow, gain: f.gain })) },
     /** Someone said something (text, where): given a voice one of two ways, if the page asked for one (`?voices=babble` or `speech`). A direction being tried. */
@@ -319,9 +324,13 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } 
         const hour = scene.hour(), sort = scene.paving(Math.round(eye[0]), Math.round(eye[2])) & 7
         place = threat > 0.4 ? 'danger' : scene.making() ? 'making' : under || high > 2500 ? 'sea' : snow ? 'snow' : hour < 5.5 || hour > 20.5 ? 'night' : shore.level > 0.3 || sort < 2 ? 'coast' : 'town'
         // A realm whose rule has said what its music is has that, whatever the place; one that has not keeps the place's.
-        if (realm) { place = realm.key; music.want(realm.key, realm.now, realm.pace); realm.now = false }
-        else music.want(place, place === 'danger')
-        music.drive = realm ? realm.drive : null
+        // A lean lies on top of either: more or less of the music in, and its pace up or down by as much as an eighth.
+        leaning = Math.abs(lean - leaning) < 0.01 ? lean : leaning + (lean - leaning) * (1 - Math.exp(-dt / 2))
+        const own = realm?.pace || resolve(realm ? realm.key : place).bpm, beats = leaning ? Math.round(Math.min(PACE[1], Math.max(PACE[0], own * (1 + 0.125 * leaning)))) : realm ? realm.pace : 0
+        if (realm) { place = realm.key; music.want(realm.key, realm.now, beats); realm.now = false }
+        else music.want(place, place === 'danger', beats)
+        const drive = realm ? realm.drive : null
+        music.drive = leaning ? Math.min(1, Math.max(0, (drive ?? 0.5) + 0.5 * leaning)) : drive
         music.steady = !!realm
         music.tick()
       }
