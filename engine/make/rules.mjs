@@ -327,8 +327,9 @@ export async function write({ wish, world, where, change, unless, by = 'maker', 
       const out = { state: 'refused', ms: 0, trial: 0, tries: 0, cannot: [], steps: [] }
       for (let n = 1, failed = 0; n <= steps && failed < 2; n++) {
         // What whoever plays asked to have changed meanwhile is told with the step: it was written from the first words, and would otherwise write their change out again.
-        const asked = since().slice(-6), kept = asked.length ? `Since it was begun, whoever plays asked for these changes. They are in the rule as it stands and they stand: build on them, never undo them.\n${asked.map((a) => `- ${String(a).slice(0, 400)}`).join('\n')}` : ''
-        const step = await turn(() => writeOne({ wish, world, where, change: quick.id, by: GROWING, model, trial, cannot, beside: [beside, NEXT(n, steps), kept].filter(Boolean).join('\n\n'), seconds, complete: true }))
+        // (Read when the step's turn comes, not before it waits: a change that went in ahead of it in the queue was otherwise left out of the very next step, seen with a real model on November 14.)
+        const kept = () => { const asked = since().slice(-6); return asked.length ? `Since it was begun, whoever plays asked for these changes. They are in the rule as it stands and they stand: build on them, never undo them.\n${asked.map((a) => `- ${String(a).slice(0, 400)}`).join('\n')}` : '' }
+        const step = await turn(() => writeOne({ wish, world, where, change: quick.id, by: GROWING, model, trial, cannot, beside: [beside, NEXT(n, steps), kept()].filter(Boolean).join('\n\n'), seconds, complete: true }))
         out.ms += step.ms ?? 0; out.trial += step.trial ?? 0; out.tries += step.tries ?? 0
         grew({ n, state: step.state, why: step.why, changed: step.changed, ms: step.ms, trial: step.trial, tries: step.tries })
         if (step.state === 'complete') { out.state = 'there'; delete out.why; break }
