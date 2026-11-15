@@ -11,7 +11,7 @@ import type { Doing, People, Person } from './people.ts'
 import { runningAt, strideAt } from './people.ts'
 import { NAMED, type Move } from './moves.ts'
 
-interface Other { who: Someone; shown: [number, number, number]; yaw: number; stride: number; walking: number; down: number; flinch: number; heard: number; says: string; until: number; pace: number; /** The move it is in: which setting, the move, when it began (seconds on the world's clock), its aim; and the one before, while this takes over. */ doing: { n: number; move: Move; since: number; aim?: [number, number, number] } | null; before: { move: Move; since: number; aim?: [number, number, number] } | null }
+interface Other { /** How far the head is turned to whoever spoke last (radians to the right), brought round gently. */ glance: number; who: Someone; shown: [number, number, number]; yaw: number; stride: number; walking: number; down: number; flinch: number; heard: number; says: string; until: number; pace: number; /** The move it is in: which setting, the move, when it began (seconds on the world's clock), its aim; and the one before, while this takes over. */ doing: { n: number; move: Move; since: number; aim?: [number, number, number] } | null; before: { move: Move; since: number; aim?: [number, number, number] } | null }
 
 /** A number of its own for a name, so that a name always looks the same person. */
 export const seedOf = (name: string) => { let h = 2166136261; for (const ch of name) h = Math.imul(h ^ ch.charCodeAt(0), 16777619); return h | 0 }
@@ -19,20 +19,21 @@ export const seedOf = (name: string) => { let h = 2166136261; for (const ch of n
 /** No move at all: what a body comes to rest in. */
 const REST: Move = { keys: [{ t: 0 }], hold: true }
 
-export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number; frame?: readonly [number, number, number, number] }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void; where(by: string): readonly [number, number, number] | null } {
+export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [number, number, number]; yaw: number; frame?: readonly [number, number, number, number] }, taken: Set<number>): { readonly count: number; readonly name: string; say(text: string): void; standing(): readonly (readonly [number, number, number])[]; where(by: string): readonly [number, number, number] | null } {
   const asked = new URLSearchParams(location.search).get('name')
   let kept = ''
   try { kept = localStorage.getItem('village.name') ?? '' } catch { /* a page that may keep nothing */ }
   const name = (asked || kept || `guest ${far.me.slice(0, 3)}`).slice(0, 24)
   try { if (asked) localStorage.setItem('village.name', name) } catch { /* the same */ }
   const others = new Map<string, Other>()
+  let spoke: { by: string; at: readonly [number, number, number]; until: number } | null = null
   far.onhere = (who) => {
     // A resident a rule took is this body now: the town's rule leaves them out until the body goes.
     if (who.gone) { const was = others.get(who.by)?.who.was; if (was !== undefined) taken.delete(was); others.delete(who.by); return }
     if (typeof who.was === 'number') taken.add(who.was)
     const o = others.get(who.by)
     if (o) { o.who = who; o.heard = performance.now() }
-    else others.set(who.by, { who, shown: [...who.at], yaw: who.yaw, stride: who.stride ?? 0, walking: 0, down: 0, flinch: 0, heard: performance.now(), says: '', until: 0, pace: 0, doing: null, before: null })
+    else others.set(who.by, { glance: 0, who, shown: [...who.at], yaw: who.yaw, stride: who.stride ?? 0, walking: 0, down: 0, flinch: 0, heard: performance.now(), says: '', until: 0, pace: 0, doing: null, before: null })
   }
   /** A body's move as it was last told: a new setting takes over from the one before; told of none, it comes to rest from whatever it was in. */
   const moved_ = (o: Other) => {
@@ -55,6 +56,8 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
     if (Math.hypot(v.at[0] - e[0], v.at[1] - e[1], v.at[2] - e[2]) > 300 + 20) return
     const o = others.get(v.by)
     if (o) { o.says = v.text; o.until = performance.now() + Math.max(5000, v.text.length * 90) }
+    // Whoever is near looks at whoever spoke, for a few seconds.
+    spoke = { by: v.by, at: v.at, until: performance.now() + Math.max(3500, v.text.length * 70) }
     hud.heard(`${v.name}: ${v.text}`)
   }
   const say = (text: string) => { if (text.trim()) far.say(name, text.trim().slice(0, 200)) }
@@ -84,12 +87,20 @@ export function presence(far: Link, folk: People, hud: Hud, eye: () => { at: [nu
       o.down += ((o.who.down ? 1 : 0) - o.down) * Math.min(1, dt * (o.who.down ? 7 : 2.2))
       o.flinch += ((o.who.flinch ? 1 : 0) - o.flinch) * Math.min(1, dt * (o.who.flinch ? 14 : 3))
       moved_(o)
+      // The head turns to whoever spoke last within eight metres, as far as a head turns; the speaker's own stays.
+      let look = 0
+      if (spoke && now < spoke.until && spoke.by !== by && !o.who.down) {
+        const dx = spoke.at[0] - o.shown[0], dz = spoke.at[2] - o.shown[2]
+        if (Math.hypot(dx, dz) < 80) { look = Math.atan2(dx, -dz) - o.yaw; look -= Math.round(look / (Math.PI * 2)) * Math.PI * 2; look = Math.abs(look) > 2.2 ? 0 : Math.max(-1.1, Math.min(1.1, look)) }
+      }
+      o.glance += (look - o.glance) * Math.min(1, dt * 6)
       const clock = far.clock(), doing: Doing | undefined = o.doing ? { move: o.doing.move, t: clock - o.doing.since, aim: o.doing.aim } : undefined
       // Asked to think (#264), it shows that it has heard and is about to speak: dots that come and go, until its words do.
       const pause = o.who.thinking ? '.'.repeat(1 + (Math.floor(now / 350) % 3)) : ''
-      shown.push({ at: o.shown, yaw: o.yaw, frame: o.who.frame, seed: o.who.was ?? seedOf(o.who.name || o.who.by), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, time: seconds, name: o.who.name, says: o.who.thinking ? pause : now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
+      shown.push({ at: o.shown, yaw: o.yaw, frame: o.who.frame, seed: o.who.was ?? seedOf(o.who.name || o.who.by), stride: o.stride, walking: o.walking, down: o.down, flinch: o.flinch, glance: o.glance, struck: o.who.struck ? { t: clock - o.who.struck.t / 1000, way: o.who.struck.way } : undefined, time: seconds, name: o.who.name, says: o.who.thinking ? pause : now < o.until ? o.says : '', look: o.who.look, running: runningAt(o.pace), pace: o.pace, move: doing, was: o.before && doing ? { move: o.before.move, t: clock - o.before.since, aim: o.before.aim } : undefined })
     }
     return shown
   })
-  return { get count() { return others.size }, name, say, /** Where someone is shown now (their feet), by the name the world knows them by: for what is heard on them (#247). */ where: (by) => others.get(by)?.shown ?? null }
+  const stood: [number, number, number][] = []
+  return { get count() { return others.size }, name, say, /** Where everyone else stands now, as they are shown: the town's residents go round them. */ standing: () => { stood.length = 0; for (const o of others.values()) stood.push(o.shown); return stood }, /** Where someone is shown now (their feet), by the name the world knows them by: for what is heard on them (#247). */ where: (by) => others.get(by)?.shown ?? null }
 }

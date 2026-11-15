@@ -29,6 +29,8 @@ export interface Person {
   walking?: number
   /** How much of that walk is a run, 0 to 1 (`runningAt` of its pace): a runner's stride is longer (`strideAt`). */
   running?: number
+  /** How fast it is going, cells a second: the feet stay where they are put at that pace. Left out, it is taken from `running`, which cannot tell a fast run from a faster one. */
+  pace?: number
   /** What it is doing with its limbs (moves.ts): the move, how many seconds into it, and where it is aimed (the world's cells), if it is aimed. Laid over the walk or the standing. */
   move?: Doing
   /** The move it was in before this one, still running: this one takes over from it without a jump. */
@@ -41,6 +43,8 @@ export interface Person {
   flinch?: number
   /** 0 standing to 1 lying on the ground. */
   down?: number
+  /** Something struck them: how many seconds ago, and the way it pushed them (the world's axes). They reel that way and come upright again. */
+  struck?: { t: number; way: readonly [number, number, number] }
   /** What they hold up before them and look at (a phone), 0 to 1. */
   reading?: number
   /** Seconds, for what a body does while it stands: it shifts and breathes. */
@@ -348,7 +352,7 @@ const roll = (f: Frame, by: number) => {
   for (let a = 0; a < 3; a++) { const x = f[a], y = f[3 + a]; f[a] = x * c - y * s; f[3 + a] = y * c + x * s }
 }
 
-const T = new Float64Array(12), AX = new Float64Array(12)
+const T = new Float64Array(12), AX = new Float64Array(12), TOES = [0, 0]
 const ROOT = new Float64Array(12), HIP = new Float64Array(12), LEG = new Float64Array(12), SHIN = new Float64Array(12), FOOT = new Float64Array(12)
 const CHEST = new Float64Array(12), HEAD = new Float64Array(12), ARM = new Float64Array(12), FORE = new Float64Array(12), HELD = new Float64Array(12)
 /** How long a pair of steps is, in cells: the feet then stay where they are put. */
@@ -363,6 +367,8 @@ const POSE = new Float64Array(CHANNELS.length), POSE_WAS = new Float64Array(CHAN
 /** How long one move takes to give way to the next (seconds): no joint jumps. */
 const GIVE = 0.16
 const smooth = (v: number) => { const c = Math.max(0, Math.min(1, v)); return c * c * (3 - 2 * c) }
+/** What `smooth` was given, from what it gave (0 to 1). */
+const unsmooth = (v: number) => 0.5 - Math.sin(Math.asin(1 - 2 * Math.max(0, Math.min(1, v))) / 3)
 /** How long a pair of steps is at a pace (cells a second): a walker's 14.4 cells, a runner's up to seven metres. Whoever moves a figure gives distance over this as `stride`. */
 export const strideAt = (pace: number) => STRIDE + Math.max(0, Math.min(56, (pace - 16) * 0.5))
 /** How much of a run a pace is, 0 a walk to 1 a run. */
@@ -431,21 +437,62 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   // ── The pose: what each joint would be doing anyway, then whatever move is laid over it. ──
   const P = POSE
   P.fill(0)
-  // Going down and getting up, the body folds at knee and hip: it is not a board tipped over on its heels.
-  const fold = 4 * down * (1 - down)
-  P[J.crouch] = flinch * 0.55 + fold * 0.6
-  P[J.lie] = down
-  // A walk, and a run: a runner's thighs swing twice as far, the knees come up, the body leans into it and leaves the ground between steps.
+  // Going down and getting up is by way of sitting: from lying the chest comes up first, then the feet come under
+  // and the body stands. (Tipped over stiff on its heels it was a board.)
+  const sat = smooth((1 - down) / 0.5) * (1 - smooth((0.5 - down) / 0.5)), fold = sat
+  P[J.crouch] = flinch * 0.55 + sat * 0.75
+  P[J.lie] = smooth((down - 0.3) / 0.7)
+  // A walk, and a run. Each foot is put down ahead and stays where it is put while the body goes over it, then is
+  // lifted and brought forward; the leg's two angles are whatever reaches it. A walker has both feet down between
+  // steps, a runner neither, and the faster the run the longer it is in the air.
+  const pace = p.pace ?? (p.running ? 18 + 16 * unsmooth(p.running) : 16), pair = strideAt(pace)
+  const thigh = THIGH * tall, calf = CALF * tall, most = thigh + calf
+  const planted = Math.min(0.62 - 0.27 * running, 1.15 * most / pair), travel = planted * pair
+  // How high the hips ride: so that the leg is all but straight as the foot comes down, a little higher as the body
+  // passes over it.
+  const turns = (p.stride ?? 0) - 0.25, stood = thigh + calf * Math.cos(0.06)
+  // Which leg someone standing has their weight off (-1 to 1): it changes every ten seconds or so, each at their own time.
+  const shift = Math.max(-1, Math.min(1, 2.5 * Math.sin(time * 0.31 + s * 2.3) + 0.8 * Math.sin(time * 0.13 + s)))
+  // The foot comes down a little ahead of the hips and leaves the ground further behind them: the hips need drop
+  // only so far that the leg reaches the foot in front, and behind, the heel lifts for what the leg lacks.
+  const front = travel * 0.38, behind = travel - front
+  const lowest = Math.sqrt(Math.max(1, (most * 0.992) ** 2 - front * front))
+  const heel = Math.max(0, Math.min(stood, lowest) - Math.sqrt(Math.max(0, (most * 0.992) ** 2 - behind * behind))) + 0.15
   for (const side of [-1, 1]) {
-    const ph = stride + (side < 0 ? 0 : Math.PI), arm = stride + (side < 0 ? Math.PI : 0)
-    P[side < 0 ? J.swingL : J.swingR] = walking * ((0.4 + 0.42 * running) * Math.sin(ph) + 0.04 + 0.12 * running)
-    P[side < 0 ? J.kneeL : J.kneeR] = 0.06 + walking * (0.95 + 0.85 * running) * Math.max(0, Math.cos(ph + 0.3)) ** 2 + running * 0.22
+    let at = turns + (side < 0 ? 0 : 0.5)
+    at -= Math.floor(at)
+    let ahead: number, up: number, toe: number
+    if (at < planted) {
+      const on = at / planted, off = smooth((on - 0.6) / 0.4)
+      ahead = front - travel * on; up = heel * off
+      // It lands on the heel with the toes up, lies flat, and leaves from the toes.
+      toe = Math.asin(Math.min(0.9, up / 2.2)) - 0.22 * (1 - smooth(on / 0.18))
+    } else {
+      const back = (at - planted) / (1 - planted)
+      ahead = -behind + travel * (1 - Math.cos(back * Math.PI)) / 2
+      up = heel * (1 - back) ** 2 + (0.7 + 2.6 * running) * Math.sin(back * Math.PI) ** 1.5 * (1 + 0.6 * running * (1 - back))
+      toe = Math.asin(Math.min(0.9, heel / 2.2)) * (1 - smooth(back / 0.5)) + (0.5 * running) * Math.sin(back * Math.PI) - 0.22 * smooth((back - 0.6) / 0.4)
+    }
+    TOES[side < 0 ? 0 : 1] = toe * walking
+    // The hips are lowest as a foot comes down and all but as high as standing as the body passes over it: twice a
+    // pair of steps, the same for both legs. (Kept low all the way, the walk was on bent knees.)
+    const high = lowest + Math.max(0, stood * 0.985 - lowest) * (1 - 0.6 * running) * Math.sin(at * Math.PI * 2) ** 2
+    const down = stood + walking * (Math.min(high, stood) - up - stood), reach = Math.min(Math.hypot(ahead * walking, down), most - 0.01), fore = ahead * walking
+    const bend = Math.PI - Math.acos(Math.max(-1, Math.min(1, (thigh * thigh + calf * calf - reach * reach) / (2 * thigh * calf))))
+    P[side < 0 ? J.swingL : J.swingR] = Math.atan2(fore, down) + Math.acos(Math.max(-1, Math.min(1, (thigh * thigh + reach * reach - calf * calf) / (2 * thigh * reach))))
+    // Standing, the weight is on one leg and then the other: the knee of the leg it is off is eased, that foot a little ahead.
+    const eased = (1 - walking) * Math.max(0, side * shift)
+    P[side < 0 ? J.swingL : J.swingR] += eased * 0.16
+    P[side < 0 ? J.kneeL : J.kneeR] = bend + eased * 0.3
+    const arm = stride + (side < 0 ? Math.PI : 0)
     P[side < 0 ? J.liftL : J.liftR] = walking * (0.4 + 0.55 * running) * Math.sin(arm) + flinch * 2.5
-    P[side < 0 ? J.bendL : J.bendR] = 0.12 + walking * (0.22 + 0.2 * Math.max(0, Math.sin(arm))) + running * 1.3 + flinch * 1.9
+    P[side < 0 ? J.bendL : J.bendR] = 0.12 + (1 - walking) * (0.14 + 0.1 * chance(s, side < 0 ? 46 : 47)) + walking * (0.22 + 0.2 * Math.max(0, Math.sin(arm))) + running * 1.3 + flinch * 1.9
     P[side < 0 ? J.outL : J.outR] = flinch * 0.25
   }
-  P[J.rise] = running * 1.5 * Math.abs(Math.sin(stride + 0.6))
-  P[J.lean] = walking * 0.06 + running * 0.24 + flinch * 0.55 + fold * 0.7
+  // Between a runner's steps both feet are off the ground.
+  const flight = planted < 0.5 ? Math.max(0, Math.sin(((((turns % 0.5) + 0.5) % 0.5) - planted) / (0.5 - planted) * Math.PI)) : 0
+  P[J.rise] = walking * flight * Math.min(2.2, 0.5 + pair * 0.03)
+  P[J.lean] = walking * 0.06 + running * 0.24 + flinch * 0.55 + fold * 1.25
   P[J.twist] = walking * Math.sin(stride) * -0.1 * (1 + running * 1.4)
   P[J.turn] = (p.glance ?? 0) + (1 - walking) * Math.sin(time * 0.23 + s * 1.7) * 0.25 * (1 - reading)
   P[J.nod] = reading * 0.45 + flinch * 0.4
@@ -454,6 +501,23 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   // A hand that grips a thing picked up (held.ts) carries it up: the elbow bent, the forearm level, so the thing stands out of the fist where it is seen.
   else if (extras.some((b) => b.on === 'gripR')) { P[J.liftR] = 0.12 + P[J.liftR] * 0.25; P[J.bendR] = 1.45 + running * 0.2 + flinch * 0.4 }
   else if (reading > 0) { P[J.liftR] = P[J.liftR] * (1 - reading) + reading * 0.35; P[J.bendR] = P[J.bendR] * (1 - reading) + reading * 1.85 }
+  // Struck, the body goes the way the blow pushed it: the chest over that way at once, the head a moment behind it,
+  // the arms flung out, a knee giving; and upright again inside a second.
+  if (p.struck && p.struck.t >= 0 && p.struck.t < 1 && down < 0.5) {
+    const t = p.struck.t, hard = smooth(t / 0.07) * (1 - smooth((t - 0.22) / 0.7)), late = smooth((t - 0.05) / 0.1) * (1 - smooth((t - 0.3) / 0.6))
+    // The way, as the body has it: ahead of it, and to its right.
+    const ahead = p.struck.way[0] * Math.sin(p.yaw) - p.struck.way[2] * Math.cos(p.yaw), right = p.struck.way[0] * Math.cos(p.yaw) + p.struck.way[2] * Math.sin(p.yaw)
+    P[J.lean] += ahead * 0.55 * hard; P[J.tilt] += right * 0.42 * hard; P[J.twist] += right * 0.25 * hard
+    P[J.nod] += -ahead * 0.35 * (hard - late) + ahead * 0.3 * late
+    P[J.crouch] += 0.2 * hard
+    // The leg on the side it goes to takes a step that way to hold it up.
+    P[ahead < 0 ? J.swingR : J.swingL] += -ahead * 0.35 * hard
+    for (const side of [-1, 1]) {
+      P[side < 0 ? J.liftL : J.liftR] += (0.3 - ahead * 0.3) * hard
+      P[side < 0 ? J.outL : J.outR] += (0.45 + side * right * 0.35) * hard
+      P[side < 0 ? J.bendL : J.bendR] += 0.6 * hard
+    }
+  }
   let aim = p.move?.aim, going = false
   if (p.move) {
     const was = p.was, give = was ? smooth(p.move.t / GIVE) : 1
@@ -501,7 +565,7 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
     ROOT[9] += ROOT[3] * rise; ROOT[10] += ROOT[4] * rise; ROOT[11] += ROOT[5] * rise
     pitch(ROOT, lie * Math.PI / 2)
   }
-  const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * Math.sin(time * 0.6 + s) * 0.012
+  const sway = walking * Math.sin(stride) * 0.035 + (1 - walking) * (Math.sin(time * 0.6 + s) * 0.008 - shift * 0.035)
   child(HIP, ROOT, 0, hipHigh, 0)
   roll(HIP, sway)
   // How much of it is drawn: all of it near, less across a street, the least from far off.
@@ -515,16 +579,16 @@ export function figure(p: Person, out: Float32Array, at: number, anchor: V3, far
   const under = pick(UNDER, s, 44)
   for (const side of [-1, 1]) {
     const leg = side < 0 ? left : right
-    child(LEG, HIP, side * 0.95 * broad * hips, 0, 0)
+    child(LEG, HIP, side * 1.02 * broad * hips, 0, 0)
     pitch(LEG, leg.swing)
     // A thigh ends round at the hip and at the knee, and a shin begins round there: bent, the knee is whole.
-    shape(LEG, 0, -THIGH * tall / 2 + 0.05, 0, 1.75, THIGH * tall + 1.1, 1.9, legs, CLOTH, 2.6, 1, 0.82, 0.2, 0.2)
+    shape(LEG, 0, -THIGH * tall / 2 + 0.05, 0, 1.65, THIGH * tall + 1.1, 1.9, legs, CLOTH, 2.6, 1, 0.82, 0.2, 0.2)
     child(SHIN, LEG, 0, -THIGH * tall, 0)
     pitch(SHIN, -leg.knee)
     shape(SHIN, 0, -CALF * tall / 2 + 0.3, 0.08, 1.45, CALF * tall + 0.6, 1.55, legs, CLOTH, 2.6, 1, 0.8, 0.3, 0)
     child(FOOT, SHIN, 0, -CALF * tall, 0)
-    // The foot lies level on the ground, and points down a little as it leaves it.
-    pitch(FOOT, leg.knee - leg.swing - walking * 0.35 * Math.max(0, Math.cos(stride + (side < 0 ? 0 : Math.PI) + 1.5)))
+    // The foot lies level on the ground but as the walk has it: toes up as it lands, down as it leaves.
+    pitch(FOOT, leg.knee - leg.swing - TOES[side < 0 ? 0 : 1])
     // A shoe is long the way the foot points: its shape is told along that (right, ahead, up).
     AX.set(FOOT)
     for (let a = 0; a < 3; a++) { AX[3 + a] = -FOOT[6 + a]; AX[6 + a] = FOOT[3 + a] }
@@ -869,19 +933,38 @@ export const REACH = 1400
  * `shocks` is what has gone off lately, for whoever makes a blast to add to; `taken` is who a rule of the world
  * has taken off their round (presence.ts keeps it).
  */
-export function townsfolk(land: Land, hour: () => number, rain: () => number, clock: () => number, shocks: Shock[], taken?: ReadonlySet<number>): (view: View, seconds: number) => readonly Person[] {
+export function townsfolk(land: Land, hour: () => number, rain: () => number, clock: () => number, shocks: Shock[], taken?: ReadonlySet<number>, bodies?: () => readonly (readonly [number, number, number])[]): (view: View, seconds: number) => readonly Person[] {
   const found: Resident[] = [], shown: Person[] = []
+  // How far aside each is shown, going round somebody: brought in at no more than a brisk step, so that nobody is
+  // seen to jump when the rule's answer changes in a moment (somebody crosses in front of them).
+  const aside = new Map<number, { x: number; z: number; yaw: number; at: number }>()
+  let last = 0
   return (view, seconds) => {
-    const now = clock()
+    const now = clock(), dt = Math.max(0, Math.min(0.1, seconds - last))
+    last = seconds
     // A bang is forgotten once everyone it moved is back where they would have been.
     while (shocks.length && now - shocks[0].t > 60) shocks.shift()
-    const n = residents(land, [view.eye[0], view.eye[2]], REACH, now, hour(), found, shocks, taken), wet = rain() > 0.3
+    const n = residents(land, [view.eye[0], view.eye[2]], REACH, now, hour(), found, shocks, taken, bodies?.()), wet = rain() > 0.3
     shown.length = n
+    const near = 1 - Math.exp(-dt * 9), most = 11 * dt
     for (let i = 0; i < n; i++) {
       const r = found[i], p = (shown[i] ??= { at: r.at, yaw: 0, seed: 0 }) as { -readonly [K in keyof Person]: Person[K] }
-      p.at = r.at; p.yaw = r.yaw; p.seed = r.seed; p.stride = r.stride; p.walking = r.walking; p.reading = r.reading
-      p.umbrella = r.carries && wet; p.time = seconds; p.flinch = r.flinch; p.down = r.down
+      let yaw = r.yaw
+      const was = aside.get(r.seed)
+      if (was || r.aside[0] || r.aside[1] || r.aside[2]) {
+        const a = was ?? { x: 0, z: 0, yaw: 0, at: 0 }
+        if (!was) aside.set(r.seed, a)
+        // After a gap (out of reach and back) they are where the rule has them.
+        if (seconds - a.at > 1) { a.x = r.aside[0]; a.z = r.aside[1]; a.yaw = r.aside[2] }
+        const dx = (r.aside[0] - a.x) * near, dz = (r.aside[1] - a.z) * near, far = Math.hypot(dx, dz), slow = far > most ? most / far : 1
+        a.x += dx * slow; a.z += dz * slow; a.yaw += (r.aside[2] - a.yaw) * Math.min(1, dt * 5); a.at = seconds
+        r.at[0] += a.x - r.aside[0]; r.at[2] += a.z - r.aside[1]; yaw += a.yaw - r.aside[2]
+        if (!r.aside[0] && !r.aside[1] && Math.abs(a.x) + Math.abs(a.z) + Math.abs(a.yaw) < 0.01) aside.delete(r.seed)
+      }
+      p.at = r.at; p.yaw = yaw; p.seed = r.seed; p.stride = r.stride; p.walking = r.walking; p.reading = r.reading
+      p.umbrella = r.carries && wet; p.time = seconds; p.flinch = r.flinch; p.down = r.down; p.glance = r.glance
     }
+    if (aside.size > 400) for (const [seed, a] of aside) if (seconds - a.at > 5) aside.delete(seed)
     return shown
   }
 }

@@ -137,7 +137,7 @@ export function person(o: {
     // In the head nobody sees their own figure; on a wall the eye is in the head (below). The figure itself stands by its own up.
     if (!on || !at || view === 'head' || tilted() || backNow < NEAR) return []
     const now = performance.now() / 1000, d = turned(frame, [0, -(com[1] + LEG), 0])
-    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), down: lying, time: seconds, look: carry ? { ...(limbs.look ?? {}), carry } : limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
+    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), pace: speed, down: lying, time: seconds, look: carry ? { ...(limbs.look ?? {}), carry } : limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
     return [shown]
   })
   const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed, frame: tilted() ? frame : undefined } }

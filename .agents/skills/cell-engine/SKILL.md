@@ -988,6 +988,28 @@ never cells of the town (the town's sum is untouched) and the rays never see one
   the same six people in eleven poses from five eyes: run on two commits, its pictures are the pairs a change is
   judged by. Cost on the GPU, paired and turn about at 1280 x 720: a street of 150 the same as the boxes were (about
   1 ms, inside the noise); forty people within four metres filling the picture 2.3 ms against 0.4.
+- **A foot is put down and stays there** (#371). The walk was sines on the thigh and knee, and a foot that was down
+  went 3 to 14 cells a second over the ground (measured by following the shoe). Now each foot has a place: ahead of
+  the hips as it lands, fixed while the body goes over it, lifted and brought forward; the leg's two angles are
+  whatever reaches it (two bones, the law of cosines) and the hips ride at one height for both legs. What made it
+  read: the foot lands 0.38 of its travel ahead and leaves 0.62 behind, where the heel lifts for what the leg lacks;
+  the hips rise to all but standing height over the planted foot (kept low, it was a walk on bent knees); a runner's
+  feet are down a smaller share and the body is in the air between. The figure must know the pace for this
+  (`Person.pace`; left out it is guessed from `running`, which cannot tell a fast run from a faster one).
+  `test/people.mjs` follows the shoes: 0.9 cm of slide at worst while a foot is flat (a fast run; the check allows
+  3), walking, jogging and running. The page's own body gives its pace too (`person.ts`).
+- **Residents go round whoever stands in the world** (#371): `residents(..., bodies)` is given everyone's feet
+  (pages, seats, actors; the page's own body) and each resident who would come within 7 cells steps to the side their
+  lane has room on, beginning 3.6 m before and ending 2.2 m after, kept on the pavement; standers give way by the
+  same rule; all glance at somebody within three metres. It is still a rule of place and time, so the world's
+  process, given the same bodies, has them where pages draw them. The side changes in a moment when somebody
+  crosses in front of a resident, and a corner turns what is "across": the rule says how much of where they are is
+  the going round (`aside`) and the page that draws them brings it in at no more than 1.1 m a second. Measured over
+  25 residents who would have walked through a person: none nearer than 6 cells.
+- **Struck, down, standing** (#371). `here` says `struck: {t, way}` for 1.5 s (#366's): the figure goes over that
+  way at once, the head a moment behind, arms out, a step to hold it up, and is upright inside a second. Going down
+  and getting up is by way of a squat and a sit, not a board tipped on its heels. Someone standing has their weight
+  on one leg and then the other, the other knee eased; heads turn to whoever spoke within eight metres.
 - **Lit as the world is**: `shade` and `tone` from `march.ts`, the sun through `sunlit`, and the street lamps from
   the town's nine places a block (a third copy of that list, after `city.rs` and `march.ts` `lit`; still no check
   that they agree). Without the lamps and a little fill a wet night made them cut-outs. Skin is given darker than it

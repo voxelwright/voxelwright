@@ -35,7 +35,12 @@ const POSES = {
   wave: { move: { move: NAMED.wave, t: 0.28 } },
   strike: { move: { move: NAMED.strike, t: 0.23 } },
   hit: { move: { move: NAMED.hit, t: 0.1 } },
+  // Struck from in front (they face south, the blow goes north) and from their left.
+  reel: { struck: { t: 0.16, way: [0, 0, -1] } },
+  reel2: { struck: { t: 0.16, way: [-1, 0, 0] } },
   down: { down: 1 },
+  // On the way down, and up again.
+  down1: { down: 0.25 }, down2: { down: 0.5 }, down3: { down: 0.75 },
   read: { reading: 1, time: 3 },
   rain: { umbrella: true, walking: 1, stride: 0.2 },
 }
@@ -71,7 +76,7 @@ try {
     for (const [where, eye] of Object.entries(EYES)) {
       if (eyes.length && !eyes.includes(where)) continue
       if ((where === 'face' || where === 'dressed') && name !== 'stand') continue
-      if (where === 'side' && !['stand', 'walk', 'run', 'sit', 'hit'].includes(name)) continue
+      if (where === 'side' && !['stand', 'walk', 'run', 'sit', 'hit', 'reel', 'down1', 'down2', 'down3'].includes(name)) continue
       if (where === 'far' && !['stand', 'walk', 'run'].includes(name)) continue
       await place(eye)
       await still(page, { sun: true, limit: 40_000 }).catch(() => console.log(`  ${name} ${where}: never still`))

@@ -223,12 +223,14 @@ async function main() {
   // Unasked, the sun stands where it always has. `?hour=18.4` or the [ and ] keys set the time of day: the sun goes
   // from the east at six over the south to the sea in the west at eighteen, and the moon lights the night.
   let hour: number | null = null
+  // Who stands in the world for the residents to go round (#371): said once the person's own body and the others are there.
+  let inTheWay: () => readonly (readonly [number, number, number])[] = () => []
   // The town's residents (#218): by rule from place and from the clock every page of a world shares. `?people=0` leaves them out.
   const folkClock = { now: () => Date.now() / 1000 }
   const shocks: Shock[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
-  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff))
+  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
@@ -559,6 +561,9 @@ async function main() {
   // is told every edit, so that the body walks on the world as it is.
   const shadow = far ? new Worker('/page/mover.ts', { type: 'module' }) : null
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
+  // The residents go round this person's own body when it is on its feet, and round everyone else who is here.
+  const waysFull: (readonly [number, number, number])[] = []
+  inTheWay = () => { waysFull.length = 0; const f = me.feet; if (f) waysFull.push(f.at); if (others) for (const at of others.standing()) waysFull.push(at); return waysFull }
   if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
   // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
   // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.

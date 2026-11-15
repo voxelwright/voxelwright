@@ -30,6 +30,10 @@ export interface Resident {
   down: number
   /** Which block they live round and which of its people they are: enough to ask the rule about this one alone (`whereabouts`). */
   home: [number, number, number]
+  /** How far of where they are is their going round somebody (x, z), and how far of the way they face (radians): already in `at` and `yaw`. Whoever draws them may bring it in gently: it can change in a moment when somebody crosses in front of them. */
+  aside: [number, number, number]
+  /** Which way the head is turned from the body (radians to the right): to somebody who stands or passes close. */
+  glance: number
 }
 
 /** Something that broke with a bang: where, how big (a blast's radius in cells), and when on the shared clock. */
@@ -82,7 +86,7 @@ const ease = (v: number) => { const c = Math.max(0, Math.min(1, v)); return c * 
 const SHAKEN = 45
 
 /** One resident's walk at a moment, before anything startles them: where, heading, and what they are doing. */
-const W = { x: 0, z: 0, hx: 0, hz: 1, s: 0, still: false, moving: 0, aside: 0, ix: 0, iz: 0 }
+const W = { x: 0, z: 0, hx: 0, hz: 1, px: 0, pz: 1, s: 0, still: false, moving: 0, aside: 0, ix: 0, iz: 0, lot: 6 }
 function walk(x0: number, z0: number, seed: number, t: number) {
   // Keep right: the lane nearer the houses goes round one way, the other the other.
   const inner = chance(seed, 21) < 0.5, lane = inner ? 0 : 1, d = LANES[lane]
@@ -112,7 +116,11 @@ function walk(x0: number, z0: number, seed: number, t: number) {
   along(x0, z0, lane, (at - 5 + round) % round, B)
   along(x0, z0, lane, (at + 5) % round, C)
   W.hx = (C.x - B.x) * way; W.hz = (C.z - B.z) * way
-  W.x = A.x; W.z = A.z; W.s = s; W.still = still; W.moving = moving; W.aside = aside; W.ix = A.ix; W.iz = A.iz
+  // And the way their path runs, taken over more of it: what they go round is told against this, which turns more slowly at a corner.
+  along(x0, z0, lane, (at - 16 + round) % round, B)
+  along(x0, z0, lane, (at + 16) % round, C)
+  W.px = (C.x - B.x) * way; W.pz = (C.z - B.z) * way
+  W.x = A.x; W.z = A.z; W.s = s; W.still = still; W.moving = moving; W.aside = aside; W.ix = A.ix; W.iz = A.iz; W.lot = d[0]
   if (still) {
     // Standing: out of the way (the lane by the houses has no room to step into, the other has two cells towards
     // the kerb), turned to the street.
@@ -120,6 +128,36 @@ function walk(x0: number, z0: number, seed: number, t: number) {
     W.x += A.ix * step * k; W.z += A.iz * step * k
     W.hx = W.hx * (1 - k) - A.ix * 10 * k; W.hz = W.hz * (1 - k) - A.iz * 10 * k
   }
+}
+
+/** How near a resident lets anybody come (cells, middle to middle), and how far ahead they begin to go round. */
+const ROOM = 7, AHEAD = 36, BEHIND = 22
+/**
+ * How far a resident who would be at a place, heading a way, steps towards the lots (or, under 0, towards the kerb)
+ * to go round whoever stands in the world there: a person at a page, a seat, a rule's actor. Each goes to the side they
+ * are already on, by as much as leaves room, beginning well before they meet and ending once past; nobody is pushed
+ * off the pavement (`lot` is how far their lane is from the lots: they keep 3 cells off the houses and 14 from them
+ * at most). It is a number of the place alone, so two pages that know the same bodies see the same step. It changes as
+ * smoothly as the two of them move, but for the moment somebody crosses the line where the side changes: whoever draws
+ * them brings that in gently (`aside`).
+ */
+function round(x: number, z: number, high: number, hx: number, hz: number, ix: number, iz: number, lot: number, bodies: readonly (readonly [number, number, number])[]): number {
+  let step = 0
+  // With somebody dead ahead, which side: the one their lane has more room on (the kerb's from the lane by the houses,
+  // the houses' from the other). The line where the side changes is off to the other side, so that someone met head on
+  // is always passed the same way.
+  const lean = lot < 8 ? -2.5 : 2.5
+  for (const b of bodies) {
+    const dx = b[0] - x, dz = b[2] - z
+    // Someone well over their heads (flying, or on a roof) is not in the way.
+    if (Math.abs(dx) > AHEAD || Math.abs(dz) > AHEAD || Math.abs(b[1] - high) > 25) continue
+    const along = dx * hx + dz * hz, across = dx * ix + dz * iz
+    const near = ease((along + BEHIND) / (BEHIND - 4)) * (1 - ease((along - 8) / (AHEAD - 8)))
+    if (near <= 0 || Math.abs(across) >= ROOM) continue
+    // The body is `across` towards the lots from them: they go the other way, by what is short of room.
+    step -= (across > lean ? 1 : -1) * (ROOM - Math.abs(across)) * near
+  }
+  return Math.max(lot - 14, Math.min(lot - 3, step))
 }
 
 /** What the last bang that reached someone at a place does to them now: they stop where they were when it went off
@@ -183,9 +221,10 @@ function standing(land: Land, bx: number, bz: number): [number, number, number][
 /**
  * The residents out within `reach` cells of a place at second `t`, at an hour of the day, written over `into`
  * (which is kept and grown, not made again). `shocks` is what has gone off lately. `taken` is who is off their
- * round because a rule of the world has taken them as its own (they are somebody's actor meanwhile): left out. Returns how many.
+ * round because a rule of the world has taken them as its own (they are somebody's actor meanwhile): left out. `bodies`
+ * is where everyone else in the world stands (their feet): residents go round them. Returns how many.
  */
-export function residents(land: Land, eye: readonly [number, number], reach: number, t: number, hour: number, into: Resident[], shocks: readonly Shock[] = [], taken?: { has(seed: number): boolean }): number {
+export function residents(land: Land, eye: readonly [number, number], reach: number, t: number, hour: number, into: Resident[], shocks: readonly Shock[] = [], taken?: { has(seed: number): boolean }, bodies: readonly (readonly [number, number, number])[] = []): number {
   let n = 0
   const share = out(hour)
   tries = 1
@@ -202,15 +241,42 @@ export function residents(land: Land, eye: readonly [number, number], reach: num
         const when = S.when, down = S.down, flinch = S.flinch, towards = S.towards, turned = S.turned, frozen = S.frozen
         walk(x0, z0, seed, when)
         if (Math.abs(W.x - eye[0]) > reach || Math.abs(W.z - eye[1]) > reach) continue
-        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0] })
+        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0], aside: [0, 0, 0], glance: 0 })
         r.seed = seed; r.home[0] = bx; r.home[1] = bz; r.home[2] = i
-        const x = W.x, z = W.z, long = Math.hypot(W.hx, W.hz) || 1, hx = W.hx / long, hz = W.hz / long
+        let x = W.x, z = W.z, long = Math.hypot(W.hx, W.hz) || 1, hx = W.hx / long, hz = W.hz / long
+        const plain = Math.atan2(hx, -hz)
+        r.aside[0] = 0; r.aside[1] = 0; r.aside[2] = 0
+        if (bodies.length && !down) {
+          // They go round whoever is in the way, walking or standing: the same asked a little behind and a little ahead
+          // along their way says which way they face as they do (the body turns less than the path does: a step to
+          // the side is not a turn).
+          const far = Math.hypot(W.px, W.pz) || 1, px = W.px / far, pz = W.pz / far
+          // Which way the lots are, square to the way they are going: at a corner that turns as they do.
+          const hand = -pz * W.ix + px * W.iz > 0 ? 1 : -1, ix = -pz * hand, iz = px * hand, lot = W.lot, high = land.feet_at(Math.round(x), Math.round(z)), here = round(x, z, high, px, pz, ix, iz, lot, bodies)
+          if (here !== 0) {
+            const behind = round(x - px * 8, z - pz * 8, high, px, pz, ix, iz, lot, bodies), ahead = round(x + px * 8, z + pz * 8, high, px, pz, ix, iz, lot, bodies), turned = W.still ? 0 : (ahead - behind) / 24
+            x += ix * here; z += iz * here; r.aside[0] = ix * here; r.aside[1] = iz * here
+            const fx = hx + ix * turned, fz = hz + iz * turned, f = Math.hypot(fx, fz) || 1
+            hx = fx / f; hz = fz / f
+          }
+        }
         r.at[0] = x; r.at[2] = z
         // A kerb is stepped over two steps, not jumped.
         r.at[1] = (land.feet_at(Math.round(x + hx * 2), Math.round(z + hz * 2)) + land.feet_at(Math.round(x - hx * 2), Math.round(z - hz * 2)) + land.feet_at(Math.round(x), Math.round(z))) / 3
         let yaw = Math.atan2(hx, -hz)
+        r.aside[2] = yaw - plain
         if (turned) { let by = towards - yaw; by -= Math.round(by / (Math.PI * 2)) * Math.PI * 2; yaw += by * turned }
         r.yaw = yaw
+        // They look at whoever is within three metres and not behind them: more, the nearer.
+        r.glance = 0
+        for (const b of bodies) {
+          const dx = b[0] - x, dz = b[2] - z, far = Math.hypot(dx, dz)
+          if (far > 32 || far < 1 || Math.abs(b[1] - r.at[1]) > 25) continue
+          let to = Math.atan2(dx, -dz) - yaw
+          to -= Math.round(to / (Math.PI * 2)) * Math.PI * 2
+          const keen = (1 - ease((far - 12) / 20)) * (1 - ease((Math.abs(to) - 1.3) / 0.9))
+          if (Math.abs(to * keen) > Math.abs(r.glance)) r.glance = Math.max(-1, Math.min(1, to)) * keen
+        }
         r.stride = W.s / STRIDE
         r.walking = W.still || frozen ? 0 : ease(W.moving / 0.7)
         // Some take out a phone once they have stood a moment.
@@ -227,9 +293,9 @@ export function residents(land: Land, eye: readonly [number, number], reach: num
         if (chance(seed, 20) >= share || taken?.has(seed) || Math.abs(x - eye[0]) > reach || Math.abs(z - eye[1]) > reach) continue
         if (shocks.length) startle(land, seed, t, shocks, () => { W.x = x; W.z = z })
         else { S.down = 0; S.flinch = 0; S.turned = 0 }
-        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0] })
+        const r = (into[n] ??= { seed: 0, at: [0, 0, 0], yaw: 0, stride: 0, walking: 0, reading: 0, carries: false, flinch: 0, down: 0, home: [0, 0, 0], aside: [0, 0, 0], glance: 0 })
         r.seed = seed; r.home[0] = bx; r.home[1] = bz; r.home[2] = 9000 + j
-        r.at[0] = x; r.at[1] = feet; r.at[2] = z
+        r.at[0] = x; r.at[1] = feet; r.at[2] = z; r.aside[0] = 0; r.aside[1] = 0; r.aside[2] = 0; r.glance = 0
         // Turned to whoever stands nearest, if they are near enough to be talking; else as they happen to stand.
         let yaw = chance(seed, 32) * Math.PI * 2, nearest = 60
         for (let k = 0; k < spots.length; k++) { const far = Math.hypot(spots[k][0] - x, spots[k][2] - z); if (k !== j && far < nearest) { nearest = far; yaw = Math.atan2(spots[k][0] - x, -(spots[k][2] - z)) } }

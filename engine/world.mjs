@@ -194,6 +194,8 @@ const AWAY_KEPT = 600
 /** Pages that have gone, by id: when, where they stood, and how a rule had them look. */
 const away = new Map()
 const folk = new Map()
+/** Where everybody stands: the town's residents go round them (residents.ts), here as on every page. */
+const standing = () => [...folk.values()].map((p) => p.at)
 const voices = []
 /** What has gone off lately: the town's residents are moved by it, by their rule (residents.ts). */
 const shocks = []
@@ -289,7 +291,7 @@ function seat(m) {
       if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.thinking ? 'thinking' : o.goal ? 'walking' : 'standing' })
     }
     // The town's residents, by the same rule the pages draw them from, at the realm's own hour (`hourNow`).
-    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken)
+    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken, standing())
     const town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
     const heard = voices.filter((v) => v.n > (m.since || 0) && v.by !== p.by && Math.hypot(v.at[0] - p.at[0], v.at[1] - p.at[1], v.at[2] - p.at[2]) <= EARSHOT).map((v) => ({ n: v.n, name: v.name, text: v.text, far: Math.round(Math.hypot(v.at[0] - p.at[0], v.at[2] - p.at[2])), seconds_ago: Math.round((now - v.t) / 1000) }))
     // What the eyes meet, level, the eight ways round.
@@ -322,7 +324,7 @@ function townNear(now) {
   let persons = 0
   for (const p of folk.values()) {
     if (p.rule || persons++ >= 8) continue
-    const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, hourNow(), found, shocks, taken)
+    const n = residents(core, [p.at[0], p.at[2]], TOLD_WITHIN, now / 1000, hourNow(), found, shocks, taken, standing())
     for (let i = 0; i < n; i++) {
       const r = found[i], far = Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2]), id = residentId(r.seed), old = by.get(id)
       if (far <= TOLD_WITHIN && (!old || far < old.far)) by.set(id, { id, seed: r.seed, home: [...r.home], at: [...r.at], yaw: r.yaw, stride: r.stride, walking: r.walking > 0.5, far })
@@ -343,7 +345,7 @@ function take(rule, short, id, now, wrong) {
   if (taken.has(r.seed)) { wrong(`resident "${r.id}" is somebody's actor already`); return null }
   if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
   // Where they are now, not a quarter of a second ago: nobody should see them jump.
-  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, hourNow(), fresh, shocks, taken), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
+  const fresh = [], n = residents(core, [r.at[0], r.at[2]], 60, now / 1000, hourNow(), fresh, shocks, taken, standing()), live = fresh.slice(0, n).find((f) => f.seed === r.seed) ?? r
   const p = { by: `${rule.id}/${short}`, short, rule: rule.id, name: '', seat: true, at: [...live.at], yaw: live.yaw, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0, was: r.seed, home: [...r.home], stride: live.stride }
   folk.set(p.by, p); taken.set(r.seed, p); town.at = 0
   return p

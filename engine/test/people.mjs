@@ -62,6 +62,61 @@ try {
   const calm = residents(core, [700, 4070], 1400, t0 + 44, 10.5, b)
   check(key(after(44), calm) === key(b, calm), 'and three quarters of a minute on everyone is where they would have been')
 
+  // Somebody stands where residents walk (#371): each who would have walked through them goes round, no nearer than
+  // half a metre middle to middle, and is back on their own way afterwards. Asked the same without anybody there,
+  // the rule answers as it always did.
+  {
+    const walkers = a.slice(0, count).filter((r) => r.walking === 1).slice(0, 30)
+    let through = 0, nearest = 1e9, back = 0, tried = 0
+    for (const w of walkers) {
+      const there = (() => { const l = []; const n = residents(core, [700, 4070], 1400, t0 + 12, 10.5, l); return l.slice(0, n).find((r) => r.seed === w.seed) })()
+      if (!there || there.walking !== 1) continue
+      tried++
+      const body = [there.at[0], there.at[1], there.at[2]]
+      let plain = 1e9, round = 1e9
+      for (let t = 6; t < 18; t += 0.1) {
+        const l = [], q = []
+        const n = residents(core, [700, 4070], 1400, t0 + t, 10.5, l, [], undefined, [body]), m = residents(core, [700, 4070], 1400, t0 + t, 10.5, q)
+        const r = l.slice(0, n).find((r) => r.seed === w.seed), o = q.slice(0, m).find((r) => r.seed === w.seed)
+        if (r && o) { round = Math.min(round, Math.hypot(r.at[0] - body[0], r.at[2] - body[2])); plain = Math.min(plain, Math.hypot(o.at[0] - body[0], o.at[2] - body[2])) }
+      }
+      const l = [], q = [], n = residents(core, [700, 4070], 1400, t0 + 24, 10.5, l, [], undefined, [body]), m = residents(core, [700, 4070], 1400, t0 + 24, 10.5, q)
+      const r = l.slice(0, n).find((r) => r.seed === w.seed), o = q.slice(0, m).find((r) => r.seed === w.seed)
+      // Back on their own way (or gone on out of reach), unless they have stopped beside the person and are still giving them room.
+      if ((!r && !o) || (r && o && (Math.hypot(r.at[0] - o.at[0], r.at[2] - o.at[2]) < 0.01 || Math.hypot(o.at[0] - body[0], o.at[2] - body[2]) < 40))) back++
+      if (plain < 2) through++
+      nearest = Math.min(nearest, round)
+    }
+    check(tried >= 10 && through >= 10 && nearest >= 5 && back === tried, `of ${tried} residents who would walk through somebody standing in their way (${through} within 20 cm), none comes nearer than ${nearest.toFixed(1)} cells, and all are back on their way once past (${back})`)
+  }
+
+  // A foot that is down stays where it was put (#371): a walker's and a runner's, tall and short. Followed far off,
+  // where a figure's first six parts are thigh, shin and shoe, twice.
+  {
+    const { figure, EACH, strideAt, runningAt } = await import('../page/people.ts')
+    const out = new Float32Array(EACH * 400), dt = 1 / 240, worst = []
+    for (const [pace, look] of [[12, {}], [14, { tall: 1.2 }], [14, { tall: 0.8 }], [30, {}], [58, {}]]) {
+      let z = 0, stride = 0, floor = 1e9
+      const frames = []
+      for (let t = 0; t < 6; t += dt) {
+        z -= pace * dt; stride += pace * dt / strideAt(pace)
+        figure({ at: [0, 0, z], yaw: 0, seed: 11, look, stride, walking: 1, running: runningAt(pace), pace }, out, 0, [0, 0, 0], true)
+        const feet = [2, 5].map((i) => [out[i * EACH + 1], out[i * EACH + 2]])
+        frames.push(feet); floor = Math.min(floor, feet[0][0], feet[1][0])
+      }
+      // While a shoe is within a millimetre or two of as low as shoes get, how far it goes along the ground in all.
+      let far = 0
+      const last = [null, null], down = [0, 0]
+      for (const feet of frames) for (const k of [0, 1]) {
+        if (feet[k][0] > floor + 0.02) { last[k] = null; far = Math.max(far, down[k]); down[k] = 0; continue }
+        if (last[k] !== null) down[k] += Math.abs(feet[k][1] - last[k])
+        last[k] = feet[k][1]
+      }
+      worst.push(far)
+    }
+    check(worst.every((far) => far < 0.3), `a foot that is flat on the ground slides under 3 cm while it is down, at a walk, a jog and a run, tall and short (${worst.map((v) => (v * 10).toFixed(1)).join(', ')} cm)`)
+  }
+
   const page = await city('scale=0.5&fire=0')
   await still(page)
   await page.evaluate(() => {
