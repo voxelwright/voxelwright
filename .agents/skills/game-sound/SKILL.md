@@ -5,6 +5,11 @@ description: How Village's engine makes sound (#247), all of it synthesised in a
 
 # Sound in the engine
 
+> **Changed by #410 (November 14, 2026), read `sound-judge` first.** The music now plays at 0.95 (not half) through a
+> compressor on its bus and measures about -26 to -21 LUFS; rain is wash and drops, not mostly hiss; steps have a low
+> body; ringing things have a thump under them; a 20 Hz DC blocker sits before the ceiling. Numbers below that say
+> otherwise are from before. How it sounds is judged by `node test/judged.mjs`.
+
 Version 7, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds, a realm's music, a voice being tried). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing

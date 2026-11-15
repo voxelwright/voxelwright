@@ -278,7 +278,8 @@ console.log('How loud things are')
   for (const which of ['rain', 'wind', 'fire', 'surf', 'under', 'rumble']) { const o = bed(which); loud[which] = ears.lufs(o.l, o.r, 48000) }
   check(Object.values(loud).every((v) => v > -45 && v < -16), `each bed full up is between -45 and -16 LUFS (${Object.entries(loud).map(([k, v]) => `${k} ${v.toFixed(0)}`).join(', ')})`)
   const rain = bed('rain'), surf = bed('surf'), fire = bed('fire'), deep = bed('under')
-  check(ears.band(rain.l, 48000, 2000, 16000) > 0.5, `rain is mostly hiss (${(ears.band(rain.l, 48000, 2000, 16000) * 100).toFixed(0)}% over 2 kHz)`)
+  // Recorded rain falls away toward the top (#410: beside references, rain that was mostly hiss read as white noise).
+  check(ears.band(rain.l, 48000, 2000, 16000) > 0.05 && ears.band(rain.l, 48000, 2000, 16000) < 0.5, `rain has a top but is not mostly hiss (${(ears.band(rain.l, 48000, 2000, 16000) * 100).toFixed(0)}% over 2 kHz)`)
   check(ears.band(fire.l, 48000, 20, 600) > 0.5, `fire is mostly roar (${(ears.band(fire.l, 48000, 20, 600) * 100).toFixed(0)}% under 600 Hz)`)
   check(ears.band(deep.l, 48000, 20, 300) > 0.6, `the sea overhead is a low press (${(ears.band(deep.l, 48000, 20, 300) * 100).toFixed(0)}% under 300 Hz)`)
   const swell = ears.envelope(surf.l, 48000, 500), high = Math.max(...swell), low = Math.min(...swell)

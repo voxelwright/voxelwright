@@ -250,6 +250,7 @@ runs on the audio thread (`page/sound/dsp.ts`) and nothing a patch says gets pas
   speaker, louder when near, but not placed in the world and not measured by anything here. The lab has both.
 - `/page/sound/lab.html` plays every sound by hand, with a picture of what is sounding and what the audio thread
   costs, and takes a patch of your own. It is the place to listen: the checks cannot.
+- **How it sounds is judged with nobody listening** (#410, `ears/`): `node ears/bench.mjs --out dir` renders 54 fixed clips of what the engine plays; `cd ears && uv sync && uv run python judge.py measure dir && uv run python score.py clips dir` measures them and says each fault in words, against ranges taken from well-made reference audio; `node test/judged.mjs` is the check (a hard fault, a new fault or a lower score fails; `--accept` takes a change on purpose). What each measure is, how it was proven and what it cannot see: `.agents/skills/sound-judge/SKILL.md`.
 - `node test/sound.mjs` measures the synthesiser in Node (no browser); `node test/music.mjs` measures the rules, the search and the handover between places; `node test/heard.mjs` taps the real page; `node test/played.mjs` plays the instruments with real keys and touches;
   `node test/listen.mjs --out clip.webm` records picture and sound together. What they stand in for and what
   they cannot say: `.agents/skills/game-sound/SKILL.md`.

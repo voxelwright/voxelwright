@@ -75,14 +75,16 @@ const clap: Patch = { how: 'struck', hard: 0.9, rough: 1, modes: [[1, 0.3]], pit
 const shaker: Patch = { how: 'struck', hard: 0.6, rough: 1, modes: [[1, 0.1]], pitch: 5000, ring: 0.01, damp: 1, air: { from: 6000, to: 8500, for: 0.07, gain: 0.7, q: 1 }, gain: 0.22 }
 const drum: Patch = { how: 'struck', hard: 0.4, rough: 0.3, shape: 'skin', pitch: 74, ring: 0.5, damp: 0.7, bend: 0.5, gain: 0.8 }
 const bass: Patch = { how: 'plucked', hard: 0.3, rough: 0, shape: 'string', pitch: 55, ring: 1.1, damp: 0.75, gain: 0.85 }
-const keys: Patch = { how: 'struck', hard: 0.42, rough: 0.04, modes: [[1, 1], [2, 0.35], [3, 0.12], [4.2, 0.06], [14.2, 0.03]], pitch: 220, ring: 1.5, damp: 0.45, gain: 0.5 }
+const keys: Patch = { how: 'struck', hard: 0.42, rough: 0.04, modes: [[1, 1], [2, 0.35], [3, 0.12], [4.2, 0.06], [14.2, 0.012]], pitch: 220, ring: 1.5, damp: 0.45, gain: 0.5 }
 const pad: Patch = { how: 'blown', hard: 0.04, rough: 0.05, shape: 'tube', pitch: 220, ring: 1.6, damp: 0.78, waver: 0.3, gain: 0.26 }
-const strum: Patch = { how: 'plucked', hard: 0.6, rough: 0.1, shape: 'string', pitch: 196, ring: 2.6, damp: 0.45, where: 0.2, gain: 0.55 }
+const strum: Patch = { how: 'plucked', hard: 0.3, rough: 0.1, shape: 'string', pitch: 196, ring: 2.6, damp: 0.62, where: 0.2, gain: 0.55 }
 const bell: Patch = { how: 'struck', hard: 0.85, rough: 0, shape: 'bell', pitch: 880, ring: 4.5, damp: 0.2, gain: 0.3 }
 const celesta: Patch = { how: 'struck', hard: 0.8, rough: 0, modes: [[1, 1], [4, 0.22], [10, 0.05]], pitch: 880, ring: 1.9, damp: 0.3, gain: 0.36 }
-const marimba: Patch = { how: 'struck', hard: 0.5, rough: 0.08, modes: [[1, 1], [4, 0.3], [9.2, 0.08]], pitch: 262, ring: 0.5, damp: 0.5, gain: 0.55 }
-const piano: Patch = { how: 'struck', hard: 0.5, rough: 0.03, shape: 'string', pitch: 262, ring: 3.6, damp: 0.5, where: 0.12, gain: 0.5 }
+const marimba: Patch = { how: 'struck', hard: 0.65, rough: 0.08, modes: [[1, 1], [4, 0.3], [9.2, 0.08]], pitch: 262, ring: 0.5, damp: 0.5, gain: 0.55 }
+const piano: Patch = { how: 'struck', hard: 0.58, rough: 0.1, shape: 'string', pitch: 262, ring: 3.6, damp: 0.4, where: 0.12, gain: 0.5 }
 const flute: Patch = { how: 'blown', hard: 0.45, rough: 0.2, shape: 'hollow', pitch: 587, ring: 0.25, damp: 0.6, waver: 0.5, gain: 0.3 }
+/** A soft deep beat under a calm place: felt more than heard. */
+const heart: Patch = { how: 'struck', hard: 0.2, rough: 0.05, shape: 'skin', pitch: 46, ring: 0.5, damp: 0.9, bend: 0.6, gain: 0.8 }
 const low: Patch = { how: 'rubbed', hard: 0.2, rough: 0.1, shape: 'string', pitch: 73, ring: 0.6, damp: 0.6, waver: 0.2, gain: 0.3 }
 
 const rules = (...list: Rule<never>[]) => list
@@ -96,50 +98,56 @@ const DORIAN = [0, 2, 3, 5, 7, 9, 10], LYDIAN = [0, 2, 4, 6, 7, 9, 11], AEOLIAN 
 /** The music of each place. The tonic is D for all of them. */
 export const MOODS: Record<string, Mood> = {
   town: { name: 'town', idiom: 'a deep house groove', bpm: 116, steps: 16, beat: 4, bars: 4, tonic: 50, scale: DORIAN, minor: true, colour: 5, sections: 12, gap: [45, 100], swing: 0.06, room: 0.18, voices: [
-    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.8, low: 12, want: 1, rules: [] },
+    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.45, low: 0, want: 1, rules: [] },
     { name: 'keys', kind: 'stab', patch: keys, layer: 2, gain: 0.7, pan: -0.25, low: 12, want: 3, rules: rules(as(R.amount), as(R.pushes, 3), as(R.fillsGaps, 1), as(R.likeATradition), as(R.loudAndSoft, 0.5)) },
-    { name: 'bass', kind: 'bass', patch: bass, layer: 2, gain: 0.9, low: -12, want: 0.3, rules: under },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 2, gain: 1, low: -12, want: 0.45, rules: under },
     { name: 'kick', kind: 'beat', patch: kick, layer: 3, gain: 0.9, low: 0, want: 4, rules: rules(as(R.onTheFloor), as(R.amount)) },
-    { name: 'hat', kind: 'beat', patch: hat, layer: 3, gain: 0.8, pan: 0.2, low: 0, want: 6, rules: rules(as(R.fillsGaps), as(R.amount), as(R.even), as(R.repeats), as(R.loudAndSoft)) },
-    { name: 'clap', kind: 'beat', patch: clap, layer: 4, gain: 0.7, pan: -0.1, low: 0, want: 2, rules: rules(as(R.backbeat), as(R.amount)) },
+    { name: 'hat', kind: 'beat', patch: hat, layer: 3, gain: 0.5, pan: 0.2, low: 0, want: 6, rules: rules(as(R.fillsGaps), as(R.amount), as(R.even), as(R.repeats), as(R.loudAndSoft)) },
+    { name: 'clap', kind: 'beat', patch: clap, layer: 4, gain: 0.5, pan: -0.1, low: 0, want: 2, rules: rules(as(R.backbeat), as(R.amount)) },
     { name: 'lead', kind: 'line', patch: strum, layer: 4, gain: 0.7, pan: 0.25, low: 12, want: 0.34, span: 9, bars: 2, rules: melody(2) },
   ] },
   coast: { name: 'coast', idiom: 'a lilt in six, guitar and flute', bpm: 84, steps: 12, beat: 3, bars: 4, tonic: 50, scale: LYDIAN, minor: false, colour: 3, sections: 8, gap: [50, 110], swing: 0, room: 0.3, voices: [
     { name: 'guitar', kind: 'line', patch: strum, layer: 1, gain: 0.75, pan: -0.2, low: 0, want: 0.5, span: 10, bars: 2, rules: rules(as(R.inKey), as(R.onTheChord, 3), as(R.leavesRoom), as(R.keepsItsRange), as(R.doesNotStammer), as(L(R.likeATradition))) },
-    { name: 'pad', kind: 'pad', patch: pad, layer: 2, gain: 0.7, low: 12, want: 1, rules: [] },
-    { name: 'bass', kind: 'bass', patch: bass, layer: 2, gain: 0.7, low: -12, want: 0.18, rules: under },
-    { name: 'shaker', kind: 'beat', patch: shaker, layer: 3, gain: 0.6, pan: 0.3, low: 0, want: 5, rules: rules(as(R.likeATradition, 3), as(R.amount), as(R.loudAndSoft)) },
+    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.45, low: 0, want: 1, rules: [] },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 1, gain: 1, low: -12, want: 0.3, rules: under },
+    { name: 'heart', kind: 'beat', patch: heart, layer: 1, gain: 0.8, low: 0, want: 2, rules: rules(as(R.amount), as(R.even)) },
+    { name: 'shaker', kind: 'beat', patch: shaker, layer: 3, gain: 0.35, pan: 0.3, low: 0, want: 5, rules: rules(as(R.likeATradition, 3), as(R.amount), as(R.loudAndSoft)) },
     { name: 'flute', kind: 'line', patch: flute, layer: 3, gain: 0.7, pan: 0.15, low: 12, want: 0.3, span: 8, bars: 4, rules: melody(2.5) },
   ] },
   sea: { name: 'sea', idiom: 'no pulse: long tones and far bells', bpm: 48, steps: 8, beat: 2, bars: 4, tonic: 50, scale: PENTA, minor: false, colour: 2, sections: 6, gap: [25, 60], swing: 0, room: 0.6, voices: [
-    { name: 'deep', kind: 'pad', patch: low, layer: 1, gain: 0.9, low: 0, want: 1, rules: [] },
-    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.8, low: 12, want: 1, rules: [] },
+    { name: 'deep', kind: 'pad', patch: low, layer: 1, gain: 1, low: -12, want: 1, rules: [] },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 1, gain: 0.9, low: -12, want: 0.2, rules: under },
+    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.5, low: 0, want: 1, rules: [] },
+    { name: 'heart', kind: 'beat', patch: heart, layer: 1, gain: 0.8, low: 0, want: 1, rules: rules(as(R.amount), as(R.even)) },
     // Three lines of three lengths: together they come round only every 105 bars.
-    { name: 'bell', kind: 'line', patch: bell, layer: 2, gain: 0.6, pan: -0.4, low: 24, want: 0.1, span: 7, bars: 3, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.bySteps, 1), as(R.doesNotStammer)) },
-    { name: 'glass', kind: 'line', patch: celesta, layer: 2, gain: 0.5, pan: 0.4, low: 24, want: 0.08, span: 7, bars: 5, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.leapsTurnBack), as(R.doesNotStammer)) },
+    { name: 'bell', kind: 'line', patch: bell, layer: 2, gain: 0.6, pan: -0.2, low: 24, want: 0.14, span: 7, bars: 3, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.bySteps, 1), as(R.doesNotStammer)) },
+    { name: 'glass', kind: 'line', patch: celesta, layer: 2, gain: 0.5, pan: 0.2, low: 24, want: 0.12, span: 7, bars: 5, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.leapsTurnBack), as(R.doesNotStammer)) },
     { name: 'far', kind: 'line', patch: flute, layer: 3, gain: 0.45, pan: 0.1, low: 12, want: 0.12, span: 5, bars: 7, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.bySteps), as(R.comesHome)) },
   ] },
   snow: { name: 'snow', idiom: 'bells, and space between them', bpm: 60, steps: 8, beat: 2, bars: 4, tonic: 50, scale: PENTA, minor: false, colour: 2, sections: 5, gap: [60, 140], swing: 0, room: 0.5, voices: [
-    { name: 'celesta', kind: 'line', patch: celesta, layer: 1, gain: 0.8, pan: -0.2, low: 24, want: 0.16, span: 8, bars: 4, rules: melody(4) },
-    { name: 'pad', kind: 'pad', patch: pad, layer: 2, gain: 0.55, low: 12, want: 1, rules: [] },
+    { name: 'celesta', kind: 'line', patch: celesta, layer: 1, gain: 0.8, pan: -0.2, low: 12, want: 0.25, span: 8, bars: 4, rules: melody(4) },
+    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.5, low: 0, want: 1, rules: [] },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 1, gain: 0.9, low: -12, want: 0.2, rules: under },
+    { name: 'heart', kind: 'beat', patch: heart, layer: 1, gain: 0.8, low: 0, want: 1, rules: rules(as(R.amount), as(R.even)) },
     { name: 'bell', kind: 'line', patch: bell, layer: 3, gain: 0.5, pan: 0.3, low: 24, want: 0.06, span: 6, bars: 5, rules: rules(as(R.inKey), as(R.leavesRoom, 4), as(R.onTheChord), as(R.doesNotStammer)) },
   ] },
   night: { name: 'night', idiom: 'slow, a few notes on a piano', bpm: 66, steps: 16, beat: 4, bars: 4, tonic: 50, scale: AEOLIAN, minor: true, colour: 5, sections: 5, gap: [60, 130], swing: 0, room: 0.4, voices: [
-    { name: 'piano', kind: 'line', patch: piano, layer: 1, gain: 0.8, pan: -0.1, low: 12, want: 0.14, span: 9, bars: 4, rules: melody(4) },
-    { name: 'pad', kind: 'pad', patch: pad, layer: 2, gain: 0.6, low: 12, want: 1, rules: [] },
-    { name: 'bass', kind: 'bass', patch: bass, layer: 3, gain: 0.6, low: -12, want: 0.08, rules: under },
+    { name: 'piano', kind: 'line', patch: piano, layer: 1, gain: 1, pan: -0.1, low: 12, want: 0.22, span: 9, bars: 4, rules: melody(4) },
+    { name: 'pad', kind: 'pad', patch: pad, layer: 1, gain: 0.55, low: 0, want: 1, rules: [] },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 1, gain: 1, low: -12, want: 0.22, rules: under },
+    { name: 'heart', kind: 'beat', patch: heart, layer: 1, gain: 0.8, low: 0, want: 1, rules: rules(as(R.amount), as(R.even)) },
   ] },
   danger: { name: 'danger', idiom: 'a driving figure over low drums', bpm: 138, steps: 16, beat: 4, bars: 4, tonic: 50, scale: PHRYGIAN, minor: true, colour: 1, sections: 4, gap: [0, 0], swing: 0, room: 0.15, voices: [
-    { name: 'drum', kind: 'beat', patch: drum, layer: 1, gain: 0.9, low: 0, want: 6, rules: rules(as(R.amount), as(R.pushes, 3), as(R.likeATradition), as(R.loudAndSoft)) },
-    { name: 'figure', kind: 'line', patch: marimba, layer: 1, gain: 0.7, pan: 0.2, low: 0, want: 0.75, span: 5, bars: 1, rules: rules(as(R.inKey), as(R.bySteps), as(R.onTheChord), as(R.leavesRoom), as(L(R.repeats), 2)) },
-    { name: 'low', kind: 'pad', patch: low, layer: 2, gain: 0.9, low: -12, want: 1, rules: [] },
-    { name: 'hat', kind: 'beat', patch: hat, layer: 2, gain: 0.7, pan: -0.2, low: 0, want: 8, rules: rules(as(R.amount), as(R.even), as(R.loudAndSoft)) },
+    { name: 'drum', kind: 'beat', patch: drum, layer: 1, gain: 0.7, low: 0, want: 6, rules: rules(as(R.amount), as(R.pushes, 3), as(R.likeATradition), as(R.loudAndSoft)) },
+    { name: 'figure', kind: 'line', patch: marimba, layer: 1, gain: 0.9, pan: 0.2, low: 12, want: 0.75, span: 5, bars: 1, rules: rules(as(R.inKey), as(R.bySteps), as(R.onTheChord), as(R.leavesRoom), as(L(R.repeats), 2)) },
+    { name: 'low', kind: 'pad', patch: low, layer: 2, gain: 0.45, low: -12, want: 1, rules: [] },
+    { name: 'hat', kind: 'beat', patch: hat, layer: 2, gain: 0.9, pan: -0.2, low: 0, want: 8, rules: rules(as(R.amount), as(R.even), as(R.loudAndSoft)) },
   ] },
   making: { name: 'making', idiom: 'bright and busy: a marimba at work', bpm: 122, steps: 16, beat: 4, bars: 4, tonic: 50, scale: PENTA, minor: false, colour: 2, sections: 4, gap: [0, 0], swing: 0.04, room: 0.2, voices: [
     { name: 'marimba', kind: 'line', patch: marimba, layer: 1, gain: 0.8, pan: -0.2, low: 12, want: 0.5, span: 8, bars: 2, rules: rules(as(R.inKey), as(R.bySteps), as(R.leapsTurnBack), as(R.onTheChord), as(R.leavesRoom), as(R.doesNotStammer), as(L(R.pushes))) },
-    { name: 'shaker', kind: 'beat', patch: shaker, layer: 1, gain: 0.6, pan: 0.3, low: 0, want: 10, rules: rules(as(R.likeATradition, 3), as(R.amount), as(R.loudAndSoft)) },
-    { name: 'bass', kind: 'bass', patch: bass, layer: 2, gain: 0.8, low: -12, want: 0.25, rules: under },
-    { name: 'keys', kind: 'stab', patch: keys, layer: 2, gain: 0.6, pan: 0.2, low: 12, want: 2, rules: rules(as(R.amount), as(R.pushes, 3)) },
+    { name: 'shaker', kind: 'beat', patch: shaker, layer: 1, gain: 0.4, pan: 0.3, low: 0, want: 10, rules: rules(as(R.likeATradition, 3), as(R.amount), as(R.loudAndSoft)) },
+    { name: 'bass', kind: 'bass', patch: bass, layer: 1, gain: 1, low: -12, want: 0.4, rules: under },
+    { name: 'keys', kind: 'stab', patch: keys, layer: 1, gain: 0.6, pan: 0.2, low: 0, want: 2, rules: rules(as(R.amount), as(R.pushes, 3)) },
   ] },
 }
 

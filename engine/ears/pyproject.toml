@@ -1,0 +1,16 @@
+[project]
+name = "village-ears"
+version = "0.1.0"
+description = "The judge of the engine's sound (#410): measures of rendered audio, with nobody listening."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "numpy>=2.0",
+  "scipy>=1.14",
+  "soundfile>=0.12",
+  "librosa>=0.11",
+  "pyloudnorm>=0.1.1",
+  "matplotlib>=3.9",
+]
+
+[tool.uv]
+package = false

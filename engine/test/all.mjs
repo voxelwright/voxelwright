@@ -40,6 +40,7 @@ const checks = [
   ['back', 'node', ['test/back.mjs'], true],
   ['chase', 'node', ['test/chase.mjs'], false],
   ['conjure', 'node', ['test/conjure.mjs'], true],
+  ['judged', 'node', ['test/judged.mjs'], false],
   ['sounded', 'node', ['test/sounded.mjs'], true],
   ['tuned', 'node', ['test/tuned.mjs'], true],
   ['inrealm', 'node', ['test/inrealm.mjs'], true],

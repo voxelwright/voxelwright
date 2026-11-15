@@ -17,7 +17,7 @@ export const HIT: Record<string, Patch> = {
   water: { how: 'struck', hard: 0.3, rough: 0.6, shape: 'hollow', pitch: 420, ring: 0.09, damp: 0.6, bend: -0.5, pieces: { count: 6, over: 0.3, spread: 0.7 }, air: { from: 1800, to: 5000, for: 0.3, gain: 0.6, q: 0.5 }, gain: 0.7 },
   asphalt: { how: 'struck', hard: 0.85, rough: 0.55, shape: 'lump', pitch: 290, ring: 0.05, damp: 0.85, air: { from: 2400, to: 900, for: 0.05, gain: 0.3 }, gain: 0.85 },
   concrete: { how: 'struck', hard: 0.9, rough: 0.45, shape: 'lump', pitch: 240, ring: 0.09, damp: 0.8, air: { from: 2800, to: 900, for: 0.05, gain: 0.3 }, gain: 0.9 },
-  brick: { how: 'struck', hard: 0.85, rough: 0.5, shape: 'lump', pitch: 390, ring: 0.06, damp: 0.8, air: { from: 3400, to: 1300, for: 0.05, gain: 0.3 }, gain: 0.9 },
+  brick: { how: 'struck', hard: 0.85, rough: 0.5, shape: 'lump', pitch: 390, ring: 0.06, damp: 0.8, air: { from: 3400, to: 1300, for: 0.09, gain: 0.35 }, gain: 0.9 },
   plaster: { how: 'struck', hard: 0.5, rough: 0.6, shape: 'plate', pitch: 210, ring: 0.07, damp: 0.9, air: { from: 2600, to: 800, for: 0.09, gain: 0.4, q: 0.6 }, gain: 0.75 },
   wood: { how: 'struck', hard: 0.6, rough: 0.35, shape: 'bar', pitch: 250, ring: 0.13, damp: 0.45, gain: 0.85 },
   glass: { how: 'struck', hard: 1, rough: 0.1, shape: 'plate', pitch: 1250, ring: 0.45, damp: 0.3, gain: 0.7 },
@@ -29,11 +29,11 @@ export const HIT: Record<string, Patch> = {
 
 /** Coming apart: the blow, then pieces of it going on. Glass is many small bright ones; a wall is fewer, lower, in dust. */
 export const BREAK: Record<string, Patch> = {
-  glass: { how: 'struck', hard: 1, rough: 0.3, shape: 'plate', pitch: 1500, ring: 0.35, damp: 0.3, pieces: { count: 34, over: 0.7, spread: 0.9 }, air: { from: 9500, to: 4500, for: 0.3, gain: 0.75, q: 0.6 }, gain: 0.8 },
+  glass: { how: 'struck', hard: 1, rough: 0.3, shape: 'plate', pitch: 1500, ring: 0.35, damp: 0.3, pieces: { count: 34, over: 0.7, spread: 0.9 }, air: { from: 6500, to: 3200, for: 0.3, gain: 0.55, q: 0.7 }, gain: 0.8 },
   brick: { how: 'struck', hard: 0.85, rough: 0.7, shape: 'lump', pitch: 330, ring: 0.07, damp: 0.8, pieces: { count: 16, over: 0.7, spread: 0.5 }, air: { from: 1900, to: 240, for: 0.7, gain: 0.8, q: 0.5 }, gain: 0.9 },
   concrete: { how: 'struck', hard: 0.9, rough: 0.7, shape: 'lump', pitch: 210, ring: 0.1, damp: 0.8, pieces: { count: 14, over: 0.8, spread: 0.5 }, air: { from: 1600, to: 180, for: 0.9, gain: 0.85, q: 0.5 }, gain: 0.9 },
   rock: { how: 'struck', hard: 0.95, rough: 0.6, shape: 'lump', pitch: 420, ring: 0.08, damp: 0.75, pieces: { count: 12, over: 0.6, spread: 0.6 }, air: { from: 2200, to: 300, for: 0.6, gain: 0.7, q: 0.5 }, gain: 0.9 },
-  wood: { how: 'struck', hard: 0.6, rough: 0.6, shape: 'bar', pitch: 230, ring: 0.14, damp: 0.8, pieces: { count: 7, over: 0.35, spread: 0.7 }, air: { from: 3200, to: 500, for: 0.25, gain: 0.6, q: 0.7 }, gain: 0.9 },
+  wood: { how: 'struck', hard: 0.7, rough: 0.6, shape: 'bar', pitch: 520, ring: 0.12, damp: 0.8, pieces: { count: 9, over: 0.35, spread: 0.7 }, air: { from: 4200, to: 1100, for: 0.25, gain: 0.7, q: 0.7 }, gain: 0.9 },
   plaster: { how: 'struck', hard: 0.5, rough: 0.8, shape: 'plate', pitch: 200, ring: 0.06, damp: 0.9, pieces: { count: 10, over: 0.5, spread: 0.5 }, air: { from: 2400, to: 300, for: 0.6, gain: 0.8, q: 0.5 }, gain: 0.85 },
   steel: { how: 'struck', hard: 1, rough: 0.4, shape: 'plate', pitch: 260, ring: 1.4, damp: 0.15, pieces: { count: 5, over: 0.5, spread: 0.4 }, air: { from: 5000, to: 900, for: 0.3, gain: 0.5 }, gain: 0.85 },
   earth: { how: 'struck', hard: 0.15, rough: 0.9, shape: 'lump', pitch: 80, ring: 0.1, damp: 0.9, pieces: { count: 6, over: 0.5, spread: 0.3 }, air: { from: 900, to: 150, for: 0.5, gain: 0.8, q: 0.5 }, gain: 0.85 },
@@ -44,13 +44,13 @@ for (const [like, as] of [['asphalt', 'concrete'], ['roofing', 'brick'], ['lamp'
 /** Sounds that are not a material's. */
 export const WORLD: Record<string, Patch> = {
   // A blast near: the crack. Far off only its boom is left, late.
-  crack: { how: 'struck', hard: 1, rough: 1, shape: 'lump', pitch: 800, ring: 0.03, damp: 0.9, air: { from: 7500, to: 700, for: 0.22, gain: 1, q: 0.4 }, gain: 1 },
+  crack: { how: 'struck', hard: 1, rough: 1, shape: 'lump', pitch: 800, ring: 0.03, damp: 0.9, air: { from: 4800, to: 500, for: 0.22, gain: 1, q: 0.5 }, gain: 1 },
   // The boom: a great skin that starts high and falls, with the air rolling away under it.
   boom: { how: 'struck', hard: 0.45, rough: 0.6, shape: 'skin', pitch: 46, ring: 1.3, damp: 0.7, bend: 1.3, air: { from: 1400, to: 60, for: 1.8, gain: 1, q: 0.4 }, gain: 1 },
   // A shoe on something hard, on earth, on grass, on sand, in water.
-  step: { how: 'struck', hard: 0.5, rough: 0.6, shape: 'lump', pitch: 170, ring: 0.035, damp: 0.9, air: { from: 2600, to: 1100, for: 0.05, gain: 0.3, q: 0.8 }, gain: 0.5 },
-  stepSoft: { how: 'struck', hard: 0.15, rough: 0.8, shape: 'lump', pitch: 90, ring: 0.05, damp: 0.95, air: { from: 2200, to: 800, for: 0.09, gain: 0.4, q: 0.6 }, gain: 0.45 },
-  stepLoose: { how: 'struck', hard: 0.2, rough: 1, shape: 'lump', pitch: 140, ring: 0.03, damp: 0.95, air: { from: 5000, to: 2200, for: 0.13, gain: 0.7, q: 0.5 }, gain: 0.4 },
+  step: { how: 'struck', hard: 0.85, rough: 0.6, shape: 'lump', pitch: 92, ring: 0.07, damp: 0.7, air: { from: 2400, to: 700, for: 0.09, gain: 0.3, q: 0.6 }, gain: 0.6 },
+  stepSoft: { how: 'struck', hard: 0.6, rough: 0.8, shape: 'lump', pitch: 76, ring: 0.07, damp: 0.8, air: { from: 1800, to: 500, for: 0.1, gain: 0.3, q: 0.6 }, gain: 0.55 },
+  stepLoose: { how: 'struck', hard: 0.7, rough: 1, shape: 'lump', pitch: 84, ring: 0.07, damp: 0.8, air: { from: 3800, to: 1200, for: 0.12, gain: 0.25, q: 0.5 }, gain: 0.65 },
   // The torch catching: a puff that opens.
   catch: { how: 'struck', hard: 0.1, rough: 1, shape: 'lump', pitch: 120, ring: 0.1, damp: 0.9, air: { from: 250, to: 1800, for: 0.45, gain: 0.8, q: 0.5 }, gain: 0.6 },
   // The cutter: steel drawn through a wall.

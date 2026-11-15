@@ -103,7 +103,7 @@ try {
   t0 = await clock()
   await wait(1300)
   const wet = await take(t0 - 1.2, t0)
-  check(ears.rms(wet.l) > ears.rms(calm.l) * 2 && ears.band(wet.l, wet.sr, 1500, 12000) > 0.3, `rain is heard, and it is a hiss (${ears.db(ears.rms(wet.l)).toFixed(0)} dB, ${(ears.band(wet.l, wet.sr, 1500, 12000) * 100).toFixed(0)}% of it over 1.5 kHz)`)
+  check(ears.rms(wet.l) > ears.rms(calm.l) * 2 && ears.band(wet.l, wet.sr, 1500, 12000) > 0.08, `rain is heard, and it has a top without being all hiss (#410) (${ears.db(ears.rms(wet.l)).toFixed(0)} dB, ${(ears.band(wet.l, wet.sr, 1500, 12000) * 100).toFixed(0)}% of it over 1.5 kHz)`)
   await page.evaluate(() => { globalThis.engine.rain = 0 })
 
   // Under the sea everything loses its top.

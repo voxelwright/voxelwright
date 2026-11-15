@@ -14,7 +14,7 @@ export interface Instrument { name: string; sounds: { play: Patch; surface: Surf
 const strings = [40, 45, 50, 55, 59, 64]
 const chords: [string, number[]][] = [['D', [45, 50, 57, 62, 66, 69]], ['G', [43, 47, 50, 55, 59, 67]], ['A', [45, 52, 57, 61, 64, 69]], ['Bm', [47, 54, 59, 62, 66, 71]], ['Em', [40, 47, 52, 55, 59, 64]], ['C', [40, 48, 52, 55, 60, 64]]]
 export const guitar: Instrument = { name: 'guitar', sounds: {
-  play: { how: 'plucked', hard: 0.6, rough: 0.1, shape: 'string', pitch: 196, ring: 3.2, damp: 0.42, where: 0.2, gain: 0.75 },
+  play: { how: 'plucked', hard: 0.22, rough: 0.1, shape: 'string', pitch: 196, ring: 3.2, damp: 0.75, where: 0.2, air: { from: 1100, to: 400, for: 0.05, gain: 0.6, q: 1 }, gain: 0.75 },
   surface: { size: [14, 7], release: 'rings', parts: [
     { shape: 'round', at: [0.2, 0.3, 9.6, 6.4], colour: 'wood' },
     { shape: 'round', at: [3.2, 2, 3, 3], colour: 'dark' },
@@ -26,7 +26,7 @@ export const guitar: Instrument = { name: 'guitar', sounds: {
 
 const holes = [62, 65, 69, 71, 74]
 export const ocarina: Instrument = { name: 'ocarina', sounds: {
-  play: { how: 'blown', hard: 0.75, rough: 0.14, shape: 'hollow', pitch: 587, ring: 0.09, damp: 0.6, waver: 0.35, gain: 0.7 },
+  play: { how: 'blown', hard: 0.75, rough: 0.3, shape: 'hollow', pitch: 587, ring: 0.09, damp: 0.6, waver: 0.5, gain: 0.6 },
   surface: { size: [12, 6], parts: [
     { shape: 'poly', points: [[0.3, 3.2], [1.6, 1.2], [5, 0.4], [9, 0.9], [11.6, 2.6], [11.4, 4.2], [9, 5.4], [4.6, 5.6], [1.4, 4.9]], colour: 'blue' },
     { shape: 'poly', points: [[4.6, 0.45], [5.6, 0], [6.6, 0], [7.2, 0.6]], colour: 'sky' },
@@ -37,7 +37,7 @@ export const ocarina: Instrument = { name: 'ocarina', sounds: {
 const white = [0, 2, 4, 5, 7, 9, 11], black: [number, number][] = [[1, 0], [3, 1], [6, 3], [8, 4], [10, 5]]
 const rows = [{ from: 60, white: 'ZXCVBNM', black: 'SDGHJ' }, { from: 72, white: 'QWERTYU', black: '23567' }]
 export const piano: Instrument = { name: 'piano', sounds: {
-  play: { how: 'struck', hard: 0.5, rough: 0.03, shape: 'string', pitch: 262, ring: 4.5, damp: 0.5, where: 0.12, gain: 0.7 },
+  play: { how: 'struck', hard: 0.65, rough: 0.1, shape: 'string', pitch: 262, ring: 4.5, damp: 0.4, where: 0.12, air: { from: 1500, to: 350, for: 0.07, gain: 0.2, q: 0.9 }, gain: 0.7 },
   surface: { size: [14.4, 5], release: 'stops', parts: [
     { shape: 'rect', at: [0, 0, 14.4, 5], colour: 'dark' },
     ...rows.flatMap((row, r) => white.map((semi, i): Part => ({ shape: 'rect', at: [0.2 + (r * 7 + i), 0.5, 0.94, 4.3], colour: 'ivory', note: row.from + semi, key: `Key${row.white[i]}`, label: semi === 0 ? `C${r + 4}` : undefined }))),

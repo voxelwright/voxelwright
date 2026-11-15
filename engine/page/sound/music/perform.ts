@@ -6,7 +6,7 @@ import type { Section } from './compose.ts'
 
 export interface Played { at: number; patch: Patch; hz: number; force: number; dur: number; pan: number; gain: number; room: number; voice: string }
 /** How loud the music is against a thing struck beside you: it lies under the world. */
-export const LEVEL = 0.5
+export const LEVEL = 0.95
 
 /** Seconds a step takes. */
 export const stepTime = (s: Section) => 60 / s.bpm / s.beat
