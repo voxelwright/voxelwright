@@ -167,9 +167,10 @@ parts.portal = async () => {
   await page.waitForFunction((id) => globalThis.engine.realms.here === id, other, { timeout: 30_000 })
   await wait(1500)
   // There: on a little, the head turned round, a run and back to the window.
+  // (Straight on from the window, not turned round first: turned round, the run went back through it and the part was spent at home.)
   await mark('there'); await wait(2500); await page.keyboard.up('KeyW')
-  await turnBy(1.5, 2100)
   await keys(['ShiftLeft', 'KeyW'], 5000); await turnBy(1.6, 4000)
+  line(`there: in ${await page.evaluate(() => { const e = globalThis.engine, l = e.look(); return `${e.realms.here}, hour ${l.hour}, rain ${l.rain}, ${e.others} others` })}`)
   await shot('portal-there')
   await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.state.passable, null, { timeout: 30_000 })
   await face()

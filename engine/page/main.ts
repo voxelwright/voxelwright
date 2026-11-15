@@ -497,7 +497,7 @@ async function main() {
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
-  const alive = living({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
   /** Whether the person was on foot when they got on what they ride: they are set down on foot again. */
   let wasAfoot = false
   /** How many bodies are on their way down: every body but the living, which are bodies for as long as they live. */

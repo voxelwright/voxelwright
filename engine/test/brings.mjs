@@ -35,7 +35,8 @@ on('said', (world, e) => {
 let since = 0
 const says = async (ok, tries = 40) => { let text = ''; for (let i = 0; i < tries; i++) { const a = await (await fetch(`${server.url}/world/around?by=steward&since=${since}`)).json(); for (const h of a.heard ?? []) if (h.name === 'Marshal') { text = h.text; since = Math.max(since, h.n) } const t = text && Object.fromEntries(text.split(' ; ').map((l) => l.split('|')).map((f) => [f[0], { name: f[1], at: (f[2] || '').split(' ').map(Number), yaw: Number(f[3]), speed: Number(f[4]), up: f[5] === 'up', seats: Number(f[6]), riders: f[7] ? f[7].split('+') : [] }])); if (t && ok(t)) return t; await wait(250) } console.log('  the marshal last said', text); return null }
 try {
-  await post('join', { by: 'steward', at: [704, 4104] })
+  // The steward stands clear of where the craft is sent (#367): at 4104 they stood at its side, the craft met them and stopped short, and whether it had gone its four metres by then turned on a tick.
+  await post('join', { by: 'steward', at: [704, 4150] })
   check((await post('ask', { by: 'tester', rule: { id: 'marshal', name: 'A marshal', source: RULE } })).asked, 'a rule that brings living things is taken')
   await wait(1200)
   await post('say', { by: 'steward', text: 'set out' })

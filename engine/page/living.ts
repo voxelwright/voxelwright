@@ -111,6 +111,8 @@ export function living(o: {
   pose: { x: number; y: number; z: number; yaw: number; pitch: number }
   /** How high the ground is at a place (metres). */
   ground(x: number, z: number): number
+  /** Where the person's own body is when they are on foot (cells, at the height of their chest), or null: what is near is near that. */
+  body?: () => [number, number, number] | null
   /** What a cell of the world is made of (0: nothing), as this page has it: for keeping the eye that rides out of what stands. */
   kind?: (x: number, y: number, z: number) => number
   /** In a shared world: the page's line to it, and the made things it knows. The world's own process moves every living thing; this page only says what a rider asks. */
@@ -205,6 +207,10 @@ export function living(o: {
     if (was !== riding) {
       if (was?.ref) o.world?.ride(was.ref, false)
       if (riding?.ref) o.world?.ride(riding.ref, true)
+      // Off: the seat's keys go first, and then the person is on their feet again (#367). The other way round, taking
+      // the seat's mode off took the feet's with it (a mode goes with all that was put over it), and after a ride
+      // Space did not jump and V did not change where the eye rides.
+      if (!riding) { leave?.(); leave = null }
       if (!was !== !riding) o.ridden?.(!!riding)
     }
     const at = riding && where(riding)
@@ -265,7 +271,9 @@ export function living(o: {
       for (const s of told.struck) { struck.push(s); if (struck.length > 64) struck.shift() }
     },
     frame(dt) {
-      const eye = [o.pose.x * M, o.pose.y * M, o.pose.z * M]
+      // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
+      // right beside them was out of reach and E did nothing until they had walked past it.
+      const eye = o.body?.() ?? [o.pose.x * M, o.pose.y * M, o.pose.z * M]
       if (!riding) {
         // The nearest thing within reach of an arm, and a few steps more.
         near = null
