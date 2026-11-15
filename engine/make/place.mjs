@@ -34,11 +34,11 @@ const STEEP = 8, CLEAR = 6
  * near it are tried, that way first, out to eight metres. Returns { origin: [x, base, z], rows, moved } with the thing's rows there, feet carried down to the ground.
  * `clear`: it stands at the place itself whatever is there.
  */
-export async function site(world, thing, spot, facing, back = [0, 0], { clear = false } = {}) {
+export async function site(world, thing, spot, facing, back = [0, 0], { clear = false, most = ROWS_MOST, level = false } = {}) {
   // Asked to clear the place: it stands where it was put, level, whatever is there now (the caller empties its box first).
   if (clear) {
     const made = rows(thing, [spot[0], spot[1] + 1, spot[2]], facing)
-    if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
+    if (made.length > most) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${most}: fewer separate pieces, wider bands, or smaller`), { form: true })
     return { origin: [spot[0], spot[1] + 1, spot[2]], rows: made, moved: 0 }
   }
   // A big thing takes more of a slope under it: its feet are carried down to the ground wherever they are.
@@ -62,10 +62,13 @@ export async function site(world, thing, spot, facing, back = [0, 0], { clear = 
     if (gone || wet) { why = wet ? 'that is water' : 'the ground falls away there'; continue }
     const feet = new Map(columns.map((c, i) => [`${c.x},${c.z}`, high[i]]))
     const stood = columns.map((c, i) => (c.foot ? high[i] : null)).filter((v) => v !== null)
-    const base = Math.max(...stood) + 1
+    // `level` (a thing of cells finer than the world's, whose feet cannot be carried down in cells of 10 cm): it stands at the height most
+    // of the ground under its feet is, nothing carried down, and not where something under a foot stands higher.
+    const base = (level ? [...stood].sort((p, q) => p - q)[stood.length >> 1] : Math.max(...stood)) + 1
+    if (level && Math.max(...stood) > base + 1) { why = 'something already stands there'; continue }
     if (base - 1 - Math.min(...stood) > steep * 2) { why = 'the ground is too steep there'; continue }
-    const made = rows(thing, [x, base, z], facing, (cx, cz) => feet.get(`${cx},${cz}`) ?? base - 1)
-    if (made.length > ROWS_MOST) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${ROWS_MOST}: fewer separate pieces, wider bands, or smaller`), { form: true })
+    const made = rows(thing, [x, base, z], facing, level ? undefined : (cx, cz) => feet.get(`${cx},${cz}`) ?? base - 1)
+    if (made.length > most) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${most}: fewer separate pieces, wider bands, or smaller`), { form: true })
     // `moved`: how far from the place asked for it stands, in cells.
     return { origin: [x, base, z], rows: made, moved: Math.round(Math.hypot(ox, oz) * 4) }
   }
@@ -90,7 +93,7 @@ export function towards([x, , z], eye) {
 export const outOf = (facing) => { const [, xz, , zz] = FACINGS[facing]; return [-xz, -zz] }
 
 /** The rows as an edit (page/edits.ts), and with every row emptied: the same edit undone. */
-export const edit = (made, kind) => [1, made.length, ...made.flatMap((r) => (kind === undefined ? r : [r[0], r[1], r[2], r[3], kind]))]
+export const edit = (made, kind, grain = 1) => { const out = [grain === 4 ? 3 : grain === 8 ? 4 : 1, made.length]; for (const r of made) out.push(r[0], r[1], r[2], r[3], kind === undefined ? r[4] : kind); return out }
 const bounds = (made) => { const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (const r of made) [[r[0], r[1] - 1], [r[2], r[2]], [r[3], r[3]]].forEach(([a, b], k) => { lo[k] = Math.min(lo[k], a); hi[k] = Math.max(hi[k], b) }); return [lo, hi] }
 export const middle = (made) => { const [lo, hi] = bounds(made); return lo.map((v, k) => Math.round((v + hi[k]) / 2)) }
 /**
@@ -123,19 +126,23 @@ export const samples = (made, most = 24) => made.filter((_, i) => i % Math.ceil(
 /** How many of the sampled cells are what they should be. */
 export async function counted(world, cells, kind) {
   const found = await all(cells, (c) => at(world, c))
-  return found.filter((f, i) => f.kind === (kind ?? cells[i][3])).length
+  // A cell asked after as -1 is one that only has to hold something (a cell of finer cells has no one kind).
+  return found.filter((f, i) => { const want = kind ?? cells[i][3]; return want === -1 ? f.material !== 0 : f.kind === want }).length
 }
 
 /**
  * Sends the thing: one ask. Resolves to 'there' once the world's own cells are the thing's and stay so, 'fell'
  * if they were and then were not, 'not there' if they never were, and 'unknown' if the world could not be asked.
+ * `gone`: the id of a made thing to take out, cells and record on one ask: the world empties the cells it keeps for it (`made` only says where to ask after them).
  * It never sends twice: after a send whose answer was lost it asks the world what is there, and says.
  */
-export async function send(world, made, by, { kind, thing, wait = 5000, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
-  const cells = samples(made)
+export async function send(world, made, by, { kind, thing, gone, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
+  // A thing of finer cells (`fine`: { grain, rows }) is sent as those rows; `made` is then its stand-in in the
+  // world's cells, which says where to ask after it: a cell of the world that holds any of it is no longer air.
+  const cells = samples(made).map((c) => (fine ? [c[0], c[1], c[2], kind === 0 ? 0 : -1] : c))
   let sent = 'lost'
   try {
-    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(made, kind), release: beside(made), thing }) })
+    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify(gone ? { by, gone, release: beside(made) } : { by, edit: fine ? edit(fine.rows, kind, fine.grain) : edit(made, kind), release: beside(made), thing }) })
     if (res.status !== 202) return { state: 'not there', why: `the world refused it (${res.status}): ${(await res.text()).slice(0, 160)}` }
     sent = 'taken'
   } catch { /* the answer was lost: whether the ask arrived is not known, so the world is asked */ }
@@ -148,7 +155,7 @@ export async function send(world, made, by, { kind, thing, wait = 5000, pause = 
     }
     if (seen < cells.length) return { state: 'not there', why: sent === 'lost' ? 'the world could not be reached when it was sent, and it is not there' : `only ${seen} of ${cells.length} cells asked after are there` }
     // Whatever was going to come loose has by now.
-    await pause(1500)
+    await pause(settle)
     const stayed = await counted(world, cells, kind)
     return stayed === cells.length ? { state: 'there' } : { state: 'fell', why: `${cells.length - stayed} of ${cells.length} cells asked after came loose` }
   } catch (e) {

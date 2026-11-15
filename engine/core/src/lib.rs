@@ -175,7 +175,17 @@ pub extern "C" fn merged_words() -> *const i32 {
 /// tag 3 or 4 changes nothing in any copy, and each sector it is made with counts it in `fine_refused`.
 #[unsafe(no_mangle)]
 pub extern "C" fn fine_cells(on: u32) {
-    INSTANCE.with_borrow_mut(|i| i.scratch.finer = on != 0)
+    INSTANCE.with_borrow_mut(|i| {
+        i.scratch.finer = on != 0;
+        // The solver's world is told too (#372): a cell that holds finer cells is to it a cell of the kind most of
+        // them are (with the mark), so what is made of finer cells is stood on, walked into, looked at and broken as
+        // the world's own cells are. Sectors it made before are made again.
+        let g = &mut moving(i).ground;
+        if g.scratch.finer != (on != 0) {
+            g.scratch.finer = on != 0;
+            g.forget_all();
+        }
+    })
 }
 
 /// How many edits of finer cells the sector last made by `make_sector` refused whole: the switch is off, or the
@@ -292,7 +302,13 @@ pub const ROUNDS: u32 = 12;
 // ── Bodies: what has come loose and moves (bodies.rs). One instance, in a worker of its own or the world process. ──
 
 fn moving(i: &mut Instance) -> &mut bodies::Bodies {
-    i.bodies.get_or_insert_with(|| Box::new(bodies::Bodies::new()))
+    // A solver made anew (after `world_forget`) is told what the last was: whether cells may hold finer cells.
+    let finer = i.scratch.finer;
+    i.bodies.get_or_insert_with(|| {
+        let mut b = Box::new(bodies::Bodies::new());
+        b.ground.scratch.finer = finer;
+        b
+    })
 }
 
 /// Tells the solver of edits made by someone else (a blast): the edits written at `edits_room`. `after` is how many of

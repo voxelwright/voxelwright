@@ -26,9 +26,10 @@ const HARD = new Set([11, 12, 15])
  * less of a blade: of its two outer thirds, the one with less steel, glass and lamp. Drawn at its own size up to
  * 1.4 m long, smaller beyond.
  */
-export function inHand(rows: ArrayLike<number>): Extra[] {
+export function inHand(rows: ArrayLike<number>, grain = 1): Extra[] {
   const b = boxOf(rows), size = [b[3] - b[0], b[4] - b[1], b[5] - b[2]], { long, up, side } = ways(size)
-  const scale = Math.min(1, LONG / size[long]), n = Math.max(1, Math.min(BOXES, Math.ceil(size[long] / 2)))
+  // `grain`: how many of the rows' cells lie along one of the world's (#372): a thing of finer cells is drawn at its own size.
+  const scale = Math.min(1, LONG / (size[long] / grain)) / grain, n = Math.max(1, Math.min(BOXES, Math.ceil(size[long] / grain / 2)))
   const slices = Array.from({ length: n }, () => ({ lo: [Infinity, Infinity], hi: [-Infinity, -Infinity], kinds: new Map<number, number>() }))
   // How much of each end is hard: [cells, hard cells] of the low third and of the high third.
   const ends = [[0, 0], [0, 0]]
@@ -47,7 +48,7 @@ export function inHand(rows: ArrayLike<number>): Extra[] {
     if (!s.kinds.size) return
     const kind = [...s.kinds].sort((p, q) => q[1] - p[1])[0][0]
     // A hand's width of it under the fist, the rest standing out of it.
-    out.push({ on: 'gripR', at: [round(((s.lo[0] + s.hi[0]) / 2 - mid[0]) * scale), round(-((s.lo[1] + s.hi[1]) / 2 - mid[1]) * scale), round(1 - (k + 0.5) * each)], size: [round(Math.max(0.2, (s.hi[0] - s.lo[0]) * scale)), round(Math.max(0.2, (s.hi[1] - s.lo[1]) * scale)), round(Math.max(0.2, each))], colour: hex(kind), shiny: (kind & 15) === 12 || (kind & 15) === 11 })
+    out.push({ on: 'gripR', at: [round(((s.lo[0] + s.hi[0]) / 2 - mid[0]) * scale), round(-((s.lo[1] + s.hi[1]) / 2 - mid[1]) * scale), round(1 - (k + 0.5) * each)], size: [round(Math.max(0.2 / grain, (s.hi[0] - s.lo[0]) * scale)), round(Math.max(0.2 / grain, (s.hi[1] - s.lo[1]) * scale)), round(Math.max(0.2 / grain, each))], colour: hex(kind), shiny: (kind & 15) === 12 || (kind & 15) === 11 })
   })
   return out
 }
@@ -64,8 +65,8 @@ export function block(rows: ArrayLike<number>): { kinds: Uint16Array; size: [num
  * hand's reach from the eye, its longest way pointing where they look, what was its up still up. A thing longer
  * than 1.4 m is drawn smaller, as it is in a figure's hand. `pos` is its middle, `cell` how big one of its cells is drawn.
  */
-export function before(view: View, size: readonly [number, number, number]): { pos: [number, number, number]; rot: [number, number, number, number]; cell: number } {
-  const { long, up, side } = ways([...size]), cell = Math.min(1, LONG / size[long]), f = view.forward, u = view.up, r = view.right
+export function before(view: View, size: readonly [number, number, number], grain = 1): { pos: [number, number, number]; rot: [number, number, number, number]; cell: number } {
+  const { long, up, side } = ways([...size]), cell = Math.min(1, LONG / (size[long] / grain)) / grain, f = view.forward, u = view.up, r = view.right
   // Its long way goes to forward and its up to up; its third way goes to whichever of forward x up and its opposite keeps this a turn and not a mirror.
   const even = (long + 1) % 3 === up, cols: number[][] = [[], [], []]
   const fxu = [f[1] * u[2] - f[2] * u[1], f[2] * u[0] - f[0] * u[2], f[0] * u[1] - f[1] * u[0]]

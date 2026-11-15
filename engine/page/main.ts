@@ -96,11 +96,18 @@ async function main() {
     levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
     poolWords: (poolMb << 20) / 4,
     fine: Number(query.get('fine') ?? 0),
+    // Cells may hold finer cells (#259): a made thing may be of cells of 2.5 or 1.25 cm (#372). `?bricks=1` from the
+    // start, `?bricks=0` never; otherwise from the moment this world first holds such a thing, so that a world
+    // without one pays nothing (world.ts `bricksLater`).
     bricks: query.get('bricks') === '1',
     fineSun: query.get('bricks') === '1' && query.get('finesun') !== '0',
+    // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
+    bricksLater: query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     workers: Number(query.get('workers') ?? Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2))),
   })
   const march = await marcher(device, gpu.format, world)
+  // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
+  world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
   const blit = await glow(gpu)
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
@@ -896,19 +903,20 @@ async function main() {
   // What this page's person holds, as they see it themselves (#246, held.ts). With a figure of their own in view
   // (the eye behind), the figure carries it as everyone's does. With the eye in the head, or flying as an eye with
   // no body, the thing itself is drawn before the eye: low and to the right, pointing where they look.
-  let inView: { id: string; piece: Piece; size: [number, number, number] } | null = null
+  let inView: { id: string; piece: Piece; size: [number, number, number]; grain: number } | null = null
   const ownHold = (v: View) => {
     const h = grip.holding
     if (h?.id !== inView?.id || (h && !me.carry)) {
       inView?.piece.destroy()
       inView = null
-      me.carry = h ? carried(h.cells) : undefined
-      if (h) { const b = block(h.cells), born = thing(b.kinds, b.size); born.com = [b.size[0] / 2, b.size[1] / 2, b.size[2] / 2]; inView = { id: h.id, piece: falling.add(born), size: b.size } }
+      // A thing of finer cells (#372) is carried and seen at its own grain.
+      me.carry = h ? carried(h.cells, h.grain ?? 1) : undefined
+      if (h) { const b = block(h.cells), born = thing(b.kinds, b.size); born.com = [b.size[0] / 2, b.size[1] / 2, b.size[2] / 2]; inView = { id: h.id, piece: falling.add(born), size: b.size, grain: h.grain ?? 1 } }
     }
     if (!inView) return
     // Behind one's own figure it is in the figure's hand: the thing before the eye is put out of sight (no cell of it has any size).
     const own = me.feet !== null && me.view === 'behind'
-    Object.assign(inView.piece, own ? { cell: 0 } : beforeEye(v, inView.size))
+    Object.assign(inView.piece, own ? { cell: 0 } : beforeEye(v, inView.size, inView.grain))
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { held: { get shown() { return inView && inView.piece.cell > 0 ? { id: inView.id, pos: inView.piece.pos, rot: inView.piece.rot, cell: inView.piece.cell } : null } } })
 
@@ -983,7 +991,8 @@ async function main() {
   const gate = far && realm ? await portal({
     gpu, far, realms: realm, world, march, pose, began,
     make: () => new World(device, { ...world.options, workers: Number(query.get('portalworkers') ?? world.options.workers) }),
-    marcher: (w) => marcher(device, gpu.format, w, true),
+    // The other world's own marcher: made again, as this one's is, when that world comes to hold finer cells (#372).
+    marcher: async (w) => { const m = await marcher(device, gpu.format, w, true); w.onFine = () => void m.reshade((wgsl) => wgsl); return m },
     people: (m) => people(device, gpu.format, m),
     residents: (look, taken) => query.get('people') === '0' ? () => [] : townsfolk(core, () => look()?.hour ?? 11, () => look()?.rain ?? 0, () => folkClock.now(), [], taken),
     light: (m, l) => { const s = sunOf(l?.hour !== undefined ? l.hour : ownLook.hour); m.light(s.sun, s.day, s.low) },

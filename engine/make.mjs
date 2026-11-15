@@ -8,6 +8,7 @@
 //   --fill 100,120,100 --grow cap|scale   a space to fill, in cells (wide, high, deep), and how a thing past 6.4 m is come by
 //   --facing south|north|east|west   which way its front faces (default: towards --from, or south)
 //   --model opus                     which of your models makes it (sonnet is about twice as fast and plainer)
+//   --program                        the reply is a program that lays the thing in cells as fine as 1.25 cm (minutes, far more detail)
 //   --reply file                     a reply kept in a file stands in for the model (no model is run)
 //   --dry                            make and check it, send nothing
 //   --by name  --journal file  --claude path
@@ -19,14 +20,20 @@ import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BRIEF, SEEN, again, asked } from './make/brief.mjs'
-import { SIZE_MOST, fieldsBrief, read, refused, scaled } from './make/form.mjs'
+import { BRIEF, PROGRAM, SEEN, again, asked } from './make/brief.mjs'
+import { fineRows, grained, standin } from './make/fine.mjs'
+import { ROWS_MOST, SIZE_MOST, THING_ROWS_MOST, fieldsBrief, read, refused, scaled } from './make/form.mjs'
+import { made as programmed, refused as stopped } from './make/program.mjs'
 import { reply as ask } from './make/model.mjs'
 import { at, beside, edit, emptied, gaze, look, middle, people, outOf, send, site, stands, towards } from './make/place.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** How many times a model is asked for one thing: once, and twice more if its reply cannot be used, told why. */
 const TRIES = 3
+/** The most of one sector's cells that rows of finer cells may reach (the core's scratch.rs `FINE_BLOCKS`). */
+const FINE_REACH_MOST = 16_384
+/** How many things of finer cells, bigger than a hand's, may stand within `NEAR` cells of each other (one: #367's bound is one fine thing's worth in view): the next is made in the world's own cells. And how long a thing for a hand is at most, in the world's cells. */
+const FINE_NEAR_MOST = 1, NEAR = 200, HAND_MOST = 16
 /** How far above the land's own top a place may be and still be the ground, in cells. */
 const ON_GROUND = 12
 export const JOURNAL = join(homedir(), '.village', 'engine', 'made.jsonl')
@@ -88,8 +95,8 @@ async function settle(world, core, thing, { spot, eye, wall, centred }, facing, 
   // toes. At the foot of a wall it is where its back goes: it stands out from the wall, towards the asker.
   const out1 = outOf(facing), deep = Math.ceil(thing.size[2] / 2) * (wall ? 1 : -1)
   // A box to fill is filled where it is: the thing's middle at the box's.
-  const placed = await site(world, thing, eye && !centred ? [spot[0] + out1[0] * deep, spot[1], spot[2] + out1[1] * deep] : spot, facing, eye ? out1 : [0, 0], { clear })
-  const count = (rows) => rows.reduce((n, r) => n + r[1] - r[0], 0), whole = count(placed.rows), parts = new Map()
+  const placed = await site(world, thing, eye && !centred ? [spot[0] + out1[0] * deep, spot[1], spot[2] + out1[1] * deep] : spot, facing, eye ? out1 : [0, 0], { clear, most: thing.program ? THING_ROWS_MOST : ROWS_MOST, level: !!thing.fine })
+  const count = (rows) => rows.reduce((n, r) => n + r[1] - r[0], 0), whole = count(placed.rows), parts = new Map(), all = placed.rows
   let rows = placed.rows
   // What falls is taken off from the top down, a third of its height at a time, and asked again: a top too heavy
   // for its post brings the post down with it, and without the top the post stands.
@@ -102,21 +109,58 @@ async function settle(world, core, thing, { spot, eye, wall, centred }, facing, 
     rows = Object.assign(rows.filter((_, i) => !gone.has(i)), { from: rows.from.filter((_, i) => !gone.has(i)) })
     if (round === 15 && (await stands(core, rows)).length) rows = Object.assign([], { from: [] })
   }
-  return { origin: placed.origin, rows, moved: placed.moved, share: count(rows) / whole, fell: [...parts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n]) => `part ${n} (${JSON.stringify(thing.said[n - 1]).slice(0, 60)})`) }
+  // A thing of finer cells is sent as those, where its stand-in stands (make/fine.mjs). Unless it would make a
+  // crowd of them (#367's bound: fine cells in view are paid for in picture size, and that must not add up): where
+  // a thing of finer cells bigger than a hand's already stands within 20 m, this one goes in as its stand-in,
+  // in the world's own cells. What is for a hand (under a metre) is always fine.
+  const big = (size) => Math.max(...size) > HAND_MOST
+  const crowd = thing.fine && big(thing.size) ? (await fetch(`${world}/world/things`).then((r) => r.json()).catch(() => [])).filter((t) => t.grain && !t.held && big(t.size) && Math.hypot(t.at[0] - placed.origin[0], t.at[2] - placed.origin[2]) <= NEAR).length : 0
+  const fine = thing.fine && crowd < FINE_NEAR_MOST ? { grain: thing.fine.grain, rows: fineRows(thing.fine, placed.origin, facing) } : undefined
+  // A sector of the world (6.4 m a side) takes rows of finer cells that reach at most so many of its cells, whole or
+  // not at all (the core's scratch.rs `FINE_BLOCKS`): a thing that would be refused there is not sent.
+  if (fine) {
+    const reach = new Map()
+    for (const r of rows) for (let sx = r[0] >> 6; sx <= (r[1] - 1) >> 6; sx++) { const key = `${sx},${r[2] >> 6},${r[3] >> 6}`; reach.set(key, (reach.get(key) ?? 0) + Math.min(r[1], (sx + 1) << 6) - Math.max(r[0], sx << 6)) }
+    const most = Math.max(...reach.values())
+    if (most > FINE_REACH_MOST) throw Object.assign(new Error(`it is too solid for cells so fine: ${most} of the world's 10 cm cells in one box 6.4 m a side would hold finer cells, and the most is ${FINE_REACH_MOST}. Build it as a shell two or three cells thick and hollow inside, or thinner, or with a bigger cell`), { form: true })
+  }
+  if (fine && fine.rows.length > THING_ROWS_MOST) throw Object.assign(new Error(`it comes to ${fine.rows.length} runs and the most is ${THING_ROWS_MOST}: fewer changes of colour from cell to cell along a row`), { form: true })
+  // A thing of finer cells is sent whole or not at all, so it is asked after whole: `rows` is all of its stand-in,
+  // and `share` still says how much of it the standing rule would let stand.
+  return { origin: placed.origin, rows: fine ? all : rows, fine, coarse: !!thing.fine && !fine, moved: placed.moved, share: count(rows) / whole, fell: [...parts].sort((a, b) => b[1] - a[1]).slice(0, 5).map(([n]) => (thing.said[n - 1] ? `part ${n} (${JSON.stringify(thing.said[n - 1]).slice(0, 60)})` : 'what is highest and reaches furthest out')) }
 }
 
 /** Sends a thing that stands at its place, written down before and after. `clear`: the cells of its box are emptied first. */
 async function deliver({ out, thing, placed, world, by, journal, wish, facing, clear, say }) {
-  Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.filled, crumbs: thing.crumbs, rows: placed.rows.length, origin: placed.origin, moved: placed.moved })
+  // What goes: the rows it stands as, or for a thing of finer cells those (and then only if all of its stand-in stands: it is sent whole).
+  const fine = placed.fine
+  Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (fine?.rows ?? placed.rows).length, grain: fine?.grain, coarse: placed.coarse || undefined, origin: placed.origin, moved: placed.moved })
+  if (placed.coarse) say('a thing of finer cells stands near: this one is made in the world\'s own cells', { stage: 'note', why: 'made plainer: a fine thing stands near' })
   // It is written down before it is sent, and what came of it after: a send that was cut short is not made again blindly.
   const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
   say('sending it', { stage: 'sending', id, name: thing.name, at: placed.origin, size: thing.size, facing })
   if (clear) for (const rows of emptied(placed.rows)) await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(rows), release: beside(placed.rows) }) })
-  await note(journal, { id, state: 'sending', world, by, wish, name: thing.name, model: out.model, facing, origin: placed.origin, rows: placed.rows })
+  await note(journal, { id, state: 'sending', world, by, wish, name: thing.name, model: out.model, facing, origin: placed.origin, rows: fine?.rows ?? placed.rows, grain: fine?.grain, stood: fine ? placed.rows : undefined })
   // Its record goes on the same ask as its cells (#243): the world has neither without the other, and never two of one id.
-  const sent = await send(world, placed.rows, by, { thing: { id, name: thing.name, wish, at: placed.origin, size: thing.size, facing, ...thing.record } })
+  const sent = await send(world, placed.rows, by, { fine, settle: fine ? 4000 : 1500, thing: { id, name: thing.name, wish, at: placed.origin, size: thing.size, facing, ...thing.record } })
+  // A thing of finer cells that the world took only part of, or that came apart, is taken out again: no slice of it and no record are left behind.
+  if (fine && ['not there', 'fell'].includes(sent.state)) {
+    await send(world, placed.rows, by, { kind: 0, gone: id, fine, wait: 3000, settle: 0 }).catch(() => {})
+    await note(journal, { id, state: 'undone', why: `taken out again: ${sent.why}` })
+  }
   await note(journal, { id, state: sent.state, why: sent.why })
   return { ...out, id, ...sent, look: middle(placed.rows) }
+}
+
+/** Whether a made thing is still as it was put: in the world, where it was stood, in nobody's hand. */
+async function asPut(world, { id, at: was }) {
+  try { const t = (await (await fetch(`${world}/world/things`)).json()).find((t) => t.id === id); return !!t && !t.held && t.at.every((v, a) => v === was[a]) } catch { return false }
+}
+
+/** A reply that is a program, as a thing the placing takes: its stand-in in the world's cells, with the finer thing under `fine` if it is finer. */
+async function built(reply) {
+  const thing = grained(await programmed(reply)), stand = standin(thing)
+  return { ...stand, program: true, fine: thing.grain > 1 ? thing : undefined }
 }
 
 /**
@@ -131,14 +175,17 @@ async function deliver({ out, thing, placed, world, by, journal, wish, facing, c
  * place that is taken means the nearest that is not, out to eight metres. `held`: it is made and no place near will
  * take it; `hold` is the thing, for `put` to stand where the asker next says, or there with the place cleared.
  * `refused` is left for a model that could not be run, replies nothing can be made of, and no ground within reach.
+ * `kept`: made in place of a thing that is no longer as it was put (`instead`): it has a reply to keep, and stands nowhere.
  *
  * `say(words, stage)` is told how it goes: { stage: 'place', at, facing }, { stage: 'asking', try }, { stage: 'shaped', name, size, facing }, { stage: 'refused', why }, { stage: 'sending', id, name, at, size, facing }.
  * `model` is how a reply is got ({ system, prompt } to { text, model, ms, cost }): the real binary unless another is given.
+ * `tries`: how many times it is asked at most (a reply that is kept is the same however often it is asked for: once).
  */
-export async function make({ wish = '', picture, page, world, where, fill, grow = 'cap', facing, by = 'maker', journal = JOURNAL, model = (q) => ask(q), dry = false, core = join(here, 'page', 'core.wasm'), say = () => {} }) {
+export async function make({ wish = '', picture, page, world, where, fill, grow = 'cap', facing, by = 'maker', journal = JOURNAL, model = (q) => ask(q), how = 'parts', instead, tries = TRIES, dry = false, core = join(here, 'page', 'core.wasm'), say = () => {} }) {
   wish = String(wish).trim().slice(0, 400)
   if (!wish && !picture && !page) return { state: 'refused', why: 'say what to make' }
-  const found = await ground(world, where)
+  // In place of a thing that stands (`instead`), it goes where that one stands: on the cell under its lowest.
+  const found = instead?.id ? { spot: [instead.at[0], instead.at[1] - 1, instead.at[2]], eye: null, wall: false } : await ground(world, where)
   if (found.why) return { state: 'refused', why: found.why }
   const { spot, eye } = found
   facing ??= eye ? towards(spot, eye) : 'south'
@@ -156,10 +203,13 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
   const sized = !fill ? '' : times > 1
     ? `\n\nIt will be made ${times} times as big after you build it, to fill a space ${(fill[0] / 10).toFixed(1)} m wide, ${(fill[1] / 10).toFixed(1)} m high and ${(fill[2] / 10).toFixed(1)} m deep. Build a model of it at one part in ${times}: about ${Math.floor(fill[0] / times)} cells wide, ${Math.floor(fill[1] / times)} high and ${Math.floor(fill[2] / times)} deep, in its own proportions. Every cell of yours becomes a block ${times} cells a side, so the sizes of things given above are ${times} times too big for it: a person would be ${Math.round(17 / times)} cells tall beside it.`
     : `\n\nIt is to fill a space ${Math.min(fill[0], FILL_MOST)} cells wide, ${Math.min(fill[1], FILL_MOST)} high and ${Math.min(fill[2], FILL_MOST)} deep: build it that big, in its own proportions (do not stretch it to fit).`
-  const first = asked(wish, page, picture) + sized, system = BRIEF.replace(`Size is at most ${SIZE_MOST.join(' by ')}`, `Size is at most ${most.join(' by ')}`) + fieldsBrief() + (picture || page ? SEEN : ''), pictures = picture ? [picture] : []
+  // `how: 'program'` (#372): the reply is a program that lays the thing in cells of its own choosing (make/program.mjs),
+  // run in a box; what it built is read as any reply is. It is given the room a program has, whatever `fill` says.
+  const program = how === 'program'
+  const first = asked(wish, page, picture) + (program ? '' : sized), system = program ? PROGRAM + (picture || page ? SEEN.replace('in the form', 'as a program') : '') : BRIEF.replace(`Size is at most ${SIZE_MOST.join(' by ')}`, `Size is at most ${most.join(' by ')}`) + fieldsBrief() + (picture || page ? SEEN : ''), pictures = picture ? [picture] : []
   /** The best of what the replies gave so far: the thing, where it stands, and how much of what was described is left. */
   let prompt = first, best = null, why = ''
-  for (; out.tries < TRIES;) {
+  for (; out.tries < tries;) {
     out.tries++
     say(`asking the model${out.tries > 1 ? ' again' : ''}`, { stage: 'asking', try: out.tries })
     let got
@@ -167,7 +217,16 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
     out.ms += got.ms; out.cost += got.cost ?? 0; out.model = got.model; out.reply = got.text
     why = ''
     try {
-      const thing = scaled(read(got.text, { lenient: true, most }), times)
+      const thing = program ? await built(got.text) : scaled(read(got.text, { lenient: true, most }), times)
+      // Made in place of a thing that stands (`instead`: { id, at }, make/best.mjs): that one is taken out now, when
+      // this one has a shape, if it is still as it was put; if it is not (held, moved, gone), this one is made for the
+      // keeping only and stood nowhere.
+      if (instead && !out.swapped) {
+        if (!instead.id || !(await asPut(world, instead))) return { ...out, state: 'kept', name: thing.name, size: thing.size }
+        const gone = await undo({ world, id: instead.id, by, journal })
+        if (gone.state !== 'undone') return { ...out, state: 'kept', name: thing.name, size: thing.size, why: gone.why }
+        out.swapped = true
+      }
       // Its size is known from here, a second or two before it is placed and sent: what covers the wait closes round it.
       say('it has a shape', { stage: 'shaped', name: thing.name, size: thing.size, facing })
       let placed = null
@@ -182,13 +241,13 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
       if (!placed.rows.length) why = 'none of it would stand: nothing of it that reaches the ground carries the rest'
       else if (share < ENOUGH) why = [...thing.left.slice(0, 6), placed.fell.length ? `these would come loose and fall: ${placed.fell.join('; ')}. A join carries only so much: let wood or steel that reaches the ground carry what hangs or reaches out, make what carries thicker, and keep the weight over the feet` : ''].filter(Boolean).join('. ')
     } catch (e) {
-      if (!refused(e) && !e.form) throw e
+      if (!refused(e) && !stopped(e) && !e.form) throw e
       why = e.message
     }
     if (!why) break
     say(`asked again: ${why}`, { stage: 'refused', why })
     out.refusals = [...(out.refusals ?? []), why]
-    if (out.tries < TRIES) prompt = again(first, got.text.slice(0, 20_000), why)
+    if (out.tries < tries) prompt = program ? again(first, got.text.slice(0, 80_000), why).replace('in the same form', 'as a program') : again(first, got.text.slice(0, 20_000), why)
   }
   if (!best) return { ...out, state: 'refused', why }
   const { thing, placed } = best
@@ -196,7 +255,7 @@ export async function make({ wish = '', picture, page, world, where, fill, grow 
   out.reply = best.reply
   if (best.share < 1) out.left = Math.round((1 - best.share) * 100)
   if (!placed) return { ...out, state: 'held', why: best.blocked, name: thing.name, size: thing.size, hold: { thing, facing, wish, model: out.model } }
-  if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.filled, crumbs: thing.crumbs, rows: placed.rows.length, origin: placed.origin, moved: placed.moved }); return { ...out, state: 'dry', made: placed.rows } }
+  if (dry) { Object.assign(out, { name: thing.name, size: thing.size, parts: thing.parts, cells: thing.fine?.filled ?? thing.filled, crumbs: thing.crumbs, rows: (placed.fine?.rows ?? placed.rows).length, grain: placed.fine?.grain, origin: placed.origin, moved: placed.moved }); return { ...out, state: 'dry', made: placed.rows, fine: placed.fine } }
   return deliver({ out, thing, placed, world, by, journal, wish, facing, say })
 }
 
@@ -232,10 +291,12 @@ export async function undo({ world, id, by = 'maker', journal = JOURNAL }) {
   for (const l of lines) last.set(l.id, { ...last.get(l.id), ...l })
   const thing = [...last.values()].reverse().find((t) => t.world === world && t.rows && (id ? t.id === id : ['there', 'fell', 'unknown', 'sending'].includes(t.state)))
   if (!thing) return { state: 'refused', why: 'nothing made in that world is written down' }
-  const sent = await send(world, thing.rows, by, { kind: 0 })
+  // Its record goes with its cells, on the one ask: a thing of more rows than a plain edit may be is taken out as it was put in.
+  const out = (gone) => (thing.grain ? send(world, thing.stood, by, { kind: 0, gone, fine: { grain: thing.grain, rows: thing.rows } }) : send(world, thing.rows, by, { kind: 0, gone }))
+  let sent = await out(thing.id)
+  // (A thing whose record is gone already, or that was made before the world kept records: its cells alone.)
+  if (sent.state === 'not there' && /\(409\)/.test(sent.why ?? '')) sent = await out(undefined)
   const state = sent.state === 'there' ? 'undone' : sent.state
-  // Its record goes with it. (A thing made before the world kept records has none: that refusal is not a failure.)
-  if (state === 'undone') await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, gone: thing.id }) }).catch(() => {})
   await note(journal, { id: thing.id, state, why: sent.why })
   return { id: thing.id, name: thing.name, state, why: sent.why }
 }
@@ -261,8 +322,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
   if (!wish || !where) { console.error('node make.mjs "what to make" --world URL (--me | --at x,z | --from x,y,z --toward dx,dy,dz)'); process.exit(2) }
   const canned = flag('reply')
-  const model = canned ? async () => ({ text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => ask({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const r = await make({ wish, world, where, fill, grow: flag('grow') ?? 'cap', facing: flag('facing'), by, journal, model, dry: has('dry'), say: (s) => console.log(`  ${s}`) })
+  const model = canned ? async () => ({ text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => ask({ ...q, model: flag('model') ?? 'opus', effort: flag('effort'), binary: flag('claude') ?? 'claude', limit: has('program') ? 1_200_000 : undefined })
+  const r = await make({ wish, world, where, fill, grow: flag('grow') ?? 'cap', facing: flag('facing'), by, journal, model, how: has('program') ? 'program' : 'parts', dry: has('dry'), say: (s) => console.log(`  ${s}`) })
   const what = r.origin ? `${r.name}: ${r.cells} cells in ${r.rows} runs, ${r.size.join(' x ')}, facing ${r.facing} at ${r.origin.join(', ')}` : ''
   if (r.left) console.log(`  about ${r.left} in a hundred of what the model described could not be used and was left out`)
   if (r.moved) console.log(`  the place itself was taken: it stands ${(r.moved / 10).toFixed(1)} m from it`)

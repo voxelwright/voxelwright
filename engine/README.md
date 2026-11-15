@@ -172,6 +172,48 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
 - `node test/helper.mjs` checks who the helper answers, which links it will fetch, asks from the real page's bar in
   Chrome with a made-up picture pasted and dropped, the record across a restart, and that keys have one owner: **a kept reply stands in for the model.**
 
+### Fidelity: a thing as a program, in cells as fine as 1.25 cm (#372)
+
+```sh
+node make.mjs "a pelican riding a bicycle" --world http://127.0.0.1:5741 --at 700,4040 --program --model claude-fable-5-2
+node helper.mjs --world http://127.0.0.1:5741      # the bar: --first sonnet makes at once, --best claude-fable-5-2 makes it better behind that (--best none: never)
+node test/fine.mjs                                 # the check: kept programs stand in for the model
+```
+
+- **The reply is a program** (`make/program.mjs`, the brief is `PROGRAM` in `make/brief.mjs`): JavaScript that lays
+  the thing with `put`, `box`, `ball`, `tube` and `text` in a grid of up to 256 cells a side, at true size, in a
+  cell it chooses: 1.25 cm for what is held, 2.5 cm for what a person stands beside up to a car, 10 cm for
+  everything bigger (a house front at 10 cm has its porch, sills and railings as shape, and the engine's own
+  surfaces draw its bricks). A sword is 80 cells long at 1.25 cm; a car 168 at 2.5 cm. It is run in QuickJS in a thread of its own with nothing bound into it, a memory with a maximum
+  and 20 s; what comes out is one string, read as any reply is (named materials and colours, never a kind number).
+- **Why**: a list of parts spends 20 to 35 cells across a thing whatever a cell is (#254). On ten wishes that are
+  also MineBench gallery builds, programs by Fable 5.2 were picked by a blind judge over the gallery's covers on
+  nine (#372 has the sheet). A program takes Sonnet 23 to 67 s and Fable one to five minutes.
+- **At once, then better** (`make/best.mjs`, what the helper does for a wish with no space to fill): what is kept
+  for the wish, or a program by the quick model, stands first; the best model's then takes its place where it
+  stands, unless someone holds the first or it has been moved, and is what is kept (`grade: 'best'`). Nine things
+  made once by the best model come with the engine in `make/kept/` (a sword and a pistol for the hand, a sword, a
+  car, a house front, a chair, a tree, a street lamp, a market stall) and are found like anything kept. Top effort
+  was tried and is not worth it: 18 to 20 minutes and $4 a thing for no more detail.
+- **Finer cells in the world** (#259): a thing of 2.5 or 1.25 cm cells is one edit of rows of those cells (tags 3
+  and 4 of `page/edits.ts`), which `serve.mjs` now takes; a made thing's cells may be 240,000 rows. Its record says
+  its `grain` (4 or 8). To the world's own process a cell that holds finer cells is a cell of the kind most of them
+  are: it is stood on, walked into, looked at, and breaks at 10 cm. Picked up and put down it is the same cells
+  (`rules/holding.mjs`); thrown, it is a body of 10 cm cells.
+- **A page looks into finer cells from the moment its world holds any** (`?bricks=1` from the start, `?bricks=0`
+  never): a world with none pays nothing. A fine thing that fills a good part of the view costs 10 to 16% of the
+  frame (two of them 19 to 23%), which the page meets by drawing fewer pixels; shadows at the thing's own grain
+  cost half as much again and are for `?finesun=1`. A house front at 10 cm costs nothing. Numbers: #367.
+- **Fine things do not crowd** (agreed on #367): where a thing of finer cells bigger than a hand's (1.6 m) stands
+  within 20 m, the next is made as its stand-in, in the world's own cells: of a row of cars the first is fine and
+  the rest are the same cars at 10 cm. What is held does not count.
+- **Taken out whole**: a thing's cells and its record go on one ask (`{gone: id, release: [x, y, z]}`): the world
+  empties the cells it keeps for the thing, never rows the asker sends, so a thing of any size can be undone and
+  replaced by its better. Not while it is held or alive. A new thing's cells must lie where its record says it stands.
+- **What the maker will not send**: a fine thing that reaches more than 16,384 of the world's cells in one sector
+  (the core would refuse it there: build it as a shell), and one the world took only part of or that came apart is
+  taken out again. The brief says both, and how the world holds things up (at 10 cm, by the commonest material).
+
 ## Sound (#247)
 
 Everything heard is computed as it plays, in the page, from patches: no recording exists. A patch is strict data

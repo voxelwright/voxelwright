@@ -25,6 +25,8 @@ export interface WorldOptions {
   bricks?: boolean
   /** With `bricks`, unless `finesun=0`: the sun's maps say where a cell of finer cells is, so that its shadow is asked of the world at its own grain (march.ts `sunlitText`). */
   fineSun?: boolean
+  /** Not yet `bricks`, and to become so by itself when the first edit of finer cells comes (#372): `fineSun` is then set to this. A world with nothing finer in it pays nothing for the switch. */
+  bricksLater?: { fineSun: boolean }
   /** Edits, one after another, as one edit of rows that leaves the column from x0, z0 to x1, z1 the same in the copy `lod` times coarser when put after their balls and blasts (the core's `merge_rows`). */
   merge(edits: readonly Edit[], lod: number, x0: number, x1: number, z0: number, z1: number): Edit
 }
@@ -147,6 +149,17 @@ export interface WorldStats {
   boxes: { made: number; ms: number; words: number }[]
 }
 
+/** Whether an edit's numbers hold rows of finer cells (tags 3 and 4) anywhere among them: one edit may be balls and rows one after another (edits.ts). */
+function holdsFiner(words: Int32Array): boolean {
+  for (let i = 0; i < words.length;) {
+    if (words[i] === 3 || words[i] === 4) return true
+    if (words[i] === 0) i += 6
+    else if (i + 1 < words.length && words[i + 1] >= 0) i += 2 + words[i + 1] * 5
+    else return false
+  }
+  return false
+}
+
 export class World {
   levels: Level[]
   pool: Pool
@@ -188,8 +201,19 @@ export class World {
 
   /** Something was done to the world. Every sector it reaches is made again; the old one is shown until then. */
   edit(e: Edit) {
+    // The first edit of finer cells (tags 3 and 4) turns the switch on, before the sectors it reaches are made again with it.
+    if (holdsFiner(e.words)) this.finer()
     this.edits.push(e)
     this.touch(e, true)
+  }
+  /** Told when this world first holds finer cells and has turned `bricks` on for itself: whoever draws it makes its shader again. */
+  onFine: (() => void) | null = null
+  /** This world holds finer cells: the switch goes on, if it was left to (`bricksLater`) and is not yet. */
+  private finer() {
+    const later = this.options.bricksLater
+    if (!later || this.options.bricks) return
+    this.options.bricks = true; this.options.fineSun = later.fineSun
+    this.onFine?.()
   }
 
   /**
@@ -215,6 +239,8 @@ export class World {
   trade(other: World) {
     for (const key of ['levels', 'pool', 'poolBuffer', 'topBuffer', 'edits', 'reach'] as const) { const mine = this[key]; (this as Record<string, unknown>)[key] = other[key]; (other as unknown as Record<string, unknown>)[key] = mine }
     for (const world of [this, other]) {
+      // What each now holds may be finer than it has looked into yet.
+      if (world.edits.some((e) => holdsFiner(e.words))) world.finer()
       for (const level of world.levels) {
         for (let i = 0; i < level.state.length; i++) {
           if (level.state[i] === FLYING || level.state[i] === QUEUED) level.state[i] = MISSING

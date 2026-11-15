@@ -280,6 +280,12 @@ impl Ground {
         }
     }
 
+    /// Every sector made is forgotten: asked for again, each is made from the edits as they are now read.
+    pub(crate) fn forget_all(&mut self) {
+        self.forget(([i32::MIN; 3], [i32::MAX; 3]));
+        self.kept.clear();
+    }
+
     fn forget(&mut self, (lo, hi): ([i32; 3], [i32; 3])) {
         let s = SIDE as i32;
         let spare = &mut self.spare;

@@ -80,6 +80,7 @@ const checks = [
   ['portal', 'node', ['test/portal.mjs'], true],
   ['wheel', 'node', ['test/wheel.mjs'], true],
   ['make', 'node', ['test/make.mjs'], false],
+  ['fine', 'node', ['test/fine.mjs'], true],
   ['helper', 'node', ['test/helper.mjs'], true],
   ['rulewrite', 'node', ['test/rulewrite.mjs'], false],
   ['sound', 'node', ['test/sound.mjs'], false],

@@ -26,8 +26,10 @@ export interface Thing {
   facing: 'south' | 'north' | 'east' | 'west'
   /** Who asked for it: the name they go by in the world. */
   by: string
-  /** Its cells as it was made, in the world: rows of five, [x0, x1, y, z, kind], x1 not filled. */
+  /** Its cells as it was made, in the world: rows of five, [x0, x1, y, z, kind], x1 not filled. Counted in its own cells if it has a `grain`. */
   cells: Int32Array
+  /** How many of its cells lie along one of the world's, if they are finer (#372): 4 or 8. Its rows then count those; its box is still in the world's. */
+  grain?: 4 | 8
   /** The box that holds its cells: [x0, y0, z0, x1, y1, z1], the high corner not filled. */
   box: [number, number, number, number, number, number]
   /** Who holds it, while someone does (rules/holding.mjs): its cells are then in nobody's world, and it is not found by a place. */
@@ -61,7 +63,9 @@ export function things(): Things {
         if (t.held) continue
         const b = t.box
         if (x < b[0] || y < b[1] || z < b[2] || x >= b[3] || y >= b[4] || z >= b[5]) continue
-        for (let i = 0; i < t.cells.length; i += 5) if (t.cells[i + 2] === y && t.cells[i + 3] === z && x >= t.cells[i] && x < t.cells[i + 1]) return t
+        // A thing of finer cells is there if any of them lies in that cell of the world.
+        const g = t.grain ?? 1
+        for (let i = 0; i < t.cells.length; i += 5) if (Math.floor(t.cells[i + 2] / g) === y && Math.floor(t.cells[i + 3] / g) === z && x >= Math.floor(t.cells[i] / g) && x <= Math.floor((t.cells[i + 1] - 1) / g)) return t
       }
       return null
     },
@@ -72,12 +76,12 @@ export function things(): Things {
       if (known) {
         Object.assign(known, echo.thing)
         // Put down, its cells are the rows it was put down as (rules/holding.mjs).
-        if ((echo as { put?: unknown }).put !== undefined && echo.edit && echo.box && echo.edit[0] === 1) { known.cells = Int32Array.from(echo.edit.slice(2)); known.box = echo.box }
+        if ((echo as { put?: unknown }).put !== undefined && echo.edit && echo.box && [1, 3, 4].includes(echo.edit[0])) { known.cells = Int32Array.from(echo.edit.slice(2)); known.box = echo.box; if (echo.edit[0] === 1) delete known.grain; else known.grain = echo.edit[0] === 3 ? 4 : 8 }
         tell('changed', known, live)
         return
       }
       // A new thing comes with the edit that is its cells: rows, after the two numbers that say so.
-      if (!echo.edit || !echo.box || echo.edit[0] !== 1) return
+      if (!echo.edit || !echo.box || ![1, 3, 4].includes(echo.edit[0])) return
       const thing = { ...echo.thing, cells: Int32Array.from(echo.edit.slice(2)), box: echo.box } as Thing
       all.set(thing.id, thing)
       tell('made', thing, live)

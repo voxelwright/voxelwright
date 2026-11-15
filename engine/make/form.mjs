@@ -27,6 +27,8 @@ export const SIZE_MOST = [64, 80, 64], PARTS_MOST = 240
 /** How many cells that touch nothing may be left out of a thing without asking for it again. */
 const CRUMBS = 12
 export const ROWS_MOST = Math.floor((65536 - 2) / 5)
+/** The most rows the cells of a thing made by a program may be (serve.mjs `THING_MOST`). */
+export const THING_ROWS_MOST = 240_000
 
 /** A colour of the palette by name: "own", "white", "black", "grey:0" to "grey:14" (white to black), or "hue:tone" (24 hues, ten tones). */
 export function colour(name) {
@@ -41,7 +43,8 @@ export function colour(name) {
   return hue <= 23 && tone <= 9 ? 16 + hue * 10 + tone : -1
 }
 
-const FONT = {
+/** Letters 5 cells wide and 7 high, each row from the top, for `text`. */
+export const FONT = {
   A: '01110 10001 10001 11111 10001 10001 10001', B: '11110 10001 10001 11110 10001 10001 11110', C: '01110 10001 10000 10000 10000 10001 01110',
   D: '11110 10001 10001 10001 10001 10001 11110', E: '11111 10000 10000 11110 10000 10000 11111', F: '11111 10000 10000 11110 10000 10000 10000',
   G: '01110 10001 10000 10111 10001 10001 01111', H: '10001 10001 10001 11111 10001 10001 10001', I: '11111 00100 00100 00100 00100 00100 11111',

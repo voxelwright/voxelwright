@@ -270,6 +270,8 @@ async function pluginsLook() {
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
 /** An edit is at most this many whole numbers: 13,107 rows. It was 16,384 until one part of a house wall that runs along z (6,473 rows, #246) had to be refused; at 65,536 a wall of 13,000 rows is in the world a quarter of a second after it is asked (test/helper.mjs). */
 const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
+/** The most whole numbers the cells of one made thing may be: 240,000 rows (a house front of 5 cm cells whose rows run across its boards was 177,000). And the most cells those rows may fill: a grid 256 a side, the most a program builds in (make/program.mjs). */
+const THING_MOST = 2 + 5 * 240_000, THING_CELLS_MOST = 256 ** 3
 /** What bodies may ask a second, all told: around takes the world's one thread 30 ms (measured), so this is at most six tenths of it. */
 const BODIES_A_SECOND = 20
 /** What riders may tell living things a second, all told: each says it four times a second and when a key changes. */
@@ -404,7 +406,9 @@ function allowed(body) {
   }
   if (body.edit) {
     const e = body.edit
-    if (!Array.isArray(e) || e.length > EDIT_MOST || !e.every((v) => whole(v)) || !place(body.release)) return `an edit is at most ${EDIT_MOST} whole numbers, with a place to ask what it left unheld`
+    // The cells of a made thing may be more than any other edit: a thing made as a program is tens of thousands of rows (#372).
+    const most = body.thing === undefined ? EDIT_MOST : THING_MOST
+    if (!Array.isArray(e) || e.length > most || !e.every((v) => whole(v)) || !place(body.release)) return `an edit is at most ${most} whole numbers, with a place to ask what it left unheld`
     // Its box is worked out here, not taken on trust: pages make the town again by it.
     const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], grow = (lo, hi) => { for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], lo[a]); box[a + 3] = Math.max(box[a + 3], hi[a]) } }
     for (let i = 0; i < e.length;) {
@@ -412,23 +416,44 @@ function allowed(body) {
         const r = e[i + 5] === 0 ? Math.ceil((e[i + 4] * 44) / 16) + 1 : e[i + 4]
         grow([e[i + 1] - r, e[i + 2] - r, e[i + 3] - r], [e[i + 1] + r + 1, e[i + 2] + r + 1, e[i + 3] + r + 1])
         i += 6
-      } else if (e[i] === 1 && e[i + 1] >= 1 && i + 2 + e[i + 1] * 5 <= e.length) {
+      } else if ((e[i] === 1 || e[i] === 3 || e[i] === 4) && e[i + 1] >= 1 && i + 2 + e[i + 1] * 5 <= e.length) {
+        // Rows of the world's cells (1), or of cells 4 (3) or 8 (4) to one of the world's along each way (#259): those
+        // count the finer cells, and their box is worked out in the world's.
+        const per = e[i] === 1 ? 1 : e[i] === 3 ? 4 : 8
         for (let k = i + 2; k < i + 2 + e[i + 1] * 5; k += 5) {
           if (!(e[k] < e[k + 1] && e[k + 1] - e[k] <= 4096 && e[k + 4] >= 0 && e[k + 4] <= 65535)) return 'a row of an edit runs from one cell to a higher one, of a kind'
-          grow([e[k], e[k + 2], e[k + 3]], [e[k + 1], e[k + 2] + 1, e[k + 3] + 1])
+          grow([Math.floor(e[k] / per), Math.floor(e[k + 2] / per), Math.floor(e[k + 3] / per)], [Math.floor((e[k + 1] - 1) / per) + 1, Math.floor(e[k + 2] / per) + 1, Math.floor(e[k + 3] / per) + 1])
         }
         i += 2 + e[i + 1] * 5
       } else return 'an edit is balls and rows (page/edits.ts)'
     }
     if (!e.length) return 'an edit of nothing'
     if (body.thing === undefined) return { by, edit: e, box, release: body.release }
+    // From here the edit is a made thing's cells, put in or taken out: one list of rows, bounded in how much it is,
+    // since whoever handles a thing (a hand, a page, the core's sectors) goes through its cells.
+    if (![1, 3, 4].includes(e[0]) || 2 + e[1] * 5 !== e.length) return 'the cells of a thing are one list of rows'
+    let cells = 0
+    for (let k = 2; k < e.length; k += 5) cells += e[k + 1] - e[k]
+    if (cells > THING_CELLS_MOST) return `a thing is at most ${THING_CELLS_MOST} cells`
     // A thing's cells are rows alone, and its record goes with them.
-    if (e[0] !== 1 || 2 + e[1] * 5 !== e.length) return 'the cells of a thing are one list of rows'
     const thing = record(body.thing, by, true)
-    return typeof thing === 'string' ? thing : { by, edit: e, box, release: body.release, thing }
+    if (typeof thing === 'string') return thing
+    // How many of its cells lie along one of the world's: said by the rows themselves, never by the asker.
+    if (e[0] !== 1) thing.grain = e[0] === 3 ? 4 : 8
+    // What brings a thing to life reads its cells as the world's own (the living lane): not yet for finer ones, and
+    // it goes through every cell of every row, so a thing that is to live is held to an edit's usual size.
+    if (thing.grain && thing.controls !== undefined) return 'a thing of finer cells cannot be given controls yet'
+    if (thing.controls !== undefined && e.length > EDIT_MOST) return `a thing with controls is at most ${EDIT_MOST} whole numbers`
+    // Its cells are where its record says it stands: the room a made thing is given is for the thing, not for
+    // rows anywhere in the world. (As wide as its longest side either way, since it may face any way; its feet may be carried down.)
+    const wide = Math.max(thing.size[0], thing.size[2]) + 2
+    if (box[0] < thing.at[0] - wide || box[3] > thing.at[0] + wide + 1 || box[2] < thing.at[2] - wide || box[5] > thing.at[2] + wide + 1 || box[1] < thing.at[1] - 64 || box[4] > thing.at[1] + thing.size[1] + 2) return 'the cells of a thing lie where its record says it stands: within its size of its place'
+    return { by, edit: e, box, release: body.release, thing }
   }
   if (body.thing !== undefined) { const thing = record(body.thing, by, false); return typeof thing === 'string' ? thing : { by, thing } }
-  if (body.gone !== undefined) return typeof body.gone === 'string' && ID.test(body.gone) ? { by, gone: body.gone } : 'what is gone is a thing, by its id'
+  // A thing gone: its record alone, or (with a place to ask what that leaves unheld) its cells with it, which the
+  // server empties from what it keeps of the thing, never from rows the asker sends (#372).
+  if (body.gone !== undefined) return typeof body.gone === 'string' && ID.test(body.gone) && (body.release === undefined || place(body.release)) ? { by, gone: body.gone, ...(body.release ? { release: body.release } : {}) } : 'what is gone is a thing, by its id, and to take its cells with it a place to ask what that leaves unheld'
   if (body.rule !== undefined) { const rule = ruled(body.rule, by); return typeof rule === 'string' ? rule : { by, rule } }
   if (body.unrule !== undefined) return typeof body.unrule === 'string' && RULE_ID.test(body.unrule) ? { by, unrule: body.unrule } : 'what is taken out is a rule, by its id'
   if (body.realm !== undefined) { const realm = recorded(body.realm); return typeof realm === 'string' ? realm : { by, realm } }
@@ -470,7 +495,7 @@ function open(of) {
     else if (ask.realm) { realm = of.record = changed(realm, ask.realm); called() }
     // Picked up, a thing's record says who holds it; put down, where it now stands, and its cells are the rows of that ask.
     else if (ask.hold !== undefined) { const t = things.get(ask.hold); if (t) t.record.held = ask.by }
-    else if (ask.put !== undefined) { const t = things.get(ask.put); if (t) { delete t.record.held; if (ask.thing?.at) t.record.at = ask.thing.at; t.at = at } }
+    else if (ask.put !== undefined) { const t = things.get(ask.put); if (t) { delete t.record.held; if (ask.thing?.at) t.record.at = ask.thing.at; t.at = at; if (ask.edit?.[0] === 3 || ask.edit?.[0] === 4) t.record.grain = ask.edit[0] === 3 ? 4 : 8; else delete t.record.grain } }
     else if (ask.gone) things.delete(ask.gone)
     else if (ask.thing && ask.edit) { things.set(ask.thing.id, { record: ask.thing, at }); coming.delete(ask.thing.id) }
     else if (ask.thing && things.has(ask.thing.id)) Object.assign(things.get(ask.thing.id).record, ask.thing)
@@ -491,7 +516,7 @@ function open(of) {
   // Things that lived (#245: a record whose controls have a motor) get up again where they last slept: bodies are
   // not kept, and the edit that took their cells out is.
   // A thing that was in someone's hand when the world stopped is in nobody's now: it is put down where it was taken from.
-  for (const t of things.values()) if (t.record.held) thread.postMessage({ settle: { id: t.record.id, rows: rowsOf(t), at: t.record.at } })
+  for (const t of things.values()) if (t.record.held) thread.postMessage({ settle: { id: t.record.id, rows: rowsOf(t), at: t.record.at, grain: t.record.grain } })
   for (const t of things.values()) if (t.record.controls?.motor) thread.postMessage({ revive: { id: t.record.id, name: t.record.name, controls: t.record.controls, rows: rowsOf(t) } })
   // The rules the world had are put in again, each as it was last put: their actors come back when each starts.
   let peopleKept = {}
@@ -536,7 +561,7 @@ function open(of) {
     if (m.think) return minds.think(m.think)
     if (m.echo) { note(m.echo, log.length); return keep(ECHO, Buffer.from(JSON.stringify(m.echo))) }
     // A rule gives someone a thing or takes it from them: the cells are here, so the ask starts here.
-    if (m.want) { const t = m.want.hold && things.get(m.want.hold.id); if (t && !t.record.held && !t.record.controls?.motor) thread.postMessage({ ask: { by: m.want.hold.by, hold: m.want.hold.id, name: t.record.name }, rows: rowsOf(t) }); else if (m.want.put) thread.postMessage({ ask: { by: m.want.put.by, put: true } }); return }
+    if (m.want) { const t = m.want.hold && things.get(m.want.hold.id); if (t && !t.record.held && !t.record.controls?.motor) thread.postMessage({ ask: { by: m.want.hold.by, hold: m.want.hold.id, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) }); else if (m.want.put) thread.postMessage({ ask: { by: m.want.put.by, put: true } }); return }
     if (m.refused) return
     // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
     // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
@@ -723,7 +748,12 @@ function open(of) {
       if (++asked > ASKS_A_SECOND) return send(res, 429, 'too many asks')
       const parts = []
       let size = 0
-      for await (const chunk of req) { size += chunk.length; if (size > 1 << 20) return send(res, 413, 'too much'); parts.push(chunk) }
+      // Said to be too much before any of it is read.
+      if (Number(req.headers['content-length']) > 8 << 20) return send(res, 413, 'too much')
+      for await (const chunk of req) { size += chunk.length; if (size > 8 << 20) return send(res, 413, 'too much'); parts.push(chunk) }
+      // A big ask (a made thing's cells) counts as many: what all may send in a second is held to what it was when an ask was half a megabyte at most.
+      asked += Math.floor(size / (512 << 10))
+      if (asked > ASKS_A_SECOND) return send(res, 429, 'too many asks')
       let body
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
       const ask = allowed(body)
@@ -731,6 +761,19 @@ function open(of) {
       // A thing is made once: an id the world has is refused, so a send that is tried again cannot make two.
       if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.add(ask.thing.id) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
+      // Taken out with its cells: they are the rows the world keeps for it, emptied; not while someone holds it or it lives (its cells are then not where they were put).
+      if (ask.gone && ask.release) {
+        const t = things.get(ask.gone)
+        if (t.record.held || t.record.controls?.motor) return send(res, 409, 'that thing is held or alive: it is not taken out with its cells')
+        const was = JSON.parse(log[t.at].subarray(12).toString('utf8')).edit, per = was[0] === 3 ? 4 : was[0] === 4 ? 8 : 1, box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
+        const edit = was.slice()
+        for (let k = 2; k < edit.length; k += 5) {
+          edit[k + 4] = 0
+          const lo = [Math.floor(edit[k] / per), Math.floor(edit[k + 2] / per), Math.floor(edit[k + 3] / per)], hi = [Math.floor((edit[k + 1] - 1) / per) + 1, lo[1] + 1, lo[2] + 1]
+          for (let a = 0; a < 3; a++) { box[a] = Math.min(box[a], lo[a]); box[a + 3] = Math.max(box[a + 3], hi[a]) }
+        }
+        Object.assign(ask, { edit, box })
+      }
       if (ask.unrule && !rules.has(ask.unrule) && !(ask.unrule === TALK.id && talks)) return send(res, 409, 'no rule of that id is in the world')
       if (ask.rule && !rules.has(ask.rule.id) && !awaited.has(ask.rule.id)) { if (rules.size + awaited.size >= RULES_MOST) return send(res, 409, `a world has at most ${RULES_MOST} rules: take one out first`); awaited.add(ask.rule.id) }
       // A thing picked up: it must be there, in nobody's hand and not alive; the world's process is sent its cells.
@@ -739,10 +782,11 @@ function open(of) {
         if (!t) return send(res, 409, 'no thing of that id is in the world')
         if (t.record.held) return send(res, 409, 'someone holds that already')
         if (t.record.controls?.motor) return send(res, 409, 'that thing is alive: it is not picked up')
-        thread.postMessage({ ask: { ...ask, name: t.record.name }, rows: rowsOf(t) })
+        thread.postMessage({ ask: { ...ask, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) })
         return send(res, 202, '{"asked":true}', TYPES['.json'])
       }
       // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
+      if (ask.thing && !ask.edit && ask.thing.controls !== undefined && things.get(ask.thing.id).record.grain) return send(res, 409, 'a thing of finer cells cannot be given controls yet')
       thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
       send(res, 202, '{"asked":true}', TYPES['.json'])
     },

@@ -21,8 +21,8 @@ try {
   console.log(`world made in ${(first / 1000).toFixed(1)} s: ${stats.ready} sectors ready, ${stats.made} made at ${(stats.makeMs / stats.made).toFixed(2)} ms each, pool ${(stats.poolUsed / 262144).toFixed(0)} MB, ${stats.full} did not fit, ${stats.wholeLevels} boxes whole`)
   if (stats.full) failures.push(`${stats.full} sectors did not fit the pool`)
   const base = stats.pose
-  // With the switch off, as here, an edit of finer cells (#259) is refused whole: the world is as it was.
-  if (!/bricks=1/.test(query)) {
+  // With the switch off (`bricks=0`: left alone it turns on with the first such edit), an edit of finer cells (#259) is refused whole: the world is as it was.
+  if (/bricks=0/.test(query)) {
     const fine = await page.evaluate(() => {
       const e = globalThis.engine, was = e.world.done().length, cells = btoa(String.fromCharCode(...new Uint8Array(new Uint16Array(64).fill(0x0509).buffer)))
       const rows = e.fineEdit(cells, [4, 4, 4], [Math.round(e.pose.x * 10), Math.round(e.pose.y * 10), Math.round(e.pose.z * 10)])

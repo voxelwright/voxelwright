@@ -37,6 +37,8 @@ const { instance } = await WebAssembly.instantiate(await readFile(workerData.cor
 // The core may be swapped for a newer build while this process runs (`swap`, below): everything here asks `core` for
 // what it needs at the moment it needs it, and keeps nothing of the core's memory from one call to the next.
 let core = instance.exports
+// Cells may hold finer cells here (#259, #372): a made thing may be of cells of 2.5 or 1.25 cm.
+core.fine_cells(1)
 /** While the core is being swapped: what was said meanwhile, to be done in order when the new one is whole; when it began; where the fire was. */
 let swapping = null
 /** Where the core last said some of its fire was (three numbers a cell), or null when nothing burns: to light it again in another core. */
@@ -729,7 +731,7 @@ function tops([x0, z0, x1, z1], from) {
 parentPort.on('message', (said) => {
   const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle } = said
   // A thing a world started again finds still held by nobody: put down where it was taken from.
-  if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
+  if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at, settle.grain); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
   // What the world's people remembered of talk when it last stopped.
   if (talked !== undefined) return minds.back(talked)
   if (called !== undefined) { realmIs = called && typeof called === 'object' ? called : null; direct(); return }
@@ -748,7 +750,7 @@ parentPort.on('message', (said) => {
     // what it had logged is on its way to the server ahead of the answer to this, and is in what the server sends back.
     swapping = { held: [], began, fire: fireSeen }
     alive.clear()
-    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; core.fine_cells(1); swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
     return
   }
   // While the swap is under way: the world's own history is taken as it comes (the server sends it once the new

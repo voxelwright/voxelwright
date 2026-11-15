@@ -13,13 +13,15 @@ const ENV = ['HOME', 'PATH', 'USER', 'LOGNAME', 'TMPDIR', 'LANG', 'SHELL']
  * One reply to one prompt, and to the pictures that come with it ({ type, data: base64 }), if any. Resolves to { text, model, ms, cost, tokens } or throws: on a run that fails, is too
  * slow (it is stopped), says it had a tool or a server after all, or ends without a result.
  */
-export async function reply({ system, prompt, pictures = [], model = 'opus', binary = 'claude', limit = 240_000 }) {
+export async function reply({ system, prompt, pictures = [], model = 'opus', effort, binary = 'claude', limit = 240_000 }) {
   const cwd = await mkdtemp(join(tmpdir(), 'thing-'))
   const env = Object.fromEntries(ENV.filter((k) => process.env[k] !== undefined).map((k) => [k, process.env[k]]))
   env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1'
   const args = ['-p', '--model', model, '--system-prompt', system, '--tools', '', '--strict-mcp-config', '--setting-sources', '', '--disable-slash-commands', '--no-session-persistence', '--output-format', 'stream-json', '--verbose']
   // A picture goes in as the message itself (the model has no tool to open a file with): one line of JSON on stdin.
   // Nothing of it is written anywhere: no session is kept, and the folder made for the run stays empty.
+  // How hard it thinks before it replies (low to max): left to the binary unless said.
+  if (effort) args.push('--effort', effort)
   if (pictures.length) args.push('--input-format', 'stream-json')
   const said = pictures.length ? JSON.stringify({ type: 'user', message: { role: 'user', content: [...pictures.map((p) => ({ type: 'image', source: { type: 'base64', media_type: p.type, data: p.data } })), { type: 'text', text: prompt }] } }) + '\n' : prompt
   const began = Date.now()

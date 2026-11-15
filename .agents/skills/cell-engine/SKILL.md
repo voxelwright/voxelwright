@@ -2909,3 +2909,54 @@ times up; a wall one cell thick the same. Built roads striped, thin things were 
   place's middle is moved inland until the ground is 80 cm over the sea (40 m at most).
 - **A model given the shape used it in its first plan**, with the doorway towards where people come from, as told.
 
+
+## Things as programs, and finer cells in a shared world (#372, November 14)
+
+- **Detail comes from what the model writes, not from the cell.** A list of parts spends 20 to 35 cells across a
+  thing whatever a cell is (#254). A program (`make/program.mjs`, brief `PROGRAM`) with `put`, `box`, `ball`,
+  `tube`, `text`, a grid of up to 256 a side and a cell it chooses (10, 2.5, 1.25 cm) spends the room: 35,000 to 790,000 cells a thing, 16 of 16 first replies ran and stood. Fable 5.2
+  takes 1 to 5 minutes; Sonnet 23 to 67 s. On ten MineBench gallery wishes two blind judges picked ours over the
+  gallery's cover on 9 and 8. Showing the model its own picture once more changed little on top of a program.
+- **The box**: QuickJS in a worker thread, a wasm memory of its own with a maximum (192 MB), a clock in the
+  interrupt handler (20 s) and the thread ended at 30 s. Nothing is bound; the grid lives in the guest and comes
+  out as one string of runs with named materials and colours; `shaped()` checks every count and builds the kinds.
+- **A fine thing has a stand-in** (`make/fine.mjs`): the thing in 10 cm cells, a cell wherever any finer cell is.
+  Placing, `tops`, and the standing rule work on the stand-in; the fine rows are what is sent. A program's thing
+  stands level at the height most of the ground under it is, nothing carried down (`site` `level`).
+- **The solver's world must be told** (`fine_cells` now sets `Ground.scratch.finer` and forgets its sectors). It was
+  not, and a fine thing was a ghost: `/world/at` said air, people walked through it, the maker's own check said
+  "not there". A cell with a block is its commonest kind with the mark (bit 6) there, so it is solid at 10 cm;
+  breaking and bodies are still 10 cm.
+- **A thing is one edit still**, of up to 240,000 rows (`THING_MOST`) and 256^3 cells, in a body of up to 8 MB (rows run along the world's x, so what a thing costs depends on how it faces: a house front of 5 cm cells was 73,000 rows one way and 177,000 the other); a
+  big ask counts as many against the asks a second. A hand takes at most 64 cells a side, 40,000 rows, 1.5 million
+  cells (`holding.mjs` `liftable`): everything done with a held thing walks its cells on the world's one thread.
+  (The review of this change found both: a 120,000-row thing of 4,096-cell rows froze the world for 15 s when
+  picked up and crashed it when thrown.)
+- **`things.ts` knew only tag 1**: a fine thing had no record on any page. It carries `grain` now, set by the
+  server from the edit's tag, never by the asker.
+- **The page's switch follows the world** (`world.ts` `bricksLater`, `finer()`): off until the first edit of tag 3
+  or 4, then on, the marcher made again by `reshade` behind the frames; the portal's other world the same. So a
+  world with nothing fine pays nothing, which is #367's rule.
+- **What it costs in view** (2560 x 1440 forced, a busy GPU, `test/finer.mjs --free --thing`): a Formula 1 car of
+  2.5 cm cells (140,274 cells, 40,336 rows) 5 m ahead in the street: rays 1.08, all on 1.11 to 1.20 of a plain page.
+- **What a fine thing in view costs, measured properly** (`test/paired.mjs`, both GPU turns held, 5 of 5 pairs
+  quiet, all on, against the same thing as 10 cm cells): a car of 2.5 cm cells 5 m off, 10 to 16% of the frame; a
+  house front of 5 cm cells, 5 to 14%; both, 19 to 23%; with shadows at the thing's own grain half as much again
+  (47% at worst). Nothing fine in view: no difference. `tries=2` halves it in an easy view and thickens lacy things
+  (a bicycle's spokes fill in); `walk=loop` is no better in view and 6 to 10% always. #367 accepted one thing's
+  worth (16%) with a cap: nothing bigger than a car in finer cells (the brief), and the second fine thing within 20 m
+  goes in as plain cells (`make.mjs` `FINE_NEAR_MOST`, 1). 5 cm cells are gone: a building at 10 cm costs nothing.
+- **The world holds things up at 10 cm by the commonest material in each cell.** A crown of leaves on twigs of
+  2.5 cm tears off (the twigs' cells are leaves to it). The brief says so; the maker's own standing rule (on the
+  stand-in) asks again, and a tree stood on the second asking. How long the world takes to drop what does not hold
+  varies (a crown was still there at 4 s in one run and gone in another), so `send` asks after the whole stand-in.
+- **A sector refuses rows of finer cells that reach more than 16,384 of its cells** (`FINE_BLOCKS`), whole: a solid
+  house front of 5 cm cells showed as a slice one sector wide. The maker counts the reach before it sends and says
+  "build it as a shell". A thing the world took only part of is taken out again.
+- **Taking a big thing out**: a removal sent as a plain edit is held to 65,536 numbers, so no thing over 13,107
+  rows could be undone or replaced. Now `{gone: id, release}` has the server empty the cells it keeps for that thing
+  itself. (A first cut took the asker's rows of nothing under the thing's larger cap; a second review pass showed
+  that let any player empty 240,000 scattered cells by naming any thing.) A thing's cells must also lie within its
+  record's size of its place, and one with `controls` keeps to a plain edit's size (the living lane walks its cells).
+- **Top effort is not worth it**: Fable at `--effort max` took 18 to 20 minutes and $4 for a sword and a pistol of
+  400 to 500 cells; four other wishes ran past 25 minutes. Usual effort: 1 to 5 minutes, $0.2 to $1.2.
