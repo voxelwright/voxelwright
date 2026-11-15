@@ -166,6 +166,56 @@ try {
   // The walk: nothing at the height of a body's middle along the straight line from the person to the window.
   const walk = await page.evaluate(([from, to]) => { let met = 0; for (let i = 3; i < 100; i++) { const t = i / 100; if (globalThis.engine.wand.kind(Math.round(from[0] + (to[0] - from[0]) * t), from[1] + 9, Math.round(from[2] + (to[2] - from[2]) * t))) met++ } return met }, [me, stood])
   check(still_ && walk === 0, `with a wall three metres ahead the window stands where the walk to it is clear (nothing met on the way; ${Math.round(me[0] - stood[0])} cells across, ${Math.round(me[2] - stood[2])} ahead; the wall is 28 ahead)`)
+  if (out) { await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 }).catch(() => {}); await page.waitForTimeout(600); await page.screenshot({ path: join(out, 'play-6b-wall.png') }) }
+  // Hemmed in: walls two metres to each side and behind, the wall still ahead, and a planter two metres before them,
+  // half a metre high. Nowhere three metres off can be walked to: the window stands nearer, short of the planter,
+  // not past it, and they walk into it.
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => !globalThis.engine.portal.gate, null, { timeout: 5000 })
+  const [X, Y, Z] = me, box = (x0, x1, y0, y1, z0, z1) => { const c = []; for (let y = y0; y <= y1; y++) for (let z = z0; z <= z1; z++) c.push(x0, x1, y, z, 8); return c }
+  const nook = [...box(X - 22, X - 18, Y - 2, Y + 22, Z - 27, Z + 22), ...box(X + 18, X + 22, Y - 2, Y + 22, Z - 27, Z + 22), ...box(X - 17, X + 17, Y - 2, Y + 22, Z + 18, Z + 22), ...box(X - 17, X + 17, Y - 2, Y + 6, Z - 23, Z - 18)]
+  const nooked = await post('/world/ask', { by: 'check', edit: [1, nook.length / 5, ...nook], release: [X, Y + 1, Z] })
+  const planted = await page.waitForFunction(([x, y, z]) => (globalThis.engine.wand.kind(x, y, z) & 15) === 8 && (globalThis.engine.wand.kind(x + 20, y, z) & 15) === 8, [X, Y + 4, Z - 20], { timeout: 10_000 }).then(() => true, () => false)
+  await page.waitForTimeout(800)
+  await page.evaluate(() => { globalThis.engine.pose.yaw = 0 })
+  await page.keyboard.press('KeyP')
+  await page.waitForFunction(() => globalThis.engine.portal.gate, null, { timeout: 10_000 })
+  const nookGate = await page.evaluate(() => globalThis.engine.portal.gate.at), nookFeet = await page.evaluate(() => globalThis.engine.me.feet.at.map(Math.round))
+  // The walk, from the shins to over the head, along the straight line from the feet to the window.
+  const nookWalk = await page.evaluate(([from, to]) => { let met = 0; for (let i = 3; i < 100; i++) { const t = i / 100; for (let up = 3; up <= 18; up += 3) if (globalThis.engine.wand.kind(Math.round(from[0] + (to[0] - from[0]) * t), from[1] + up, Math.round(from[2] + (to[2] - from[2]) * t))) { met++; break } } return met }, [nookFeet, nookGate])
+  // (Straight ahead, nearer than the planter, the street's kerb is in its frame: it may stand to one side in the nook.)
+  check(nooked === 202 && planted && nookWalk === 0 && Z - nookGate[2] < 18 && Math.abs(nookGate[0] - X) < 18 && nookGate[2] - Z < 18 && Math.hypot(nookGate[0] - X, nookGate[2] - Z) > 8, `hemmed in, with a planter two metres ahead, the window stands in the nook short of the planter where the walk to it is clear (${Math.round(X - nookGate[0])} cells across, ${Math.round(Z - nookGate[2])} ahead, ${nookWalk} points of the walk met something; the planter is 18 ahead, the walls 18 to each side)`)
+  const nookSteps = await page.evaluate(() => globalThis.engine.portal.stats.steps.length)
+  await page.waitForFunction(() => globalThis.engine.portal.state.passable, null, { timeout: 60_000 }).catch(() => {})
+  // Turned to it, and on.
+  await page.evaluate(([x, z]) => { const e = globalThis.engine, f = e.me.feet.at; e.pose.yaw = Math.atan2(x - f[0], -(z - f[2])) }, [nookGate[0], nookGate[2]])
+  if (out) { await page.waitForFunction(() => globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 60_000 }).catch(() => {}); await page.waitForTimeout(600); await page.screenshot({ path: join(out, 'play-7-nook.png') }) }
+  await page.keyboard.down('KeyW')
+  const walkedIn = await page.waitForFunction((n) => globalThis.engine.portal.stats.steps.length > n && globalThis.engine.realms.here === 'dusk', nookSteps, { timeout: 30_000 }).then(() => true, () => false)
+  await page.waitForTimeout(900)
+  await page.keyboard.up('KeyW')
+  check(walkedIn, 'and walking ahead, they go through it into the other realm')
+  // (Had they not, they are put through, so that what follows is seen all the same.)
+  if (!walkedIn) { await page.evaluate(() => globalThis.engine.portal.step()); await page.waitForFunction(() => globalThis.engine.realms.here === 'dusk' && globalThis.engine.portal.gate, null, { timeout: 30_000 }) }
+  // In the realm, one press of the key is a way home: the window they came by stands before them, still leading home.
+  await page.waitForTimeout(600)
+  await page.keyboard.press('KeyP')
+  await page.waitForTimeout(800)
+  const homeway = await page.evaluate(() => { const e = globalThis.engine, p = e.portal, f = e.me.feet?.at, g = p.gate; return { realm: e.realms.here, to: p.to, passable: p.state.passable, ahead: g && f ? (g.at[0] - f[0]) * Math.sin(e.pose.yaw) - (g.at[2] - f[2]) * Math.cos(e.pose.yaw) : null, off: g && f ? Math.hypot(g.at[0] - f[0], g.at[2] - f[2]) : null } })
+  check(homeway.realm === 'dusk' && homeway.to === 'home' && homeway.passable && homeway.ahead > 8 && homeway.off < 75, `in the realm, one press of the key and a window home stands before them (${JSON.stringify(homeway)})`)
+  // The key again closes it, and once more opens one home.
+  await page.keyboard.press('KeyP')
+  await page.waitForTimeout(700)
+  const shut = await page.evaluate(() => globalThis.engine.portal.gate === null)
+  await page.keyboard.press('KeyP')
+  const reopened = await page.waitForFunction(() => globalThis.engine.portal.gate && globalThis.engine.portal.to === 'home' && globalThis.engine.portal.state.passable && globalThis.engine.portal.state.open >= 1, null, { timeout: 30_000 }).then(() => true, () => false)
+  check(shut && reopened, `the key again closes it (${shut}), and once more opens a window home (${reopened})`)
+  const homeSteps = await page.evaluate(() => globalThis.engine.portal.stats.steps.length)
+  await page.keyboard.down('KeyW')
+  const wentHome = await page.waitForFunction((n) => globalThis.engine.portal.stats.steps.length > n && globalThis.engine.realms.here === 'home', homeSteps, { timeout: 30_000 }).then(() => true, () => false)
+  await page.waitForTimeout(900)
+  await page.keyboard.up('KeyW')
+  check(wentHome, 'and walking ahead, they are home')
   const memory = await page.evaluate(() => globalThis.engine.portal.memory)
   console.log(`  the second world takes ${memory.pool.toFixed(0)} MB of the GPU for its trees and boxes, ${memory.sun.toFixed(0)} MB for its sun's maps, ${memory.picture.toFixed(0)} MB for the window's pictures`)
   if (bench) {

@@ -108,6 +108,8 @@ export async function portal(o: {
   /** A size fixed for a measurement, or 0: the window's own choice. */
   let fixed = 0
   let side = 0, stepping = false, asked = 0
+  /** Whether the open window is the one the person came by, not one they opened where they are. */
+  let came = false
   /** How the eye rode before the person came near the window, while it rides in their head; else null. */
   let rode: 'behind' | 'head' | null = null
   const stats = { rect: [0, 0, 0, 0] as [number, number, number, number], scale: 1, share: 0, steps: [] as unknown[], opened: null as unknown, released: false }
@@ -212,8 +214,9 @@ export async function portal(o: {
   const before = (g: Gate, p: readonly number[]) => { const a = across(g); return ((p[0] - g.at[0]) * -a[2] + (p[2] - g.at[2]) * a[0]) * side }
   /**
    * A place for a window before the person, facing them: near, on the ground, with room for all of it and a clear
-   * walk to it. Tried straight ahead from three metres out to seven, then to each side of that and at last behind;
-   * a place with room but no clear walk is taken only if none all the way round has both.
+   * walk to it. Tried straight ahead at four metres, three, then nearer (two, one and a bit) when something stands in
+   * the way, then further out to seven; then to each side of that and at last behind. A place with room but no clear
+   * walk is taken only if none all the way round has both.
    */
   const stand = (): { at: [number, number, number]; yaw: number } => {
     const at = body(), feet = Math.round(at[1] - 16.5)
@@ -221,7 +224,7 @@ export async function portal(o: {
     const open = (x: number, z: number, from: number) => { for (let up = 3; up <= 18; up += 3) if (o.kind(x, from + up, z)) return false; return true }
     let roomy: { at: [number, number, number]; yaw: number } | null = null, any: { at: [number, number, number]; yaw: number } | null = null
     // Ahead first; then round to each side, and behind if nowhere ahead can be walked to: a window one must turn to see is better than one behind a wall.
-    for (const turn of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.57, -1.57, 2.2, -2.2, Math.PI]) for (const far of [40, 30, 50, 60, 70]) {
+    for (const turn of [0, 0.35, -0.35, 0.7, -0.7, 1.05, -1.05, 1.57, -1.57, 2.2, -2.2, Math.PI]) for (const far of [40, 30, 20, 12, 50, 60, 70]) {
       const yaw = o.pose.yaw + turn, ahead = [Math.sin(yaw), -Math.cos(yaw)], right = [Math.cos(yaw), Math.sin(yaw)]
       const x = Math.round(at[0] + ahead[0] * far), z = Math.round(at[2] + ahead[1] * far)
       // The ground there: the first cell with something under it and air in it, from a little over the eye down.
@@ -238,8 +241,8 @@ export async function portal(o: {
       roomy ??= here
       // The walk to it: a body's width of open way all along, the ground rising or falling no more than a kerb at a step.
       let clear = true, ground = feet
-      // A cell at a time: a wall one cell thick is a wall.
-      for (let step = 3; step < far && clear; step++) for (const side of [-4, 0, 4]) {
+      // A cell at a time: a wall one cell thick is a wall. Up to the window's own foot: one standing on a planter is not walked into.
+      for (let step = 3; step <= far && clear; step++) for (const side of [-4, 0, 4]) {
         const px = Math.round(at[0] + ahead[0] * step + right[0] * side), pz = Math.round(at[2] + ahead[1] * step + right[1] * side)
         let g = ground + 3
         while (g > ground - 4 && !o.kind(px, g - 1, pz)) g--
@@ -274,9 +277,19 @@ export async function portal(o: {
     get memory() { let picture = 0; for (const p of pictures.values()) picture += (p.to.size[0] * p.to.size[1] * 8) / 2 ** 20; return other ? { pool: (other.poolBuffer.size + other.topBuffer.size) / 2 ** 20, sun: (other.levels.length * SUN_SIDE * SUN_SIDE * 4) / 2 ** 20, picture } : null },
     /**
      * The key: with no window, opens one to a realm (the one given, else from home the selected realm, else home)
-     * before the person; with one, closes it. Resolves when the window is open, or closed.
+     * before the person; with one, closes it. In a realm, the window one came by is not closed: one from home is
+     * stood again before the person, still leading home, and one from another realm gives way to a window home. One
+     * press is a way home, and the next closes it. Resolves when
+     * the window is open, or closed.
      */
     async toggle(to?: string) {
+      if (gate && !closing && came && o.realms.here !== 'home') {
+        // Come by from another realm, it leads there: one home stands in its place.
+        if (id !== 'home') { void self.lead('home'); return null }
+        const h = stand()
+        gate = { ...gate, at: h.at, yaw: h.yaw }; side = 0; came = false; open = 0.02
+        return null
+      }
       if (gate && !closing) { self.close(); return null }
       const target = to ?? (o.realms.here === 'home' ? o.realms.selected : 'home')
       if (!target || target === o.realms.here) { o.notice(target ? 'You are there already' : 'No other realm yet: open the wheel and make one'); return null }
@@ -313,7 +326,7 @@ export async function portal(o: {
       march2.rain = look?.rain ?? 0
       tint = look?.tint ?? [1, 1, 1]
       if (!g) { const foot = entry(to, realm); g = { at: here!.at, yaw: here!.yaw, size: SIZE, to: [foot[0], foot[1] + SIZE[1] / 2, foot[2]] } }
-      id = to; gate = g; side = 0; closing = false
+      id = to; gate = g; side = 0; closing = false; came = standing
       // A window one has just come through stands open and clear.
       open = standing ? 1 : 0.02; veil = standing ? 0 : 1
       let shown = 0, clear = 0
@@ -409,7 +422,7 @@ export async function portal(o: {
       // The window then stands in the other world, and leads back to where it stood in this one: from the very
       // moment the worlds change places, or the world behind it would be made round a place that is neither's.
       const back: Gate = { at: g.to, yaw: g.yaw, size: g.size, to: g.at }
-      const stepped = await o.realms.step(id, there, () => { trade(); gate = back; id = from; side = 0; theirs.clear(); taken.clear() }, stood)
+      const stepped = await o.realms.step(id, there, () => { trade(); gate = back; id = from; side = 0; came = true; theirs.clear(); taken.clear() }, stood)
       const again = await self.open(from, back, true)
       stepping = false
       const took = { ...stepped, total: performance.now() - began, back: again }
