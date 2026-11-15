@@ -34,6 +34,7 @@ const checks = [
   ['chain', 'node', ['test/chain.mjs'], true],
   ['wand', 'node', ['test/wand.mjs'], true],
   ['spells', 'node', ['test/spells.mjs'], true],
+  ['keys', 'node', ['test/keys.mjs'], false],
   ['hands', 'node', ['test/hands.mjs'], true],
   ['hold', 'node', ['test/hold.mjs'], true],
   ['back', 'node', ['test/back.mjs'], true],

@@ -561,6 +561,9 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   which the world's process finds because it knows where everyone stands. `node test/hands.mjs` checks it with two
   rules that are not alike: a stall that sells to whoever looks at its keeper, and someone to wave at for as long
   as the wave is held, offered to one person. Residents are not met by an aim yet (they are not bodies of the world's).
+  Whose each letter key is (the page's own, the page's but given way to an offer that asks, or free to hand to one
+  that asked for none) is one list, `page/keys.ts`, read by both sides; `node test/keys.mjs` checks it against the
+  page's code, with no page.
 - **Holding a thing** (`rules/holding.mjs`, `page/hands.ts`). A made thing looked at from within six metres is
   picked up with G (a button on a phone) and put down with G where the eye looks. Picked up, its cells leave the
   world in one edit and the holder's figure carries it in the right hand, as up to eight boxes cut from its cells

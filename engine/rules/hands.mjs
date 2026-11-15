@@ -10,9 +10,11 @@
 // to all. They are a rule's own numbers and words, shown: an alarm, a health bar, a lap count, a round's clock are
 // none of them words the engine has. Every word is cleaned and cut as a name is, and pages put it as text.
 
+import { OWN } from '../page/keys.ts'
+
 const ID = /^[a-z0-9][a-z0-9-]{0,23}$/, KEY = /^Key[A-Z]$/
-/** Keys that move the body or belong to the page whatever a realm offers. */
-const KEPT = new Set(['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyX', 'KeyC', 'KeyG', 'KeyT', 'KeyB', 'KeyP'])
+/** Keys that move the body or belong to the page whatever a realm offers (page/keys.ts). */
+const KEPT = new Set(Object.keys(OWN))
 /** The most a rule may offer, the most people one offer may be for, and the most a person may do a second. */
 const OFFERS_MOST = 16, FOR_MOST = 64, ACTS_A_SECOND = 30
 /** How far round its middle a body is met by an aim, cells. */
@@ -96,7 +98,7 @@ export function hands({ folk, tall, look, text, tell, hear, using = () => undefi
     const next = { rule: rule.id, id, word, hold: old?.hold ?? false, aim: old?.aim ?? false, key: old?.key ?? '', to: old?.to ?? null }
     if (w.hold !== undefined) next.hold = w.hold === true
     if (w.aim !== undefined) next.aim = w.aim === true
-    if (w.key !== undefined) { if (typeof w.key === 'string' && KEY.test(w.key) && !KEPT.has(w.key)) next.key = w.key; else { next.key = ''; if (w.key) wrong(`a key is "KeyE" to "KeyZ" and not one the body moves by (${[...KEPT].map((k) => k.slice(3)).join(', ')}): the page picks one`) } }
+    if (w.key !== undefined) { if (typeof w.key === 'string' && KEY.test(w.key) && !KEPT.has(w.key)) next.key = w.key; else { next.key = ''; if (w.key) wrong(`a key is "KeyE" to "KeyZ" and not one the page keeps (${[...KEPT].map((k) => k.slice(3)).join(', ')}): the page picks one`) } }
     // Who it is for: one person, several, or (null) everyone. They are named as world.people names them.
     if (w.to !== undefined) {
       const who = w.to === null ? null : (Array.isArray(w.to) ? w.to : [w.to]).filter((v) => typeof v === 'string' && v.length <= 24).slice(0, FOR_MOST)

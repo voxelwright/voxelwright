@@ -13,6 +13,7 @@
 // The word of an offer, and every word shown, is text a rule wrote (and a rule is text someone or their model wrote): it is shown as
 // text, never as markup.
 import type { Hud } from './hud.ts'
+import { FREE } from './keys.ts'
 import type { Input } from './input.ts'
 import type { Link, Offer, Shown } from './link.ts'
 import type { Thing, Things } from './things.ts'
@@ -41,9 +42,6 @@ export interface Hands {
   /** Told whenever what is offered changes. */
   onchange: (() => void) | null
 }
-
-/** Keys the page gives to offers that asked for none, in order. B and P are the page's own whatever is offered (leaving the body, the portal): never given. */
-const POOL = ['KeyE', 'KeyR', 'KeyF', 'KeyV', 'KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
 
 /** How near (cells) a thing must be to be picked up, and to put one down: from the person on foot, from the eye when they fly as one. */
 const REACH = 45
@@ -126,11 +124,12 @@ export function hands(far: Link | null, keys: Input, over: Hud, aim: () => { fro
     },
   }
   if (far) far.onoffers = (all) => {
-    // Those for everyone or for this page; each on the key it asked for if that is free, or the next of the page's own.
+    // Those for everyone or for this page; each on the key it asked for if no other offer has it, or the next of the
+    // letters the page never listens for (keys.ts).
     const mine = all.filter((o) => o.to === null || o.to.includes(far.me)), taken = new Set<string>()
     const next: Offered[] = []
     for (const o of mine) if (o.key && !taken.has(o.key)) { taken.add(o.key); next.push({ ...o, code: o.key }) } else next.push({ ...o, code: '' })
-    for (const o of next) if (!o.code) { o.code = POOL.find((k) => !taken.has(k)) ?? ''; taken.add(o.code) }
+    for (const o of next) if (!o.code) { o.code = FREE.find((k) => !taken.has(k)) ?? ''; taken.add(o.code) }
     // A hold whose offer is gone is let go of without a word: there is nobody to tell.
     for (const key of [...down.keys()]) if (!next.some((o) => name(o) === key)) down.delete(key)
     offered = next.filter((o) => o.code)
