@@ -9,6 +9,8 @@ import { Worker } from 'node:worker_threads'
 
 /** The most rules a world may have: each is a thread and an interpreter (about 40 MB at most). */
 export const RULES_MOST = 16
+/** The most characters a rule's source may have. */
+export const SOURCE_MOST = 65536
 /** How long a rule's thread may take to start and run the rule's own text, and how long one call may take, by the clock (ms). Generous: a busy machine is slow, and nothing waits on a rule but the rule. */
 const START_MOST = 30_000, CALL_MOST = 1000
 /**

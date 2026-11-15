@@ -7,7 +7,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { MessageChannel } from 'node:worker_threads'
 import { join } from 'node:path'
-import { rules as keep } from '../rules/run.mjs'
+import { rules as keep, SOURCE_MOST } from '../rules/run.mjs'
 import { arg, chrome, serve } from './kit.mjs'
 
 const file = join(mkdtempSync(join(tmpdir(), 'engine-rules-')), 'world.log')
@@ -178,7 +178,7 @@ on('refused', (world, e) => world.actor('usher', { say: 'Refused ' + e.what.leng
   check(said.filter((h) => h.text === 'again').length <= 8 * 2, 'what its actors say in a second is capped')
   const echoed = said.filter((h) => h.name === 'echo').length
   check(echoed >= 1 && echoed <= 8, `what an actor says is not told to rules: eight things were said and ${echoed} echoed, none of them an echo of an echo`)
-  check((await rule('big', 'x'.repeat(40000))).refused === 400, 'a rule of more than 32,768 characters is refused')
+  check((await rule('big', 'x'.repeat(SOURCE_MOST + 1))).refused === 400, `a rule of more than ${SOURCE_MOST} characters is refused`)
   check((await post('join', { by: 'greeter/guide' })).refused === 400 && (await post('join', { by: 'anyone/at-all' })).refused === 400, 'nobody outside goes by a name that could be an actor\'s')
   await rule('fifteenth', `on('start', () => {})`); await rule('sixteenth', `on('start', () => {})`)
   check((await rule('seventeenth', `on('start', () => {})`)).refused === 409, 'a world has at most sixteen rules')

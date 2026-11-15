@@ -20,11 +20,12 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { reply as ask } from './model.mjs'
+import { SOURCE_MOST } from '../rules/run.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url))
 /** Where what the model said it could not do is kept: a line an asking. */
 export const CANNOT = join(homedir(), '.village', 'engine', 'cannot.jsonl')
-const TRIES = 3, SOURCE_MOST = 65536
+const TRIES = 3
 /** The most of an ask that is read: a realm is described at length. Past this the asker is told, not the model left to find out. */
 export const WISH_MOST = 4000
 /** What the quick model is told beside the ask, when a fuller rule follows: a first version, small. */

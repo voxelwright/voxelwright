@@ -17,7 +17,7 @@ import { reply as ask } from './model.mjs'
 
 /** The shapes a place is made of, in the build plugin's own words to a rule: its guide, from the first shape to the line on what must rest on what. */
 const SHAPES = () => readFileSync(fileURLToPath(new URL('../plugins/build/guide.txt', import.meta.url)), 'utf8').split('\n').filter((l) => /^\s+\["|^\s+material is|^\s+What is built must rest/.test(l)).join('\n')
-/** The most builds a place is, and the most a plan's rule may be as text (a rule is at most 32,768 characters). */
+/** The most builds a place is, and the most a plan's rule may be as text (under a rule's own most, rules/run.mjs SOURCE_MOST). */
 export const BUILDS_MOST = 6, SOURCE_MOST = 30_000
 /** The id of the rule that builds a realm's place. */
 export const PLACE = 'place'
