@@ -175,7 +175,9 @@ fn stamp_house(h: &Built, s: &mut Scratch) {
         h.put(s, (2, w - 2), (d / 2, d / 2 + 2), (2, tall - 2), kind(PLASTER, WHITE), Meet::Middle);
         h.put(s, (30, 42), (d / 2, d / 2 + 2), (2, 24), 0, Meet::Middle);
     }
-    h.put(s, (0, w), (0, d), (tall - 2, tall), kind(ROOFING, OWN), Meet::Middle);
+    // (Touch, as the walls are: by its middle a roof two cells thick was missed in half the houses of a copy four
+    // times as coarse, and from 60 m up those stood open, their top floors white in the sun.)
+    h.put(s, (0, w), (0, d), (tall - 2, tall), kind(ROOFING, OWN), Meet::Touch);
     h.put(s, (0, w), (0, 2), (tall, tall + 6), h.wall, Meet::Middle);
     h.put(s, (0, w), (-2, 0), (tall - 4, tall), h.trim, Meet::Middle);
     let bay = (h.seed >> 26) % 3 != 0;
@@ -269,7 +271,7 @@ fn stamp_tower(t: &Built, s: &mut Scratch) {
             v += 24;
         }
     }
-    t.put(s, (0, w), (0, d), (tall - 3, tall), kind(ROOFING, OWN), Meet::Middle);
+    t.put(s, (0, w), (0, d), (tall - 3, tall), kind(ROOFING, OWN), Meet::Touch);
     t.put(s, (60, w - 60), (60, d - 60), (tall, tall + 28), t.trim, Meet::Middle);
 }
 
@@ -2087,7 +2089,8 @@ mod tests {
     /// views and the flight all stand inside this. A change to the land round the town, or to anything else, that
     /// moves a cell here fails; if the town was meant to change, the pictures and the baseline are to be taken
     /// again and the sum set to what the failure prints. (Set again on November 12 for the shopping street across
-    /// from the water tower and the yard's six-storey office; the shops' row is one of the places since then.)
+    /// from the water tower and the yard's six-storey office; the shops' row is one of the places since then. Set again
+    /// on November 14 for roofs that hold in the coarser copies, #163: the finest cells are as they were.)
     #[test]
     fn the_town_is_cell_for_cell_what_it_was() {
         let mut sum = 0xcbf29ce484222325u64;
@@ -2106,7 +2109,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(sum, 12774791369607163724, "the town's sum");
+        assert_eq!(sum, 4626774200439058952, "the town's sum");
     }
 
     /// Looking for earth laid bare: in the yard across from the start, at each coarseness, how many columns of a
