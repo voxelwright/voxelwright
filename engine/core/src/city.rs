@@ -744,6 +744,9 @@ fn stamp_yard(s: &mut Scratch, x0: i32, z0: i32, reaches: &impl Fn(i32, i32, i32
 /// sort of block it is (0 open country, 1 shore, 2 park, 3 homes, 4 towers, 5 yard). It reads the rule and changes
 /// nothing: the people of the town are never cells of it.
 pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
+    if crate::bay::on() {
+        return crate::bay::footing(x, z);
+    }
     let g = ground(x, z);
     let (top, kerb) = surface(x, z, g);
     let sort = match block(x.div_euclid(BLOCK_X), z.div_euclid(BLOCK_Z)) { Block::Open => 0, Block::Shore => 1, Block::Park => 2, Block::Homes => 3, Block::Towers => 4, Block::Yard => 5 };
@@ -752,6 +755,9 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
 
 /// What the ground's top is made of at a column by the land's own rule, before anything was done to it: its kind.
 pub fn top(x: i32, z: i32) -> Kind {
+    if crate::bay::on() {
+        return crate::bay::top(x, z);
+    }
     surface(x, z, ground(x, z)).0
 }
 
@@ -1825,6 +1831,9 @@ fn ground_range(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
 
 /// Which sectors of a column of sectors are worth making: below the first is all earth, above the last all air.
 pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
+    if crate::bay::on() {
+        return crate::bay::span(sx, sz, lod);
+    }
     let size = (SIDE as i32) << lod;
     let (lo, hi) = ground_range(sx, sz, lod);
     let mut top = hi.max(SEA) + 2;
@@ -1850,6 +1859,10 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
 
 /// Makes one sector of the city in `s`, at the coarseness `s` was started with.
 pub fn make(s: &mut Scratch) {
+    // The Bay from data (#373), where its packs are loaded, in place of the town.
+    if crate::bay::on() {
+        return crate::bay::make(s);
+    }
     let (k, half) = (s.lod, (1 << s.lod) / 2);
     let side = SIDE as i32;
     let (lo, hi) = s.bounds();

@@ -2,6 +2,8 @@
 // of sectors at one coarseness and answers with each sector's tree. It keeps nothing between
 // asks: the edits that reach the column come with the ask.
 
+import { open } from './bay.ts'
+
 export interface Ask {
   id: number
   level: number
@@ -49,12 +51,12 @@ interface Core {
 const EARTH = 1
 const SIDE = 64
 
-let ready: Promise<Core> = WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {}).then((r) => r.instance.exports as unknown as Core)
+let ready: Promise<Core> = open<Core>('/page/core.wasm')
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
   // The core built again (#264, world.ts `recore`): what is asked for from here on is made by the new one.
   const anew = (e.data as unknown as { core?: string }).core
-  if (anew) { ready = WebAssembly.instantiateStreaming(fetch(anew), {}).then((r) => r.instance.exports as unknown as Core); return }
+  if (anew) { ready = open<Core>(anew); return }
   const core = await ready, ask = e.data, t0 = performance.now()
   const size = SIDE << ask.level
   // The core's memory moves when it grows: ask for an address first, then look at the memory.

@@ -1004,6 +1004,11 @@ const server = createServer((req, res) => {
     return send(res, 404, 'not here')
   }
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')
+  // The Bay's packs and their names (#373): baked outside the repo by bay/bake.py, read by page/bay.ts.
+  if (url.pathname.startsWith('/bay/')) {
+    const named = /^\/bay\/([0-9._]+)\.(bay|json)$/.exec(url.pathname)
+    try { return send(res, 200, readFileSync(join(homedir(), '.village', 'engine', 'bay', 'packs', `${named[1]}.${named[2]}`)), named[2] === 'json' ? TYPES['.json'] : 'application/octet-stream') } catch { return send(res, 404, 'no such square of the Bay') }
+  }
   if (url.pathname === '/favicon.ico') return send(res, 204, '')
   // The address a phone is sent is the city, which measures itself; the probe keeps its own.
   const path = url.pathname === '/' || url.pathname === '/city' ? 'page/index.html' : url.pathname === '/probe' ? 'probe/index.html' : url.pathname

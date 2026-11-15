@@ -37,6 +37,7 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
+import { BAY, SQUARES, open, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -76,7 +77,7 @@ async function main() {
   type Core = { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
-  let inner = (await WebAssembly.instantiateStreaming(fetch('/page/core.wasm'), {})).instance.exports as unknown as Core
+  let inner = await open<Core>('/page/core.wasm')
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
@@ -129,13 +130,15 @@ async function main() {
   march.maps = query.get('maps') !== '0'
 
   // Start on land, a little above a street.
-  let startX = 700, startZ = 4070
-  while (core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
+  // In the Bay (#373, `?bay=1`): in Washington Square, looking at Telegraph Hill.
+  let startX = SQUARES.length ? 519_500 : 700, startZ = SQUARES.length ? 661_150 : 4070
+  while (!SQUARES.length && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   const at = numbers('at', [startX / M, core.ground_at(startX, startZ) / M + 12, startZ / M])
-  const look = numbers('look', [20, -8])
+  const look = numbers('look', SQUARES.length ? [64, 4] : [20, -8])
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
+  if (SQUARES.length) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)])
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -438,7 +441,7 @@ async function main() {
   // what everyone else asked.
   // `?realm=id`: another realm that the server keeps (#264), in place of home.
   const far = query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
-  const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker('/page/mover.ts', { type: 'module' })
+  const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker(`/page/mover.ts${BAY}`, { type: 'module' })
   /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
   const asked: boolean[] = []
   const moving = new Map<number, Piece>()
@@ -592,7 +595,7 @@ async function main() {
   // A person's own body (#264, person.ts): B gets down onto the feet and back up to fly; `?walk=1` starts on foot.
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
-  const shadow = far ? new Worker('/page/mover.ts', { type: 'module' }) : null
+  const shadow = far ? new Worker(`/page/mover.ts${BAY}`, { type: 'module' }) : null
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   // The residents go round this person's own body when it is on its feet, and round everyone else who is here.
   const waysFull: (readonly [number, number, number])[] = []
@@ -916,7 +919,7 @@ async function main() {
   // still held. Answers how long this thread's part took. Not carried across, alone: whatever is loose (the mover's core).
   const recore = async (url: string) => {
     const began = performance.now()
-    inner = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
+    inner = await open<Core>(url)
     world.recore(url)
     if (shadow) {
       const on = me.on, held = on ? ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ShiftLeft', 'ShiftRight'].filter((code) => controls.held(code)) : []

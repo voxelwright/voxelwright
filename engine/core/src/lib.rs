@@ -5,6 +5,7 @@
 //! What the outside calls is at the bottom: plain functions over the instance's own memory,
 //! no generated glue. An instance does one thing at a time; a page runs one in each worker.
 
+pub mod bay;
 pub mod bodies;
 pub mod city;
 pub mod fire;
@@ -262,6 +263,20 @@ pub extern "C" fn sector_span(sx: i32, sz: i32, lod: u32) -> *const i32 {
         i.out[1] = hi;
         i.out.as_ptr()
     })
+}
+
+/// Room for the bytes of a pack of the Bay (#373, bay.rs): write them at the address returned, then `bay_load`.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_room(bytes: usize) -> *mut u8 {
+    bay::room(bytes)
+}
+
+/// Takes the pack in the room: from then on this core's world is the Bay's, not the town's. Returns how many packs
+/// it holds, or -1 where the bytes are not a pack. Every core that makes or asks about the same world must hold
+/// the same packs.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_load() -> i32 {
+    bay::load()
 }
 
 /// How high the ground is at a column of the finest cells.

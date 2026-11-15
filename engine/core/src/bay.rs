@@ -1,0 +1,761 @@
+//! The San Francisco Bay Area at true size, from data (#373). Where the town (city.rs) is rules alone, this is
+//! rules over packs: a pack holds what was measured of a square of the real place (the ground, what stands on it
+//! and how high, what the ground is, a colour for each top, every building's outline, where trees have their
+//! trunks: engine/bay/bake.py makes one), and the rules here say what each cell of it is, at any coarseness, the
+//! same on every machine that holds the same packs. Nothing is on until a pack is loaded: then the whole world
+//! is the Bay's, and what no pack covers is level water.
+//!
+//! The frame: a cell is 10 cm; x is east and z is south from 500,000 m east, 4,250,000 m north of UTM zone 10N;
+//! y is up from the bay's water. Sources and licences: .agents/skills/bay-sources.
+
+use crate::hash::{hash, hash3};
+use crate::kinds::*;
+use crate::scratch::Scratch;
+use crate::tree::{Kind, SIDE, at};
+use std::cell::{Cell, RefCell};
+
+thread_local! {
+    static ON: Cell<bool> = const { Cell::new(false) };
+    static PACKS: RefCell<Vec<Pack>> = const { RefCell::new(Vec::new()) };
+    static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Whether the world is the Bay's: a pack has been loaded.
+#[inline]
+pub fn on() -> bool {
+    ON.get()
+}
+
+/// No sample: nothing stands here.
+const NONE: i16 = i16::MIN;
+/// The ground where no pack reaches, and under water: three metres down.
+const BED: i32 = -30;
+/// How far below the ground a column of sectors is made (as city.rs `DEEP`).
+const DEEP: i32 = 192;
+/// What the ground is, in a pack's `class` (bake.py): the low three bits, and 8 where leaves stand over it.
+const ROAD: u8 = 0;
+const PAVEMENT: u8 = 1;
+const GRASS_HERE: u8 = 2;
+const WATER_HERE: u8 = 5;
+const YARD: u8 = 6;
+const CANOPY: u8 = 8;
+/// Buildings are found by the patch of 12.8 m they reach into, and what stands is summed in patches of 6.4 m.
+const PATCH: i32 = 7;
+const BLOCK: i32 = 6;
+/// How far from its trunk a tree's crown is shaped by it.
+const REACH: i32 = 64;
+/// How far out of its outline a building may put cells: a bay window, a cornice.
+const OUT: i32 = 8;
+
+struct Building {
+    first: usize,
+    count: usize,
+    wall: Kind,
+    trim: Kind,
+    /// Cells a storey, cells a bay of the front, whether people live in it, and a number of its own.
+    storey: i32,
+    module: i32,
+    home: bool,
+    /// 1: a round tower of concrete, fluted, with an arcade under its top.
+    special: u32,
+    seed: u32,
+    /// The street's level at its lowest: where its storeys are counted from.
+    base: i32,
+    low: [i32; 2],
+    high: [i32; 2],
+}
+
+struct Pack {
+    /// The ground: a sample every `gstep` cells, `gw` a side, the first at (`gx0`, `gz0`).
+    gstep: i32,
+    gw: i32,
+    gx0: i32,
+    gz0: i32,
+    ground: Vec<i16>,
+    /// What stands (a roof, a crown), what the ground is and a colour for the top: one every `tstep` cells.
+    tstep: i32,
+    tw: i32,
+    tx0: i32,
+    tz0: i32,
+    top: Vec<i16>,
+    class: Vec<u8>,
+    tint: Vec<u8>,
+    buildings: Vec<Building>,
+    /// Corners: x, z, and what the side from this corner on looks at (1 open air, 2 the street; 4 ends a ring).
+    verts: Vec<[i32; 3]>,
+    /// Trunks: x, z, the crown's top, how thick.
+    trunks: Vec<[i32; 4]>,
+    near: Vec<Vec<u32>>,
+    stems: Vec<Vec<u32>>,
+    pw: i32,
+    /// The lowest ground and the highest thing in each patch of 6.4 m.
+    lows: Vec<i16>,
+    highs: Vec<i16>,
+    bw: i32,
+}
+
+/// Room for a pack's bytes: write them at the address returned, then `load`.
+pub fn room(bytes: usize) -> *mut u8 {
+    ROOM.with_borrow_mut(|r| {
+        r.clear();
+        r.resize(bytes, 0);
+        r.as_mut_ptr()
+    })
+}
+
+/// Takes the pack in the room. Returns how many packs are held, or -1 where the bytes are not a pack (nothing changes).
+pub fn load() -> i32 {
+    let bytes = ROOM.with_borrow_mut(std::mem::take);
+    let Some(pack) = read(&bytes) else { return -1 };
+    let held = PACKS.with_borrow_mut(|p| {
+        p.push(pack);
+        // The finest first: where two packs cover a place, the one that knows it best answers.
+        p.sort_by_key(|p| p.gstep);
+        p.len() as i32
+    });
+    ON.set(true);
+    held
+}
+
+/// Lets every pack go: the world is the town's again.
+pub fn clear() {
+    PACKS.with_borrow_mut(|p| p.clear());
+    ON.set(false);
+}
+
+fn read(b: &[u8]) -> Option<Pack> {
+    let int = |i: usize| b.get(i * 4..i * 4 + 4).map(|w| i32::from_le_bytes([w[0], w[1], w[2], w[3]]));
+    let head: Vec<i32> = (0..16).map(int).collect::<Option<_>>()?;
+    if head[0] != 0x3159_4142 || head[4] <= 0 || head[5] <= 1 || head[8] < 0 || head[9] < 0 || head[12..15].iter().any(|&n| n < 0) {
+        return None;
+    }
+    let (gw, tw) = (head[5] as usize, if head[8] > 0 { head[9] as usize } else { 0 });
+    let (nb, nv, nt) = (head[12] as usize, head[13] as usize, head[14] as usize);
+    let mut from: usize = 64;
+    let mut take = |n: usize| {
+        let part = b.get(from..from.checked_add(n)?)?;
+        from += n;
+        Some(part)
+    };
+    let shorts = |p: &[u8]| p.chunks_exact(2).map(|w| i16::from_le_bytes([w[0], w[1]])).collect::<Vec<_>>();
+    let ints = |p: &[u8]| p.chunks_exact(4).map(|w| i32::from_le_bytes([w[0], w[1], w[2], w[3]])).collect::<Vec<_>>();
+    let ground = shorts(take(gw.checked_mul(gw)?.checked_mul(2)?)?);
+    let top = shorts(take(tw * tw * 2)?);
+    let class = take(tw * tw)?.to_vec();
+    let tint = take(tw * tw)?.to_vec();
+    let rows = ints(take(nb.checked_mul(24)?)?);
+    let verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
+    let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
+    let mut buildings = Vec::with_capacity(nb);
+    for r in rows.chunks_exact(6) {
+        let (first, count) = (r[0] as usize, r[1] as usize);
+        let own = verts.get(first..first.checked_add(count)?)?;
+        if own.is_empty() {
+            return None;
+        }
+        let style = r[4] as u32;
+        buildings.push(Building {
+            first,
+            count,
+            wall: r[2] as Kind,
+            trim: r[3] as Kind,
+            storey: (style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 },
+            module: (style >> 8 & 255).max(16) as i32,
+            home: style >> 16 & 1 == 1,
+            special: style >> 17 & 3,
+            seed: style >> 24,
+            base: r[5],
+            low: [own.iter().map(|v| v[0]).min()?, own.iter().map(|v| v[1]).min()?],
+            high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
+        });
+    }
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    // Which buildings and trunks reach into each patch.
+    let wide = (p.gw - 1) * p.gstep;
+    p.pw = (wide >> PATCH) + 1;
+    p.near = vec![Vec::new(); (p.pw * p.pw) as usize];
+    p.stems = vec![Vec::new(); (p.pw * p.pw) as usize];
+    let patch = |v: i32, o: i32, pw: i32| ((v - o) >> PATCH).clamp(0, pw - 1);
+    for (i, b) in p.buildings.iter().enumerate() {
+        for pz in patch(b.low[1] - OUT, p.gz0, p.pw)..=patch(b.high[1] + OUT, p.gz0, p.pw) {
+            for px in patch(b.low[0] - OUT, p.gx0, p.pw)..=patch(b.high[0] + OUT, p.gx0, p.pw) {
+                p.near[(pz * p.pw + px) as usize].push(i as u32);
+            }
+        }
+    }
+    for (i, t) in p.trunks.iter().enumerate() {
+        for pz in patch(t[1] - REACH, p.gz0, p.pw)..=patch(t[1] + REACH, p.gz0, p.pw) {
+            for px in patch(t[0] - REACH, p.gx0, p.pw)..=patch(t[0] + REACH, p.gx0, p.pw) {
+                p.stems[(pz * p.pw + px) as usize].push(i as u32);
+            }
+        }
+    }
+    // The lowest ground and the highest thing in each patch of 6.4 m, for knowing which sectors are worth making.
+    p.bw = (wide >> BLOCK) + 1;
+    p.lows = vec![i16::MAX; (p.bw * p.bw) as usize];
+    p.highs = vec![i16::MIN; (p.bw * p.bw) as usize];
+    for j in 0..p.gw {
+        for i in 0..p.gw {
+            let g = p.ground[(j * p.gw + i) as usize];
+            // A sample on a patch's edge is the next patch's too.
+            for (bi, bj) in [(i * p.gstep >> BLOCK, j * p.gstep >> BLOCK), ((i * p.gstep - 1).max(0) >> BLOCK, (j * p.gstep - 1).max(0) >> BLOCK)] {
+                let k = (bj.min(p.bw - 1) * p.bw + bi.min(p.bw - 1)) as usize;
+                p.lows[k] = p.lows[k].min(g);
+                p.highs[k] = p.highs[k].max(g);
+            }
+        }
+    }
+    for j in 0..p.tw {
+        for i in 0..p.tw {
+            let t = p.top[(j * p.tw + i) as usize];
+            if t != NONE {
+                let k = (((p.tz0 - p.gz0 + j * p.tstep) >> BLOCK).clamp(0, p.bw - 1) * p.bw + ((p.tx0 - p.gx0 + i * p.tstep) >> BLOCK).clamp(0, p.bw - 1)) as usize;
+                p.highs[k] = p.highs[k].max(t);
+            }
+        }
+    }
+    Some(p)
+}
+
+impl Pack {
+    /// Whether the pack knows a column: its samples reach round it.
+    fn holds(&self, x: i32, z: i32) -> bool {
+        let wide = (self.gw - 1) * self.gstep;
+        x >= self.gx0 && z >= self.gz0 && x < self.gx0 + wide && z < self.gz0 + wide
+    }
+
+    /// The ground's top cell at a column: between the four samples round it.
+    fn ground(&self, x: i32, z: i32) -> i32 {
+        let (fx, fz) = ((x - self.gx0) as f32 / self.gstep as f32, (z - self.gz0) as f32 / self.gstep as f32);
+        let (i, j) = ((fx as i32).clamp(0, self.gw - 2), (fz as i32).clamp(0, self.gw - 2));
+        let (u, v) = ((fx - i as f32).clamp(0.0, 1.0), (fz - j as f32).clamp(0.0, 1.0));
+        let s = |i: i32, j: i32| self.ground[(j * self.gw + i) as usize] as f32;
+        let (a, b, c, d) = (s(i, j), s(i + 1, j), s(i, j + 1), s(i + 1, j + 1));
+        // Water is level: beside the shore the bed does not climb the bank a sample early.
+        if a.min(b).min(c).min(d) <= BED as f32 {
+            return s(i + (u > 0.5) as i32, j + (v > 0.5) as i32) as i32;
+        }
+        (a + (b - a) * u + (c + (d - c) * u - (a + (b - a) * u)) * v + 0.5).floor() as i32
+    }
+
+    /// The sample of what stands that a column is in.
+    fn cell(&self, x: i32, z: i32) -> Option<usize> {
+        if self.tstep == 0 {
+            return None;
+        }
+        let (i, j) = ((x - self.tx0).div_euclid(self.tstep), (z - self.tz0).div_euclid(self.tstep));
+        (i >= 0 && j >= 0 && i < self.tw && j < self.tw).then(|| (j * self.tw + i) as usize)
+    }
+
+    /// How high what stands at a column is. Between samples that are of one surface (within a metre of each other)
+    /// it slopes, so a pitched roof is a slope and not steps half a metre wide; across an edge it is the nearest.
+    fn top(&self, x: i32, z: i32) -> Option<i32> {
+        let here = self.cell(x, z)?;
+        let half = self.tstep as f32 / 2.0;
+        let (fx, fz) = (((x - self.tx0) as f32 + 0.5 - half) / self.tstep as f32, ((z - self.tz0) as f32 + 0.5 - half) / self.tstep as f32);
+        let (i, j) = (fx.floor() as i32, fz.floor() as i32);
+        if i >= 0 && j >= 0 && i < self.tw - 1 && j < self.tw - 1 {
+            let s = |i: i32, j: i32| self.top[(j * self.tw + i) as usize];
+            let four = [s(i, j), s(i + 1, j), s(i, j + 1), s(i + 1, j + 1)];
+            let (lo, hi) = (*four.iter().min().unwrap(), *four.iter().max().unwrap());
+            if lo != NONE && hi - lo <= 10 {
+                let (u, v) = (fx - i as f32, fz - j as f32);
+                let f = four.map(|v| v as f32);
+                return Some((f[0] + (f[1] - f[0]) * u + (f[2] + (f[3] - f[2]) * u - (f[0] + (f[1] - f[0]) * u)) * v + 0.5).floor() as i32);
+            }
+        }
+        (self.top[here] != NONE).then(|| self.top[here] as i32)
+    }
+
+    /// What the ground is at a column, and the colour of its top. Road against pavement is settled between samples,
+    /// so a kerb runs straight and not in steps of half a metre.
+    fn surface(&self, x: i32, z: i32) -> (u8, u8) {
+        let Some(here) = self.cell(x, z) else { return (GRASS_HERE, 0) };
+        let (c, tint) = (self.class[here], self.tint[here]);
+        let sort = c & 7;
+        if sort != ROAD && sort != PAVEMENT {
+            return (c, tint);
+        }
+        let half = self.tstep as f32 / 2.0;
+        let (fx, fz) = (((x - self.tx0) as f32 + 0.5 - half) / self.tstep as f32, ((z - self.tz0) as f32 + 0.5 - half) / self.tstep as f32);
+        let (i, j) = ((fx.floor() as i32).clamp(0, self.tw - 2), (fz.floor() as i32).clamp(0, self.tw - 2));
+        let (u, v) = ((fx - i as f32).clamp(0.0, 1.0), (fz - j as f32).clamp(0.0, 1.0));
+        let s = |i: i32, j: i32| (self.class[(j * self.tw + i) as usize] & 7 == ROAD) as i32 as f32;
+        let road = s(i, j) + (s(i + 1, j) - s(i, j)) * u + (s(i, j + 1) + (s(i + 1, j + 1) - s(i, j + 1)) * u - (s(i, j) + (s(i + 1, j) - s(i, j)) * u)) * v;
+        (c & !7 | if road > 0.5 { ROAD } else { PAVEMENT }, tint)
+    }
+
+    /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
+    fn building(&self, x: i32, z: i32) -> Option<(&Building, Probe)> {
+        let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
+        let mut best: Option<(&Building, Probe)> = None;
+        for &i in &self.near[patch] {
+            let b = &self.buildings[i as usize];
+            if x < b.low[0] - OUT || z < b.low[1] - OUT || x > b.high[0] + OUT || z > b.high[1] + OUT {
+                continue;
+            }
+            let p = self.probe(b, x, z);
+            if p.inside {
+                return Some((b, p));
+            }
+            if p.far < OUT as f32 && best.as_ref().is_none_or(|(_, q)| p.far < q.far) {
+                best = Some((b, p));
+            }
+        }
+        best
+    }
+
+    /// Where a column is against a building's outline: in it or not (a ring inside a ring is a yard), how far from
+    /// its nearest side, how far along that side, how long the side is, what it looks at, and the nearest point of it.
+    fn probe(&self, b: &Building, x: i32, z: i32) -> Probe {
+        let (px, pz) = (x as f32 + 0.5, z as f32 + 0.5);
+        let own = &self.verts[b.first..b.first + b.count];
+        let mut p = Probe { inside: false, far: f32::MAX, along: 0.0, round: 0.0, long: 0.0, looks: 0, side: 0, on: [0.0; 2] };
+        let (mut start, mut run) = (0, 0.0f32);
+        for i in 0..own.len() {
+            let a = own[i];
+            let last = a[2] & 4 != 0 || i == own.len() - 1;
+            let c = if last { own[start] } else { own[i + 1] };
+            let before = run;
+            let (ax, az, cx, cz) = (a[0] as f32, a[1] as f32, c[0] as f32, c[1] as f32);
+            if (az > pz) != (cz > pz) && px < ax + (pz - az) / (cz - az) * (cx - ax) {
+                p.inside = !p.inside;
+            }
+            let (dx, dz) = (cx - ax, cz - az);
+            let long = (dx * dx + dz * dz).sqrt();
+            run = if last { 0.0 } else { run + long };
+            if last {
+                start = i + 1;
+            }
+            if long < 0.5 {
+                continue;
+            }
+            let t = (((px - ax) * dx + (pz - az) * dz) / (long * long)).clamp(0.0, 1.0);
+            let (qx, qz) = (ax + dx * t, az + dz * t);
+            let far = ((px - qx) * (px - qx) + (pz - qz) * (pz - qz)).sqrt();
+            if far < p.far {
+                p = Probe { inside: p.inside, far, along: t * long, round: before + t * long, long, looks: a[2], side: (b.first + i) as u32, on: [qx, qz] };
+            }
+        }
+        p
+    }
+
+    /// The trunk nearest a column, if one stands within reach: how far off it is, and the trunk.
+    fn trunk(&self, x: i32, z: i32) -> Option<(f32, [i32; 4])> {
+        let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
+        let far = |t: &[i32; 4]| (x - t[0]) * (x - t[0]) + (z - t[1]) * (z - t[1]);
+        self.stems[patch].iter().map(|&i| self.trunks[i as usize]).min_by_key(far).filter(|t| far(t) <= REACH * REACH).map(|t| ((far(&t) as f32).sqrt(), t))
+    }
+}
+
+struct Probe {
+    inside: bool,
+    far: f32,
+    along: f32,
+    /// How far round its ring from the ring's first corner.
+    round: f32,
+    long: f32,
+    looks: i32,
+    side: u32,
+    on: [f32; 2],
+}
+
+/// What a front is at one place on it: how its storeys, windows and doors go. `up` is cells above the building's
+/// base, `top` where its wall ends, `deep` how many cells in from the outline, `size` the cell's size.
+fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32, size: i32) -> Kind {
+    let glass = kind(GLASS, OWN);
+    let dark = kind(PLASTER, grey(13));
+    let (storey, module) = (b.storey, b.module as f32);
+    if b.special == 1 {
+        // The tower: flutes up its shaft, and under its top an arcade of open arches with the dark behind.
+        let round = p.round as i32;
+        return if up > top - 62 && up < top - 24 && round % 21 < 11 && (up < top - 30 || (round % 21 - 5).abs() < top - 24 - up) {
+            if deep < 3.0 * size as f32 { 0 } else { kind(PLASTER, grey(13)) }
+        } else if size == 1 && deep < 1.0 && up < top - 70 && up > 60 && round % 9 < 2 {
+            0
+        } else {
+            b.wall
+        };
+    }
+    // The cornice: the wall's last cells are trim.
+    if up >= top - 3 && size <= 2 {
+        return b.trim;
+    }
+    // A side that looks on nothing (a neighbour's wall, a light well) or is too short for a window is plain.
+    if p.looks & 1 == 0 || p.long < module {
+        return b.wall;
+    }
+    let (floor, fy) = (up.div_euclid(storey), up.rem_euclid(storey));
+    let count = (p.long / module).floor().max(1.0);
+    let within = p.along - (p.long - count * module) / 2.0;
+    if within < 0.0 || within >= count * module {
+        return b.wall;
+    }
+    let (bay, mu) = ((within / module) as i32, within % module - module / 2.0);
+    let chance = hash(bay, p.side as i32, b.seed);
+    // What the opening is: its half width, its foot and its head, and whether it is a door.
+    let (half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
+        if !b.home {
+            (module / 2.0 - 3.0, 5, storey - 7, 0) // a shop's window
+        } else if chance % 3 == 0 {
+            (module / 2.0 - 4.0, 0, 23, 2) // a garage
+        } else if chance % 3 == 1 {
+            (5.0, 0, 22, 1) // the way in
+        } else {
+            (6.0, 10, storey - 6, 0)
+        }
+    } else if b.home {
+        (6.0 + (b.seed % 2) as f32, 9, storey - 6, 0)
+    } else if storey > 60 {
+        (4.5, 14, storey - 12, 0) // a church's windows: tall and narrow
+    } else {
+        ((module / 2.0 - 5.0).min(8.0), 8, storey - 6, 0)
+    };
+    // A belt at each floor and a sill under each window, where cells are fine enough to show them.
+    if size == 1 && deep < 1.0 {
+        if fy == 0 && floor > 0 && !b.home {
+            return b.trim;
+        }
+        if door == 0 && fy == foot - 1 && mu.abs() < half + 1.0 {
+            return b.trim;
+        }
+    }
+    if mu.abs() >= half || fy < foot || fy >= head || up + (head - fy) > top - 4 || over_ground + (fy - foot) < 3 && door == 0 {
+        return b.wall;
+    }
+    match door {
+        2 => if deep < 1.0 && size == 1 { 0 } else { kind(WOOD, grey(4 + (chance >> 4) as u8 % 6)) },
+        1 => if deep < 1.0 && size == 1 { 0 } else if fy >= head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
+        // A window sits a cell back in its wall, with the room dark behind it.
+        _ if size > 1 => if deep < size as f32 { glass } else { dark },
+        _ => if deep < 1.0 { 0 } else if deep < 2.0 { if mu.abs() < 0.6 || (fy - foot) == (head - foot) / 2 { b.trim } else { glass } } else { dark },
+    }
+}
+
+/// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
+struct Column<'a> {
+    g: i32,
+    /// The ground's top cell's kind, and how many cells of it stand over the ground (a pavement's kerb).
+    ground: Kind,
+    kerb: i32,
+    what: What<'a>,
+}
+
+enum What<'a> {
+    Open,
+    /// In a building: its roof's cell and colour.
+    In(&'a Building, Probe, i32, u8),
+    /// Just outside one, where its bays and cornice stand: how high its wall is there.
+    By(&'a Building, Probe, i32),
+    /// Leaves from here up to there, and a trunk up to so high if one stands in this column.
+    Crown(i32, i32, Option<i32>),
+}
+
+fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
+    let Some(p) = packs.iter().find(|p| p.holds(x, z)) else {
+        return Column { g: BED, ground: kind(SAND, OWN), kerb: 0, what: What::Open };
+    };
+    let g = p.ground(x, z);
+    let (class, tint) = p.surface(x, z);
+    let (ground, kerb) = match class & 7 {
+        ROAD => (kind(ASPHALT, OWN), 0),
+        PAVEMENT => (kind(CONCRETE, OWN), 1),
+        GRASS_HERE => (kind(GRASS, OWN), 0),
+        WATER_HERE => (kind(SAND, OWN), 0),
+        YARD => (kind(CONCRETE, tint), 0),
+        _ => (kind(EARTH, OWN), 0),
+    };
+    let what = match p.building(x, z) {
+        Some((b, probe)) if probe.inside => {
+            let roof = p.top(x, z).unwrap_or(b.base + 2 * b.storey).max(g + 22);
+            What::In(b, probe, roof, tint)
+        }
+        Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
+            // The wall's height where this column is nearest it: a little way in from the outline.
+            let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
+            let far = probe.far.max(0.01);
+            let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
+            match p.top(ix, iz) {
+                Some(roof) => What::By(b, probe, roof),
+                None => What::Open,
+            }
+        }
+        _ if class & CANOPY != 0 => match p.top(x, z) {
+            Some(t) if t > g + 4 => {
+                let tall = t - g;
+                let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
+                match p.trunk(x, z) {
+                    // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
+                    // rim what the lidar saw is a spray of leaves and no more.
+                    Some((far, trunk)) if tall >= 28 => {
+                        let high = (trunk[2] - g).max(tall);
+                        let deep = (high as f32 * 0.55).clamp(16.0, 90.0);
+                        let rim = (high as f32 * 0.4).clamp(14.0, REACH as f32);
+                        let middle = g as f32 + high as f32 - deep / 2.0;
+                        let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
+                        let foot = (under as i32 + ragged).max(g + 18).min(t - 3);
+                        What::Crown(foot, t, (far <= trunk[3] as f32 + 0.5).then(|| t - 8))
+                    }
+                    // A bush or a hedge is leaves to the ground.
+                    _ => What::Crown(if tall < 28 { g + 1 } else { t - (tall / 2).clamp(10, 40) + ragged }, t, None),
+                }
+            }
+            _ => What::Open,
+        },
+        _ => What::Open,
+    };
+    Column { g, ground, kerb, what }
+}
+
+/// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
+fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
+    // A coarse cell is what its middle is.
+    let mid = y + size / 2;
+    if mid <= c.g {
+        return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
+    }
+    match &c.what {
+        What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
+        What::In(b, p, roof, tint) => {
+            if mid > *roof {
+                0
+            } else if mid > *roof - size {
+                kind(ROOFING, *tint)
+            } else if p.far < 3.0 * size as f32 && size <= 8 {
+                front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
+            } else {
+                b.wall
+            }
+        }
+        What::By(b, p, roof) => {
+            if size == 1 && mid <= c.g + c.kerb {
+                return c.ground;
+            }
+            let (up, top) = (mid - b.base, *roof - b.base);
+            // The cornice stands a cell or two out from the wall's top.
+            if p.far < 2.0 && up >= top - 3 && up <= top {
+                return b.trim;
+            }
+            // Bay windows: on a home's street front, over every other bay of it, from the first floor to the cornice.
+            if !b.home || p.long < b.module as f32 || up < b.storey || up > top - 4 {
+                return 0;
+            }
+            let module = b.module as f32;
+            let count = (p.long / module).floor().max(1.0);
+            let within = p.along - (p.long - count * module) / 2.0;
+            if within < 0.0 || within >= count * module {
+                return 0;
+            }
+            let (bay, mu) = ((within / module) as i32, within % module - module / 2.0);
+            if count > 1.0 && (bay + b.seed as i32) % 2 == 1 || b.seed % 5 == 0 {
+                return 0;
+            }
+            // Six cells out across the middle, slanting back to the wall at each side.
+            let out = 6.0 - (mu.abs() - 5.0).max(0.0);
+            if p.far >= out {
+                return 0;
+            }
+            let fy = up.rem_euclid(b.storey);
+            if up >= top - 6 {
+                b.trim
+            } else if p.far >= out - 1.2 && fy >= 9 && fy < b.storey - 6 {
+                kind(GLASS, OWN)
+            } else {
+                b.wall
+            }
+        }
+        What::Crown(foot, top, trunk) => {
+            if trunk.is_some_and(|t| mid <= t) {
+                kind(WOOD, colour(2, 9))
+            } else if size == 1 && mid <= c.g + c.kerb {
+                c.ground
+            } else if mid < *foot || mid > *top {
+                0
+            } else if size == 1 && hash3(x >> 1, y >> 1, z >> 1, 3) % 7 == 0 {
+                0 // light comes through a crown
+            } else {
+                kind(LEAVES, if hash3(x >> 2, y >> 2, z >> 2, 5) % 4 == 0 { colour(7, 5) } else { OWN })
+            }
+        }
+    }
+}
+
+/// How high the ground is at a column: its top cell.
+pub fn ground(x: i32, z: i32) -> i32 {
+    PACKS.with_borrow(|packs| packs.iter().find(|p| p.holds(x, z)).map_or(BED, |p| p.ground(x, z)))
+}
+
+/// Where someone on foot stands at a column, whether it is paved, and the sort of place (always 0: the town's
+/// blocks are not the Bay's). On a roof where a building stands.
+pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
+    PACKS.with_borrow(|packs| {
+        let c = column(packs, x, z, 1);
+        match c.what {
+            What::In(_, _, roof, _) => (roof + 1, false, 0),
+            _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
+        }
+    })
+}
+
+/// What the ground's top is made of at a column.
+pub fn top(x: i32, z: i32) -> Kind {
+    PACKS.with_borrow(|packs| column(packs, x, z, 1).ground)
+}
+
+/// Which sectors of a column of sectors are worth making: below the first is all earth, above the last all air.
+pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
+    let size = (SIDE as i32) << lod;
+    let (x0, z0, x1, z1) = (sx * size, sz * size, (sx + 1) * size, (sz + 1) * size);
+    let (lo, hi) = PACKS.with_borrow(|packs| {
+        let (mut lo, mut hi) = (BED, 0);
+        for p in packs {
+            let wide = (p.gw - 1) * p.gstep;
+            if x1 <= p.gx0 || z1 <= p.gz0 || x0 >= p.gx0 + wide || z0 >= p.gz0 + wide {
+                continue;
+            }
+            for bz in ((z0 - p.gz0) >> BLOCK).max(0)..=((z1 - 1 - p.gz0) >> BLOCK).min(p.bw - 1) {
+                for bx in ((x0 - p.gx0) >> BLOCK).max(0)..=((x1 - 1 - p.gx0) >> BLOCK).min(p.bw - 1) {
+                    let k = (bz * p.bw + bx) as usize;
+                    lo = lo.min(p.lows[k] as i32);
+                    hi = hi.max(p.highs[k] as i32);
+                }
+            }
+        }
+        (lo, hi)
+    });
+    ((lo - DEEP).div_euclid(size), (hi + 4).div_euclid(size))
+}
+
+/// Makes one sector of the Bay in `s`, at the coarseness `s` was started with.
+pub fn make(s: &mut Scratch) {
+    let (k, size) = (s.lod, 1i32 << s.lod);
+    let side = SIDE as i32;
+    PACKS.with_borrow(|packs| {
+        for cz in 0..side {
+            for cx in 0..side {
+                let (x, z) = (((s.low[0] + cx) << k) + size / 2, ((s.low[2] + cz) << k) + size / 2);
+                let c = column(packs, x, z, size);
+                for cy in 0..side {
+                    let v = kind_at(&c, x, (s.low[1] + cy) << k, z, size);
+                    if v != 0 {
+                        s.cells[at(cx as usize, cy as usize, cz as usize)] = v;
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pack of the bake's own shape, made here: a slope, a road and a pavement, one house.
+    fn pack() -> Vec<u8> {
+        let (gw, tw) = (65i32, 128i32);
+        let mut b: Vec<u8> = Vec::new();
+        for v in [0x3159_4142, 0, 0, 640, 10, gw, 0, 0, 5, tw, 0, 0, 1, 4, 1, 0] {
+            b.extend((v as i32).to_le_bytes());
+        }
+        for _ in 0..gw {
+            for i in 0..gw {
+                b.extend(((100 + i * 2) as i16).to_le_bytes());
+            }
+        }
+        let inside = |i: i32, j: i32| (40..80).contains(&i) && (40..80).contains(&j);
+        for j in 0..tw {
+            for i in 0..tw {
+                b.extend((if inside(i, j) { 260i16 } else { NONE }).to_le_bytes());
+            }
+        }
+        for j in 0..tw {
+            b.extend(std::iter::repeat_n(if j < 20 { ROAD } else if j < 30 { PAVEMENT } else { YARD }, tw as usize));
+        }
+        b.extend(std::iter::repeat_n(3u8, (tw * tw) as usize));
+        for v in [0, 4, kind(PLASTER, WHITE) as i32, kind(PLASTER, grey(3)) as i32, 32 | 30 << 8 | 1 << 16 | 7 << 24, 140] {
+            b.extend(v.to_le_bytes());
+        }
+        for v in [[200, 200, 3], [400, 200, 1], [400, 400, 1], [200, 400, 1 | 4]] {
+            for n in v {
+                b.extend((n as i32).to_le_bytes());
+            }
+        }
+        for n in [500, 500, 300, 1] {
+            b.extend((n as i32).to_le_bytes());
+        }
+        b
+    }
+
+    fn with_pack(f: impl FnOnce()) {
+        let bytes = pack();
+        let at = room(bytes.len());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), at, bytes.len()) };
+        assert_eq!(load(), 1);
+        f();
+        clear();
+    }
+
+    #[test]
+    fn a_pack_is_read_and_bad_bytes_are_not() {
+        assert!(read(&pack()).is_some());
+        assert!(read(&pack()[..5000]).is_none());
+        assert!(read(&[0u8; 64]).is_none());
+        let mut wrong = pack();
+        // A building that says it has more corners than there are.
+        let rows = 64 + 65 * 65 * 2 + 128 * 128 * 4;
+        wrong[rows + 4..rows + 8].copy_from_slice(&900i32.to_le_bytes());
+        assert!(read(&wrong).is_none());
+    }
+
+    #[test]
+    fn the_ground_follows_the_samples_and_what_no_pack_holds_is_water() {
+        with_pack(|| {
+            assert!(on());
+            assert_eq!(ground(0, 0), 100);
+            assert_eq!(ground(100, 300), 120);
+            assert_eq!(ground(105, 300), 121);
+            assert_eq!(ground(-50, 0), BED);
+            assert_eq!(ground(5000, 5000), BED);
+        });
+        assert!(!on());
+    }
+
+    #[test]
+    fn a_house_stands_where_its_outline_is_with_a_roof_and_windows() {
+        with_pack(|| {
+            // On its roof inside, on the ground outside; the pavement is a kerb over the road.
+            assert_eq!(footing(300, 300).0, 261);
+            assert_eq!(footing(100, 50).0, ground(100, 50) + 1);
+            assert_eq!(footing(100, 120).0, ground(100, 120) + 2);
+            let mut s = Scratch::new();
+            let mut kinds = std::collections::HashMap::new();
+            for sy in 1..5 {
+                for (sx, sz) in [(3, 3), (4, 3), (3, 4), (4, 4), (5, 5), (6, 6), (3, 2), (2, 3)] {
+                    s.start(sx, sy, sz, 0);
+                    make(&mut s);
+                    for &c in &s.cells {
+                        *kinds.entry(material(c)).or_insert(0) += 1;
+                    }
+                }
+            }
+            for m in [PLASTER, GLASS, ROOFING, CONCRETE] {
+                assert!(kinds.get(&m).copied().unwrap_or(0) > 50, "material {m}: {kinds:?}");
+            }
+            // Every sector with something in it is within the span, at every coarseness.
+            for lod in 0..6 {
+                let size = 64 << lod;
+                for sx in -1..=640 / size {
+                    for sz in -1..=640 / size {
+                        let (lo, hi) = span(sx, sz, lod);
+                        for sy in [lo - 1, hi + 1] {
+                            s.start(sx, sy, sz, lod);
+                            make(&mut s);
+                            let full = s.cells.iter().filter(|&&c| c != 0).count();
+                            assert!(if sy < lo { full == s.cells.len() } else { full == 0 }, "lod {lod} sector {sx} {sy} {sz}: {full} cells, span {lo} to {hi}");
+                        }
+                    }
+                }
+            }
+        });
+    }
+}

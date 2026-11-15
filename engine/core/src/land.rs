@@ -385,6 +385,10 @@ fn overgrown(x: i32, z: i32) -> f32 {
 
 /// How high the ground is at a column: its top cell.
 pub fn ground(x: i32, z: i32) -> i32 {
+    // Where packs of the Bay are loaded (#373) the land is theirs.
+    if crate::bay::on() {
+        return crate::bay::ground(x, z);
+    }
     let town = noise(x, z, 9000, 11) * 1200.0 + noise(x, z, 2600, 12) * 300.0 + noise(x, z, 700, 13) * 50.0 - 560.0;
     if open(x, z) == 0.0 {
         return town.floor() as i32;

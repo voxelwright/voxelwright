@@ -6,6 +6,7 @@
 // words, and tells the shader which part of each box is whole enough to march.
 import { stream, type Edit } from './edits.ts'
 import type { Answer, Ask } from './worker.ts'
+import { BAY } from './bay.ts'
 
 export const SIDE = 64
 const UNIFORM = 0x80000000
@@ -192,7 +193,7 @@ export class World {
     this.topBuffer = device.createBuffer({ label: 'boxes', size: this.stride * levels * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
     this.stats = { ready: 0, wanted: 0, stale: 0, flying: 0, poolUsed: 0, poolWords, made: 0, makeMs: 0, full: 0, refused: 0, wholeLevels: 0, boxes: Array.from({ length: levels }, () => ({ made: 0, ms: 0, words: 0 })) }
     for (let i = 0; i < options.workers; i++) {
-      const worker = new Worker('/page/worker.ts', { type: 'module' })
+      const worker = new Worker(`/page/worker.ts${BAY}`, { type: 'module' })
       const slot = { worker, busy: 0 }
       worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; this.take(e.data) }
       this.workers.push(slot)

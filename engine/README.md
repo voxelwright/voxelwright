@@ -1118,6 +1118,26 @@ node helper.mjs --world http://127.0.0.1:5801      # as for making things; open 
   design: it is the one step that lets code in. A gap met only in a realm nobody has an id and a place for (an ask
   from before November 14) can be sent but not asked again.
 
+## The Bay Area from data (#373)
+
+`/city?bay=1` opens the real place in place of the town: so far two square kilometres of San Francisco at true
+size (Telegraph Hill, North Beach, Russian Hill's east side), from the city's own lidar, ground model, building
+outlines, streets and addresses and from aerial colour. The default world is unchanged. Sources and licences:
+`.agents/skills/bay-sources`. How it is made and what it costs: `.agents/skills/cell-engine`, "The Bay from data".
+
+```sh
+python3 -m venv ~/.village/engine/bay/venv
+~/.village/engine/bay/venv/bin/pip install numpy pillow 'laspy[lazrs]' tifffile imagecodecs pyproj   # once: the bake's tools
+PY=~/.village/engine/bay/venv/bin/python
+$PY bay/fetch.py 551.7_4183.5      # one square, named by the km of its south-west corner in UTM 10N: about 650 MB into ~/.village/engine/bay/raw
+$PY bay/bake.py 551.7_4183.5       # about a minute: ~/.village/engine/bay/packs/551.7_4183.5.bay (20 MB) and .json (names)
+node serve.mjs --port 5920         # then http://127.0.0.1:5920/city?bay=1   (B to walk; &bay=a,b names other squares)
+node bay/shot.mjs --name look --where --views "51925,+1.7,66140,352,14"   # pictures into ~/.village/engine/bay/shots
+```
+
+Raw data and packs stay outside the repo. Bottom left the page says the street underfoot and the nearest address.
+A shared world (`?shared=1`, `world.mjs`) does not load packs yet: the Bay is for a page by itself.
+
 ## Checks and tools
 
 ```sh

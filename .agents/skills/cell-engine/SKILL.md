@@ -2982,3 +2982,39 @@ times up; a wall one cell thick the same. Built roads striped, thin things were 
   record's size of its place, and one with `controls` keeps to a plain edit's size (the living lane walks its cells).
 - **Top effort is not worth it**: Fable at `--effort max` took 18 to 20 minutes and $4 for a sword and a pistol of
   400 to 500 cells; four other wishes ran past 25 minutes. Usual effort: 1 to 5 minutes, $0.2 to $1.2.
+
+## The Bay from data (#373, `core/src/bay.rs`, `engine/bay/`, `page/bay.ts`; November 15)
+
+The town is rules alone; the Bay is rules over packs. Sources and licences are in the `bay-sources` skill.
+
+- **A pack** is one square kilometre baked from open data (`bay/bake.py`): the ground every metre (USGS 1 m model),
+  what stands every half metre (the highest lidar return: roofs, crowns), what the ground is and a colour for each
+  top (aerial picture, near infra-red for leaves), every building's outline as it is drawn by the city, in cells,
+  with which sides look on open air and on the street, and a trunk under each crown's top. 20 MB a square.
+- **The core's part** (`bay.rs`): a sector at any coarseness is asked column by column, as `city.rs` does. Walls are
+  cut from the outline at 10 cm, the roof inside it is the lidar's (sloping between samples of one surface, a step
+  across an edge), and the front is a program: storeys, windows a cell back in the wall with a sill, bays on homes (seen in
+  pictures); doors, garages, a cornice and the tower's flutes are written and not yet picked out in one. `land::ground`, `city::make`, `span`, `footing` and `top`
+  hand over to it once a pack is loaded (`bay_room`, `bay_load`); with none loaded nothing changes and the town's
+  sum holds. What no pack covers is level water.
+- **Every core must hold the same packs before it is asked anything**: the page's, each maker of sectors, the mover.
+  All open their core through `page/bay.ts` `open`. `world.mjs` does not yet, so a shared world is still the town.
+- **Frame**: x east, z south, in cells from 500,000 m east and 4,250,000 m north of UTM zone 10N; y up from 1 m over
+  NAVD88's zero. The lidar is in Web Mercator, where a metre is 0.79 m on the ground here: everything is put into
+  UTM before it meets anything else. Outlines and lidar roofs then agree to within a sample.
+- **Measured** (M1 Pro, two squares loaded), on Filbert Street at Grant Avenue, between house fronts
+  (`at=52136,48.1,66040`; the page's own start is a lawn, which flatters): `test/paired.mjs --b 'bay=1&at=...'` at
+  2560 x 1440, town against Bay: street 34.1 and 22.7 ms, fronts 28.9 and 25.8, roofs 28.2 and 34.7 (+23%), 130 m
+  up 42.5 and 33.0, 730 m up 35.5 and 15.7. `test/sitting.mjs --query 'bay=1&at=...'`: 60 frames a second walking,
+  running and turning (p99 16.7 ms over 6,000 frames, none over 25 ms) with the picture at 0.35 to 0.50 of full
+  size; in the square 0.60 to 0.85. The world round a place is made in 4 to 5 s (18,432 sectors), 170 to 200 MB of
+  trees.
+- **A bake is repeatable**: a building's number is the city's own (`sf16_bldgid`) through `zlib.crc32`, never
+  Python's `hash`, which differs every run; two bakes give the same bytes.
+- **Facts paid for**: this lidar has no building or leaf classes (only ground, unclassified, noise), so buildings
+  are what lies in an outline and leaves are what is bright in near infra-red and stands over the ground. A median
+  over the surface took the church's spires off; only a sample two metres clear of all eight neighbours is dropped.
+  The streets here lie 9 degrees off the grid of cells, so every wall is stepped about every 60 cm.
+- **Not built**: wall colours are a program's guess (no open source has them without a key); nothing past the
+  packs but water; no people, cars, signs or road paint; crowns are leaves over one trunk; interiors are solid;
+  a pack is 20 MB in each of eight cores, which is what streaming must cut (#373's comment on the path).
