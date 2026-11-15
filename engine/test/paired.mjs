@@ -10,6 +10,7 @@
 //   node test/paired.mjs --a 'people=0' --b 'people=1' --people   ... with whoever is in view drawn as well as the march
 //   node test/paired.mjs --other ../../main/engine           B is this checkout, A is another checkout's page (say one at origin/main): for a change to the code
 //   node test/paired.mjs                                     A against A: how far apart two measures of the same thing lie just now
+//   --do-file path   the same js read from a file (a long scene on the command line had the run killed before it began)
 //   --rounds 5 (pairs kept at each place)   --do 'js run in the page once it is up, before measuring (to put a thing in view, say)'
 //
 // Both of this machine's turns on the GPU are held while it runs (a few minutes): other threads' checks wait.
@@ -20,7 +21,7 @@ import { arg, CHROME, has, here, quiet, still } from './kit.mjs'
 import { from } from './rows.mjs'
 
 const PLACES = [['street', 0, 1.8, 0, 90, -2], ['fronts', 0, 1.8, 0, 60, 5], ['roofs', 0, 12, 0, 20, -8], ['high', 0, 130, 0, 30, -22], ['far', 0, 730, 0, 200, -30]]
-const rounds = Number(arg('rounds', 5)), act = arg('do', ''), people = has('people')
+const rounds = Number(arg('rounds', 5)), act = arg('do-file', '') ? readFileSync(arg('do-file', ''), 'utf8') : arg('do', ''), people = has('people')
 const serveFrom = async (dir) => {
   const server = spawn('node', ['serve.mjs', '--port', '0', '--reports', '/dev/null'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] })
   const port = await new Promise((resolve, reject) => {
