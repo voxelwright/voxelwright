@@ -176,6 +176,27 @@ fn four(p: (f32, f32), period: f32) -> [f32; 4] {
 fn turn(q: (f32, f32)) -> (f32, f32) {
     (q.0 * 0.8 - q.1 * 0.6, q.0 * 0.6 + q.1 * 0.8)
 }
+/// The first of the four alone, where only it is wanted: a quarter of the work.
+fn one(p: (f32, f32), period: f32) -> f32 {
+    let (qx, qz) = (p.0 / period, p.1 / period);
+    let (cx, cz) = (qx.floor(), qz.floor());
+    let (fx, fz) = (qx - cx, qz - cz);
+    let (ux, uz) = (fx * fx * (3.0 - 2.0 * fx), fz * fz * (3.0 - 2.0 * fz));
+    let (t, at) = (chance(), |x: f32, z: f32| ((z as i32).rem_euclid(256) * 256 + (x as i32).rem_euclid(256)) as usize * 4);
+    let (top, bottom) = (t[at(cx, cz)] + (t[at(cx + 1.0, cz)] - t[at(cx, cz)]) * ux, t[at(cx, cz + 1.0)] + (t[at(cx + 1.0, cz + 1.0)] - t[at(cx, cz + 1.0)]) * ux);
+    top + (bottom - top) * uz
+}
+fn weave_one(p: (f32, f32), period: f32, count: u32) -> f32 {
+    let (mut q, mut size, mut sum, mut weight, mut all) = (p, period, 0.0, 0.5, 0.0);
+    for k in 0..count {
+        sum += one((q.0 + k as f32 * 37.3, q.1 + k as f32 * 91.7), size) * weight;
+        all += weight;
+        q = turn(q);
+        size *= 0.47;
+        weight *= 0.5;
+    }
+    sum / all
+}
 /// Folds of it (space.ts `weave`, with every fold shown: the cells are always near).
 fn weave(p: (f32, f32), period: f32, count: u32) -> [f32; 4] {
     let (mut q, mut size, mut sum, mut weight, mut all) = (p, period, [0.0f32; 4], 0.5, 0.0);
@@ -206,15 +227,15 @@ pub enum Cover {
 /// edges of fields, heath between, streams in dark gullies.
 pub fn cover(x: i32, z: i32) -> Cover {
     let p = km(x, z);
-    let (slow, mid, near) = (weave(p, 420.0, 3), weave(p, 30.0, 5), weave(p, 9.0, 3));
-    let lie = 1.0 - (weave(p, 38.0, 4)[0] * 2.0 - 1.0).abs();
+    let (slow, mid, near) = (weave(p, 420.0, 3), weave_one(p, 30.0, 5), weave(p, 9.0, 3));
+    let lie = 1.0 - (weave_one(p, 38.0, 4) * 2.0 - 1.0).abs();
     let valley = 1.0 - ease(0.0, 0.03, river(x, z).0);
     let way = if slow[2] > 0.5 { (p.0 * 0.96 + p.1 * 0.28, p.1 * 0.96 - p.0 * 0.28) } else { turn(p) };
     let (wide, long) = (3.4, 2.1);
     let row = (way.1 / long).floor();
     let along = way.0 / wide + lot(row, 113.0)[0] * 3.0;
     let small = lot(along.floor(), row);
-    let wooded = mid[0] - 0.56 + (slow[0] - 0.5) * 0.4 + (lie - 0.5) * 0.3 - valley * 0.06 + (small[2] - 0.5) * 0.07;
+    let wooded = mid - 0.56 + (slow[0] - 0.5) * 0.4 + (lie - 0.5) * 0.3 - valley * 0.06 + (small[2] - 0.5) * 0.07;
     if (near[3] - 0.5).abs() < 0.004 {
         return Cover::Wood;
     }
@@ -469,6 +490,13 @@ mod tests {
             }
             println!("{name}: {:.0} ns a column (mean height {})", t.elapsed().as_nanos() as f64 / 200_000.0, sum / 200_000);
         }
+        // And what the planet's green land costs to cover (city.rs asks it for every column of it).
+        let t = std::time::Instant::now();
+        let mut woods = 0;
+        for i in 0..200_000 {
+            woods += matches!(cover(3_000_000 + (i % 450) * 7, -9_000_000 + (i / 450) * 7), Cover::Wood) as i32;
+        }
+        println!("cover of green land: {:.0} ns a column ({woods} of 200000 wood)", t.elapsed().as_nanos() as f64 / 200_000.0);
     }
 
     /// The picture of chance and its folds, to hold against the page's own: `cargo test --release chance_says -- --ignored --nocapture`
@@ -499,5 +527,16 @@ mod tests {
             }
         }
         std::fs::write(std::env::var("LAND_MAP").unwrap(), out).unwrap();
+    }
+
+    /// The cover's one-number folds are the first of the four, to the bit, so the cheaper cover is the same land.
+    #[test]
+    fn weave_one_is_the_first_of_four() {
+        for i in 0..20_000 {
+            let p = ((i % 200) as f32 * 3.7 - 400.0, (i / 200) as f32 * 41.3 - 2_000.0);
+            for (period, count) in [(30.0, 5), (38.0, 4)] {
+                assert_eq!(weave_one(p, period, count).to_bits(), weave(p, period, count)[0].to_bits(), "at {p:?}");
+            }
+        }
     }
 }
