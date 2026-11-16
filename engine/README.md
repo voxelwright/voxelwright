@@ -1160,8 +1160,9 @@ node test/player.mjs          # measures it in Chrome and WebKit; pictures in ~/
   in the core's own words (balls and rows of cells, as a shared world's log keeps them). The world under it is
   the one the core makes from its rules. It holds no data from anywhere else.
 - **In a page** it is an iframe on `player/index.html?scene=<address>`. It tells the page that holds it, by
-  `postMessage`, `{ village: 'player', type }`: `unsupported` (no WebGPU: within a second, and nothing more is
-  downloaded), `ready` (the scene is seen, with `ms`), `error`. `player/host.html` is a page that holds two.
+  `postMessage`, `{ village: 'player', type }`: within a second either `unsupported` (no WebGPU, and nothing more
+  is downloaded) or `loading`; then `ready` (the scene is seen, with `ms`) or `error`. A frame that has said
+  nothing after a second or so never loaded. `player/host.html` is a page that holds two.
   Do not hide the frame while waiting (`visibility: hidden`, `display: none`): a browser draws no frames there,
   and `ready` never comes. Lay the flat picture over it.
 - **It needs no cross-origin isolation**: no COOP, COEP or CORP header, and it runs in a frame of another origin.

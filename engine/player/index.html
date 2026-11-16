@@ -20,15 +20,16 @@
 <!--
   What the page that holds this one is told, each a message to it: { village: 'player', type, ... }.
     unsupported  { reason }                 no WebGPU here: said within a second of this page starting, and nothing more is loaded
+    loading      {}                         WebGPU is here and the engine is being fetched: said within that same second
     ready        { ms, firstFrame, scene }  the scene is seen: ms since this page was asked for
     error        { message }                WebGPU was found and something failed after (the scene, the GPU, a worker)
-  The holder knows which player spoke by the message's `source`. Silence is to be read as unsupported: a page that
-  never loaded says nothing.
+  The holder knows which player spoke by the message's `source`. One of the first two comes within a second; silence
+  for longer is a page that never loaded. After `loading` the wait is the download's, and has no bound of its own.
 -->
 <script type="module">
   const held = parent !== window
   if (held) document.documentElement.classList.add('held')
-  // Looking for WebGPU, then starting, then ready; or unsupported from looking, or error from starting or ready. Each is said once.
+  // Looking for WebGPU, then starting (said as `loading`), then ready; or unsupported from looking, or error from starting or ready. Each is said once.
   let state = 'probing'
   const say = (type, more) => { state = type; document.documentElement.dataset.state = type; document.documentElement.dataset.said = more.message ?? more.reason ?? ''; if (held) parent.postMessage({ village: 'player', type, ...more }, '*') }
   const none = (reason) => { if (state === 'probing') say('unsupported', { reason }) }
@@ -43,6 +44,7 @@
     if (!navigator.gpu) throw new Error('this browser has no WebGPU')
     if (!(await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }))) throw new Error('WebGPU gave no adapter')
     if (state === 'probing') {
+      say('loading', {})
       state = 'starting'
       const { play } = await import('./player.ts')
       document.querySelector('#hint').hidden = false

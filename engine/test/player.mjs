@@ -63,7 +63,7 @@ const built = spawnSync('npm', ['run', '-s', 'player'], { cwd: here, encoding: '
 if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 mkdirSync(shots, { recursive: true })
 // The player on one origin and the page that holds two of them on another, as a post that borrows a scene would be.
-const site = await plain(dist, '127.0.0.1'), other = await plain(dist, 'localhost')
+const site = await plain(dist, '127.0.0.1'), other = await plain(dist, 'localhost'), under = await plain(here, '127.0.0.1')
 const playerUrl = `${site.url}/player/index.html?scene=scenes/sample.json${arg('query', '')}`, hostUrl = `${other.url}/player/host.html?player=${encodeURIComponent(`${site.url}/player/index.html`)}`
 const results = {}
 
@@ -142,8 +142,9 @@ for (const name of only) {
     two.on('pageerror', (e) => failures.push(`${name} host page error: ${e.message}`))
     await two.goto(url)
     await two.waitForFunction(() => document.querySelectorAll('.scene[data-state]').length === 2, null, { timeout: 60000 })
-    const heard = await two.evaluate(() => globalThis.heard.map((h) => ({ type: h.type, ms: h.ms })))
-    check(heard.length === 2 && heard.every((h) => h.type === 'ready'), `two players in a page of ${where} both said ready (${heard.map((h) => `${h.type} ${h.ms} ms`).join(', ')})`)
+    const all = await two.evaluate(() => globalThis.heard.map((h) => ({ type: h.type, ms: h.ms }))), heard = all.filter((h) => h.type !== 'loading'), loading = all.filter((h) => h.type === 'loading')
+    check(loading.length === 2 && loading.every((h) => h.ms < 1000), `two players in a page of ${where} both said loading within a second (${loading.map((h) => `${h.ms} ms`).join(', ')})`)
+    check(heard.length === 2 && heard.every((h) => h.type === 'ready'), `and both said ready (${heard.map((h) => `${h.type} ${h.ms} ms`).join(', ')})`)
     const inner = two.frames().filter((f) => f !== two.mainFrame())
     if (inner.length === 2 && heard.every((h) => h.type === 'ready')) {
       await two.waitForTimeout(3000)
@@ -151,12 +152,58 @@ for (const name of only) {
       const box = await two.locator('.scene').first().boundingBox(), busy = Promise.all(inner.map((f) => watch(f, seconds)))
       await pokes(two, box, seconds - 0.5)
       const poked2 = await busy
-      out.two[where] = { ready: heard.map((h) => h.ms), dpr: await inner[0].evaluate(() => devicePixelRatio), idle: idle.map(said), poked: poked2.map(said) }
+      out.two[where] = { loading: loading.map((h) => h.ms), ready: heard.map((h) => h.ms), dpr: await inner[0].evaluate(() => devicePixelRatio), idle: idle.map(said), poked: poked2.map(said) }
       check(idle.every((w) => w.isolated === false), 'neither was cross-origin isolated')
       await two.waitForTimeout(1000)
       if (where === 'another origin') await two.screenshot({ path: join(shots, `host-${name}.png`), fullPage: true })
     }
     await twoContext.close()
+  }
+
+  // ── Under a folder of a site, and not at its top ──
+  {
+    const c = await browser.newContext({ viewport: { width: 640, height: 400 } }), p = await c.newPage()
+    await p.goto(`${under.url}/dist/player/index.html?scene=scenes/sample.json`)
+    const there = await ready(p)
+    check(there.state === 'ready', `served from a folder of a site (/dist/player/), the scene is seen (${there.state}${there.said ? `: ${there.said}` : ''})`)
+    await c.close()
+  }
+
+  // ── By touch ──
+  {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 720 }, hasTouch: true }), p = await c.newPage()
+    await p.goto(playerUrl)
+    await ready(p)
+    await whole(p)
+    const before = await p.evaluate(() => ({ thrown: globalThis.player.thrown, yaw: globalThis.player.eye.yaw }))
+    await p.touchscreen.tap(1280 * TARGETS[2][0], 720 * TARGETS[2][1])
+    await p.waitForTimeout(400)
+    const tapped = await p.evaluate(() => globalThis.player.thrown)
+    check(tapped === before.thrown + 1, `a tap of a finger throws a ball (${tapped - before.thrown})`)
+    out.touch = { tap: tapped - before.thrown }
+    // A finger dragged across turns the eye: sent as touches by Chrome's own protocol. Playwright's WebKit has no way to drag a finger.
+    if (name === 'chrome') {
+      const cdp = await c.newCDPSession(p), at = (x) => [{ x, y: 300, id: 1 }]
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: at(400) })
+      for (let x = 410; x <= 560; x += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: at(x) })
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+      await p.waitForTimeout(200)
+      const after = await p.evaluate(() => ({ thrown: globalThis.player.thrown, yaw: globalThis.player.eye.yaw }))
+      check(Math.abs(after.yaw - before.yaw) > 0.5 && after.thrown === tapped, `a finger dragged across turns the eye and throws nothing (${round(after.yaw - before.yaw, 2)} radians)`)
+      out.touch.drag = round(after.yaw - before.yaw, 2)
+    }
+    await c.close()
+  }
+
+  // ── A slow download: the holder waits past its five seconds, having been told `loading` ──
+  if (name === 'chrome') {
+    const c = await browser.newContext({ viewport: { width: 1280, height: 1100 } }), p = await c.newPage()
+    await c.route('**/core.wasm', async (route) => { await new Promise((r) => setTimeout(r, 6000)); await route.continue() })
+    await p.goto(hostUrl)
+    await p.waitForFunction(() => document.querySelectorAll('.scene[data-state]').length === 2, null, { timeout: 60000 })
+    const slow = await p.evaluate(() => ({ states: [...document.querySelectorAll('.scene')].map((b) => b.dataset.state), heard: globalThis.heard.map((h) => `${h.type} ${h.ms} ms`) }))
+    check(slow.states.every((state) => state === 'ready'), `with the core held back six seconds, both are shown when they are ready (${slow.heard.join(', ')})`)
+    await c.close()
   }
 
   // ── No WebGPU: the holder is told within a second ──
@@ -181,7 +228,7 @@ for (const name of only) {
   await browser.close()
 }
 back()
-site.stop(); other.stop()
+site.stop(); other.stop(); under.stop()
 console.log(`\n${JSON.stringify(results, null, 1)}`)
 console.log(failures.length ? `\nFAILED:\n${failures.map((f) => `  ${f}`).join('\n')}` : `\nPASSED. Pictures in ${shots}`)
 process.exit(failures.length ? 1 : 0)

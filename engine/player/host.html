@@ -22,8 +22,8 @@
 <body>
 <!--
   A page that holds two players (#419), as a post would: each an iframe on the player's page, each with a flat
-  picture over it that is shown until the player says `ready`, and for good if it says `unsupported` or `error` or
-  says nothing for five seconds. `?player=` is where the player's page is (another origin, as it would be for a
+  picture over it that is shown until the player says `ready`, and for good if it says `unsupported` or `error`, or
+  says nothing at all for five seconds (a player says `unsupported` or `loading` within one). `?player=` is where the player's page is (another origin, as it would be for a
   post that borrows a scene); unsaid, it is the one beside this page.
 -->
 <h1>Two scenes in a page</h1>
@@ -48,16 +48,20 @@
     to.searchParams.set('scene', box.dataset.scene)
     frame.src = to.href
     frame.title = 'A scene to turn and poke'
-    const settle = (state, text) => { if (box.dataset.state) return; box.dataset.state = state; box.classList.toggle('ready', state === 'ready'); if (state !== 'ready') flat.textContent = 'The flat picture stands here'; note.textContent = text; clearTimeout(quiet) }
-    const quiet = setTimeout(() => settle('silent', 'The player said nothing in five seconds: the flat picture stays.'), 5000)
+    // What stands in the box: the flat picture until the player is ready, and again if it then fails.
+    const show = (state, text) => { box.dataset.state = state; box.classList.toggle('ready', state === 'ready'); flat.textContent = state === 'ready' ? '' : 'The flat picture stands here'; note.textContent = text }
+    // A player says `unsupported` or `loading` within a second. One that has said neither in five never loaded.
+    const quiet = setTimeout(() => show('silent', 'The player said nothing in five seconds: the flat picture stays.'), 5000)
     addEventListener('message', (e) => {
       // Only this frame's own player, by who sent it: what it says is read as data.
       if (e.source !== frame.contentWindow || e.data?.village !== 'player') return
       const ms = Math.round(performance.now() - began)
       heard.push({ type: e.data.type, ms, data: e.data })
-      if (e.data.type === 'ready') settle('ready', `Ready ${ms} ms after the frame was added (${Number(e.data.ms)} ms by its own clock).`)
-      else if (e.data.type === 'unsupported') settle('unsupported', `No WebGPU here, said after ${ms} ms: the flat picture stays.`)
-      else if (e.data.type === 'error') { box.dataset.state = ''; settle('error', 'The scene failed: the flat picture stays.') }
+      clearTimeout(quiet)
+      // `loading` changes nothing seen: the flat picture stays until `ready`, however long the download takes.
+      if (e.data.type === 'ready') show('ready', `Ready ${ms} ms after the frame was added (${Number(e.data.ms)} ms by its own clock).`)
+      else if (e.data.type === 'unsupported') show('unsupported', `No WebGPU here, said after ${ms} ms: the flat picture stays.`)
+      else if (e.data.type === 'error') show('error', 'The scene failed: the flat picture stays.')
     })
     box.append(frame)
   }
