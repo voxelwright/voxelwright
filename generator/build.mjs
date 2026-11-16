@@ -56,8 +56,9 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
     ...posts.map((p) => postPage(site, p, rendered.get(p.slug))),
   ];
 
-  fs.rmSync(outDir, { recursive: true, force: true });
+  // Empty the directory rather than replacing it, so a dev server watching it keeps working.
   fs.mkdirSync(outDir, { recursive: true });
+  for (const entry of fs.readdirSync(outDir)) fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
   fs.cpSync(path.join(ROOT, "static"), outDir, { recursive: true });
 
   for (const page of pages) {
