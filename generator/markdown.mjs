@@ -52,7 +52,8 @@ export function renderPost(source, ctx) {
 
 /** Renders a short Markdown string (no embeds expected), e.g. the home page intro. */
 export function renderInline(text) {
-  return md.renderInline(text);
+  // Relative links resolve from the site root, as on the home page.
+  return md.renderInline(text, { ctx: { basePath: "/", origin: "" }, errors: [], absolute: false });
 }
 
 // Code colours. The feed (and the baseline look) keep the GitHub pair as inline light-dark()

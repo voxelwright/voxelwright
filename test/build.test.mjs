@@ -72,3 +72,8 @@ test("a valid model note becomes an attributed blockquote in Markdown", async ()
   const md = pages.find((p) => p.path === "/blog/fixture/").markdown;
   assert.match(md, /^> \*\*Note from Model X \(Maker Y\):\*\* First line\.\n>\n> Second\.$/m);
 });
+
+test("a home intro with a relative link builds", async () => {
+  const { renderInline } = await import("../generator/markdown.mjs");
+  assert.equal(renderInline("See [Village](tags/village/)."), 'See <a href="/tags/village/">Village</a>.');
+});
