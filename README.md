@@ -38,17 +38,17 @@ Write these custom elements straight into the Markdown, each as its own block (b
 before, no indentation). The build fails if a required attribute or file is missing.
 
 ```html
-<engine-scene src="scene.json" poster="poster.png" alt="What the scene shows."></engine-scene>
+<engine-scene src="scene.json" poster="poster.png" alt="What the scene shows.">
 
-<model-compare before="a.glb" after="b.glb" poster="compare.png" alt="What changes between them."></model-compare>
+<model-compare before="a.glb" after="b.glb" poster="compare.png" alt="What changes between them.">
 
 <model-note model="Model name" maker="Maker">
 The model's words, in Markdown.
 </model-note>
 ```
 
-- `alt` is the text equivalent and `poster` the still. Both are required for scenes and comparisons. An optional `caption` replaces the default caption.
-- For now scenes and comparisons render as their poster with a caption; the element is present but inert.
+- Scenes and comparisons need `alt` (the text equivalent), `poster` (a still), or both; give both when you can. A closing tag on the same line is optional. An optional `caption` replaces the default caption.
+- For now they render as the poster (or the alt text, if there is no poster) with a caption; the element is present but inert.
 - `model-note` renders as an attributed aside. In the Markdown version it becomes a blockquote starting `**Note from <model> (<maker>):**`.
 
 ## What the build writes

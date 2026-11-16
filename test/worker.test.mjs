@@ -65,6 +65,22 @@ test("wildcards and lower-ranked markdown never select Markdown", () => {
   assert.equal(prefersMarkdown("text/markdown, text/plain, */*"), true);
 });
 
+test("a conditional request for Markdown gets a Markdown 304, not HTML", async () => {
+  const env = {
+    ASSETS: {
+      async fetch(input) {
+        const { pathname } = new URL(input.url);
+        if (pathname === "/index.md" && input.headers.get("If-None-Match") === '"md"') return new Response(null, { status: 304, headers: { ETag: '"md"' } });
+        return new Response("<h1>Home</h1>", { headers: { "Content-Type": "text/html; charset=utf-8", ETag: '"html"' } });
+      },
+    },
+  };
+  const req = new Request("https://example.com/", { headers: { Accept: "text/markdown", "If-None-Match": '"md"' } });
+  const res = await worker.fetch(req, env);
+  assert.equal(res.status, 304);
+  assert.equal(res.headers.get("Vary"), "Accept");
+});
+
 test("a page without a twin falls back to HTML", async () => {
   const res = await worker.fetch(get("/tags/ai/", "text/markdown"), { ASSETS: assets(FILES) });
   assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");

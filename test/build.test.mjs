@@ -23,12 +23,27 @@ async function buildPost(body, files = {}, summary = "A fixture.") {
 
 const poster = { "p.png": "x", "s.json": "{}", "a.glb": "x", "b.glb": "x" };
 
-test("an embed without alt text fails the build", async () => {
-  await assert.rejects(buildPost(`<engine-scene src="s.json" poster="p.png"></engine-scene>`, poster), (e) => e instanceof ContentError && /needs alt=/.test(e.message));
+test("an embed with neither alt text nor a poster fails the build", async () => {
+  await assert.rejects(buildPost(`<engine-scene src="s.json"></engine-scene>`, poster), (e) => e instanceof ContentError && /needs alt="…" \(a text equivalent\) or poster=/.test(e.message));
+  await assert.rejects(buildPost(`<model-compare before="a.glb" after="b.glb">`, poster), (e) => e instanceof ContentError && /or poster=/.test(e.message));
 });
 
-test("an embed without a poster fails the build", async () => {
-  await assert.rejects(buildPost(`<model-compare before="a.glb" after="b.glb" alt="Two models."></model-compare>`, poster), (e) => e instanceof ContentError && /needs poster=/.test(e.message));
+test("the bare opening-tag form builds, with alt alone or poster alone", async () => {
+  const { pages } = await buildPost(`<engine-scene src="s.json" poster="p.png" alt="A scene.">\n\n<model-compare before="a.glb" after="b.glb" alt="Two models.">\n\nAfter.`, poster);
+  const page = pages.find((p) => p.path === "/blog/fixture/");
+  assert.match(page.html, /<engine-scene [^>]*><img src="\/blog\/fixture\/p.png" alt="A scene."/);
+  assert.match(page.html, /<model-compare [^>]*><p class="embed-text">Two models.<\/p><\/model-compare>/);
+  assert.match(page.html, /<p>After.<\/p>/);
+  assert.match(page.markdown, /^Two models\.$/m);
+});
+
+test("an embed never swallows the text after it", async () => {
+  const body = `<engine-scene src="s.json" alt="A scene.">\n\nProse after.\n\n\`\`\`html\n</engine-scene>\n\`\`\``;
+  const { pages } = await buildPost(body, poster);
+  const page = pages.find((p) => p.path === "/blog/fixture/");
+  assert.match(page.html, /<p>Prose after.<\/p>/);
+  assert.equal(page.html.match(/<engine-scene /g).length, 1);
+  assert.match(page.html, /<pre class="shiki/);
 });
 
 test("an embed pointing at a missing file fails the build", async () => {
@@ -44,8 +59,8 @@ test("an embed inside a paragraph fails instead of passing through unchecked", a
   await assert.rejects(buildPost(`Text then <engine-scene src="s.json" poster="p.png" alt="x"></engine-scene> inline.`, poster), (e) => /must start its own top-level block/.test(e.message));
 });
 
-test("an unclosed embed fails the build", async () => {
-  await assert.rejects(buildPost(`<engine-scene src="s.json" poster="p.png" alt="x">`, poster), (e) => /is not closed/.test(e.message));
+test("an unclosed model note fails the build", async () => {
+  await assert.rejects(buildPost(`<model-note model="M" maker="L">\nWords.`), (e) => /is not closed/.test(e.message));
 });
 
 test("a published post needs a summary", async () => {

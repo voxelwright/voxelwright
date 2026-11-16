@@ -11,11 +11,12 @@ const loadedLangs = new Set(highlighter.getLoadedLanguages());
 
 /**
  * The custom elements a post may use. `required` attributes must be present and non-empty;
- * `files` are resolved against the post folder and must exist.
+ * `equivalent` embeds need alt text or a poster (or both); `files` are resolved against the
+ * post folder and must exist.
  */
 export const EMBEDS = {
-  "engine-scene": { required: ["src", "poster", "alt"], files: ["src", "poster"] },
-  "model-compare": { required: ["before", "after", "poster", "alt"], files: ["before", "after", "poster"] },
+  "engine-scene": { required: ["src"], equivalent: true, bodiless: true, files: ["src", "poster"] },
+  "model-compare": { required: ["before", "after"], equivalent: true, bodiless: true, files: ["before", "after", "poster"] },
   "model-note": { required: ["model", "maker"], files: [] },
 };
 const EMBED_NAMES = Object.keys(EMBEDS);
@@ -99,10 +100,14 @@ function embedRule(state, startLine, endLine, silent) {
   let text = "";
   let line = startLine;
   let closed = false;
+  // Scenes and comparisons have no body: the opening tag alone is enough, optionally followed
+  // by its closing tag on the same line. A model note runs until its closing tag.
+  const bodiless = EMBEDS[name].bodiless;
   for (; line < endLine; line++) {
     text += (line === startLine ? "" : "\n") + state.src.slice(state.bMarks[line] + state.tShift[line], state.eMarks[line]);
     const openEnd = findOpenTagEnd(text);
-    if (openEnd !== -1 && (text.slice(0, openEnd + 1).endsWith("/>") || text.includes(closing, openEnd))) {
+    if (openEnd === -1) continue;
+    if (bodiless || text.slice(0, openEnd + 1).endsWith("/>") || text.includes(closing, openEnd)) {
       closed = true;
       break;
     }
@@ -119,8 +124,15 @@ function embedRule(state, startLine, endLine, silent) {
   const openEnd = findOpenTagEnd(text);
   const openTag = text.slice(0, openEnd + 1);
   const selfClosing = openTag.endsWith("/>");
-  const inner = selfClosing ? "" : text.slice(openEnd + 1, text.lastIndexOf(closing));
-  const trailing = selfClosing ? text.slice(openEnd + 1) : text.slice(text.lastIndexOf(closing) + closing.length);
+  const afterOpen = text.slice(openEnd + 1);
+  let inner = "";
+  let trailing = afterOpen;
+  if (bodiless) {
+    trailing = afterOpen.trim().startsWith(closing) ? afterOpen.trim().slice(closing.length) : afterOpen;
+  } else if (!selfClosing) {
+    inner = text.slice(openEnd + 1, text.lastIndexOf(closing));
+    trailing = text.slice(text.lastIndexOf(closing) + closing.length);
+  }
   if (trailing.trim()) {
     env.errors.push(`${env.ctx.file}:${lineNo} put <${name}> on its own lines; found text after it.`);
   }
@@ -166,9 +178,11 @@ function validateEmbed(meta, env) {
   const where = `${ctx.file}:${meta.line} <${meta.name}>`;
   for (const attr of spec.required) {
     if (!meta.attrs[attr] || !meta.attrs[attr].trim()) {
-      const why = attr === "alt" ? " (its text equivalent)" : attr === "poster" ? " (its still image)" : "";
-      errors.push(`${where} needs ${attr}="…"${why}.`);
+      errors.push(`${where} needs ${attr}="…".`);
     }
+  }
+  if (spec.equivalent && !meta.attrs.alt?.trim() && !meta.attrs.poster?.trim()) {
+    errors.push(`${where} needs alt="…" (a text equivalent) or poster="…" (a still image).`);
   }
   for (const attr of spec.files) {
     const value = meta.attrs[attr];
@@ -223,7 +237,9 @@ function renderEmbedHtml(meta, env) {
   const caption = a.caption || LABELS[meta.name];
   return (
     `<figure class="embed embed-${meta.name}">` +
-    `<${meta.name} ${elementAttrs}><img src="${attr(url(a.poster))}" alt="${attr(a.alt)}" loading="lazy"></${meta.name}>` +
+    `<${meta.name} ${elementAttrs}>` +
+    (a.poster ? `<img src="${attr(url(a.poster))}" alt="${attr(a.alt ?? "")}" loading="lazy">` : `<p class="embed-text">${escapeHtml(a.alt)}</p>`) +
+    `</${meta.name}>` +
     `<figcaption>${escapeHtml(caption)}</figcaption></figure>\n`
   );
 }
@@ -239,10 +255,11 @@ function renderEmbedMarkdown(meta, ctx) {
     return lines.map((l) => (l ? `> ${l}` : ">")).join("\n");
   }
   const caption = a.caption ? `${a.caption} ` : "";
+  const still = a.poster ? `![${a.alt ?? ""}](${url(a.poster)})` : a.alt;
   if (meta.name === "engine-scene") {
-    return `![${a.alt}](${url(a.poster)})\n\n*${caption}Interactive engine scene, shown as a still. Scene data: [${path.basename(a.src)}](${url(a.src)}).*`;
+    return `${still}\n\n*${caption}Interactive engine scene${a.poster ? ", shown as a still" : ""}. Scene data: [${path.basename(a.src)}](${url(a.src)}).*`;
   }
-  return `![${a.alt}](${url(a.poster)})\n\n*${caption}Model comparison, shown as a still. Models: [before](${url(a.before)}) and [after](${url(a.after)}).*`;
+  return `${still}\n\n*${caption}Model comparison${a.poster ? ", shown as a still" : ""}. Models: [before](${url(a.before)}) and [after](${url(a.after)}).*`;
 }
 
 // ---------------------------------------------------------------------------

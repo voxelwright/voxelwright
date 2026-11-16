@@ -13,7 +13,7 @@ export default {
     if (prefersMarkdown(request.headers.get("Accept"))) {
       const twin = new URL(markdownTwin(url.pathname), url);
       const res = await env.ASSETS.fetch(new Request(twin, { method, headers: request.headers }));
-      if (res.ok) {
+      if (res.ok || res.status === 304) {
         const out = new Response(res.body, res);
         out.headers.set("Content-Type", "text/markdown; charset=utf-8");
         out.headers.set("Vary", "Accept");

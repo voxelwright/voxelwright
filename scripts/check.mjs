@@ -65,8 +65,9 @@ function checkOutput(label, out, { posts, site }) {
 
     for (const m of html.matchAll(/<(engine-scene|model-compare)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
       embeds++;
-      if (!/\sposter="[^"]+"/.test(m[2])) fail(label, `${route}: <${m[1]}> without a poster`);
-      if (!/<img [^>]*alt="[^"]+"/.test(m[3])) fail(label, `${route}: <${m[1]}> without an image with alt text`);
+      const poster = /\sposter="[^"]+"/.test(m[2]) && /<img [^>]*src="[^"]+"/.test(m[3]);
+      const text = /<p class="embed-text">[^<\s][^<]*<\/p>/.test(m[3]);
+      if (!poster && !text) fail(label, `${route}: <${m[1]}> without a poster or a text equivalent`);
     }
     for (const m of html.matchAll(/<model-note\b([^>]*)>([\s\S]*?)<\/model-note>/g)) {
       embeds++;
