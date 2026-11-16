@@ -295,7 +295,8 @@ export async function land(tell: Tell): Promise<void> {
 
   // ── The holder, and whether anyone is looking ───────────────────────────
   let wanted = true
-  const pace = () => { if (wanted && !document.hidden) on.go(); else on.rest() }
+  // Until the scene has been seen once it is drawn whoever is looking: the holder waits for that word.
+  const pace = () => { if ((wanted || !seenAt) && !document.hidden) on.go(); else on.rest() }
   document.addEventListener('visibilitychange', pace)
   addEventListener('message', (e) => {
     if (e.source !== parent || e.data?.village !== 'host') return
@@ -311,8 +312,13 @@ export async function land(tell: Tell): Promise<void> {
   // Alone on a page, nobody says the world is shown: it is.
   if (parent === window && where === 'sky') on.seenNear = (ms, firstFrame) => { seenAt = ms; tell('ready', { ms, firstFrame }); entered() }
 
+  /** Where a place in the world is on the picture, CSS pixels from its corner: for whoever drives the page from outside. */
+  const spot = (p: readonly number[]): [number, number] => {
+    const v = view(), d = sub(p, v.eye), dot = (a: readonly number[]) => d[0] * a[0] + d[1] * a[1] + d[2] * a[2], far = dot(v.forward), h = canvas.clientHeight / 2
+    return [canvas.clientWidth / 2 + (dot(v.right) / far / on.tanHalf) * h, h - (dot(v.up) / far / on.tanHalf) * h]
+  }
   // For whoever measures and for the console: nothing of the page's own reads it.
-  Object.assign(globalThis, { landing: { on, places, head, look, choose, mend, skip, toss, shot, view, get where() { return where }, get flying() { return !!flight }, get dirty() { return dirty }, get cam() { return cam }, set cam(to: Shot) { cam = to; flight = null } } })
+  Object.assign(globalThis, { landing: { on, places, head, look, choose, mend, skip, toss, shot, view, spot, get where() { return where }, get flying() { return !!flight }, get dirty() { return dirty }, get cam() { return cam }, set cam(to: Shot) { cam = to; flight = null } } })
   pace()
   on.start()
   tell('seen')

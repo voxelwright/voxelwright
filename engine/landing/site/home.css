@@ -1,0 +1,118 @@
+/* The stand-in home page and the street's signpost (#421). Two inks, the owner's: blue #0e22ff and yellow #fff600,
+   on white paper, as a two-colour print is. Signs are set in Overpass, which is drawn from the lettering of American
+   road signs; reading text in Literata. Both are OFL and served from fonts/. */
+@font-face { font-family: "Overpass"; src: url(fonts/overpass/overpass-latin-wght-normal.woff2) format("woff2"); font-weight: 100 900; font-display: swap; }
+@font-face { font-family: "Literata"; src: url(fonts/literata/literata-latin-wght-normal.woff2) format("woff2"); font-weight: 200 900; font-display: swap; }
+
+:root {
+  --blue: #0e22ff;
+  --yellow: #fff600;
+  --paper: #ffffff;
+  --ink: #0a0f5c;
+  --quiet: #454b9c;
+  --link: var(--blue);
+  --rule: #d5d8ff;
+  --plate: var(--blue);
+  --plate-ink: #ffffff;
+  --sign: "Overpass", "Highway Gothic", "Arial Narrow", sans-serif;
+  --text: "Literata", "Iowan Old Style", Georgia, serif;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --bar: 3.75rem;
+  --edge: max(1rem, env(safe-area-inset-left));
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --paper: #070b3a; --ink: #e6e8ff; --quiet: #a7ace8; --link: var(--yellow); --rule: #232a86; }
+}
+@media (max-width: 46rem) { :root { --bar: 6.75rem; } }
+
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; background: var(--paper); }
+body { margin: 0; color: var(--ink); font: 400 1.125rem/1.6 var(--text); font-optical-sizing: auto; }
+:focus-visible { outline: 3px solid var(--yellow); outline-offset: 2px; box-shadow: 0 0 0 5px var(--blue); border-radius: 4px; }
+
+/* ── A plate: what every sign here is ─────────────────────────────────── */
+.mark, .switch, #menu a, .hud button {
+  font: 800 1rem/1 var(--sign); letter-spacing: 0.01em; text-decoration: none;
+  color: var(--plate-ink); background: var(--plate); border: 2px solid var(--plate-ink); border-radius: 0.4rem;
+  box-shadow: 0 0 0 2px var(--plate);
+}
+.mark, .switch, #menu, .bar, .hud, #note { position: fixed; z-index: 3; }
+
+.bar { z-index: 2; inset: 0 0 auto 0; height: var(--bar); background: var(--paper); border-bottom: 2px solid var(--rule); }
+.mark { top: 0.9rem; left: var(--edge); padding: 0.62em 0.7em 0.42em; font-size: 1.05rem; }
+
+.switch { top: 0.9rem; right: max(1rem, env(safe-area-inset-right)); display: flex; padding: 0; overflow: hidden; }
+.switch button { all: unset; box-sizing: border-box; min-height: 2.1rem; padding: 0.62em 0.75em 0.42em; cursor: pointer; font: inherit; color: inherit; -webkit-tap-highlight-color: transparent; transition: background-color 160ms ease, color 160ms ease; position: relative; }
+/* The hit area is taller than the plate looks: 44 px by an unseen edge. */
+.switch button::before, #menu a::before, .hud button::before { content: ""; position: absolute; inset: -0.45rem 0; }
+.switch button[aria-pressed="true"] { background: var(--yellow); color: var(--blue); }
+.switch button:focus-visible { outline-offset: -5px; box-shadow: none; outline-color: currentColor; }
+.switch button[data-busy]::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: var(--yellow); transform-origin: left; animation: busy 1.4s linear infinite; }
+@keyframes busy { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* ── The menu: the page's links, and the street's signpost ─────────────── */
+#menu ul { list-style: none; margin: 0; padding: 0; display: flex; gap: 0.6rem; }
+#menu a { position: relative; display: block; padding: 0.62em 0.7em 0.42em; -webkit-tap-highlight-color: transparent; transition: transform 140ms var(--ease-out), background-color 160ms ease, color 160ms ease; }
+#menu a:active { transform: scale(0.97); }
+#menu a span { display: none; font: 500 0.8rem/1.2 var(--sign); letter-spacing: 0.02em; }
+#menu b { font-weight: 800; }
+/* On the page: a row in the bar. */
+[data-view="2d"] #menu { top: 0.9rem; left: 50%; transform: translateX(-50%); }
+@media (max-width: 46rem) { [data-view="2d"] #menu { top: 3.9rem; left: var(--edge); transform: none; } }
+@media (hover: hover) and (pointer: fine) { #menu a:hover, .hud button:hover { background: var(--yellow); color: var(--blue); border-color: var(--blue); } }
+
+/* On the street: a signpost at the corner, bottom left. The pole is the list's own edge. */
+[data-view="3d"] #menu { left: var(--edge); bottom: max(1.1rem, env(safe-area-inset-bottom)); }
+[data-view="3d"] #menu ul { flex-direction: column; align-items: flex-start; gap: 0.45rem; padding: 0.5rem 0 0.5rem 0.9rem; border-left: 0.5rem solid #fff; box-shadow: -2px 0 0 var(--blue), inset 2px 0 0 var(--blue); }
+[data-view="3d"] #menu a { font-size: clamp(1.25rem, 1rem + 1.6vw, 1.9rem); letter-spacing: 0; margin-left: -0.9rem; }
+[data-view="3d"] #menu a[aria-current] { background: var(--yellow); color: var(--blue); border-color: var(--blue); box-shadow: 0 0 0 2px var(--yellow); }
+[data-view="3d"] #menu a[aria-current] span { display: block; margin-top: 0.3em; }
+
+/* ── The page: a sheet over the street ─────────────────────────────────── */
+#page { position: relative; z-index: 1; min-height: 100dvh; background: var(--paper); padding: calc(var(--bar) + 2.5rem) var(--edge) 4rem; transition: transform 520ms var(--ease-drawer), visibility 0s; }
+[data-view="3d"] #page { transform: translateY(100dvh); visibility: hidden; transition: transform 520ms var(--ease-drawer), visibility 0s 520ms; }
+[data-view="3d"], [data-view="3d"] body { overflow: hidden; }
+[data-view="3d"] .bar { display: none; }
+[data-view="3d"] { background: var(--blue); }
+.column { max-width: 38rem; margin: 0 auto; }
+h1 { margin: 0 0 1.2rem; font: 900 clamp(2.6rem, 1.4rem + 7vw, 5.2rem)/0.95 var(--sign); letter-spacing: -0.03em; color: var(--link); text-wrap: balance; }
+h2 { margin: 2.8rem 0 0.8rem; font: 800 1.35rem/1.2 var(--sign); letter-spacing: -0.005em; }
+p { margin: 0 0 1.6rem; text-wrap: pretty; }
+.intro { font-size: 1.3rem; line-height: 1.5; }
+a { color: var(--link); text-decoration-thickness: 0.08em; text-underline-offset: 0.18em; }
+.posts { list-style: none; margin: 0 0 1.6rem; padding: 0; }
+.posts li { padding: 0.9rem 0; border-top: 2px solid var(--rule); }
+.posts a { font: 700 1.25rem/1.25 var(--sign); }
+.posts time { display: block; margin: 0.25rem 0 0.2rem; font: 500 0.85rem/1.4 var(--sign); letter-spacing: 0.04em; color: var(--quiet); font-variant-numeric: tabular-nums; }
+.posts p { margin: 0; font-size: 1rem; }
+.projects { padding-left: 1.1rem; }
+footer { margin-top: 3.5rem; padding-top: 1rem; border-top: 2px solid var(--rule); font: 500 0.9rem/1.5 var(--sign); color: var(--quiet); }
+footer p { margin: 0; }
+
+/* ── The street, and what stands over it ───────────────────────────────── */
+#world { position: fixed; inset: 0; z-index: 0; }
+#world iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+.hud { right: max(1rem, env(safe-area-inset-right)); bottom: max(1.1rem, env(safe-area-inset-bottom)); display: flex; flex-direction: column; align-items: flex-end; gap: 0.6rem; max-width: min(46vw, 22rem); }
+[data-view="2d"] .hud { display: none; }
+.hud button { position: relative; cursor: pointer; padding: 0.62em 0.75em 0.42em; -webkit-tap-highlight-color: transparent; transition: transform 140ms var(--ease-out), background-color 160ms ease, color 160ms ease; }
+.hud button:active { transform: scale(0.97); }
+.hud [hidden] { display: none; }
+#hint { margin: 0; padding: 0.5em 0.7em 0.38em; text-align: right; font: 600 0.85rem/1.3 var(--sign); letter-spacing: 0.02em; color: #fff; background: rgba(8, 14, 110, 0.82); border-radius: 0.4rem; transition: opacity 300ms ease; }
+#hint:empty { opacity: 0; }
+#note { z-index: 4; left: 50%; top: calc(var(--bar) + 0.8rem); transform: translateX(-50%); width: max-content; max-width: calc(100vw - 2rem); margin: 0; padding: 0.6em 0.9em 0.45em; font: 600 0.9rem/1.35 var(--sign); color: var(--blue); background: var(--yellow); border: 2px solid var(--blue); border-radius: 0.4rem; }
+#note[hidden] { display: none; }
+/* Leaving for a page the street chose: the picture goes to the blue of its signs, then the page comes. */
+.wipe { position: fixed; inset: 0; z-index: 9; background: var(--blue); opacity: 0; pointer-events: none; transition: opacity 240ms ease; }
+[data-leaving] .wipe { opacity: 1; }
+
+/* Less motion: the page and the street change places at once, with a short fade. */
+@media (prefers-reduced-motion: reduce) {
+  #page, [data-view="3d"] #page { transition: opacity 160ms ease, visibility 0s; transform: none; }
+  [data-view="3d"] #page { opacity: 0; transition: opacity 160ms ease, visibility 0s 160ms; }
+  #menu a, .hud button { transition: background-color 160ms ease, color 160ms ease; }
+  #menu a:active, .hud button:active { transform: none; }
+  .switch button[data-busy]::after { animation: none; }
+}

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en" data-view="2d">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="Notes on AI, music, games, what I learned, and a dev diary for Village.">
+<link rel="alternate" type="text/markdown" href="index.md">
+<link rel="icon" href="data:,">
+<title>zahynailo.dev</title>
+<!--
+  A STAND-IN for the home page of the owner's site (#421): the links its generator writes (generator/pages.mjs
+  `homePage`, `NAV`), a switch between this page and the street, and the street laid under it. The words and the
+  posts are made up. The site's own look is being chosen elsewhere: this page's job is the seam, and the lead moves
+  the seam into the site.
+
+  The page is the document. The street is a picture of it: every sign on the street is one of the links in
+  <nav id="menu">, and choosing a sign follows that link. Nothing here waits for the street.
+-->
+<link rel="stylesheet" href="home.css">
+</head>
+<body>
+<!-- First in the page, so first by Tab: the way to the plain page. -->
+<div class="switch" role="group" aria-label="View">
+  <button type="button" id="plain" aria-pressed="true">Plain page</button>
+  <button type="button" id="street" aria-pressed="false">Street</button>
+</div>
+<a class="mark" href="index.html">zahynailo.dev</a>
+<nav id="menu" aria-label="Site">
+  <ul>
+    <li><a href="blog/index.html" data-sign="blog"><b>Blog</b> <span>Every post, newest first</span></a></li>
+    <li><a href="tags/village/index.html" data-sign="village"><b>Village</b> <span>Dev diary of the engine and the home</span></a></li>
+    <li><a href="tags/index.html" data-sign="tags"><b>Tags</b> <span>Posts by subject</span></a></li>
+    <li><a href="feed.xml" data-sign="feed"><b>Feed</b> <span>Atom, for a reader</span></a></li>
+  </ul>
+</nav>
+<div class="bar" aria-hidden="true"></div>
+
+<!-- The street's own controls: shown only while the street is. -->
+<div class="hud">
+  <p id="hint">Tap throws a ball. Hold throws it hard. Drag looks around.</p>
+  <button type="button" id="skip" hidden>Skip the flight</button>
+  <button type="button" id="corner" hidden>Back to the corner</button>
+</div>
+<p id="note" role="status" hidden></p>
+
+<main id="page">
+  <article class="column">
+    <h1>zahynailo.dev</h1>
+    <p class="intro">A software engineer in San Francisco. Notes on AI, music and games, things I learned the slow way, and a dev diary for Village: a home for a family and its agents, and the engine under it.</p>
+
+    <section aria-labelledby="latest">
+      <h2 id="latest">Latest posts</h2>
+      <ol class="posts">
+        <li><a href="blog/index.html">A world of ten-centimetre cells</a> <time datetime="2026-11-12">12 November 2026</time><p>Why the engine draws a city by marching rays through boxes of cells, and what that cost on a phone.</p></li>
+        <li><a href="blog/index.html">What should break when you tap it</a> <time datetime="2026-11-09">9 November 2026</time><p>Glass gives, steel does not: a small table of materials that makes a street fun to poke.</p></li>
+        <li><a href="blog/index.html">A week of agents building a home</a> <time datetime="2026-11-06">6 November 2026</time><p>What went wrong when the process outgrew the product, and what I changed.</p></li>
+      </ol>
+      <p><a href="blog/index.html">All posts</a></p>
+    </section>
+
+    <section aria-labelledby="projects">
+      <h2 id="projects">Projects</h2>
+      <ul class="projects">
+        <li><strong><a href="tags/village/index.html">Village</a></strong>: a private home hub for a family and its agents, a software factory, and an engine of small cells with physics you can break.</li>
+      </ul>
+    </section>
+
+    <footer>
+      <p>This page for agents: <a href="index.md">Markdown</a>, <a href="llms.txt">llms.txt</a>, <a href="feed.xml">feed</a>.</p>
+    </footer>
+  </article>
+</main>
+
+<!-- The street. The frame is added by the script once this page can be read, and only where the street can be shown. -->
+<div id="world" aria-hidden="true"></div>
+<div class="wipe" aria-hidden="true"></div>
+<script type="module" src="home.js"></script>
+</body>
+</html>
