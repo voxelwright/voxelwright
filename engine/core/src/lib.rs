@@ -279,6 +279,18 @@ pub extern "C" fn bay_load() -> i32 {
     bay::load()
 }
 
+/// Makes this core's world the Bay's with no pack held yet (bay.rs `begin`): packs then come and go.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_begin() {
+    bay::begin()
+}
+
+/// Lets go of one pack, named by where its ground starts and how far apart its samples are. Returns how many are held.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_drop(x0: i32, z0: i32, gstep: i32) -> i32 {
+    bay::drop(x0, z0, gstep)
+}
+
 /// How high the ground is at a column of the finest cells.
 #[unsafe(no_mangle)]
 pub extern "C" fn ground_at(x: i32, z: i32) -> i32 {

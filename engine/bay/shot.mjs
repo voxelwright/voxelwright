@@ -14,12 +14,23 @@ const pack = readFileSync(join(homedir(), '.village', 'engine', 'bay', 'packs', 
 const head = new Int32Array(pack.buffer, pack.byteOffset, 16), heights = new Int16Array(pack.buffer, pack.byteOffset + 64, head[5] * head[5])
 /** The ground at a place, in metres. */
 const ground = (x, z) => heights[Math.round((z * 10 - head[7]) / head[4]) * head[5] + Math.round((x * 10 - head[6]) / head[4])] / 10
-const views = arg('views', '51950,+1.7,66115,64,4').split(';').map((v) => v.split(',')).map((v) => [Number(v[0]), v[1].startsWith('+') ? Math.round((ground(Number(v[0]), Number(v[2])) + Number(v[1])) * 100) / 100 : Number(v[1]), Number(v[2]), Number(v[3]), Number(v[4])])
+// `--frame 31n5500`: a place elsewhere on Earth (bay/earth.py `frame`): its ground is read from the tile the server makes.
+const elsewhere = async (x, z) => {
+  const tx = Math.floor((x * 10) / 2500), tz = Math.floor((z * 10) / 2500), r = await fetch(`${arg('server', 'http://127.0.0.1:5920')}/bay/earth/${arg('frame', '')}/0/${tx}_${tz}.bay`)
+  if (r.status !== 200) return 0
+  const b = Buffer.from(await r.arrayBuffer()), gw = b.readInt32LE(20)
+  return b.readInt16LE(64 + 2 * (Math.round((z * 10 - tz * 2500) / 10) * gw + Math.round((x * 10 - tx * 2500) / 10))) / 10
+}
+const views = []
+for (const v of arg('views', '51950,+1.7,66115,64,4').split(';').map((v) => v.split(','))) {
+  const under = v[1].startsWith('+') ? (has('frame') ? await elsewhere(Number(v[0]), Number(v[2])) : ground(Number(v[0]), Number(v[2]))) : 0
+  views.push([Number(v[0]), v[1].startsWith('+') ? Math.round((under + Number(v[1])) * 100) / 100 : Number(v[1]), Number(v[2]), Number(v[3]), Number(v[4])])
+}
 const browser = await chrome(), page = await (await browser.newContext({ viewport: { width: Number(arg('size', '1280x720').split('x')[0]), height: Number(arg('size', '1280x720').split('x')[1]) }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log('page error:', e.message))
 page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text().slice(0, 300)) })
 for (const [n, v] of views.entries()) {
-  await page.goto(`${arg('server', 'http://127.0.0.1:5920')}/city?bay=${arg('bay', '1')}&fly=0&sound=0&scale=1&hour=${arg('hour', '15')}&at=${v[0]},${v[1]},${v[2]}&look=${v[3]},${v[4]}${arg('query', '')}`)
+  await page.goto(`${arg('server', 'http://127.0.0.1:5920')}/city?bay=${arg('bay', '1')}&fly=0&sound=0&scale=1&hour=${arg('hour', '15')}${has('bare') ? '' : `&at=${v[0]},${v[1]},${v[2]}&look=${v[3]},${v[4]}`}${arg('query', '')}`)
   await page.waitForFunction(() => globalThis.engine?.world.stats.ready > 0, null, { timeout: 120_000 })
   const began = Date.now()
   await page.waitForFunction(() => { const s = engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000 }).catch(() => console.log('not all made in two minutes'))
@@ -29,6 +40,8 @@ for (const [n, v] of views.entries()) {
   await page.addStyleTag({ content: `#hud, #aim, #boom, #tools, #over${has('where') ? '' : ', #where'} { display: none }` })
   await page.screenshot({ path: join(out, `${arg('name', 'shot')}-${n}.png`) })
   console.log(`${arg('name', 'shot')}-${n}: ${v.join(',')}  made in ${made} ms`, JSON.stringify(said))
+  // `--bare`: the page as someone opens it (no place or look given), then on foot (B) where it starts.
+  if (has('bare')) { await page.keyboard.press('KeyB'); await page.waitForTimeout(6000); await page.screenshot({ path: join(out, `${arg('name', 'shot')}-${n}-foot.png`) }); console.log('on foot at', await page.evaluate(() => { const f = engine.me.feet; return f ? f.at.map((v) => Math.round(v)) : null })) }
 }
 await browser.close()
 process.exit(0)

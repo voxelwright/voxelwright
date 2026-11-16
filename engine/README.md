@@ -1131,7 +1131,10 @@ python3 -m venv ~/.village/engine/bay/venv
 PY=~/.village/engine/bay/venv/bin/python
 $PY bay/fetch.py 551.7_4183.5      # one square, named by the km of its south-west corner in UTM 10N: about 650 MB into ~/.village/engine/bay/raw
 $PY bay/bake.py 551.7_4183.5       # about a minute: ~/.village/engine/bay/packs/551.7_4183.5.bay (20 MB) and .json (names)
-node serve.mjs --port 5920         # then http://127.0.0.1:5920/city?bay=1   (B to walk; &bay=a,b names other squares)
+$PY bay/tiles.py                   # after any bake: cuts every baked square into the tiles the page asks for as the eye moves (packs/tiles)
+node serve.mjs --port 5920         # then http://127.0.0.1:5920/city?bay=1   (B to walk; ?bay=a,b holds those squares whole instead)
+# Anywhere on Earth: tiles nothing is baked for are made on asking from Overture and Mapterhorn (bay/earth.py, needs: pip install pmtiles mapbox-vector-tile)
+#   http://127.0.0.1:5920/city?bay=1&ll=48.8584,2.2945     (latitude,longitude; ?bay=earth uses no lidar squares even in San Francisco)
 node bay/shot.mjs --name look --where --views "51925,+1.7,66140,352,14"   # pictures into ~/.village/engine/bay/shots
 ```
 

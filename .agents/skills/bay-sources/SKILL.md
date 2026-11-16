@@ -36,6 +36,35 @@ Rules that hold for all of it:
 Credit line for a world built from these: "U.S. Geological Survey 3DEP; USDA NAIP; City and
 County of San Francisco (DataSF)".
 
+## Used for the planet (`engine/bay/earth.py`, November 15): no key, with duties
+
+Where nothing is baked from lidar, a tile is made on asking from two sources, a map tile at a time:
+
+- **Overture Maps, release `2026-10-21.0`**, PMTiles read by byte range from
+  `https://tiles.overturemaps.org/<release>/{buildings,transportation,base}.pmtiles` (zooms 0 to 14; base to 13;
+  gzip; extent 4096). **fetched**: the zoom-14 tile over Filbert Street holds 2,836 buildings, 2,609 with a
+  `height`; layers `building`, `building_part`, `segment` (roads with `class`), `water`, `land_use`,
+  `land_cover`, `land` (trees as points), `infrastructure`, `bathymetry`. A building that crosses a map tile's
+  edge comes cut in two. Licence: base, buildings and transportation are ODbL; the one credit the attribution
+  page gives is "© OpenStreetMap contributors, Overture Maps Foundation" (**read** through a lookup; the per-theme
+  list came from a summary). The page says nothing of rules for the hosted tiles.
+- **Mapterhorn terrain**, `https://tiles.mapterhorn.com/{z}/{x}/{y}.webp`: 512 pixels a side, height in metres
+  = R * 256 + G + B / 256 - 32768, a sample its pixel's middle. **fetched**: zoom 15 over Telegraph Hill is
+  1.9 m a pixel; where a place has nothing finer the tile is missing and the parent is used. Its data-access page
+  states no limits and offers extracts and mirrors (hosting sponsored). No one licence: each source keeps its own
+  (`https://download.mapterhorn.com/attribution.json`, 151 sources, **fetched**): the United States at 1 m is USGS
+  3DEP, "Public Domain (U.S. Government Work)"; world-wide is Copernicus GLO-30, "full, free and open license".
+  Credit "terrain: Mapterhorn" with the link to its attribution page.
+- Checked against the lidar bake on two tiles at Filbert Street: the ground differs by a median of 0.1 m (p10 to
+  p90: -1.2 to 0.6 m), buildings 269 and 287 against 260 and 270 outlines, roofs lower by a median of 1.0 and
+  1.8 m. San Francisco is a well-mapped place: elsewhere will be worse.
+- Tools, in the bake's venv, verified by use: `pmtiles` 3.8.1 (reader with our own range function),
+  `mapbox-vector-tile` 2.2.0 (decodes; y is up from the tile's bottom), shapely 2.2.0 came with it and is unused.
+- What is made from Overture is a derived work under ODbL. The baked squares (`packs/*.bay`) hold none of it.
+  The planet's tiles (`earth/tiles/`) are wholly derived from it, and the tiles cut for the page (`packs/tiles/`)
+  are blended: lidar where a square reaches, the planet's version elsewhere. Both of those are a cache that can
+  be made again, are not in git, and are shown with the credit on the page.
+
 ## Open, with duties: for past the city line
 
 DataSF stops at San Francisco's edge. The rest of the Bay needs these. They are open data, not

@@ -14,6 +14,7 @@
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
+import { spawn } from 'node:child_process'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { Worker } from 'node:worker_threads'
@@ -243,6 +244,30 @@ const pluggedList = () => frame(PLUGGED, 0, Buffer.from(JSON.stringify({ list: p
 const pluginsNow = () => plugins.map((p) => ({ name: p.name, world: p.world, page: p.page, does: plugged.get(p.name)?.does ?? [], error: p.error || plugged.get(p.name)?.error || '' }))
 /** The core each world's process runs, by the hash of its file when the server started or last swapped it. */
 let coreIs = ''
+// The maker of tiles of the Earth (#373): one child of the bake's Python, asked a tile a line, answering a line of JSON.
+let earthMaker = null
+const earthAsks = new Map()
+function earth(ask) {
+  if (!earthMaker) {
+    earthMaker = spawn(join(homedir(), '.village', 'engine', 'bay', 'venv', 'bin', 'python'), [join(root, 'bay', 'earth.py'), 'serve'], { stdio: ['pipe', 'pipe', 'ignore'] })
+    let rest = ''
+    earthMaker.stdout.on('data', (d) => {
+      const lines = (rest + d).split('\n')
+      rest = lines.pop()
+      for (const line of lines) { try { const r = JSON.parse(line), w = earthAsks.get(r.ask); earthAsks.delete(r.ask); if (r.error) w?.no(new Error(r.error)); else w?.yes() } catch { /* not an answer */ } }
+    })
+    const gone = () => { earthMaker = null; for (const w of earthAsks.values()) w.no(new Error('the maker of tiles stopped')); earthAsks.clear() }
+    earthMaker.on('exit', gone)
+    earthMaker.on('error', gone)
+  }
+  const waiting = earthAsks.get(ask)
+  if (waiting) return waiting.promise
+  const w = {}
+  w.promise = new Promise((yes, no) => { w.yes = yes; w.no = no })
+  earthAsks.set(ask, w)
+  earthMaker.stdin.write(ask + '\n')
+  return w.promise
+}
 const coreOnDisk = () => createHash('sha256').update(readFileSync(join(root, 'page', 'core.wasm'))).digest('hex').slice(0, 12)
 /** Has every world that is awake take the core as it is on disk now, if it has changed (a realm that wakes later starts with it anyway). */
 let coreLooking = Promise.resolve()
@@ -1004,9 +1029,20 @@ const server = createServer((req, res) => {
     return send(res, 404, 'not here')
   }
   if (req.method !== 'GET') return send(res, 405, 'GET or POST /report')
+  // A tile of anywhere on Earth (#373, bay/earth.py): made the first time it is asked for, from open map data, by a
+  // process of the bake's Python that this server keeps; kept on disk after. An empty tile (all sea) answers 204.
+  const earthly = /^\/bay\/earth\/([0-9]{1,2}[ns][0-9]{1,5})\/([0-2])\/(-?[0-9]{1,7})_(-?[0-9]{1,7})\.bay$/.exec(url.pathname)
+  if (earthly) {
+    const [, frame, level, tx, tz] = earthly, path = join(homedir(), '.village', 'engine', 'bay', 'earth', 'tiles', frame, level, `${tx}_${tz}.bay`)
+    const answer = () => { const bytes = readFileSync(path); return bytes.length ? send(res, 200, bytes, 'application/octet-stream') : send(res, 204, '') }
+    const none = (e) => send(res, 503, `no tile: ${String(e?.message ?? e).slice(0, 200)}`)
+    if (existsSync(path)) { try { return answer() } catch (e) { return none(e) } }
+    return void earth(`${frame} ${level} ${tx} ${tz}`).then(answer).catch(none)
+  }
   // The Bay's packs and their names (#373): baked outside the repo by bay/bake.py, read by page/bay.ts.
   if (url.pathname.startsWith('/bay/')) {
-    const named = /^\/bay\/([0-9._]+)\.(bay|json)$/.exec(url.pathname)
+    // Whole squares, and the tiles cut from them that come as the eye moves (bay/tiles.py): tiles/<level>/<x>_<z>.bay, tiles/index.json.
+    const named = /^\/bay\/([0-9._]+|tiles\/[0-2]\/-?[0-9]+_-?[0-9]+|tiles\/index)\.(bay|json)$/.exec(url.pathname)
     try { return send(res, 200, readFileSync(join(homedir(), '.village', 'engine', 'bay', 'packs', `${named[1]}.${named[2]}`)), named[2] === 'json' ? TYPES['.json'] : 'application/octet-stream') } catch { return send(res, 404, 'no such square of the Bay') }
   }
   if (url.pathname === '/favicon.ico') return send(res, 204, '')

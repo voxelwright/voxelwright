@@ -3018,3 +3018,54 @@ The town is rules alone; the Bay is rules over packs. Sources and licences are i
 - **Not built**: wall colours are a program's guess (no open source has them without a key); nothing past the
   packs but water; no people, cars, signs or road paint; crowns are leaves over one trunk; interiors are solid;
   a pack is 20 MB in each of eight cores, which is what streaming must cut (#373's comment on the path).
+
+### The Bay in tiles (#373, November 15)
+
+`?bay=1` no longer loads squares whole. `bay/tiles.py` cuts what is baked into three levels of packs, each on its
+own grid of the frame: 250 m tiles at full detail (1.3 MB), 1 km at 2 m with no outlines (2 MB: a building is a
+mass in its wall's kind, class bit 16, a `walls` grid of u16 after `tint` when header word 15 is 1), 4 km at 16 m
+(0.5 MB). The core picks a pack by the cells it is making (`bay.rs` `least_step`: any to 0.8 m, 2 m packs to
+6.4 m, 16 m past that), so a far sector is the same whichever fine tiles a core happens to hold. `bay.ts` `need`
+has a core hold the tiles a job touches before the job and lets the longest unwanted go (`bay_drop`); a sector
+worker asks per column of sectors, the page's core and the mover ask round the eye every half second (`near`).
+At most 24, 8 and 8 tiles a core, about 50 MB, however large the world is.
+
+- Checked: the same three views from whole squares and from tiles are the same pictures; the sitting on Filbert
+  (walk, run, turn, a far run across tile edges) held 16.7 ms p99 with none over 25 ms.
+- Paid for: a coarse sample's height must come only from samples that are a roof or a crown, and not the single
+  highest (a stray lidar return makes a needle a kilometre away); a coarse wall needs its material, not only a
+  colour, or brick turns grey past 100 m.
+- Not built: tiles for names and addresses (the label still loads whole squares' lists); a producer for places
+  nothing is baked for; the world's process holding packs.
+
+### The planet (#373, November 15)
+
+`bay/earth.py` makes any tile of any place from Overture (buildings with heights and parts, roads by class,
+water, land use and cover, mapped trees) and Mapterhorn terrain, in the same three levels. `serve.mjs` keeps one
+child of it (six processes) and answers `/bay/earth/<frame>/<level>/<x>_<z>.bay`, making a tile the first time
+(0.6 to 4 s each, kept on disk; 204 for open sea). A frame is a UTM zone and the northing z is counted south from
+(a multiple of 250 km), so cells stay under 2^24 and bay.rs's f32 arithmetic stays exact: `10n4250` is the Bay.
+`?bay=1&ll=lat,lon` starts anywhere (`bay.ts` `place`, which agrees with `earth.py frame` to the cell in four
+cities); `?bay=earth` uses no lidar. `tiles.py` now fills what the lidar squares do not reach with the planet's
+version, so San Francisco has no water edge.
+
+- Measured: Filbert Street, planet against lidar: ground 0.1 m apart at the median, roofs 1 to 2 m lower. A cold
+  start in San Francisco from planet data alone 29 s, in Paris 28 s (it was 82 s with one process); warm 4 to
+  6 s. The sitting on Filbert with the whole city to the horizon: 16.7 ms p99, none over 25 ms, picture scale
+  0.30 to 0.40 (it was 0.45 to 0.80 with two squares alone in the sea).
+- At full size (2560 x 1440, `test/paired.mjs` on Filbert, town then Bay): street 34.4 and 22.9 ms, fronts 28.9
+  and 26.1, roofs 28.2 and 34.8, 130 m up 42.5 and 36.3, 730 m up 35.5 and 34.5 (that last was 15.7 when two
+  squares stood alone in the sea: the city to the horizon costs it).
+- Disk, after San Francisco, Paris, Zermatt and Sydney were each opened once: 125 to 290 tiles and 144 to 308 MB
+  a place, 850 MB of fetched map tiles between them. It grows with every place visited; nothing clears it.
+- Checked by opening the bare address `?bay=1&ll=...`: the Eiffel Tower (the eye starts over the top, 309 m),
+  the Sydney Opera House (southern frame, the largest cell numbers: steady on foot), Zermatt (valley, river,
+  forest). Walls of a curved or slanted outline (the Colosseum, Zermatt's chalets) show as vertical stripes of light and shade: the known stepping of cells against a wall off the grid, at its worst.
+- What the planet lacks beside lidar: trees where nobody mapped them (Telegraph Hill is bare), roof shapes (all
+  flat), anything under 2 m of ground detail, wall colours (seeded guesses, as everywhere).
+- Paid for: water above sea level has no cell in the engine (the sea is a plane at y 0), so a river is dark glass;
+  a tower mapped as one outline with a height is a solid block 330 m high, so a building with parts is drawn as
+  its parts, lowest first; a building crossing a map tile's edge comes in two pieces.
+- Not built: a frame's edge (walking out of a zone), street names and addresses outside the baked squares,
+  the sitting's `street` part in the Bay (it stands at the town's coordinates), packs in `world.mjs`.
+

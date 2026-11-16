@@ -2,7 +2,7 @@
 // bodies and the world as they meet it. The page tells it of each blast, which answers with
 // what the blast threw out and loosened, and then asks it every frame to move the bodies on. It answers in the core's own
 // words (told.ts reads them). Everything is done in the order asked.
-import { open } from './bay.ts'
+import { near, open } from './bay.ts'
 
 /** What the page asks: a blast (where, how big, and how many of the mover's own edits the page had applied when it made it), or time to move on by. */
 export interface Ask { /** Forgets everything done to the world and everything that moves (#264): the page is leaving this world for another, whose edits are told next. */ forget?: true; blast?: [number, number, number]; radius?: number; after?: number; /** Whether the blast sets alight what can burn round it. */ spark?: boolean; tick?: number; /** Sets alight what can burn within `radius` of a point. */ ignite?: [number, number, number]; /** Edits made by the page (a cut, a thing placed), as edits.ts streams them; `release` is where to ask what they left unheld. */ edit?: Int32Array; release?: [number, number, number]; /** A ball thrown: from where, how fast (cells a second), its radius and kind. */ ball?: { from: [number, number, number]; speed: [number, number, number]; radius: number; kind: number }; /** A living thing to make (#245): its cells (one kind each, laid out x, then z, then y), its size, where its low corner is, whether those cells are taken out of the world as it is born, and its motor's numbers (living.ts `numbers`). The answer says its id. */ spawn?: { cells: Int32Array; size: [number, number, number]; low: [number, number, number]; take?: boolean; motor: Float32Array }; /** What a living thing is told to do until it is told again, or for a second. Alone, it gets no answer. */ drive?: { id: number; go: number; turn: number; rise: number; roll?: boolean; jump?: boolean }; /** A living thing that lives no more: a loose body from now on. Alone, it gets no answer. */ end?: number; /** Someone's body to make (#264, person.ts): where its low corner is, its size, its motor's numbers. The answer says its id. */ figure?: { low: [number, number, number]; size: [number, number, number]; motor: Float32Array }; /** How someone's body is to go: the way it faces (its front at cos, 0, sin), forward and to its right from -1 to 1, up and down, a jump. Alone, it gets no answer. */ walk?: { id: number; heading: number; go: number; side: number; rise: number; jump: boolean }; /** New numbers for a living thing's motor. Alone, it gets no answer. */ motor?: { id: number; numbers: Float32Array }; /** A living thing taken out of the world, leaving nothing. Alone, it gets no answer. */ vanish?: number; /** How a living thing falls (1 as everything does) and how high a wall it climbs (cells). Alone, it gets no answer. */ ways?: { id: number; fall: number; climb: number }; /** A push on a living thing: so much speed at once (cells a second). Alone, it gets no answer. */ kick?: { id: number; speed: [number, number, number] }; /** Which way is down for a living thing (all zero for the world's own), and whether it clings to whatever face it walks onto. Alone, it gets no answer. */ down?: { id: number; way: [number, number, number]; cling: boolean } }
@@ -37,6 +37,8 @@ interface Core {
   living_down(id: number, dx: number, dy: number, dz: number, cling: number): number
 }
 let ready: Promise<Core> = open<Core>('/page/core.wasm')
+/** In the Bay that comes in tiles (#373): the tiles round where the page says its person is, before anything else is done. */
+let here: Promise<void> = Promise.resolve()
 const post = (answer: Answer) => (self as unknown as Worker).postMessage(answer, [answer.words.buffer])
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
@@ -44,9 +46,12 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
   // nothing yet: whoever sent this tells it the world's edits again and makes its bodies again.
   const anew = (e.data as unknown as { core?: string }).core
   if (anew) { ready = open<Core>(anew); return }
+  const bay = (e.data as unknown as { bay?: [number, number] }).bay
+  if (bay) { here = ready.then((core) => near(core, bay[0], bay[1])).catch(() => {}); return }
   const ask = e.data, t0 = performance.now(), released = !!ask.blast || !!ask.release
   try {
     const core = await ready
+    await here
     if (ask.forget) { core.world_forget(); return }
     if (ask.drive) core.living_drive(ask.drive.id, ask.drive.go, ask.drive.turn, ask.drive.rise, ask.drive.roll ? 1 : 0, ask.drive.jump ? 1 : 0)
     if (ask.end !== undefined) core.living_end(ask.end)

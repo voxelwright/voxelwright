@@ -2,7 +2,7 @@
 // of sectors at one coarseness and answers with each sector's tree. It keeps nothing between
 // asks: the edits that reach the column come with the ask.
 
-import { open } from './bay.ts'
+import { need, open } from './bay.ts'
 
 export interface Ask {
   id: number
@@ -62,6 +62,8 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
   // The core's memory moves when it grows: ask for an address first, then look at the memory.
   // A box of cells finer than the core's: its sectors are parts of the core's finest, and the span is theirs.
   const fine = ask.fine ?? 0, finer = Math.max(0, fine - ask.level), lod = Math.max(0, ask.level - fine)
+  // In the Bay that comes in tiles (#373): the ones that know this column, before anything is asked of it.
+  { const wide = SIDE << lod, x0 = (ask.sx >> finer) * wide, z0 = (ask.sz >> finer) * wide; await need(core, x0, z0, x0 + wide, z0 + wide, 1 << lod) }
   const spanAt = core.sector_span(ask.sx >> finer, ask.sz >> finer, lod)
   const span = new Int32Array(core.memory.buffer, spanAt, 2)
   const lo = span[0] << finer, hi = ((span[1] + 1) << finer) - 1

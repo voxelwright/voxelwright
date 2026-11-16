@@ -37,7 +37,7 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
-import { BAY, SQUARES, open, whereabouts } from './bay.ts'
+import { BAY, ON as BAY_ON, START as BAY_START, STREAM, near, open, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -131,14 +131,17 @@ async function main() {
 
   // Start on land, a little above a street.
   // In the Bay (#373, `?bay=1`): in Washington Square, looking at Telegraph Hill.
-  let startX = SQUARES.length ? 519_500 : 700, startZ = SQUARES.length ? 661_150 : 4070
-  while (!SQUARES.length && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
-  const at = numbers('at', [startX / M, core.ground_at(startX, startZ) / M + 12, startZ / M])
-  const look = numbers('look', SQUARES.length ? [64, 4] : [20, -8])
+  let startX = BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
+  // Where the Bay comes in tiles, the ones round the start and round where the page was told to stand come first.
+  if (STREAM) { const there = query.get('at')?.split(',').map(Number); await near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
+  while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
+  // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
+  const at = numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
+  const look = numbers('look', BAY_ON ? [64, 4] : [20, -8])
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (SQUARES.length) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)])
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)])
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -444,6 +447,8 @@ async function main() {
   const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker(`/page/mover.ts${BAY}`, { type: 'module' })
   /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
   const asked: boolean[] = []
+  // The Bay in tiles (#373): this page's core and the one that moves things hold what is round the eye, asked again as it moves.
+  if (STREAM) { const tell = () => { const x = Math.round(pose.x * M), z = Math.round(pose.z * M); void near(inner, x, z); mover.postMessage({ bay: [x, z] } as never) }; tell(); setInterval(tell, 500) }
   const moving = new Map<number, Piece>()
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []

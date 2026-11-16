@@ -39,6 +39,8 @@ const GRASS_HERE: u8 = 2;
 const WATER_HERE: u8 = 5;
 const YARD: u8 = 6;
 const CANOPY: u8 = 8;
+/// In a pack with no outlines (a coarse one, bay/tiles.py): a building stands over this sample.
+const BUILT: u8 = 16;
 /// Buildings are found by the patch of 12.8 m they reach into, and what stands is summed in patches of 6.4 m.
 const PATCH: i32 = 7;
 const BLOCK: i32 = 6;
@@ -80,6 +82,8 @@ struct Pack {
     top: Vec<i16>,
     class: Vec<u8>,
     tint: Vec<u8>,
+    /// In a coarse pack: the wall's kind (its material and colour) of what stands over each sample.
+    walls: Vec<u16>,
     buildings: Vec<Building>,
     /// Corners: x, z, and what the side from this corner on looks at (1 open air, 2 the street; 4 ends a ring).
     verts: Vec<[i32; 3]>,
@@ -117,6 +121,35 @@ pub fn load() -> i32 {
     held
 }
 
+/// Makes the world the Bay's before any pack has come: packs come and go as the eye moves (the page's bay.ts),
+/// and where none is held yet there is water.
+pub fn begin() {
+    ON.set(true);
+}
+
+/// Lets go of the pack whose ground starts at (`x0`, `z0`) with a sample every `gstep` cells. Returns how many
+/// packs are held after. The world stays the Bay's.
+pub fn drop(x0: i32, z0: i32, gstep: i32) -> i32 {
+    PACKS.with_borrow_mut(|p| {
+        p.retain(|p| (p.gx0, p.gz0, p.gstep) != (x0, z0, gstep));
+        p.len() as i32
+    })
+}
+
+/// The pack that answers for a column made of cells `size` wide: the finest that holds it among those no finer
+/// than such cells are worth (a far sector is made from a coarse pack, and so is made the same whichever finer
+/// packs happen to be held); where there is none of those, the finest that holds it at all.
+fn pick(packs: &[Pack], x: i32, z: i32, size: i32) -> Option<&Pack> {
+    let least = least_step(size);
+    packs.iter().find(|p| p.gstep >= least && p.holds(x, z)).or_else(|| packs.iter().find(|p| p.holds(x, z)))
+}
+
+/// The finest sampling worth holding for cells `size` wide: 1 m to cells of 0.8 m, 2 m to 6.4 m, 16 m past that.
+/// The page's bay.ts asks for packs by the same rule.
+pub fn least_step(size: i32) -> i32 {
+    if size <= 8 { 0 } else if size <= 64 { 20 } else { 160 }
+}
+
 /// Lets every pack go: the world is the town's again.
 pub fn clear() {
     PACKS.with_borrow_mut(|p| p.clear());
@@ -143,6 +176,7 @@ fn read(b: &[u8]) -> Option<Pack> {
     let top = shorts(take(tw * tw * 2)?);
     let class = take(tw * tw)?.to_vec();
     let tint = take(tw * tw)?.to_vec();
+    let walls = if head[15] & 1 == 1 { take(tw * tw * 2)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
     let rows = ints(take(nb.checked_mul(24)?)?);
     let verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
@@ -169,7 +203,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
     }
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -449,10 +483,12 @@ enum What<'a> {
     By(&'a Building, Probe, i32),
     /// Leaves from here up to there, and a trunk up to so high if one stands in this column.
     Crown(i32, i32, Option<i32>),
+    /// A building seen from far, from a pack with no outlines: its roof's cell and colour, and its wall.
+    Mass(i32, u8, Kind),
 }
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
-    let Some(p) = packs.iter().find(|p| p.holds(x, z)) else {
+    let Some(p) = pick(packs, x, z, size) else {
         return Column { g: BED, ground: kind(SAND, OWN), kerb: 0, what: What::Open };
     };
     let g = p.ground(x, z);
@@ -461,6 +497,8 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         ROAD => (kind(ASPHALT, OWN), 0),
         PAVEMENT => (kind(CONCRETE, OWN), 1),
         GRASS_HERE => (kind(GRASS, OWN), 0),
+        // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
+        WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
         WATER_HERE => (kind(SAND, OWN), 0),
         YARD => (kind(CONCRETE, tint), 0),
         _ => (kind(EARTH, OWN), 0),
@@ -480,6 +518,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                 None => What::Open,
             }
         }
+        _ if class & BUILT != 0 => match (p.top(x, z), p.cell(x, z)) {
+            (Some(roof), Some(here)) if roof > g => What::Mass(roof, tint, match p.walls.get(here) { Some(&w) if w != 0 => w as Kind, _ => kind(PLASTER, OWN) }),
+            _ => What::Open,
+        },
         _ if class & CANOPY != 0 => match p.top(x, z) {
             Some(t) if t > g + 4 => {
                 let tall = t - g;
@@ -527,6 +569,7 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 b.wall
             }
         }
+        What::Mass(roof, tint, wall) => if mid > *roof { 0 } else if mid > *roof - size { kind(ROOFING, *tint) } else { *wall },
         What::By(b, p, roof) => {
             if size == 1 && mid <= c.g + c.kerb {
                 return c.ground;
@@ -692,6 +735,39 @@ mod tests {
         unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), at, bytes.len()) };
         assert_eq!(load(), 1);
         f();
+        clear();
+    }
+
+    /// A coarse pack of the same place: a sample every 16 m, flat ground at 300, nothing standing.
+    fn coarse() -> Vec<u8> {
+        let mut b: Vec<u8> = Vec::new();
+        for v in [0x3159_4142, 0, 0, 640, 160, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] {
+            b.extend((v as i32).to_le_bytes());
+        }
+        b.extend(std::iter::repeat_n(300i16.to_le_bytes(), 25).flatten());
+        b
+    }
+
+    #[test]
+    fn a_far_sector_is_made_from_the_coarse_pack_and_a_pack_let_go_is_gone() {
+        clear();
+        for bytes in [pack(), coarse()] {
+            let at = room(bytes.len());
+            unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), at, bytes.len()) };
+            assert!(load() > 0);
+        }
+        // Near, the fine pack answers; in cells of 12.8 m the coarse one does, though the fine one is held.
+        assert_eq!(ground(320, 320), 164);
+        PACKS.with_borrow(|p| {
+            assert_eq!(column(p, 320, 320, 1).g, 164);
+            assert_eq!(column(p, 320, 320, 128).g, 300);
+        });
+        // The fine pack let go: the coarse one answers near too. Both let go: water, and the world is still the Bay's.
+        assert_eq!(drop(0, 0, 10), 1);
+        assert_eq!(ground(320, 320), 300);
+        assert_eq!(drop(0, 0, 160), 0);
+        assert_eq!(ground(320, 320), BED);
+        assert!(on());
         clear();
     }
 
