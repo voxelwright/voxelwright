@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>The corner</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #0e22ff; overflow: hidden; }
+  /* Every touch is the world's: the page that holds this one lays it over the whole window. */
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; cursor: crosshair; outline: none; }
+  canvas.choosable { cursor: pointer; }
+  canvas.holding { cursor: grabbing; }
+  /* How hard a held throw will be: a ring under the finger that grows, and fills when it is hardest. */
+  #charge { position: fixed; left: -34px; top: -34px; width: 68px; height: 68px; box-sizing: border-box; border: 4px solid #fff600; border-radius: 50%; box-shadow: 0 0 0 2px #0e22ff, inset 0 0 0 2px #0e22ff; pointer-events: none; will-change: transform; }
+  #charge.full { background: rgba(255, 246, 0, 0.35); }
+  #charge[hidden] { display: none; }
+</style>
+</head>
+<body>
+<canvas></canvas>
+<div id="charge" hidden></div>
+<!-- What the page that holds this one is told, and what it may say: the top of landing.ts. The first four words are the player's own (player/index.html). -->
+<script type="module">
+  const held = parent !== window
+  // Looking for WebGPU, then starting (said as `loading`), then ready; or unsupported from looking, or error from starting or ready. Each is said once.
+  let state = 'probing'
+  const post = (type, more = {}) => { if (held) parent.postMessage({ village: 'landing', type, ...more }, '*') }
+  const say = (type, more) => { state = type; document.documentElement.dataset.state = type; document.documentElement.dataset.said = more.message ?? more.reason ?? ''; post(type, more) }
+  const none = (reason) => { if (state === 'probing') say('unsupported', { reason }) }
+  const fail = (message) => { if (state === 'starting' || state === 'ready') say('error', { message }) }
+  const tell = (type, more = {}) => { if (type === 'error') fail(more.message); else if (type === 'ready') { if (state === 'starting') say(type, more) } else post(type, more) }
+  const words = (e) => (e instanceof Error ? e.message : String(e))
+  // An adapter that has not answered by now is taken for none: the holder was promised a word within a second.
+  setTimeout(() => none('WebGPU did not answer in time'), 800)
+  addEventListener('error', (e) => fail(e.message))
+  addEventListener('unhandledrejection', (e) => fail(words(e.reason)))
+  try {
+    if (!navigator.gpu) throw new Error('this browser has no WebGPU')
+    if (!(await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }))) throw new Error('WebGPU gave no adapter')
+    if (state === 'probing') {
+      say('loading', {})
+      state = 'starting'
+      const { land } = await import('./landing.ts')
+      await land(tell)
+    }
+  } catch (e) {
+    none(words(e))
+    fail(words(e))
+  }
+</script>
+</body>
+</html>
