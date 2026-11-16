@@ -18,7 +18,8 @@ out; everything here is plain CSS, HTML and small vanilla JS.
 1. Build with drafts and a fixture with several posts, so lists and tag pages are real.
 2. Screenshot home, a post, the blog list and a tag page at 1280 and 390, light and dark.
 3. Gate on numbers first: fonts actually loaded, no external requests, no horizontal
-   scroll at 390, body text contrast 7:1 or better, muted text 4.5:1 or better.
+   scroll at 390, body text contrast 7:1 or better, muted text and every code token 4.5:1
+   or better (measure each token span, not the block's default colour).
 4. Then judge taste against this file, score 1 to 10, fix the weakest thing, re-shoot.
 5. Compare against the previous screenshots side by side, not from memory.
 
@@ -49,8 +50,8 @@ out; everything here is plain CSS, HTML and small vanilla JS.
 
 - Self-host woff2 under `static/fonts/<family>/` with the licence (`OFL.txt`) beside it.
   No runtime requests to font services.
-- Latin subset, variable when the axes are used, at most three families per look, and
-  about 250 KB of fonts per look at most.
+- Latin subset, variable when the axes are used, at most three text families plus one
+  monospace per look, and about 300 KB of fonts per look at most.
 - `font-display: swap`, and a fallback stack with similar metrics.
 - Banned as the main face: Inter, Roboto, Arial, Helvetica, Space Grotesk, system-ui.
   The look needs a voice.
@@ -65,7 +66,9 @@ out; everything here is plain CSS, HTML and small vanilla JS.
 - Focus is always visible: a 2px outline in the accent with an offset, on every
   focusable thing, using `:focus-visible`. Never remove an outline without a replacement.
 - Code blocks use a Shiki theme pair chosen for the look; the block background comes from
-  the look, not from Shiki.
+  the look, not from Shiki. Most bundled light themes fall under 4.5:1 for some tokens;
+  deepen them with `color-mix(in oklab, <token colour> N%, #000)` rather than giving up the
+  theme's hues.
 - Model output (`model-note`) must read as not the author's words at a glance: different
   face or size, a label, and a distinct surface. Pleasant, never alarming.
 
@@ -112,6 +115,9 @@ Rules:
 - Animate `transform` and `opacity` (and `clip-path`). Never `width`, `height`, `top`,
   `left`, `margin` or `padding`.
 - Never `transition: all`. Name the properties.
+- A transform on an element makes it the containing block for its absolute children. Don't
+  transform a link whose `::after` stretches over a larger card or row; press feedback
+  there uses colour.
 - Never start from `scale(0)`. Start from 0.95 to 0.97 with `opacity: 0`.
 - Popovers grow from their trigger; centred dialogs grow from the centre.
 - Use transitions, not keyframes, for anything that can be triggered twice quickly:
@@ -184,7 +190,9 @@ state change.
 ## 9. Mobile at 390 px
 
 - No horizontal page scroll. Wide things (code, tables) scroll inside themselves.
-- Gutters at least 16 px; tap targets at least 44 px tall, including nav links.
+- Gutters at least 16 px. Standalone links and controls (nav, tags, footer) get a hit area
+  at least 44 px tall, enlarged with an invisible pseudo-element where the visible mark is
+  smaller. Links inside running text are exempt.
 - The header fits on one or two calm lines; nav never wraps into a ragged pile.
 - `-webkit-tap-highlight-color: transparent` only when a designed `:active` state
   replaces it.
