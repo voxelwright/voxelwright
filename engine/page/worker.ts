@@ -51,7 +51,7 @@ interface Core {
 const EARTH = 1
 const SIDE = 64
 
-let ready: Promise<Core> = open<Core>('/page/core.wasm')
+let ready: Promise<Core> = open<Core>(new URL('./core.wasm', import.meta.url).href)
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
   // The core built again (#264, world.ts `recore`): what is asked for from here on is made by the new one.
