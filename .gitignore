@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.dev/
+.shots/
+.cloudflare/
+.wrangler/
+.dev.vars*
+.env*
+!.env.example
+.DS_Store
