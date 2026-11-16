@@ -83,16 +83,24 @@ for (const name of only) {
   check(site.asked.every((a) => a.status === 200) && loaded.every((p) => existsSync(join(dist, p))), `it asked for ${loaded.length} files, all of the folder, and nothing else`)
   await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 })
   const times = (seen) => ({ firstFrame: Math.round(seen.first), ready: Math.round(seen.near), whole: Math.round(seen.whole) })
-  out.cold = times(await page.evaluate(() => globalThis.player.seen))
+  const first = await page.evaluate(() => globalThis.player.seen)
+  out.cold = { veryFirst: times(first) }
   if (has('look')) { await page.waitForTimeout(Number(arg('wait', '1500'))); await page.screenshot({ path: join(shots, `look-${name}.png`) }); console.log(`  ${join(shots, `look-${name}.png`)}`); await browser.close(); continue }
   if (!results.download) {
     const sizes = loaded.map((p) => { const body = readFileSync(join(dist, p)); return { path: p, raw: body.length, gzip: gzipSync(body, { level: 9 }).length, brotli: brotliCompressSync(body).length } })
     const sum = (k) => sizes.reduce((n, s) => n + s[k], 0)
     results.download = { files: sizes.length, raw: sum('raw'), gzip: sum('gzip'), brotli: sum('brotli'), biggest: sizes.sort((a, b) => b.brotli - a.brotli).slice(0, 4) }
   }
+  // Cold is a browser just started, with nothing kept: three of them, the middle one said. (This script's own first
+  // visit above is the very first of the run and is said beside it: a browser's first use of the GPU after a build.)
+  const colds = [first]
+  for (let i = 0; i < 2; i++) { const b = await browsers[name](), p = await (await b.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })).newPage(); await p.goto(playerUrl); await ready(p); await p.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); colds.push(await p.evaluate(() => globalThis.player.seen)); await b.close() }
+  const mid = (all) => times({ first: middle(all.map((w) => w.first)), near: middle(all.map((w) => w.near)), whole: middle(all.map((w) => w.whole)) })
+  out.cold = { ...mid(colds), veryFirst: times(first) }
+  // Warm is the same page asked for again in the same browser: its files kept, its shaders compiled before.
   const warm = []
   for (let i = 0; i < 5; i++) { await page.reload(); await ready(); await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); warm.push(await page.evaluate(() => globalThis.player.seen)) }
-  out.warm = times({ first: middle(warm.map((w) => w.first)), near: middle(warm.map((w) => w.near)), whole: middle(warm.map((w) => w.whole)) })
+  out.warm = mid(warm)
   const alone = await watch(page, 1)
   check(alone.isolated === false, `it ran with no cross-origin isolation (crossOriginIsolated ${alone.isolated}, SharedArrayBuffer ${alone.shared ? 'there' : 'not there'})`)
   out.isolated = alone.isolated

@@ -1141,6 +1141,33 @@ node bay/shot.mjs --name look --where --views "51925,+1.7,66140,352,14"   # pict
 Raw data and packs stay outside the repo. Bottom left the page says the street underfoot and the nearest address.
 A shared world (`?shared=1`, `world.mjs`) does not load packs yet: the Bay is for a page by itself.
 
+## The player: one scene from static files (#419)
+
+The engine with no server behind it: one scene, drawn and moved, for a page on any host of plain files. An
+experiment, for the owner's own site. No making, no talk, no realm, no shared world.
+
+```sh
+npm run player                # writes dist/: the player's page, its modules as .js, the core, the sample scene
+node player/serve.mjs         # a host of plain files on http://127.0.0.1:5760/player/index.html (and host.html: two in a page)
+node player/sample.mjs        # writes the sample scene again (player/scenes/sample.json)
+node test/player.mjs          # measures it in Chrome and WebKit; pictures in ~/.village/engine/player
+```
+
+- **The build** (`player/build.mjs`) is the page server's own stripper run once: every module the player reaches,
+  types out, `.ts` addresses written as `.js`. No bundler. `dist/` keeps the engine's layout (`player/`, `page/`,
+  `probe/`) and may be put under any folder of a site.
+- **A scene** (`player/scene.ts`) is JSON: a name, the place the eye turns about, where the eye starts, and edits
+  in the core's own words (balls and rows of cells, as a shared world's log keeps them). The world under it is
+  the one the core makes from its rules. It holds no data from anywhere else.
+- **In a page** it is an iframe on `player/index.html?scene=<address>`. It tells the page that holds it, by
+  `postMessage`, `{ village: 'player', type }`: `unsupported` (no WebGPU: within a second, and nothing more is
+  downloaded), `ready` (the scene is seen, with `ms`), `error`. `player/host.html` is a page that holds two.
+  Do not hide the frame while waiting (`visibility: hidden`, `display: none`): a browser draws no frames there,
+  and `ready` never comes. Lay the flat picture over it.
+- **It needs no cross-origin isolation**: no COOP, COEP or CORP header, and it runs in a frame of another origin.
+- Drag turns the eye, the wheel or a pinch brings it nearer (in a frame: the wheel with Ctrl), a tap throws a ball
+  of wood, a hold throws it hard enough to break glass and brick.
+
 ## Checks and tools
 
 ```sh

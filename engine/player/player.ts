@@ -125,18 +125,21 @@ export async function play(tell: Tell): Promise<void> {
 
   // ── Drawing ─────────────────────────────────────────────────────────────
   // How many pixels are marched for each pixel shown follows the GPU, by main.ts's rule (`steer`), without its
-  // answer to a sudden dear view: this eye turns about one place.
+  // answer to a sudden dear view (this eye turns about one place), and with one more test of the GPU's clock.
   const fixed = query.has('scale')
   let scale = Number(query.get('scale') ?? 0.75), wait = 0
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
   const steer = (budget: number) => {
     if (fixed || --wait > 0) return
     const late = frameMs > budget * 1.12
-    const want = late ? scale * 0.85 : clocked && gpuMs > 0 ? scale * Math.sqrt((0.6 * budget) / gpuMs) : scale + 0.05
+    // A clock that says the march took longer than the frames are apart is not believed: WebKit's said 19 ms with a
+    // frame every 6, and by it the picture was held at three tenths of its size.
+    const believed = clocked && gpuMs > 0 && gpuMs <= frameMs
+    const want = late ? scale * 0.85 : believed ? scale * Math.sqrt((0.6 * budget) / gpuMs) : scale + 0.05
     const next = Math.round(Math.max(0.3, Math.min(1, want)) * 20) / 20
     if (next === scale) return
     scale = next
-    wait = late ? 45 : clocked ? 20 : 45
+    wait = late ? 45 : believed ? 20 : 45
   }
   let target: Offscreen | null = null
   const fit = () => {
