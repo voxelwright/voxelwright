@@ -114,6 +114,27 @@ Nobody holds the account's password; it is reset through the owner's email when 
   map-feature tiles in `street.js`. Its players' browsers ask Spawn's server
   (`/api/streetphoto/images?bbox=...`, seen in the guest session's traffic), which adds the key: "NO KEY IN THE BROWSER".
 
+### A first try at wall colours from it (November 15; an experiment outside the repo, `~/.village/engine/bay/mly/`)
+
+`walls.py` takes a level-0 tile, asks for its panoramas, projects points of each street-facing side into the
+nearest cameras that see it, and keeps the 60th percentile colour; `apply.py` writes it as the wall's kind;
+`view.py` cuts a camera's view out of a panorama so the engine can be shot from the same place.
+
+- A camera's solved place agrees with our frame: its `computed_altitude` is 2.0 m over our ground at the median
+  (a car's roof). `computed_rotation` is an angle-axis taking east, north, up into the camera (x right, y down,
+  z forward), and **the middle of the panorama is the camera's back**: longitude = atan2(x, z) + pi. Found by
+  drawing the projected points on the picture; without the half turn they land on the sky across the street.
+- A list asked of a whole tile is cut at its limit and the busiest street takes all of it: ask in boxes of
+  about 40 m (36 a tile) and keep one camera every 4 m. Then 188 cameras cover a 250 m tile.
+- Result on the tile at Filbert and Grant: 144 of 277 buildings got a colour (241 have a street-facing side);
+  four minutes, nearly all of it fetching 2048-pixel panoramas. From a camera's own place the dark blue house
+  is dark blue in both pictures; a yellow one came out dark grey and another olive.
+- What is wrong with it: a side in shade or behind a tree gives a dark or green colour (lifting dark ones to a
+  usual lightness is a patch); one colour a building loses trim, doors and shop fronts; an outline with many
+  short sides (bay windows) gives few points a side. Next: weigh samples by how head-on and how sunlit, take
+  the colour per side not per building, then per cell near the eye (as Spawn's `photos.js` and the
+  fast-voxels lane both do: each cell from the view that faces it most).
+
 ## Needs a key or an account: not used
 
 | Service | What decides it |
