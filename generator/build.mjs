@@ -3,10 +3,10 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadPosts } from "./posts.mjs";
 import { renderPost, ContentError } from "./markdown.mjs";
-import { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } from "./pages.mjs";
+import * as basePages from "./pages.mjs";
 import { llmsTxt, atomFeed, sitemap, robotsTxt } from "./feeds.mjs";
 import { markdownTwin, postPath, slugify } from "../lib/paths.mjs";
-import { lookStylesheet } from "./looks.mjs";
+import { lookStylesheet, chosenLook, DESIGNS } from "./looks.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -22,8 +22,10 @@ const ROOT = path.resolve(import.meta.dirname, "..");
  */
 export async function build({ outDir, drafts = false, dev = false, postsDir = path.join(ROOT, "posts"), site }) {
   site ??= (await import(path.join(ROOT, "site.config.mjs"))).default;
-  site = { ...site, origin: site.origin.replace(/\/+$/, "") };
+  site = { ...site, origin: site.origin.replace(/\/+$/, ""), look: chosenLook(site) };
   lookStylesheet(site.look); // fails early on an unknown look
+  const design = DESIGNS[site.look];
+  const { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } = design?.pages ?? basePages;
 
   const { posts, errors } = loadPosts(postsDir, { includeDrafts: drafts });
 
@@ -64,6 +66,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   fs.mkdirSync(outDir, { recursive: true });
   for (const entry of fs.readdirSync(outDir)) fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
   fs.cpSync(path.join(ROOT, "static"), outDir, { recursive: true });
+  if (design && fs.existsSync(path.join(design.dir, "static"))) fs.cpSync(path.join(design.dir, "static"), outDir, { recursive: true });
 
   for (const page of pages) {
     write(outDir, path.join(page.path, "index.html"), layout(page, site, { dev }));

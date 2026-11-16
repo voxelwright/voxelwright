@@ -7,7 +7,7 @@ export default {
   language: "en",
   // TODO: the real origin once the domain is chosen. Feed, sitemap, canonical links and
   // the Markdown twins use it for absolute URLs.
-  origin: "https://example.com",
+  origin: "https://zahynailo.dev",
 
   // Answer `Accept: text/markdown` on page routes from the Worker.
   // Off by default: every page view would then invoke the Worker and count against the

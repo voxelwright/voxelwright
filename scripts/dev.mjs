@@ -6,11 +6,13 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { startServer } from "./serve.mjs";
+import { outName } from "../generator/looks.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
+const DEV_DIR = outName(".dev");
 const PORT = Number(process.env.PORT ?? 4321);
 const RELOAD_PORT = PORT + 1; // the dev pages listen here (see generator/pages.mjs)
-const WATCH = ["posts", "static", "generator", "lib", "src", "site.config.mjs"];
+const WATCH = ["designs", "posts", "static", "generator", "lib", "src", "site.config.mjs"];
 
 const rebuild = () => spawnSync(process.execPath, ["scripts/build.mjs", "--dev"], { cwd: ROOT, stdio: "inherit" }).status === 0;
 
@@ -40,7 +42,7 @@ for (const target of WATCH) {
 let child;
 const useNode = process.argv.includes("--node") || !(await startCf());
 if (useNode) {
-  await startServer({ root: path.join(ROOT, ".dev"), port: PORT });
+  await startServer({ root: path.join(ROOT, DEV_DIR), port: PORT });
   console.log(`Serving .dev/ with the Node fallback (negotiation mimicked) at http://localhost:${PORT}/`);
 }
 
@@ -49,7 +51,7 @@ async function startCf() {
   if (!fs.existsSync(bin)) return false;
   child = spawn(bin, ["dev", "--mode", "development", "--port", String(PORT)], {
     cwd: ROOT,
-    env: { ...process.env, SITE_ASSETS_DIR: ".dev" },
+    env: { ...process.env, SITE_ASSETS_DIR: DEV_DIR },
     stdio: ["ignore", "pipe", "pipe"],
   });
   return new Promise((resolve) => {

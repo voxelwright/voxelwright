@@ -1,10 +1,11 @@
 // npm run build: production build into dist/ (no drafts).
 // With --dev: drafts included, live-reload script added, written to .dev/ (used by npm run dev).
 import path from "node:path";
+import { outName as lookOut } from "../generator/looks.mjs";
 import { build, ContentError } from "../generator/build.mjs";
 
 const dev = process.argv.includes("--dev");
-const outName = dev ? ".dev" : "dist";
+const outName = lookOut(dev ? ".dev" : "dist");
 const outDir = path.resolve(import.meta.dirname, "..", outName);
 const started = performance.now();
 try {
