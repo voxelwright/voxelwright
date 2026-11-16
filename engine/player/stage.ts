@@ -137,7 +137,7 @@ export async function stage(failed: (e: unknown) => void, unsaid = 'scenes/sampl
 
   /** The view turned to look along the line through a place on the picture (CSS pixels from its corner). */
   const through = (px: number, py: number): View => {
-    const v = self.view(), h = canvas.clientHeight / 2, x = ((px - canvas.clientWidth / 2) / h) * tanHalf, y = ((h - py) / h) * tanHalf
+    const v = self.view(), h = canvas.clientHeight / 2, x = ((px - canvas.clientWidth / 2) / h) * v.tanHalf, y = ((h - py) / h) * v.tanHalf
     const d = v.forward.map((f, a) => f + v.right[a] * x + v.up[a] * y), l = Math.hypot(d[0], d[1], d[2])
     return { ...v, forward: [d[0] / l, d[1] / l, d[2] / l] }
   }

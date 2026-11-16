@@ -55,15 +55,17 @@ export async function land(tell: Tell): Promise<void> {
   const blue = light(BRAND.blue), yellow = light(BRAND.yellow)
   on.gpu.device.queue.writeBuffer(march.looks, places.colours.blue * 16, new Float32Array([...blue, 1]))
   on.gpu.device.queue.writeBuffer(march.looks, places.colours.yellow * 16, new Float32Array([...yellow, 1]))
-  on.hour(Number(query.get('hour') ?? 8.6))
+  on.hour(Number(query.get('hour') ?? 10.4))
   const ball = 10 | (places.colours.yellow << 8)
 
   // ── Where the eye stands ────────────────────────────────────────────────
   const aspect = () => canvas.clientWidth / Math.max(1, canvas.clientHeight)
+  /** The tangent of half the picture's angle, top to bottom. A tall, narrow picture is given a wider one, so that it still sees a street's width: as a game does on a phone held upright. */
+  const tan = () => Math.min(0.9, Math.max(on.tanHalf, 0.42 / aspect()))
   const ground = (x: number, z: number) => core.ground_at(Math.floor(x), Math.floor(z))
   /** Before a sign: far enough that its board fills most of the picture's width, a little under it, looking up. */
   const before = (s: Sign): Shot => {
-    const w = s.box[3] - s.box[0], far = Math.max(150, w / 2 / (on.tanHalf * aspect() * 0.78))
+    const w = s.box[3] - s.box[0], far = Math.max(150, w / 2 / (tan() * aspect() * 0.78))
     const eye: V3 = [s.at[0] - far * 0.16, s.at[1] - far * 0.2, s.at[2] + far]
     eye[1] = Math.max(eye[1], ground(eye[0], eye[2]) + 22)
     return { eye, at: [s.at[0], s.at[1] - 3, s.at[2]] }
@@ -71,13 +73,13 @@ export async function land(tell: Tell): Promise<void> {
   /** Home: the whole row, from across the street and a little to the west, so that the houses show their sides. Where the picture is tall and narrow the row is looked along instead, from the corner. */
   const home = (): Shot => {
     const { x0, x1, front, roof } = places.row, mid = (x0 + x1) / 2, a = aspect()
-    if (a < 1) return { eye: [x0 - 150, roof + 40, front + 330], at: [mid - 30, roof - 20, front - 10] }
-    const far = ((x1 - x0) / 2 + 40) / (on.tanHalf * a * 0.86)
+    if (a < 1) return { eye: [x0 - 95, roof - 30, front + 270], at: [mid - 70, roof + 5, front] }
+    const far = ((x1 - x0) / 2 + 40) / (tan() * a * 0.86)
     return { eye: [mid - far * 0.28, roof + 6 + far * 0.02, front + far], at: [mid, roof - 22, front] }
   }
   const sky = (): Shot => { const h = home(); return { eye: [h.eye[0] - 1500, h.eye[1] + 1500, h.eye[2] + 2300], at: h.at } }
   const faceShot = (): Shot => {
-    const f = places.face, far = Math.max(95, f.tall / 2 / (on.tanHalf * 0.62), f.wide / 2 / (on.tanHalf * aspect() * 0.7))
+    const f = places.face, far = Math.max(95, f.tall / 2 / (tan() * 0.62), f.wide / 2 / (tan() * aspect() * 0.7))
     return { eye: [f.at[0] + f.normal[0] * far, f.at[1] - 2, f.at[2] + f.normal[2] * far], at: [f.at[0], f.at[1], f.at[2]] }
   }
   const shot = (id: string): Shot => id === 'home' ? home() : id === 'sky' ? sky() : id === 'face' ? faceShot() : before(places.signs.find((s) => s.id === id) ?? places.signs[0])
@@ -108,7 +110,7 @@ export async function land(tell: Tell): Promise<void> {
     const cp = Math.cos(pitch), forward = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp] as const
     const right = [Math.cos(yaw), 0, Math.sin(yaw)] as const
     const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]] as const
-    return { eye: cam.eye, forward, right, up, tanHalf: on.tanHalf }
+    return { eye: cam.eye, forward, right, up, tanHalf: tan() }
   }
   on.view = view
 
@@ -243,7 +245,7 @@ export async function land(tell: Tell): Promise<void> {
     if (!press.moved && Math.hypot(x - press.x0, y - press.y0) > STILL) { press.moved = true; ring(0, 0, 0) }
     if (!press.moved) return
     // The picture follows the finger: what is under it stays under it, near enough.
-    const per = (2 * on.tanHalf) / Math.max(1, canvas.clientHeight)
+    const per = (2 * tan()) / Math.max(1, canvas.clientHeight)
     turned.yaw = Math.max(-0.9, Math.min(0.9, turned.yaw - dx * per))
     turned.pitch = Math.max(-0.5, Math.min(0.5, turned.pitch + dy * per))
   })
@@ -315,7 +317,7 @@ export async function land(tell: Tell): Promise<void> {
   /** Where a place in the world is on the picture, CSS pixels from its corner: for whoever drives the page from outside. */
   const spot = (p: readonly number[]): [number, number] => {
     const v = view(), d = sub(p, v.eye), dot = (a: readonly number[]) => d[0] * a[0] + d[1] * a[1] + d[2] * a[2], far = dot(v.forward), h = canvas.clientHeight / 2
-    return [canvas.clientWidth / 2 + (dot(v.right) / far / on.tanHalf) * h, h - (dot(v.up) / far / on.tanHalf) * h]
+    return [canvas.clientWidth / 2 + (dot(v.right) / far / v.tanHalf) * h, h - (dot(v.up) / far / v.tanHalf) * h]
   }
   // For whoever measures and for the console: nothing of the page's own reads it.
   Object.assign(globalThis, { landing: { on, places, head, look, choose, mend, skip, toss, shot, view, spot, get where() { return where }, get flying() { return !!flight }, get dirty() { return dirty }, get cam() { return cam }, set cam(to: Shot) { cam = to; flight = null } } })

@@ -55,8 +55,11 @@ function mirror() {
   skip.hidden = !arriving
   corner.hidden = arriving || at === 'home'
   for (const a of links) { if (a.dataset.sign === at && root.dataset.view === '3d') a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current') }
-  if (at === 'face') hint.textContent = 'A stand-in face. Take hold and pull.'
-  else if (hint.dataset.said !== 'broke') hint.textContent = arriving ? '' : hint.dataset.first ?? 'Tap throws a ball. Hold throws it hard. Drag looks around.'
+  const sign = root.dataset.view === '3d' ? links.find((a) => a.dataset.sign === at) : null
+  if (hint.dataset.said === 'broke') hint.textContent = 'It mends itself in a moment.'
+  else if (at === 'face') hint.textContent = 'A stand-in face. Take hold and pull.'
+  else if (sign && !flying) hint.textContent = `${sign.querySelector('span').textContent}. Tap the sign to go in.`
+  else hint.textContent = arriving || flying ? '' : hint.dataset.first ?? 'Tap throws a ball. Hold throws it hard. Drag looks around.'
 }
 
 /** Asks for the street: the frame is made, and what it says is listened to. */
@@ -101,7 +104,7 @@ addEventListener('message', (e) => {
     if (!chosen && root.dataset.view === '3d') { show('2d'); say('The street runs slowly on this device, so here is the page. Street, top right, shows it anyway.') }
   } else if (type === 'at') { at = String(e.data.id); flying = !!e.data.flying; if (at === 'home' && !flying) mark('menu'); mirror() }
   else if (type === 'navigate') go(String(e.data.id))
-  else if (type === 'broke') { hint.dataset.said = 'broke'; hint.textContent = 'It mends itself in a moment.' }
+  else if (type === 'broke') { hint.dataset.said = 'broke'; mirror() }
   else if (type === 'mended') { delete hint.dataset.said; hint.dataset.first = ''; mirror() }
 })
 

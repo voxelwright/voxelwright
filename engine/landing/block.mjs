@@ -62,7 +62,7 @@ const wide = (word) => (word.length * (5 + GAP) - GAP) * BULBS
  * is a lower roof beside it that longer legs go down to, from which x on. Returns what the landing world needs.
  */
 function sign(id, word, x, y, z, lift, over) {
-  const w = wide(word) + 12, h = 7 * BULBS + 12, x0 = Math.round(x - w / 2), y0 = y + 1 + lift
+  const w = wide(word) + 6, h = 7 * BULBS + 10, x0 = Math.round(x - w / 2), y0 = y + 1 + lift
   // Legs: steel, on glass feet four cells high. A foot is two cells square: one hard ball takes it out.
   const legs = []
   for (let n = 0, count = Math.max(3, Math.round(w / 34)); n < count; n++) legs.push(x0 + 3 + Math.round((n * (w - 8)) / (count - 1)))
@@ -76,9 +76,9 @@ function sign(id, word, x, y, z, lift, over) {
   box(x0, y0, z - 3, w, 1, 2, FRAME)
   // The board, its rule, and the word.
   box(x0, y0 + 1, z - 2, w, h, 2, BOARD)
-  for (let i = 2; i < w - 2; i++) { set(x0 + i, y0 + 3, z, RULE); set(x0 + i, y0 + h - 2, z, RULE) }
-  for (let j = 3; j < h - 1; j++) { set(x0 + 2, y0 + j, z, RULE); set(x0 + w - 3, y0 + j, z, RULE) }
-  const from = x0 + 6, low = y0 + 7
+  for (let i = 0; i < w; i++) { set(x0 + i, y0 + 1, z, RULE); set(x0 + i, y0 + h, z, RULE) }
+  for (let j = 1; j <= h; j++) { set(x0, y0 + j, z, RULE); set(x0 + w - 1, y0 + j, z, RULE) }
+  const from = x0 + 3, low = y0 + 6
   for (const [n, letter] of [...word].entries()) for (const [row, bits] of FACE[letter].entries()) for (let col = 0; col < 5; col++) {
     if (bits[col] === '#') box(from + (n * (5 + GAP) + col) * BULBS, low + (6 - row) * BULBS, z, BULBS, BULBS, 1, BULB)
   }
@@ -89,9 +89,9 @@ const shops = [0, 1, 2, 3, 4].map(shop)
 // Blog on the corner house; Village across the two houses beside it, the low one reached by long legs; then Tags and Feed.
 const signs = [
   sign('blog', 'BLOG', shops[0].x0 + LOT / 2, shops[0].roof, shops[0].front - 8, 14),
-  sign('village', 'VILLAGE', shops[2].x0 - 2, shops[2].roof, shops[2].front - 8, 8, { from: 0, roof: shops[1].roof, to: shops[2].x0 }),
-  sign('tags', 'TAGS', shops[3].x0 + LOT / 2, shops[3].roof, shops[3].front - 8, 10),
-  sign('feed', 'FEED', shops[4].x0 + LOT / 2, shops[4].roof, shops[4].front - 8, 22),
+  sign('village', 'VILLAGE', shops[2].x0 + 4, shops[2].roof, shops[2].front - 8, 8, { from: 0, roof: shops[1].roof, to: shops[2].x0 }),
+  sign('tags', 'TAGS', shops[3].x0 + LOT / 2, shops[3].roof, shops[3].front - 8, 18),
+  sign('feed', 'FEED', shops[4].x0 + LOT / 2, shops[4].roof, shops[4].front - 8, 8),
 ]
 
 // The crate table, in the road before the row: a top of wood on four glass legs, crates stacked on it.
