@@ -25,7 +25,8 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   site = { ...site, origin: site.origin.replace(/\/+$/, ""), look: chosenLook(site) };
   lookStylesheet(site.look); // fails early on an unknown look
   const design = DESIGNS[site.look];
-  const { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } = design?.pages ?? basePages;
+  const pagesModule = design?.pagesFile ? await import(design.pagesFile) : basePages;
+  const { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } = pagesModule;
 
   const { posts, errors } = loadPosts(postsDir, { includeDrafts: drafts });
 

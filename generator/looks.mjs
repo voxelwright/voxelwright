@@ -25,7 +25,9 @@ for (const name of fs.existsSync(DESIGNS_DIR) ? fs.readdirSync(DESIGNS_DIR).sort
   DESIGNS[name] = {
     ...(await import(pathToFileURL(file).href)).default,
     dir,
-    pages: fs.existsSync(pagesFile) ? await import(pathToFileURL(pagesFile).href) : null,
+    // Imported by the build, not here: a design's pages.mjs may import markdown.mjs or this
+    // module, and importing it during this module's top-level await would deadlock.
+    pagesFile: fs.existsSync(pagesFile) ? pathToFileURL(pagesFile).href : null,
   };
   LOOKS[name] = { code: DESIGNS[name].code };
 }
