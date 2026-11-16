@@ -4,7 +4,7 @@
 // march, the mover, the pieces, crumbs and smoke); what main.ts does with them in a frame is done again here.
 //
 //   ?scene=scenes/sample.json   the scene (scene.ts says what one holds), an address beside index.html or anywhere that lets it be read
-//   ?grid=8,8,8  ?levels=6  ?pool=64  ?workers=2   how much of the world round the scene is held: small, for a picture in a page
+//   ?grid=8,8,8  ?levels=6  ?pool=64  ?workers=4   how much of the world round the scene is held: small, for a picture in a page
 //   ?scale=0.75  pixels drawn for each pixel shown, each way: unsaid, it follows the GPU as main.ts does
 //
 // The eye turns about the scene's middle: drag to turn it, pinch or the wheel to come nearer. A tap throws a ball of
@@ -27,8 +27,8 @@ export type Tell = (type: 'ready' | 'error', more: Record<string, unknown>) => v
 
 /** Cells in a metre. */
 const M = 10
-/** The ball a poke throws: its half in cells, and what it is made of (wood, in the palette's own brown). */
-const BALL = { radius: 2, kind: 10 }
+/** The ball a poke throws: its half in cells, and what it is made of (wood). Of 60 cells or more, as this is, a body breaks what is built where it strikes hard enough (bodies.rs); thrown softly it only knocks, and held longest it breaks itself as well. */
+const BALL = { radius: 3, kind: 10 }
 /** How fast a tap throws it and how fast the longest hold does, cells a second; and how long that hold is, ms. */
 const SOFT = 90, HARD = 600, HOLD = 700
 /** How the core pulls things down, cells a second each second (bodies.rs `G`). */
@@ -73,7 +73,7 @@ export async function play(tell: Tell): Promise<void> {
     grid: numbers('grid', [8, 8, 8]) as [number, number, number],
     levels: Number(query.get('levels') ?? 6),
     poolWords: (poolMb << 20) / 4,
-    workers: Number(query.get('workers') ?? 2),
+    workers: Number(query.get('workers') ?? Math.max(2, Math.min(4, (navigator.hardwareConcurrency || 4) - 2))),
   })
   // The scene's own cells are there before the first sector is made: nothing is made twice.
   const sceneEdits: Edit[] = scene.edits.map((e) => ({ words: Int32Array.from(e.edit), box: e.box }))
@@ -92,9 +92,19 @@ export async function play(tell: Tell): Promise<void> {
   const tanHalf = Math.tan((Number(query.get('fov') ?? 50) * Math.PI) / 360)
   /** How far from the middle the eye is drawn: what was asked for, or less where something stands between, come to over a few frames. */
   let shown = eye.far, clear = eye.far, clearFor = ''
-  /** How far out from the middle along a way the world is open, up to `far`: the eye is never put in a wall or behind one. Leaves and water are looked through. */
+  /**
+   * How far out from the middle along a way the world is open, up to `far`: the eye is never put in a wall or behind
+   * one. Leaves and water are looked through, and so is what is thin (a lamp's post, a trunk): only what is met
+   * again and again over the next two metres stops the eye.
+   */
+  const stands = (away: readonly number[], d: number) => { const k = core.world_kind(Math.floor(scene.centre[0] + away[0] * d), Math.floor(scene.centre[1] + away[1] * d), Math.floor(scene.centre[2] + away[2] * d)) & 15; return k !== 0 && k !== 5 && k !== 13 }
   const openTo = (away: readonly number[], far: number) => {
-    for (let d = 2; d <= far; d += 2) { const k = core.world_kind(Math.floor(scene.centre[0] + away[0] * d), Math.floor(scene.centre[1] + away[1] * d), Math.floor(scene.centre[2] + away[2] * d)) & 15; if (k !== 0 && k !== 5 && k !== 13) return Math.max(2, d - 6) }
+    for (let d = 2; d <= far; d += 2) {
+      if (!stands(away, d)) continue
+      let more = 0
+      for (let on = 2; on <= 20; on += 2) if (stands(away, d + on)) more++
+      if (more >= 3) return Math.max(2, d - 6)
+    }
     return far
   }
   const view = (): View => {
@@ -145,8 +155,8 @@ export async function play(tell: Tell): Promise<void> {
   } : null
   let gpuMs = 0, cpuMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, screenMs = 16.7, shortest = Infinity
   const started = last
-  /** When the first picture was drawn, and when the first with the whole scene in it was: ms since the page was asked for. */
-  const seen = { first: 0, whole: 0 }
+  /** When the first picture was drawn, when the first with the scene in it was (every box whole across its middle half, as main.ts counts a world shown: the boxes fill from the middle, where the scene is), and when the first with every box whole was: ms since the page was asked for. */
+  const seen = { first: 0, near: 0, whole: 0 }
   /** Every gap between frames since it was last emptied, ms: for whoever measures (test/player.mjs). */
   const gaps: number[] = []
   const flags = SHADOWS | MIRRORS
@@ -164,7 +174,9 @@ export async function play(tell: Tell): Promise<void> {
     shown += (clear - shown) * Math.min(1, dt * (clear < shown ? 14 : 5))
     const v = view(), to = fit()
     fallOn(dt)
-    world.update(v.eye)
+    // The boxes of the world lie round the scene's middle, not round the eye: the eye turns about that place, so what it
+    // looks at is always in the finest cells and nothing is made again as it turns.
+    world.update(scene.centre)
     const whole = world.stats.wanted === 0 && world.stats.stale === 0
     if (spoiled.length && whole) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
     const encoder = device.createCommandEncoder(), timed = clock && !clock.busy, time = (now - started) / 1000
@@ -188,9 +200,12 @@ export async function play(tell: Tell): Promise<void> {
         if (b > a) gpuMs += (Number(b - a) / 1e6 - gpuMs) * 0.1
       })
     }
-    // The holder is told once the scene is seen: the first picture drawn with every sector round it made.
-    if (!seen.first) { seen.first = -1; void device.queue.onSubmittedWorkDone().then(() => { seen.first = performance.now() }) }
-    if (!seen.whole && whole && frames > 0) { seen.whole = -1; void device.queue.onSubmittedWorkDone().then(() => { seen.whole = performance.now(); tell('ready', { ms: Math.round(seen.whole), firstFrame: Math.round(seen.first), scene: scene.name }) }) }
+    // The holder is told once the scene is seen: the first picture drawn with the middle of every box whole. Their edges
+    // are still being made then, and fill in behind it.
+    const after = (what: 'first' | 'near' | 'whole', then?: () => void) => { seen[what] = -1; void device.queue.onSubmittedWorkDone().then(() => { seen[what] = performance.now(); then?.() }) }
+    if (!seen.first) after('first')
+    if (!seen.near && frames > 0 && world.stats.stale === 0 && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) after('near', () => tell('ready', { ms: Math.round(seen.near), firstFrame: Math.round(seen.first), scene: scene.name }))
+    if (!seen.whole && frames > 0 && whole) after('whole')
     frames++
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)

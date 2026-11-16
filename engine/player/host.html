@@ -10,10 +10,11 @@
   h1 { font-size: 28px; margin: 0 0 8px; }
   figure { margin: 24px 0; }
   .scene { position: relative; aspect-ratio: 16 / 10; border-radius: 10px; overflow: hidden; background: #d9d6cb; }
-  .scene iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; }
-  .scene.ready iframe { visibility: visible; }
+  /* The frame is never hidden while it is waited for: a browser draws no frames in a hidden frame of another origin, so
+     a player kept out of sight until it says `ready` never says it. The flat picture lies over it instead. */
+  .scene iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
   /* The picture a page shows where the scene cannot be: here a plain card that says so. */
-  .scene .flat { position: absolute; inset: 0; display: grid; place-items: center; font: 14px system-ui, sans-serif; color: #5b5f66; }
+  .scene .flat { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; background: #d9d6cb; font: 14px system-ui, sans-serif; color: #5b5f66; }
   .scene.ready .flat { display: none; }
   figcaption { margin-top: 6px; font: 13px system-ui, sans-serif; color: #5b5f66; }
 </style>
@@ -21,7 +22,7 @@
 <body>
 <!--
   A page that holds two players (#419), as a post would: each an iframe on the player's page, each with a flat
-  picture under it that is shown until the player says `ready`, and for good if it says `unsupported` or `error` or
+  picture over it that is shown until the player says `ready`, and for good if it says `unsupported` or `error` or
   says nothing for five seconds. `?player=` is where the player's page is (another origin, as it would be for a
   post that borrows a scene); unsaid, it is the one beside this page.
 -->

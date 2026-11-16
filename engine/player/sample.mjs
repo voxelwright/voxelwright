@@ -41,7 +41,7 @@ for (const [x, y, z, kind] of sorted) {
 const scene = {
   village: 'scene', version: 1, name: 'A table on glass legs',
   centre: [X - 4, FLOOR + 12, Z],
-  eye: { far: 230, yaw: 25, pitch: -20, nearest: 60, farthest: 420 },
+  eye: { far: 125, yaw: 48, pitch: -24, nearest: 60, farthest: 420 },
   edits: [{ edit: [1, rows.length / 5, ...rows], box: [...low, ...high] }],
 }
 const to = new URL('scenes/sample.json', import.meta.url)

@@ -10,36 +10,14 @@
 // beside them how many pixels the page chose to draw (its scale), the GPU's time for the march and this thread's
 // time a frame. A frame time alone flatters: the page draws fewer pixels to hold it.
 // --look only opens the player, waits for it and takes the picture: for making a scene.
-import { createServer } from 'node:http'
-import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { extname, join, normalize, sep } from 'node:path'
+import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
 import { chromium, webkit } from 'playwright'
 import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
-
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.wasm': 'application/wasm' }
-/**
- * A host of plain files, as a static site's is: each file with its usual type, an ETag, and leave to keep it ten
- * minutes (what GitHub Pages sends). No header of the page server's: no COOP, no COEP, no CSP. `asked` is every
- * path it was asked for and what it answered.
- */
-export async function plain(dir, host = '127.0.0.1') {
-  const asked = []
-  const server = createServer((req, res) => {
-    const path = decodeURIComponent(new URL(req.url, 'http://x').pathname), rel = normalize(path).replace(/^[/\\]+/, ''), file = join(dir, rel)
-    if (rel.split(sep).includes('..') || !(extname(rel) in TYPES) || !existsSync(file) || !statSync(file).isFile()) { asked.push({ path, status: 404 }); res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('not found') }
-    const s = statSync(file), etag = `"${s.size.toString(16)}-${Math.round(s.mtimeMs).toString(16)}"`
-    const headers = { 'Content-Type': TYPES[extname(rel)], ETag: etag, 'Last-Modified': s.mtime.toUTCString(), 'Cache-Control': 'max-age=600' }
-    if (req.headers['if-none-match'] === etag) { asked.push({ path, status: 304 }); res.writeHead(304, headers); return res.end() }
-    asked.push({ path, status: 200 })
-    res.writeHead(200, { ...headers, 'Content-Length': s.size })
-    createReadStream(file).pipe(res)
-  })
-  await new Promise((done) => server.listen(0, host, done))
-  return { url: `http://${host}:${server.address().port}`, asked, stop: () => server.close() }
-}
+import { plain } from '../player/serve.mjs'
 
 const middle = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1]
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
@@ -55,17 +33,19 @@ const watch = (frame, seconds) => frame.evaluate(async (ms) => {
 }, seconds * 1000)
 const said = (w) => ({ ...frames(w.gaps), scale: w.scale, marchMs: round(w.gpuMs), cpuMs: round(w.cpuMs), canvas: w.canvas })
 
-/** Pokes a player through the page's own mouse for some seconds: a tap, then a hold, at places across the picture, and a turn of the eye now and then. `box` is where the player is on the page. */
+/** Where the sample scene's things are in its first picture, as parts of the picture across and down: the pane, a leg of the table, its crates, the wall, its top. */
+const TARGETS = [[0.615, 0.417], [0.495, 0.614], [0.5, 0.4], [0.31, 0.69], [0.52, 0.5]]
+/** Pokes a player through the page's own mouse for some seconds: a tap, then a hold, at one thing after another, and from the sixth on a turn of the eye now and then. `box` is where the player is on the page. */
 async function pokes(page, box, seconds) {
   const until = Date.now() + seconds * 1000
   for (let i = 0; Date.now() < until; i++) {
-    const x = box.x + box.width * (0.3 + 0.4 * ((i * 0.37) % 1)), y = box.y + box.height * (0.35 + 0.3 * ((i * 0.61) % 1))
+    const [fx, fy] = TARGETS[(i >> 1) % TARGETS.length], x = box.x + box.width * fx, y = box.y + box.height * fy
     await page.mouse.move(x, y)
     await page.mouse.down()
-    if (i % 4 === 3) { await page.mouse.move(x + 60, y + 10, { steps: 6 }); await page.mouse.up(); continue }
-    await page.waitForTimeout(i % 2 ? 700 : 40)
+    if (i > 5 && i % 5 === 0) { await page.mouse.move(x + 50, y + 8, { steps: 6 }); await page.mouse.up(); continue }
+    await page.waitForTimeout(i % 2 ? 750 : 40)
     await page.mouse.up()
-    await page.waitForTimeout(250)
+    await page.waitForTimeout(200)
   }
 }
 
@@ -101,7 +81,9 @@ for (const name of only) {
   if (cold.state !== 'ready') { await browser.close(); continue }
   const loaded = [...new Set(site.asked.map((a) => a.path))]
   check(site.asked.every((a) => a.status === 200) && loaded.every((p) => existsSync(join(dist, p))), `it asked for ${loaded.length} files, all of the folder, and nothing else`)
-  out.cold = { firstFrame: Math.round(cold.seen.first), seen: Math.round(cold.seen.whole) }
+  await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 })
+  const times = (seen) => ({ firstFrame: Math.round(seen.first), ready: Math.round(seen.near), whole: Math.round(seen.whole) })
+  out.cold = times(await page.evaluate(() => globalThis.player.seen))
   if (has('look')) { await page.waitForTimeout(Number(arg('wait', '1500'))); await page.screenshot({ path: join(shots, `look-${name}.png`) }); console.log(`  ${join(shots, `look-${name}.png`)}`); await browser.close(); continue }
   if (!results.download) {
     const sizes = loaded.map((p) => { const body = readFileSync(join(dist, p)); return { path: p, raw: body.length, gzip: gzipSync(body, { level: 9 }).length, brotli: brotliCompressSync(body).length } })
@@ -109,8 +91,8 @@ for (const name of only) {
     results.download = { files: sizes.length, raw: sum('raw'), gzip: sum('gzip'), brotli: sum('brotli'), biggest: sizes.sort((a, b) => b.brotli - a.brotli).slice(0, 4) }
   }
   const warm = []
-  for (let i = 0; i < 5; i++) { await page.reload(); const w = await ready(); warm.push(w.seen) }
-  out.warm = { firstFrame: Math.round(middle(warm.map((w) => w.first))), seen: Math.round(middle(warm.map((w) => w.whole))) }
+  for (let i = 0; i < 5; i++) { await page.reload(); await ready(); await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); warm.push(await page.evaluate(() => globalThis.player.seen)) }
+  out.warm = times({ first: middle(warm.map((w) => w.first)), near: middle(warm.map((w) => w.near)), whole: middle(warm.map((w) => w.whole)) })
   const alone = await watch(page, 1)
   check(alone.isolated === false, `it ran with no cross-origin isolation (crossOriginIsolated ${alone.isolated}, SharedArrayBuffer ${alone.shared ? 'there' : 'not there'})`)
   out.isolated = alone.isolated

@@ -36,7 +36,7 @@
   const tell = (type, more) => { if (type === 'error') fail(more.message); else if (state === 'starting') say(type, more) }
   const words = (e) => (e instanceof Error ? e.message : String(e))
   // An adapter that has not answered by now is taken for none: the holder was promised a word within a second.
-  setTimeout(() => none('WebGPU did not answer in time'), 900)
+  setTimeout(() => none('WebGPU did not answer in time'), 800)
   addEventListener('error', (e) => fail(e.message))
   addEventListener('unhandledrejection', (e) => fail(words(e.reason)))
   try {
