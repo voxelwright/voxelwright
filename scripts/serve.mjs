@@ -28,6 +28,7 @@ const TYPES = {
   ".glb": "model/gltf-binary",
   ".gltf": "model/gltf+json",
   ".wasm": "application/wasm",
+  ".woff2": "font/woff2",
 };
 
 /** env.ASSETS for a directory, following htmlHandling "auto-trailing-slash" and notFoundHandling "404-page". */

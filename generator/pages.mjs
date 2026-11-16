@@ -2,6 +2,13 @@
 // Each function returns { path, title, description, html, markdown }.
 import { escapeHtml as e, renderInline } from "./markdown.mjs";
 import { markdownTwin, postPath, tagPath, slugify } from "../lib/paths.mjs";
+import { lookStylesheet } from "./looks.mjs";
+
+const NAV = [
+  { href: "/blog/", label: "Blog" },
+  { href: "/tags/", label: "Tags" },
+  { href: "/feed.xml", label: "Feed" },
+];
 
 export function layout(page, site, { dev }) {
   const twin = markdownTwin(page.path);
@@ -17,24 +24,35 @@ export function layout(page, site, { dev }) {
 ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
 <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
-<link rel="stylesheet" href="/style.css">
-</head>
-<body>
+<link rel="stylesheet" href="${lookStylesheet(site.look)}">
+${dev ? DEV_LOOK : ""}</head>
+<body data-page="${page.kind}">
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="site-title" href="/">${e(site.title)}</a>
-<nav aria-label="Site"><a href="/blog/">Blog</a> <a href="/tags/">Tags</a> <a href="/feed.xml">Feed</a></nav>
+<nav aria-label="Site"><ul>${NAV.map((n) => `<li><a href="${n.href}"${page.path.startsWith(n.href) ? ` aria-current="${page.path === n.href ? "page" : "true"}"` : ""}>${n.label}</a></li>`).join("")}</ul></nav>
 </header>
 <main id="main">
 ${page.html}
 </main>
 <footer class="site-footer">
-<p>${twin ? `<a href="${e(twin)}">This page as Markdown</a> · ` : ""}<a href="/llms.txt">llms.txt</a> · <a href="/feed.xml">Atom feed</a></p>
+<ul class="footer-links">${twin ? `<li><a href="${e(twin)}">This page as Markdown</a></li>` : ""}<li><a href="/llms.txt">llms.txt</a></li><li><a href="/feed.xml">Atom feed</a></li></ul>
 </footer>
 ${dev ? DEV_RELOAD : ""}</body>
 </html>
 `;
 }
+
+// dev only: ?look=<name> swaps the stylesheet and sticks for the tab; ?look= clears it.
+const DEV_LOOK = `<script>
+{
+  const q = new URLSearchParams(location.search).get("look");
+  let look = q;
+  try { if (q !== null) sessionStorage.setItem("look", q); else look = sessionStorage.getItem("look"); } catch {}
+  if (look && /^[a-z0-9-]+$/.test(look)) document.querySelector('link[rel="stylesheet"]').href = "/looks/" + look + ".css";
+}
+</script>
+`;
 
 const DEV_RELOAD = `<script type="module">
 // dev only: reload when the build changes
@@ -92,12 +110,13 @@ ${site.links.length ? `<ul>${site.links.map((l) => `<li><a href="${e(l.url)}">${
     `All posts: ${site.origin}/blog.md`,
   ].join("\n");
 
-  return { path: "/", title: site.title, description: site.description, html, markdown: md + "\n" };
+  return { path: "/", kind: "home", title: site.title, description: site.description, html, markdown: md + "\n" };
 }
 
 export function blogPage(site, posts) {
   return {
     path: "/blog/",
+    kind: "blog",
     title: "Blog",
     description: `All posts on ${site.title}.`,
     html: `<h1>Blog</h1>\n${postListHtml(posts) || "<p>No posts yet.</p>"}`,
@@ -109,6 +128,7 @@ export function tagsPage(site, tags) {
   const list = [...tags.values()].sort((a, b) => a.name.localeCompare(b.name));
   return {
     path: "/tags/",
+    kind: "tags",
     title: "Tags",
     description: `Topics on ${site.title}.`,
     html: `<h1>Tags</h1>\n<ul class="tags-list">\n${list.map((t) => `<li><a href="${tagPath(t.name)}">${e(t.name)}</a> <span class="count">${t.posts.length}</span></li>`).join("\n")}\n</ul>`,
@@ -119,6 +139,7 @@ export function tagsPage(site, tags) {
 export function tagPage(site, tag) {
   return {
     path: tagPath(tag.name),
+    kind: "tag",
     title: `Tag: ${tag.name}`,
     description: `Posts tagged ${tag.name} on ${site.title}.`,
     html: `<h1>Posts tagged <em>${e(tag.name)}</em></h1>\n${postListHtml(tag.posts)}\n<p><a href="/tags/">All tags</a></p>`,
@@ -127,11 +148,11 @@ export function tagPage(site, tag) {
 }
 
 export function postPage(site, post, rendered) {
-  const tags = post.tags.map((t) => `<a href="${tagPath(t)}">${e(t)}</a>`).join(", ");
+  const tags = post.tags.map((t) => `<li><a href="${tagPath(t)}">${e(t)}</a></li>`).join("");
   const html = `<article class="post">
 <header class="post-header">
 <h1>${e(post.title)}</h1>
-<p class="post-meta"><time datetime="${post.date}">${formatDate(post.date)}</time>${tags ? ` · ${tags}` : ""}${post.draft ? ` · <span class="draft">Draft</span>` : ""}</p>
+<div class="post-meta"><time datetime="${post.date}">${formatDate(post.date)}</time>${tags ? `<ul class="post-tags" aria-label="Tags">${tags}</ul>` : ""}${post.draft ? `<span class="draft">Draft</span>` : ""}</div>
 </header>
 ${rendered.html}
 </article>`;
@@ -150,6 +171,7 @@ ${rendered.html}
 
   return {
     path: postPath(post.slug),
+    kind: "post",
     title: post.title,
     description: post.summary,
     html,
@@ -160,6 +182,7 @@ ${rendered.html}
 export function notFoundPage(site) {
   return {
     path: "/404.html",
+    kind: "not-found",
     title: "Not found",
     html: `<h1>Not found</h1>\n<p>Nothing lives at this address. Try the <a href="/">home page</a> or the <a href="/blog/">blog</a>.</p>`,
   };

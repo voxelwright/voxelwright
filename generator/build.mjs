@@ -6,6 +6,7 @@ import { renderPost, ContentError } from "./markdown.mjs";
 import { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } from "./pages.mjs";
 import { llmsTxt, atomFeed, sitemap, robotsTxt } from "./feeds.mjs";
 import { markdownTwin, postPath, slugify } from "../lib/paths.mjs";
+import { lookStylesheet } from "./looks.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 
@@ -22,6 +23,7 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 export async function build({ outDir, drafts = false, dev = false, postsDir = path.join(ROOT, "posts"), site }) {
   site ??= (await import(path.join(ROOT, "site.config.mjs"))).default;
   site = { ...site, origin: site.origin.replace(/\/+$/, "") };
+  lookStylesheet(site.look); // fails early on an unknown look
 
   const { posts, errors } = loadPosts(postsDir, { includeDrafts: drafts });
 
@@ -33,6 +35,8 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
       dir: post.dir,
       basePath: postPath(post.slug),
       origin: site.origin,
+      look: site.look,
+      dev,
     });
     errors.push(...result.errors);
     rendered.set(post.slug, result);

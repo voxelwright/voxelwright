@@ -4,9 +4,11 @@ import fs from "node:fs";
 import path from "node:path";
 import MarkdownIt from "markdown-it";
 import { createHighlighter } from "shiki";
+import { LOOKS, BASELINE_CODE } from "./looks.mjs";
 
 const LANGS = ["ts", "tsx", "js", "jsx", "json", "bash", "shell", "html", "css", "md", "yaml", "toml", "rust", "python", "glsl", "wgsl", "diff", "sql"];
-const highlighter = await createHighlighter({ themes: ["github-light", "github-dark"], langs: LANGS });
+const THEMES = [...new Set([...BASELINE_CODE, ...Object.values(LOOKS).flatMap((l) => l.code)])];
+const highlighter = await createHighlighter({ themes: THEMES, langs: LANGS });
 const loadedLangs = new Set(highlighter.getLoadedLanguages());
 
 /**
@@ -36,7 +38,13 @@ export function renderPost(source, ctx) {
   const env = { ctx, errors, absolute: false };
   const tokens = md.parse(source, env);
   findStrayEmbeds(tokens, ctx, errors);
-  const html = md.renderer.render(tokens, md.options, env);
+  let html;
+  try {
+    codeOptions = pageCodeOptions(ctx.look, ctx.dev);
+    html = md.renderer.render(tokens, md.options, env);
+  } finally {
+    codeOptions = FEED_CODE;
+  }
   const feedHtml = md.renderer.render(tokens, md.options, { ...env, absolute: true });
   const markdown = toMarkdown(source, tokens, ctx);
   return { html, feedHtml, markdown, errors };
@@ -45,6 +53,24 @@ export function renderPost(source, ctx) {
 /** Renders a short Markdown string (no embeds expected), e.g. the home page intro. */
 export function renderInline(text) {
   return md.renderInline(text);
+}
+
+// Code colours. The feed (and the baseline look) keep the GitHub pair as inline light-dark()
+// colours, so feed readers show colour without the site's CSS. A look's pages carry its own
+// pair as --shiki-light / --shiki-dark variables, which its stylesheet applies; dev builds
+// also carry every other look's pair (--shiki-<look>-light/-dark) so ?look= can switch them.
+const FEED_CODE = { themes: { light: BASELINE_CODE[0], dark: BASELINE_CODE[1] }, defaultColor: "light-dark()" };
+let codeOptions = FEED_CODE;
+
+function pageCodeOptions(look, dev) {
+  if (!look) return FEED_CODE;
+  const themes = { light: LOOKS[look].code[0], dark: LOOKS[look].code[1] };
+  if (dev) {
+    for (const [name, other] of Object.entries(LOOKS)) {
+      if (name !== look) Object.assign(themes, { [`${name}-light`]: other.code[0], [`${name}-dark`]: other.code[1] });
+    }
+  }
+  return { themes, defaultColor: false };
 }
 
 const md = new MarkdownIt({
@@ -56,11 +82,7 @@ const md = new MarkdownIt({
     if (!loadedLangs.has(language)) {
       return `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`;
     }
-    return highlighter.codeToHtml(code, {
-      lang: language,
-      themes: { light: "github-light", dark: "github-dark" },
-      defaultColor: "light-dark()",
-    });
+    return highlighter.codeToHtml(code, { lang: language, ...codeOptions });
   },
 });
 
