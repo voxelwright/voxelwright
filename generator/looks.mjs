@@ -2,7 +2,7 @@
 // static/style.css, plus the Shiki theme pair its code blocks use. site.config.mjs picks one
 // with `look`; with no look the baseline style.css and the GitHub pair are used.
 export const LOOKS = {
-  notebook: { code: ["kanagawa-lotus", "kanagawa-dragon"] },
+  notebook: { code: ["gruvbox-light-hard", "gruvbox-dark-medium"] },
   street: { code: ["vitesse-light", "vitesse-dark"] },
   editorial: { code: ["min-light", "min-dark"] },
 };

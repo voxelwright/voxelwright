@@ -59,8 +59,16 @@ The model's words, in Markdown.
 
 ## Settings
 
-`site.config.mjs` holds the title, description, origin (still `https://example.com`), home page
-text, projects, links, and `negotiateMarkdown`.
+`site.config.mjs` holds the title, description, origin (still `https://example.com`), the look,
+home page text, projects, links, and `negotiateMarkdown`.
+
+### Looks
+
+Three designs share the same HTML: `notebook`, `street` and `editorial`. Each is one stylesheet
+in `static/looks/` plus a Shiki theme pair in `generator/looks.mjs`; `look:` in the config picks
+one. In `npm run dev`, `?look=street` switches the current tab (code colours too); `?look=` goes
+back to the configured one. Fonts are self-hosted in `static/fonts/`, each with its OFL licence.
+The rules the looks are designed against are in `.claude/skills/site-craft/SKILL.md`.
 
 ### Markdown by `Accept` header
 
@@ -81,7 +89,9 @@ site.config.mjs         settings
 generator/              build: posts, Markdown and embeds, pages, feeds
 lib/paths.mjs           URL rules shared by build, Worker, checks and dev server
 src/worker.mjs          Markdown negotiation Worker
-static/style.css        all styling (temporary baseline)
+static/looks/           the looks, one stylesheet each
+static/fonts/           self-hosted fonts and their licences
+static/style.css        plain baseline, used when no look is set
 scripts/                new, build, dev, check, Node dev server
 test/                   Worker and build-failure tests
 cloudflare.config.ts    Worker config for the cf CLI
