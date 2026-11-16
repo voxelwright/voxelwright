@@ -71,40 +71,51 @@ const browsers = { chrome: () => chromium.launch({ ...CHROME, headless: !has('he
 const back = has('look') ? await turn() : await quiet()
 for (const name of only) {
   console.log(`\n${name}`)
-  const browser = await browsers[name](), out = (results[name] = { version: browser.version() })
+  const out = (results[name] = {})
+  const ready = async (p) => { await p.waitForFunction(() => ['ready', 'error', 'unsupported'].includes(document.documentElement.dataset.state), null, { timeout: 60000 }); return p.evaluate(() => ({ state: document.documentElement.dataset.state, said: document.documentElement.dataset.said })) }
+  const times = (seen) => ({ firstFrame: Math.round(seen.first), ready: Math.round(seen.near), whole: Math.round(seen.whole) })
+  const mid = (all) => times({ first: middle(all.map((w) => w.first)), near: middle(all.map((w) => w.near)), whole: middle(all.map((w) => w.whole)) })
+  const whole = async (p) => { await p.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); return p.evaluate(() => globalThis.player.seen) }
+
+  // ── Alone: the first visit ──
+  // Cold is a browser just started, with nothing kept and nothing else drawing: three, one after another, the middle one said.
+  const colds = []
+  let seen = true
+  for (let i = 0; i < 3 && seen; i++) {
+    const b = await browsers[name](), p = await (await b.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })).newPage()
+    site.asked.length = 0
+    await p.goto(playerUrl)
+    const cold = await ready(p)
+    if (i === 0) {
+      out.version = b.version()
+      check(cold.state === 'ready', `the scene is seen from plain files (${cold.state}${cold.said ? `: ${cold.said}` : ''})`)
+      seen = cold.state === 'ready'
+      const loaded = [...new Set(site.asked.map((a) => a.path))]
+      if (seen) check(site.asked.every((a) => a.status === 200) && loaded.every((path) => existsSync(join(dist, path))), `it asked for ${loaded.length} files, all of the folder, and nothing else`)
+      if (seen && !results.download) {
+        const sizes = loaded.map((path) => { const body = readFileSync(join(dist, path)); return { path, raw: body.length, gzip: gzipSync(body, { level: 9 }).length, brotli: brotliCompressSync(body).length } })
+        const sum = (k) => sizes.reduce((n, size) => n + size[k], 0)
+        results.download = { files: sizes.length, raw: sum('raw'), gzip: sum('gzip'), brotli: sum('brotli'), biggest: sizes.sort((x, y) => y.brotli - x.brotli).slice(0, 4) }
+      }
+    }
+    if (seen) colds.push(await whole(p))
+    if (seen && has('look')) { await p.waitForTimeout(Number(arg('wait', '1500'))); await p.screenshot({ path: join(shots, `look-${name}.png`) }); console.log(`  ${join(shots, `look-${name}.png`)}`); seen = false; out.cold = times(colds[0]) }
+    await b.close()
+  }
+  if (!seen) continue
+  out.cold = { ...mid(colds), each: colds.map((c) => Math.round(c.near)) }
+
+  const browser = await browsers[name]()
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })
   const page = await context.newPage()
   page.on('pageerror', (e) => failures.push(`${name} page error: ${e.message}`))
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') console.log(`  page ${m.type()}: ${m.text().slice(0, 400)}`) })
-  const ready = async (p = page) => { await p.waitForFunction(() => ['ready', 'error', 'unsupported'].includes(document.documentElement.dataset.state), null, { timeout: 60000 }); return p.evaluate(() => ({ state: document.documentElement.dataset.state, said: document.documentElement.dataset.said, seen: globalThis.player?.seen })) }
-
-  // ── Alone: the first visit, and visits after ──
-  site.asked.length = 0
   await page.goto(playerUrl)
-  const cold = await ready()
-  check(cold.state === 'ready', `the scene is seen from plain files (${cold.state}${cold.said ? `: ${cold.said}` : ''})`)
-  if (cold.state !== 'ready') { await browser.close(); continue }
-  const loaded = [...new Set(site.asked.map((a) => a.path))]
-  check(site.asked.every((a) => a.status === 200) && loaded.every((p) => existsSync(join(dist, p))), `it asked for ${loaded.length} files, all of the folder, and nothing else`)
-  await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 })
-  const times = (seen) => ({ firstFrame: Math.round(seen.first), ready: Math.round(seen.near), whole: Math.round(seen.whole) })
-  const first = await page.evaluate(() => globalThis.player.seen)
-  out.cold = { veryFirst: times(first) }
-  if (has('look')) { await page.waitForTimeout(Number(arg('wait', '1500'))); await page.screenshot({ path: join(shots, `look-${name}.png`) }); console.log(`  ${join(shots, `look-${name}.png`)}`); await browser.close(); continue }
-  if (!results.download) {
-    const sizes = loaded.map((p) => { const body = readFileSync(join(dist, p)); return { path: p, raw: body.length, gzip: gzipSync(body, { level: 9 }).length, brotli: brotliCompressSync(body).length } })
-    const sum = (k) => sizes.reduce((n, s) => n + s[k], 0)
-    results.download = { files: sizes.length, raw: sum('raw'), gzip: sum('gzip'), brotli: sum('brotli'), biggest: sizes.sort((a, b) => b.brotli - a.brotli).slice(0, 4) }
-  }
-  // Cold is a browser just started, with nothing kept: three of them, the middle one said. (This script's own first
-  // visit above is the very first of the run and is said beside it: a browser's first use of the GPU after a build.)
-  const colds = [first]
-  for (let i = 0; i < 2; i++) { const b = await browsers[name](), p = await (await b.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2 })).newPage(); await p.goto(playerUrl); await ready(p); await p.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); colds.push(await p.evaluate(() => globalThis.player.seen)); await b.close() }
-  const mid = (all) => times({ first: middle(all.map((w) => w.first)), near: middle(all.map((w) => w.near)), whole: middle(all.map((w) => w.whole)) })
-  out.cold = { ...mid(colds), veryFirst: times(first) }
+  await ready(page)
+  await whole(page)
   // Warm is the same page asked for again in the same browser: its files kept, its shaders compiled before.
   const warm = []
-  for (let i = 0; i < 5; i++) { await page.reload(); await ready(); await page.waitForFunction(() => globalThis.player.seen.whole > 0, null, { timeout: 60000 }); warm.push(await page.evaluate(() => globalThis.player.seen)) }
+  for (let i = 0; i < 5; i++) { await page.reload(); await ready(page); warm.push(await whole(page)) }
   out.warm = mid(warm)
   const alone = await watch(page, 1)
   check(alone.isolated === false, `it ran with no cross-origin isolation (crossOriginIsolated ${alone.isolated}, SharedArrayBuffer ${alone.shared ? 'there' : 'not there'})`)
