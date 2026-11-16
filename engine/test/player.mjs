@@ -21,8 +21,13 @@ import { plain } from '../player/serve.mjs'
 
 const middle = (xs) => [...xs].sort((a, b) => a - b)[xs.length >> 1]
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
-/** The gaps between frames, said shortly: the mean, the middle, the 95th of a hundred and the worst, ms; and how many were over 25 ms. */
-const frames = (gaps) => { const s = [...gaps].sort((a, b) => a - b); return { frames: s.length, mean: round(s.reduce((a, b) => a + b, 0) / s.length), middle: round(s[s.length >> 1]), p95: round(s[Math.floor(s.length * 0.95)]), worst: round(s[s.length - 1]), late: s.filter((g) => g > 25).length } }
+/**
+ * The gaps between frames, said shortly: the mean, the middle, the 95th of a hundred and the worst, ms; and how many
+ * were over 25 ms. `twice` is how many frames came in the same refresh as the one before (a gap under 2 ms): headless
+ * Chrome calls a frame of another origin twice a refresh, with one timestamp, whatever the page in it does (a bare
+ * requestAnimationFrame loop there is called twice too). Those are counted with the frame before them.
+ */
+const frames = (gaps) => { const s = gaps.filter((g) => g >= 2).sort((a, b) => a - b); return { frames: s.length, twice: gaps.length - s.length, mean: round(s.reduce((a, b) => a + b, 0) / s.length), middle: round(s[s.length >> 1]), p95: round(s[Math.floor(s.length * 0.95)]), worst: round(s[s.length - 1]), late: s.filter((g) => g > 25).length } }
 
 /** In a player's frame: empties its gaps, waits, and says how the frames were and what the page was drawing. */
 const watch = (frame, seconds) => frame.evaluate(async (ms) => {
@@ -119,26 +124,29 @@ for (const name of only) {
   check(poked.faults.length === 0, `the GPU reported no fault${poked.faults.length ? `: ${poked.faults[0]}` : ''}`)
   await context.close()
 
-  // ── Two in a page of another origin ──
-  const twoContext = await browser.newContext({ viewport: { width: 1280, height: 1100 }, deviceScaleFactor: 2 }), two = await twoContext.newPage()
-  two.on('pageerror', (e) => failures.push(`${name} host page error: ${e.message}`))
-  await two.goto(hostUrl)
-  await two.waitForFunction(() => document.querySelectorAll('.scene[data-state]').length === 2, null, { timeout: 60000 })
-  const heard = await two.evaluate(() => globalThis.heard.map((h) => ({ type: h.type, ms: h.ms })))
-  check(heard.length === 2 && heard.every((h) => h.type === 'ready'), `two players in a page of another origin both said ready (${heard.map((h) => `${h.type} ${h.ms} ms`).join(', ')})`)
-  const inner = two.frames().filter((f) => f.url().includes('/player/index.html'))
-  if (inner.length === 2 && heard.every((h) => h.type === 'ready')) {
-    await two.waitForTimeout(3000)
-    const idle = await Promise.all(inner.map((f) => watch(f, seconds)))
-    const box = await two.locator('.scene').first().boundingBox(), busy = Promise.all(inner.map((f) => watch(f, seconds)))
-    await pokes(two, box, seconds - 0.5)
-    const poked2 = await busy
-    out.two = { ready: heard.map((h) => h.ms), idle: idle.map(said), poked: poked2.map(said) }
-    check(idle.every((w) => w.isolated === false), 'neither was cross-origin isolated')
-    await two.waitForTimeout(1000)
-    await two.screenshot({ path: join(shots, `host-${name}.png`), fullPage: true })
+  // ── Two in a page: of another origin, as a post that borrows a scene would be, and of the player's own ──
+  out.two = {}
+  for (const [where, url] of [['another origin', hostUrl], ['the same origin', `${site.url}/player/host.html`]]) {
+    const twoContext = await browser.newContext({ viewport: { width: 1280, height: 1100 }, deviceScaleFactor: 2 }), two = await twoContext.newPage()
+    two.on('pageerror', (e) => failures.push(`${name} host page error: ${e.message}`))
+    await two.goto(url)
+    await two.waitForFunction(() => document.querySelectorAll('.scene[data-state]').length === 2, null, { timeout: 60000 })
+    const heard = await two.evaluate(() => globalThis.heard.map((h) => ({ type: h.type, ms: h.ms })))
+    check(heard.length === 2 && heard.every((h) => h.type === 'ready'), `two players in a page of ${where} both said ready (${heard.map((h) => `${h.type} ${h.ms} ms`).join(', ')})`)
+    const inner = two.frames().filter((f) => f !== two.mainFrame())
+    if (inner.length === 2 && heard.every((h) => h.type === 'ready')) {
+      await two.waitForTimeout(3000)
+      const idle = await Promise.all(inner.map((f) => watch(f, seconds)))
+      const box = await two.locator('.scene').first().boundingBox(), busy = Promise.all(inner.map((f) => watch(f, seconds)))
+      await pokes(two, box, seconds - 0.5)
+      const poked2 = await busy
+      out.two[where] = { ready: heard.map((h) => h.ms), dpr: await inner[0].evaluate(() => devicePixelRatio), idle: idle.map(said), poked: poked2.map(said) }
+      check(idle.every((w) => w.isolated === false), 'neither was cross-origin isolated')
+      await two.waitForTimeout(1000)
+      if (where === 'another origin') await two.screenshot({ path: join(shots, `host-${name}.png`), fullPage: true })
+    }
+    await twoContext.close()
   }
-  await twoContext.close()
 
   // ── No WebGPU: the holder is told within a second ──
   out.none = {}
