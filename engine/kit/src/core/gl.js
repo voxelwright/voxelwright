@@ -89,10 +89,10 @@ void main() {
   c = mix(c, uHighlight, clamp((l - 1.0) * 1.5, 0.0, 0.55));
   // Seams: one device pixel along every voxel edge, so the grid stays countable.
   vec2 e = min(vUv, 1.0 - vUv) * uPx;
-  float seam = 1.0 - smoothstep(0.0, 1.0, min(e.x, e.y));
+  float seam = vColor.a < 0.0 ? 0.0 : 1.0 - smoothstep(0.0, 1.0, min(e.x, e.y));
   c *= 1.0 - seam * uSeam;
   // Voxels that glow keep their colour whatever the light does.
-  float g = vColor.a * uGlow;
+  float g = max(vColor.a, 0.0) * uGlow;
   c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.36);
   o = vec4(c, 1.0);
 }`;
@@ -145,7 +145,7 @@ uniform vec4 uView; uniform vec2 uShear; uniform vec2 uSize; uniform float uRadi
 out vec2 vC; out vec4 vColor;
 void main() {
   vC = aCorner; vColor = iColor;
-  float r = iColor.a > 0.0 ? uRadius * iPos.w : 0.0;
+  float r = iColor.a > 0.0 ? uRadius * iPos.w : 0.0; // glow of 0 or the no-seam mark: no halo
   float px = uView.x + (iPos.x + uShear.x * iPos.z + aCorner.x * r) * uView.z;
   float py = uView.y + (iPos.y + uShear.y * iPos.z + aCorner.y * r) * uView.z;
   gl_Position = vec4(px / uSize.x * 2.0 - 1.0, 1.0 - py / uSize.y * 2.0, -(iPos.z + 0.6) / ${Z_RANGE}.0, 1.0);

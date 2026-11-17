@@ -35,14 +35,14 @@ const defs = {
   // Lamp: a light source. Warm, always on at night.
   lamp: { day: '#fff3c4', night: '#ffe9a0', jitter: 0.01, glow: 1 },
   // Ink: lettering set into a surface.
-  ink: { day: '#0a0f3d', night: '#eceefb', jitter: 0.0 },
+  ink: { day: '#0a0f3d', night: '#eceefb', jitter: 0.0, seamless: true },
 };
 
 export const MATERIALS = {};
 export const MATERIAL_IDS = {};
 let n = 0;
 for (const [name, d] of Object.entries(defs)) {
-  MATERIALS[name] = { name, id: n, day: hex(d.day), night: hex(d.night), jitter: d.jitter ?? 0.02, glow: d.glow ?? 0, grain: d.grain ?? null, hex: d };
+  MATERIALS[name] = { name, id: n, day: hex(d.day), night: hex(d.night), jitter: d.jitter ?? 0.02, glow: d.glow ?? 0, grain: d.grain ?? null, seamless: !!d.seamless, hex: d };
   MATERIAL_IDS[n] = MATERIALS[name];
   n++;
 }
@@ -51,7 +51,7 @@ for (const [name, d] of Object.entries(defs)) {
 export function defineMaterial(name, d) {
   const prev = MATERIALS[name];
   const id = prev ? prev.id : Object.keys(MATERIALS).length;
-  MATERIALS[name] = { name, id, day: hex(d.day), night: hex(d.night ?? d.day), jitter: d.jitter ?? 0.02, glow: d.glow ?? 0, grain: d.grain ?? null, hex: d };
+  MATERIALS[name] = { name, id, day: hex(d.day), night: hex(d.night ?? d.day), jitter: d.jitter ?? 0.02, glow: d.glow ?? 0, grain: d.grain ?? null, seamless: !!d.seamless, hex: d };
   MATERIAL_IDS[id] = MATERIALS[name];
   return MATERIALS[name];
 }

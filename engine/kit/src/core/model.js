@@ -161,7 +161,7 @@ export class Part {
       col[i * 4] = clamp01(base[0] + j);
       col[i * 4 + 1] = clamp01(base[1] + j);
       col[i * 4 + 2] = clamp01(base[2] + j);
-      col[i * 4 + 3] = m.glow;
+      col[i * 4 + 3] = m.seamless ? -1 : m.glow; // the fourth value is glow; -1 means no seams
     }
   }
 }
