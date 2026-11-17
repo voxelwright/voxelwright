@@ -14,6 +14,8 @@ const defs = {
   signal: { day: '#fff600', night: '#fff600', jitter: 0.025, glow: 1 },
   // Chalk: surfaces that hold content.
   chalk: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
+  // Floor: what you type on, at the bottom of a field. Chalk by default; a look may darken it.
+  floor: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
   slate: { day: '#c3c9de', night: '#222963', jitter: 0.012 },
   // Steel: neutral parts and anything switched off.
@@ -39,6 +41,7 @@ const defs = {
 };
 
 export const MATERIALS = {};
+export const revision = { n: 0 }; // goes up when a material is added or replaced
 export const MATERIAL_IDS = {};
 let n = 0;
 for (const [name, d] of Object.entries(defs)) {
@@ -53,6 +56,7 @@ export function defineMaterial(name, d) {
   const id = prev ? prev.id : Object.keys(MATERIALS).length;
   MATERIALS[name] = { name, id, day: hex(d.day), night: hex(d.night ?? d.day), jitter: d.jitter ?? 0.02, glow: d.glow ?? 0, grain: d.grain ?? null, seamless: !!d.seamless, hex: d };
   MATERIAL_IDS[id] = MATERIALS[name];
+  revision.n++;
   return MATERIALS[name];
 }
 

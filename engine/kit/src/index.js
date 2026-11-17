@@ -21,6 +21,8 @@ import { behave, unbehave } from './plain.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
+export { LOOKS, defineLook } from './core/look.js';
+export { wrapLabel } from './components/util.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
 export { FONTS, registerFont, makeFont, layout as layoutText, measure as measureText } from './core/fonts/index.js';
 

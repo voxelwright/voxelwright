@@ -20,13 +20,15 @@ export const list = {
       const current = li.getAttribute('aria-current') === 'true' || li.getAttribute('aria-selected') === 'true';
       const part = m.part('row' + i);
       part.grounded = false;
-      part.box(1, top, 1, W - 2, h, 1, 'chalk');
-      if (current) { part.box(1, top, 2, W - 2, h, 1, 'chalk'); part.box(1, top, 2, 2, h, 1, 'signal'); part.box(1, top, 3, 2, h, 1, 'signal'); }
+      // a tile stands on the tray; the current one stands a voxel higher and carries the marker
+      const d = Math.max(1, live.look.slab - 1), mw = live.look.round;
+      part.box(1, top, 1, W - 2, h, d, 'chalk');
+      if (current) { part.box(1, top, 1 + d, W - 2, h, 1, 'chalk'); part.box(1, top, 1 + d, mw, h, 2, 'signal'); }
       const row = { li, part, current, press: live.spring('row' + i) };
       rows.push(row);
-      live.label(wrapLabel(li, 'vx-row'), () => (current ? 3 : 2) + part.tz);
+      live.label(wrapLabel(li, 'vx-row'), () => (current ? 2 + d : 1 + d) + part.tz);
     });
-    live.faceZ = 2;
+    live.faceZ = 1 + Math.max(1, live.look.slab - 1);
   },
 
   pose(live) {
