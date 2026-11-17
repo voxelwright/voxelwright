@@ -21,11 +21,13 @@ PORT=5989 node tools/crisp.mjs      # words on keys and canvases start on whole 
 PORT=5989 node tools/contrast.mjs   # 7:1 body text, 4.5:1 quiet text and labels
 PORT=5989 node tools/select.mjs     # lettering is text: it selects, copies, and plays
 PORT=5989 node tools/film.mjs       # every motion, frame by frame: must end "rehearsal passed"
+PORT=5989 node tools/seam.mjs       # a renderer handed to the kit: late, none, failing, lost
+PORT=5989 node tools/default.mjs    # who draws when no renderer is handed over
 node tools/root.mjs http://127.0.0.1:5989   # the address a person is given
 ```
 
-Both renderers: once with `node tools/serve.mjs`, once with `--engine`. Check each gate's own
-exit code; a pipe into `tail` hides it.
+The engine's renderer is the default, so the gates run on it. Check each gate's own exit code;
+a pipe into `tail` hides it.
 
 ## 2. Numbers
 
@@ -33,7 +35,7 @@ Where a number exists it is read before anyone gives an opinion.
 
 | Number | Tool | Today |
 |---|---|---|
-| Gates passing, both renderers | section 1 | all |
+| Gates passing | section 1 | all |
 | Motion: time to settle against the spec's range; `no response`, `pop`, `snap`, `empty frame` | `film.mjs` | passes |
 | Parts built, of the full set (shadcn's and Bootstrap's lists) | the inventory, section 5 | 13 of 76 |
 | Plain against voxels, per part and state (an image difference) | to be built with the web version | not measured |

@@ -3,6 +3,7 @@
 
 import { Stage } from './core/stage.js';
 import { Renderer } from './core/gl.js';
+import { renderer as engine } from './engine.js';
 import { button } from './components/button.js';
 import { toggle } from './components/toggle.js';
 import { slider } from './components/slider.js';
@@ -29,10 +30,26 @@ export { sound, cue } from './core/sound.js';
 export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block];
 let stage = null;
 
-// The renderer. By default the kit makes its own (WebGL2). use() hands it another.
+// The renderer. By default it is the Village engine's (WebGPU, src/engine.js). use() hands the
+// kit another. Where there is no WebGPU the kit's own WebGL2 renderer (core/gl.js) still stands
+// in; it goes once the plain version looks right, and such a browser then gets the plain page.
 let given;          // undefined: the default; null: none, the page stays plain; else a renderer
-let pending = null; // a promise while a handed renderer is still on its way
+let pending = null; // a promise while a renderer is still on its way
 let waiting = [];   // what adopt() and release() were asked for meanwhile, in order
+
+// Ask for the default renderer, once, the first time the page wants voxels. A WebGPU device
+// takes a moment, so the page is plain until it arrives, exactly as with use(). A page that is
+// plain by choice asks for nothing, and neither does one that was handed a renderer (or null).
+function auto() {
+  if (given !== undefined || pending || stage || typeof document === 'undefined') return;
+  if (document.documentElement.hasAttribute('data-vx-plain')) return;
+  if (!globalThis.navigator?.gpu) return; // no WebGPU: given stays undefined, and WebGL2 stands in
+  use(engine().then((r) => r ?? own(), own));
+}
+// The stand-in, or null where there is no WebGL2 either.
+function own() {
+  try { return Renderer.supported() ? new Renderer() : null; } catch { return null; }
+}
 
 /**
  * Hand the kit a renderer: anything with draw(frame, target), or a promise for one (a WebGPU
@@ -73,12 +90,14 @@ function loadKeyFonts() {
  * to the stage, or to null if the page is plain.
  */
 export function ready() {
+  auto();
   if (pending) return pending.then(() => ready());
   return loadKeyFonts().then(() => getStage());
 }
 
 /** True while the CSS stands alone: by choice, for want of a renderer, or while one is on its way. */
 export function plain() {
+  auto();
   if (document.documentElement.hasAttribute('data-vx-plain') || pending) return true;
   return given === undefined ? !Renderer.supported() : given === null;
 }
@@ -108,6 +127,7 @@ function fail() {
  * and made when it arrives).
  */
 export function adopt(root = document) {
+  auto();
   if (pending && !document.documentElement.hasAttribute('data-vx-plain')) {
     waiting.push([adopt, root]);
     return null;

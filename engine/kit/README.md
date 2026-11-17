@@ -18,18 +18,19 @@ A design language where every control is a small solid built from voxels. The ru
 ```
 
 There is no build step and no dependency. The stylesheet alone is the plain version; `adopt()`
-adds the voxels where WebGL2 exists. Give the page `overflow-x: clip` (see Bleed in the spec).
+adds the voxels. Give the page `overflow-x: clip` (see Bleed in the spec).
 
-To draw with the Village engine's WebGPU renderer (a copy lives in `src/engine/`), or any other
-backend, hand it over before the first `adopt()`:
+The voxels are drawn by the Village engine's WebGPU renderer (a copy lives in `src/engine/`).
+Its device takes a moment to arrive, so a page is plain first and `ready()` says when it is live:
 
 ```js
-import { use, adopt, ready } from './voxelmorphism/src/index.js';
-import { renderer } from './voxelmorphism/src/engine.js';
-use(renderer());       // a promise for a renderer; null where there is no WebGPU, and the page stays plain
-adopt();               // remembered until the renderer arrives; the page is plain meanwhile
+import { adopt, ready } from './voxelmorphism/src/index.js';
+adopt();                       // remembered until the renderer arrives; the page is plain meanwhile
 const stage = await ready();   // the stage, or null if the page stays plain
 ```
+
+Where there is no WebGPU the kit's own WebGL2 renderer stands in for now. To hand the kit another
+backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`.
 
 ## What it exports
 
@@ -44,7 +45,7 @@ const stage = await ready();   // the stage, or null if the page stays plain
 | `sound(on)`, `cue(name)` | Turn sound on from a user gesture; play a cue |
 | `plant(part, opts)`, `pot(part, …)`, `stageOf(g)` | The plant generator |
 | `refresh(el)` | Redraw a part after changing what it is drawn from (values set from code are heard without it) |
-| `use(renderer)`, `ready()` | Hand the kit another renderer; know when the page is live |
+| `use(renderer)`, `ready()` | Hand the kit another renderer, or `null` for none; know when the page is live |
 | `defineMaterial(name, def)`, `MATERIALS`, `LIGHTS` | Materials and light |
 | `Model`, `Part`, `Spring`, `assemble`, `crumble` | The pieces parts are made from |
 

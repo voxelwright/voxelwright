@@ -216,8 +216,8 @@ Decide by how often it happens (from the site-craft rules):
 ## 11. The plain version
 
 - `voxelmorphism.css` alone is a complete interface: flat faces, two borders for the top and the
-  side of a button, hard offset shadows. It is what shows with no script, with no WebGL2, or with
-  `data-vx-plain` on the root.
+  side of a button, hard offset shadows. It is what shows with no script, with neither WebGPU
+  nor WebGL2, or with `data-vx-plain` on the root.
 - A part becomes voxels when the script gives it `data-vx-live`; its painted faces then step aside.
   `release()` gives it back.
 - The plain version uses the same tokens, sizes and focus rules, so switching changes the surface
@@ -235,14 +235,17 @@ Decide by how often it happens (from the site-craft rules):
 
 - Each part has its own small canvas, which sits behind the part's content. So parts layer
   correctly inside dialogs and popovers and scroll with the page for free.
-- **Two renderers draw into those canvases, and they draw the same picture.** The Village
-  engine's (WebGPU, `src/engine.js`) draws straight into each part's canvas. The kit's own
-  (WebGL2, `src/core/gl.js`) draws into one hidden canvas and copies. The engine's is the one the
-  kit is going to: `use(renderer())` hands it over, and `gl.js` goes once the engine's has been
-  seen on an iPhone. `src/engine/` is a copy of the engine's built modules, made by
-  `node tools/sync-engine.mjs <Village engine folder>`; `ENGINE.json` there says which commit.
-  `PORT=5986 node tools/serve.mjs --engine` serves every page on it, and every tool runs
-  against that port unchanged.
+- **The Village engine's renderer draws them** (WebGPU, `src/engine.js`), straight into each
+  part's canvas. It is the default: a page calls `adopt()` and nothing else. A WebGPU device
+  takes a moment to arrive, so every page starts plain and becomes voxels when it does, and
+  nothing moves when that happens. `src/engine/` is a copy of the engine's built modules, made
+  by `node tools/sync-engine.mjs <Village engine folder>`; `ENGINE.json` there says which commit.
+- **Where there is no WebGPU** the kit's own WebGL2 renderer (`src/core/gl.js`) still stands in,
+  drawing into one hidden canvas and copying. It draws the same picture. It goes when the plain
+  version looks right; a browser without WebGPU then gets the plain page. A real iPhone drew the
+  engine page on 17 November 2026, which was the condition for this.
+- A page that is plain by choice (`data-vx-plain` on the root) asks for no GPU device.
+  `node tools/default.mjs` checks who draws in each case.
 - At rest nothing runs: no frame loop, no timers. A part is redrawn only when its state changes.
   Parts off screen are not drawn until they come near.
 - Voxels are instanced cubes with per-voxel colour, corner occlusion and a seam; one extra pass
@@ -254,8 +257,8 @@ Decide by how often it happens (from the site-craft rules):
   or the part's canvas itself for a renderer that says `ownsCanvas: true` and draws into each
   canvas with its own context (measured in real Safari with 59 parts redrawn every frame: 29 ms
   a frame that way, against 159 copying from one WebGPU canvas and 378 for the WebGL2 stand-in). `use(renderer)` hands the kit another
-  backend (the Village engine, WebGPU) without touching a part. It takes a renderer or a promise
-  for one, because a WebGPU device takes a moment to arrive: until it does the page is plain,
+  backend without touching a part, and `use(null)` says none: the page stays plain. It takes a
+  renderer or a promise for one: until it settles the page is plain,
   `adopt()` and `release()` are remembered in order, and `ready()` resolves to the stage, or to
   null if no renderer came. A part is never marked live before something can draw it.
 
