@@ -51,6 +51,8 @@ that live in this repo.
   crop, never the original group photo. Do not send it to outside services without asking him.
 - Socials: X `pasha_knz`, LinkedIn `pavlo-zahynailo`, Twitch `p_bender`, no YouTube for now. They can be logos on
   office buildings rather than billboards.
+- The menu in a view with few logical billboard spots: one natural surface carries the whole menu, inspired by Midnight
+  Club 3's projected menu but not taken literally. No billboard on top of a painted lady.
 - Mapillary: he leans to using assets derived from it. I explained the share-alike terms (see the chat), so this is
   pending his final word.
 
