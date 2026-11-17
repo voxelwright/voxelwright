@@ -1,6 +1,6 @@
-# Put the Vox Block and Vox Sign web fonts into showcase/type.css as data URIs. Run after rebuilding them.
+# Put the Vox Block and Vox Sign web fonts into the kit's stylesheet as data URIs. Run after rebuilding them.
 import base64, re
-p = 'showcase/type.css'; s = open(p).read()
+p = 'packages/voxelmorphism/voxelmorphism.css'; s = open(p).read()
 for fam, path in [('Vox Block', 'vox-block/vox-block-400-normal.woff2'), ('Vox Sign', 'vox-sign/vox-sign-400-normal.woff2')]:
     b = base64.b64encode(open('packages/voxelmorphism/fonts/' + path, 'rb').read()).decode()
     pat = re.compile(r'@font-face \{ font-family: "%s"; src: [^}]*\}' % re.escape(fam))

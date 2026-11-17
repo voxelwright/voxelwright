@@ -52,12 +52,15 @@ export function fit(el, vx) {
       }
       const laid = lines.map((l) => layout(font, l));
       const width = Math.max(...laid.map((l) => l.width));
-      const rows = lines.length * font.cap + (lines.length - 1) * font.lineGap;
+      // Lines keep the set's own gap. A line opens further only where a tail above (Щ, Ц, a comma)
+      // would otherwise meet a mark below (Ї, Й): tail + mark + one clear cell.
+      const gaps = laid.slice(1).map((l, i) => Math.max(font.lineGap, laid[i].bottom - font.cap - l.top + 1));
+      const rows = lines.length * font.cap + gaps.reduce((a, b) => a + b, 0);
       // The box runs from the cap line of the first line to the baseline of the last, as a trimmed
       // text box does. Tails and accents hang outside it, in the bleed, so the plain version and
       // the voxels have the same footprint. On a board they are given room.
       const over = bare ? 0 : -laid[0].top, under = bare ? 0 : laid[laid.length - 1].bottom - font.cap;
-      last = { text, font, lines, laid, width, rows, over, under, scale, margin: m, bare };
+      last = { text, font, lines, laid, gaps, width, rows, over, under, scale, margin: m, bare };
       if (width > max) continue;
       // a board keeps to one line while any glyph set and scale can manage it
       if (!fixed && !bare && lines.length > 1 && (scale > 1 || font !== fonts[fonts.length - 1])) continue;
@@ -158,11 +161,11 @@ export const lettering = {
     const mat = el.dataset.vxInk || (bare ? 'ink' : 'signal');
     const b = box(f);
     let y = Math.round((H - b.h) / 2) + (bare ? 0 : f.margin * scale + 1) + f.over * scale;
-    for (const line of f.laid) {
+    f.laid.forEach((line, i) => {
       const x0 = bare ? 0 : Math.round((W - line.width * scale) / 2);
       for (const { g, x } of line.glyphs) for (const [vx, vy] of voxels(g, scale, refine)) letters.box(x0 + x * scale + vx, y + vy, z, 1, 1, depth, mat);
-      y += (font.cap + font.lineGap) * scale;
-    }
+      y += (font.cap + (f.gaps[i] ?? font.lineGap)) * scale;
+    });
     live.faceZ = z;
     live.state.scale = scale;
     live.state.fit = f;

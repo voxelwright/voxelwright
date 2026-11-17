@@ -6,6 +6,7 @@
 // tall and stay open once the top face of the stroke below is drawn over them.
 
 import { makeFont, registerFont } from './index.js';
+import { UK_BLOCK, SHARED_CAPS } from './ukrainian.js';
 
 const CAPS = `
 A
@@ -653,7 +654,8 @@ export const block = registerFont(makeFont({
   id: 'block', name: 'Vox Block',
   cap: 11, descent: 2, gap: 2, space: 3, lineGap: 4, upper: true, maxKern: 3, kernKeep: 2,
   depth: (scale) => scale, // half as deep as its stroke is wide: counters stay open
-  src: CAPS + DIGITS + MARKS,
+  src: CAPS + DIGITS + MARKS + UK_BLOCK,
+  alias: SHARED_CAPS,
   // by hand: an L tucks under what overhangs it; a comma or full stop never tucks under a T, P, F or Y
-  kern: { LT: -3, LY: -3, LV: -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0 },
+  kern: { LT: -3, LY: -3, LV: -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0, 'Г,': 0, 'Г.': 0, 'Т,': 0, 'Т.': 0, 'Р,': 0, 'Р.': 0, 'У,': 0, 'У.': 0, 'Ч,': 0, 'Ч.': 0 },
 }));

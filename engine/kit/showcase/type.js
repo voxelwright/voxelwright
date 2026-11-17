@@ -41,6 +41,9 @@ const choose = (tabs, fn) => {
 };
 choose($('#size'), (v) => { root.style.fontSize = v + 'px'; });
 choose($('#light'), (v) => { if (v) root.dataset.theme = v; else delete root.dataset.theme; });
+// the language is in the address, so the page is rebuilt in it
+if (q.get('lang')) pick($('#lang'), q.get('lang'));
+choose($('#lang'), (v) => { if ((v || '') === (q.get('lang') || '')) return; const u = new URL(location.href); if (v) u.searchParams.set('lang', v); else u.searchParams.delete('lang'); location.href = u.href; });
 
 // ----- the screens
 const tpl = $('#screen');
