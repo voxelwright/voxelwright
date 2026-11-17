@@ -38,7 +38,10 @@ let waiting = [];   // what adopt() and release() were asked for meanwhile, in o
  * Hand the kit a renderer: anything with draw(frame, target), or a promise for one (a WebGPU
  * device takes a moment). target is the part's 2D context; a renderer with ownsCanvas: true is
  * given the part's canvas element instead and takes its own context on it (the kit still makes
- * and sizes the canvas, and never reads it back). Call it before adopt(). While the promise is open the page is plain and
+ * and sizes the canvas, and never reads it back). The kit sets two hooks on the renderer:
+ * onrestore(), to call after a lost context or device is back (every part is drawn again), and
+ * onfail(), to call if it can never draw again (every part goes back to plain CSS, and the
+ * document hears a `vx-plain` event). Call use() before adopt(). While the promise is open the page is plain and
  * adopt() remembers what it was asked for; if it settles on nothing, the page stays plain.
  * Returns a promise for the stage, or null.
  */
@@ -84,7 +87,19 @@ export function plain() {
 export function getStage() {
   if (stage || plain()) return stage;
   try { stage = new Stage(given ?? new Renderer()); } catch { stage = null; }
+  if (stage) stage.onfail = fail;
   return stage;
+}
+
+// The renderer can never draw again (a device lost, and no other to be had). Every part goes
+// back to plain CSS with its behaviour, and the page stays plain from here on.
+function fail() {
+  const st = stage;
+  if (!st) return;
+  for (const el of [...st.lives.keys()]) { st.remove(el); behave(el); }
+  stage = null;
+  given = null;
+  document.dispatchEvent(new CustomEvent('vx-plain'));
 }
 
 /**

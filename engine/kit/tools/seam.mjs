@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch();
-for (const q of ['', '?none', '?fail', '?late=0', '?own']) {
+for (const q of ['', '?none', '?fail', '?late=0', '?own', '?own&lost']) {
   const p = await b.newPage();
   const errs = []; p.on('pageerror', (e) => errs.push(e.message));
   await p.goto('http://127.0.0.1:5985/showcase/seam.html' + q);

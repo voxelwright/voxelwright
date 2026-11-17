@@ -204,11 +204,15 @@ export class Stage {
   /**
    * renderer: anything with draw(frame, target). target is the part's 2D context, or, if the
    * renderer says ownsCanvas: true, the part's canvas element itself. It may call its onrestore
-   * after losing its context or device, and every part is drawn again.
+   * after losing its context or device, and every part is drawn again; or its onfail if it can
+   * never draw again, and every part goes back to plain CSS.
    */
   constructor(renderer) {
     this.renderer = renderer;
     this.renderer.onrestore = () => { for (const l of this.lives.values()) l.invalidate(); };
+    // The renderer calls this when it has lost its device for good. The stage's owner (index.js)
+    // sets onfail and gives every part back to plain CSS, so nothing is left without a face.
+    this.renderer.onfail = () => this.onfail?.();
     this.lives = new Map();
     this.awake = new Set();
     this.raf = 0;

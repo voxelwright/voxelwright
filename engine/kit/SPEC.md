@@ -206,6 +206,8 @@ Decide by how often it happens (from the site-craft rules):
 - The plain version uses the same tokens, sizes and focus rules, so switching changes the surface
   and nothing else.
 
+- If the renderer loses its device and can get no other, it says so (`onfail`) and every part
+  goes back to plain CSS at once, with its behaviour. Nothing is ever left live without a face.
 - **Behaviour without voxels.** Tabs, a dialog's `data-vx-close` buttons and a menu need script
   to behave. `adopt()` wires that behaviour when the page is plain too (it draws nothing), so a
   plain page needs no handlers of its own. With no script at all, tabs are buttons that do

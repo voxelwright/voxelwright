@@ -46,6 +46,12 @@
   const st = await ready();
   await new Promise((r) => setTimeout(r, 200));
   log.after = { stage: !!st, plain: plain(), live: document.querySelectorAll('[data-vx-live]').length, lives: st ? st.lives.size : 0, kitContexts: st ? [...st.lives.values()].filter((l) => l.ctx).length : 0 };
+  // a renderer that then loses its device for good
+  if (q.has('lost') && st) {
+    st.renderer.onfail();
+    await new Promise((r) => setTimeout(r, 50));
+    log.lost = { plain: plain(), live: document.querySelectorAll('[data-vx-live]').length, canvases: document.querySelectorAll('.vx-canvas').length, adoptAfter: adopt() };
+  }
   document.documentElement.dataset.ready = '';
 </script>
 </html>
