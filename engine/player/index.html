@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>Village scene</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #10141a; overflow: hidden; }
+  /* Alone on a page every touch is the scene's. In another page (class `held`) an up or down swipe is that page's, to scroll by. */
+  canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab; }
+  .held canvas { touch-action: pan-y; }
+  #hint { position: fixed; left: 50%; bottom: 10px; transform: translateX(-50%); margin: 0; padding: 4px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); color: #e8ecf1; font: 12px/1.4 -apple-system, system-ui, sans-serif; white-space: nowrap; pointer-events: none; }
+  #hint[hidden] { display: none; }
+</style>
+</head>
+<body>
+<canvas></canvas>
+<p id="hint" hidden>Drag to turn · tap to throw · hold to throw hard</p>
+<!--
+  What the page that holds this one is told, each a message to it: { village: 'player', type, ... }.
+    unsupported  { reason }                 no WebGPU here: said within a second of this page starting, and nothing more is loaded
+    loading      {}                         WebGPU is here and the engine is being fetched: said within that same second
+    ready        { ms, firstFrame, scene }  the scene is seen: ms since this page was asked for
+    error        { message }                WebGPU was found and something failed after (the scene, the GPU, a worker)
+  The holder knows which player spoke by the message's `source`. One of the first two comes within a second; silence
+  for longer is a page that never loaded. After `loading` the wait is the download's, and has no bound of its own.
+-->
+<script type="module">
+  const held = parent !== window
+  if (held) document.documentElement.classList.add('held')
+  // Looking for WebGPU, then starting (said as `loading`), then ready; or unsupported from looking, or error from starting or ready. Each is said once.
+  let state = 'probing'
+  const say = (type, more) => { state = type; document.documentElement.dataset.state = type; document.documentElement.dataset.said = more.message ?? more.reason ?? ''; if (held) parent.postMessage({ village: 'player', type, ...more }, '*') }
+  const none = (reason) => { if (state === 'probing') say('unsupported', { reason }) }
+  const fail = (message) => { if (state === 'starting' || state === 'ready') say('error', { message }) }
+  const tell = (type, more) => { if (type === 'error') fail(more.message); else if (state === 'starting') say(type, more) }
+  const words = (e) => (e instanceof Error ? e.message : String(e))
+  // An adapter that has not answered by now is taken for none: the holder was promised a word within a second.
+  setTimeout(() => none('WebGPU did not answer in time'), 800)
+  addEventListener('error', (e) => fail(e.message))
+  addEventListener('unhandledrejection', (e) => fail(words(e.reason)))
+  try {
+    if (!navigator.gpu) throw new Error('this browser has no WebGPU')
+    if (!(await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' }))) throw new Error('WebGPU gave no adapter')
+    if (state === 'probing') {
+      say('loading', {})
+      state = 'starting'
+      const { play } = await import('./player.ts')
+      document.querySelector('#hint').hidden = false
+      await play(tell)
+    }
+  } catch (e) {
+    none(words(e))
+    fail(words(e))
+  }
+</script>
+</body>
+</html>

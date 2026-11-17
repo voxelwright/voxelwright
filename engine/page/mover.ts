@@ -36,7 +36,7 @@ interface Core {
   living_kick(id: number, vx: number, vy: number, vz: number): number
   living_down(id: number, dx: number, dy: number, dz: number, cling: number): number
 }
-let ready: Promise<Core> = open<Core>('/page/core.wasm')
+let ready: Promise<Core> = open<Core>(new URL('./core.wasm', import.meta.url).href)
 /** In the Bay that comes in tiles (#373): the tiles round where the page says its person is, before anything else is done. */
 let here: Promise<void> = Promise.resolve()
 const post = (answer: Answer) => (self as unknown as Worker).postMessage(answer, [answer.words.buffer])
