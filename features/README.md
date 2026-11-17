@@ -43,7 +43,9 @@ nothing from the worktree's `package.json` is used. Strict reads the change befo
 of it and refuses unless all of this holds:
 
 - the change is committed and descends from the base;
-- it only adds or changes plain files inside `features/<name>/` (no links, no executables);
+- it only adds or changes plain files inside `features/<name>/` (no links, no executables), and
+  only for features whose flag is off: one that is on is live code, and changing it is not a
+  flag-off change;
 - in `site.config.mjs` nothing differs except new names set to `false` in the one-line `flags`
   literal.
 

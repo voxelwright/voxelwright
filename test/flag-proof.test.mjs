@@ -83,6 +83,22 @@ test("strict lets site.config.mjs change only by new flags set to false", () => 
   }
 });
 
+test("strict refuses a change to a feature whose flag is already on", () => {
+  // a second base: the hello feature exists and the owner has turned it on
+  const live = candidate((d) => { feature(d); edit(d, "site.config.mjs", '"hello": false', '"hello": true'); });
+  const liveBase = git(live, "rev-parse", "HEAD");
+  const dir = path.join(repo, ".seeds", `c${++n}`);
+  git(repo, "worktree", "add", "--quiet", dir, "-b", `seed/c${n}`, liveBase);
+  put(dir, "features/hello/feature.mjs", HELLO + "// changed while live\n");
+  put(dir, "features/other/feature.mjs", "export default {};\n");
+  edit(dir, "site.config.mjs", '"hello": true', '"hello": true, "other": false');
+  git(dir, "add", "-A"); git(dir, "commit", "--quiet", "-m", "candidate");
+  const r = spawnSync(process.execPath, ["scripts/flag-proof.mjs", liveBase, "--candidate", dir, "--strict"], { cwd: repo, encoding: "utf8" });
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /changed a feature whose flag is on: features\/hello\/feature\.mjs/);
+  assert.doesNotMatch(r.stdout + r.stderr, /features\/other/);
+});
+
 test("strict refuses links, executables and uncommitted files", () => {
   const link = proof(candidate((d) => { feature(d); fs.symlinkSync("/etc/hosts", path.join(d, "features/hello/static/hello/hosts")); }), "--strict");
   assert.equal(link.code, 1, link.text);

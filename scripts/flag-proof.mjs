@@ -9,8 +9,8 @@
 //                      this script, and its package.json scripts, are never used.
 //   --strict           for a change made by an agent. Before anything from the candidate runs:
 //                      it must be committed and descend from <base>; it may only add or change
-//                      plain files in features/<name>/, and list flags as false in the `flags`
-//                      literal of site.config.mjs. Nothing else may differ: not the Worker, not
+//                      plain files in features/<name>/ for features whose flag is off, and list
+//                      new flags as false in the `flags` literal of site.config.mjs. Nothing else may differ: not the Worker, not
 //                      the deploy config, not package.json, not this script, not a test.
 //   --try <flag>       after the proof passes, build the candidate once more with that flag on,
 //                      in a sandbox, and say what it adds or changes. This is the only safe way
@@ -69,17 +69,22 @@ function strictProblems() {
   if (dirty) out.push("the candidate has uncommitted or untracked files: commit the change, and nothing else, first");
   if (tryGit(ROOT, "merge-base", "--is-ancestor", base, head) === null) out.push("the candidate does not descend from the base");
   const changed = git(ROOT, "diff", "--name-only", "--no-renames", "-z", base, head).split("\0").filter(Boolean);
+  // A feature whose flag is already on is live code: the build, the tests and the next deploy all
+  // load it. A strict change may only touch features that are off, at the base and after it.
+  const baseConfig = git(ROOT, "show", `${base}:site.config.mjs`);
+  const on = new Set([...(baseConfig.match(/\bflags:\s*\{([^{}\n]*)\}/)?.[1] ?? "").matchAll(/"([^"]+)":\s*true/g)].map((m) => m[1]));
   for (const file of changed) {
     if (file === "site.config.mjs") continue;
     const m = file.match(/^features\/([^/]+)\/.+/);
     if (!m || !FLAG_NAME.test(m[1])) out.push(`changed outside a feature folder: ${file}`);
+    else if (on.has(m[1])) out.push(`changed a feature whose flag is on: ${file}`);
   }
   // only plain files in features/: no links, no executables, no submodules
   for (const line of git(ROOT, "ls-tree", "-r", "-z", head, "--", "features").split("\0").filter(Boolean)) {
     const [meta, file] = line.split("\t");
     if (!meta.startsWith("100644 ") && changed.includes(file)) out.push(`not a plain file: ${file}`);
   }
-  if (changed.includes("site.config.mjs")) out.push(...configProblems(git(ROOT, "show", `${base}:site.config.mjs`), git(ROOT, "show", `${head}:site.config.mjs`)));
+  if (changed.includes("site.config.mjs")) out.push(...configProblems(baseConfig, git(ROOT, "show", `${head}:site.config.mjs`)));
   return out;
 }
 
