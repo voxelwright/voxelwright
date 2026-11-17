@@ -17,10 +17,10 @@ export default {
   // `npm run dev` always negotiates, whatever this says.
   negotiateMarkdown: false,
 
-  // The look: "notebook", "street" or "editorial" (static/looks/<name>.css and its code
+  // The look (owner picked iter-1, "Ink", Nov 17): a design in designs/<name>/, or "notebook", "street", "editorial" (static/looks/<name>.css and its code
   // colours, see generator/looks.mjs). Leave it out for the plain baseline in static/style.css.
   // In `npm run dev`, add ?look=<name> to a URL to try another look for that tab.
-  look: "notebook",
+  look: "iter-1",
 
   // Home page sections.
   intro: "TODO: a short intro, written by the owner.",
