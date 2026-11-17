@@ -51,7 +51,10 @@ export function fit(el, vx) {
       const laid = lines.map((l) => layout(font, l));
       const width = Math.max(...laid.map((l) => l.width));
       const rows = lines.length * font.cap + (lines.length - 1) * font.lineGap;
-      const over = -laid[0].top, under = laid[laid.length - 1].bottom - font.cap;
+      // The box runs from the cap line of the first line to the baseline of the last, as a trimmed
+      // text box does. Tails and accents hang outside it, in the bleed, so the plain version and
+      // the voxels have the same footprint. On a board they are given room.
+      const over = bare ? 0 : -laid[0].top, under = bare ? 0 : laid[laid.length - 1].bottom - font.cap;
       last = { text, font, lines, laid, width, rows, over, under, scale, margin: m, bare };
       if (width > max) continue;
       // a board keeps to one line while any glyph set and scale can manage it

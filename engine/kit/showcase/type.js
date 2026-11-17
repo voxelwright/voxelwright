@@ -24,8 +24,8 @@ export const FACES = [
     files: ['geist-pixel/geist-pixel-latin-400-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
   { id: 'departure', name: 'Departure Mono', why: 'A pixel monospace with real craft. Crisp only at 11, 22 and 33 px.', font: 'Departure Mono', mono: 'Departure Mono', weights: [400],
     files: ['departure-mono/departure-mono-400-normal.woff2'] },
-  { id: 'voxtext', name: 'Vox Text', why: 'Ours: the voxel lettering itself, flat, as a web font.', font: 'Vox Text', mono: 'Departure Mono', weights: [400, 700], optional: true,
-    files: ['vox-text/vox-text-400-normal.woff2', 'vox-text/vox-text-700-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
+  { id: 'voxtext', name: 'Vox Text', why: 'Ours: the voxel lettering itself, flat, as a web font. Crisp at 10, 20, 30 and 40 px. One weight so far.', font: 'Vox Text', mono: 'Departure Mono', weights: [400], optional: true,
+    files: ['vox-text/vox-text-400-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
 ];
 
 // ----- controls
@@ -83,10 +83,16 @@ async function build(face) {
 
 for (const face of FACES) await build(face);
 
+// ----- pairings
+try {
+  const m = await import('./type-pairings.js');
+  await m.default({ host: $('#pairings-host'), solo: q.get('pair') });
+} catch (e) { console.error(e); }
+
 // ----- lettering directions (filled in by lettering.js when it exists)
 try {
   const m = await import('./type-lettering.js');
-  await m.default({ define, host: $('#directions'), solo: q.get('lettering') });
+  await m.default({ define, host: $('#directions'), solo: q.get('lettering') || (q.get('pair') ? 'none' : null) });
 } catch (e) { if (!/Failed to fetch|import/.test(String(e))) console.error(e); $('#lettering').hidden = !$('#directions').children.length; }
 
 await document.fonts.ready;

@@ -1,5 +1,5 @@
-# Build Vox Text, a web font, from the voxel glyph data: every cell becomes a square of outline.
-# Needs fonttools and brotli. Usage: python tools/vox-text-build.py glyphs.json out-dir
+# Build a web font from a voxel glyph set: every cell becomes a square of outline.
+# Needs fonttools and brotli. Usage: python tools/vox-text-build.py glyphs.json out-dir "Family Name" file-stem
 # 10 cells to the em, so one cell is 2 px at 20 px and 4 px (one voxel) at 40 px.
 import json, sys, os
 from fontTools.fontBuilder import FontBuilder
@@ -7,10 +7,12 @@ from fontTools.pens.ttGlyphPen import TTGlyphPen
 from fontTools.ttLib import TTFont
 
 src, out = sys.argv[1], sys.argv[2]
+FAMILY = sys.argv[3] if len(sys.argv) > 3 else 'Vox Text'
+STEM = sys.argv[4] if len(sys.argv) > 4 else 'vox-text'
 d = json.load(open(src))
 U = 100                      # units per cell
-ASC, DESC = 800, 200         # one row of room above the capitals, two below the baseline
 cap = d['cap']
+ASC, DESC = max(800, cap * U), 200   # room above the capitals where the set has it, two rows below the baseline
 
 def cells(g, bold):
     s = set()
@@ -89,7 +91,7 @@ def build(bold, path):
     fb.setupHorizontalMetrics(metrics)
     fb.setupHorizontalHeader(ascent=ASC, descent=-DESC, lineGap=0)
     style = 'Bold' if bold else 'Regular'
-    fb.setupNameTable({'familyName': 'Vox Text', 'styleName': style})
+    fb.setupNameTable({'familyName': FAMILY, 'styleName': style})
     fb.setupOS2(sTypoAscender=ASC, sTypoDescender=-DESC, sTypoLineGap=0, usWinAscent=ASC, usWinDescent=DESC,
                 sCapHeight=cap * U, sxHeight=d['xHeight'] * U, usWeightClass=700 if bold else 400, fsSelection=0x20 if bold else 0x40)
     fb.setupPost()
@@ -105,5 +107,6 @@ def build(bold, path):
     print(path, os.path.getsize(path), 'bytes,', len(order), 'glyphs')
 
 os.makedirs(out, exist_ok=True)
-build(False, os.path.join(out, 'vox-text-400-normal.woff2'))
-build(True, os.path.join(out, 'vox-text-700-normal.woff2'))
+build(False, os.path.join(out, STEM + '-400-normal.woff2'))
+# A bold needs drawing: smearing each cell one to the right closes the W, M and every diagonal.
+# build(True, os.path.join(out, 'vox-text-700-normal.woff2'))

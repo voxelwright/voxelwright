@@ -6,8 +6,18 @@
 import { makeFont, registerFont } from './index.js';
 import { CAPS, DIGITS, MARKS } from './sign.js';
 
-// In mixed case a one-cell I is an l. Here the capital I carries bars.
+// In mixed case a one-cell I is an l, so here the capital I carries bars. The A comes to a point:
+// at text sizes the square arch of the sign reads as a box, and a point steps cleanly when redrawn.
 const CAP_I = `
+A
+..#..
+.#.#.
+#...#
+#...#
+#####
+#...#
+#...#
+
 I
 ###
 .#.

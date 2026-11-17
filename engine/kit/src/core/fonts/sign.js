@@ -469,6 +469,122 @@ export const MARKS = `
 _ 6
 #####
 
+’
+#
+#
+
+‘
+#
+#
+
+“
+#.#
+#.#
+
+”
+#.#
+#.#
+
+— 3
+#######
+
+… 6
+#.#.#
+
+· 3
+#
+
+• 2
+##
+##
+
+< 1
+..#
+.#.
+#..
+.#.
+..#
+
+> 1
+#..
+.#.
+..#
+.#.
+#..
+
+[
+##
+#.
+#.
+#.
+#.
+#.
+##
+
+]
+##
+.#
+.#
+.#
+.#
+.#
+##
+
+{
+.##
+.#.
+.#.
+#..
+.#.
+.#.
+.##
+
+}
+##.
+.#.
+.#.
+..#
+.#.
+.#.
+##.
+
+$ -1
+..#..
+.####
+#.#..
+#.#..
+.###.
+..#.#
+..#.#
+####.
+..#..
+
+← 2
+..#..
+.#...
+#####
+.#...
+..#..
+
+↑ 1
+..#..
+.###.
+#.#.#
+..#..
+..#..
+
+↓ 1
+..#..
+..#..
+#.#.#
+.###.
+..#..
+
+× 2
+#.#
+.#.
+#.#
+
 → 2
 ..#..
 ...#.
@@ -479,7 +595,7 @@ _ 6
 
 export const sign = registerFont(makeFont({
   id: 'sign', name: 'Vox Sign 2',
-  cap: 7, descent: 1, gap: 1, space: 2, lineGap: 3, upper: true, maxKern: 2, kernKeep: 1,
+  cap: 7, descent: 1, gap: 1, space: 3, lineGap: 3, upper: true, maxKern: 2, kernKeep: 1,
   depth: (scale) => (scale < 3 ? scale : scale - 1), // one cell deep, but never a slab at display sizes
   src: CAPS + DIGITS + MARKS,
   // by hand: an L may tuck fully under what overhangs it

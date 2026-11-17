@@ -15,6 +15,7 @@
     r.classList.add('js');
     if (q.get('size')) r.style.fontSize = Number(q.get('size')) + 'px';
     if (q.get('theme')) r.dataset.theme = q.get('theme');
+    if (q.get('plain')) r.setAttribute('data-vx-plain', '');
     setTimeout(function () { r.dataset.ready = '1'; }, 6000);
   })();
 </script>
@@ -44,6 +45,12 @@
 </header>
 
 <main>
+<section id="pairings" aria-labelledby="pairings-h">
+  <h2 id="pairings-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">Pairings</h2>
+  <p class="intro">Lettering and text together, on the top of a real page. Each is the whole system: board, headings, controls, paragraphs and code.</p>
+  <div class="pairings" id="pairings-host"></div>
+</section>
+
 <section id="lettering" aria-labelledby="lettering-h">
   <h2 id="lettering-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">Lettering in voxels</h2>
   <div class="directions" id="directions"></div>
@@ -91,6 +98,52 @@
   <p class="meta">Watered 16 November 2026 at 09:41. 3 of 5 tests passing, 1,280 voxels, 0 O o l I 1.</p>
   <pre><code>import { adopt } from 'voxelmorphism';
 adopt(); // 0 O o l I 1 { } =&gt;</code></pre>
+</article>
+</template>
+
+<template id="pairing">
+<article class="pairing">
+  <header class="tag"><b></b><span class="why"></span><span class="cost"></span></header>
+  <div class="page">
+    <h1 data-role="board">Voxelmorphism</h1>
+    <p class="lede">Skeuomorphism painted controls to look like leather and brushed metal. Voxelmorphism builds them out of blocks, lit by one light, and you can count what each is made of.</p>
+    <h2 data-role="h2">The rules</h2>
+    <div class="rule">
+      <div class="say">
+        <h3>The voxel is the unit</h3>
+        <p>One voxel is 4 px. Every size is a whole number of voxels: a button is 11 tall, a switch is 16 by 8, a gap is 1. Nothing is a fraction of a block, so nothing looks nearly right.</p>
+        <p>Change the size of a voxel and the whole interface scales with it. Call <code>adopt()</code> and it is built.</p>
+      </div>
+      <div class="show">
+        <div class="row">
+          <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+          <button class="vx-button" data-vx-material="chalk">Water it</button>
+          <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
+        </div>
+        <div class="vx-tabs" role="tablist" aria-label="Garden">
+          <button role="tab" aria-selected="true">Growing</button>
+          <button role="tab" aria-selected="false">Bloomed</button>
+          <button role="tab" aria-selected="false">Wilted</button>
+        </div>
+        <ul class="vx-list">
+          <li aria-current="true"><a href="#pairings">A new easter egg for the blog</a><span class="vx-row-meta">bud</span></li>
+          <li><a href="#pairings">A greeting in the console</a><span class="vx-row-meta">sprout</span></li>
+        </ul>
+        <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
+      </div>
+    </div>
+    <h2 data-role="h2">A plant, grown from a number</h2>
+    <div class="rule">
+      <div class="say">
+        <p>The growth meter is a plant. Every voxel in it has a birthday between 0 and 1, so one number draws it at any moment of its life.</p>
+        <p class="meta">Watered 16 November 2026 at 09:41. 3 of 5 tests passing.</p>
+      </div>
+      <div class="show">
+        <article class="vx-card" data-vx-edge="walnut"><p><strong>Watered on 16 November</strong></p><p>Typing the old cheat code turns every heading into voxels for a minute.</p></article>
+        <div class="vx-toast" data-vx-kind="done"><span class="vx-toast-text">Watered. Two more and it buds.</span></div>
+      </div>
+    </div>
+  </div>
 </article>
 </template>
 
