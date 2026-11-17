@@ -27,7 +27,6 @@ const FLOWER = [
   '.PPPPP.',
   '..PPP..',
 ];
-const GAPS = [[1, 1], [5, 1], [1, 5], [5, 5]];
 const PETALS = ['petal', 'signal', 'chalk', 'enamel', 'brick'];
 
 /**
@@ -57,10 +56,10 @@ export function plant(part, opts = {}) {
     px = x;
   }
 
-  // leaves: one every three voxels, alternating sides, each growing out from the stem
+  // leaves: one every two or three voxels, alternating sides, each growing out from the stem
   let side = r(3) > 0.5 ? 1 : -1;
-  for (let h = 3, n = 0; h < H - 3; h += 3, n++) {
-    const len = 3 + Math.floor(r(10 + n) * 2.4) + (h > H * 0.5 ? 0 : 1);
+  for (let h = 2, n = 0; h < H - 2; h += 2 + (n % 3 === 2 ? 1 : 0), n++) {
+    const len = 3 + Math.floor(r(10 + n) * 2.6) + (h > H * 0.55 ? 0 : 2);
     const lz = z0 + (n % 2 ? 1 : -1) * (r(20 + n) > 0.3 ? 1 : 0);
     const sx = stemX(h), sy = base - 1 - h;
     for (let i = 1; i <= len; i++) {
@@ -69,6 +68,7 @@ export function plant(part, opts = {}) {
       part.plot(sx + side * i, sy - rise, lz, 'leaf', b);
       if (i > 1 && i < len) part.plot(sx + side * i, sy - rise - 1, lz, 'leaf', b + 0.015);
       if (i > 1 && i < len - 1) part.plot(sx + side * i, sy - rise, lz + 1, 'leaf', b + 0.03);
+      if (len > 4 && i > 2 && i < len - 1) part.plot(sx + side * i, sy - rise + 1, lz, 'leaf', b + 0.045);
     }
     side = -side;
   }
@@ -81,13 +81,16 @@ export function plant(part, opts = {}) {
   }
   const petal = opts.petal ?? PETALS[Math.floor(r(40) * PETALS.length)];
   const core = petal === 'signal' ? 'walnut' : 'signal';
+  // a disc of petals, a raised inner ring, and a core standing proud of both; it opens outward
   for (let j = 0; j < 7; j++) for (let i = 0; i < 7; i++) {
     const c = FLOWER[j][i];
-    if (c === '.' || GAPS.some(([gx, gy]) => gx === i && gy === j)) continue;
-    const d = Math.hypot(i - 3, j - 3) / 3.6;
-    const b = 0.88 + 0.1 * d;
-    if (c === 'C') { part.plot(tx - 3 + i, ty - 4 + j, z0 + 2, core, 0.86); part.plot(tx - 3 + i, ty - 4 + j, z0 + 3, core, 0.87); }
-    else part.plot(tx - 3 + i, ty - 4 + j, z0 + 2, petal, b);
+    if (c === '.') continue;
+    const d = Math.hypot(i - 3, j - 3);
+    const x = tx - 3 + i, y = ty - 4 + j;
+    const b = 0.875 + 0.075 * (d / 3.2);
+    part.plot(x, y, z0 + 2, petal, b);
+    if (d < 2.3) part.plot(x, y, z0 + 3, petal, b + 0.01);
+    if (c === 'C') part.plot(x, y, z0 + 4, core, 0.9);
   }
   return { top: [tx, ty - 4, z0 + 2], height: H + 4 };
 }

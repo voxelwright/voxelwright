@@ -22,7 +22,7 @@ export const slider = {
     lit.tz = 0.03;
     const thumb = m.part('thumb');
     thumb.grounded = false;
-    thumb.slab(0, 0, 1, THUMB, H, 4, live.el.querySelector('input')?.disabled ? 'steel' : 'enamel', 1);
+    thumb.slab(0, 1, 1, THUMB, H - 2, 4, live.el.querySelector('input')?.disabled ? 'steel' : 'enamel', 1);
     live.faceZ = 2;
     live.state.travel = W - THUMB;
   },

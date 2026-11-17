@@ -16,7 +16,7 @@ export const toggle = {
     const { W, H } = live;
     const input = live.state.input = live.el.parentElement.querySelector('input');
     const off = input?.disabled;
-    m.part('tray').slab(0, 0, 0, W, H, 1, off ? 'steel' : 'slate', 2);
+    m.part('tray').slab(0, 0, 0, W, H, 1, off ? 'steel' : 'slate', 1);
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false;
     lit.slab(1, 1, 1, W - 2, H - 2, 1, 'signal', 1);
