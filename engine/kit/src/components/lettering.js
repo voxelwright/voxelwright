@@ -195,9 +195,13 @@ export const lettering = {
     const z = bare ? 0 : 2;
     if (!bare) {
       m.part('board').slab(0, 0, 0, W, H, 2, el.dataset.vxMaterial || 'enamel', 2);
-      const frame = m.part('frame');
-      frame.grounded = false;
-      frame.box(1, 1, 2, W - 2, H - 2, 1, 'signal').carve(2, 2, 2, W - 4, H - 4, 1).notch(1, 1, 2, W - 2, H - 2, 1, 1);
+      // data-vx-frame names the frame's material; "none" leaves the board bare
+      const rim = el.dataset.vxFrame || 'signal';
+      if (rim !== 'none') {
+        const frame = m.part('frame');
+        frame.grounded = false;
+        frame.box(1, 1, 2, W - 2, H - 2, 1, rim).carve(2, 2, 2, W - 4, H - 4, 1).notch(1, 1, 2, W - 2, H - 2, 1, 1);
+      }
     }
     const letters = m.part('letters');
     letters.grounded = bare;
