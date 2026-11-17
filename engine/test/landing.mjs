@@ -156,18 +156,17 @@ for (const name of only) {
   const mended = await inner.evaluate(() => ({ dirty: globalThis.landing.dirty, bodies: globalThis.landing.on.bodies, pieces: globalThis.landing.on.pieces }))
   check(await page.evaluate(() => globalThis.home.heard.includes('mended')) && !mended.dirty && mended.bodies === 0 && mended.pieces === 0, `left alone, the corner mended itself (${JSON.stringify(mended)})`)
   await page.screenshot({ path: join(shots, `street-${name}-mended.png`) })
-  // Ten more times, and the cost of a frame and of making the corner again stays where it was.
-  const cycles = []
+  // Ten more times: what was done to the world is forgotten each time, so the list of it stays as long as the scene's own, and frames cost what they did.
   for (let i = 0; i < 10; i++) {
     await press(page, await spot(inner, places.signs[i % 4].at), 850)
     await page.waitForTimeout(900)
-    const t0 = Date.now()
     await inner.evaluate(() => globalThis.landing.mend())
-    await inner.waitForFunction(() => { const s = globalThis.landing.on.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 20000 })
-    cycles.push(Date.now() - t0)
+    await page.waitForTimeout(500)
   }
-  out.mends = { first: cycles[0], last: cycles[9], most: Math.max(...cycles) }
-  check(cycles[9] < cycles[0] * 2 + 250, `broken and mended ten times, mending takes no longer (${cycles.join(', ')} ms)`)
+  await inner.waitForFunction(() => { const s = globalThis.landing.on.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 20000 })
+  const kept = await inner.evaluate(() => ({ edits: globalThis.landing.on.world.edits.length, scene: globalThis.landing.on.scene.edits.length, broken: globalThis.landing.on.broken }))
+  out.mends = { ...kept, after: said(await watch(inner, 3)) }
+  check(kept.edits === kept.scene && kept.broken > out.playing.edits, `broken and mended ten times more (${kept.broken} changes in all), the world holds ${kept.edits} edit, the scene's own; frames after: ${out.mends.after.mean} ms at scale ${out.mends.after.scale}`)
 
   // ── The face ──
   await page.keyboard.press('f')

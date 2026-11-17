@@ -34,5 +34,5 @@ export async function plain(dir, host = '127.0.0.1', port = 0) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
   const site = await plain(resolve(dirname(dirname(fileURLToPath(import.meta.url))), arg('dir', 'dist')), '127.0.0.1', Number(arg('port', '5760')))
-  console.log(`the player on ${site.url}/player/index.html, two in a page on ${site.url}/player/host.html`)
+  console.log(`the player on ${site.url}/player/index.html, two in a page on ${site.url}/player/host.html\nthe landing (#421): the home page over the street on ${site.url}/landing/site/index.html, the street alone on ${site.url}/landing/index.html`)
 }

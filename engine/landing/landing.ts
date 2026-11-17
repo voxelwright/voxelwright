@@ -33,7 +33,7 @@ const light = (c: readonly number[]): V3 => [(c[0] / 255) ** 2.2, (c[1] / 255) *
 /** How long a press is before it is a hold, how long the hardest hold is, ms; and how far a press may move and still be one, px. */
 const HOLD_FROM = 220, HOLD_FULL = 800, STILL = 7
 /** How long the flights take, s: in over the town, from one place to another, and through a chosen sign. */
-const FLY_IN = 3.2, FLY = 1.05, PUSH = 0.5
+const FLY_IN = 2.6, FLY = 1.05, PUSH = 0.5
 /** How long after the last thing moved the corner is put back, s. */
 const MEND_AFTER = 6
 

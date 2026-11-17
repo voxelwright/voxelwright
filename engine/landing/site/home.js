@@ -51,7 +51,8 @@ function show(view) {
 
 /** What the street's controls say, from where its eye is. */
 function mirror() {
-  const arriving = at === 'sky' || (at === 'home' && flying)
+  // The flight in is the first one only: once the eye has landed, coming home is an ordinary flight.
+  const arriving = !times.menu && (at === 'sky' || (at === 'home' && flying))
   skip.hidden = !arriving
   corner.hidden = arriving || at === 'home'
   for (const a of links) { if (a.dataset.sign === at && root.dataset.view === '3d') a.setAttribute('aria-current', 'true'); else a.removeAttribute('aria-current') }
