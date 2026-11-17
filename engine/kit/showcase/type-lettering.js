@@ -14,14 +14,17 @@ const DIRECTIONS = [
 ];
 
 const Q = new URLSearchParams(location.search);
-const PANGRAM = 'Sphinx of black quartz, judge my vow.';
-const NUMBERS = '0123456789 +-=/:;!?&';
+const UK = Q.get('lang') === 'uk';
+const PANGRAM = UK ? 'Чуєш їх, доцю, га? Кумедна ж ти, прощайся без ґольфів!' : 'Sphinx of black quartz, judge my vow.';
+const NUMBERS = UK ? 'АБВГҐДЕЄЖЗИІЇЙКЛМНОПРСТУФХЦЧШЩЬЮЯ' : '0123456789 +-=/:;!?&';
+const WORDS = UK ? ['Правила', 'Рослина, вирощена з числа', 'Вокселморфізм', 'Їжак і ґанок: щастя, йод'] : ['The rules', 'A plant, grown from a number', 'Voxelmorphism', null];
 
 export default async function ({ define, host, solo }) {
   define(lettering);
   const el = (tag, attrs = {}, text = '') => { const n = document.createElement(tag); for (const k in attrs) n.setAttribute(k, attrs[k]); n.textContent = text; return n; };
   for (const d of DIRECTIONS) {
     if (solo && solo !== d.id) continue;
+    if (UK && d.id === 'today') continue; // today's set has no Cyrillic
     const sec = el('article', { class: 'direction', 'data-direction': d.id });
     const head = el('header');
     head.append(el('b', {}, d.name), el('span', {}, d.say));
@@ -38,9 +41,10 @@ export default async function ({ define, host, solo }) {
     };
     const cap = (t) => el('p', { class: 'cap' }, t);
     set.append(cap('One voxel per cell'), line(PANGRAM, 1), line(NUMBERS, 1));
-    set.append(cap('The rules, at 1, 2 and 3 voxels per cell'), line('The rules', 1), line('The rules', 2), line('The rules', 3));
-    set.append(cap('A real heading'), line('A plant, grown from a number', d.bigScale || 2));
-    set.append(cap('On the board'), line('Voxelmorphism', 3, { board: true }));
+    set.append(cap('At 1, 2 and 3 voxels per cell'), line(WORDS[0], 1), line(WORDS[0], 2), line(WORDS[0], 3));
+    set.append(cap('A real heading'), line(WORDS[1], d.bigScale || 2));
+    if (WORDS[3]) set.append(cap('Marks above and tails below, on two lines'), line(WORDS[3], d.bigScale || 2));
+    set.append(cap('On the board'), line(WORDS[2], 3, { board: true }));
     sec.append(set);
     host.append(sec);
   }

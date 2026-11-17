@@ -30,12 +30,16 @@ export function parse(src) {
  * letters may use. gap: cells between two glyphs. space: cells in a word space (the gaps on each
  * side come on top). lineGap: cells between the baseline of one line and the cap line of the next.
  * upper: the set has capitals only, so text is set in capitals. maxKern: the most two glyphs may
- * be drawn together, in cells. kern: pairs corrected by hand, e.g. { LT: -2 }.
+ * be drawn together, in cells. kern: pairs corrected by hand, e.g. { LT: -2 }. alias: letters that
+ * share a glyph, e.g. { 'А': 'A' }.
  */
 export function makeFont(o) {
   const glyphs = typeof o.src === 'string' ? parse(o.src) : o.glyphs;
   const font = { gap: 1, space: 2, lineGap: 3, descent: 0, xHeight: o.cap, upper: false, maxKern: 1, kern: {}, ...o, glyphs };
   delete font.src;
+  // alias: letters that are the same shape as a glyph already drawn (Cyrillic А is Latin A)
+  for (const [ch, as] of Object.entries(o.alias || {})) if (glyphs[as] && !glyphs[ch]) glyphs[ch] = { ...glyphs[as], ch };
+  delete font.alias;
   const lo = -3, hi = font.cap + font.descent + 1; // rows a profile covers
   for (const g of Object.values(glyphs)) {
     g.left = []; g.right = []; g.cells = [];

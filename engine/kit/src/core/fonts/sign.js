@@ -3,6 +3,7 @@
 // own slabs; where a stroke ends, it is cut square. Diagonals take the fewest cells that still read.
 
 import { makeFont, registerFont } from './index.js';
+import { UK_CAPS, UK_YI_POST, SHARED_CAPS } from './ukrainian.js';
 
 export const CAPS = `
 A
@@ -597,7 +598,8 @@ export const sign = registerFont(makeFont({
   id: 'sign', name: 'Vox Sign 2',
   cap: 7, descent: 1, gap: 1, space: 3, lineGap: 3, upper: true, maxKern: 2, kernKeep: 1,
   depth: (scale) => (scale < 3 ? scale : scale - 1), // one cell deep, but never a slab at display sizes
-  src: CAPS + DIGITS + MARKS,
+  src: CAPS + DIGITS + MARKS + UK_CAPS + UK_YI_POST,
+  alias: SHARED_CAPS,
   // by hand: an L may tuck fully under what overhangs it
-  kern: { LT: -2, LY: -2, LV: -1, "L'": -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0 },
+  kern: { LT: -2, LY: -2, LV: -1, "L'": -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0, 'Г,': 0, 'Г.': 0, 'Т,': 0, 'Т.': 0, 'Р,': 0, 'Р.': 0, 'У,': 0, 'У.': 0, 'Ч,': 0, 'Ч.': 0 },
 }));

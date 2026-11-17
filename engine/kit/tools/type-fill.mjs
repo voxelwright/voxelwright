@@ -29,7 +29,7 @@ const open = (cells, scale, depth) => { const s = Math.min(1, depth / 2 / scale)
 const sets = [];
 const today = {}; for (const ch of 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789') { const { cells, width } = oldLayout(ch); const rows = Array.from({ length: 7 }, () => Array(width).fill('.')); for (const [x, y] of cells) rows[y][x] = '#'; today[ch] = rows.map((r) => r.join('')); }
 sets.push({ name: 'Vox Sign (today)', glyphs: today, depth: () => 2 });
-for (const id of ['sign', 'block', 'sentence']) { const f = FONTS[id]; sets.push({ name: f.name, glyphs: Object.fromEntries(Object.entries(f.glyphs).filter(([c]) => /[A-Za-z0-9]/.test(c)).map(([c, g]) => [c, g.rows])), depth: f.depth }); }
+for (const id of ['sign', 'block', 'sentence']) { const f = FONTS[id]; sets.push({ name: f.name, glyphs: Object.fromEntries(Object.entries(f.glyphs).filter(([c]) => /[A-Za-z0-9\u0400-\u04ff]/.test(c)).map(([c, g]) => [c, g.rows])), depth: f.depth }); }
 console.log('set'.padEnd(18), 'scale depth  tightest counter open   glyphs with a counter under half open');
 for (const s of sets) for (const scale of [1, 2, 3]) {
   const depth = s.depth(scale); let worst = 1, worstCh = '', bad = [];
