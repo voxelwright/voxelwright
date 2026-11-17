@@ -46,4 +46,7 @@ const stage = await ready();   // the stage, or null if the page stays plain
 
 ## Fonts
 
-Overpass and Overpass Mono, both under the SIL Open Font License (`fonts/*/OFL.txt`).
+Text is IBM Plex Sans and IBM Plex Mono, under the SIL Open Font License (`fonts/*/OFL.txt`).
+Lettering is the kit's own glyph sets, Vox Block and Vox Sign, in `src/core/fonts/`, with flat
+copies inlined in the stylesheet for the plain version. The other folders in `fonts/` are the
+candidates the type study compared (`showcase/type.html`); the kit does not load them.

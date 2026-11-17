@@ -147,7 +147,7 @@ Decide by how often it happens (from the site-craft rules):
 - **Never** assemble something because it scrolled into view, and never on page load except one
   orchestrated moment the page chooses. Nothing moves while someone reads.
 - **Break and mend** (the sign): a poke knocks the lettering under the pointer loose. It breaks
-  along its own joints: each glyph cell is one block. Blocks fly for 0.5 to 1.15 s, then are pulled
+  into single voxels, the one place single voxels fly. They fly for 0.5 to 1.15 s, then are pulled
   home by a critically damped spring. It can be poked again
   at any time; nothing is a keyframe.
 - **Growth.** A plant's voxels each have a birth between 0 and 1. Showing the plant at `g` shows
@@ -245,7 +245,7 @@ define({
 adopt();
 ```
 
-- `part.box`, `part.slab` (stepped corners), `part.carve`, `part.text` (Vox Sign lettering),
+- `part.box`, `part.slab` (stepped corners), `part.carve`, `part.text(str, x, y, z, depth, material, scale, font)` (lettering),
   `part.plot(x, y, z, material, birth)`.
 - `live.spring(name)` gives a spring; `live.play('assemble' | 'crumble', parts, opts)` returns a
   promise; `live.label(node, () => z)` keeps a DOM node on a moving face.
@@ -274,7 +274,35 @@ node tools/film.mjs dialog-open --dark
 The idea of filming your own work and gating on it comes from Benji Taylor's Stageshow skill
 (MIT). Its own scripts film a React stage; this tool is ours because it has to read a canvas.
 
-## 15. The kit
+## 15. Type
+
+There are two kinds of type, and they do not mix: lettering built from voxels, and text set in a
+text face on top of them.
+
+- **Lettering** is for the sign and for headings. The glyph set is **Vox Block**: capitals eleven
+  cells tall (the height of a button) with a two-cell stroke, drawn so every counter stays open at
+  one voxel per cell. It is never enlarged to make it fit: a heading is one voxel per cell, a
+  board may go to two. Where a column is too narrow for it (a board on a phone) the part falls
+  back to **Vox Sign**, five cells by seven. Lettering is capitals only.
+- Spacing, kerning and line gaps are in whole cells and belong to the glyph set. Depth follows
+  scale: one voxel deep at one voxel per cell. At two or more voxels per cell diagonals are
+  redrawn as stairs of single voxels, not enlarged.
+- **The plain version of lettering is the same glyphs as a flat font** (inlined, about 2 KB a
+  set), sized ten voxels to the em and trimmed to the cap line and baseline. A heading therefore
+  has the same box with and without voxels, and nothing moves when they arrive. A board cannot
+  ask the script which glyph set fits, so a page that knows its own word sets the steps with a
+  container query (see the showcase). `node tools/shift.mjs <page>` measures what moves.
+- **Text** is IBM Plex Sans, with IBM Plex Mono for code: sturdy at 14 to 20 px, level in its
+  box (labels need no nudge), with a 1 that has a foot. Weights 400 to 700 only; nothing is faux
+  bold. Labels on buttons and tabs are text, not lettering.
+- Gaps and line heights are whole voxels wherever the page can manage it. That, more than the
+  face, is what keeps both kinds of type sharp on a 1x display.
+- Not drawn yet: Cyrillic for Vox Block (a Ukrainian heading shows `?`), and lowercase in
+  lettering (a set exists, Vox Sentence, and is not used).
+- Chosen in a study with five review rounds on real parts (`showcase/type.html`); the runner-up
+  set key labels in the voxel glyphs as a flat font (Vox Text). It is one CSS rule away.
+
+## 16. The kit
 
 Button (with icons: chevron, plus, check, cross, drop, seed), toggle, slider, text field, note
 card, list, menu, dialog, tabs, meter (plain and growth), toast. Also the sign (voxel lettering
