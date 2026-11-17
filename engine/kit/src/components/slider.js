@@ -4,7 +4,7 @@
 import { cue } from '../core/sound.js';
 import { listeners, clamp } from './util.js';
 
-const THUMB = 4;
+const THUMB = 5;
 
 export const slider = {
   name: 'slider',
@@ -18,6 +18,7 @@ export const slider = {
     m.part('floor').box(1, y + 1, 0, W - 2, 3, 1, 'slate');
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false;
+    lit.covered = true; // its voxels appear under the thumb, never in the open
     lit.box(1, y + 1, 0, W - 2, 3, 1, 'signal');
     lit.tz = 0.03;
     const thumb = m.part('thumb');
@@ -36,7 +37,7 @@ export const slider = {
     thumb.tx = x;
     thumb.tz = live.spring('press').x;
     const edge = x + THUMB / 2;
-    for (let i = 0; i < lit.count; i++) lit.scales[i] = lit.rest[i * 3] < edge ? 1 : 0;
+    for (let i = 0; i < lit.count; i++) lit.scales[i] = Math.max(0, Math.min(1, edge - lit.rest[i * 3] + 0.5));
   },
 
   bind(live) {

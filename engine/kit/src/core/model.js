@@ -40,14 +40,29 @@ export class Part {
     return this;
   }
 
-  /** Show the voxels born by g (0 to 1). Each one pops in over a short window. */
-  grow(g, window = 0.05) {
+  /**
+   * Show the voxels born by g (0 to 1). Each takes about 140 ms to appear once its moment has come
+   * (and to go, if g falls back), however fast g moves. Pass dt in seconds; dt of 0 sets it at once.
+   * Returns true while any voxel is still on its way.
+   */
+  grow(g, dt = 0) {
     const sc = this.scales, b = this.birth;
-    if (!sc || !b) return;
+    if (!sc || !b) return false;
+    const shown = (this.shown ??= new Float32Array(this.count));
+    const rate = dt > 0 ? dt / 0.14 : 1;
+    let busy = false;
     for (let i = 0; i < this.count; i++) {
-      const p = (g - b[i]) / window;
-      sc[i] = p <= 0 ? 0 : p >= 1 ? 1 : 1 + 2.1 * Math.pow(p - 1, 3) + 1.1 * Math.pow(p - 1, 2);
+      const want = g >= b[i] ? 1 : 0;
+      let p = shown[i];
+      if (p !== want) {
+        p = want > p ? Math.min(1, p + rate) : Math.max(0, p - rate * 1.6);
+        shown[i] = p;
+        if (p !== want) busy = true;
+      }
+      // a gentle start, a small overshoot as it lands
+      sc[i] = p <= 0 ? 0 : p >= 1 ? 1 : 1 - (1 - p) * (1 - p) * (1 + 1.2 * p) + 0.1 * Math.sin(Math.PI * p) * p * p;
     }
+    return busy;
   }
 
   /** Fill a box. x, y, z is its top-left-back corner; w, h, d its size. */

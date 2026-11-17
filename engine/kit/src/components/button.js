@@ -3,6 +3,7 @@
 
 import { PRESS, RELEASE, CALM } from '../core/motion.js';
 import { cue } from '../core/sound.js';
+import { icon, ICONS } from '../core/icons.js';
 import { wrapLabel } from './util.js';
 
 const CAP = 3;       // voxels the cap stands above its socket
@@ -18,8 +19,15 @@ export const button = {
     const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
     const mat = off ? 'steel' : el.dataset.vxMaterial || 'enamel';
     const depth = off ? 1 : CAP;
+    // A keycap: a body, and a top one voxel smaller all round. The step is what says "block".
     const cap = m.part('cap');
-    cap.slab(0, 0, 0, W, H, depth, mat, 1);
+    if (off) cap.slab(0, 0, 0, W, H, 1, mat, 1);
+    else { cap.slab(0, 0, 0, W, H, depth - 1, mat, 1); cap.slab(1, 1, depth - 1, W - 2, H - 2, 1, mat, 1); }
+    const name = el.dataset.vxIcon;
+    if (name && ICONS[name]) {
+      const g = ICONS[name], on = mat === 'enamel' || mat === 'brick' || mat === 'walnut' ? 'ivory' : 'ink';
+      icon(cap, name, W - g[0].length - 5, Math.round((H - g.length) / 2), depth, off ? 'slate' : on);
+    }
     live.state.off = off;
     live.state.top = depth;
     live.faceZ = depth;
@@ -37,7 +45,7 @@ export const button = {
     const press = live.spring('press'), hover = live.spring('hover');
     let held = false;
     const down = () => { if (live.state.off) return; held = true; press.to(-TRAVEL, PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
-    const up = () => { if (!held) return; held = false; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
+    const up = () => { if (!held) return; held = false; if (el.getAttribute('aria-expanded') === 'true') return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
     const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
     const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
     const leave = () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(); live.invalidate(); };
@@ -49,8 +57,15 @@ export const button = {
     el.addEventListener('keydown', key);
     el.addEventListener('keyup', up);
     el.addEventListener('blur', up);
-    const watch = new MutationObserver(() => live.rebuild());
-    watch.observe(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material'] });
+    const watch = new MutationObserver((list) => {
+      if (list.some((r) => r.attributeName !== 'aria-expanded')) return live.rebuild();
+      // a trigger stays down while what it opened is open
+      const open = el.getAttribute('aria-expanded') === 'true';
+      held = false;
+      press.to(open ? -TRAVEL : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
+      live.invalidate();
+    });
+    watch.observe(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-icon', 'aria-expanded'] });
     return () => {
       watch.disconnect();
       for (const [t, f] of [['pointerdown', down], ['pointerup', up], ['pointercancel', up], ['pointerenter', enter], ['pointerleave', leave], ['keydown', key], ['keyup', up], ['blur', up]]) el.removeEventListener(t, f);

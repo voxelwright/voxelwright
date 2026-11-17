@@ -27,6 +27,7 @@ export const meter = {
     const s = live.spring('v', v, CALM.k, CALM.c);
     if (live.state.built === undefined) s.snap(v);
     live.state.built = true;
+    live.state.posed = false;
     if (growth) {
       const potW = 7, x = Math.floor((W - potW) / 2), base = H - 6;
       pot(m.part('pot'), x, base, 0, potW, el.dataset.vxPot || 'brick');
@@ -47,9 +48,14 @@ export const meter = {
   },
 
   pose(live) {
+    // first drawing: show the value as it is, with no growing in
+    if (!live.state.posed) { live.state.posed = true; meter.step(live, 0); }
+  },
+
+  step(live, dt) {
     const v = live.spring('v').x;
-    if (live.state.growth) live.model.byName.plant.grow(v, 0.05);
-    else live.model.byName.fill.grow(v + 0.0001, 1.5 / Math.max(8, live.W));
+    const part = live.state.growth ? live.model.byName.plant : live.model.byName.fill;
+    return part.grow(v + 0.0001, dt);
   },
 
   bind(live) {

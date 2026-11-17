@@ -247,7 +247,18 @@ export class Stage {
   }
 
   schedule() {
+    if (this.manual) return;
     if (!this.raf && !document.hidden) this.raf = requestAnimationFrame(this.tick);
+  }
+
+  /** Step time by hand: stage.manual = true, then advance(1 / 60) per frame. For filming and tests. */
+  advance(dt) {
+    for (const live of [...this.awake]) {
+      const moving = live.step(dt);
+      live.draw();
+      if (!moving && !live.dirty) this.awake.delete(live);
+      else if (!live.visible && !moving) this.awake.delete(live);
+    }
   }
 
   tick(now) {

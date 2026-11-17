@@ -17,10 +17,10 @@ export const dialog = {
     const head = el.querySelector(':scope > header');
     const hh = head ? Math.round((head.offsetTop + head.offsetHeight) / vx) : 0;
     const panel = m.part('panel');
-    panel.box(0, 0, 0, W, H, 4, 'chalk');
-    if (hh) panel.box(0, 0, 0, W, hh, 4, el.dataset.vxMaterial || 'enamel');
-    panel.notch(0, 0, 0, W, H, 4, 2);
-    live.faceZ = 4;
+    panel.box(0, 0, 0, W, H, 6, 'chalk');
+    if (hh) panel.box(0, 0, 0, W, hh, 6, el.dataset.vxMaterial || 'enamel');
+    panel.notch(0, 0, 0, W, H, 6, 2);
+    live.faceZ = 6;
   },
 
   bind(live) {
@@ -34,7 +34,7 @@ export const dialog = {
       live.rebuild();
       cue('build');
       live.play('assemble', null, { from: [live.W / 2, live.H / 2], duration: 0.46, each: 0.24 });
-      setTimeout(() => el.removeAttribute('data-vx-building'), 230);
+      setTimeout(() => el.removeAttribute('data-vx-building'), 340); // the words arrive once there is a slab to carry them
     };
     const leave = async (value) => {
       if (leaving || !el.open) return;

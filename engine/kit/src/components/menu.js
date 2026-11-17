@@ -12,16 +12,16 @@ export const menu = {
 
   build(live, m) {
     const { W, H, el, vx } = live;
-    m.part('panel').slab(0, 0, 0, W, H, 3, 'chalk', 2);
+    m.part('panel').slab(0, 0, 0, W, H, 4, 'chalk', 2);
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const first = items[0];
     const h = first ? Math.max(2, Math.round(first.offsetHeight / vx)) : 2;
     const pick = m.part('pick');
     pick.grounded = false;
-    pick.slab(2, 0, 3, Math.max(1, W - 4), h, 1, 'enamel', 1);
+    pick.slab(2, 0, 4, Math.max(1, W - 4), h, 1, 'enamel', 1);
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));
-    live.faceZ = 3;
-    items.forEach((it, i) => live.label(wrapLabel(it), () => (live.state.active === i ? 4 : 3)));
+    live.faceZ = 4;
+    items.forEach((it, i) => live.label(wrapLabel(it), () => (live.state.active === i ? 5 : 4)));
   },
 
   pose(live) {
@@ -53,6 +53,7 @@ export const menu = {
       return [fromX / live.vx, fromY / live.vx];
     };
     on(el, 'toggle', (e) => {
+      invoker()?.setAttribute('aria-expanded', String(e.newState === 'open'));
       if (e.newState !== 'open') { setActive(-1); return; }
       const from = place();
       live.rebuild();

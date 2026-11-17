@@ -31,7 +31,7 @@ This file is the rule book. `voxelmorphism.css` and `src/` implement it; `showca
 |---|---|---|
 | Smallest hit target (button, tab, list row, field) | 11 tall | 44 px |
 | Switch | 16 by 8 | 64 by 32 px |
-| Slider | 11 tall (the thumb is 9), thumb 4 wide | 44 px |
+| Slider | 11 tall (the thumb is 9), thumb 5 wide | 44 px |
 | Gap between tiles in a tray | 1 | 4 px |
 | Button side padding | 5 | 20 px |
 | Card padding | 5 by 6 | 20 by 24 px |
@@ -60,13 +60,15 @@ from the next), and whether it glows at night.
 |---|---|---|---|
 | Enamel | `#0e22ff` | `#2b3dff` | Things you act on: the main button, a picked menu item, a slider thumb, a focused rim |
 | Signal | `#fff600` | `#fff600`, glows | Where you are and what is on: the chosen tab, a lit track, the current row |
-| Chalk | `#fbfcff` | `#232a63` | Surfaces that carry content: cards, dialogs, menus, the floor of a field |
-| Slate | `#c3c9de` | `#0d1136` | Trays, tracks and rims |
-| Steel | `#aab1c9` | `#4a5287` | Housings, and anything switched off |
+| Chalk | `#fbfcff` | `#303a7c` | Surfaces that carry content: cards, dialogs, menus, the floor of a field |
+| Slate | `#c3c9de` | `#161c4f` | Trays, tracks and rims |
+| Steel | `#aab1c9` | `#59629c` | Housings, and anything switched off |
+| Ivory | `#fbfcff` | `#ccd1f2` | The knob of a switch, and icons on enamel: it stays light at night so it can be found |
 | Walnut | `#7c4a29` | `#5a3520` | Structure that carries other things: shelves, frames |
 | Leaf | `#23a84b` | `#2ec25c` | Growth, progress, "it went well" |
 | Brick | `#e0331f` | `#ff5340` | Destructive actions, failure, pots |
-| Soil, stem, petal, lamp, ink | | | The garden, light sources, lettering |
+| Ink | `#0a0f3d` | `#eceefb` | Lettering and icons in voxels |
+| Soil, stem, petal, lamp | | | The garden and light sources |
 
 - Text on enamel and brick is white. Text on signal is ink `#0a0f3d` in both themes. Text on chalk
   is `--vx-ink`. Body text contrast is 7:1 or better; quiet text is 4.5:1 or better.
@@ -79,15 +81,17 @@ from the next), and whether it glows at night.
 - One light, from the top left and a little toward the viewer: direction `(-0.5, -0.7, 0.6)`.
 - Tones on a material: the top face is lightest (about 18% toward white), the front is the true
   colour, the left side is darkest (about 78%), faces in shadow lean cool.
-- Each voxel edge carries a seam one device pixel wide, 7% darker (10% at night), so the grid can
-  be counted. Each voxel varies in lightness by the material's grain.
+- Each voxel edge carries a seam one device pixel wide, 5% darker (8% at night), so the grid can
+  be counted. Each voxel varies in lightness by the material's grain. Keep both quiet: the surface
+  pattern must never be louder than the shape. Shape is what says "block".
 - Corners where voxels meet are darkened (ambient occlusion, three steps), so wells and joints read.
-- Shadows come from a depth map drawn from the light, with a penumbra of about half a voxel on
-  solids and a little more on the page. A shadow travels 0.83 voxels right and 1.17 down per voxel
+- Shadows come from a depth map drawn from the light, with a penumbra of about a fifth of a voxel:
+  hard enough to read as cast by a block, never a soft glow. A shadow travels 0.83 voxels right and 1.17 down per voxel
   of height. Page shadow colour: deep blue at 30% by day, near black at 55% by night.
 - **Night.** Dark mode is night, not an inversion. Materials keep their identity, the light drops,
-  and signal and lamp voxels glow: they keep their colour in shadow and throw a halo of about
-  2.6 voxels onto what is around them.
+  and signal and lamp voxels glow: they keep half their shading, so their sides still read, and
+  throw a faint halo of about 2.4 voxels. Chalk, slate and steel stay well clear of the ground
+  colour at night; a control that cannot be seen is not dark mode, it is broken.
 
 ## 6. Depth and press
 
@@ -97,10 +101,14 @@ from the next), and whether it glows at night.
 | Hover (mouse only) | 3.5 | You are on it |
 | Pressed | 1 | Is being pressed |
 | Disabled | 1, in steel | Cannot be pressed |
-| Content slab (card, toast, menu) | 2 to 3 | Holds content, is not pressed |
-| Dialog | 4 | In front of everything |
+| Card, list tile | 2 | Holds content, is not pressed |
+| Menu, toast | 4 | Floats over the page for a moment |
+| Dialog | 6 | In front of everything, over a scrim of ink at 50% |
 | Well (field) | floor 1 below its rim | Takes input |
 
+- A button is a keycap: a body, and a top one voxel smaller all round. The step is what makes it
+  read as a block at arm's length. Shadow length follows height, so the scale above is visible.
+- A trigger stays down while what it opened is open, and carries a chevron in voxels.
 - Press responds on pointer down, in the same frame. The press spring settles in about 110 ms
   (`k = 1500, c = 76`); release takes about 190 ms with one soft overshoot (`k = 620, c = 34`).
 - Sliders: while the pointer is down the thumb follows the value exactly. No easing, no spring.
@@ -119,10 +127,11 @@ Decide by how often it happens (from the site-craft rules):
 | Rarely | The sign, a bloom | Delight lives here |
 
 - **Assembly** marks the moment a thing is made: a dialog opens, a toast arrives, a note is added.
-  Voxels are set in place lowest layer first, outward from an origin, each arriving from the
-  viewer's side with 5 to 10% overshoot. One voxel takes 140 to 260 ms; the whole build takes
-  200 ms (menu), 300 ms (toast), 460 ms (dialog). Gaps between voxels shrink toward the end, and
-  a little noise keeps it from being a wipe.
+  Voxels are set in place lowest layer first, in a front that sweeps outward from an origin, each
+  dropping in from the viewer's side with 5 to 10% overshoot and growing from nothing over 75 ms.
+  One voxel takes 140 to 200 ms; the whole build takes 200 ms (menu), 300 ms (toast), 460 ms
+  (dialog). The first block lands on the frame of the input. Gaps shrink toward the end, and 5%
+  noise keeps the front from being a wipe. Words appear once there is a slab to carry them.
 - **Origin.** A menu is built out of the corner nearest its trigger. A dialog is built from its
   centre. A toast is built from its stripe.
 - **Crumble** marks removal: voxels fall down the page, spinning, and shrink away. 280 to 340 ms,
@@ -133,8 +142,8 @@ Decide by how often it happens (from the site-craft rules):
   for 0.55 to 1.05 s, then are pulled home by a critically damped spring. It can be poked again
   at any time; nothing is a keyframe.
 - **Growth.** A plant's voxels each have a birth between 0 and 1. Showing the plant at `g` shows
-  every voxel born by then, each popping in over a window of 0.05. The value itself follows a calm
-  spring (`k = 170, c = 26`), so growth is smooth whatever the step.
+  every voxel born by then; each takes 140 ms to appear once its moment has come, however fast the
+  value moves. The value itself follows a calm spring (`k = 170, c = 26`).
 - Everything a hand can touch is a spring or a per-frame effect, so it can be interrupted and
   retargeted. Input is never blocked while something plays.
 
@@ -166,7 +175,8 @@ Decide by how often it happens (from the site-craft rules):
   part, using `:focus-visible`. A focused field also changes its rim to enamel.
 - Keyboard-driven changes do not animate: arrow keys in tabs and menus move at once.
 - Hit targets are at least 11 voxels (44 px) tall.
-- Lettering in voxels (the sign) keeps its text in the DOM for readers.
+- Lettering in voxels (the sign, and headings set with `data-vx-board="none"`) keeps its text in
+  the DOM for readers, wraps to fit its column and balances its lines.
 - Toasts are `role="status"`, or `role="alert"` for a failure. Their clock stops on hover and
   while the tab is hidden.
 - **Less motion** (`prefers-reduced-motion: reduce`): the voxels stay; travel goes. Builds and
@@ -229,8 +239,32 @@ adopt();
   promise; `live.label(node, () => z)` keeps a DOM node on a moving face.
 - A part must look finished in the plain version first. Write its CSS, then its voxels.
 
-## 14. The kit
+## 14. Rehearse
 
-Button, toggle, slider, text field, note card, list, menu, dialog, tabs, meter (plain and growth),
-toast. Also the sign (voxel lettering that breaks and mends) and the block (one solid).
+Looking at one screenshot misses motion. Before a motion is done, film it and read every frame.
+
+```sh
+node tools/film.mjs                 # every scene
+node tools/film.mjs dialog-open --dark
+```
+
+- Time is stepped by hand (`stage.manual = true`, `stage.advance(1 / 60)`), so the film is the same
+  on any machine. Each scene becomes a contact sheet in `shots/film/` with the time on every frame.
+- The report reads the voxels themselves and prints, per scene: how long it took to settle against
+  the range this spec gives, and any `no response` (nothing changed on the frame of the input),
+  `pop` (voxels that appear at over a third of their size in one frame), `snap` (a voxel that moves
+  far more in one frame than in the frames around it) or `empty frame`.
+- `rehearsal passed` is necessary, not sufficient. Then read the sheet: does the first frame answer
+  the input, does anything arrive before the thing that carries it, is any frame just noise?
+- Do not clear a line by hiding what it points at. The one exception is marked in code: voxels that
+  appear inside another solid (`part.covered`), such as a lit track under its knob.
+
+The idea of filming your own work and gating on it comes from Benji Taylor's Stageshow skill
+(MIT). Its own scripts film a React stage; this tool is ours because it has to read a canvas.
+
+## 15. The kit
+
+Button (with icons: chevron, plus, check, cross, drop, seed), toggle, slider, text field, note
+card, list, menu, dialog, tabs, meter (plain and growth), toast. Also the sign (voxel lettering
+that breaks and mends, on a board or bare as a heading) and the block (one solid).
 Markup for each is at the top of its file in `src/components/`.

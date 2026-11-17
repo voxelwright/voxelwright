@@ -1,4 +1,4 @@
-import { adopt, release, live, toast, sound, stageOf } from '/packages/voxelmorphism/src/index.js';
+import { adopt, release, live, toast, sound, stageOf, getStage } from '/packages/voxelmorphism/src/index.js';
 
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;
@@ -72,7 +72,7 @@ brk.addEventListener('click', async () => {
 bld.addEventListener('click', async () => {
   bld.disabled = true;
   const l = live(card);
-  setTimeout(() => card.removeAttribute('data-gone'), l ? 260 : 0);
+  setTimeout(() => card.removeAttribute('data-gone'), l ? 380 : 0);
   await l?.play('assemble', null, { duration: 0.5 });
   brk.disabled = false;
   brk.focus();
@@ -83,7 +83,6 @@ $('#w').addEventListener('input', (e) => { $('#w-out').textContent = e.target.va
 $('#open-dialog').addEventListener('click', () => $('#dlg').showModal());
 $('#dlg').addEventListener('close', () => { if ($('#dlg').returnValue === 'yes') toast('Bloom started. The session is running.', { kind: 'done' }); });
 $('#toast-done').addEventListener('click', () => toast('Watered. Two more and it buds.', { kind: 'done' }));
-$('#toast-failed').addEventListener('click', () => toast('The session failed: 2 tests did not pass.', { kind: 'failed' }));
 
 // ----- growth
 const meters = [...document.querySelectorAll('#shelf progress')];
@@ -96,5 +95,5 @@ $('#grow').addEventListener('input', (e) => grow(e.target.value / 100));
 grow(0.55);
 
 if (!root.hasAttribute('data-vx-plain')) adoptAll();
-window.vx = { live, toast };
+window.vx = { live, toast, get stage() { return getStage(); } };
 root.dataset.ready = '1';

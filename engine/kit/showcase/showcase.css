@@ -33,7 +33,7 @@ h2, h3 { text-wrap: balance; }
 
 /* ---------- top ---------- */
 
-.top { display: grid; gap: 1.5rem; justify-items: start; margin-block-end: clamp(4rem, 10vw, 7rem); }
+.top { display: grid; gap: 1.5rem; justify-items: start; margin-block-end: clamp(3.25rem, 8vw, 5.5rem); }
 .top .vx-sign { margin-block-end: 0.75rem; max-inline-size: 100%; }
 .lede { max-inline-size: 36em; font-size: clamp(1.15rem, 0.9rem + 1vw, 1.4rem); line-height: 1.45; font-weight: 500; letter-spacing: -0.005em; }
 .aside { color: var(--vx-ink-quiet); margin-block-start: -0.5rem; }
@@ -41,13 +41,18 @@ h2, h3 { text-wrap: balance; }
 
 /* ---------- sections ---------- */
 
-section { margin-block-end: clamp(4.5rem, 10vw, 8rem); }
-h2 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3rem); line-height: 1.08; font-weight: 800; letter-spacing: -0.022em; margin-block-end: clamp(2rem, 5vw, 3.5rem); }
+section { margin-block-end: clamp(3.75rem, 8vw, 6.25rem); }
+h2 { font-size: clamp(1.9rem, 1.3rem + 2.4vw, 3rem); line-height: 1.08; font-weight: 800; letter-spacing: -0.022em; margin-block-end: clamp(1.75rem, 4vw, 2.75rem); }
+h2.vx-sign { min-block-size: calc(var(--vx) * 14); }
+html.js:not([data-ready]):not([data-vx-plain]) .vx-sign { visibility: hidden; }
+html.js:not([data-ready]):not([data-vx-plain]) .top .vx-sign { block-size: 60px; }
+@media (min-width: 46.5rem) { html.js:not([data-ready]):not([data-vx-plain]) .top .vx-sign { block-size: 112px; } }
+@media (min-width: 70.5rem) { html.js:not([data-ready]):not([data-vx-plain]) .top .vx-sign { block-size: 164px; } }
 h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.01em; margin-block-end: 0.75rem; }
-.intro { max-inline-size: 38em; margin-block: -1.5rem 3rem; }
+.intro { max-inline-size: 38em; margin-block: 0 2.5rem; }
 
 .rule { display: grid; grid-template-columns: minmax(0, 27rem) minmax(0, 1fr); gap: 2rem clamp(2rem, 6vw, 5rem); align-items: start; }
-.rule + .rule { margin-block-start: clamp(3.5rem, 8vw, 5.5rem); }
+.rule + .rule { margin-block-start: clamp(2.75rem, 6vw, 4rem); }
 .say { display: grid; gap: 0.9rem; align-content: start; }
 .say h3 { margin-block-end: 0; }
 .say code, .foot code { font-family: var(--vx-mono); font-size: 0.88em; }
@@ -56,6 +61,7 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 .bench { display: flex; align-items: center; gap: 2rem; min-block-size: 5.5rem; }
 .bench.wrap { flex-wrap: wrap; gap: 1.75rem 2rem; }
 .bench.stack { display: grid; gap: 1.5rem; align-items: start; justify-items: stretch; }
+.bench.stack.start { justify-items: start; }
 .bench.tall { min-block-size: 9rem; }
 .bench.gridded { --vx: 8px; --_line: color-mix(in oklab, var(--vx-ink) 9%, transparent); padding: calc(var(--vx) * 4); justify-content: center;
   background-image: linear-gradient(to right, var(--_line) 1px, transparent 1px), linear-gradient(to bottom, var(--_line) 1px, transparent 1px);
@@ -63,7 +69,8 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 .grow { flex: 1 1 14rem; }
 .pair { display: flex; flex-wrap: wrap; gap: 1.5rem; }
 
-.knob { display: grid; gap: 0.6rem; max-inline-size: 22rem; font-weight: 600; font-size: 0.94rem; }
+.knob { display: grid; gap: 0.6rem; font-weight: 600; font-size: 0.94rem; }
+.say .knob { max-inline-size: 22rem; }
 .knob > span:first-child { display: flex; justify-content: space-between; gap: 1rem; }
 .knob output { font-weight: 500; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
 
@@ -74,16 +81,18 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 
 .swatches { --vx: 5px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem 1.25rem; font-weight: 600; font-size: 0.94rem; }
 .swatches li { display: grid; gap: 0.9rem; justify-items: start; }
+.swatches.heights { align-items: end; margin-block-end: 0.5rem; }
+.swatches.heights li { gap: 1.6rem; }
 
 /* ---------- kit ---------- */
 
-.kit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(3rem, 6vw, 4.5rem) clamp(2.5rem, 7vw, 6rem); }
+.kit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(2.5rem, 5vw, 3.5rem) clamp(2.5rem, 7vw, 6rem); }
 .kit figure { margin: 0; display: grid; gap: 1.25rem; align-content: start; grid-template-rows: auto 1fr; }
-.kit figcaption { order: -1; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.005em; }
+.kit figcaption { order: -1; font-weight: 800; font-size: 1.3rem; line-height: 1.2; letter-spacing: -0.01em; }
 .kit .bench { min-block-size: 0; }
-.kit .knob { max-inline-size: none; }
-.panel { color: var(--vx-ink-quiet); }
 .kit .vx-tabs { justify-self: start; }
+.kit .bench.stack:has(.tabcard) { gap: calc(var(--vx) * 2); }
+.tabcard { min-block-size: calc(var(--vx) * 22); }
 
 /* ---------- growth ---------- */
 
@@ -94,7 +103,8 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 /* ---------- code ---------- */
 
 .code code { font: inherit; }
-.code { margin: 0; padding: 1.25rem 1.5rem; overflow-x: auto; font-family: var(--vx-mono); font-size: 0.82rem; line-height: 1.65; color: var(--vx-ink); background: color-mix(in oklab, var(--vx-chalk) 70%, var(--vx-ground)); border-inline-start: calc(var(--vx) * 2) solid var(--vx-enamel); tab-size: 2; }
+.code { margin: 0; overflow-x: auto; font-family: var(--vx-mono); font-size: 0.82rem; line-height: 1.65; color: var(--vx-ink); tab-size: 2; }
+.codecard { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); }
 
 .foot { color: var(--vx-ink-quiet); font-size: 0.94rem; max-inline-size: 40em; }
 
@@ -103,6 +113,9 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
   .kit { grid-template-columns: minmax(0, 1fr); }
   .swatches { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.5rem 0.75rem; }
   .swatches { --vx: 4px; }
+}
+@media (max-width: 34rem) {
+  .code { white-space: pre-wrap; overflow-wrap: anywhere; }
 }
 @media (max-width: 26rem) {
   .controls { gap: 1rem 1.5rem; }

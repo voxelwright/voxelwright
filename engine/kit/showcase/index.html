@@ -7,6 +7,7 @@
 <meta name="description" content="Voxelmorphism: a design language where every control is a small solid built from voxels.">
 <link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
 <link rel="stylesheet" href="showcase.css">
+<script>document.documentElement.classList.add("js"); setTimeout(function () { document.documentElement.dataset.ready = "1"; }, 3000);</script>
 </head>
 <body>
 <a class="skip" href="#rules">Skip to the rules</a>
@@ -29,7 +30,7 @@
 
 <main>
 <section id="rules" aria-labelledby="rules-h">
-  <h2 id="rules-h">The rules</h2>
+  <h2 id="rules-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">The rules</h2>
 
   <article class="rule">
     <div class="say">
@@ -100,11 +101,13 @@
       <p>Dark mode is night. The materials stay; the light drops, and anything made of signal lights the wall around it.</p>
     </div>
     <div class="show">
-      <div class="bench wrap">
-        <button class="vx-button" data-vx-material="signal">Hold me down</button>
-        <span class="vx-block" data-vx-material="chalk" data-vx-depth="8" style="inline-size: calc(var(--vx) * 10); block-size: calc(var(--vx) * 10)"></span>
-        <span class="vx-block" data-vx-material="signal" data-vx-depth="2" style="inline-size: calc(var(--vx) * 10); block-size: calc(var(--vx) * 10)"></span>
-      </div>
+      <ul class="swatches heights">
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="2"></span>2 voxels high</li>
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="6"></span>6</li>
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="12"></span>12</li>
+        <li><span class="vx-block" data-vx-material="signal" data-vx-depth="6"></span>Signal, 6</li>
+      </ul>
+      <div class="bench"><button class="vx-button" data-vx-material="signal">Hold me down and watch the shadow</button></div>
     </div>
   </article>
 
@@ -127,15 +130,16 @@
 </section>
 
 <section id="kit" aria-labelledby="kit-h">
-  <h2 id="kit-h">The kit</h2>
+  <h2 id="kit-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">The kit</h2>
   <p class="intro">Eleven parts, each a real HTML control underneath. Tab through them: the keyboard works as it would with no voxels at all.</p>
 
   <div class="kit">
     <figure><div class="bench wrap">
-      <button class="vx-button">Plant a seed</button>
+      <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
       <button class="vx-button" data-vx-material="signal">Let it bloom</button>
-      <button class="vx-button" data-vx-material="chalk">Not yet</button>
       <button class="vx-button" data-vx-material="brick">Pull it up</button>
+      <button class="vx-button" disabled>Asleep</button>
     </div><figcaption>Button</figcaption></figure>
 
     <figure><div class="bench stack">
@@ -149,24 +153,12 @@
     </div><figcaption>Slider</figcaption></figure>
 
     <figure><div class="bench stack">
-      <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
-      <label class="vx-field"><span class="vx-field-label">Water it</span><span class="vx-well"><textarea placeholder="What did you learn about this idea today?"></textarea></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
-    </div><figcaption>Text field</figcaption></figure>
-
-    <figure><div class="bench stack">
-      <article class="vx-card" data-vx-edge="enamel"><p><strong>Watered on 16 November</strong></p><p>Typing the old cheat code turns every heading into voxels for a minute.</p></article>
-    </div><figcaption>Note card</figcaption></figure>
-
-    <figure><div class="bench stack">
-      <ul class="vx-list">
-        <li aria-current="true"><a href="#kit">A new easter egg for the blog</a><span class="vx-row-meta">bud</span></li>
-        <li><a href="#kit">A greeting in the console</a><span class="vx-row-meta">sprout</span></li>
-        <li><a href="#kit">The LOG page as a changelog</a><span class="vx-row-meta">seed</span></li>
-      </ul>
-    </div><figcaption>List</figcaption></figure>
+      <label class="knob"><span>Tests passing <output>3 of 5</output></span>
+        <span class="vx-meter"><progress value="3" max="5">3 of 5</progress></span></label>
+    </div><figcaption>Meter</figcaption></figure>
 
     <figure><div class="bench wrap">
-      <button class="vx-button" data-vx-material="chalk" popovertarget="plant-menu">This plant</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="plant-menu" aria-haspopup="menu" aria-expanded="false">This plant</button>
       <div class="vx-menu" id="plant-menu" popover role="menu">
         <button role="menuitem">Water it</button>
         <button role="menuitem">Move to another shelf</button>
@@ -180,30 +172,45 @@
     </div><figcaption>Dialog</figcaption></figure>
 
     <figure><div class="bench stack">
+      <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+      <label class="vx-field"><span class="vx-field-label">Water it</span><span class="vx-well"><textarea placeholder="What did you learn about this idea today?"></textarea></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
+    </div><figcaption>Text field</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <ul class="vx-list">
+        <li aria-current="true"><a href="#kit">A new easter egg for the blog</a><span class="vx-row-meta">bud</span></li>
+        <li><a href="#kit">A greeting in the console</a><span class="vx-row-meta">sprout</span></li>
+        <li><a href="#kit">The LOG page as a changelog</a><span class="vx-row-meta">seed</span></li>
+      </ul>
+    </div><figcaption>List</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <article class="vx-card" data-vx-edge="walnut"><p><strong>Watered on 16 November</strong></p><p>Typing the old cheat code turns every heading into voxels for a minute.</p></article>
+    </div><figcaption>Note card</figcaption></figure>
+
+    <figure><div class="bench stack start">
+      <div class="vx-toast" data-vx-kind="done"><span class="vx-toast-text">Watered. Two more and it buds.</span></div>
+      <div class="vx-toast" data-vx-kind="failed"><span class="vx-toast-text">The session failed: 2 tests did not pass.</span></div>
+      <button class="vx-button" data-vx-material="chalk" id="toast-done">Show a toast</button>
+    </div><figcaption>Toast</figcaption></figure>
+
+    <figure><div class="bench stack">
       <div class="vx-tabs" role="tablist" aria-label="Garden">
         <button role="tab" aria-selected="true" aria-controls="tp1">Growing</button>
         <button role="tab" aria-selected="false" aria-controls="tp2">Bloomed</button>
         <button role="tab" aria-selected="false" aria-controls="tp3">Wilted</button>
       </div>
-      <p class="panel" id="tp1" role="tabpanel">Three plants are growing.</p>
-      <p class="panel" id="tp2" role="tabpanel" hidden>One has bloomed and shipped.</p>
-      <p class="panel" id="tp3" role="tabpanel" hidden>Nothing has wilted.</p>
+      <div class="vx-card tabcard">
+        <p id="tp1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
+        <p id="tp2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
+        <p id="tp3" role="tabpanel" hidden>Nothing has wilted.</p>
+      </div>
     </div><figcaption>Tabs</figcaption></figure>
-
-    <figure><div class="bench stack">
-      <label class="knob"><span>Tests passing <output>3 of 5</output></span>
-        <span class="vx-meter"><progress value="3" max="5">3 of 5</progress></span></label>
-    </div><figcaption>Meter</figcaption></figure>
-
-    <figure><div class="bench wrap">
-      <button class="vx-button" data-vx-material="chalk" id="toast-done">Watered</button>
-      <button class="vx-button" data-vx-material="chalk" id="toast-failed">The session failed</button>
-    </div><figcaption>Toast</figcaption></figure>
   </div>
 </section>
 
 <section id="growth" aria-labelledby="growth-h">
-  <h2 id="growth-h">A plant, grown from a number</h2>
+  <h2 id="growth-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">A plant, grown from a number</h2>
   <div class="rule">
     <div class="say">
       <p>The growth meter is a plant. Every voxel in it has a birthday between 0 and 1, so one number draws it at any moment of its life: seed, sprout, sapling, bud, bloom. Each plant grows from its own seed number and no two are alike.</p>
@@ -224,7 +231,7 @@
 </section>
 
 <section id="plain" aria-labelledby="plain-h">
-  <h2 id="plain-h">The plain version</h2>
+  <h2 id="plain-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">The plain version</h2>
   <div class="rule">
     <div class="say">
       <p>The voxels are an addition. Underneath, every part is ordinary HTML styled by one stylesheet, and that plain version is what you get with no script or no WebGL2. Turn <em>Voxels</em> off at the top of the page to see it.</p>
@@ -242,21 +249,21 @@
 </section>
 
 <section id="use" aria-labelledby="use-h">
-  <h2 id="use-h">Use it</h2>
+  <h2 id="use-h" class="vx-sign" data-vx-board="none" data-vx-scale="2">Use it</h2>
   <div class="rule">
     <div class="say">
       <p>Link the stylesheet, write ordinary markup with the class names, and call <code>adopt()</code>. There is no build step and no framework. A part of your own is a function that fills a model with boxes.</p>
       <p>The rules in full, with every number, are in <a href="/packages/voxelmorphism/SPEC.md">the spec</a>.</p>
     </div>
     <div class="show">
-<pre class="code"><code>&lt;link rel="stylesheet" href="voxelmorphism.css"&gt;
+<div class="vx-card codecard"><pre class="code"><code>&lt;link rel="stylesheet" href="voxelmorphism.css"&gt;
 
 &lt;button class="vx-button"&gt;Plant a seed&lt;/button&gt;
 
 &lt;script type="module"&gt;
   import { adopt } from './voxelmorphism/src/index.js';
   adopt();
-&lt;/script&gt;</code></pre>
+&lt;/script&gt;</code></pre></div>
     </div>
   </div>
 </section>

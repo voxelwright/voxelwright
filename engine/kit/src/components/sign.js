@@ -10,15 +10,41 @@ import { listeners } from './util.js';
 
 const MARGIN = 3; // voxels of board around the lettering, in glyph cells
 
+// Break the text into lines that fit, at the largest whole scale that fits.
 function fit(el, vx) {
-  const text = (el.dataset.vxText || el.textContent).trim();
-  const tw = measure(text);
-  let scale = Number(el.dataset.vxScale);
-  if (!scale) {
-    const room = (el.parentElement?.clientWidth || innerWidth) / vx;
-    scale = Math.max(1, Math.min(Number(el.dataset.vxMax || 4), Math.floor(room / (tw + MARGIN * 2))));
+  const text = (el.dataset.vxText || el.textContent).trim().replace(/\s+/g, ' ');
+  const bare = el.dataset.vxBoard === 'none';
+  const margin = bare ? 0 : MARGIN;
+  const room = (el.parentElement?.clientWidth || innerWidth) / vx;
+  const words = text.split(' ');
+  const want = Number(el.dataset.vxScale) || Number(el.dataset.vxMax || 4);
+  for (let scale = want; scale >= 1; scale--) {
+    const max = Math.floor((room - (bare ? 0 : 2)) / scale) - margin * 2;
+    const wrap = (limit) => {
+      const out = [];
+      let line = '';
+      for (const w of words) {
+        const next = line ? line + ' ' + w : w;
+        if (measure(next) <= limit || !line) line = next; else { out.push(line); line = w; }
+      }
+      if (line) out.push(line);
+      return out;
+    };
+    let lines = wrap(max);
+    // balance: the narrowest limit that still gives the same number of lines, so no word is left alone
+    for (let limit = max - 1; limit > 0 && lines.length > 1; limit--) {
+      const t = wrap(limit);
+      if (t.length > lines.length) break;
+      lines = t;
+    }
+    const width = Math.max(...lines.map((l) => measure(l)));
+    if (width <= max || scale === 1) {
+      const fixed = Number(el.dataset.vxScale);
+      // a sign told its scale keeps it if one line fits; otherwise it wraps, then shrinks
+      if (!fixed && lines.length > 1 && scale > 1 && !bare) continue;
+      return { text, lines, width, scale, margin, bare, gap: 3 };
+    }
   }
-  return { text, tw, scale };
 }
 
 function physics(part) {
@@ -89,17 +115,25 @@ export const sign = {
 
   build(live, m) {
     const { W, H, el } = live;
-    const { text, tw, scale } = fit(el, live.vx);
-    const board = m.part('board');
-    board.slab(0, 0, 0, W, H, 2, el.dataset.vxMaterial || 'enamel', 2);
-    const frame = m.part('frame');
-    frame.grounded = false;
-    frame.box(1, 1, 2, W - 2, H - 2, 1, 'signal').carve(2, 2, 2, W - 4, H - 4, 1).notch(1, 1, 2, W - 2, H - 2, 1, 1);
+    const f = fit(el, live.vx);
+    const { scale, lines, bare } = f;
+    const z = bare ? 0 : 2;
+    if (!bare) {
+      m.part('board').slab(0, 0, 0, W, H, 2, el.dataset.vxMaterial || 'enamel', 2);
+      const frame = m.part('frame');
+      frame.grounded = false;
+      frame.box(1, 1, 2, W - 2, H - 2, 1, 'signal').carve(2, 2, 2, W - 4, H - 4, 1).notch(1, 1, 2, W - 2, H - 2, 1, 1);
+    }
     const letters = m.part('letters');
-    letters.grounded = false;
-    const x = Math.round((W - tw * scale) / 2), y = Math.round((H - 7 * scale) / 2);
-    letters.text(text, x, y, 2, Math.max(2, scale), el.dataset.vxInk || 'signal', scale);
-    live.faceZ = 2;
+    letters.grounded = bare;
+    const block = (lines.length * 7 + (lines.length - 1) * f.gap) * scale;
+    let y = Math.round((H - block) / 2);
+    for (const line of lines) {
+      const x = bare ? 0 : Math.round((W - measure(line) * scale) / 2);
+      letters.text(line, x, y, z, bare ? 2 : Math.max(2, scale), el.dataset.vxInk || (bare ? 'ink' : 'signal'), scale);
+      y += (7 + f.gap) * scale;
+    }
+    live.faceZ = z;
     live.state.scale = scale;
   },
 
@@ -108,9 +142,10 @@ export const sign = {
     const el = live.el;
     const size = () => {
       const vx = parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4;
-      const { tw, scale } = fit(el, vx);
-      el.style.inlineSize = (tw * scale + MARGIN * 2 * scale + 2) * vx + 'px';
-      el.style.blockSize = (7 * scale + MARGIN * 2 * scale + 2) * vx + 'px';
+      const f = fit(el, vx);
+      const pad = f.bare ? 0 : f.margin * 2 * f.scale + 2;
+      el.style.inlineSize = (f.width * f.scale + pad) * vx + 'px';
+      el.style.blockSize = ((f.lines.length * 7 + (f.lines.length - 1) * f.gap) * f.scale + pad) * vx + 'px';
     };
     size();
     on(window, 'resize', size);

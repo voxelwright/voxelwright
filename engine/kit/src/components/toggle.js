@@ -19,10 +19,11 @@ export const toggle = {
     m.part('tray').slab(0, 0, 0, W, H, 1, off ? 'steel' : 'slate', 1);
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false;
+    lit.covered = true; // its voxels appear under the knob, never in the open
     lit.slab(1, 1, 1, W - 2, H - 2, 1, 'signal', 1);
     const knob = m.part('knob');
     knob.grounded = false;
-    knob.slab(0, 0, 1, KNOB, H - 2, 3, off ? 'steel' : 'chalk', 1);
+    knob.slab(0, 0, 1, KNOB, H - 2, 3, off ? 'steel' : 'ivory', 1);
     knob.ty = 1;
     live.faceZ = 1;
     live.state.travel = W - 2 - KNOB;
@@ -40,7 +41,7 @@ export const toggle = {
     const edge = x + KNOB / 2;
     for (let i = 0; i < lit.count; i++) {
       const cx = lit.rest[i * 3];
-      lit.scales[i] = t <= 0.001 ? 0 : cx < edge ? 1 : 0;
+      lit.scales[i] = t <= 0.001 ? 0 : Math.max(0, Math.min(1, edge - cx + 0.5));
     }
   },
 

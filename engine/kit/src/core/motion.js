@@ -57,7 +57,7 @@ function quat(out, o, ax, ay, az, angle) {
  */
 export function assemble(part, opts = {}) {
   const n = part.count, rest = part.rest;
-  const each = opts.each ?? 0.26;
+  const each = opts.each ?? 0.2;
   const total = Math.max(each, opts.duration ?? 0.52);
   const spread = total - each;
   const from = opts.from ?? null;
@@ -71,20 +71,22 @@ export function assemble(part, opts = {}) {
     d[i] = from ? Math.hypot(x - from[0], y - from[1]) : x + y * 0.6;
     dmax = Math.max(dmax, d[i]);
   }
-  const delay = new Float32Array(n), start = new Float32Array(n * 3);
-  let dmin = Infinity;
+  const delay = new Float32Array(n), start = new Float32Array(n * 3), rank = new Float32Array(n);
+  let dmin = Infinity, rmin = Infinity, rmax = -Infinity;
   for (let i = 0; i < n; i++) dmin = Math.min(dmin, d[i]);
   for (let i = 0; i < n; i++) {
     const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
     const r = hash3(x + seed, y, z), r2 = hash3(x, y + seed, z), r3 = hash3(x, y, z + seed);
     const layer = zmax > zmin ? (z - zmin) / (zmax - zmin) : 0;
     const dist = dmax > dmin ? (d[i] - dmin) / (dmax - dmin) : 0;
-    const rank = clamp01(layer * 0.45 + dist * 0.45 + r * 0.1);
-    delay[i] = (opts.delay ?? 0) + spread * Math.pow(rank, 0.75); // gaps shrink toward the end
-    start[i * 3] = (r2 - 0.5) * 3;
-    start[i * 3 + 1] = (r3 - 0.5) * 3 - 1.5;
-    start[i * 3 + 2] = 5 + r * 7;
+    rank[i] = layer * 0.38 + dist * 0.57 + r * 0.05; // a front, with just enough noise not to be a wipe
+    rmin = Math.min(rmin, rank[i]); rmax = Math.max(rmax, rank[i]);
+    start[i * 3] = (r2 - 0.5) * 1.2;
+    start[i * 3 + 1] = (r3 - 0.5) * 1.2 - 0.6;
+    start[i * 3 + 2] = 3 + r * 4;
   }
+  // the first block lands on the frame of the input: nothing waits for a slot that no voxel fills
+  for (let i = 0; i < n; i++) delay[i] = (opts.delay ?? 0) + spread * Math.pow(rmax > rmin ? (rank[i] - rmin) / (rmax - rmin) : 0, 0.75);
   return {
     kind: 'assemble', t: 0, end: (opts.delay ?? 0) + total,
     write(pos, o, part) {
@@ -96,7 +98,7 @@ export function assemble(part, opts = {}) {
         pos[o] = rest[i * 3] + part.tx + start[i * 3] * k;
         pos[o + 1] = rest[i * 3 + 1] + part.ty + start[i * 3 + 1] * k;
         pos[o + 2] = rest[i * 3 + 2] + part.tz + start[i * 3 + 2] * k;
-        pos[o + 3] = 0.55 + 0.45 * easeOut(clamp01(p * 2.2));
+        pos[o + 3] = clamp01((t - delay[i]) / 0.075); // grows from nothing over 75 ms: a block is never suddenly there
         pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
       }
       return t >= this.end;

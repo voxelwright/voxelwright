@@ -9,15 +9,17 @@ const hex = (h) => [parseInt(h.slice(1, 3), 16) / 255, parseInt(h.slice(3, 5), 1
 // grain: optional (x, y, z) => lightness offset, for materials with a pattern.
 const defs = {
   // Enamel blue: things you act on.
-  enamel: { day: '#0e22ff', night: '#2b3dff', jitter: 0.03 },
+  enamel: { day: '#0e22ff', night: '#2b3dff', jitter: 0.018 },
   // Signal yellow: where you are, what is on, what wants attention. It glows at night.
   signal: { day: '#fff600', night: '#fff600', jitter: 0.025, glow: 1 },
   // Chalk: surfaces that hold content.
-  chalk: { day: '#fbfcff', night: '#232a63', jitter: 0.012 },
+  chalk: { day: '#fbfcff', night: '#303a7c', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
-  slate: { day: '#c3c9de', night: '#0d1136', jitter: 0.02 },
+  slate: { day: '#c3c9de', night: '#161c4f', jitter: 0.012 },
   // Steel: neutral parts and anything switched off.
-  steel: { day: '#aab1c9', night: '#4a5287', jitter: 0.03 },
+  steel: { day: '#aab1c9', night: '#59629c', jitter: 0.018 },
+  // Ivory: the knob of a switch. It stays light at night so the knob can always be found.
+  ivory: { day: '#fbfcff', night: '#ccd1f2', jitter: 0.006 },
   // Walnut: structure that carries other things (shelves, frames, trays).
   walnut: {
     day: '#7c4a29', night: '#5a3520', jitter: 0.03,
@@ -29,7 +31,7 @@ const defs = {
   soil: { day: '#3d2a20', night: '#2a1c15', jitter: 0.07 },
   petal: { day: '#ff5c8a', night: '#ff6f98', jitter: 0.04 },
   // Brick: destructive actions and failures.
-  brick: { day: '#e0331f', night: '#ff5340', jitter: 0.04 },
+  brick: { day: '#e0331f', night: '#ff5340', jitter: 0.025 },
   // Lamp: a light source. Warm, always on at night.
   lamp: { day: '#fff3c4', night: '#ffe9a0', jitter: 0.01, glow: 1 },
   // Ink: lettering set into a surface.
@@ -64,17 +66,17 @@ export const LIGHTS = {
     ambientTint: [0.9, 0.93, 1.0], // shadowed faces lean cool
     highlight: [1.0, 1.0, 0.98],
     shadow: [0.04, 0.07, 0.38, 0.3], // colour and strength of shadow on the page
-    seam: 0.07,
+    seam: 0.05,
     glow: 0.0,
   },
   night: {
     toLight: norm([-0.5, -0.7, 0.6]),
     sun: 0.62,
-    ambient: { top: 0.72, front: 0.646, side: 0.42, under: 0.3 },
+    ambient: { top: 0.78, front: 0.646, side: 0.36, under: 0.3 },
     ambientTint: [0.82, 0.86, 1.0],
-    highlight: [0.75, 0.8, 1.0],
+    highlight: [0.8, 0.85, 1.0],
     shadow: [0.0, 0.0, 0.05, 0.55],
-    seam: 0.1,
+    seam: 0.08,
     glow: 1.0,
   },
 };

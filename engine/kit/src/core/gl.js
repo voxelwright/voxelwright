@@ -88,7 +88,7 @@ void main() {
   c *= 1.0 - seam * uSeam;
   // Voxels that glow keep their colour whatever the light does.
   float g = vColor.a * uGlow;
-  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.74);
+  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.5);
   o = vec4(c, 1.0);
 }`;
 
@@ -358,7 +358,7 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D, this.shadowTex);
 
     const view = [frame.ox, frame.oy, frame.s, 0];
-    const soft = frame.soft ?? 0.5;
+    const soft = frame.soft ?? 0.22;
 
     // page shadow
     gl.useProgram(this.ground.p);
@@ -368,7 +368,7 @@ export class Renderer {
     gl.uniform1i(this.ground.u.uShadow, 0);
     gl.uniform2f(this.ground.u.uLShear, lsx, lsy);
     gl.uniform4fv(this.ground.u.uLRect, lrect);
-    gl.uniform1f(this.ground.u.uSoft, soft * 1.6);
+    gl.uniform1f(this.ground.u.uSoft, soft * 1.25);
     gl.disable(gl.DEPTH_TEST); gl.depthMask(false);
     gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindVertexArray(this.vaoGround);
@@ -405,8 +405,8 @@ export class Renderer {
         gl.uniform4fv(g.uView, view);
         gl.uniform2fv(g.uShear, frame.shear);
         gl.uniform2f(g.uSize, wpx, hpx);
-        gl.uniform1f(g.uRadius, frame.glowRadius ?? 2.6);
-        gl.uniform1f(g.uStrength, light.glow * (frame.glowStrength ?? 0.2));
+        gl.uniform1f(g.uRadius, frame.glowRadius ?? 2.4);
+        gl.uniform1f(g.uStrength, light.glow * (frame.glowStrength ?? 0.11));
         gl.depthMask(false);
         gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.bindVertexArray(this.vaoGlow);
