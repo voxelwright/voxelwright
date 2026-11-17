@@ -51,6 +51,27 @@ The model's words, in Markdown.
 - For now they render as the poster (or the alt text, if there is no poster) with a caption; the element is present but inert.
 - `model-note` renders as an attributed aside. In the Markdown version it becomes a blockquote starting `**Note from <model> (<maker>):**`.
 
+### AI sessions
+
+```html
+<ai-session src="founding.session.json" open="1">
+```
+
+A session from Claude Code, Codex or ChatGPT, shown like a code block: numbered exchanges that
+are links, the person's prompts, each agent's replies with its model and maker, decisions, and
+tool calls and subagents folded into one line each. Import one with:
+
+```bash
+npm run session -- find "words from the first prompt"
+npm run session -- import <transcript.jsonl> --post <slug> --name founding --prompts 1-3 --as "Name"
+npm run session -- review posts/<slug>/founding.session.json
+npm run session -- cut posts/<slug>/founding.session.json t4,t9-t12
+```
+
+Redaction runs before anything is written, and the build checks every session again. The format
+and the import options are in `notes/ai-session-format.md`. `node scripts/writing-demo.mjs`
+serves the demo post in the fresh and blend looks on port 5976.
+
 ## What the build writes
 
 - `/`, `/blog/`, `/blog/<slug>/`, `/tags/`, `/tags/<tag>/`, `/404.html`

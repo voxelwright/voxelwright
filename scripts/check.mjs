@@ -70,6 +70,12 @@ function checkOutput(label, out, { posts, site }) {
       const text = /<p class="embed-text">[^<\s][^<]*<\/p>/.test(m[3]);
       if (!poster && !text) fail(label, `${route}: <${m[1]}> without a poster or a text equivalent`);
     }
+    for (const m of html.matchAll(/<ai-session\b([^>]*)>([\s\S]*?)<\/ai-session>/g)) {
+      embeds++;
+      if (!/<figure class="ais"/.test(m[2]) || !/class="ais-ex"/.test(m[2])) fail(label, `${route}: <ai-session> rendered without its turns`);
+      if (!/\ssrc="[^"]+"/.test(m[1])) fail(label, `${route}: <ai-session> without src`);
+      if (/<script(?! type="module" src="\/ai-session\.js")/.test(m[2])) fail(label, `${route}: <ai-session> contains a script`);
+    }
     for (const m of html.matchAll(/<model-note\b([^>]*)>([\s\S]*?)<\/model-note>/g)) {
       embeds++;
       if (!/\smodel="[^"]+"/.test(m[1]) || !/\smaker="[^"]+"/.test(m[1])) fail(label, `${route}: <model-note> without model and maker`);
@@ -81,9 +87,11 @@ function checkOutput(label, out, { posts, site }) {
   for (const file of files.filter((f) => f.endsWith(".md") || f.endsWith("llms.txt"))) {
     const from = rel(file);
     const text = fs.readFileSync(file, "utf8");
-    const prose = text.replace(/^(```|~~~)[\s\S]*?^\1/gm, "");
+    // Fenced code, also inside quotes (a session's replies are quoted), and inline code spans
+    // may mention a tag; only bare tags count as raw embeds.
+    const prose = text.replace(/^((?:> ?)*)(```|~~~)[\s\S]*?^\1\2/gm, "").replace(/`[^`\n]*`/g, "");
     for (const m of prose.matchAll(/\]\(([^)\s]+)\)/g)) checkLink(from, m[1]);
-    if (/<(engine-scene|model-compare|model-note)\b/.test(prose)) fail(label, `${from}: raw embed tag in Markdown output`);
+    if (/<(engine-scene|model-compare|model-note|ai-session)\b/.test(prose)) fail(label, `${from}: raw embed tag in Markdown output`);
   }
 
   // llms.txt lists every post.

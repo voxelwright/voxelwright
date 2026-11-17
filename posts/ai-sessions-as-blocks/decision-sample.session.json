@@ -1,0 +1,137 @@
+{
+ "format": "ai-session/1",
+ "title": "Choosing the store (synthetic sample)",
+ "source": {
+  "app": "Claude Code",
+  "version": "9.9.9"
+ },
+ "timezone": "America/Los_Angeles",
+ "people": [
+  {
+   "id": "h",
+   "name": "Mira",
+   "role": "author"
+  }
+ ],
+ "agents": [
+  {
+   "id": "a1",
+   "name": "Claude",
+   "model": "Opus 5.5",
+   "modelId": "claude-opus-5-5",
+   "maker": "Anthropic",
+   "role": "main"
+  },
+  {
+   "id": "a2",
+   "name": "Claude",
+   "model": "Fable 5.2",
+   "modelId": "claude-fable-5-2",
+   "maker": "Anthropic",
+   "role": "main"
+  }
+ ],
+ "turns": [
+  {
+   "id": "t1",
+   "type": "prompt",
+   "by": "h",
+   "at": "2026-11-16T18:00:00.000Z",
+   "text": "Where should posts live once I can write them from the website? Keep it boring and safe. My token is [token] and my mail is [email]."
+  },
+  {
+   "id": "t2",
+   "type": "activity",
+   "by": "a1",
+   "at": "2026-11-16T18:00:05.000Z",
+   "tools": [
+    {
+     "tool": "Read",
+     "label": "README.md"
+    },
+    {
+     "tool": "Shell",
+     "label": "List the posts"
+    }
+   ]
+  },
+  {
+   "id": "t3",
+   "type": "reply",
+   "by": "a1",
+   "at": "2026-11-16T18:00:20.000Z",
+   "text": "Both stores work. One question decides it."
+  },
+  {
+   "id": "t4",
+   "type": "decision",
+   "by": "a1",
+   "at": "2026-11-16T18:00:20.000Z",
+   "questions": [
+    {
+     "header": "Store",
+     "question": "Where should a published post be written first?",
+     "multi": false,
+     "options": [
+      {
+       "label": "Private git repo",
+       "description": "Every publish is a commit; the build runs in CI."
+      },
+      {
+       "label": "D1 and R2",
+       "description": "Posts in a database, files in a bucket; a builder exports them."
+      }
+     ],
+     "picked": [
+      "Private git repo"
+     ]
+    },
+    {
+     "header": "Sign-in",
+     "question": "How should the editor know it is you?",
+     "multi": false,
+     "options": [
+      {
+       "label": "Passkey",
+       "description": "Face ID or Touch ID on your own devices."
+      },
+      {
+       "label": "Cloudflare Access",
+       "description": "An email code or Google sign-in in front of /edit."
+      }
+     ],
+     "picked": [],
+     "text": "Keep both until the spike measures them"
+    }
+   ]
+  },
+  {
+   "id": "t5",
+   "type": "event",
+   "event": "model-switch",
+   "at": "2026-11-16T18:01:30.000Z",
+   "text": "Switched to Fable 5.2"
+  },
+  {
+   "id": "t6",
+   "type": "reply",
+   "by": "a2",
+   "at": "2026-11-16T18:01:30.000Z",
+   "text": "Then the git repo is the source of truth, and the spike keeps both sign-ins until the numbers are in.\n\n## Next\n- Build the write path against a local bare repo.\n- Measure publish-to-live for both."
+  },
+  {
+   "id": "t7",
+   "type": "event",
+   "event": "interrupted",
+   "at": "2026-11-16T18:02:00.000Z",
+   "text": "The person stopped the agent."
+  }
+ ],
+ "redaction": {
+  "rules": [
+   "api key",
+   "email"
+  ],
+  "replaced": 2
+ }
+}

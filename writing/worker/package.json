@@ -1,0 +1,10 @@
+{
+  "name": "site-writing-spike-worker",
+  "private": true,
+  "type": "module",
+  "description": "cf dev looks for a dev server here; it resolves to the site's own wrangler and cf.",
+  "devDependencies": {
+    "cf": "1.0.0-rc.0",
+    "wrangler": "4.163.0"
+  }
+}

@@ -9,9 +9,11 @@
   },
   "scripts": {
     "new": "node scripts/new.mjs",
+    "session": "node scripts/session.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
     "check": "node scripts/check.mjs && node --test \"test/*.test.mjs\"",
+    "test": "node --test \"test/*.test.mjs\"",
     "deploy": "npm run check && cf deploy"
   },
   "dependencies": {

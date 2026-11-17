@@ -5,6 +5,9 @@ import path from "node:path";
 import MarkdownIt from "markdown-it";
 import { createHighlighter } from "shiki";
 import { LOOKS, BASELINE_CODE } from "./looks.mjs";
+import { validateSession } from "../lib/session/format.mjs";
+import { findLeaks } from "../lib/session/redact.mjs";
+import { sessionHtml, sessionFeedHtml, sessionMarkdown } from "../lib/session/render.mjs";
 
 const LANGS = ["ts", "tsx", "js", "jsx", "json", "bash", "shell", "html", "css", "md", "yaml", "toml", "rust", "python", "glsl", "wgsl", "diff", "sql"];
 const THEMES = [...new Set([...BASELINE_CODE, ...Object.values(LOOKS).flatMap((l) => l.code)])];
@@ -20,6 +23,8 @@ export const EMBEDS = {
   "engine-scene": { required: ["src"], equivalent: true, bodiless: true, files: ["src", "poster"] },
   "model-compare": { required: ["before", "after"], equivalent: true, bodiless: true, files: ["before", "after", "poster"] },
   "model-note": { required: ["model", "maker"], files: [] },
+  // A session's text equivalent is the session itself, so it needs no alt or poster.
+  "ai-session": { required: ["src"], bodiless: true, files: ["src"] },
 };
 const EMBED_NAMES = Object.keys(EMBEDS);
 const EMBED_START = new RegExp(`^<(${EMBED_NAMES.join("|")})(?=[\\s>/]|$)`);
@@ -210,6 +215,10 @@ function validateEmbed(meta, env) {
   for (const attr of spec.files) {
     const value = meta.attrs[attr];
     if (!value || isExternal(value) || value.startsWith("/")) continue;
+    if (meta.name === "ai-session" && value !== path.basename(value)) {
+      errors.push(`${where} ${attr} must be a file in the post folder.`);
+      continue;
+    }
     if (!fs.existsSync(path.join(ctx.dir, value))) {
       errors.push(`${where} ${attr}="${value}" does not exist in ${path.relative(process.cwd(), ctx.dir) || "."}.`);
     }
@@ -217,6 +226,32 @@ function validateEmbed(meta, env) {
   if (meta.name === "model-note" && !meta.body) {
     errors.push(`${where} is empty; write the model's words between the tags.`);
   }
+  if (meta.name === "ai-session") loadSession(meta, ctx, errors, where);
+}
+
+/** Reads, validates and leak-checks a session file; the parsed session rides on the token. */
+function loadSession(meta, ctx, errors, where) {
+  const src = meta.attrs.src;
+  if (!src || isExternal(src) || src.startsWith("/") || src !== path.basename(src)) {
+    if (src) errors.push(`${where} src must be a file in the post folder.`);
+    return;
+  }
+  const file = path.join(ctx.dir, src);
+  if (!fs.existsSync(file)) return; // reported above
+  let session;
+  try {
+    session = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    errors.push(`${where} ${src} is not valid JSON.`); // the parser's message quotes the file
+    return;
+  }
+  const problems = validateSession(session);
+  if (problems.length) errors.push(`${where} ${src} is not a valid ai-session/1 file: ${problems.slice(0, 5).join("; ")}.`);
+  const leaks = findLeaks(session);
+  if (leaks.length) errors.push(`${where} ${src} still contains ${leaks.join(", ")}. Re-import it with npm run session, or remove them.`);
+  const open = meta.attrs.open;
+  if (open && open !== "all" && !/^\d+(\s*,\s*\d+)*$/.test(open)) errors.push(`${where} open="${open}" must be "all" or prompt numbers like "1,3".`);
+  if (!problems.length && !leaks.length) meta.session = session;
 }
 
 function findStrayEmbeds(tokens, ctx, errors) {
@@ -243,6 +278,7 @@ const LABELS = {
 function renderEmbedHtml(meta, env) {
   const a = meta.attrs;
   const url = (v) => (v ? resolveUrl(v, env) : "");
+  if (meta.name === "ai-session") return renderSessionHtml(meta, env, url);
   if (meta.name === "model-note") {
     const who = `${a.model} (${a.maker})`;
     const body = md.render(meta.body, env);
@@ -270,6 +306,7 @@ function renderEmbedHtml(meta, env) {
 function renderEmbedMarkdown(meta, ctx) {
   const a = meta.attrs;
   const url = (v) => resolveUrl(v, { ctx, absolute: true });
+  if (meta.name === "ai-session") return meta.session ? sessionMarkdown(meta.session, { src: url(a.src), caption: a.caption }) : "";
   if (meta.name === "model-note") {
     const label = `**Note from ${a.model} (${a.maker}):**`;
     const body = rewriteMarkdownUrls(meta.body, ctx).split("\n");
@@ -283,6 +320,30 @@ function renderEmbedMarkdown(meta, ctx) {
     return `${still}\n\n*${caption}Interactive engine scene${a.poster ? ", shown as a still" : ""}. Scene data: [${path.basename(a.src)}](${url(a.src)}).*`;
   }
   return `${still}\n\n*${caption}Model comparison${a.poster ? ", shown as a still" : ""}. Models: [before](${url(a.before)}) and [after](${url(a.after)}).*`;
+}
+
+const highlightTurn = (code, lang) => md.options.highlight(code, lang);
+
+function renderSessionHtml(meta, env, url) {
+  const a = meta.attrs;
+  if (!meta.session) return "";
+  if (env.absolute) return sessionFeedHtml(meta.session, { src: url(a.src), caption: a.caption, highlight: highlightTurn }) + "\n";
+  // Ids must be unique on the page, also when one file is shown twice.
+  env.sessionIds ??= new Map();
+  const base = "s-" + (path.basename(a.src).replace(/\.session\.json$|\.json$/, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "session");
+  const seen = env.sessionIds.get(base) ?? 0;
+  env.sessionIds.set(base, seen + 1);
+  const id = seen ? `${base}-${seen + 1}` : base;
+  const open = !a.open ? undefined : a.open === "all" ? "all" : new Set(a.open.split(",").map((n) => Number(n.trim())));
+  // The stylesheet and script come with the first session on a page, and never into the feed.
+  const assets = env.sessionAssets ? "" : `<link rel="stylesheet" href="/ai-session.css"><script type="module" src="/ai-session.js"></script>`;
+  env.sessionAssets = true;
+  return (
+    assets +
+    `<ai-session src="${attr(url(a.src))}">` +
+    sessionHtml(meta.session, { id, src: url(a.src), open, caption: a.caption, highlight: highlightTurn }) +
+    `</ai-session>\n`
+  );
 }
 
 // ---------------------------------------------------------------------------
