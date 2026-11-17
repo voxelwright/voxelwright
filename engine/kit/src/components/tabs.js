@@ -31,7 +31,7 @@ export const tabs = {
     s.snap(xs[index] ?? 1);
     // Labels keep one baseline. The block is set back by its own height, so its face lands
     // exactly on the seat it marks.
-    tabsEl.forEach((t) => wrapLabel(t));
+    tabsEl.forEach((t) => live.label(wrapLabel(t), () => live.faceZ)); // they do not move; registered so their words are kept on whole pixels
     block.ty = -1;
   },
 

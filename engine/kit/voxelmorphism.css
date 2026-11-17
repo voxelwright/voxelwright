@@ -305,7 +305,10 @@
 .vx-list { list-style: none; margin: 0; padding: var(--vx); display: grid; gap: var(--vx); }
 .vx-list > li { display: flex; min-block-size: calc(var(--vx) * 11); }
 .vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
-.vx-list > li:is([aria-current="true"], [aria-selected="true"]) .vx-row { font-weight: 700; }
+/* With voxels the part wraps each row's content in a .vx-row. A row written without one takes
+   the same box, so a list is the same height plain and live. */
+.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
+.vx-list > li:is([aria-current="true"], [aria-selected="true"]) { font-weight: 700; }
 .vx-row :is(a, button) { color: inherit; font: inherit; text-decoration: none; background: none; border: 0; padding: 0; text-align: start; cursor: pointer; }
 .vx-row :is(a, button)::after { content: ""; position: absolute; inset: 0; }
 .vx-row :is(a, button):focus-visible { outline: 0; }
@@ -408,7 +411,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
   font-family: var(--vx-key-font); font-size: var(--vx-key-size); letter-spacing: 0;
   -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
 }
-:is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; }
+:is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; white-space: nowrap; } /* a key carries one line */
 .vx-tabs[data-vx-size="small"] > [role="tab"] { font-size: var(--vx-key-size); }
 
 /* ---------- Lettering: a sign, or a heading ---------- */

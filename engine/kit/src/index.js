@@ -35,8 +35,10 @@ let pending = null; // a promise while a handed renderer is still on its way
 let waiting = [];   // what adopt() and release() were asked for meanwhile, in order
 
 /**
- * Hand the kit a renderer: anything with draw(frame, ctx2d), or a promise for one (a WebGPU
- * device takes a moment). Call it before adopt(). While the promise is open the page is plain and
+ * Hand the kit a renderer: anything with draw(frame, target), or a promise for one (a WebGPU
+ * device takes a moment). target is the part's 2D context; a renderer with ownsCanvas: true is
+ * given the part's canvas element instead and takes its own context on it (the kit still makes
+ * and sizes the canvas, and never reads it back). Call it before adopt(). While the promise is open the page is plain and
  * adopt() remembers what it was asked for; if it settles on nothing, the page stays plain.
  * Returns a promise for the stage, or null.
  */

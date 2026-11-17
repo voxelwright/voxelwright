@@ -225,7 +225,10 @@ Decide by how often it happens (from the site-craft rules):
 - **Bleed.** A part's canvas is larger than its box by 5 to 16 voxels a side, for its shadow and
   for pieces in flight. Give the page `overflow-x: clip` so bleed never widens it, and do not put a
   part inside `overflow: hidden` unless you mean to cut its shadow.
-- The renderer is behind one call, `draw(frame, ctx2d)`. `use(renderer)` hands the kit another
+- The renderer is behind one call, `draw(frame, target)`. The target is the part's 2D context,
+  or the part's canvas itself for a renderer that says `ownsCanvas: true` and draws into each
+  canvas with its own context (measured in real Safari with 59 parts redrawn every frame: 29 ms
+  a frame that way, against 159 copying from one WebGPU canvas and 378 for the WebGL2 stand-in). `use(renderer)` hands the kit another
   backend (the Village engine, WebGPU) without touching a part. It takes a renderer or a promise
   for one, because a WebGPU device takes a moment to arrive: until it does the page is plain,
   `adopt()` and `release()` are remembered in order, and `ready()` resolves to the stage, or to

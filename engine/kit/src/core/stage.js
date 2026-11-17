@@ -21,7 +21,10 @@ export class Live {
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'vx-canvas';
     this.canvas.setAttribute('aria-hidden', 'true');
-    this.ctx = this.canvas.getContext('2d');
+    // A renderer that owns the canvases (ownsCanvas) draws straight into each part's canvas with
+    // its own context, so the kit must not take one: a canvas has only one kind of context.
+    // Otherwise the renderer draws elsewhere and copies the picture into this 2D context.
+    this.ctx = stage.renderer.ownsCanvas ? null : this.canvas.getContext('2d');
     (def.canvasHost ? def.canvasHost(el) : el).prepend(this.canvas);
     el.setAttribute('data-vx-live', '');
     this.unbind = def.bind ? def.bind(this) : null;
@@ -75,7 +78,10 @@ export class Live {
     if (c.width !== this.wpx) c.width = this.wpx;
     if (c.height !== this.hpx) c.height = this.hpx;
     c.style.width = cw + 'px'; c.style.height = ch + 'px';
-    c.style.left = -padPx + 'px'; c.style.top = -padPx + 'px';
+    this.base = -padPx;
+    this.nudge ??= [0, 0];
+    c.style.left = this.base + this.nudge[0] + 'px'; c.style.top = this.base + this.nudge[1] + 'px';
+    this.stage.resnapSoon();
     this.s = this.vx * dpr;
     // The face that carries the label sits exactly on the element's box when at rest.
     const lift = this.faceZ;
@@ -155,13 +161,15 @@ export class Live {
       bounds: this.bounds, light: LIGHTS[this.theme], shear: SHEAR, glows: this.glows,
       soft: this.def.soft, glowRadius: this.def.glowRadius, glowStrength: this.def.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
-    }, this.ctx);
+    }, this.ctx ?? this.canvas);
     // labels follow their faces
     const k = this.vx;
     for (const l of this.labels) {
       const dz = l.z() - this.faceZ;
       const tx = dz * SHEAR[0] * k, ty = dz * SHEAR[1] * k;
-      const t = Math.abs(tx) < 0.01 && Math.abs(ty) < 0.01 ? '' : `translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px)`;
+      // plus the nudge that puts the words on whole pixels (see Stage.resnap)
+      l.ax = tx + (l.nx ?? 0); l.ay = ty + (l.ny ?? 0);
+      const t = Math.abs(l.ax) < 0.01 && Math.abs(l.ay) < 0.01 ? '' : `translate(${l.ax.toFixed(3)}px, ${l.ay.toFixed(3)}px)`;
       if (l.last !== t) { l.node.style.transform = t; l.last = t; }
     }
     if (ok) this.dirty = false;
@@ -193,7 +201,11 @@ export class Live {
 }
 
 export class Stage {
-  /** renderer: anything with draw(frame, ctx2d); it may call its onrestore after losing its context. */
+  /**
+   * renderer: anything with draw(frame, target). target is the part's 2D context, or, if the
+   * renderer says ownsCanvas: true, the part's canvas element itself. It may call its onrestore
+   * after losing its context or device, and every part is drawn again.
+   */
   constructor(renderer) {
     this.renderer = renderer;
     this.renderer.onrestore = () => { for (const l of this.lives.values()) l.invalidate(); };
@@ -214,19 +226,59 @@ export class Stage {
         const live = this.lives.get(e.target);
         if (!live) continue;
         live.visible = e.isIntersecting;
+        if (live.visible) this.resnapSoon(); // it may have been moved since it was last looked at
         if (live.visible && live.dirty) this.wake(live);
       }
     }, { rootMargin: '200px' });
     this.dpr = window.devicePixelRatio;
     addEventListener('resize', () => {
+      this.resnapSoon();
       if (window.devicePixelRatio === this.dpr) return;
       this.dpr = window.devicePixelRatio;
       for (const l of this.lives.values()) { l.layout(); l.invalidate(); }
     });
+    document.fonts?.addEventListener?.('loadingdone', () => this.resnapSoon());
+    // text reflowing above a part moves it without resizing it; the page's height gives that away
+    if (document.body) new ResizeObserver(() => this.resnapSoon()).observe(document.body);
     const retint = () => { for (const l of this.lives.values()) l.retint(); };
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retint);
     new MutationObserver(retint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'], subtree: true });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && this.awake.size) this.schedule(); });
+  }
+
+  /**
+   * Put every part's canvas, and the words on it, on whole device pixels.
+   * A page may leave a part on a fraction of a pixel: a gap in rem, a line of text above it, a
+   * label before it in a row. Voxels and pixel lettering are sharp only on whole pixels, so each
+   * canvas and each label is nudged by the fraction it is off. All reads, then all writes.
+   */
+  resnap() {
+    this.snapping = 0;
+    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const off = (v) => Math.round(v * dpr) / dpr - v;
+    const todo = [];
+    const range = document.createRange();
+    for (const l of this.lives.values()) {
+      if (!l.canvas.isConnected || !l.el.offsetParent && getComputedStyle(l.el).position !== 'fixed') continue;
+      const c = l.canvas.getBoundingClientRect();
+      // where the words themselves start, not their box: a label may be centred in a wider one
+      const labels = l.labels.map((b) => { range.selectNodeContents(b.node); const r = range.getBoundingClientRect(); return [b, off(r.left - (b.ax ?? 0)), off(r.top - (b.ay ?? 0))]; });
+      todo.push([l, off(c.left - l.nudge[0]), off(c.top - l.nudge[1]), labels]);
+    }
+    for (const [l, nx, ny, labels] of todo) {
+      let moved = false;
+      if (Math.abs(nx - l.nudge[0]) > 0.005 || Math.abs(ny - l.nudge[1]) > 0.005) {
+        l.nudge = [nx, ny];
+        l.canvas.style.left = l.base + nx + 'px'; l.canvas.style.top = l.base + ny + 'px';
+      }
+      for (const [b, x, y] of labels) if (Math.abs(x - (b.nx ?? 0)) > 0.005 || Math.abs(y - (b.ny ?? 0)) > 0.005) { b.nx = x; b.ny = y; moved = true; }
+      if (moved) l.invalidate(); // the next draw applies the labels' nudges
+    }
+  }
+
+  resnapSoon() {
+    if (this.snapping) return;
+    this.snapping = requestAnimationFrame(() => this.resnap());
   }
 
   add(el, def) {

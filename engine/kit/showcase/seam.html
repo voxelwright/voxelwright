@@ -19,9 +19,21 @@
   const made = new Promise((res, rej) => setTimeout(() => {
     if (q.has('fail')) return rej(new Error('no adapter'));
     if (q.has('none')) return res(null);
+    if (q.has('own')) {
+      // a stand-in for a backend that owns each part's canvas: it takes its own context on the
+      // element it is handed and fills the part's box
+      return res({ ownsCanvas: true, draw(frame, canvas) {
+        log.calls++;
+        log.target = canvas instanceof HTMLCanvasElement ? 'canvas' : 'context';
+        const c = canvas.getContext('2d');
+        c.clearRect(0, 0, canvas.width, canvas.height);
+        c.fillStyle = '#0e22ff'; c.fillRect(frame.ox, frame.oy, frame.s * 8, frame.s * 4);
+        return true;
+      } });
+    }
     const r = new Renderer();
     const draw = r.draw.bind(r);
-    r.draw = (...a) => { log.calls++; return draw(...a); };
+    r.draw = (...a) => { log.calls++; log.target = a[1] instanceof HTMLCanvasElement ? 'canvas' : 'context'; return draw(...a); };
     res(r);
   }, late));
   use(made);
@@ -33,7 +45,7 @@
   log.before = { adoptReturned: first, plain: plain(), live: document.querySelectorAll('[data-vx-live]').length };
   const st = await ready();
   await new Promise((r) => setTimeout(r, 200));
-  log.after = { stage: !!st, plain: plain(), live: document.querySelectorAll('[data-vx-live]').length, lives: st ? st.lives.size : 0 };
+  log.after = { stage: !!st, plain: plain(), live: document.querySelectorAll('[data-vx-live]').length, lives: st ? st.lives.size : 0, kitContexts: st ? [...st.lives.values()].filter((l) => l.ctx).length : 0 };
   document.documentElement.dataset.ready = '';
 </script>
 </html>

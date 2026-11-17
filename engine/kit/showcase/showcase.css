@@ -8,20 +8,22 @@ html {
   font-family: var(--vx-font);
   font-size: 106.25%; /* 17 px */
   line-height: 1.6;
+  --pad: round(clamp(1rem, 5vw, 4rem), var(--vx)); /* the page's side padding, in whole voxels */
   -webkit-text-size-adjust: 100%;
   overflow-x: clip; /* voxel shadows bleed past their boxes; they must not widen the page */
-  scroll-padding-top: 2rem;
+  scroll-padding-top: calc(var(--vx) * 8);
 }
 
 body {
   margin: 0;
-  padding: clamp(1.25rem, 5vw, 4rem) clamp(1rem, 5vw, 4rem) 6rem;
-  max-inline-size: 76rem;
-  margin-inline: auto;
+  padding: var(--pad) var(--pad) calc(var(--vx) * 24);
+  max-inline-size: calc(var(--vx) * 323);
+  /* centred, but never on half a pixel */
+  margin-inline: round(down, max(0px, (100% - var(--vx) * 323) / 2), 1px) 0;
   overflow-x: clip;
 }
 
-.skip { position: absolute; inset-inline-start: 1rem; inset-block-start: -4rem; padding: 0.5rem 0.75rem; background: var(--vx-enamel); color: #fff; font-weight: 700; }
+.skip { position: absolute; inset-inline-start: 1rem; inset-block-start: -4rem; padding: calc(var(--vx) * 2) calc(var(--vx) * 3); background: var(--vx-enamel); color: #fff; font-weight: 700; }
 .skip:focus { inset-block-start: 1rem; z-index: 10; }
 
 a { color: var(--vx-link); text-decoration-thickness: 0.09em; text-underline-offset: 0.18em; }
@@ -33,11 +35,11 @@ h2, h3 { text-wrap: balance; }
 
 /* ---------- top ---------- */
 
-.top { display: grid; gap: 1.5rem; justify-items: start; margin-block-end: clamp(3.25rem, 8vw, 5.5rem); }
-.top .vx-sign { margin-block-end: 0.75rem; max-inline-size: 100%; }
+.top { display: grid; gap: calc(var(--vx) * 6); justify-items: start; margin-block-end: clamp(3.25rem, 8vw, 5.5rem); }
+.top .vx-sign { margin-block-end: calc(var(--vx) * 3); max-inline-size: 100%; }
 .lede { max-inline-size: 36em; font-size: clamp(1.15rem, 0.9rem + 1vw, 1.4rem); line-height: 1.45; font-weight: 500; letter-spacing: -0.005em; }
-.aside { color: var(--vx-ink-quiet); margin-block-start: -0.5rem; }
-.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 1.25rem 2.25rem; margin-block-start: 0.75rem; }
+.aside { color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * -2); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 5) calc(var(--vx) * 10); margin-block-start: calc(var(--vx) * 3); }
 
 /* ---------- sections ---------- */
 
@@ -47,48 +49,48 @@ h2.vx-sign { margin-block-end: calc(var(--vx) * 10); }
 /* The board's plain version takes the size the voxels will: these are the script's own sums for
    this word (lettering + margins + frame, in voxels, times 4 px). */
 .top { container-type: inline-size; }
-@container (min-width: 496px) { .top .vx-sign:not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); line-height: 1.5; padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
-@container (min-width: 984px) { .top .vx-sign:not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
-h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin-block-end: 0.75rem; }
-.intro { max-inline-size: 38em; margin-block: 0 2.5rem; }
+@container (min-width: 496px) { .top .vx-sign:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); line-height: 1.5; padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
+@container (min-width: 984px) { .top .vx-sign:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin-block-end: calc(var(--vx) * 3); }
+.intro { max-inline-size: 38em; margin-block: 0 calc(var(--vx) * 11); }
 
 .rule { display: grid; grid-template-columns: minmax(0, 27rem) minmax(0, 1fr); gap: 2rem clamp(2rem, 6vw, 5rem); align-items: start; }
 .rule + .rule { margin-block-start: clamp(2.75rem, 6vw, 4rem); }
-.say { display: grid; gap: 0.9rem; align-content: start; }
+.say { display: grid; gap: calc(var(--vx) * 4); align-content: start; }
 .say h3 { margin-block-end: 0; }
 .say code, .foot code { font-family: var(--vx-mono); font-size: 0.88em; }
-.show { display: grid; gap: 1.75rem; align-content: start; min-inline-size: 0; }
+.show { display: grid; gap: calc(var(--vx) * 7); align-content: start; min-inline-size: 0; }
 
-.bench { display: flex; align-items: center; gap: 2rem; min-block-size: 5.5rem; }
-.bench.wrap { flex-wrap: wrap; gap: 1.75rem 2rem; }
-.bench.stack { display: grid; gap: 1.5rem; align-items: start; justify-items: stretch; }
+.bench { display: flex; align-items: center; gap: calc(var(--vx) * 8); min-block-size: calc(var(--vx) * 23); }
+.bench.wrap { flex-wrap: wrap; gap: calc(var(--vx) * 7) calc(var(--vx) * 8); }
+.bench.stack { display: grid; gap: calc(var(--vx) * 6); align-items: start; justify-items: stretch; }
 .bench.stack.start { justify-items: start; }
-.bench.tall { min-block-size: 9rem; }
+.bench.tall { min-block-size: calc(var(--vx) * 38); }
 .bench.gridded { --vx: 8px; --_line: color-mix(in oklab, var(--vx-ink) 9%, transparent); padding: calc(var(--vx) * 4); justify-content: center;
   background-image: linear-gradient(to right, var(--_line) 1px, transparent 1px), linear-gradient(to bottom, var(--_line) 1px, transparent 1px);
   background-size: var(--vx) var(--vx); }
 .grow { flex: 1 1 14rem; }
-.pair { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+.pair { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 6); }
 
-.knob { display: grid; gap: 0.6rem; font-weight: 600; font-size: 0.94rem; }
+.knob { display: grid; gap: calc(var(--vx) * 3); font-weight: 600; font-size: 0.94rem; }
 .say .knob { max-inline-size: 22rem; }
-.knob > span:first-child { display: flex; justify-content: space-between; gap: 1rem; }
+.knob > span:first-child { display: flex; justify-content: space-between; gap: calc(var(--vx) * 4); }
 .knob output { font-weight: 500; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
 
-#scale-bench { min-block-size: 7rem; }
+#scale-bench { min-block-size: calc(var(--vx) * 30); }
 #build-bench .vx-card { inline-size: min(100%, 22rem); }
 #build-bench .vx-card > :not(canvas) { transition: opacity 140ms ease; }
 #build-bench .vx-card[data-gone] > :not(canvas) { opacity: 0; }
 
-.swatches { --vx: 5px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2rem 1.25rem; font-weight: 600; font-size: 0.94rem; }
-.swatches li { display: grid; gap: 0.9rem; justify-items: start; }
-.swatches.heights { align-items: end; margin-block-end: 0.5rem; }
-.swatches.heights li { gap: 1.6rem; }
+.swatches { --vx: 5px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 5); font-weight: 600; font-size: 0.94rem; }
+.swatches li { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
+.swatches.heights { align-items: end; margin-block-end: calc(var(--vx) * 2); }
+.swatches.heights li { gap: calc(var(--vx) * 7); }
 
 /* ---------- kit ---------- */
 
 .kit { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: clamp(2.5rem, 5vw, 3.5rem) clamp(2.5rem, 7vw, 6rem); }
-.kit figure { margin: 0; display: grid; gap: 1.25rem; align-content: start; grid-template-rows: auto 1fr; }
+.kit figure { margin: 0; display: grid; gap: calc(var(--vx) * 5); align-content: start; grid-template-rows: auto 1fr; }
 .kit figcaption { order: -1; font-weight: 700; font-size: 1.3rem; line-height: 1.2; letter-spacing: -0.01em; }
 .kit .bench { min-block-size: 0; }
 .kit .vx-tabs { justify-self: start; }
@@ -112,7 +114,7 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
 @media (max-width: 52rem) {
   .rule { grid-template-columns: minmax(0, 1fr); }
   .kit { grid-template-columns: minmax(0, 1fr); }
-  .swatches { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.5rem 0.75rem; }
+  .swatches { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 3); }
   .swatches { --vx: 4px; }
 }
 @media (max-width: 34rem) {
@@ -120,8 +122,34 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
   .swatches.heights { font-size: 0.8rem; }
 }
 @media (max-width: 26rem) {
-  .controls { gap: 1rem 1.5rem; }
+  .controls { gap: calc(var(--vx) * 4) calc(var(--vx) * 6); }
   .shelf { --vx: 4px; padding-inline: calc(var(--vx) * 2); }
   .shelf .plank { margin-inline: calc(var(--vx) * -2); }
   .bench.gridded { --vx: 6px; }
 }
+
+/* ---------- the page on the voxel grid ----------
+   A voxel, and the pixel lettering on a key, are sharp only when they start on a whole pixel.
+   With voxels the kit nudges each part there itself. For the plain version the page has to keep
+   its own spacing whole: every line height here is a whole number of voxels, whatever the text
+   size, and gaps that follow the window are rounded to voxels. */
+:where(body, body *) { line-height: round(1.6em, var(--vx)); }
+.lede { line-height: round(1.45em, var(--vx)); }
+h2, h3, .kit figcaption, .quiet-h, #detail h2 { line-height: round(1.2em, var(--vx)); }
+.code { line-height: round(1.65em, var(--vx)); }
+.top { gap: calc(var(--vx) * 6); margin-block-end: round(clamp(3.25rem, 8vw, 5.5rem), var(--vx)); }
+section { margin-block-end: round(clamp(3.75rem, 8vw, 6.25rem), var(--vx)); }
+h3 { margin-block-end: calc(var(--vx) * 3); }
+.intro { margin-block: 0 calc(var(--vx) * 10); }
+.rule { grid-template-columns: minmax(0, calc(var(--vx) * 115)) minmax(0, 1fr); gap: calc(var(--vx) * 8) round(clamp(2rem, 6vw, 5rem), var(--vx)); }
+.rule + .rule { margin-block-start: round(clamp(2.75rem, 6vw, 4rem), var(--vx)); }
+.say { gap: calc(var(--vx) * 4); }
+.show { gap: calc(var(--vx) * 7); }
+.bench { gap: calc(var(--vx) * 8); min-block-size: calc(var(--vx) * 23); flex-wrap: wrap; }
+.bench.wrap { gap: calc(var(--vx) * 7) calc(var(--vx) * 8); }
+.bench.stack { gap: calc(var(--vx) * 6); }
+.controls { gap: calc(var(--vx) * 5) calc(var(--vx) * 9); margin-block-start: calc(var(--vx) * 3); }
+.kit { gap: round(clamp(2.5rem, 5vw, 3.5rem), var(--vx)) round(clamp(2.5rem, 7vw, 6rem), var(--vx)); }
+.kit figure { gap: calc(var(--vx) * 5); }
+.knob { gap: calc(var(--vx) * 2); }
+@media (max-width: 52rem) { .rule { grid-template-columns: minmax(0, 1fr); } }
