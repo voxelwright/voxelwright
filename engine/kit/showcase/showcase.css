@@ -51,6 +51,12 @@ h2.vx-sign { margin-block-end: calc(var(--vx) * 10); }
 .top { container-type: inline-size; }
 @container (min-width: 496px) { .top .vx-sign:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); line-height: 1.5; padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
 @container (min-width: 984px) { .top .vx-sign:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+/* Narrow phones. In Vox Sign the word needs 81 voxels of column: 324 px. Below that the board,
+   and only the board, is built from a smaller voxel: 3 px, then 2 px. Its letters, margin, frame
+   and shadow all follow, in the voxels and in the plain version alike, because both read the
+   board's own --vx. The word is never broken. The widths are for this word: (its cells + 8) voxels. */
+@container (width < 324px) { .top .vx-sign:not([data-vx-board="none"]) { --vx: 3px; } }
+@container (width < 243px) { .top .vx-sign:not([data-vx-board="none"]) { --vx: 2px; } }
 h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; margin-block-end: calc(var(--vx) * 3); }
 .intro { max-inline-size: 38em; margin-block: 0 calc(var(--vx) * 11); }
 
@@ -65,6 +71,13 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
 .bench.wrap { flex-wrap: wrap; gap: calc(var(--vx) * 7) calc(var(--vx) * 8); }
 .bench.stack { display: grid; gap: calc(var(--vx) * 6); align-items: start; justify-items: stretch; }
 .bench.stack.start { justify-items: start; }
+/* Tabs cannot wrap. With full seats the garden strip is 358 px, wider than this page's column on
+   any screen under 398 px (the screen less its side padding), so there it takes the kit's small
+   seats, 286 px: the same legends and the same height to hit. Under 320 px no strip fits at
+   4 px a voxel, so the strips alone are built from 3 px voxels, as the board is, and their
+   legends follow (the key size is five voxels of the strip's own). */
+@media (max-width: 397px) { .bench .vx-tabs:not([data-vx-size]) > [role="tab"] { padding-inline: calc(var(--vx) * 2); } }
+@media (max-width: 319px) { .vx-tabs { --vx: 3px; --vx-key-size: calc(var(--vx) * 5); } }
 .bench.tall { min-block-size: calc(var(--vx) * 38); }
 .bench.gridded { --vx: 8px; --_line: color-mix(in oklab, var(--vx-ink) 9%, transparent); padding: calc(var(--vx) * 4); justify-content: center;
   background-image: linear-gradient(to right, var(--_line) 1px, transparent 1px), linear-gradient(to bottom, var(--_line) 1px, transparent 1px);
