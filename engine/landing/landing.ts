@@ -185,7 +185,7 @@ export async function land(tell: Tell): Promise<void> {
   }
 
   // ── Each frame ──────────────────────────────────────────────────────────
-  let probing = 0, probed = false
+  let probing = 0, probed = false, probeFrames = 0
   on.each = (dt) => {
     clock += dt
     shake *= Math.exp(-dt * 9)
@@ -201,9 +201,19 @@ export async function land(tell: Tell): Promise<void> {
     if (press && !press.moved && !press.grab) ring(press.x, press.y, (performance.now() - press.t - HOLD_FROM) / (HOLD_FULL - HOLD_FROM))
     if (dirty && on.bodies === 0 && clock - stirred > MEND_AFTER && !head.held) mend()
     else if (on.bodies > 0) stirred = clock
-    // Once the world is seen, the frames are watched for two seconds: late even at the fewest pixels, the holder is told.
-    if (seenAt && !probed && (probing += dt) > 2) { probed = true; if (on.scale <= 0.35 && on.frameMs > 34) tell('slow', { ms: Math.round(on.frameMs), scale: on.scale }) }
+    // Once the world is seen, the frames are watched for two seconds: fewer than twenty-five a second over them, at
+    // whatever size the picture has been brought down to by then, and the holder is told. (`dt` is never more than a
+    // tenth of a second, so the window is counted by the clock.)
+    if (seenAt && !probed) {
+      if (!probing) probing = performance.now()
+      probeFrames++
+      const took = performance.now() - probing
+      if (took > 2000) { probed = true; if (probeFrames < took / 40) tell('slow', { ms: Math.round(took / probeFrames), scale: on.scale }) }
+    }
+    // For the check alone: `?drag=50` wastes so many ms a frame, as a slow device would.
+    if (drag) { const until = performance.now() + drag; while (performance.now() < until) { /* spin */ } }
   }
+  const drag = Number(query.get('drag') ?? 0)
   let seenAt = 0
   on.seenNear = (ms, firstFrame) => { seenAt = ms; tell('ready', { ms, firstFrame }) }
   const entered = () => { if (where === 'sky') fly('home', FLY_IN, undefined, arrive) }

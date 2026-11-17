@@ -127,12 +127,23 @@ for (const name of only) {
   check(await inner.evaluate(() => globalThis.landing.on.frames) === hiddenAt, 'with the tab hidden the street draws nothing')
   await inner.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); document.dispatchEvent(new Event('visibilitychange')) })
 
+  // ── A tap knocks, a hold breaks ──
+  const places = await inner.evaluate(() => globalThis.landing.places)
+  const leg = [places.table.at[0] - 13, places.table.at[1] - 15, places.table.at[2] + 8]
+  for (let i = 0; i < 3; i++) { await press(page, await spot(inner, leg), 60); await page.waitForTimeout(700) }
+  const tapped = await inner.evaluate(() => ({ thrown: globalThis.landing.on.thrown, broken: globalThis.landing.on.broken }))
+  check(tapped.thrown === 3 && tapped.broken === 0, `three taps on the table's glass leg throw three balls and break nothing (${tapped.broken} changes)`)
+  await press(page, await spot(inner, leg), 900)
+  await inner.waitForFunction(() => globalThis.landing.on.broken > 0, null, { timeout: 5000 }).catch(() => {})
+  check(await inner.evaluate(() => globalThis.landing.on.broken) > 0, 'a hold on the same leg breaks it')
+  await inner.evaluate(() => globalThis.landing.mend())
+  await page.waitForTimeout(600)
+
   // ── Frames: nothing touched, then played with ──
   await page.mouse.move(640, 300)
   await page.waitForTimeout(2500)
   out.idle = said(await watch(inner, seconds))
   await page.screenshot({ path: join(shots, `street-${name}.png`) })
-  const places = await inner.evaluate(() => globalThis.landing.places)
   const playing = watch(inner, seconds)
   const until = Date.now() + (seconds - 0.5) * 1000
   for (let i = 0; Date.now() < until; i++) {
@@ -142,7 +153,7 @@ for (const name of only) {
     await page.waitForTimeout(150)
   }
   const played = await playing
-  out.playing = { ...said(played), thrown: await inner.evaluate(() => globalThis.landing.on.thrown), edits: await inner.evaluate(() => globalThis.landing.on.broken) }
+  out.playing = { ...said(played), thrown: await inner.evaluate(() => globalThis.landing.on.thrown) - 4, edits: await inner.evaluate(() => globalThis.landing.on.broken) }
   check(out.playing.thrown > 0 && out.playing.edits > 0, `played with, it threw ${out.playing.thrown} balls and the world was changed ${out.playing.edits} times`)
   check(played.faults.length === 0, `the GPU reported no fault${played.faults.length ? `: ${played.faults[0]}` : ''}`)
   await page.waitForTimeout(600)
@@ -150,11 +161,12 @@ for (const name of only) {
 
   // ── What breaks mends ──
   check(await page.evaluate(() => globalThis.home.heard.includes('broke')), 'the page was told something broke')
-  await page.waitForFunction(() => globalThis.home.heard.includes('mended'), null, { timeout: 30000 }).catch(() => {})
+  // (It was mended once already, by hand, after the hold above: this waits for the one it does by itself.)
+  await page.waitForFunction(() => globalThis.home.heard.filter((h) => h === 'mended').length > 1, null, { timeout: 40000 }).catch(() => {})
   await inner.waitForFunction(() => { const s = globalThis.landing.on.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 20000 }).catch(() => {})
   await page.waitForTimeout(500)
   const mended = await inner.evaluate(() => ({ dirty: globalThis.landing.dirty, bodies: globalThis.landing.on.bodies, pieces: globalThis.landing.on.pieces }))
-  check(await page.evaluate(() => globalThis.home.heard.includes('mended')) && !mended.dirty && mended.bodies === 0 && mended.pieces === 0, `left alone, the corner mended itself (${JSON.stringify(mended)})`)
+  check(await page.evaluate(() => globalThis.home.heard.filter((h) => h === 'mended').length > 1) && !mended.dirty && mended.bodies === 0 && mended.pieces === 0, `left alone, the corner mended itself (${JSON.stringify(mended)})`)
   await page.screenshot({ path: join(shots, `street-${name}-mended.png`) })
   // Ten more times: what was done to the world is forgotten each time, so the list of it stays as long as the scene's own, and frames cost what they did.
   for (let i = 0; i < 10; i++) {
@@ -220,6 +232,19 @@ for (const name of only) {
     await phone.touchscreen.tap(Math.max(60, Math.min(330, tx)), Math.max(120, Math.min(560, ty)))
     await phone.waitForTimeout(500)
     check(await street(phone).evaluate(() => globalThis.landing.on.thrown) > before, 'a finger\'s tap throws a ball')
+    // The face is round the corner: a drag turns the eye to it, a tap goes to it, and it is pulled there.
+    const ph = street(phone), fp = (await ph.evaluate(() => globalThis.landing.places)).face
+    await phone.mouse.move(120, 300); await phone.mouse.down(); await phone.mouse.move(300, 300, { steps: 8 }); await phone.mouse.up()
+    const [fx, fy] = await spot(ph, [fp.at[0] - 6, fp.at[1], fp.at[2]])
+    await phone.touchscreen.tap(fx, fy)
+    await landed(phone, 'face', 8000).catch(() => {})
+    await phone.waitForTimeout(300)
+    const [nx, ny] = await spot(ph, [fp.at[0] - 8, fp.at[1] - 6, fp.at[2]])
+    await phone.mouse.move(nx, ny); await phone.mouse.down(); await phone.mouse.move(nx + 90, ny - 60, { steps: 8 })
+    const far = await ph.evaluate(() => globalThis.landing.head.stretch)
+    await phone.screenshot({ path: join(shots, `phone-${name}-face.png`) })
+    await phone.mouse.up()
+    check(await phone.evaluate(() => globalThis.home.at) === 'face' && far > 5, `on a phone the face is found by a drag and a tap (the tap landed at ${Math.round(fx)}, ${Math.round(fy)}), and pulled ${round(far)} cells`)
     await phone.tap('#plain')
     await phone.waitForTimeout(800)
     await phone.screenshot({ path: join(shots, `phone-${name}-page.png`) })
@@ -250,6 +275,19 @@ for (const name of only) {
   }
   { const { c } = await page2d('an adapter that never answers', {}, (p) => p.addInitScript(() => { navigator.gpu.requestAdapter = () => new Promise(() => {}) })); await c.close() }
   { const { c } = await page2d('?view=2d', {}, null, '?view=2d'); await c.close() }
+  {
+    // A device that draws it slowly (every frame made to take 60 ms more): the street says so, and the page comes back with a word of why.
+    const { context: c, page: p } = await open(browser)
+    await p.goto(home + '?drag=60')
+    await p.waitForFunction(() => globalThis.home.heard.includes('slow'), null, { timeout: 30000 }).catch(() => {})
+    await p.waitForTimeout(800)
+    const got = await p.evaluate(() => ({ heard: globalThis.home.heard.includes('slow'), view: globalThis.home.view, note: document.querySelector('#note').textContent, hidden: document.querySelector('#note').hidden, times: globalThis.home.times }))
+    check(got.heard && got.view === '2d' && !got.hidden && /slowly/.test(got.note), `frames too slow in the street's first two seconds: the page comes back and says why (${got.times.slow - got.times.ready} ms after the street was ready)`)
+    await p.click('#street')
+    await p.waitForTimeout(600)
+    check(await p.evaluate(() => globalThis.home.view === '3d'), 'and Street shows it all the same')
+    await c.close()
+  }
   {
     // The choice is kept: Plain page chosen once, the next visit is the page, whatever the address says.
     const { context: c, page: p } = await open(browser)
@@ -288,6 +326,7 @@ if (has('clip')) {
   const browser = await browsers.chrome(), dir = join(shots, 'film')
   rmSync(dir, { recursive: true, force: true })
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1, recordVideo: { dir, size: { width: 1280, height: 720 } } }), page = await context.newPage()
+  const began = Date.now(), moments = {}
   await page.goto(home)
   await landed(page, 'home', 60000)
   const inner = street(page), places = await inner.evaluate(() => globalThis.landing.places)
@@ -298,6 +337,7 @@ if (has('clip')) {
   await press(page, await spot(inner, places.signs[1].at), 900)
   await page.waitForTimeout(700)
   await press(page, await spot(inner, places.signs[3].at), 900)
+  moments.broken = (Date.now() - began) / 1000 + 0.9
   await page.waitForFunction(() => globalThis.home.heard.includes('mended'), null, { timeout: 30000 }).catch(() => {})
   await page.waitForTimeout(1800)
   // The face.
@@ -305,7 +345,7 @@ if (has('clip')) {
   await landed(page, 'face')
   await page.waitForTimeout(500)
   const nose = await spot(inner, [places.face.at[0] - 8, places.face.at[1] - 6, places.face.at[2]])
-  await page.mouse.move(nose[0], nose[1]); await page.mouse.down(); await page.mouse.move(nose[0] + 190, nose[1] - 70, { steps: 25 }); await page.waitForTimeout(350); await page.mouse.up()
+  await page.mouse.move(nose[0], nose[1]); await page.mouse.down(); await page.mouse.move(nose[0] + 190, nose[1] - 70, { steps: 25 }); moments.pulled = (Date.now() - began) / 1000 + 0.15; await page.waitForTimeout(350); await page.mouse.up()
   await page.waitForTimeout(1300)
   const ear = await spot(inner, [places.face.at[0] - 5, places.face.at[1] + 2, places.face.at[2] - 17])
   await page.mouse.move(ear[0], ear[1]); await page.mouse.down(); await page.mouse.move(ear[0] - 160, ear[1] + 40, { steps: 20 }); await page.waitForTimeout(300); await page.mouse.up()
@@ -326,6 +366,7 @@ if (has('clip')) {
     renameSync(join(dir, made), join(shots, 'landing.webm'))
     spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', join(shots, 'landing.webm'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '20', join(shots, 'landing.mp4')])
     spawnSync('ffmpeg', ['-v', 'error', '-y', '-i', join(shots, 'landing.webm'), '-vf', 'fps=0.6,scale=480:-1,tile=5x5', '-frames:v', '1', join(shots, 'landing-strip.jpg')])
+    for (const [what, at] of Object.entries(moments)) spawnSync('ffmpeg', ['-v', 'error', '-y', '-ss', at.toFixed(2), '-i', join(shots, 'landing.webm'), '-frames:v', '1', join(shots, `film-${what}.jpg`)])
     console.log(`  ${join(shots, 'landing.webm')}\n  ${join(shots, 'landing.mp4')}\n  ${join(shots, 'landing-strip.jpg')}`)
   } else failures.push('no film was made')
   rmSync(dir, { recursive: true, force: true })

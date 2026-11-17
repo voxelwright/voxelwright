@@ -73,7 +73,8 @@ function load() {
   frame.title = 'The street: the same links as signs on buildings'
   frame.tabIndex = -1
   frame.allow = 'fullscreen'
-  frame.src = new URL(`../index.html${query.has('scene') ? `?scene=${encodeURIComponent(query.get('scene'))}` : ''}`, location.href).href
+  // What this page's address asks of the street (another scene, an hour) is passed on to it.
+  frame.src = new URL(`../index.html${location.search}`, location.href).href
   document.querySelector('#world').append(frame)
   // Out of sight is not drawn: under the page (said in `show`), or off the window.
   new IntersectionObserver(([e]) => tell(e.isIntersecting && root.dataset.view === '3d' ? 'go' : 'rest')).observe(frame)
