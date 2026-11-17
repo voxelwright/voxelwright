@@ -35,7 +35,7 @@ Where a number exists it is read before anyone gives an opinion.
 |---|---|---|
 | Gates passing, both renderers | section 1 | all |
 | Motion: time to settle against the spec's range; `no response`, `pop`, `snap`, `empty frame` | `film.mjs` | passes |
-| Parts built, of the full set (shadcn's and Bootstrap's lists) | the inventory, section 5 | 13 of about 53 |
+| Parts built, of the full set (shadcn's and Bootstrap's lists) | the inventory, section 5 | 13 of 76 |
 | Plain against voxels, per part and state (an image difference) | to be built with the web version | not measured |
 
 ## 3. Look and feel
@@ -75,23 +75,68 @@ open, a round compares several directions side by side before anything is polish
 
 ## 5. The full set
 
-Exists: button, switch, slider, text field, card, list, menu, dialog, tabs, meter, toast, block,
-lettering.
+Held against shadcn's component index and Bootstrap's Components, Forms and Content lists, as
+they stood on 17 November 2026. Names follow whichever of the two is plainer.
+
+Exists (13): button, switch, slider, text field (input and textarea), card, list, dropdown menu,
+dialog, tabs, meter (progress), toast, block, lettering.
 
 To build, in this order:
 
-1. **Forms:** checkbox, radio group, select, field errors, input group, number stepper, toggle
-   button and group.
-2. **Reading:** prose (headings, links, quote, code, kbd), table, separator, badge, callout,
-   avatar, figure, breadcrumb, pagination, skeleton, spinner, empty state.
-3. **Overlays:** accordion, tooltip, popover, alert dialog, sheet, context menu, hover card.
-4. **Navigation:** navbar, sidebar, menubar, command palette, combobox, scroll area.
-5. **Heavy:** calendar and date picker, carousel, data table, chart, resizable panels, code input.
+1. **Forms (12):** checkbox, radio group, select (native first), label, field with error and
+   validation states, floating label, input group, number stepper, toggle button, toggle group,
+   button group, close button.
+2. **Reading (20):** prose (headings, links, quote, lists), code block, kbd, table, figure and
+   image, aspect ratio, separator, badge, callout (alert), avatar, item, breadcrumb, pagination,
+   skeleton (placeholder), spinner, empty state, scroll area, scroll spy, list group, direction
+   (right to left).
+3. **Overlays (9):** accordion, collapsible, tooltip, popover, hover card, alert dialog, sheet,
+   drawer (offcanvas), context menu.
+4. **Navigation (7):** navbar, navs, navigation menu, menubar, sidebar, command palette, combobox.
+5. **Heavy (8):** calendar, date picker, carousel, data table, chart, resizable panels, code
+   input (one-time code), the theme picker.
+6. **Conversation (7),** shadcn's newest set: message, bubble, message scroller, attachment,
+   marker, questionnaire, trace.
 
-Also: the theme picker.
+That is 63 to build and 76 in all.
 
 ## 6. Log
 
 | Round | Date | What | Result |
 |---|---|---|---|
-| 0 | 2026-11-17 | Baseline of the kit as merged at `bf55acd` | see `shots/baseline/` |
+| 0 | 2026-11-17 | Baseline of the kit as merged at `bf55acd`, shot on the engine renderer (`shots/baseline/`) | GPT 6.2 Sol: 6.22. Opus 5.5: 6.33. See below. |
+
+### Round 0, by criterion
+
+| | GPT | Opus |
+|---|---|---|
+| Built from blocks | 7 | 8 |
+| Says what it does | 6 | 6 |
+| Level of detail | 5 | 6 |
+| Type | 7 | 6 |
+| Colour and light | 7 | 6 |
+| Motion and touch | 5 | 6 |
+| Composition and fit | 5 | 5 |
+| Consistency | 6 | 6 |
+| Its own voice | 8 | 8 |
+
+Both reviewers opened the pictures. What both found, so it is taken as true:
+
+1. At 390 px the page is cut: the fourth swatch of the light demo and its long button run off
+   the right edge. No gate sees it, because the page clips sideways overflow.
+2. At night every content surface and the action colour are one blue. A field does not read as
+   a hole, and a chalk button reads like an enamel one.
+3. The grid on reading faces is louder than the shape: cards look like graph paper.
+4. Words appear before the surface that carries them (menu and toast, the first 50 ms). The
+   film gate passes it, because it reads voxels and not labels.
+5. The dialog's scrim snaps off after the break has ended.
+6. The focus ring is a flat rectangle outside the solid, and at night it is the state colour.
+7. Menu items are set in a thin pixel weight beside a bold trigger.
+
+One each: hover shows nothing, the field is the weakest part (Opus); the dialog's blue header
+competes with its blue action, the tab block passes over the middle tab (GPT). Strongest part,
+both: the slider.
+
+Directions they would compare: fewer and larger blocks with quiet faces (both, GPT's bet);
+moulded material where light does the work instead of grid lines (Opus); only what you touch is
+solid, content is flat lit paper (Opus's bet).
