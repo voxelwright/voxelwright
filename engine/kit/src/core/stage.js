@@ -2,7 +2,7 @@
 // At rest nothing runs: no frame loop, no timers.
 
 import { Model } from './model.js';
-import { LIGHTS } from './materials.js';
+import { lookOf, lightOf } from './look.js';
 import { Spring, assemble, crumble, settle, reducedMotion } from './motion.js';
 
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
@@ -37,17 +37,21 @@ export class Live {
     const cs = getComputedStyle(el);
     this.vx = parseFloat(cs.getPropertyValue('--vx')) || 4;
     this.theme = cs.getPropertyValue('--vx-theme').trim() === 'night' ? 'night' : 'day';
+    // the look it stands in, and that look's own model for this part, if it has one
+    this.look = lookOf(cs);
+    const other = this.look.parts[def.name];
+    this.form = other ? { ...def, ...other } : def;
     const w = el.offsetWidth, h = el.offsetHeight;
     this.cssW = w; this.cssH = h;
     this.W = Math.max(1, Math.floor(w / this.vx + 0.01));
     this.H = Math.max(1, Math.floor(h / this.vx + 0.01));
-    this.pad = def.pad ?? 6;
+    this.pad = this.form.pad ?? 6;
     this.faceZ = 0;
     this.well = null;
     this.model = new Model();
     this.labels.length = 0;
-    def.build(this, this.model);
-    this.model.bake(this.theme);
+    this.form.build(this, this.model);
+    this.model.bake(this.theme, this.look);
     let n = 0, glows = false;
     for (const p of this.model.parts) { n += p.count; for (let i = 0; i < p.count; i++) if (p.col[i * 4 + 3] > 0) { glows = true; break; } }
     this.capacity = n;
@@ -56,16 +60,17 @@ export class Live {
     this.ao = new Uint32Array(n * 2);
     this.glows = glows;
     this.layout();
-    def.pose?.(this);
+    this.form.pose?.(this);
     this.invalidate();
   }
 
   retint() {
     const cs = getComputedStyle(this.el);
     const theme = cs.getPropertyValue('--vx-theme').trim() === 'night' ? 'night' : 'day';
+    if (lookOf(cs) !== this.look) return this.rebuild(); // another look is another shape
     if (theme === this.theme) return;
     this.theme = theme;
-    this.model.tint(theme);
+    this.model.tint(theme, this.look);
     this.invalidate();
   }
 
@@ -128,14 +133,14 @@ export class Live {
       p.fx.t += dt;
       moving = true;
     }
-    if (this.def.step && this.def.step(this, dt)) moving = true;
+    if (this.form.step && this.form.step(this, dt)) moving = true;
     if (moving) this.dirty = true;
     return moving;
   }
 
   draw() {
     if (!this.dirty || !this.visible) return;
-    this.def.pose?.(this);
+    this.form.pose?.(this);
     const pos = this.pos, col = this.col, ao = this.ao;
     let o = 0, n = 0;
     for (const p of this.model.parts) {
@@ -158,8 +163,8 @@ export class Live {
     }
     const ok = this.stage.renderer.draw({
       pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
-      bounds: this.bounds, light: LIGHTS[this.theme], shear: SHEAR, glows: this.glows,
-      soft: this.def.soft, glowRadius: this.def.glowRadius, glowStrength: this.def.glowStrength,
+      bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
+      soft: this.form.soft, glowRadius: this.form.glowRadius, glowStrength: this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx ?? this.canvas);
     // labels follow their faces
@@ -246,7 +251,7 @@ export class Stage {
     if (document.body) new ResizeObserver(() => this.resnapSoon()).observe(document.body);
     const retint = () => { for (const l of this.lives.values()) l.retint(); };
     matchMedia('(prefers-color-scheme: dark)').addEventListener('change', retint);
-    new MutationObserver(retint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'], subtree: true });
+    new MutationObserver(retint).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-vx-look', 'class'], subtree: true });
     document.addEventListener('visibilitychange', () => { if (!document.hidden && this.awake.size) this.schedule(); });
   }
 

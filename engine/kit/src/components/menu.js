@@ -13,16 +13,18 @@ export const menu = {
 
   build(live, m) {
     const { W, H, el, vx } = live;
-    m.part('panel').slab(0, 0, 0, W, H, 4, 'chalk', 2);
+    const d = live.look.float;
+    m.part('panel').slab(0, 0, 0, W, H, d, 'chalk', live.look.round);
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const first = items[0];
     const h = first ? Math.max(2, Math.round(first.offsetHeight / vx)) : 2;
     const pick = m.part('pick');
     pick.grounded = false;
-    pick.slab(2, 0, 4, Math.max(1, W - 4), h, 1, 'enamel', 1);
+    const inset = live.look.round;
+    pick.slab(inset, 0, d, Math.max(1, W - inset * 2), h, 1, 'enamel', 1);
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));
-    live.faceZ = 4;
-    items.forEach((it, i) => live.label(wrapLabel(it), () => (live.state.active === i ? 5 : 4)));
+    live.faceZ = d;
+    items.forEach((it, i) => live.label(wrapLabel(it), () => (live.state.active === i ? d + 1 : d)));
   },
 
   pose(live) {

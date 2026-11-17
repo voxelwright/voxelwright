@@ -1,7 +1,8 @@
 // A model is a few rigid parts; a part is a set of voxels on the integer grid.
 // Axes: x right, y down, z toward the viewer. z = 0 is the page; nothing goes below it.
 
-import { MATERIALS, MATERIAL_IDS, hash3 } from './materials.js';
+import { MATERIALS, hash3 } from './materials.js';
+import { BASE, tableOf } from './look.js';
 import { FONTS, raster } from './fonts/index.js';
 
 // x: 11 bits (-1024..1023), y: 13 bits (-4096..4095, so a long list fits), z: 8 bits (-128..127)
@@ -113,11 +114,11 @@ export class Part {
   }
 
   /** Turn the cells into flat arrays the renderer can draw. Hidden interior voxels are dropped. */
-  bake(theme) {
+  bake(theme, look) {
     const cells = this.cells;
     const grounded = this.grounded;
     const occ = (x, y, z) => (grounded && z < 0 && !this.sunk) || cells.has(key(x, y, z));
-    const pos = [], col = [], ao = [], mats = [], births = [];
+    const pos = [], col = [], ao = [], mats = [], births = [], flat = [];
     for (const [k, id] of cells) {
       const x = (k >>> 21) - 1024, y = ((k >>> 8) & 8191) - 4096, z = (k & 255) - 128;
       // exposed at all?
@@ -140,31 +141,37 @@ export class Part {
       ao.push(lo >>> 0, hi >>> 0);
       mats.push(id);
       births.push(this.births?.get(k) ?? 0);
+      // shows its front face and nothing else: the middle of a face, where a look may keep the surface plain
+      flat.push(!occ(x, y, z + 1) && occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) ? 1 : 0);
     }
     this.count = mats.length;
     this.rest = new Float32Array(pos);
     this.ao = new Uint32Array(ao);
     this.mats = new Uint8Array(mats);
     this.birth = new Float32Array(births);
+    this.flat = new Uint8Array(flat);
     this.col = new Float32Array(this.count * 4);
     this.scales = this.masked ? new Float32Array(this.count).fill(1) : null; // per-voxel size, for fills and growth
-    this.tint(theme);
+    this.tint(theme, look);
     return this;
   }
 
-  /** Recolour for a theme without rebuilding the shape. */
-  tint(theme) {
-    const { rest, mats, col } = this;
+  /** Recolour for a theme, in a look's colours, without rebuilding the shape. */
+  tint(theme, look = BASE) {
+    const { rest, mats, col, flat } = this;
+    const table = tableOf(look);
     for (let i = 0; i < this.count; i++) {
-      const m = MATERIAL_IDS[mats[i]];
+      const m = table[mats[i]];
       const base = theme === 'night' ? m.night : m.day;
       const x = Math.floor(rest[i * 3]), y = Math.floor(rest[i * 3 + 1]), z = Math.floor(rest[i * 3 + 2]);
-      let j = (hash3(x, y, z) - 0.5) * 2 * m.jitter;
-      if (m.grain) j += m.grain(x, y, z);
+      // a quiet look keeps the middle of a face plain; what glows keeps its grid, or it would lose its glow
+      const still = look.quiet && flat[i] && !(m.glow > 0);
+      let j = 0;
+      if (!still) { j = (hash3(x, y, z) - 0.5) * 2 * m.jitter; if (m.grain) j += m.grain(x, y, z); j *= look.grain; }
       col[i * 4] = clamp01(base[0] + j);
       col[i * 4 + 1] = clamp01(base[1] + j);
       col[i * 4 + 2] = clamp01(base[2] + j);
-      col[i * 4 + 3] = m.seamless ? -1 : m.glow; // the fourth value is glow; -1 means no seams
+      col[i * 4 + 3] = m.seamless || still ? -1 : m.glow; // the fourth value is glow; -1 means no seams
     }
   }
 }
@@ -185,13 +192,13 @@ export class Model {
     return p;
   }
 
-  bake(theme) {
-    for (const p of this.parts) p.bake(theme);
+  bake(theme, look) {
+    for (const p of this.parts) p.bake(theme, look);
     return this;
   }
 
-  tint(theme) {
-    for (const p of this.parts) p.tint(theme);
+  tint(theme, look) {
+    for (const p of this.parts) p.tint(theme, look);
   }
 
   get count() {

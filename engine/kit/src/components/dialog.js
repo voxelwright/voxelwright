@@ -17,10 +17,11 @@ export const dialog = {
     const head = el.querySelector(':scope > header');
     const hh = head ? Math.round((head.offsetTop + head.offsetHeight) / vx) : 0;
     const panel = m.part('panel');
-    panel.box(0, 0, 0, W, H, 6, 'chalk');
-    if (hh) panel.box(0, 0, 0, W, hh, 6, el.dataset.vxMaterial || 'enamel');
-    panel.notch(0, 0, 0, W, H, 6, 2);
-    live.faceZ = 6;
+    const d = live.look.dialog;
+    panel.box(0, 0, 0, W, H, d, 'chalk');
+    if (hh) panel.box(0, 0, 0, W, hh, d, el.dataset.vxMaterial || 'enamel');
+    panel.notch(0, 0, 0, W, H, d, live.look.round);
+    live.faceZ = d;
   },
 
   bind(live) {

@@ -14,11 +14,12 @@ export const toastDef = {
 
   build(live, m) {
     const { W, H, el } = live;
-    m.part('body').slab(0, 0, 0, W, H, 4, 'chalk', 2);
+    const d = live.look.float, r = live.look.round;
+    m.part('body').slab(0, 0, 0, W, H, d, 'chalk', r);
     const s = m.part('stripe');
     s.grounded = false;
-    s.box(0, 2, 4, 2, H - 4, 1, STRIPE[el.dataset.vxKind] || 'signal');
-    live.faceZ = 4;
+    s.box(0, r, d, r, H - r * 2, 1, STRIPE[el.dataset.vxKind] || 'signal');
+    live.faceZ = d;
   },
 
   bind(live) {

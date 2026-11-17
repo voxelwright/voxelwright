@@ -1,6 +1,7 @@
 // A static server for the showcase. Port 5985 by default; 127.0.0.1 only.
-// With --engine every page is handed the Village engine's renderer before its own script runs,
-// so the same pages and the same tools run on WebGPU: PORT=5986 node tools/serve.mjs --engine
+// The engine's renderer is the kit's default now. --engine still hands it over by name before a
+// page's own script runs, and has each page tell this server what drew it (milestones/seen.log),
+// which is how a phone's answer is read: PORT=5986 node tools/serve.mjs --engine
 import { createServer } from 'node:http';
 import { appendFile, readFile, rename, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';

@@ -12,14 +12,16 @@ export const card = {
   build(live, m) {
     const { W, H, el } = live;
     const body = m.part('body');
-    body.slab(0, 0, 0, W, H, 2, 'chalk', 2);
+    const d = live.look.slab;
+    body.slab(0, 0, 0, W, H, d, 'chalk', live.look.round);
     const edge = el.dataset.vxEdge;
     if (edge) {
       const spine = m.part('spine');
       spine.grounded = false;
-      spine.box(0, 2, 2, 2, H - 4, 1, edge);
+      const sw = live.look.round, sy = live.look.round; // the spine is as wide as the corner step, and starts below it
+      spine.box(0, sy, d, sw, H - sy * 2, 1, edge);
     }
-    live.faceZ = 2;
+    live.faceZ = d;
   },
 
   bind(live) {
