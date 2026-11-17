@@ -88,7 +88,7 @@ void main() {
   c *= 1.0 - seam * uSeam;
   // Voxels that glow keep their colour whatever the light does.
   float g = vColor.a * uGlow;
-  c = mix(c, base * (1.0 - seam * uSeam * 0.5), g);
+  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.74);
   o = vec4(c, 1.0);
 }`;
 
@@ -405,8 +405,8 @@ export class Renderer {
         gl.uniform4fv(g.uView, view);
         gl.uniform2fv(g.uShear, frame.shear);
         gl.uniform2f(g.uSize, wpx, hpx);
-        gl.uniform1f(g.uRadius, frame.glowRadius ?? 3.2);
-        gl.uniform1f(g.uStrength, light.glow * (frame.glowStrength ?? 0.34));
+        gl.uniform1f(g.uRadius, frame.glowRadius ?? 2.6);
+        gl.uniform1f(g.uStrength, light.glow * (frame.glowStrength ?? 0.2));
         gl.depthMask(false);
         gl.enable(gl.BLEND); gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
         gl.bindVertexArray(this.vaoGlow);

@@ -32,9 +32,22 @@ export class Part {
     this.masked = false;  // true if voxels show and hide one by one (see scales)
   }
 
-  plot(x, y, z, mat) {
-    this.cells.set(key(x, y, z), MATERIALS[mat].id);
+  /** One voxel. birth (0 to 1) is when it appears as the part grows; see grow(). */
+  plot(x, y, z, mat, birth) {
+    const k = key(x, y, z);
+    this.cells.set(k, MATERIALS[mat].id);
+    if (birth !== undefined) { (this.births ??= new Map()).set(k, birth); this.masked = true; }
     return this;
+  }
+
+  /** Show the voxels born by g (0 to 1). Each one pops in over a short window. */
+  grow(g, window = 0.05) {
+    const sc = this.scales, b = this.birth;
+    if (!sc || !b) return;
+    for (let i = 0; i < this.count; i++) {
+      const p = (g - b[i]) / window;
+      sc[i] = p <= 0 ? 0 : p >= 1 ? 1 : 1 + 2.1 * Math.pow(p - 1, 3) + 1.1 * Math.pow(p - 1, 2);
+    }
   }
 
   /** Fill a box. x, y, z is its top-left-back corner; w, h, d its size. */
@@ -86,7 +99,7 @@ export class Part {
     const cells = this.cells;
     const grounded = this.grounded;
     const occ = (x, y, z) => (grounded && z < 0) || cells.has(key(x, y, z));
-    const pos = [], col = [], ao = [], mats = [];
+    const pos = [], col = [], ao = [], mats = [], births = [];
     for (const [k, id] of cells) {
       const x = (k >>> 20) - OFF, y = ((k >>> 10) & 1023) - OFF, z = (k & 1023) - OFF;
       // exposed at all?
@@ -108,11 +121,13 @@ export class Part {
       pos.push(x + 0.5, y + 0.5, z + 0.5); // a voxel at layer z spans z to z + 1
       ao.push(lo >>> 0, hi >>> 0);
       mats.push(id);
+      births.push(this.births?.get(k) ?? 0);
     }
     this.count = mats.length;
     this.rest = new Float32Array(pos);
     this.ao = new Uint32Array(ao);
     this.mats = new Uint8Array(mats);
+    this.birth = new Float32Array(births);
     this.col = new Float32Array(this.count * 4);
     this.scales = this.masked ? new Float32Array(this.count).fill(1) : null; // per-voxel size, for fills and growth
     this.tint(theme);

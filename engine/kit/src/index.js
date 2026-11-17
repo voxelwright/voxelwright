@@ -4,13 +4,28 @@
 import { Stage } from './core/stage.js';
 import { Renderer } from './core/gl.js';
 import { button } from './components/button.js';
+import { toggle } from './components/toggle.js';
+import { slider } from './components/slider.js';
+import { field } from './components/field.js';
+import { card } from './components/card.js';
+import { list } from './components/list.js';
+import { tabs } from './components/tabs.js';
+import { meter } from './components/meter.js';
+import { menu } from './components/menu.js';
+import { dialog } from './components/dialog.js';
+import { toastDef, makeToast } from './components/toast.js';
+import { sign } from './components/sign.js';
+import { block } from './components/block.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
 export { layout as layoutText, measure as measureText } from './core/font.js';
 
-export const components = [button];
+export { plant, pot, STAGES, stageOf } from './core/plant.js';
+export { sound, cue } from './core/sound.js';
+
+export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, sign, block];
 let stage = null;
 
 export function plain() {
@@ -36,9 +51,10 @@ export function adopt(root = document) {
   return st;
 }
 
-/** Give an element back to plain CSS. */
-export function release(el) {
-  stage?.remove(el);
+/** Give an element, and everything under it, back to plain CSS. */
+export function release(root = document) {
+  if (!stage) return;
+  for (const el of [...stage.lives.keys()]) if (root === document || root === el || root.contains(el)) stage.remove(el);
 }
 
 /** The live model behind an element, for code that wants to play an effect on it. */
@@ -49,4 +65,14 @@ export function live(el) {
 /** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step? }. */
 export function define(def) {
   components.push(def);
+}
+
+/** Show a toast: toast('Watered.', { kind: 'done' | 'failed' | 'note', duration }). Works plain too. */
+export const toast = makeToast((el) => adopt(el), (el) => live(el));
+
+/** Close a dialog the way its own buttons do: it crumbles, then closes. */
+export function closeDialog(el, value) {
+  const l = live(el);
+  if (l?.state.leave) return l.state.leave(value);
+  el.close(value);
 }

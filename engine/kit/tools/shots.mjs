@@ -28,6 +28,12 @@ if (press) {
   await page.mouse.down();
   await page.waitForTimeout(400);
 }
+for (let i = 0; i < args.length; i++) {
+  if (args[i] === '--click') { await page.click(args[i + 1]); await page.waitForTimeout(Number(flag('after', 700))); }
+  if (args[i] === '--hover') { await page.hover(args[i + 1]); await page.waitForTimeout(250); }
+  if (args[i] === '--key') { await page.keyboard.press(args[i + 1]); await page.waitForTimeout(250); }
+  if (args[i] === '--eval') { await page.evaluate(args[i + 1]); await page.waitForTimeout(Number(flag('after', 700))); }
+}
 const clip = flag('clip', null);
 await page.screenshot({ path: `shots/${name}.png`, fullPage: has('full'), clip: clip ? Object.fromEntries(clip.split(',').map((v, i) => [['x', 'y', 'width', 'height'][i], Number(v)])) : undefined });
 if (errors.length) console.log('console:', errors.slice(0, 12).join('\n'));

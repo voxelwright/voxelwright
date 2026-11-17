@@ -8,3 +8,14 @@ export function wrapLabel(el, cls = 'vx-label') {
   el.append(label);
   return label;
 }
+
+/** Collect listeners so a component can drop them all at once. */
+export function listeners() {
+  const off = [];
+  const on = (target, type, fn, opts) => { target.addEventListener(type, fn, opts); off.push(() => target.removeEventListener(type, fn, opts)); };
+  on.watch = (target, opts, fn) => { const m = new MutationObserver(fn); m.observe(target, opts); off.push(() => m.disconnect()); };
+  on.done = () => { for (const f of off) f(); };
+  return on;
+}
+
+export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);

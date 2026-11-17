@@ -2,6 +2,7 @@
 // be pressed, and it goes down into the page when you press it. A disabled button sits low.
 
 import { PRESS, RELEASE, CALM } from '../core/motion.js';
+import { cue } from '../core/sound.js';
 import { wrapLabel } from './util.js';
 
 const CAP = 3;       // voxels the cap stands above its socket
@@ -35,8 +36,8 @@ export const button = {
     wrapLabel(el);
     const press = live.spring('press'), hover = live.spring('hover');
     let held = false;
-    const down = () => { if (live.state.off) return; held = true; press.to(-TRAVEL, PRESS.k, PRESS.c); live.invalidate(); };
-    const up = () => { if (!held) return; held = false; press.to(0, RELEASE.k, RELEASE.c); live.invalidate(); };
+    const down = () => { if (live.state.off) return; held = true; press.to(-TRAVEL, PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
+    const up = () => { if (!held) return; held = false; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
     const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
     const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
     const leave = () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(); live.invalidate(); };
