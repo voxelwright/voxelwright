@@ -18,7 +18,7 @@ before(() => {
   repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flag-proof-test-")));
   git(ROOT, "clone", "--quiet", "--no-hardlinks", ROOT, repo);
   // the code under test is the working copy's, committed in the scratch clone as its base
-  for (const rel of ["scripts/flag-proof.mjs", "generator", "lib", "features/README.md", "site.config.mjs", "package.json", ".gitignore"]) fs.cpSync(path.join(ROOT, rel), path.join(repo, rel), { recursive: true });
+  for (const rel of ["scripts/flag-proof.mjs", "scripts/seed-commit.mjs", "generator", "lib", "features/README.md", "site.config.mjs", "package.json", ".gitignore"]) fs.cpSync(path.join(ROOT, rel), path.join(repo, rel), { recursive: true });
   // start from no flags, whatever the real config lists by now
   const config = path.join(repo, "site.config.mjs");
   const text = fs.readFileSync(config, "utf8");
@@ -438,4 +438,108 @@ export default { bodyEnd: () => {
   assert.equal(slow.status, 2, slow.stdout + slow.stderr);
   assert.match(slow.stderr, /ran longer than 5 seconds and was stopped/);
   assert.deepEqual(leftovers(), before);
+});
+
+// ---- what the third Sentinel pass found (Nov 17), each as the input it used
+
+test("strict refuses files the candidate hides with its own ignore rules", () => {
+  // a test file that is in no commit, hidden by an ignore file that is in no commit either: the
+  // next `npm test` in that folder would run it
+  const hidden = proof(candidate((d) => { feature(d); }, { commit: true }), "--strict");
+  assert.equal(hidden.code, 0, hidden.text);
+  const dir = candidate(feature);
+  put(dir, "test/.gitignore", "*\n");
+  put(dir, "test/zz-hidden.test.mjs", "import fs from 'node:fs';\n");
+  assert.equal(git(dir, "status", "--porcelain"), "", "git status sees nothing");
+  const r = proof(dir, "--strict");
+  assert.equal(r.code, 1, r.text);
+  assert.match(r.text, /files that are not in its commit, ignored ones included: .*"test\/\.gitignore".*"test\/zz-hidden\.test\.mjs"/);
+  // the same trick inside the feature, to hide a dotfile
+  const dots = candidate(feature);
+  put(dots, "features/hello/.gitignore", ".git*\n");
+  put(dots, "features/hello/.gitattributes", "* filter=lfs\n");
+  const d = proof(dots, "--strict");
+  assert.equal(d.code, 1, d.text);
+  assert.match(d.text, /not in its commit, ignored ones included/);
+});
+
+test("no git command of the proof runs a filter the owner's global settings define", () => {
+  const marker = path.join(repo, "filter-ran.txt");
+  const global = path.join(repo, "fake-global-gitconfig");
+  fs.writeFileSync(global, `[filter "handy"]\n\tclean = "sh -c 'echo clean >> ${marker}; cat'"\n\tsmudge = "sh -c 'echo smudge >> ${marker}; cat'"\n`);
+  const run = (dir, ...args) => { const r = spawnSync(process.execPath, ["scripts/flag-proof.mjs", "base", "--candidate", dir, ...args], { cwd: repo, encoding: "utf8", env: { ...process.env, GIT_CONFIG_GLOBAL: global } }); return { code: r.status, text: r.stdout + r.stderr }; };
+  // a hidden .gitattributes, and a tracked file whose time has changed, so `status` must read it again
+  const dir = candidate(feature);
+  put(dir, "features/hello/.gitignore", ".git*\n");
+  put(dir, "features/hello/.gitattributes", "* filter=handy\n");
+  const later = new Date(Date.now() + 5000);
+  fs.utimesSync(path.join(dir, "features/hello/feature.mjs"), later, later);
+  const strict = run(dir, "--strict");
+  assert.equal(fs.existsSync(marker), false, `a filter ran during the strict proof: ${fs.existsSync(marker) && fs.readFileSync(marker, "utf8")}`);
+  assert.equal(strict.code, 1, strict.text);
+  // committed, without strict: the export of the commit must not run it either
+  const committed = candidate((d) => { put(d, ".gitattributes", "*.md filter=handy\n"); });
+  const loose = run(committed);
+  assert.equal(fs.existsSync(marker), false, `a filter ran while the commit was exported: ${fs.existsSync(marker) && fs.readFileSync(marker, "utf8")}`);
+  assert.equal(loose.code, 0, loose.text);
+  fs.rmSync(global);
+});
+
+test("a candidate with loose edits, built where it stands, cannot load native code of its own", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  const lib = path.join(repo, "mark2.dylib");
+  const src = path.join(repo, "mark2.c");
+  fs.writeFileSync(src, '#include <stdio.h>\n#include <stdlib.h>\n__attribute__((constructor)) static void go(void) { char p[2048]; snprintf(p, sizeof p, "%s/loaded-native", getenv("TMPDIR")); FILE *f = fopen(p, "w"); if (f) { fputs("x", f); fclose(f); } }\n');
+  const cc = spawnSync("/usr/bin/cc", ["-dynamiclib", "-o", lib, src], { encoding: "utf8" });
+  assert.equal(cc.status, 0, `needs a C compiler: ${cc.stderr || cc.error}`);
+  // not committed: the candidate is built in its own folder, which the sandbox lets it read
+  const dir = candidate((d) => {
+    fs.copyFileSync(lib, path.join(d, "evil.node"));
+    put(d, "site.config.mjs", `import fs from "node:fs";\nimport path from "node:path";\ntry { process.dlopen({ exports: {} }, path.join(import.meta.dirname, "evil.node")); } catch {}\nif (fs.existsSync(path.join(process.env.TMPDIR, "loaded-native"))) throw new Error("NATIVE CODE LOADED");\n` + fs.readFileSync(path.join(d, "site.config.mjs"), "utf8"));
+  }, { commit: false });
+  const r = proof(dir);
+  assert.doesNotMatch(r.text, /NATIVE CODE LOADED/);
+  assert.equal(r.code, 0, r.text);
+  assert.match(r.text, /plus uncommitted edits/);
+});
+
+// ---- scripts/seed-commit.mjs: how an agent commits, without running git in the folder it wrote in
+
+const commit = (dir, flag, message, env = {}) => { const r = spawnSync(process.execPath, ["scripts/seed-commit.mjs", dir, flag, message], { cwd: repo, encoding: "utf8", env: { ...process.env, ...env } }); return { code: r.status, text: r.stdout + r.stderr }; };
+
+test("seed-commit commits the feature and the config, nothing else, and runs nothing the worktree names", () => {
+  git(repo, "config", "user.name", "Test Owner");
+  git(repo, "config", "user.email", "owner@example.invalid");
+  const marker = path.join(repo, "commit-ran.txt");
+  const global = path.join(repo, "fake-global-gitconfig-2");
+  fs.writeFileSync(global, `[filter "handy"]\n\tclean = "sh -c 'echo clean >> ${marker}; cat'"\n[user]\n\tname = Somebody Else\n\temail = else@example.invalid\n`);
+  const dir = candidate((d) => {
+    feature(d);
+    put(d, "stray.txt", "left alone\n");
+    // every way the folder could get a command run by an ordinary `git add` and `git commit` there
+    put(d, "features/hello/.gitignore", ".git*\n");
+    put(d, "features/hello/.gitattributes", "* filter=handy\n");
+    put(d, ".githooks/pre-commit", `#!/bin/sh\necho hook >> ${marker}\n`);
+    fs.chmodSync(path.join(d, ".githooks/pre-commit"), 0o755);
+  }, { commit: false });
+  git(repo, "config", "core.hooksPath", ".githooks"); // a relative hooks path is looked up in the worktree
+  try {
+    const r = commit(dir, "hello", "Add the hello feature\nand a second line that is dropped", { GIT_CONFIG_GLOBAL: global });
+    assert.equal(fs.existsSync(marker), false, `something the worktree named ran: ${fs.existsSync(marker) && fs.readFileSync(marker, "utf8")}`);
+    assert.equal(r.code, 0, r.text);
+    const sha = r.text.match(/^seed-commit: ([0-9a-f]{40})$/m)?.[1];
+    assert.equal(sha, git(repo, "rev-parse", `seed/c${n}`), r.text);
+    assert.deepEqual(git(repo, "show", "--name-only", "--format=", sha).split("\n").sort(), ["features/hello/feature.mjs", "features/hello/static/hello/hello.js", "site.config.mjs"]);
+    assert.equal(git(repo, "show", "--no-patch", "--format=%an <%ae>|%s", sha), "Test Owner <owner@example.invalid>|Add the hello feature");
+    // again, with nothing new: it says so
+    const again = commit(dir, "hello", "Again");
+    assert.equal(again.code, 1, again.text);
+    assert.match(again.text, /nothing to commit/);
+  } finally {
+    git(repo, "config", "--unset", "core.hooksPath");
+    fs.rmSync(global, { force: true });
+  }
+  // a folder that is not a worktree of this checkout, the checkout itself, and a bad flag name
+  assert.equal(commit(os.tmpdir(), "hello", "x").code, 2);
+  assert.match(commit(repo, "hello", "x").text, /is not a worktree added from this checkout/);
+  assert.match(commit(dir, "../x", "x").text, /is not a flag name/);
 });

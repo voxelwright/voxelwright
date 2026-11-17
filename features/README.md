@@ -44,11 +44,19 @@ nothing from the worktree's `package.json` is used. The candidate must be this c
 worktree added from it (`git worktree add`); a separate clone is refused. The proof never runs
 git inside the candidate and never follows the candidate's own `.git`: a git folder can name
 commands for git to run, so which commit the candidate is on is read from this repository's own
-record of its worktrees. On success it prints that commit in full, as `flag-proof: proven …`.
+record of its worktrees. Its git calls also leave out your global git settings and run no hook,
+so a `.gitattributes` in the worktree cannot pick one of your filter commands (git-lfs, say) to
+run. On success it prints that commit in full, as `flag-proof: proven …`.
+
+An agent commits its change the same way, with `node scripts/seed-commit.mjs <worktree> <flag>
+"<message>"` run from the main checkout: it commits `features/<flag>/` and `site.config.mjs` of
+that worktree and nothing else, as you, without starting git in the worktree.
 
 Strict reads the change before running any of it and refuses unless all of this holds:
 
 - the change is committed and descends from the base;
+- the worktree holds its commit's files and nothing else: no untracked file, not even one its own
+  `.gitignore` hides (so run strict before any packages are installed there);
 - the worktree's `.git` is still the plain link git made for it;
 - it only adds or changes plain files inside `features/<name>/` (no links, no executables, no
   dotfiles), and only for features whose flag is off: one that is on is live code, and changing
@@ -83,6 +91,9 @@ What the proof does not cover:
   from any repository nested in it. Look at a failed attempt from the main checkout first:
   `git diff main...seed/<name>`.
 - A build can still see the names and sizes of files elsewhere on the machine, not what is in
-  them.
+  them. It can also learn your account's name, the machine's name and its network addresses.
+- The site's tests are not sandboxed. Run them on the proven commit in a fresh checkout
+  (`git worktree add --detach <folder> <commit>`), never in the folder the agent wrote in: a
+  file left loose there is in no commit and no proof, and the tests would load it.
 
 Turning a flag on is the owner's step, in `site.config.mjs`.

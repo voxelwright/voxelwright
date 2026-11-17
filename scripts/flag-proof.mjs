@@ -23,7 +23,8 @@
 // The builds run with no network and an empty environment, and are stopped after two minutes. On
 // macOS they are also shut in a sandbox: they write to one temporary folder only, read only that
 // folder, the installed packages and the system's own libraries, start no other process, open no
-// terminal, load no native code of their own and signal no other process. What a build prints is
+// terminal, load no native code of their own and signal no other process. (A build can still learn
+// the account's name, the machine's name and its network addresses.) What a build prints is
 // never passed through: on a failure it is quoted, marked as data. Every name and message that
 // comes from the candidate is printed in quotes, with anything but plain ASCII escaped.
 // Exit 0: identical. Exit 1: different, or a strict rule broken. Exit 2: could not run.
@@ -34,6 +35,7 @@ import { builtinModules } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { FLAG_NAME } from "../lib/flags.mjs";
+import { GIT_ENV, GIT_SAFE, git, linkIntact, recordOf, tryGit } from "../lib/worktree.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const stop = (code, message) => { console.error(message); process.exit(code); };
@@ -73,8 +75,6 @@ if (opts.try !== null && !FLAG_NAME.test(opts.try)) stop(2, `flag-proof: ${quote
 
 // What git and tar print is never passed through either: on a failure it ends up, quoted, in the error.
 const PIPED = ["pipe", "pipe", "pipe"];
-const git = (cwd, ...args) => execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 1 << 28, stdio: PIPED }).replace(/\n$/, "");
-const tryGit = (cwd, ...args) => { try { return git(cwd, ...args); } catch { return null; } };
 
 if (!fs.existsSync(opts.candidate) || !fs.statSync(opts.candidate).isDirectory()) stop(2, `flag-proof: no folder at ${quote(opts.candidate)}.`);
 const cand = fs.realpathSync(opts.candidate);
@@ -82,45 +82,18 @@ const base = tryGit(ROOT, "rev-parse", "--verify", "--quiet", `${opts.base}^{com
 if (!base) stop(2, `flag-proof: no commit named ${quote(opts.base)}.`);
 
 // ---- which commit the candidate is on
-// git is never run inside the candidate, and never finds a repository through it. The
-// candidate's .git, and any repository nested in the candidate, can name commands for git to run
-// (core.fsmonitor, a hook), and they would run here, outside any sandbox, before a single check.
-// So the candidate must be this checkout or a worktree added from it, and its commit and its
-// index are read from this repository's own record of that worktree.
-const common = git(ROOT, "rev-parse", "--path-format=absolute", "--git-common-dir");
-const record = recordOf(cand);
+// git is never run inside the candidate, never finds a repository through it, and never takes a
+// command from the owner's global settings on the candidate's say-so (see lib/worktree.mjs). The
+// candidate's .git, a repository nested in it, a .gitattributes: each can name a command for git
+// to run, and it would run here, outside any sandbox, before a single check.
+const record = recordOf(ROOT, cand);
 if (!record) stop(2, `flag-proof: ${quote(cand)} is not this checkout or a worktree added from it (git worktree add).`);
-const gitOf = (...args) => git(ROOT, `--git-dir=${record}`, `--work-tree=${cand}`, "-c", "core.fsmonitor=false", ...args);
+const gitOf = (...args) => git(ROOT, `--git-dir=${record}`, `--work-tree=${cand}`, ...args);
 const head = tryGit(ROOT, `--git-dir=${record}`, "rev-parse", "--verify", "--quiet", "HEAD^{commit}");
 if (!head) stop(2, `flag-proof: ${quote(cand)} has no commit checked out.`);
 // a repository nested in the candidate is listed as it stands and never entered
 const dirty = gitOf("status", "--porcelain", "--ignore-submodules=all") !== "";
 const what = `${head.slice(0, 12)}${dirty ? " plus uncommitted edits" : ""} against ${base.slice(0, 12)}`;
-
-/** This repository's own folder for the worktree at dir (its HEAD and index live there), or null. */
-function recordOf(dir) {
-  const same = (p) => { try { return fs.realpathSync(p) === dir; } catch { return false; } };
-  const main = git(ROOT, "worktree", "list", "--porcelain", "-z").split("\0")[0].replace(/^worktree /, "");
-  if (same(main)) return common;
-  const added = path.join(common, "worktrees");
-  for (const id of fs.existsSync(added) ? fs.readdirSync(added) : []) {
-    let at;
-    try { at = fs.readFileSync(path.join(added, id, "gitdir"), "utf8").trim(); } catch { continue; }
-    if (same(path.dirname(path.resolve(added, id, at)))) return path.join(added, id);
-  }
-  return null;
-}
-
-/** Is the candidate's own .git still the plain link this repository made for it? Read as a file, never through git. */
-function linkIntact() {
-  const real = (p) => fs.realpathSync(p);
-  try {
-    const own = path.join(cand, ".git");
-    if (record === common) return fs.lstatSync(own).isDirectory() && real(own) === real(common);
-    const named = fs.lstatSync(own).isFile() && fs.readFileSync(own, "utf8").match(/^gitdir: ([^\n]+)\n?$/);
-    return Boolean(named) && real(path.resolve(cand, named[1])) === real(record);
-  } catch { return false; }
-}
 
 // ---- strict: read the change before running any of it
 let baseFlags = null; // what the base's flags literal reads as; checked against what the base's config evaluates to
@@ -134,7 +107,12 @@ function strictProblems() {
   if (dirty) out.push("the candidate has uncommitted or untracked files: commit the change, and nothing else, first");
   // This script never follows the candidate's .git, but whatever runs git in that folder next
   // (the site's tests, a shell prompt) does, and would take its settings from wherever it points.
-  if (!linkIntact()) out.push("the candidate's .git is not the link this repository made for it: do not run git in that folder");
+  // The candidate's own ignore files decide what `status` leaves out, so they are not asked:
+  // a file hidden that way is in no commit and no proof, yet it sits where the next command
+  // run in that folder will load it. Strict wants the commit's files there and nothing else.
+  const loose = gitOf("ls-files", "--others", "--directory", "-z").split("\0").filter(Boolean);
+  if (loose.length) out.push(`the candidate holds files that are not in its commit, ignored ones included: ${loose.slice(0, 6).map(quote).join(", ")}${loose.length > 6 ? ` and ${loose.length - 6} more` : ""}. Strict proves a worktree that holds its commit and nothing else, so run it before anything is installed there`);
+  if (!linkIntact(ROOT, cand, record)) out.push("the candidate's .git is not the link this repository made for it: do not run git in that folder");
   if (tryGit(ROOT, "merge-base", "--is-ancestor", base, head) === null) out.push("the candidate does not descend from the base");
   const changed = git(ROOT, "diff", "--name-only", "--no-renames", "-z", base, head).split("\0").filter(Boolean);
   // A feature whose flag is already on is live code: the build, the tests and the next deploy all
@@ -194,7 +172,7 @@ try {
   const exportTree = (commit, name) => {
     const dir = path.join(tmp, name);
     fs.mkdirSync(dir);
-    execFileSync("tar", ["-x", "-C", dir], { input: execFileSync("git", ["archive", commit], { cwd: ROOT, maxBuffer: 1 << 30, stdio: PIPED }), stdio: PIPED });
+    execFileSync("tar", ["-x", "-C", dir], { input: execFileSync("git", [...GIT_SAFE, "archive", commit], { cwd: ROOT, env: GIT_ENV, maxBuffer: 1 << 30, stdio: PIPED }), stdio: PIPED });
     fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(dir, "node_modules")); // the trusted checkout's packages
     return dir;
   };
@@ -302,7 +280,8 @@ process.exit(code);
  *    read what is typed
  *  - no other process: nothing forked, so nothing left running afterwards, and no program
  *    started (so not `security`, which reads the keychain)
- *  - no native code may be loaded from dir, the one place a build can write or bring its own
+ *  - native code may be loaded only from the system, node itself and the installed packages:
+ *    never from dir, and never from a candidate folder that was made readable
  *  - no signal to any other process
  */
 function sandboxFor(dir, readable = []) {
@@ -323,7 +302,8 @@ function sandboxFor(dir, readable = []) {
 (allow file-write* (subpath ${q(dir)}) (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/dtracehelper"))
 (deny file-read-data (subpath "/"))
 (allow file-read-data ${read})
-(deny file-map-executable (subpath ${q(dir)}))
+(deny file-map-executable)
+(allow file-map-executable ${system.join(" ")} ${node.join(" ")} (subpath ${q(real(packages))}))
 (deny process-fork)
 (deny process-exec*)
 (allow process-exec* ${node.join(" ")})
