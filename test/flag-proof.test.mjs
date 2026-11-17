@@ -19,6 +19,11 @@ before(() => {
   git(ROOT, "clone", "--quiet", "--no-hardlinks", ROOT, repo);
   // the code under test is the working copy's, committed in the scratch clone as its base
   for (const rel of ["scripts/flag-proof.mjs", "generator", "lib", "features/README.md", "site.config.mjs", "package.json", ".gitignore"]) fs.cpSync(path.join(ROOT, rel), path.join(repo, rel), { recursive: true });
+  // start from no flags, whatever the real config lists by now
+  const config = path.join(repo, "site.config.mjs");
+  const text = fs.readFileSync(config, "utf8");
+  assert.match(text, /\bflags:\s*\{[^{}\n]*\}/, "site.config.mjs has a one-line flags literal");
+  fs.writeFileSync(config, text.replace(/\bflags:\s*\{[^{}\n]*\}/, "flags: {}"));
   git(repo, "add", "-A");
   git(repo, "commit", "--quiet", "--allow-empty", "-m", "base");
   git(repo, "branch", "-f", "base");
