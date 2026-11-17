@@ -132,6 +132,9 @@ function strictProblems() {
     // .gitattributes can make the export that is built differ from the commit that is merged;
     // no other dotfile has a use in a feature either
     else if (file.split("/").some((part) => part.startsWith("."))) out.push(`a dotfile in a feature folder: ${quote(file)}`);
+    // A coding agent that later opens this folder (the owner's own, reviewing the feature) loads
+    // files of these names as instructions. A feature has no use for one.
+    else if (/^(claude(\.local)?|agents|gemini|skill)\.md$/i.test(file.split("/").pop())) out.push(`a file that coding agents load as instructions, in a feature folder: ${quote(file)}`);
   }
   // only plain files in features/: no links, no executables, no submodules
   for (const line of git(ROOT, "ls-tree", "-r", "-z", head, "--", "features").split("\0").filter(Boolean)) {

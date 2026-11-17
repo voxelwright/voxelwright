@@ -35,6 +35,20 @@ const own = (key) => { try { return execFileSync("git", ["config", "--get", key]
 const name = own("user.name"), email = own("user.email");
 if (!name || !email) stop(2, "this checkout has no user.name and user.email to commit as.");
 
+// Only plain files of the feature's own are committed: no link (a link to a file elsewhere
+// would commit that file's contents, as you), no dotfile, nothing that is not a regular file.
+const odd = [];
+const look = (rel) => {
+  const st = fs.lstatSync(path.join(cand, rel));
+  if (st.isDirectory()) { for (const name of fs.readdirSync(path.join(cand, rel))) { if (name.startsWith(".")) odd.push(`${rel}/${name} (a dotfile)`); else look(`${rel}/${name}`); } }
+  else if (!st.isFile()) odd.push(`${rel} (not a plain file)`);
+  else if (st.nlink > 1) odd.push(`${rel} (linked to a file elsewhere)`);
+};
+if (!fs.existsSync(path.join(cand, "features", flag))) stop(1, `there is no features/${flag}/ in that worktree.`);
+look(`features/${flag}`);
+look("site.config.mjs");
+if (odd.length) stop(1, `nothing was committed. A feature holds plain files of its own only: ${odd.slice(0, 6).map(quote).join(", ")}${odd.length > 6 ? ` and ${odd.length - 6} more` : ""}`);
+
 const at = [`--git-dir=${record}`, `--work-tree=${cand}`];
 const paths = [`features/${flag}`, "site.config.mjs"];
 try { git(ROOT, ...at, "add", "--", ...paths); } catch (e) { stop(1, `nothing was committed: ${quote(e.stderr || e.message)}`); }
