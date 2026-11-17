@@ -24,8 +24,12 @@ that live in this repo.
    - A second click starts the standoff: "are you threatening me?!", a MUDA MUDA barrage at the cursor, a
      bulldozer smash, "good grief", and then it escapes.
    - All art and sound are our own.
-   - A real contact route stays reachable by keyboard and screen reader, and reduced motion gets a calm version.
+   - There is no real contact route (owner, Nov 17: "There is no real contact for support. That's the joke.").
+     Keyboard and screen-reader users get the same joke: a real button, its lines announced politely, Esc to
+     dismiss. Reduced motion gets a calm version.
    - It comes in two versions: skeuomorphic and unbiased.
+   - Built on branch `support-button`: `static/support/`, demo and notes in `designs/support-button/`. Not wired
+     into a look yet.
 2. **Writing.** Post from the website with a best-in-class custom editor.
    - AI sessions are a first-class block, like code blocks: a better take on `~/.claude/skills/conversation-artifact`.
    - Output is still Markdown plus assets in `posts/<slug>/`, which the generator builds.
@@ -49,5 +53,4 @@ that live in this repo.
   - The handoff lists the token for reuse.
   - The site note excluded Mapillary because it is share-alike.
   - For now, it is used for reference only.
-- Where the support button's real contact route points.
 - Whether lanes may push draft PRs.
