@@ -4,9 +4,9 @@ const Q = new URLSearchParams(location.search);
 
 export const PAIRINGS = [
   { id: 'vox', name: 'One set of cells',
-    say: 'Vox Block on the board and for headings. Labels and short interface text in Vox Text, the same glyphs laid flat, five voxels to the em so one text cell is half a voxel. Paragraphs in IBM Plex Sans, code in IBM Plex Mono.',
+    say: 'Vox Block on the board and for headings. The name of every control in Vox Text, the voxel glyphs laid flat, five voxels to the em so one text cell is half a voxel. Everything you read or type in IBM Plex Sans, code in IBM Plex Mono.',
     board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'Vox Text', text: 'IBM Plex Sans', mono: 'IBM Plex Mono', cells: true,
-    files: ['vox-text/vox-text-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
+    files: ['vox-text/vox-text-400-normal.woff2', 'vox-text/vox-text-700-normal.woff2', 'vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
   { id: 'plex', name: 'Block and Plex',
     say: 'The same lettering in voxels. All text in IBM Plex Sans, including labels; code in IBM Plex Mono. Nothing of our own outside the voxels, and it is ready today, Ukrainian included.',
     board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',

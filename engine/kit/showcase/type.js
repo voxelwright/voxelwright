@@ -24,8 +24,8 @@ export const FACES = [
     files: ['geist-pixel/geist-pixel-latin-400-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
   { id: 'departure', name: 'Departure Mono', why: 'A pixel monospace with real craft. Crisp only at 11, 22 and 33 px.', font: 'Departure Mono', mono: 'Departure Mono', weights: [400],
     files: ['departure-mono/departure-mono-400-normal.woff2'] },
-  { id: 'voxtext', name: 'Vox Text', why: 'Ours: the voxel lettering itself, flat, as a web font. Crisp at 10, 20, 30 and 40 px. One weight so far.', font: 'Vox Text', mono: 'Departure Mono', weights: [400], optional: true,
-    files: ['vox-text/vox-text-400-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
+  { id: 'voxtext', name: 'Vox Text', why: 'Ours: the voxel lettering itself, flat, as a web font. Crisp at 10, 20, 30 and 40 px.', font: 'Vox Text', mono: 'Departure Mono', weights: [400, 700], optional: true,
+    files: ['vox-text/vox-text-400-normal.woff2', 'vox-text/vox-text-700-normal.woff2', 'departure-mono/departure-mono-400-normal.woff2'] },
 ];
 
 // ----- controls

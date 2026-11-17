@@ -14,8 +14,27 @@ U = 100                      # units per cell
 cap = d['cap']
 ASC, DESC = max(800, cap * U), 200   # room above the capitals where the set has it, two rows below the baseline
 
-def cells(g, bold):
+# Bold: every cell is smeared one cell to the right, the way bitmap bolds have always been made,
+# so stems double and bars stay one cell. Glyphs whose strokes are one cell apart would close, so
+# those are drawn by hand here.
+BOLD = {
+ 'W': (0, ['##....##', '##....##', '##....##', '##....##', '##.##.##', '########', '.##..##.']),
+ 'M': (0, ['##....##', '###..###', '########', '##.##.##', '##....##', '##....##', '##....##']),
+ 'N': (0, ['##..##', '##..##', '###.##', '######', '##.###', '##..##', '##..##']),
+ 'Q': (0, ['.####.', '##..##', '##..##', '##..##', '##..##', '##.##.', '.##.##']),
+ '0': (0, ['.####.', '##..##', '##..##', '##.###', '###.##', '##..##', '.####.']),
+ 'w': (2, ['##....##', '##....##', '##.##.##', '########', '.##..##.']),
+ '"': (0, ['##.##', '##.##']),
+ '“': (0, ['##.##', '##.##']),
+ '”': (0, ['##.##', '##.##']),
+ '#': (0, ['.##.##.', '.##.##.', '#######', '.##.##.', '#######', '.##.##.', '.##.##.']),
+}
+
+def cells(g, bold, ch=None):
     s = set()
+    if bold and ch in BOLD:
+        y, rows = BOLD[ch]
+        return {(c, r + y) for r, row in enumerate(rows) for c, v in enumerate(row) if v == '#'}
     for r, row in enumerate(g['rows']):
         for c, ch in enumerate(row):
             if ch == '#':
@@ -78,12 +97,13 @@ def build(bold, path):
     for ch, g in d['glyphs'].items():
         if ch == ' ': continue
         pen = TTGlyphPen(None)
-        for loop in outline(cells(g, bold)):
+        cs = cells(g, bold, ch)
+        for loop in outline(cs):
             pen.moveTo(loop[0])
             for p in loop[1:]: pen.lineTo(p)
             pen.closePath()
         glyphs[gname(ch)] = pen.glyph()
-        metrics[gname(ch)] = ((g['w'] + (1 if bold else 0) + d['gap']) * U, 0)
+        metrics[gname(ch)] = ((max(c for c, r in cs) + 1 + d['gap']) * U if cs else (g['w'] + d['gap']) * U, 0)
     fb = FontBuilder(1000, isTTF=True)
     fb.setupGlyphOrder(order)
     fb.setupCharacterMap(cmap)
@@ -108,5 +128,4 @@ def build(bold, path):
 
 os.makedirs(out, exist_ok=True)
 build(False, os.path.join(out, STEM + '-400-normal.woff2'))
-# A bold needs drawing: smearing each cell one to the right closes the W, M and every diagonal.
-# build(True, os.path.join(out, 'vox-text-700-normal.woff2'))
+if '--bold' in sys.argv: build(True, os.path.join(out, STEM + '-700-normal.woff2'))
