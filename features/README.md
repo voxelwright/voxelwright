@@ -59,8 +59,8 @@ itself cannot change in a strict build, and with the flag off none of the new co
 
 To see a feature working before its flag is on, add `--try <name>`: after the proof passes it
 builds once more with the flag on and lists what the feature adds or changes. That build runs
-with no network, can write only to its own temporary folder, can read nothing in your home
-folder or other temporary folders except the installed packages, can start no other program,
+with no network, can write only to its own temporary folder, can read nothing under
+`/Users`, `/Volumes` or the temporary folders except the installed packages, can start no other program,
 load no native code of its own and signal no other process (macOS `sandbox-exec`; on a system
 without it `--try` refuses to run). It is the safe way to run a feature's code. What the build
 prints is not shown unless it fails, and then only quoted; the files it built are for reading,

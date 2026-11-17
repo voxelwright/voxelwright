@@ -264,6 +264,8 @@ const got = {
   home: tryIt(() => fs.readdirSync(home)),
   checkout: tryIt(() => fs.readFileSync(${JSON.stringify(path.join(ROOT, "package.json"))})),
   otherTemp: tryIt(() => fs.readFileSync(${JSON.stringify(secret)})),
+  slashTmp: tryIt(() => fs.readdirSync("/private/tmp")),
+  trusted: tryIt(() => fs.readFileSync(${JSON.stringify(path.join(repo, "package.json"))})),
   signal: tryIt(() => process.kill(process.ppid, "SIGWINCH")),
   nativeHere: fs.existsSync(here) ? (tryIt(() => process.dlopen({ exports: {} }, here)), fs.existsSync(mark) ? "LOADED" : "REFUSED") : "NONE",
   nativeCopy: fs.existsSync(here) ? (tryIt(() => { fs.copyFileSync(here, copy); process.dlopen({ exports: {} }, copy); }), fs.existsSync(mark) ? "LOADED" : "REFUSED") : "NONE",
@@ -280,6 +282,6 @@ export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
   const kept = r.text.match(/Delete (\S+) when you are done/)[1];
   const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
   fs.rmSync(kept, { recursive: true, force: true });
-  assert.deepEqual(got, { home: "EPERM", checkout: "EPERM", otherTemp: "EPERM", signal: "EPERM", nativeHere: haveLib ? "REFUSED" : "NONE", nativeCopy: haveLib ? "REFUSED" : "NONE" }, haveLib ? "" : `no library was built: ${cc.stderr}`);
+  assert.deepEqual(got, { home: "EPERM", checkout: "EPERM", otherTemp: "EPERM", slashTmp: "EPERM", trusted: "EPERM", signal: "EPERM", nativeHere: haveLib ? "REFUSED" : "NONE", nativeCopy: haveLib ? "REFUSED" : "NONE" }, haveLib ? "" : `no library was built: ${cc.stderr}`);
   assert.ok(haveLib, `the native-code check needs a C compiler: ${cc.stderr || cc.error}`);
 });

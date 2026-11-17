@@ -17,7 +17,7 @@
 //                      to run a feature's code before the owner turns it on.
 //
 // The builds run with no network and an empty environment. On macOS they are also shut in a
-// sandbox: they write to one temporary folder only, read nothing in your home folder or in other
+// sandbox: they write to one temporary folder only, read nothing under /Users, /Volumes or the
 // temporary folders except the installed packages, start no other program, load no native code
 // of their own and signal no other process. What a build prints is never passed through: on a
 // failure it is quoted, marked as data. Every name that comes from the candidate is printed in
@@ -228,9 +228,11 @@ process.exit(code);
  * A macOS sandbox profile for a build. Later rules win over earlier ones.
  *  - no network (that includes local sockets, such as an ssh or docker agent)
  *  - writes only under dir
- *  - nothing readable in the home folder or in other temporary folders, except the installed
+ *  - nothing readable where people keep their own files: /Users, /Volumes, /private/tmp, the
+ *    temporary folders, the home folder and this checkout. The exceptions are dir, the installed
  *    packages, node itself, and any folder in `readable`. A build that could read a token file
- *    could leave it in its output for whoever reads that.
+ *    could leave it in its output for whoever reads that. (Names and sizes there can still be
+ *    seen; contents and folder listings cannot.)
  *  - no program may be started except node itself (so not `security`, which reads the keychain)
  *  - no native code may be loaded from dir, the one place a build can write or bring its own
  *  - no signal to any other process
@@ -245,13 +247,15 @@ function sandboxFor(dir, readable = []) {
   const within = (parent, child) => child === parent || child.startsWith(parent + path.sep);
   const nodeHome = within(prefix, home) || within(prefix, temp) || prefix === path.parse(prefix).root ? `(literal ${q(nodeBin)})` : `(subpath ${q(prefix)})`;
   const packages = path.join(ROOT, "node_modules");
+  const real = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
+  const shut = [...new Set(["/Users", "/Volumes", "/private/tmp", "/private/var/folders", home, temp, ROOT].map(real))].map((p) => `(subpath ${q(p)})`).join(" ");
   const read = [`(subpath ${q(dir)})`, `(literal ${q(packages)})`, `(subpath ${q(fs.realpathSync(packages))})`, nodeHome, ...readable.map((p) => `(subpath ${q(p)})`)].join(" ");
   return `(version 1)
 (allow default)
 (deny network*)
 (deny file-write*)
 (allow file-write* (subpath ${q(dir)}) (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty") (literal "/dev/dtracehelper"))
-(deny file-read-data (subpath ${q(home)}) (subpath ${q(temp)}))
+(deny file-read-data ${shut})
 (allow file-read-data ${read})
 (deny file-map-executable (subpath ${q(dir)}))
 (deny process-exec*)
