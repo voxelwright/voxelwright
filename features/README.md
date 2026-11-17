@@ -50,7 +50,14 @@ run. On success it prints that commit in full, as `flag-proof: proven …`.
 
 An agent commits its change the same way, with `node scripts/seed-commit.mjs <worktree> <flag>
 "<message>"` run from the main checkout: it commits `features/<flag>/` and `site.config.mjs` of
-that worktree and nothing else, as you, without starting git in the worktree.
+that worktree and nothing else, as you, without starting git in the worktree. It refuses links,
+dotfiles and anything that is not a plain file of the feature's own.
+
+And it tests the same way: `node scripts/seed-test.mjs <base> <commit>` makes a fresh checkout
+of the commit in a new private temporary folder, proves it strictly, and only then installs the
+locked packages and runs the tests there, with npm's workspaces off. The tests are not sandboxed,
+so they never run in a folder an agent wrote in, nor in one beside it: npm takes a parent folder
+with a `package.json` that lists workspaces as the project, and runs that folder's scripts.
 
 Strict reads the change before running any of it and refuses unless all of this holds:
 
@@ -59,8 +66,9 @@ Strict reads the change before running any of it and refuses unless all of this 
   `.gitignore` hides (so run strict before any packages are installed there);
 - the worktree's `.git` is still the plain link git made for it;
 - it only adds or changes plain files inside `features/<name>/` (no links, no executables, no
-  dotfiles), and only for features whose flag is off: one that is on is live code, and changing
-  it is not a flag-off change;
+  dotfiles, and no file a coding agent loads as instructions: `CLAUDE.md`, `AGENTS.md`,
+  `GEMINI.md`, `SKILL.md`), and only for features whose flag is off: one that is on is live
+  code, and changing it is not a flag-off change;
 - in `site.config.mjs` nothing differs except new names set to `false` in the one-line `flags`
   literal;
 - on the base, `flags` is written as exactly one one-line literal of `"name": true` or
@@ -92,8 +100,11 @@ What the proof does not cover:
   `git diff main...seed/<name>`.
 - A build can still see the names and sizes of files elsewhere on the machine, not what is in
   them. It can also learn your account's name, the machine's name and its network addresses.
-- The site's tests are not sandboxed. Run them on the proven commit in a fresh checkout
-  (`git worktree add --detach <folder> <commit>`), never in the folder the agent wrote in: a
-  file left loose there is in no commit and no proof, and the tests would load it.
+- The site's tests are not sandboxed. Run them with `scripts/seed-test.mjs`, never by hand in
+  a folder an agent wrote in or in one beside it.
+- An agent that runs these scripts can write to this repository, or it could not commit. The
+  scripts protect you from what it leaves in its worktree. They do not protect you from an
+  agent that edits the scripts, the packages or `.git/hooks` here: for that, the agent must be
+  one that cannot write outside its worktree, with these scripts run for it, not by it.
 
 Turning a flag on is the owner's step, in `site.config.mjs`.
