@@ -280,7 +280,8 @@ export const lettering = {
       press = null;
     };
     on(el, 'pointerdown', (e) => {
-      if (!e.isPrimary || e.button !== 0 || e.shiftKey || reducedMotion()) return;
+      // Shift extends a selection, and Control with a click asks for the menu: neither is play
+      if (!e.isPrimary || e.button !== 0 || e.shiftKey || e.ctrlKey || reducedMotion()) return;
       end();
       press = { id: e.pointerId, touch: e.pointerType === 'touch', x: e.clientX, y: e.clientY, t: performance.now(), mode: 'wait', last: e };
       if (press.touch) return; // a touch says what it is by moving, or by lifting
@@ -288,7 +289,10 @@ export const lettering = {
       press.timer = setTimeout(() => { if (press?.mode === 'wait') { told(); brushOn(press.last); } }, HOLD);
     });
     // where presses belong to play, a press never starts a selection
-    on(el, 'mousedown', (e) => { if (e.button === 0 && !e.shiftKey && !reducedMotion() && playFirst()) e.preventDefault(); });
+    on(el, 'mousedown', (e) => { if (e.button === 0 && !e.shiftKey && !e.ctrlKey && !reducedMotion() && playFirst()) e.preventDefault(); });
+    // a press whose release never arrives (a menu opened, the window lost the pointer) ends there
+    on(el, 'contextmenu', end);
+    on(window, 'blur', end);
     on(el, 'pointermove', (e) => {
       if (!press || e.pointerId !== press.id) return;
       press.last = e;

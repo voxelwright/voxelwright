@@ -97,6 +97,34 @@ for (const [name, kind, args] of [['chromium', chromium, ['--use-angle=metal', '
     s = await state(page, H);
     say(norm(s.sel).endsWith(norm(p.text)) && s.pokes === 0, `${mode}: Shift-click extends a selection over the heading and breaks nothing`, JSON.stringify(s.sel.replace(/\s+/g, ' ').slice(-40)));
 
+    // ---- Control-click asks for the menu: it is not a press to play, and it leaves a selection alone
+    if (!plain) {
+      await settle(page, H);
+      await clear(page);
+      await page.mouse.click(p.h.x + 20, p.h.y + p.h.h / 2, { clickCount: 3 });
+      await settle(page, H);
+      await page.evaluate(() => { window.__pokes = 0; });
+      await page.keyboard.down('Control');
+      await page.mouse.move(p.h.x + 30, p.h.y + p.h.h / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(450);
+      const held = await state(page, H);
+      await page.mouse.up();
+      await page.keyboard.up('Control');
+      await page.keyboard.press('Escape');
+      say(held.pokes === 0 && !held.brush && norm(held.sel) === norm(p.text) && !(await page.evaluate(() => document.documentElement.hasAttribute('data-vx-brushing'))), `${mode}: a Control-click on a selected heading breaks nothing and keeps the selection`, JSON.stringify(held));
+      // and a menu that swallows the release of a held press does not leave the page unselectable
+      await clear(page);
+      await page.mouse.move(p.h.x + 30, p.h.y + p.h.h / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(300);
+      await page.evaluate((sel) => document.querySelector(sel).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })), H);
+      const left = await page.evaluate(() => document.documentElement.hasAttribute('data-vx-brushing'));
+      await page.mouse.up();
+      say(!left && !(await state(page, H)).brush, `${mode}: a menu opened during a brush ends the brush`);
+      await settle(page, H);
+    }
+
     // ---- the highlight lies on the voxels (a heading of several lines too)
     if (!plain) {
       for (const [w, sel] of [[1280, '#growth-h'], [320, '#growth-h'], [320, '.top .vx-sign'], [1280, '.top .vx-sign']]) {
@@ -176,6 +204,35 @@ for (const [name, kind, args] of [['chromium', chromium, ['--use-angle=metal', '
       say(s2.pokes === 0 && !s2.busy && norm(s2.sel) === norm(p2.text), `${mode}, less motion: nothing breaks, and a held drag on a heading selects`, JSON.stringify(s2));
       await q.context().close();
     }
+  }
+
+  // ---- every piece of lettering on the pages people are sent to, in both languages and at phone width
+  for (const [path, w] of [['showcase/', 1280], ['showcase/', 320], ['showcase/type.html?pair=vox&faces=none', 1280], ['showcase/type.html?pair=vox&faces=none', 320], ['showcase/type.html?pair=vox&faces=none&lang=uk', 1280], ['showcase/type.html?pair=vox&faces=none&lang=uk', 360], ['showcase/type.html?pair=vox&faces=none&lang=uk', 320]]) {
+    const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
+    await page.goto(`http://127.0.0.1:${port}/${path}`);
+    await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(500);
+    const got = await page.evaluate(() => [...document.querySelectorAll(':is(.vx-sign, .vx-lettering)[data-vx-live]')].filter((h) => h.offsetParent && window.vx?.live?.(h)).map((h) => {
+      const l = window.vx.live(h), f = l.state.fit, vx = l.vx;
+      const text = h.querySelector('.vx-lettering-text');
+      if (!text) return `${h.textContent.trim().slice(0, 20)}: no text box`;
+      const range = document.createRange(); range.selectNodeContents(text);
+      const r = h.getBoundingClientRect();
+      const lines = [];
+      for (const c of range.getClientRects()) { const at = lines.find((b) => Math.abs(b.top - c.top) < 2); if (at) { at.left = Math.min(at.left, c.left); at.right = Math.max(at.right, c.right); } else lines.push({ top: c.top, bottom: c.bottom, left: c.left, right: c.right }); }
+      const W = Math.floor(h.offsetWidth / vx + 0.01), H = Math.floor(h.offsetHeight / vx + 0.01);
+      const bh = (f.rows + f.over + f.under) * f.scale + (f.bare ? 0 : f.margin * 2 * f.scale + 2);
+      let y = Math.round((H - bh) / 2) + (f.bare ? 0 : f.margin * f.scale + 1) + f.over * f.scale;
+      const want = f.laid.map((line, i) => { const x0 = f.bare ? 0 : Math.round((W - line.width * f.scale) / 2); const out = { left: r.left + x0 * vx, right: r.left + (x0 + line.width * f.scale) * vx, top: r.top + y * vx, bottom: r.top + (y + f.font.cap * f.scale) * vx }; y += (f.font.cap + (f.gaps[i] ?? f.font.lineGap)) * f.scale; return out; });
+      const gap = f.font.gap * f.scale * vx;
+      if (lines.length !== want.length) return `${f.text.slice(0, 20)} (${f.font.id}): ${lines.length} lines of text for ${want.length} of voxels`;
+      const off = want.map((v, i) => { const t = lines[i]; return Math.abs(t.left - v.left) > 1.5 || t.right < v.right - 1.5 || t.right > v.right + gap + 1.5 || t.top > v.top + 1.5 || t.bottom < v.bottom - 1.5 ? `line ${i + 1} text ${Math.round(t.left)}-${Math.round(t.right)} x ${Math.round(t.top)}-${Math.round(t.bottom)}, voxels ${Math.round(v.left)}-${Math.round(v.right)} x ${Math.round(v.top)}-${Math.round(v.bottom)}` : ''; }).filter(Boolean);
+      return off.length ? `${f.text.slice(0, 20)} (${f.font.id}): ${off.join('; ')}` : '';
+    }));
+    const bad = got.filter(Boolean);
+    say(bad.length === 0 && got.length > 0, `${name}: ${path} at ${w} px: the text of each of its ${got.length} letterings lies on its voxels`, bad.slice(0, 4).join(' | '));
+    await page.context().close();
   }
 
   // ---- touch, through the browser's own gesture handling (Chromium only: WebKit has no such input here)
