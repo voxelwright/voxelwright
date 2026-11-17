@@ -26,7 +26,9 @@ createServer(async (req, res) => {
       const ua = String(req.headers['user-agent'] || '');
       const device = (/iPhone|iPad|Macintosh|Android|Linux|Windows/.exec(ua) || ['?'])[0] + ' ' + (/HeadlessChrome|Chrome|Firefox|Safari/.exec(ua) || ['?'])[0];
       const page = String(url.searchParams.get('page') || '').replace(/[^\w./-]/g, '').slice(0, 80);
-      await appendFile(seen, `${new Date().toISOString()} ${by} ${device} ${page}\n`).catch(() => {});
+      // a note per page load, from fixed words only; it stops growing at 200 KB
+      const size = await stat(seen).then((st) => st.size, () => 0);
+      if (size < 200_000) await appendFile(seen, `${new Date().toISOString()} ${by} ${device} ${page}\n`).catch(() => {});
       res.writeHead(204).end(); return;
     }
     if (path.endsWith('/')) path += 'index.html';
