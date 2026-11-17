@@ -1,0 +1,161 @@
+/* Voxelmorphism. Everything here works with no script: it is the plain version.
+   Where the script runs, each element gets data-vx-live and its painted faces step aside
+   for real voxels. Sizes are counted in voxels: 1 voxel is --vx. */
+
+@font-face {
+  font-family: "Overpass";
+  src: url("fonts/overpass/overpass-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Overpass";
+  src: url("fonts/overpass/overpass-latin-wght-italic.woff2") format("woff2");
+  font-weight: 100 900; font-style: italic; font-display: swap;
+}
+
+:root {
+  --vx: 4px;
+  --vx-theme: day;
+  --vx-font: "Overpass", "Avenir Next", "Segoe UI", sans-serif;
+
+  --vx-ground: #e4e8f4;
+  --vx-ink: #0a0f3d;
+  --vx-ink-quiet: #474d7a;
+  --vx-enamel: #0e22ff;
+  --vx-enamel-top: #4a59ff;
+  --vx-enamel-side: #0b1bc9;
+  --vx-on-enamel: #ffffff;
+  --vx-signal: #fff600;
+  --vx-signal-top: #fffa73;
+  --vx-signal-side: #cfc800;
+  --vx-on-signal: #0a0f3d;
+  --vx-chalk: #fbfcff;
+  --vx-chalk-top: #ffffff;
+  --vx-chalk-side: #d0d4e6;
+  --vx-slate: #c3c9de;
+  --vx-slate-side: #a2a8c0;
+  --vx-steel: #aab1c9;
+  --vx-walnut: #7c4a29;
+  --vx-walnut-top: #9a6238;
+  --vx-walnut-side: #5f3920;
+  --vx-leaf: #23a84b;
+  --vx-brick: #e0331f;
+  --vx-shadow: rgb(10 18 97 / 0.3);
+  --vx-focus: #0e22ff;
+
+  --vx-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --vx-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vx-theme: night;
+    --vx-ground: #080b28;
+    --vx-ink: #eceefb;
+    --vx-ink-quiet: #a6abd6;
+    --vx-enamel: #2b3dff;
+    --vx-enamel-top: #5f6dff;
+    --vx-enamel-side: #1c2ac4;
+    --vx-chalk: #232a63;
+    --vx-chalk-top: #2f3778;
+    --vx-chalk-side: #171c4a;
+    --vx-slate: #0d1136;
+    --vx-slate-side: #070a22;
+    --vx-steel: #4a5287;
+    --vx-walnut: #5a3520;
+    --vx-walnut-top: #71452b;
+    --vx-walnut-side: #402515;
+    --vx-leaf: #2ec25c;
+    --vx-brick: #ff5340;
+    --vx-shadow: rgb(0 0 12 / 0.55);
+    --vx-focus: #fff600;
+  }
+}
+:root[data-theme="dark"] {
+  --vx-theme: night;
+  --vx-ground: #080b28;
+  --vx-ink: #eceefb;
+  --vx-ink-quiet: #a6abd6;
+  --vx-enamel: #2b3dff;
+  --vx-enamel-top: #5f6dff;
+  --vx-enamel-side: #1c2ac4;
+  --vx-chalk: #232a63;
+  --vx-chalk-top: #2f3778;
+  --vx-chalk-side: #171c4a;
+  --vx-slate: #0d1136;
+  --vx-slate-side: #070a22;
+  --vx-steel: #4a5287;
+  --vx-walnut: #5a3520;
+  --vx-walnut-top: #71452b;
+  --vx-walnut-side: #402515;
+  --vx-leaf: #2ec25c;
+  --vx-brick: #ff5340;
+  --vx-shadow: rgb(0 0 12 / 0.55);
+  --vx-focus: #fff600;
+}
+
+.vx-canvas {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ---------- Button ---------- */
+
+.vx-button {
+  --_face: var(--vx-enamel);
+  --_top: var(--vx-enamel-top);
+  --_side: var(--vx-enamel-side);
+  --_on: var(--vx-on-enamel);
+  --_lift: calc(var(--vx) * 1.5);
+
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11);
+  min-inline-size: calc(var(--vx) * 11);
+  padding: 0 calc(var(--vx) * 5);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--_on);
+  font: 700 1rem/1 var(--vx-font);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-button[data-vx-material="signal"] { --_face: var(--vx-signal); --_top: var(--vx-signal-top); --_side: var(--vx-signal-side); --_on: var(--vx-on-signal); }
+.vx-button[data-vx-material="chalk"] { --_face: var(--vx-chalk); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--vx-ink); }
+.vx-button[data-vx-material="walnut"] { --_face: var(--vx-walnut); --_top: var(--vx-walnut-top); --_side: var(--vx-walnut-side); --_on: #fff; }
+.vx-button[data-vx-material="brick"] { --_face: var(--vx-brick); --_top: color-mix(in oklab, var(--vx-brick), #fff 25%); --_side: color-mix(in oklab, var(--vx-brick), #000 22%); --_on: #fff; }
+.vx-button[data-vx-material="leaf"] { --_face: var(--vx-leaf); --_top: color-mix(in oklab, var(--vx-leaf), #fff 25%); --_side: color-mix(in oklab, var(--vx-leaf), #000 22%); --_on: #06260f; }
+.vx-button:disabled, .vx-button[aria-disabled="true"] { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink); --_lift: 0px; cursor: default; }
+.vx-button:disabled .vx-label, .vx-button[aria-disabled="true"] .vx-label { opacity: 0.62; }
+
+.vx-button .vx-label { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); position: relative; padding-block-start: 0.12em; }
+
+.vx-button:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
+
+/* plain: the face is a painted box; two borders stand in for the top and the side */
+.vx-button:not([data-vx-live]) { background: var(--_face); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow); }
+.vx-button:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
+  border-top: var(--_lift) solid var(--_top);
+  border-left: var(--_lift) solid var(--_side);
+  border-right: var(--_lift) solid transparent;
+  border-bottom: var(--_lift) solid transparent;
+  box-sizing: border-box;
+  z-index: -1;
+  pointer-events: none;
+}
+.vx-button:not([data-vx-live]):active:not(:disabled) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }

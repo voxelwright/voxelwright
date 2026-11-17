@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxelmorphism lab</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<style>
+  html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); }
+  body { margin: 0; padding: 48px; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: center; margin-bottom: 56px; }
+  h2 { font-size: 1rem; margin: 0 0 20px; font-weight: 600; }
+</style>
+<body>
+  <h2>Buttons at 4 px a voxel</h2>
+  <div class="row">
+    <button class="vx-button">Plant a seed</button>
+    <button class="vx-button" id="pressed">Water it</button>
+    <button class="vx-button" data-vx-material="signal">Let it bloom</button>
+    <button class="vx-button" data-vx-material="chalk">Not yet</button>
+    <button class="vx-button" data-vx-material="brick">Pull it up</button>
+    <button class="vx-button" disabled>Asleep</button>
+  </div>
+  <h2>At 2 px, 3 px and 6 px a voxel</h2>
+  <div class="row">
+    <button class="vx-button" style="--vx: 2px">Plant a seed</button>
+    <button class="vx-button" style="--vx: 3px">Plant a seed</button>
+    <button class="vx-button" style="--vx: 6px; font-size: 1.4rem">Plant a seed</button>
+  </div>
+  <h2>Plain (no script)</h2>
+  <div class="row" id="plain">
+    <button class="vx-button">Plant a seed</button>
+    <button class="vx-button" data-vx-material="signal">Let it bloom</button>
+    <button class="vx-button" data-vx-material="chalk">Not yet</button>
+    <button class="vx-button" disabled>Asleep</button>
+  </div>
+  <script type="module">
+    import { adopt, live } from '/packages/voxelmorphism/src/index.js';
+    for (const el of document.querySelectorAll('.row:not(#plain) .vx-button')) adopt(el);
+    window.vx = { live };
+    document.documentElement.dataset.ready = '1';
+  </script>
+</body>
+</html>
