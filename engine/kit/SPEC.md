@@ -303,14 +303,21 @@ text face on top of them.
   ask the script which glyph set fits, so a page that knows its own word sets the steps with a
   container query (see the showcase). `node tools/shift.mjs <page>` measures what moves.
 - **Text** is IBM Plex Sans, with IBM Plex Mono for code: sturdy at 14 to 20 px, level in its
-  box (labels need no nudge), with a 1 that has a foot. Weights 400 to 700 only; nothing is faux
-  bold. Labels on buttons and tabs are text, not lettering.
+  box, with a 1 that has a foot. Weights 400 to 700 only; nothing is faux bold. Everything you
+  read or type is text.
+- **Legends**, the words on keys (buttons, tabs, menu items), are set in **Vox Text**: the voxel
+  glyphs laid flat as a font, so what is written on a key is cut from the same cells as the key.
+  Five voxels to the em (`--vx-key-size`), so one cell is half a voxel and every edge lands on a
+  pixel. Two weights, 400 and 700. A page that wants one voice instead sets
+  `--vx-key-font: var(--vx-font)`.
 - Gaps and line heights are whole voxels wherever the page can manage it. That, more than the
   face, is what keeps both kinds of type sharp on a 1x display.
-- Not drawn yet: Cyrillic for Vox Block (a Ukrainian heading shows `?`), and lowercase in
-  lettering (a set exists, Vox Sentence, and is not used).
-- Chosen in a study with five review rounds on real parts (`showcase/type.html`); the runner-up
-  set key labels in the voxel glyphs as a flat font (Vox Text). It is one CSS rule away.
+- **Ukrainian** is drawn in all three glyph sets (33 letters; shapes shared with Latin are
+  aliases, not copies) and in Vox Text. Plex's Cyrillic is a separate file behind
+  `unicode-range`, fetched only by a page that has Cyrillic in it.
+- Lowercase in lettering exists as a set (Vox Sentence) and is not used: headings are capitals.
+- Chosen by the owner after a study with five review rounds on real parts
+  (`showcase/type.html`, and `?lang=uk` for Ukrainian).
 
 ## 16. The kit
 
