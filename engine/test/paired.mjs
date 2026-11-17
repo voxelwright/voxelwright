@@ -11,7 +11,7 @@
 //   node test/paired.mjs --other ../../main/engine           B is this checkout, A is another checkout's page (say one at origin/main): for a change to the code
 //   node test/paired.mjs                                     A against A: how far apart two measures of the same thing lie just now
 //   --do-file path   the same js read from a file (a long scene on the command line had the run killed before it began)
-//   --rounds 5 (pairs kept at each place)   --do 'js run in the page once it is up, before measuring (to put a thing in view, say)'
+//   --flags 1 (the march's flags: 3 everything on, 1 mirrors off, 0 shadows off too)   --rounds 5 (pairs kept at each place)   --do 'js run in the page once it is up, before measuring (to put a thing in view, say)'
 //
 // Both of this machine's turns on the GPU are held while it runs (a few minutes): other threads' checks wait.
 import { spawn } from 'node:child_process'
@@ -21,7 +21,7 @@ import { arg, CHROME, has, here, quiet, still } from './kit.mjs'
 import { from } from './rows.mjs'
 
 const PLACES = [['street', 0, 1.8, 0, 90, -2], ['fronts', 0, 1.8, 0, 60, 5], ['roofs', 0, 12, 0, 20, -8], ['high', 0, 130, 0, 30, -22], ['far', 0, 730, 0, 200, -30]]
-const rounds = Number(arg('rounds', 5)), act = arg('do-file', '') ? readFileSync(arg('do-file', ''), 'utf8') : arg('do', ''), people = has('people')
+const rounds = Number(arg('rounds', 5)), flags = Number(arg('flags', 3)), act = arg('do-file', '') ? readFileSync(arg('do-file', ''), 'utf8') : arg('do', ''), people = has('people')
 const serveFrom = async (dir) => {
   const server = spawn('node', ['serve.mjs', '--port', '0', '--reports', '/dev/null'], { cwd: dir, stdio: ['ignore', 'pipe', 'ignore'] })
   const port = await new Promise((resolve, reject) => {
@@ -48,13 +48,13 @@ const open = async ({ url, query }) => {
 }
 const pages = { A: await open(ways.A), B: await open(ways.B) }
 /** One measure: the fixed work, the march three times (the middle kept), the fixed work again. */
-const measure = (page) => page.evaluate(async (people) => {
+const measure = (page) => page.evaluate(async ([people, flags]) => {
   const e = globalThis.engine, quiet = [await e.quiet()], three = []
-  for (let i = 0; i < 3; i++) three.push(await e.paced(3, people, false, people, people))
+  for (let i = 0; i < 3; i++) three.push(await e.paced(flags, people, false, people, people))
   quiet.push(await e.quiet())
   e.resting = true
   return { ms: three.sort((a, b) => a - b)[1], quiet: Math.max(...quiet) }
-}, people)
+}, [people, flags])
 // What quiet is: the fixed work as it was when the bench's baseline was kept on this machine, or its least over a few looks if that is less (or there is no baseline).
 const machine = await pages.A.evaluate(() => `${globalThis.engine.gpu.adapter?.info?.description || globalThis.engine.gpu.adapter?.info?.vendor || 'gpu'} ${document.querySelector('canvas').width}x${document.querySelector('canvas').height}`)
 let least = JSON.parse(readFileSync(`${here}test/baseline.json`, 'utf8'))[machine]?.quiet ?? Infinity

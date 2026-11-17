@@ -21,7 +21,9 @@ const get = (path) => send(path), post = (path, body) => send(path, { method: 'P
 const until = async (what, ask, ms = 20_000) => { for (const began = Date.now(); Date.now() - began < ms; await wait(150)) { const v = await ask(); if (v) return v } throw new Error(`never: ${what}`) }
 const heard = async () => (await get('around?by=wren&within=1200')).heard.map((h) => h.text)
 
-// A thing as a model answers: a short sword standing on its point.
+// A thing as a model answers: a short sword standing on its point. It is asked for as a dirk: a sword for the hand
+// comes with the engine (make/kept), and what is kept is made at once with no model asked (#220), so "a sword" would
+// not reach this check's model.
 const SWORD = { name: 'short sword', size: [5, 12, 1], parts: [['box', 'steel', 'own', 2, 0, 0, 3, 8, 1], ['box', 'steel', '3:5', 0, 8, 0, 5, 9, 1], ['box', 'wood', 'own', 2, 9, 0, 3, 12, 1]] }
 let asked = 0
 const model = async () => { asked++; return { text: JSON.stringify(SWORD), model: 'a kept reply', ms: 0, cost: 0 } }
@@ -45,9 +47,9 @@ try {
   await page.waitForFunction(() => globalThis.engine?.hands && globalThis.engine.asker?.known, null, { timeout: 90_000 })
   await page.waitForFunction(() => globalThis.engine.others >= 1, null, { timeout: 20_000 })
   // A page's first words can come before the world has its body (refused, 409): said until the page shows it heard.
-  for (let i = 0; i < 8 && !(await page.evaluate(() => /a sword/.test(document.querySelector('#said')?.textContent ?? ''))); i++) { await page.evaluate(() => globalThis.engine.say('a sword')); await wait(1500) }
+  for (let i = 0; i < 8 && !(await page.evaluate(() => /a dirk/.test(document.querySelector('#said')?.textContent ?? ''))); i++) { await page.evaluate(() => globalThis.engine.say('a dirk')); await wait(1500) }
   const held = await until('the sword is in the hand', async () => { const all = await get('things'); const t = (Array.isArray(all) ? all : all.things ?? []).find((x) => x.held); return t ?? null }, 60_000)
-  check(asked === 1 && /sword/.test(held.name), `said "a sword", a thing is made for the one who said it, by their own helper (${held.name}, asked ${asked} time)`)
+  check(asked === 1 && /sword/.test(held.name), `said "a dirk", a thing is made for the one who said it, by their own helper (${held.name}, asked ${asked} time)`)
   await page.waitForFunction(() => globalThis.engine.hands.holding, null, { timeout: 10_000 })
   const mine = await page.evaluate(() => ({ id: globalThis.engine.hands.holding.id, name: globalThis.engine.hands.holding.name, says: document.querySelector('[data-panel="offers"] button[data-own]')?.textContent }))
   check(mine.id === held.id && /Put down short sword/.test(mine.says ?? ''), `and they are holding it: their page says so (${mine.says})`)
@@ -59,7 +61,7 @@ try {
   const people = await page.evaluate(() => globalThis.engine.hands.holding && true)
   check(people, 'a hand holds it until it is put down')
   // Asked again with the hand full: the first is put down and the second is held.
-  await page.evaluate(() => globalThis.engine.say('a sword'))
+  await page.evaluate(() => globalThis.engine.say('a dirk'))
   await until('a second is held and the first stands', async () => { const all = await get('things'); const list = Array.isArray(all) ? all : all.things ?? []; return list.length === 2 && list.filter((x) => x.held).length === 1 && list.find((x) => x.held).id !== held.id }, 40_000).catch(async (e) => { console.log('   things:', JSON.stringify(await get('things')).slice(0, 600), 'asked', asked, (await heard()).slice(-3)); throw e })
   check(true, 'asked again with a full hand, the first is put down and the new one held')
   if (arg('out')) { await page.waitForFunction(() => { const st = globalThis.engine.world.stats; return st.wanted === 0 && st.stale === 0 && st.ready > 0 }, null, { timeout: 120_000 }).catch(() => {}); await page.waitForTimeout(600); await page.screenshot({ path: arg('out') }) }

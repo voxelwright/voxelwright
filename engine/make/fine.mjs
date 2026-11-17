@@ -7,8 +7,8 @@
 // is. The stand-in is placed and tried; the fine rows are what is sent.
 import { FACINGS } from './form.mjs'
 
-/** A thing made by a program, with its grain: 1 for cells of 10 cm, 4 for 2.5 cm, 8 for 1.25 cm. */
-export const grained = (thing) => ({ ...thing, grain: thing.cm === 2.5 ? 4 : thing.cm === 1.25 ? 8 : 1 })
+/** A thing made by a program, with its grain: 1 for cells of 10 cm, 4 for 2.5 cm, 8 for 1.25 cm. And 2 for 5 cm (cells, make/cells.mjs), which the world holds no finer cells of: such a thing stands as its stand-in. */
+export const grained = (thing) => ({ ...thing, grain: thing.cm === 2.5 ? 4 : thing.cm === 1.25 ? 8 : thing.cm === 5 ? 2 : 1 })
 
 /**
  * A thing in the form the placing and the standing rule take (form.mjs `read`): cells of 10 cm, and nothing said of

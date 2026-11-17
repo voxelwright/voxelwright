@@ -382,6 +382,44 @@ pick; reasoning about the shader alone had cleared it three times.
   street. The street things still cost 16% more rays at street level and the shop and car glass
   3 ms of mirrors: the baseline is theirs.
 
+## Glass seen through (#163)
+
+A look that meets glass goes on through it (`fs` in `march.ts`, one loop over what a look meets); the
+sun's lines (`trace` with `through`) and traced shadows pass glass in the two finest boxes. What it
+costs, paired against the engine before at 2560 x 1440 with everything on: the bench's places -5% to
++3%, a look out of a room +24% (3.6 ms), out of a tower +10%, right under a glass tower looking up
++29% (9 ms). With mirrors off +8 to +17% at first; now -2% to +1.5% (a pipeline of its own, below).
+What it took to get there, each measured:
+
+- Every call of `trace` or `lit` is a copy in the compiled shader. With a call for each pane, the
+  street cost 40% more and the far view 9% more with no glass near. One march, one `lit` and one
+  look across, each written once inside a loop, brought high and far back to nothing.
+- A pane crossed aslant is two or three cells of glass. Beginning the march again for each was a
+  fifth of the street; walking them by their kinds (`kindAt`, `paneEnd`) cut fronts from +25% to +13%.
+- Steps are not the cost past a pane: a shorter step budget and a coarser look there changed nothing.
+  Skipping the march past the pane took all of it. A second pane cost a look out of a tower 70% more:
+  one pane is looked through (`panes`, default 2).
+- A pane asks the world one thing: what is behind it while it lets most through, what it mirrors
+  once it mirrors a third or more. Up a tower asking both was +47%; one is +29%. The old mirror's
+  looks up a tower mostly met the sky at once; a look in walks the tower's floors.
+- A branch round `lit` (to skip it for a pane behind a pane) made fronts 4% dearer, not cheaper. WGSL's
+  `select` evaluates both sides: it is no way to try leaving work out.
+- Mirrors off is a second pipeline from the same module, with `override MIRRORS: bool` set false at
+  pipeline creation (`constants`): the compiler leaves out what the constant turns off. A test of a flag
+  in the same text had left mirrors off 8 to 17% dearer; with the constant and no second target it is
+  -2% to +1.5% against the engine before glass. Both pipelines share one explicit layout: `layout: 'auto'`
+  gives each its own, and a bind group made from one does not serve the other.
+- A second colour target (`march.panes`, rgba16float: the first pane's distance and tint, for the wand
+  and for people and bodies behind it) cost about 1% with everything on.
+- State carried through the loop is dear. Haze kept per thing met (how much air each adds) made every
+  picture 2 to 5% dearer; the haze once at the end, with only what is past a pane given the air beyond
+  the pane, from the air's colour worked out once before the loop, cost nothing. Calling `hazeColour`
+  inside the loop as well as after it was 2%.
+- A second call of `paneEnd` (in traced shadows) was a second copy of its walk: 1 to 1.5% on every
+  picture. Traced shadows restart the trace a cell of glass at a time instead (up to 23).
+- Test pictures of glass must not have smoke in them: the yard chimney's smoke drifting across the look
+  made a lamp behind glass read 0.53 to 1.00 (`test/glass.mjs` turns puffs and crumbs off).
+
 ## From 100 m up the town was not drawn (`trace`, the jump to a box's roofs)
 
 A box with nothing in it has its roofs at the bottom of everything (-1e9). A ray coming down in

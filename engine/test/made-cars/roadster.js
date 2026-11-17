@@ -1,0 +1,18 @@
+// A made-up roadster for the check (test/made-cars.mjs): its nose at +x, a yellow stripe on its own left flank (+z here).
+size(170, 56, 80, 2.5)
+name("blue test roadster")
+box("steel", "16:4", 4, 10, 8, 166, 30, 72)
+box("air", "own", 50, 16, 14, 120, 30, 66)
+box("steel", "grey:12", 50, 12, 14, 120, 16, 66)
+box("wood", "2:8", 84, 16, 18, 100, 22, 36)
+box("wood", "2:8", 84, 22, 18, 88, 40, 36)
+box("glass", "own", 56, 30, 10, 116, 46, 70)
+box("air", "own", 58, 30, 12, 114, 46, 68)
+box("steel", "16:4", 56, 46, 10, 116, 50, 70)
+for (const x of [32, 138]) for (const [z0, z1] of [[0, 10], [70, 80]]) { tube("steel", "grey:13", x, 14, z0, x, 14, z1, 14); tube("steel", "grey:6", x, 14, z0, x, 14, z1, 6) }
+box("lamp", "white", 166, 18, 12, 168, 24, 24)
+box("lamp", "white", 166, 18, 56, 168, 24, 68)
+box("lamp", "0:4", 2, 18, 12, 4, 24, 24)
+box("lamp", "0:4", 2, 18, 56, 4, 24, 68)
+box("steel", "4:4", 60, 20, 72, 110, 26, 74)
+drives({ front: "+x", top_kmh: 220, zero_to_100_s: 6 })

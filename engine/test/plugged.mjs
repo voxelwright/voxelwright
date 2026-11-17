@@ -15,7 +15,9 @@ for (const p of found(join(here, 'plugins'))) {
   if (p.error) { console.log(`FAILED ${p.name}: ${p.error}`); failed.push(p.name); continue }
   if (!existsSync(check)) { console.log(`FAILED ${p.name}: it has no check.mjs`); failed.push(p.name); continue }
   if (p.world && !p.guide) { console.log(`FAILED ${p.name}: it has no guide.txt, so no model would ever use it`); failed.push(p.name); continue }
-  const r = spawnSync('node', [check], { cwd: here, encoding: 'utf8', timeout: 300_000 })
+  // The time is for a check that hangs, not a bound on it: a plugin's check that draws waits its turn on the GPU, and
+  // inside the whole check, behind the checks that draw, paint's waited longer than five minutes and was stopped.
+  const r = spawnSync('node', [check], { cwd: here, encoding: 'utf8', timeout: 900_000 })
   console.log(r.stdout.split('\n').filter((l) => l.trim()).map((l) => `  ${l}`).join('\n'))
   if (r.status !== 0) { console.log(r.stderr.split('\n').slice(-12).join('\n')); failed.push(p.name) }
 }

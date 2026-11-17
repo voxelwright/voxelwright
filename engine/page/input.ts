@@ -13,6 +13,10 @@
 // stick (`stick`) are the same for everyone: a mode acts on them only while it is `live`, which is until a
 // solid mode is pushed over it. They are emptied whenever a mode comes or goes, so a key held as the ask
 // bar opens is not still held when it shuts.
+//
+// Taking a mode off takes only that mode, wherever it is in the stack. A mode is there exactly until its own
+// owner takes it off: one lane taking its mode off (the feet's, as a ride starts or B is pressed) must never take
+// another lane's with it, since that lane would go on thinking its mode is there and its keys would do nothing.
 
 export interface Mode {
   readonly name: string
@@ -37,7 +41,7 @@ export interface Input {
   turn(): [number, number]
   /** The left thumb's stick on a phone: [right, back], each -1 to 1; [0, 0] with no thumb down. */
   readonly stick: readonly [number, number]
-  /** Adds a mode on top. Returns what takes it off again (and whatever was put over it since). */
+  /** Adds a mode on top. Returns what takes that mode off again, and only it: what was put over it since stays where it is. */
   push(mode: Mode): () => void
   /** Whether a mode of that name is in the stack with no solid mode over it. */
   live(name: string): boolean
@@ -123,7 +127,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
       return () => {
         const at = stack.indexOf(mode)
         if (at < 0) return
-        stack.length = at
+        stack.splice(at, 1)
         empty()
       }
     },

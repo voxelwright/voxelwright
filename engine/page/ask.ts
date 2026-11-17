@@ -23,7 +23,12 @@ export interface Ask {
   hand?: boolean
   /** Where or what it is for. Without one: what is ahead of the eye. */
   target?: Target
+  /** The kept thing to make (the ghost the ask bar showed for the words: `Asker.guess`): made from what was kept, with no model. */
+  kept?: string
 }
+
+/** What is kept for words being typed, and where it would stand (the helper's `/kept`): drawn with `Asker.faces`. */
+export interface Guess { id: string; name: string; sure: number; /** Where it would stand, if there is a place for it where the eye is (no place: nothing is drawn, and Enter still makes it, held). */ placed?: { facing: string; /** Where its lowest corner goes, in the world's cells. */ at: [number, number, number]; /** How many of its cells make one of the world's. */ grain: number; size: [number, number, number] } }
 
 /** How an ask goes, as the helper says it. `place` comes before the model is asked: where the thing will stand. */
 export type Stage =
@@ -72,6 +77,14 @@ export interface Asker {
   imagine(idea: string): Promise<{ name: string; about: string; look?: unknown; place?: unknown; questions: { ask: string; options: string[] }[] } | null>
   /** Makes a realm on the world's server and has its rules written into it. Resolves as `ask` does, with `realm` (its id). */
   realm(spec: { name: string; about: string; look?: unknown; place?: unknown; /** A realm that is there already and has no rules yet (its making was cut off): they are written into it, and no new realm is made. */ into?: string; answers?: { ask: string; answer: string }[]; /** With a director, written for it once its first rules are in. */ director?: boolean }, each?: (stage: Stage) => void): Promise<Done>
+  /** What is kept that the words typed so far mean, and where it would stand now; null for nothing, or no helper. */
+  guess(words: string): Promise<Guess | null>
+  /** Whether words that point at a thing ("make it drivable") would bring what the eye or the wand aims at to life: the asker's own made thing, not alive (the helper says: make.mjs `aimed`). False with no helper. */
+  drivable(): Promise<boolean>
+  /** The outside faces of a kept thing facing a way (page/fine.ts `faces`), made by the helper ahead of time. */
+  faces(id: string, facing: string): Promise<Uint32Array<ArrayBuffer> | null>
+  /** Which kept thing a wish of these words is to be made from, if any says (the ghost on the ask bar): asked as each ask is sent. */
+  kept: ((wish: string) => string | undefined) | null
   /** How many asks are being made, written or waiting. */
   readonly busy: number
   /** Something else asked of the helper, by its address there (the workshop's, #264): what it answered and whether it was a yes. Null with no helper, or one that cannot be reached. */
@@ -125,6 +138,19 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   }
   const self: Asker = {
     aim: null,
+    kept: null,
+    async guess(words) {
+      if (!helper) return null
+      try { const r = await fetch(`${helper.url}/kept`, { method: 'POST', headers: headers(), body: JSON.stringify({ words, from: eye(), realm: realmNow() }) }); const v = await r.json(); return r.ok && v.id ? { id: v.id, name: v.name, sure: v.sure, ...(v.at ? { placed: { facing: v.facing, at: v.at, grain: v.grain, size: v.size } } : {}) } : null } catch { return null }
+    },
+    async drivable() {
+      if (!helper) return false
+      try { const r = await fetch(`${helper.url}/drivable`, { method: 'POST', headers: headers(), body: JSON.stringify({ from: eye(), target: self.aim?.(), by: by(), realm: realmNow() }) }); return r.ok && (await r.json()).mine === true } catch { return false }
+    },
+    async faces(id, facing) {
+      if (!helper) return null
+      try { const r = await fetch(`${helper.url}/kept/faces?id=${encodeURIComponent(id)}&facing=${encodeURIComponent(facing)}`, { headers: headers() }); return r.ok ? new Uint32Array(await r.arrayBuffer()) : null } catch { return null }
+    },
     get busy() { return busy + written },
     async call(path, body) {
       if (!helper) return null
@@ -138,7 +164,8 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
     async ask(ask, each = () => {}) {
       const end = (done: Done) => { busy--; each(done); return done }
       // Where the eye is and what is aimed at are as they were when it was asked, not when its turn comes.
-      const body = JSON.stringify({ ...ask, target: ask.target ?? self.aim?.(), from: eye(), by: by(), realm: realmNow() })
+      const kept = ask.kept ?? (ask.wish && !ask.picture && !ask.link && !ask.fresh && !ask.hand ? self.kept?.(ask.wish) : undefined)
+      const body = JSON.stringify({ ...ask, ...(kept ? { kept } : {}), target: ask.target ?? self.aim?.(), from: eye(), by: by(), realm: realmNow() })
       if (busy++) each({ stage: 'waiting', ahead: busy - 1 })
       const before = last
       let free!: () => void

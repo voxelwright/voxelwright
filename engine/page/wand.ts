@@ -88,6 +88,8 @@ struct U {
 @group(0) @binding(0) var<uniform> u: U;
 @group(0) @binding(1) var depths: texture_depth_2d;
 @group(0) @binding(2) var cells: texture_3d<u32>;
+// Where the march looked through a pane, how far off it was (a; 0 where it looked through none: march.ts panes).
+@group(0) @binding(3) var panes: texture_2d<f32>;
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
@@ -119,8 +121,11 @@ fn onEdge(p: vec3f, lo: vec3f, hi: vec3f, wide: f32) -> f32 {
   let uv = (at.xy / u.res) * 2.0 - 1.0;
   let rd = normalize(u.forward + u.right * (uv.x * u.tanHalf * u.aspect) - u.up * (uv.y * u.tanHalf));
   let depth = textureLoad(depths, vec2i(at.xy), 0);
-  let sky = depth >= 0.999999;
-  let t = (NEAR / max(1.0e-7, 1.0 - depth * (FAR - NEAR) / FAR)) / dot(rd, u.forward);
+  // The depth is of what is behind a pane the march looked through (#163): the wand stops at the pane, as a pick does.
+  let pane = textureLoad(panes, vec2i(at.xy), 0).a;
+  let sky = depth >= 0.999999 && pane <= 0.0;
+  var t = (NEAR / max(1.0e-7, 1.0 - depth * (FAR - NEAR) / FAR)) / dot(rd, u.forward);
+  if (pane > 0.0) { t = pane; }
   let pos = u.eye + rd * t;
   // How wide a pixel is where the picture is, in cells: lines are kept a pixel or two wide however far off.
   let px = t * u.tanHalf * 2.0 / u.res.y;
@@ -289,7 +294,7 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
   const block = new ArrayBuffer(144), floats = new Float32Array(block)
   const uniforms = device.createBuffer({ size: block.byteLength, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const none = device.createTexture({ size: [1, 1, 1], dimension: '3d', format: 'r8uint', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST })
-  let mask = none, bound: { depth: GPUTextureView; mask: GPUTexture; group: GPUBindGroup } | null = null
+  let mask = none, bound: { depth: GPUTextureView; mask: GPUTexture; panes: GPUTextureView; group: GPUBindGroup } | null = null
 
   let held = false, mode: Mode = 'point', share: Share = 'whole'
   const area: [number, number, number] = [30, 30, 30]
@@ -440,7 +445,8 @@ export async function wand(device: GPUDevice, format: GPUTextureFormat, march: M
       // A ring big enough to be seen from where the eye is, and never smaller than a hand.
       floats.set([...rel(met?.at ?? view.eye), Math.max(2.5, (met?.t ?? 0) * 0.03), ...(box ? rel(box) : [0, 0, 0]), flash, ...(box ? rel(box.slice(3)) : [0, 0, 0]), going ? 0 : 1, ...(thing?.normal ?? [0, 1, 0]), mode === 'thing' && thing?.share === 'side' ? 1 : 0, to.size[0], to.size[1]], 16)
       device.queue.writeBuffer(uniforms, 0, block)
-      if (!bound || bound.depth !== to.depth || bound.mask !== mask) bound = { depth: to.depth, mask, group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.depth }, { binding: 2, resource: mask.createView() }] }) }
+      const panes = march.panes(to.size)
+      if (!bound || bound.depth !== to.depth || bound.mask !== mask || bound.panes !== panes) bound = { depth: to.depth, mask, panes, group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: to.depth }, { binding: 2, resource: mask.createView() }, { binding: 3, resource: panes }] }) }
       const pass = encoder.beginRenderPass({ colorAttachments: [{ view: to.color, loadOp: 'load', storeOp: 'store' }] })
       pass.setPipeline(pipeline)
       pass.setBindGroup(0, bound.group)

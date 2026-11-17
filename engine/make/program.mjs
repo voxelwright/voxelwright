@@ -11,7 +11,7 @@
 // whole thread (what the count does not see: a native fill, a regex).
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
-import { FONT, MATERIALS, colour } from './form.mjs'
+import { FONT, MATERIALS, colour, drivesOf } from './form.mjs'
 
 /** The most a thing may be along a side, in its own cells, and the cells a thing may be made of, in cm. */
 export const SIDE_MOST = 256, GRAINS = [10, 2.5, 1.25]
@@ -25,7 +25,7 @@ const ANSWER_MOST = 48 << 20
 // What a program sees. It shares the interpreter with the program, which can replace any of it: no check lives here.
 const GUEST = (font) => `
 const __P = [], __I = Object.create(null), __FONT = ${JSON.stringify(font)}
-let __W = 0, __H = 0, __D = 0, __G = null, __name = 'a thing', __cm = 10, __lm = null, __lc = null, __li = 0, __seed = 2463534242
+let __W = 0, __H = 0, __D = 0, __G = null, __name = 'a thing', __drives = null, __cm = 10, __lm = null, __lc = null, __li = 0, __seed = 2463534242
 const __pal = (m, c) => {
   if (m === __lm && c === __lc) return __li
   let i = 0
@@ -35,6 +35,7 @@ const __pal = (m, c) => {
 }
 function rng() { __seed ^= __seed << 13; __seed ^= __seed >>> 17; __seed ^= __seed << 5; return (__seed >>> 0) / 4294967296 }
 function name(s) { __name = String(s).slice(0, 60) }
+function drives(o) { __drives = o === undefined ? {} : JSON.parse(JSON.stringify(o)) }
 function size(w, h, d, cm) {
   if (__G) throw new Error('size is called once')
   w = Math.round(w); h = Math.round(h); d = Math.round(d)
@@ -111,7 +112,7 @@ globalThis.__done = () => {
   let last = __G[0], n = 0
   for (let k = 0; k < __G.length; k++) { const v = __G[k]; if (v === last) n++; else { runs.push(n, last); last = v; n = 1 } }
   runs.push(n, last)
-  return JSON.stringify({ name: __name, size: [__W, __H, __D], cm: __cm, palette: __P, runs })
+  return JSON.stringify({ name: __name, size: [__W, __H, __D], cm: __cm, palette: __P, runs, ...(__drives ? { drives: __drives } : {}) })
 }
 `
 
@@ -210,7 +211,10 @@ export function shaped(answer) {
   lo[1] = 0
   const size = [hi[0] - lo[0], hi[1], hi[2] - lo[2]], cells = new Uint16Array(size[0] * size[1] * size[2])
   for (let y = 0; y < size[1]; y++) for (let z = 0; z < size[2]; z++) { const from = ((y * d + z + lo[2]) * w) + lo[0]; cells.set(all.subarray(from, from + size[0]), (y * size[2] + z) * size[0]) }
-  return { name: typeof got.name === 'string' && got.name ? got.name.slice(0, 60) : 'a thing', size, cm: got.cm, cells, filled: stands, crumbs, left, kept: stands / filled }
+  // Meant to be driven (make/drivable.mjs): what it said of itself, checked. One that does not say so validly (drives("no"), drives(false)) is not driven: left out, and said.
+  let drives
+  if (got.drives !== undefined) { try { drives = drivesOf(got.drives) } catch (e) { left.push(`drives() left out: ${e.message}`) } }
+  return { name: typeof got.name === 'string' && got.name ? got.name.slice(0, 60) : 'a thing', size, cm: got.cm, cells, filled: stands, crumbs, left, kept: stands / filled, ...(drives ? { drives } : {}) }
 }
 
 /** A reply that is a program, as a thing: run, then read. Throws `Refused` with what the model can be told. */

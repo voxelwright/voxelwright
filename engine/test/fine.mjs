@@ -4,6 +4,7 @@
 // at the end sees it, with no switch said.
 //
 //   node test/fine.mjs [--out picture.png] [--no-page]
+import { bodyOf } from '../make/drivable.mjs'
 import { mkdtempSync } from 'node:fs'
 import { readdir, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,6 +14,7 @@ import { wished } from '../make/best.mjs'
 import { THING_ROWS_MOST } from '../make/form.mjs'
 import { SHIPPED, library } from '../make/library.mjs'
 import { made, refused } from '../make/program.mjs'
+import { read as readCells } from '../make/cells.mjs'
 import { arg, chrome, has, serve } from './kit.mjs'
 
 const dir = mkdtempSync(join(tmpdir(), 'engine-fine-')), file = join(dir, 'world.log'), journal = join(dir, 'made.jsonl')
@@ -40,6 +42,11 @@ try {
     let said = ''
     try {
       const k = await made(e.reply), [w, h, d] = k.size
+      // What is kept of it as cells (#220, what it is made from when asked for) is what its program makes, cell for cell.
+      const r = e.made ? readCells(e.made, { joined: e.proved?.joined }) : null
+      // A car that is driven (#245) is kept alive: its look is those cells, laid as a body lays them (make/drivable.mjs `bodyOf`).
+      const look = r?.living?.look[0], c = look ? { cm: 10 / look.per, size: look.size, cells: look.kinds } : r, want = look ? bodyOf(k) : k.cells
+      check(!!c && c.cm === k.cm && c.size.join() === k.size.join() && c.cells.every((v, i) => v === want[i]) && e.proved?.joined, `kept with the engine, ${e.wish}${e.apart ? ` (${e.apart})` : ''} is kept as the cells its program makes${e.proved?.stands ? ', and stood whole' : ''}`)
       let along = 0, across = 0
       for (let y = 0; y < h; y++) { for (let z = 0; z < d; z++) { let last = 0; for (let x = 0; x < w; x++) { const c = k.cells[(y * d + z) * w + x]; if (c && c !== last) along++; last = c } } for (let x = 0; x < w; x++) { let last = 0; for (let z = 0; z < d; z++) { const c = k.cells[(y * d + z) * w + x]; if (c && c !== last) across++; last = c } } }
       said = e.form === 'program' && e.grade === 'best' && Math.max(along, across) <= THING_ROWS_MOST ? `${k.size.join(' x ')} of ${k.cm} cm, ${Math.max(along, across)} rows` : `form ${e.form}, grade ${e.grade}, ${Math.max(along, across)} rows`

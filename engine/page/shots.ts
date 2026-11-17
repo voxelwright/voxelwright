@@ -14,6 +14,8 @@ export function shots(smoke: Puffs, debris: Crumbs): { heard(told: Told): void; 
   /** Where each body was last told to be, and whether it has been fast. */
   const last = new Map<number, { at: [number, number, number]; fast: boolean }>()
   let seen = 0
+  /** The bodies that live (the solver says which, each step they move). */
+  const alive = new Set<number>()
   const end = (id: number) => {
     const was = last.get(id)
     last.delete(id)
@@ -25,7 +27,11 @@ export function shots(smoke: Puffs, debris: Crumbs): { heard(told: Told): void; 
   return {
     get seen() { return seen },
     heard(told) {
+      // What lives is driven, not thrown: a car at 60 km/h is no shot (it trailed a streak of light down the street).
+      for (const l of told.live) alive.add(l.id)
+      for (const id of told.broke) alive.delete(id)
       for (const m of told.moves) {
+        if (alive.has(m.id)) { last.delete(m.id); continue }
         const was = last.get(m.id)
         if (!was) { last.set(m.id, { at: m.pos, fast: false }); continue }
         const d = [m.pos[0] - was.at[0], m.pos[1] - was.at[1], m.pos[2] - was.at[2]], far = Math.hypot(d[0], d[1], d[2])

@@ -46,28 +46,96 @@ export const SCHEMES: Record<'drive' | 'fly' | 'hover' | 'ride', Scheme> = {
  * own process writes so that a world started again can stand it up there. Data from a page or a model: checked by
  * `controlsOf` before anything uses it.
  */
-export interface Controls { scheme: keyof typeof SCHEMES; motor: Motor; /** Where its riders sit, each where their feet are, in its own cells from its low corner; and its size in cells, to place them by. */ seats?: [number, number, number][]; size?: [number, number, number]; rest?: { at: [number, number, number]; rot: [number, number, number, number] } }
-const finite = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every((x) => typeof x === 'number' && Number.isFinite(x))
+export interface Controls {
+  scheme: keyof typeof SCHEMES; motor: Motor
+  /** Where its riders sit, each where their feet are, in its own cells from its low corner; and its size in cells, to place them by. */ seats?: [number, number, number][]; size?: [number, number, number]
+  /** The driver's eye, in its own cells from its low corner: where the eye is when V puts it in the seat. */ eye?: [number, number, number]
+  /** Its look in finer cells: each part as a `Fine` is, but its cells are kept by the server, under `kept` (`GET /world/fine/<kept>`, the sha256 of the 16-bit kinds). */ fine?: FineKept[]
+  rest?: { at: [number, number, number]; rot: [number, number, number, number] }
+  /** Written by the world the first time anyone gets on it or drives it, a rider or a rule (#245): kept in its record, so a better version of it never takes its place (make.mjs `asPut`). */ driven?: true
+}
+/**
+ * A part of a living thing's look in cells finer than its own (#245): it rides on the body, and the body's own cells
+ * of 10 cm are then not drawn. `per` of its cells lie along one of the body's (4 or 8); `low` is its low corner in
+ * the body's own cells from the body's low corner (it may be fractional); `cells` are kinds laid
+ * `cells[(y * d + z) * w + x]`, as base64 of the 16-bit kinds when a string.
+ */
+export interface Fine { size: [number, number, number]; per: number; low: [number, number, number]; cells: string | Uint16Array }
+/** A part of a look as a shared world's record says it: its cells are fetched by `kept`, so a record of a car stays small. */
+export interface FineKept { size: [number, number, number]; per: number; low: [number, number, number]; kept: string }
+/** A look's cells as kinds, or null if they are not as many as its size says. */
+export const kindsOf = (f: Fine): Uint16Array | null => {
+  let kinds = f.cells
+  if (typeof kinds === 'string') {
+    // Text that is not base64, or not a whole number of 16-bit kinds, is no look (it used to throw, and a thing being made never answered).
+    let bytes: Uint8Array
+    try { bytes = Uint8Array.from(atob(kinds), (c) => c.charCodeAt(0)) } catch { return null }
+    if (bytes.length % 2) return null
+    kinds = new Uint16Array(bytes.buffer)
+  }
+  return kinds.length === f.size[0] * f.size[1] * f.size[2] ? kinds : null
+}
+/**
+ * What a look may be, whoever's record says it: at most 8 parts, 8 million cells in a part and 12 million in all (a
+ * car's outside at 2.5 cm and its cabin at 1.25 cm are 5 million), and at most 1.5 million of them filled (a look is
+ * a thing's outside: every filled cell may cost a page six faces to make and to hold, and a record is read by every
+ * page that joins its world).
+ */
+export const FINE_PARTS = 8, FINE_PART_CELLS = 8_000_000, FINE_CELLS = 12_000_000, FINE_FILLED = 1_500_000
+const KEPT = /^[0-9a-f]{64}$/
+const cellsOf = (f: { size: readonly number[] }) => f.size[0] * f.size[1] * f.size[2]
+/** Whether parts are within what a look may be, by their sizes alone. */
+export const fineWithin = (parts: readonly { size: readonly number[] }[]) => parts.length <= FINE_PARTS && parts.every((f) => cellsOf(f) <= FINE_PART_CELLS) && parts.reduce((n, f) => n + cellsOf(f), 0) <= FINE_CELLS
+/** A part's size and grain are what the piece drawer can draw: at most 1023 cells a side. */
+const fineShape = (f: Partial<Fine>) => finite(f.size, 3) && f.size.every((v) => Number.isInteger(v) && v > 0 && v <= 1023) && typeof f.per === 'number' && Number.isInteger(f.per) && f.per >= 1 && f.per <= 16 && finite(f.low, 3)
+/** A number the core can read: finite as the 32-bit number it becomes there (1e300 is finite here and endless there, and the core then takes none of the motor). */
+const real = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(Math.fround(x))
+const finite = (v: unknown, n: number): v is number[] => Array.isArray(v) && v.length === n && v.every(real)
 /** A record's `controls`, if it is one that can be used; else null. The core clamps every number of the motor. */
 export function controlsOf(value: unknown): Controls | null {
   const c = value as Partial<Controls> | null, m = c?.motor as Partial<Motor> | undefined
   if (!c || typeof c !== 'object' || typeof c.scheme !== 'string' || !Object.hasOwn(SCHEMES, c.scheme) || !m || typeof m !== 'object') return null
   const plain = ['front', 'grip', 'power', 'top', 'steer', 'hover', 'lift', 'upright', 'turns', 'jump', 'tough'] as const
-  if (!plain.every((k) => typeof m[k] === 'number' && Number.isFinite(m[k])) || !Array.isArray(m.feet) || m.feet.length > 16) return null
+  if (!plain.every((k) => real(m[k])) || !Array.isArray(m.feet) || m.feet.length > 16) return null
   const feet: Foot[] = []
   for (const f of m.feet as Partial<Foot>[]) {
-    if (!f || !finite(f.at, 3) || typeof f.reach !== 'number' || !Number.isFinite(f.reach)) return null
+    if (!f || !finite(f.at, 3) || !real(f.reach)) return null
     feet.push({ at: [f.at[0], f.at[1], f.at[2]], reach: f.reach, steers: f.steers === true, drives: f.drives === true })
   }
   const motor = { ...Object.fromEntries(plain.map((k) => [k, m[k]])), feet } as unknown as Motor
   const rest = c.rest && finite(c.rest.at, 3) && finite(c.rest.rot, 4) ? { at: [...c.rest.at] as [number, number, number], rot: [...c.rest.rot] as [number, number, number, number] } : undefined
   const seats = Array.isArray(c.seats) && c.seats.length <= 8 && c.seats.every((s) => finite(s, 3)) && finite(c.size, 3) ? { seats: c.seats.map((s) => [s[0], s[1], s[2]] as [number, number, number]), size: [...c.size!] as [number, number, number] } : {}
-  return { scheme: c.scheme, motor, ...seats, ...(rest ? { rest } : {}) }
+  const fine = Array.isArray(c.fine) && c.fine.length <= FINE_PARTS && c.fine.every((f) => f && fineShape(f) && typeof f.kept === 'string' && KEPT.test(f.kept)) && fineWithin(c.fine) ? { fine: c.fine.map((f) => ({ size: [...f.size] as [number, number, number], per: f.per, low: [...f.low] as [number, number, number], kept: f.kept })) } : {}
+  const eye = finite(c.eye, 3) ? { eye: [...c.eye] as [number, number, number] } : {}
+  return { scheme: c.scheme, motor, ...seats, ...eye, ...fine, ...(rest ? { rest } : {}), ...(c.driven === true ? { driven: true as const } : {}) }
 }
 
+/**
+ * Whether words ask to drive a thing already made, pointed at and nothing more ("make it drivable", "let me drive
+ * it", "make this driveable"). When what is aimed at is the asker's own made thing and not alive (the helper says:
+ * make.mjs `aimed`), the page sends them to the helper as a thing (page/making.ts), and the helper brings it to life
+ * where it stands (helper.mjs); aimed at anything else they are read as any words are. One rule for both. Words
+ * that name what they mean ("make the dragon alive", "can I ride the horse") or say more ("drive it off the cliff", "let me drive it home")
+ * are not this: they go where such words always went (a new thing, the realm's rules).
+ */
+export const asksToDrive = (text: string) => /^\s*(please\s+)?((make|turn)\s+(it|this|that)(\s+one)?\s+(into\s+something\s+)?(drivable|driveable|drive-able|rideable|ridable)|(let|can|could|may)\s+(me|i)\s+(drive|ride)\s+(it|this|that)(\s+one)?)\s*[.!?]?\s*$/i.test(text)
+
 /** A thing to bring to life: its cells (one kind each, laid out x, then z, then y), size and low corner in the world's cells, how it moves and how it is driven. */
-export interface Making { name: string; cells: Int32Array; size: [number, number, number]; low: [number, number, number]; motor: Motor; controls?: keyof typeof SCHEMES; take?: boolean }
-export interface Thing extends Making { id: number; alive: boolean; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number] }
+export interface Making {
+  name: string; cells: Int32Array; size: [number, number, number]; low: [number, number, number]; motor: Motor; controls?: keyof typeof SCHEMES; take?: boolean
+  /** Its look in finer cells, drawn riding on the body in place of the body's own cells (until it breaks). */ fine?: Fine[]
+  /** Where its riders sit, and the driver's eye, in its own cells from its low corner (as `Controls` has them). */ seats?: [number, number, number][]; eye?: [number, number, number]
+}
+/** What a thing was asked to do and was measured doing (its record's `facts`, make/alive.mjs): names of numbers. */
+export interface Facts { asked?: Record<string, number>; measured?: Record<string, number> }
+/** A record's facts as one line for a card: its top speed and 0 to 100, as measured or else as asked ("240 km/h, 0 to 100 in 6.3 s"), or ''. */
+export function factsLine(value: unknown): string {
+  const f = value as Facts | null, pick = (name: string) => [f?.measured?.[name], f?.asked?.[name]].find((v) => typeof v === 'number' && Number.isFinite(v) && v > 0)
+  if (!f || typeof f !== 'object') return ''
+  const top = pick('top_kmh'), sprint = pick('zero_to_100_s')
+  return [top !== undefined ? `${Math.round(top)} km/h` : '', sprint !== undefined ? `0 to 100 in ${sprint.toFixed(1)} s` : ''].filter(Boolean).join(', ')
+}
+export interface Thing extends Making { id: number; alive: boolean; /** One line of what it was measured doing, for its card (`factsLine`). */ facts?: string; /** In a shared world: its look's parts as its record says them, fetched from the world. */ kept?: FineKept[]; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number] }
 
 export interface Living {
   /** Brings a thing to life. Resolves when the solver has made it; its id is 0 if it could not. */
@@ -78,6 +146,12 @@ export interface Living {
   frame(dt: number): boolean
   /** Gets on a thing, or off (null). */
   mount(thing: Thing | null): void
+  /** Whether the eye of whoever rides from this page is in the seat (V): their own figure is then not drawn. */
+  readonly inside: boolean
+  /** Puts the eye of whoever rides in the seat (true) or behind (false), as V does. */
+  view(inside: boolean): void
+  /** A living thing's look as drawn now, for a check: how big a cell of its own body is drawn (0: not drawn; null: no body), and each part of its fine look, where its low corner is (the world's cells), its turn and how big a cell of it is drawn. */
+  look(thing: Thing): { body: number | null; parts: { pos: [number, number, number]; rot: [number, number, number, number]; cell: number; size: [number, number, number]; per: number }[] }
   /** Where whoever rides from this page sits now and which way they face (cells; 0 is north), as the world's process places every rider (rules/things.mjs `carry`): in the thing's first seat, or its middle. Null when nobody rides. */
   readonly rider: { at: [number, number, number]; yaw: number } | null
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
@@ -93,6 +167,12 @@ export interface Living {
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
+/** The eye's yaw that looks along each front in a thing's own cells (the eye's own straight ahead is -z). */
+const AHEADS = [Math.PI / 2, -Math.PI / 2, Math.PI, 0]
+/** How high a sitting person's eye is over where their feet are (cells): the seat is where the feet are. */
+const SITTING_EYE = 12
+/** How far outside its thing's own box a driver's eye may be (cells). */
+const EYE_OUT = 6
 const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
@@ -107,8 +187,10 @@ export function living(o: {
   input: Input
   /** What is shown over the picture (hud.ts): the cue beside a thing, the card while riding. */
   hud: Hud
-  /** The eye: metres, and which way it looks. */
-  pose: { x: number; y: number; z: number; yaw: number; pitch: number }
+  /** The eye: metres, and which way it looks; `tilt` turns its whole frame (main.ts `view`), as it does in the seat. */
+  pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] }
+  /** Draws a block of finer cells as a piece (pieces.ts), for a thing's fine look: placed each frame where the body is. */
+  look?: (kinds: Uint16Array, size: [number, number, number]) => Piece
   /** How high the ground is at a place (metres). */
   ground(x: number, z: number): number
   /** Where the person's own body is when they are on foot (cells, at the height of their chest), or null: what is near is near that. */
@@ -148,20 +230,96 @@ export function living(o: {
     held.rise = 0
     buttons.style.display = scheme && touch ? 'flex' : 'none'
     if (!scheme) return
-    buttons.replaceChildren(...scheme.lines.flatMap((line) => line.once ? [button(line.does, () => { once = line.once })] : line.rise ? [button('up', () => { held.rise = 1 }, () => { held.rise = 0 }), button('down', () => { held.rise = -1 }, () => { held.rise = 0 })] : []))
+    buttons.replaceChildren(...scheme.lines.flatMap((line) => line.once ? [button(line.does, () => { once = line.once })] : line.rise ? [button('up', () => { held.rise = 1 }, () => { held.rise = 0 }), button('down', () => { held.rise = -1 }, () => { held.rise = 0 })] : []), button('seat', () => view(!inside)))
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
   const reach = (on: boolean) => {
     if (on && !beside) beside = o.input.push({ name: 'beside', key: (code) => { if (code !== 'KeyE' || !near || riding) return false; mount(near); return true } })
-    // Taken off only from the top: taking it from under another mode would take that one off too.
-    else if (!on && beside && o.input.top === 'beside') { beside(); beside = null }
+    else if (!on && beside) { beside(); beside = null }
   }
   const where: Living['where'] = (thing) => {
     const piece = o.piece(thing.id)
     if (!piece) return null
     const f = turned(piece.rot, FRONTS[thing.motor.front]), flat = Math.hypot(f[0], f[2]) || 1
     return { at: piece.pos, rot: piece.rot, front: [f[0] / flat, 0, f[2] / flat] }
+  }
+  /** Where a place in a thing's own cells (from its low corner) is in the world now (cells), or null. */
+  const placeOf = (thing: Thing, p: readonly number[]): [number, number, number] | null => {
+    const body = o.piece(thing.id)
+    if (!body) return null
+    // The body's own cells start at its low corner when it was made, which is the thing's own low corner unless the core left out empty rows.
+    const b = body.born, v = turned(body.rot, [p[0] - (b.low[0] - thing.low[0]) - b.com[0], p[1] - (b.low[1] - thing.low[1]) - b.com[1], p[2] - (b.low[2] - thing.low[2]) - b.com[2]])
+    return [body.pos[0] + v[0], body.pos[1] + v[1], body.pos[2] + v[2]]
+  }
+  // A thing's fine look (#245): a piece for each part, kept each frame where the body is, the body's own cells not drawn.
+  // Its glass is seen through (pieces.ts), from the seat as from the street.
+  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number }
+  const looks = new Map<Thing, Worn[]>()
+  const wear = (thing: Thing, parts: { kinds: Uint16Array; size: [number, number, number]; per: number; low: [number, number, number] }[]) => {
+    if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
+    // Within what a look may be, counted before any of it is made into faces: its sizes, and how many of its cells are filled.
+    let filled = 0
+    for (const f of parts) for (let i = 0; i < f.kinds.length; i++) if (f.kinds[i]) filled++
+    if (!fineWithin(parts) || filled > FINE_FILLED) { console.warn(`a look of ${parts.length} parts with ${filled} filled cells is more than a look may be: the thing is drawn as its own cells`); return }
+    looks.set(thing, parts.map((f) => {
+      const piece = o.look!(f.kinds, f.size)
+      // Placed by its low corner, so that a part is where `low` says however it is turned.
+      piece.born.com = [0, 0, 0]
+      piece.cell = 0
+      return { piece, kinds: f.kinds, size: f.size, low: f.low, per: f.per }
+    }))
+  }
+  const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
+  const follow = () => {
+    for (const [thing, worn] of looks) {
+      const body = o.piece(thing.id)
+      // Its own cells are not drawn while it wears a look; broken, its pieces are drawn as they are.
+      if (body) body.cell = 0
+      for (const w of worn) {
+        const at = body && placeOf(thing, w.low)
+        if (at && body) { w.piece.pos = at; w.piece.rot = body.rot; w.piece.cell = 1 / w.per } else w.piece.cell = 0
+      }
+    }
+  }
+  // In a shared world the cells of a look are the world's to keep and every page's to fetch, once each.
+  const fetched = new Map<string, Promise<Uint16Array | null>>()
+  const fetchKinds = (f: FineKept) => {
+    // One that could not be had (the network, a busy server) is not kept as none: the next thing that wears it asks again.
+    if (!fetched.has(f.kept)) fetched.set(f.kept, fetch(`${o.world!.base}/fine/${f.kept}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b && b.byteLength === f.size[0] * f.size[1] * f.size[2] * 2 ? new Uint16Array(b) : null), () => null).then((kinds) => { if (!kinds) fetched.delete(f.kept); return kinds }))
+    return fetched.get(f.kept)!
+  }
+  /** Sends a part's cells to the world to keep; what its record then says of it, or null. */
+  const keep = async (f: Fine): Promise<FineKept | null> => {
+    const kinds = kindsOf(f)
+    if (!kinds || !o.world) return null
+    const r = await fetch(`${o.world.base}/fine`, { method: 'POST', body: kinds.slice() }).catch(() => null)
+    const kept = r?.ok ? ((await r.json()) as { kept?: string }).kept : undefined
+    if (!kept) return null
+    fetched.set(kept, Promise.resolve(kinds))
+    return { size: f.size, per: f.per, low: f.low, kept }
+  }
+  // The eye in the seat (V while riding): at the driver's eye, turning and leaning with the thing; the head still turns.
+  let inside = false
+  const head = [0, 0]
+  /** Where the driver's eye is in a thing's own cells: its `eye`, else its first seat with a sitting person's eye over it, else over its middle. */
+  const eyeOf = (thing: Thing): [number, number, number] => {
+    const e = thing.eye ?? (thing.seats?.[0] ? [thing.seats[0][0], thing.seats[0][1] + SITTING_EYE, thing.seats[0][2]] : [thing.size[0] / 2, thing.size[1] + SITTING_EYE / 2, thing.size[2] / 2])
+    // Held to the thing's own box and a little over it (a rider on a roof rack, not a kilometre off): a record's `eye` is anyone's to write.
+    const held = (v: number, most: number) => Math.max(-EYE_OUT, Math.min(most + EYE_OUT, v))
+    return [held(e[0], thing.size[0]), held(e[1], thing.size[1] + SITTING_EYE), held(e[2], thing.size[2])]
+  }
+  const view = (on: boolean) => {
+    if (on === inside) return
+    inside = on && !!riding
+    if (inside && riding) { head[0] = 0; head[1] = -0.08 }
+    else {
+      // Behind again: looking the way the head was turned.
+      o.pose.tilt = undefined
+      o.pose.yaw = facing + head[0]
+      o.pose.pitch = -0.22
+      room = 0
+    }
   }
   const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump') => {
     if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once); return }
@@ -172,11 +330,13 @@ export function living(o: {
   const hoped = new Map<string, (thing: Thing) => void>()
   if (o.world) o.world.onliving = ({ thing: ref, body }) => {
     const was = things.findIndex((t) => t.ref === ref)
-    if (was >= 0) { const old = things[was]; old.alive = false; things.splice(was, 1); if (riding === old) mount(null) }
+    if (was >= 0) { const old = things[was]; old.alive = false; things.splice(was, 1); unwear(old); if (riding === old) mount(null) }
     const record = o.made?.().all.get(ref), controls = controlsOf(record?.controls)
     if (!body || !record || !controls) return
-    const b = record.box, thing: Thing = { id: body, ref, alive: true, name: record.name, cells: new Int32Array(0), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]], low: [b[0], b[1], b[2]], motor: controls.motor, controls: controls.scheme, seat: controls.seats?.[0] && controls.size ? [controls.seats[0][0] - controls.size[0] / 2, controls.seats[0][1] - controls.size[1] / 2, controls.seats[0][2] - controls.size[2] / 2] : undefined }
+    const b = record.box, thing: Thing = { id: body, ref, alive: true, name: record.name, cells: new Int32Array(0), size: [b[3] - b[0], b[4] - b[1], b[5] - b[2]], low: [b[0], b[1], b[2]], motor: controls.motor, controls: controls.scheme, seats: controls.seats, eye: controls.eye, kept: controls.fine, facts: factsLine(record.facts) || undefined, seat: controls.seats?.[0] && controls.size ? [controls.seats[0][0] - controls.size[0] / 2, controls.seats[0][1] - controls.size[1] / 2, controls.seats[0][2] - controls.size[2] / 2] : undefined }
     things.push(thing)
+    const kept = controls.fine
+    if (kept?.length && o.look) void Promise.all(kept.map(fetchKinds)).then((all) => wear(thing, kept.flatMap((f, i) => { const kinds = all[i]; return kinds ? [{ kinds, size: f.size, per: f.per, low: f.low }] : [] })))
     hoped.get(ref)?.(thing)
     hoped.delete(ref)
   }
@@ -201,15 +361,14 @@ export function living(o: {
       if (at) { o.pose.x = at.at[0] / M - at.front[2] * (riding.size[2] / M / 2 + 1.2); o.pose.z = at.at[2] / M + at.front[0] * (riding.size[2] / M / 2 + 1.2); o.pose.y = Math.max(o.pose.y, o.ground(o.pose.x, o.pose.z) + 1.7) }
     }
     const was = riding
+    view(false)
     riding = thing?.alive ? thing : null
     said = ''
     // The world is told who rides what, and a body on foot is taken up or set down.
     if (was !== riding) {
       if (was?.ref) o.world?.ride(was.ref, false)
       if (riding?.ref) o.world?.ride(riding.ref, true)
-      // Off: the seat's keys go first, and then the person is on their feet again (#367). The other way round, taking
-      // the seat's mode off took the feet's with it (a mode goes with all that was put over it), and after a ride
-      // Space did not jump and V did not change where the eye rides.
+      // Off: the seat's keys go first, and then the person is on their feet again (#367).
       if (!riding) { leave?.(); leave = null }
       if (!was !== !riding) o.ridden?.(!!riding)
     }
@@ -221,18 +380,20 @@ export function living(o: {
       o.pose.pitch = -0.22
     }
     const scheme = riding && SCHEMES[riding.controls ?? 'drive']
-    o.hud.card(riding && scheme ? { title: riding.name, rows: scheme.lines.map((line) => [line.shown, line.does] as const) } : null)
+    o.hud.card(riding && scheme ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { if (code === 'KeyV') { view(!inside); return true } const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
 
   return {
-    things, struck, where, mount,
+    things, struck, where, mount, view,
     get riding() { return riding },
+    get inside() { return inside && !!riding },
+    look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, per: w.per } }) }),
     get rider() {
       const at = riding && where(riding)
       if (!riding || !at) return null
@@ -246,8 +407,14 @@ export function living(o: {
         const ref = `${making.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 24) || 'thing'}-${Math.random().toString(36).slice(2, 8)}`, r = rows(making)
         hoped.set(ref, done)
         const none = () => { hoped.delete(ref); done({ ...making, id: 0, alive: false }) }
-        void o.world.ask({ edit: [1, r.length / 5, ...r], release: [making.low[0] - 2, making.low[1] + 1, making.low[2]], thing: { id: ref, name: making.name, wish: '', at: [making.low[0] + (making.size[0] >> 1), making.low[1], making.low[2] + (making.size[2] >> 1)], size: making.size, facing: 'east', controls: { scheme: making.controls ?? 'drive', motor: making.motor } satisfies Controls } }).then((taken) => { if (!taken) none() })
-        setTimeout(() => { if (hoped.has(ref)) none() }, 10_000)
+        // Its look's cells are kept by the world first, and its record says where they are: a car's are megabytes, its record a few hundred bytes.
+        const world = o.world
+        void Promise.all((making.fine ?? []).map((f) => keep(f).catch(() => null))).then((kept) => {
+          const fine = kept.filter((f): f is FineKept => f !== null)
+          const controls: Controls = { scheme: making.controls ?? 'drive', motor: making.motor, ...(making.seats ? { seats: making.seats, size: making.size } : {}), ...(making.eye ? { eye: making.eye } : {}), ...(fine.length ? { fine } : {}) }
+          void world.ask({ edit: [1, r.length / 5, ...r], release: [making.low[0] - 2, making.low[1] + 1, making.low[2]], thing: { id: ref, name: making.name, wish: '', at: [making.low[0] + (making.size[0] >> 1), making.low[1], making.low[2] + (making.size[2] >> 1)], size: making.size, facing: 'east', controls } }).then((taken) => { if (!taken) none() })
+          setTimeout(() => { if (hoped.has(ref)) none() }, 10_000)
+        })
         return
       }
       waiting.push({ making, done })
@@ -257,7 +424,11 @@ export function living(o: {
     heard(answer, told) {
       if (answer.spawned !== undefined) {
         const next = waiting.shift()
-        if (next) { const thing: Thing = { ...next.making, id: answer.spawned, alive: answer.spawned > 0 }; if (thing.alive) things.push(thing); next.done(thing) }
+        if (next) {
+          const m = next.making, thing: Thing = { ...m, id: answer.spawned, alive: answer.spawned > 0, seat: m.seats?.[0] ? [m.seats[0][0] - m.size[0] / 2, m.seats[0][1] - m.size[1] / 2, m.seats[0][2] - m.size[2] / 2] : undefined }
+          if (thing.alive) { things.push(thing); wear(thing, (m.fine ?? []).flatMap((f) => { const kinds = kindsOf(f); return kinds ? [{ kinds, size: f.size, per: f.per, low: f.low }] : [] })) }
+          next.done(thing)
+        }
       }
       for (const id of told.broke) {
         const thing = things.find((t) => t.id === id)
@@ -265,12 +436,14 @@ export function living(o: {
         // Broken: it lives no more, and whoever rode it is on their own feet where it broke.
         thing.alive = false
         things.splice(things.indexOf(thing), 1)
+        unwear(thing)
         if (riding === thing) mount(null)
       }
       for (const state of told.live) { const thing = things.find((t) => t.id === state.id); if (thing) thing.state = state }
       for (const s of told.struck) { struck.push(s); if (struck.length > 64) struck.shift() }
     },
     frame(dt) {
+      follow()
       // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
       // right beside them was out of reach and E did nothing until they had walked past it.
       const eye = o.body?.() ?? [o.pose.x * M, o.pose.y * M, o.pose.z * M]
@@ -310,6 +483,20 @@ export function living(o: {
       if (now !== said || asked || (since > 0.25 && now !== '0,0,0')) { tell(riding, axes.go, axes.turn, axes.rise, asked); said = now; since = 0 }
       // The head still turns, round the thing.
       const [right, up] = o.input.turn()
+      const at0 = inside ? where(riding) : null, sitting = at0 && placeOf(riding, eyeOf(riding))
+      if (at0 && sitting) {
+        // In the seat: the eye is the driver's, and the whole frame turns and leans with the thing (main.ts `view`), so
+        // yaw and pitch are the head's own, from straight ahead.
+        head[0] += right
+        head[1] = Math.max(-1.4, Math.min(1.2, head[1] + up))
+        o.pose.x = sitting[0] / M; o.pose.y = sitting[1] / M; o.pose.z = sitting[2] / M
+        o.pose.tilt = [...at0.rot]
+        o.pose.yaw = AHEADS[riding.motor.front] + head[0]
+        o.pose.pitch = head[1]
+        facing = Math.atan2(at0.front[0], -at0.front[2])
+        was = null
+        return true
+      }
       o.pose.yaw += right
       o.pose.pitch = Math.max(-1.4, Math.min(1.2, o.pose.pitch + up))
       const at = where(riding)
@@ -347,7 +534,9 @@ const STEEL = 12, GLASS = 11, LAMP = 15, hue = (h: number, tone: number) => 16 +
 
 /**
  * A car written by hand, the first thing proved (#245): a steel shell 4.2 m long, a glass cabin, four wheels with a
- * foot at each, the front two steering and the back two driving. 6 m/s gathered each second, up to 20 m/s.
+ * foot at each, the front two steering and the back two driving. 6 m/s gathered each second, up to 20 m/s. Each foot
+ * reaches from its wheel's middle to 0.6 cells under the wheel, so nothing of the car but its feet meets the road.
+ * `tests::car` in `core/src/bodies/living.rs` is the same car.
  */
 export function car(low: [number, number, number]): Making {
   const size: [number, number, number] = [42, 10, 18], cells = new Int32Array(size[0] * size[1] * size[2])
@@ -368,9 +557,63 @@ export function car(low: [number, number, number]): Making {
     const round = (x === x0 || x === x0 + 5) && (y === 0 || y === 5)
     if (!round) set(x, y, z, dark)
   }
-  const foot = (x: number, z: number, front: boolean): Foot => ({ at: [x, 3, z], reach: 5, steers: front, drives: !front })
+  const foot = (x: number, z: number, front: boolean): Foot => ({ at: [x, 3, z], reach: 6, steers: front, drives: !front })
   return {
     name: 'car', cells, size, low, controls: 'drive',
     motor: { front: 0, grip: 1.3, power: 60, top: 200, steer: 0.55, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 120, feet: [foot(7, 1, false), foot(7, 17, false), foot(35, 1, true), foot(35, 17, true)] },
   }
+}
+
+/**
+ * The hand-written car with a look in cells of 2.5 cm (#245), written as a few lines of shapes: a body with rounded
+ * ends and wheel arches, a cabin of glass on pillars under a roof, four wheels with hubs, lamps; and inside, a floor,
+ * two seats in front and a bench behind, a dash and a steering wheel, so that the eye in the driver's seat sees
+ * something. The body that moves is `car`'s; the look is 1.3 m high where the body is 1 m. About a megabyte of cells.
+ */
+export function fineCar(low: [number, number, number]): Making {
+  const body = car(low), P = 4, w = 168, h = 52, d = 72, cells = new Uint16Array(w * h * d)
+  const set = (x: number, y: number, z: number, k: number) => { if (x >= 0 && y >= 0 && z >= 0 && x < w && y < h && z < d) cells[(y * d + z) * w + x] = k }
+  const paint = kind(STEEL, hue(0, 4)), trim = kind(STEEL, 13), tyre = kind(STEEL, 14), hub = kind(STEEL, 6), glass = kind(GLASS), lamp = kind(LAMP), red = kind(LAMP, hue(0, 5)), seat = kind(10, hue(2, 9)), floor = kind(STEEL, 12)
+  const wheels = [[28, 12], [140, 12]]
+  // Where the glass of the cabin begins and ends along x at a height: the windscreen leans back, the rear window less.
+  const front = (y: number) => 118 - (y - 25) * 0.9, rear = (y: number) => 40 + (y - 25) * 0.6
+  for (let y = 6; y < h; y++) for (let z = 4; z < d - 4; z++) for (let x = 0; x < w; x++) {
+    const side = Math.min(z - 4, d - 5 - z), end = Math.min(x, w - 1 - x)
+    if (y < 25) {
+      // The lower body, its corners rounded, cut for the wheels; hollow where the cabin is, over a floor.
+      if (end < 6 && side < 6 && (6 - end) ** 2 + (6 - side) ** 2 > 36) continue
+      if (y > 20 && end < 3 && y - 20 > end + 1) continue
+      if (wheels.some(([cx, cy]) => (x - cx) ** 2 + (y - cy) ** 2 < 15 * 15) && side < 10) continue
+      const cabin = x > rear(25) - 2 && x < front(25) + 2 && side >= 2 && y > 8
+      if (cabin) continue
+      set(x, y, z, y < 8 && x > 36 && x < 124 && side >= 2 ? floor : paint)
+      continue
+    }
+    // The cabin: glass between pillars, a roof over it.
+    const x0 = rear(y), x1 = front(y), inset = (y - 25) * 0.15
+    if (x < x0 || x > x1 || side < inset) continue
+    const shell = x < x0 + 2 || x > x1 - 2 || side < inset + 2 || y >= 49
+    if (!shell) continue
+    // The roof and the sill are steel; the windscreen and the rear window are glass between pillars at the corners, and the sides glass but for those and one between the doors.
+    const ends = x < x0 + 2 || x > x1 - 2, pillar = y >= 49 || y < 27 || (ends ? side < inset + 4 : x < x0 + 4 || x > x1 - 4 || Math.abs(x - 80) < 2)
+    set(x, y, z, pillar ? paint : glass)
+  }
+  // Wheels: tyres with hubs, a little proud of the body.
+  for (const [cx, cy] of wheels) for (const [z0, z1] of [[0, 9], [d - 9, d]]) for (let z = z0; z < z1; z++) for (let y = 0; y < 25; y++) for (let x = cx - 13; x <= cx + 13; x++) {
+    const r = Math.hypot(x - cx, y - cy)
+    if (r < 12) set(x, y, z, r < 6 && (z === z0 || z === z1 - 1) ? hub : tyre)
+  }
+  // Lamps in front, red ones behind.
+  for (const z of [10, 11, 12, 13, 14, 15, 56, 57, 58, 59, 60, 61]) for (let y = 15; y < 20; y++) { set(w - 1, y, z, lamp); set(0, y, z, red) }
+  // Inside: two seats and a bench (a cushion and a back each), a dash, and the driver's wheel on its column.
+  for (const [x0, z0, z1] of [[70, 12, 32], [70, 40, 60], [44, 10, 62]]) for (let z = z0; z < z1; z++) {
+    for (let x = x0; x < x0 + 16; x++) for (let y = 9; y < 15; y++) set(x, y, z, seat)
+    for (let y = 15; y < 38; y++) for (let x = x0 - 4 + Math.floor((y - 15) / 6); x < x0 + Math.floor((y - 15) / 6); x++) set(x, y, z, seat)
+  }
+  for (let z = 6; z < d - 6; z++) for (let y = 22; y < 31; y++) for (let x = 104 + (y - 22); x < 120; x++) set(x, y, z, trim)
+  for (let a = 0; a < 64; a++) { const t = (a / 64) * Math.PI * 2; for (const r of [6, 7]) set(98, Math.round(32 + Math.sin(t) * r), Math.round(22 + Math.cos(t) * r), trim) }
+  for (let x = 98; x < 108; x++) set(x, 32 - Math.round((x - 98) * 0.4), 22, trim)
+  // The driver's eye over the left front seat, in the body's cells: 1 m over the ground, a little behind the wheel. A seat is where a
+  // sitting rider's feet are drawn, their eye 1.2 m over them (`SITTING_EYE`): low, so that their head is under the roof.
+  return { ...body, name: 'car', fine: [{ size: [w, h, d], per: P, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
 }

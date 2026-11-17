@@ -17,7 +17,7 @@ import { link } from './link.ts'
 import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { wheel } from './wheel.ts'
-import { car, living } from './living.ts'
+import { car, fineCar, living } from './living.ts'
 import { person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
@@ -25,6 +25,7 @@ import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
+import { under } from './under.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
@@ -44,6 +45,7 @@ import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker } from './ask.ts'
 import { making } from './making.ts'
+import { kept } from './kept.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
@@ -118,6 +120,8 @@ async function main() {
    * eye at its middle, so the ground is out of it when the eye is 6.5 km up: from 8 km there was a blue square in haze. */
   const SPACE = 6_000
   const falling = await pieces(device, gpu.format, march)
+  // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
+  const shade = await under(device, gpu.format)
   const folk = await people(device, gpu.format, march)
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
@@ -390,7 +394,8 @@ async function main() {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
-      if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s)
+      if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
+      if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
       if (!off.has('puffs')) smoke.draw(encoder, to, v)
@@ -549,7 +554,25 @@ async function main() {
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
-  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  // A living thing's look, its faces made once for each part's cells (a car's are 4.8 million cells and half a second
+  // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
+  // (By the cells and by their size: the same cells may be a part of another shape.)
+  const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
+  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
+  const shades = () => alive.things.flatMap((t) => {
+    const w = alive.where(t)
+    if (!w) return []
+    // Its turn about y: where its own x points (the turn's first column).
+    const top = groundUnder(w.at[0], w.at[1], w.at[2]), q = w.rot
+    return [{ at: w.at, yaw: Math.atan2(-2 * (q[0] * q[2] - q[1] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2])), half: [t.size[0] / 2, t.size[2] / 2] as const, high: t.size[1], lift: Math.max(0, w.at[1] - t.size[1] / 2 - top) }]
+  })
+  /** The top of what is under a place, looked for down from `y` (cells): a kerb, a roof, a bridge as well as the ground. */
+  const groundUnder = (x: number, y: number, z: number) => {
+    const ix = Math.floor(x), iz = Math.floor(z)
+    for (let at = Math.floor(y), end = at - 40; at > end; at--) if (core.world_kind(ix, at, iz)) return at + 1
+    return core.ground_at(Math.round(x), Math.round(z))
+  }
   /** Whether the person was on foot when they got on what they ride: they are set down on foot again. */
   let wasAfoot = false
   /** How many bodies are on their way down: every body but the living, which are bodies for as long as they live. */
@@ -609,7 +632,7 @@ async function main() {
   // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
   // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.
   const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
-  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r) return []; /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */ if (Math.hypot(pose.x * M - r.at[0], pose.y * M - r.at[1] - 12, pose.z * M - r.at[2]) < 9) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
+  folk.from.push((_view, seconds) => { const r = alive.rider; if (!r || alive.inside) return []; /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */ if (Math.hypot(pose.x * M - r.at[0], pose.y * M - r.at[1] - 12, pose.z * M - r.at[2]) < 9) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
   controls.always('KeyB', () => { me.walk(!me.on); return true })
   // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is
   // everyone's but those a rule spares, who move as they always did while all else slows.
@@ -633,8 +656,9 @@ async function main() {
   /** The line to type on, opened with a new realm's words begun and the caret after them: from the wheel, and again when a realm was asked for with nothing said of it. */
   const beginRealm = () => { over.line.show(); const line = document.querySelector<HTMLInputElement>('#line'); if (line) { line.value = 'Create a realm called '; line.dispatchEvent(new Event('input', { bubbles: true })); line.focus(); line.setSelectionRange(line.value.length, line.value.length) } }
   // Words that say only that a realm is wanted are not sent to be made: the line stays, in the same turn of the keys, so that what is typed next is its idea.
-  over.line.take((ask) => {
+  over.line.take((ask, dry) => {
     if (ask.picture || ask.link || !/\brealm\b/i.test(ask.wish ?? '') || (ask.wish ?? '').replace(/\b(please|create|make|new|start|open|build|imagine|a|an|the|realm|called|named|me|us)\b/gi, '').replace(/[^\p{L}\p{N}]+/gu, '')) return false
+    if (dry) return true
     over.notice('Say what the realm is: a name, a place, what happens there', 6000)
     queueMicrotask(beginRealm)
     return true
@@ -642,7 +666,11 @@ async function main() {
   const wish = making(over, wishes, gaze, (id) => enterRealm(id), () => setTimeout(beginRealm, 0))
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
+  // What is kept, shown as a ghost where it would stand while its words are typed (#220).
+  const ghost = kept(over, wishes, falling, wish)
   over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']
+  // What the bar says Enter will do is what making will do with the words (making.ts `says`).
+  over.line.means = (text) => wish.says(text)
   over.line.onask = (ask) => {
     // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
     if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
@@ -816,11 +844,11 @@ async function main() {
   }
 
   /** The march from here at the device's own pace, ms a frame at the canvas's full size: for comparing two settings fairly. */
-  const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false, withPasses = false) => {
+  const paced = async (withFlags = flags, withPeople = false, withWand = false, withPieces = false, withPasses = false, withUnder = false) => {
     const to = offscreen(gpu, [canvas.width, canvas.height]), v = view()
     paused = true
     // With the people in sight drawn over it too, if asked: what they cost the GPU is the difference.
-    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withPieces) falling.draw(encoder, target, v, march.sun.s); if (withPasses) pluginDraws.draw(encoder, target, v, 0) }, 100)
+    const p = await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, withFlags, 0); if (withPeople) folk.draw(encoder, target, v, 0); if (withWand) staff.draw(encoder, target, v, 0); if (withUnder) shade.draw(encoder, target, v, shades(), groundUnder, march.day, march.sun.s); if (withPieces) falling.draw(encoder, target, v, march.sun.s, undefined, (withFlags & MIRRORS) !== 0); if (withPasses) pluginDraws.draw(encoder, target, v, 0) }, 100)
     paused = false
     to.destroy()
     return p.ms
@@ -840,7 +868,7 @@ async function main() {
     for (let i = 0; i < times; i++) {
       const encoder = device.createCommandEncoder()
       march.draw(encoder, to, v, withFlags, 0, { querySet: set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 })
-      falling.draw(encoder, to, v, march.sun.s, { querySet: set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 })
+      falling.draw(encoder, to, v, march.sun.s, { querySet: set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 }, (withFlags & MIRRORS) !== 0)
       encoder.resolveQuerySet(set, 0, 4, resolved, 0)
       encoder.copyBufferToBuffer(resolved, 0, read, 0, 32)
       device.queue.submit([encoder.finish()])
@@ -902,20 +930,21 @@ async function main() {
     if (offer.hold) grip.do(offer, 'up')
   }
   // Words alone that call a known spell are taken before they are a wish; anything else is the making lane's wish.
-  over.line.take((ask) => {
+  over.line.take((ask, dry) => {
     if (!staff.held) return false
     const called = ask.wish && !ask.picture && !ask.link ? known(ask.wish) : null
-    if (!called) return false
+    if (!called || dry) return !!called
     inHand = called
     casts()
     staff.power = 0
     staff.cast()
     return true
-  })
+  }, 'Cast')
 
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
   // The core built again and taken while the page runs (#264): this thread's own, then the workers', and every
@@ -1021,17 +1050,18 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, pause: (on: boolean) => { paused = on } })
 
   // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
-  if (query.get('living') === 'car') void (async () => {
+  // `?living=finecar`: the same car wearing a look in cells of 2.5 cm, with seats, a dash and a wheel inside (V from the seat).
+  if (query.get('living') === 'car' || query.get('living') === 'finecar') void (async () => {
     if (far) while (!far.live) await new Promise((done) => setTimeout(done, 100))
     // In a shared world one is enough: whoever comes later finds the one that is there.
     if (far && [...made.all.values()].some((t) => t.name === 'car')) return
     const x = Math.round(pose.x * M) + 60, z = Math.round(pose.z * M) + 4
-    await alive.spawn(car([x, core.ground_at(x, z) + 5, z]))
+    await alive.spawn((query.get('living') === 'finecar' ? fineCar : car)([x, core.ground_at(x, z) + 5, z]))
   })()
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, me, tempo, shots: streaks })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, fineCar, me, tempo, shots: streaks })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({

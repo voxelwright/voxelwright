@@ -2,6 +2,7 @@
 // where the thing will stand. The ask bar gives wishes to this; so can anything else.
 import type { Ask, Asker, Done, Stage } from './ask.ts'
 import type { Hud } from './hud.ts'
+import { asksToDrive } from './living.ts'
 
 /** A few words for what was asked, for a label. */
 const called = (ask: Ask) => (ask.wish ? (ask.wish.length > 40 ? `${ask.wish.slice(0, 38)}…` : ask.wish) : ask.picture ? 'what the picture shows' : 'what the link shows')
@@ -15,6 +16,10 @@ export interface Making {
   (ask: Ask): Promise<Done>
   /** Has a thing made, whatever the words: for what knows it is a thing that is wanted (a rule that asked for one, `plugins/make`). */
   thing(ask: Ask): Promise<Done>
+  /** Whether words, sent as they stand, would be made as a thing (not said, not a rule, a realm or an undo): for what shows a thing before it is asked for. */
+  makes(text: string): Promise<boolean>
+  /** Whether words, sent as they stand, would be said to whoever is there and not made: for the ask bar's label. */
+  says(text: string): Promise<boolean>
   /** Hears every stage of every ask, with the ask: for what covers the wait in the world. */
   on(each: (stage: Stage, ask: Ask) => void): () => void
 }
@@ -173,9 +178,10 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
   holder.append(button)
   if (new URLSearchParams(location.search).has('shared') || new URLSearchParams(location.search).has('realm')) { void shown(); setInterval(() => void shown(), 5000) }
   /** Whether the world this page is in has rules: people who may hear what is said and act on it. Asked of the world, and remembered a few seconds. */
-  let ruledAt = 0, ruledSo = false
-  const ruled = async (): Promise<boolean> => {
-    if (performance.now() - ruledAt < 4000) return ruledSo
+  let ruledAt = 0, ruledSo = false, ruling: Promise<boolean> | null = null
+  /** One question at a time: the bar's label and the ghost ask on the same key. */
+  const ruled = (): Promise<boolean> => (performance.now() - ruledAt < 4000 ? Promise.resolve(ruledSo) : (ruling ??= askRules().finally(() => { ruling = null })))
+  const askRules = async (): Promise<boolean> => {
     const realm = new URLSearchParams(location.search).get('realm')
     try { const r = await fetch(realm ? `/realm/${encodeURIComponent(realm)}/world/rules` : '/world/rules'); const list = r.ok ? await r.json() : []; ruledSo = Array.isArray(list) && list.some((x) => x.running) } catch { ruledSo = false }
     ruledAt = performance.now()
@@ -188,13 +194,16 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
    * "a red door"), or a change to how the world goes ("add ...", "change ...", "from now on ...", "let me ...").
    * In a world with no rules there is nobody to hear a power asked for, so those words ask for a rule.
    */
-  const kind = (text: string, rules: boolean): 'realm' | 'rule' | 'thing' | 'said' | 'director' | 'undo' => {
+  const kind = (text: string, rules: boolean, drives: boolean): 'realm' | 'rule' | 'thing' | 'said' | 'plain' | 'director' | 'undo' => {
     if (rules && /^\s*(please\s+)?(undo|take (that|it|the( last)? change) back|change it back|put it back( as it was)?)( (that|it|the( last)? change))?\s*[.!]?\s*$/i.test(text)) return 'undo'
     if (/^\s*(the\s+)?director\b\s*(:|,|$|(on|off|rest|stop|quiet|start|wake|back|away)\b)/i.test(text)) return 'director'
     if (/^thing:/i.test(text)) return 'thing'
     if (/^(rule|play):/i.test(text)) return 'rule'
     if (/^(say|said):/i.test(text)) return 'said'
     if (/\brealm\b/i.test(text) && /^\s*(please\s+)?(create|make|new|start|open|build|imagine)\b/i.test(text)) return 'realm'
+    // A made thing to be driven ("make it drivable", "let me drive it"), aimed at the asker's own that is not alive (the
+    // helper says: `drives`): the helper brings it to life. Aimed at anything else, the words are read as any are.
+    if (drives) return 'thing'
     // A change to how the world goes, asked for as one.
     const change = /^\s*(please\s+)?(add|change|from now on|make (them|everyone|people|him|her|it so)|give (them|everyone|him|her)|let (there|them|everyone)|everyone (should|must|will)|whenever|when (someone|somebody|anyone)|a game of)\b/i.test(text) || /\bwho (plays|sells|follows|comes|says|answers|chases|runs|walks|dances|sings|waves|greets|tells|asks|fights|sits|stands|waits)\b/i.test(text)
     if (change) return 'rule'
@@ -206,19 +215,31 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     // Asked of someone, not of a maker ("give me a sword", "I need guns", "I want a horse"): in a world with rules it is for the rules to hear and answer, in the hand if they will; a sword stood in the street by the page's own maker is not what was meant (seen November 14). Only plain making words go to the maker there.
     if (rules && /^\s*(please\s+)?(give me|hand me|get me|bring me|i want|i need|i wish for|i would like|i'd like|can i have|could i have|may i have)\b/i.test(text)) return 'said'
     if (made) return 'thing'
-    // Nothing plain: in a world with rules it is said; elsewhere talk is said and the rest is a thing, as the bar has always made.
-    if (rules) return 'said'
+    // Nothing plain: in a world with rules it is said unless it names a thing kept (`plain`, below: "bmw", "sword"); elsewhere talk is said and the rest is a thing, as the bar has always made.
+    if (rules) return /\?\s*$/.test(text) ? 'said' : 'plain'
     return /\?\s*$/.test(text) || /^(hello|hi|hey|good (morning|evening|afternoon|day)|you|we|they|he|she|it|it's|this|that|yes|no|ok|okay|thanks|thank you|please|sorry|where|who|what|why|how|do|does|did|is|are|can|could|will|would|stop|come|go|follow|wait|run)\b/i.test(text) ? 'said' : 'thing'
+  }
+  /**
+   * What words sent as they stand will be: the one answer for the ask bar's label, for the ghost and for Enter.
+   * Plain words in a world with rules (no verb, no question) are a thing when they name something kept, as the
+   * ghost shows it ("bmw" is the kept car), and are said to whoever is there otherwise ("open sesame").
+   */
+  const meaning = async (text: string) => {
+    const what = kind(text, await ruled(), asksToDrive(text) && (await asker.drivable()))
+    if (what !== 'plain') return what
+    // What the ghost and Enter both go by (make/library.mjs `meant`), wherever the eye is: a thing with no place where
+    // it looks is still the thing the words name.
+    return (await asker.guess(text.replace(/^(thing|rule|play|say|said):\s*/i, ''))) ? 'thing' : 'said'
   }
   const thing = make
   const asked = async (ask: Ask): Promise<Done> => {
     // A picture or a link is of a thing. Words alone say what they are.
     if (ask.picture || ask.link || !ask.wish) return thing(ask)
-    const what = kind(ask.wish, await ruled()), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
+    const what = await meaning(ask.wish), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
     // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
     if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words }) }
     return what === 'undo' ? undo() : what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
   }
 
-  return Object.assign(asked, { thing, director, on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
+  return Object.assign(asked, { thing, director, makes: async (text: string) => !!text.trim() && !/^(rule|play|say|said):/i.test(text) && (/^thing:/i.test(text) || (await meaning(text)) === 'thing'), says: async (text: string) => !!text.trim() && (await meaning(text)) === 'said', on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })
 }

@@ -19,6 +19,8 @@ export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--e
 // starts (ENGINE_TURN), so a check that runs other checks does not wait on itself.
 const TURNS = Number(process.env.ENGINE_TURNS ?? 2), PLACES = join(homedir(), '.village', 'engine', 'turns')
 const running = (pid) => { try { process.kill(pid, 0); return true } catch (e) { return e.code === 'EPERM' } }
+/** Clears a place away. Two processes may clear the same abandoned place at once, or one may take it again while another clears it (ENOTEMPTY, ENOENT): then it is simply tried for again. */
+const clear = (place) => { try { rmSync(place, { recursive: true, force: true }) } catch { /* someone else's doing: tried again */ } }
 /** Waits for a turn on the GPU and takes it. Returns how to give it back (done anyway when the process ends). `mine: false` takes it for a process about to be started, which is then told it has one. */
 export async function turn({ mine = true } = {}) {
   if (process.env.ENGINE_TURN) return () => {}
@@ -30,13 +32,13 @@ export async function turn({ mine = true } = {}) {
         // Taken: unless whoever took it is gone (or was stopped before it could say who it was).
         let pid = NaN
         try { pid = Number(readFileSync(holder, 'utf8')) } catch { /* not said yet */ }
-        if (Number.isInteger(pid) ? !running(pid) : waited > 20) rmSync(place, { recursive: true, force: true })
+        if (Number.isInteger(pid) ? !running(pid) : waited > 20) clear(place)
         continue
       }
       // (Between making the place and saying who has it, someone who took it for abandoned may clear it away: then it is not had, and is tried for again.)
       try { writeFileSync(holder, String(process.pid)) } catch { continue }
       let held = true
-      const back = () => { if (held) { held = false; rmSync(place, { recursive: true, force: true }); if (mine) delete process.env.ENGINE_TURN } }
+      const back = () => { if (held) { held = false; clear(place); if (mine) delete process.env.ENGINE_TURN } }
       process.on('exit', back)
       if (mine) process.env.ENGINE_TURN = '1'
       return back
@@ -59,13 +61,13 @@ export async function quiet() {
       try { mkdirSync(place) } catch {
         let pid = NaN
         try { pid = Number(readFileSync(holder, 'utf8')) } catch { /* not said yet */ }
-        if (Number.isInteger(pid) && !running(pid)) rmSync(place, { recursive: true, force: true })
+        if (Number.isInteger(pid) && !running(pid)) clear(place)
         continue
       }
       // (Between making the place and saying who has it, someone who took it for abandoned may clear it away: then it is not had, and is tried for again.)
       try { writeFileSync(holder, String(process.pid)) } catch { continue }
       let held = true
-      const back = () => { if (held) { held = false; rmSync(place, { recursive: true, force: true }) } }
+      const back = () => { if (held) { held = false; clear(place) } }
       process.on('exit', back)
       return back
     }

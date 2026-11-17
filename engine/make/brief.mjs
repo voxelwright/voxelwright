@@ -39,6 +39,9 @@ WHAT MAKES IT GOOD
 - It must stand. Everything has to rest on or share a face with something that reaches the ground; touching by an edge or corner does not hold. A top heavier than its foot goes over. Plaster and glass are weak: a sheet of them must rest on posts or a frame near its edges, and one that sits on a single pole or reaches more than about 12 cells past what holds it tears off. So an umbrella, a canopy on one post, a sail or a blade is painted steel (or wood), not plaster.
 - Its front faces the person who asked. Put what should be seen at low z.
 
+WHAT IS DRIVEN
+A car, a kart, a lorry, a tractor, anything one gets into and drives on wheels: give it a further key, "drives": {"front": "-z", "top_kmh": 180, "zero_to_100_s": 9}. front is the way its nose points in your space: "-z" when its nose is at z 0 (best: it then faces the person who asked), "+z", "-x" or "+x". top_kmh and zero_to_100_s are how such a thing really goes (a Formula 1 car 340 and 2.6, a hatchback 180 and 10, a kart 80 and leave it out). It is brought to life from your cells: build its wheels round, standing on y 0 apart from the body, a seat inside it, and it is driven where you built it.
+
 THE LIMIT
 The finished thing is counted in runs: unbroken lines of one material and colour along x (or along z; the worse of the two counts). At most ${ROWS_MOST} runs. A solid box 30 wide, 10 high and 12 deep is 120 runs; the same box in 2-cell stripes across x is 1,800. Bands across "y" are free; bands across "x" or "z" are dear, so keep them 3 cells or wider. Spend runs on what is seen.
 
@@ -113,6 +116,9 @@ Thin is right when the thing is thin: a spoke or a rope one cell, a blade two, a
 
 THE LIMIT
 The finished thing is sent as runs: unbroken lines of one material and colour along x, or along z if it is turned to face another way: the worse of the two counts. At most 120,000 runs. Bands across y cost nothing; boards, bricks and stripes that change along both x and z cost on whichever way they are cut. A solid mass costs little however big. Colour that changes from every cell to the next costs a run a cell: a tree's crown or a lawn of 300,000 cells speckled cell by cell is far over. So on big things vary colour by clump, patch, course, board or tile three cells across or more, and keep the cell-by-cell speckle for small things and focal spots. And a thing of cells finer than 10 cm may fill at most about 16,000 of the world's 10 cm cells in any box 6.4 m a side: so a big thing of finer cells (a car's body, a hull, a crown of leaves) is a shell two or three cells thick with nothing inside it, never a solid block.
+
+WHAT IS DRIVEN
+A car, a kart, a lorry, a tractor, anything one gets into and drives on wheels: call drives({ front: "-z", top_kmh: 180, zero_to_100_s: 9 }) once. front is the way its nose points in your grid: "-z" when its nose is at z 0, "+z", "-x" or "+x". top_kmh and zero_to_100_s are how such a thing really goes (a Formula 1 car 340 and 2.6, a hatchback 180 and 10, a kart 80 and no zero_to_100_s). It is brought to life from your cells: its wheels round, standing on y 0 apart from the body, a seat inside it.
 
 IT IS THE THING ALONE
 No ground, base, plinth, water, backdrop or scenery, unless the wish asks for one: the world it stands in has its own. It must stand on y 0 by itself.

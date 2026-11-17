@@ -16,6 +16,14 @@ pub const HOLD: f32 = 1.0;
 const SAG: f32 = 0.4;
 /// How quickly a foot's spring stops bouncing: 1 is at once without overshoot.
 const DAMP: f32 = 0.7;
+/// How quickly a rolling foot follows the road under it, a rate each second: a riser is taken in about 1 / ROAD s.
+const ROAD: f32 = 20.0;
+/// How soon a rolling foot pressed in past where it stands meets its stop, as a share of its reach.
+const STOP: f32 = 0.05;
+/// The steepest grade a road is believed to have, rise over run: the town's steepest street is 13%.
+const HILL: f32 = 0.15;
+/// How many times a step the feet grip, all together each time.
+const GRIPS: usize = 4;
 /// Seconds a living thing lies quiet, told nothing, before it sleeps: it is then not stepped until something stirs it.
 const QUIET: f32 = 1.0;
 /// Which way a thing faces in its own cells.
@@ -30,6 +38,9 @@ pub struct Foot {
     pub drives: bool,
     pub pressed: f32,
     pub spun: f32,
+    /// For what rolls: how high the road under it is (none when it is off the ground), and how fast that rises.
+    pub road: f32,
+    pub rise: f32,
 }
 
 pub struct Live {
@@ -135,8 +146,13 @@ impl Live {
         self.turns = n[8].clamp(0.0, 12.0);
         self.jump = n[9].clamp(0.0, 300.0);
         self.tough = n[10].clamp(10.0, 2000.0);
-        self.feet = n[11..].chunks_exact(6).take(16).map(|f| Foot { at: [f[0], f[1], f[2]], reach: f[3].clamp(1.0, 24.0), steers: f[4] != 0.0, drives: f[5] != 0.0, pressed: 0.0, spun: 0.0 }).collect();
+        self.feet = n[11..].chunks_exact(6).take(16).map(|f| Foot { at: [f[0], f[1], f[2]], reach: f[3].clamp(1.0, 24.0), steers: f[4] != 0.0, drives: f[5] != 0.0, pressed: 0.0, spun: 0.0, road: f32::NAN, rise: 0.0 }).collect();
         true
+    }
+
+    /// Whether it rides on feet that roll (a car, a cart): not on legs, nor turned to a down of its own.
+    pub(super) fn rides(&self) -> bool {
+        !self.feet.is_empty() && !(self.steer == 0.0 && self.upright > 0.0) && self.frame.is_none() && !self.figure
     }
 
     /// Whether it is being told to go somewhere.
@@ -256,6 +272,23 @@ impl Live {
         // Forward along the ground, and to the right of that.
         let flat = if front[0] * front[0] + front[2] * front[2] > 1e-3 { unit([front[0], 0.0, front[2]]) } else { [self.heading.cos(), 0.0, self.heading.sin()] };
         let right = [-flat[2], 0.0, flat[0]];
+        // A hill pulls what rolls back down it: its weight, along the way it rolls, by the grade of the road it stands
+        // on, at its middle (so it turns nothing). Its springs do not carry it along. (Held up square to one grade
+        // worked out for the whole body, a short cart astride a step was pushed back at its feet, under its middle, and
+        // went onto its roof.) How steep is read from the road under its feet at the last step, front against back, not
+        // from how the body leans; and no steeper than the town's steepest street is believed: a step is not a hill.
+        let rolling = self.rides();
+        let grade = {
+            // The line through the road under each foot, by how far along the thing the foot is.
+            let [k, a, y, aa, ay] = self.feet.iter().filter(|f| f.road.is_finite()).fold([0.0f32; 5], |[k, a, y, aa, ay], f| {
+                let along = dot(turn(b.rot, sub(f.at, b.com)), flat);
+                [k + 1.0, a + along, y + f.road, aa + along * along, ay + along * f.road]
+            });
+            let spread = aa - a * a / k.max(1.0);
+            if rolling && spread > 4.0 { ((ay - a * y / k) / spread).clamp(-HILL, HILL) * k / self.feet.len() as f32 } else { 0.0 }
+        };
+        // Given before the feet push, so that one told nothing holds it where it stopped.
+        b.vel = sub(b.vel, scale(flat, G * self.fall * grade * h));
         let flies = self.lift > 0.0 || self.hover > 0.0;
         let n = self.feet.len().max(1) as f32;
         let drivers = self.feet.iter().filter(|f| f.drives).count().max(1) as f32;
@@ -266,20 +299,64 @@ impl Live {
         // Feet steer less the faster it goes.
         let (sin, cos) = (self.steer * turning / (1.0 + rolls.abs() / self.top.max(1.0))).sin_cos();
         self.on = 0;
-        for foot in &mut self.feet {
+        // Every foot meets the body as it was when the step began, and their pushes are given together after: pushed
+        // one after another, each met the body as the one before left it, and whichever went first had the edge (a car
+        // whose left feet always pushed first turned right, steadily: 5 m off its line in 335 m).
+        let mut pushes: Vec<(V, V)> = Vec::with_capacity(self.feet.len() * 3);
+        let mut held = [0.0; 3];
+        let mut grips: Vec<(V, V, f32)> = Vec::with_capacity(self.feet.len());
+        for foot in self.feet.iter_mut() {
             let r = turn(b.rot, sub(foot.at, b.com));
             let far = ray(ground, add(b.pos, w(r)), w(down), foot.reach);
-            let want = far.map_or(0.0, |t| foot.reach - t);
-            // The road rises a cell at a time: a foot takes a step up over a thirtieth of a second, not at once.
-            foot.pressed += (want - foot.pressed) * (h * 30.0).min(1.0);
-            let Some(far) = far else { continue };
+            let Some(far) = far else {
+                foot.pressed += (0.0 - foot.pressed) * (h * 30.0).min(1.0);
+                foot.road = f32::NAN;
+                continue;
+            };
             self.on += 1;
+            if rolling {
+                // What rolls follows the road under each foot as a wheel does: smoothly over each riser of a road
+                // that climbs a cell at a time, and with no lag at all up a steady hill, by keeping how high the road
+                // is and how fast it rises. (A foot that took each riser over a thirtieth of a second, damped against
+                // all the speed up, rode lower the faster it climbed: up the main street the engine's car struck the
+                // road and broke at 58 km/h.) A step of a cell and a half or more is a kerb, taken at once.
+                let start = add(b.pos, r);
+                let met = start[1] + down[1] * far;
+                let guess = foot.road + foot.rise * h;
+                if (guess - met).abs() < 1.5 {
+                    let e = met - guess;
+                    foot.road = guess + e * (2.0 * ROAD * h).min(1.0);
+                    // No road it rides rises more than one in two.
+                    let most = 0.5 * rolls.abs() + 5.0;
+                    foot.rise = (foot.rise + e * ROAD * ROAD * h).clamp(-most, most);
+                } else {
+                    (foot.road, foot.rise) = (met, 0.0);
+                }
+                foot.pressed = (foot.reach - (start[1] - foot.road) / -down[1].min(-0.2)).clamp(0.0, foot.reach);
+            } else {
+                // What goes on legs takes a step up over a thirtieth of a second, not at once.
+                foot.pressed += (foot.reach - far - foot.pressed) * (h * 30.0).min(1.0);
+            }
             // By the pull it feels: one who falls slowly stands as low on its legs as anyone.
             let weight = mass * G * self.fall.max(0.05);
             let spring = weight / (n * SAG * foot.reach);
             let damp = 2.0 * DAMP * (spring * mass / n).sqrt();
-            let press = (spring * foot.pressed - damp * dot(b.speed_at(r), up)).clamp(0.0, weight * 4.0 / n);
-            kick(b, r, scale(up, press * h));
+            // Damped against how fast it closes on the road: climbing a hill is not the spring opening.
+            let rising = if rolling { foot.rise } else { 0.0 };
+            // Pressed in further than it stands, what rolls stiffens, as a car's spring meets its stop.
+            let more = if rolling { (foot.pressed - SAG * foot.reach).max(0.0) } else { 0.0 };
+            let stop = spring * more * more / (STOP * foot.reach);
+            let press = (spring * foot.pressed + stop - damp * (dot(b.speed_at(r), up) - rising)).clamp(0.0, weight * 4.0 / n);
+            // What rolls is pushed along its own up, as a car's springs push, but only the up of that moves it: the
+            // rest is what its tyres' grip answers, and only turns it. Pushed straight up at a foot under its middle, a
+            // short cart tilted past its feet by a step went over backwards; pushed along a grade, it was thrown.
+            if rolling {
+                let f = scale(down, -press * h);
+                pushes.push((r, f));
+                held = add(held, [f[0], 0.0, f[2]]);
+            } else {
+                pushes.push((r, scale(up, press * h)));
+            }
             // Grip and drive act most of the way up from where the foot meets the ground to the height of the thing's
             // middle: pushed at the road itself, a car at 12 m/s went onto two wheels in a turn.
             let foot_at = add(r, scale(down, far));
@@ -295,24 +372,25 @@ impl Live {
                 let long = dot(more, more).sqrt();
                 let most = (self.power * mass / n * h).min(self.grip * press * h * 4.0);
                 if long > 1e-4 {
-                    kick(b, at, scale(more, (long * mass / n).min(most) / long));
+                    pushes.push((at, scale(more, (long * mass / n).min(most) / long)));
                 }
                 continue;
             }
             let (wheel, across) = if foot.steers { (add(scale(flat, cos), scale(right, sin)), sub(scale(right, cos), scale(flat, sin))) } else { (flat, right) };
             let (most, share) = (self.grip * press * h, mass / n);
-            let slip = dot(b.speed_at(at), across);
-            kick(b, at, scale(across, (-slip * share).clamp(-most, most)));
+            grips.push((at, across, most));
             let along = dot(b.speed_at(at), wheel);
             foot.spun += along * h;
             let push = if go == 0.0 || flies && self.aloft {
                 // Told nothing it rolls to a stop, and stands where it stopped, on a hill too.
                 if flies && self.aloft { 0.0 } else if along.abs() < 6.0 { -along * share } else { -along.signum() * self.power.max(40.0) * 0.6 * share * h }
+            } else if along * go < 0.0 {
+                // Against the way it rolls: a brake, on every foot whichever of them drive, and as hard as the road will
+                // hold whatever the engine (the grip caps it below). A car that drove its rear two braked with those
+                // two alone and took 85 m to stop from 100 km/h.
+                go * (self.power * 2.5).max(self.grip * G) * mass / n * h
             } else if !foot.drives {
                 0.0
-            } else if along * go < 0.0 {
-                // Against the way it rolls: a brake.
-                go * self.power * 2.5 * mass / drivers * h
             } else {
                 // Backwards it gets to a third of its speed.
                 let top = if go > 0.0 { self.top } else { self.top * 0.35 };
@@ -320,7 +398,23 @@ impl Live {
                 let gear = 2.0 - (along.abs() / 30.0).min(1.0);
                 go * self.power * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
             };
-            kick(b, at, scale(wheel, push.clamp(-most, most)));
+            pushes.push((at, scale(wheel, push.clamp(-most, most))));
+        }
+        for (at, push) in pushes {
+            kick(b, at, push);
+        }
+        b.vel = sub(b.vel, scale(held, b.inv_mass));
+        // Then the feet grip, all of them from the body as their pushes left it, then again from the body as that left
+        // it, a few times, each foot no harder in all than the road holds: read once, before the drive's push, the grip let that turn the
+        // body a little every step, and a car heavier on one side went steadily off its line.
+        let share = mass / n;
+        let mut gripped = vec![0.0f32; grips.len()];
+        for _ in 0..GRIPS {
+            let more: Vec<f32> = grips.iter().zip(&gripped).map(|(&(at, across, most), &was)| (was - dot(b.speed_at(at), across) * share).clamp(-most, most) - was).collect();
+            for ((&(at, across, _), was), more) in grips.iter().zip(gripped.iter_mut()).zip(more) {
+                kick(b, at, scale(across, more));
+                *was += more;
+            }
         }
         self.reel = (self.reel - h).max(0.0);
         let touching = self.on > 0 || b.apart < 0.05;
@@ -655,7 +749,12 @@ impl Bodies {
             return true;
         }
         let front = turn(b.rot, FRONTS[b.live.as_ref().unwrap().front as usize]);
-        b.live.as_mut().unwrap().heading = front[2].atan2(front[0]);
+        let live = b.live.as_mut().unwrap();
+        live.heading = front[2].atan2(front[0]);
+        // What its feet knew of the road was where it stood before.
+        for foot in &mut live.feet {
+            (foot.road, foot.rise) = (f32::NAN, 0.0);
+        }
         true
     }
 
@@ -904,16 +1003,143 @@ pub mod tests {
     }
 
     const CAR: [usize; 3] = [42, 10, 18];
-    /// A steel box the size of a car on four feet, the front two steering and the back two driving: 6 m/s each
-    /// second up to 20 m/s.
+    /// The engine's own car, as the page makes it (`page/living.ts` `car`): a steel shell 4.2 m long under a glass
+    /// cabin, four wheels with a foot at each, the front two steering and the back two driving, 6 m/s gathered each
+    /// second up to 20 m/s. Its wheels stand over the road on their feet: nothing of it but its feet meets the road.
     pub fn car(bodies: &mut Bodies, low: [i32; 3]) -> u32 {
-        let id = bodies.spawn(shell(CAR, kind(STEEL, OWN)), CAR, low, false);
-        let mut numbers = vec![0.0, 1.2, 60.0, 200.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 120.0];
-        for (x, z, front) in [(6.0, 2.0, false), (6.0, 16.0, false), (36.0, 2.0, true), (36.0, 16.0, true)] {
-            numbers.extend([x, 1.0, z, 6.0, front as u32 as f32, !front as u32 as f32]);
+        laden(bodies, low, 0)
+    }
+
+    /// The engine's car with so many cells of steel laid inside its lower shell along its right side (+z), from the
+    /// side in: a car as lopsided as one made from words or a photograph is.
+    pub fn laden(bodies: &mut Bodies, low: [i32; 3], load: usize) -> u32 {
+        let mut cells = vec![0; CAR[0] * CAR[1] * CAR[2]];
+        let mut set = |x: usize, y: usize, z: usize, k: Kind| cells[x + CAR[0] * (z + CAR[2] * y)] = k;
+        for y in 2..10 {
+            for z in 1..17 {
+                for x in 0..42 {
+                    let cabin = y >= 6;
+                    if cabin && !(10..31).contains(&x) {
+                        continue;
+                    }
+                    let (x0, x1, y0, y1) = if cabin { (10, 30, 6, 9) } else { (0, 41, 2, 5) };
+                    if x == x0 || x == x1 || z == 1 || z == 16 || y == y0 || y == y1 {
+                        set(x, y, z, if cabin && y > 6 && y < 9 { kind(crate::kinds::GLASS, OWN) } else { kind(STEEL, OWN) });
+                    }
+                }
+            }
+        }
+        for z in [3, 4, 13, 14] { for y in [3, 4] { set(41, y, z, kind(crate::kinds::LAMP, OWN)); } }
+        for k in 0..load {
+            let (x, y, z) = (1 + k % 40, 3 + k / 40 % 2, 15 - k / 80);
+            set(x, y, z, kind(STEEL, OWN));
+        }
+        for x0 in [4, 32] {
+            for z in [0, 17] {
+                for x in x0..x0 + 6 {
+                    for y in 0..6 {
+                        if !((x == x0 || x == x0 + 5) && (y == 0 || y == 5)) {
+                            set(x, y, z, kind(STEEL, OWN));
+                        }
+                    }
+                }
+            }
+        }
+        let id = bodies.spawn(cells, CAR, low, false);
+        let mut numbers = vec![0.0, 1.3, 60.0, 200.0, 0.55, 0.0, 0.0, 0.0, 0.0, 0.0, 120.0];
+        for (x, z, front) in [(7.0, 1.0, false), (7.0, 17.0, false), (35.0, 1.0, true), (35.0, 17.0, true)] {
+            numbers.extend([x, 3.0, z, 6.0, front as u32 as f32, !front as u32 as f32]);
         }
         assert!(bodies.motor(id, &numbers));
         id
+    }
+
+    /// A car as fast as a real one (`~/.village/engine/fast-voxels`, the BMW X3's measured motor): 240 km/h at the
+    /// top, 0 to 100 in 6.3 s, all four feet driving. A steel shell 4.8 m by 2.2 m with its floor so many cells up
+    /// (2 is a real car's 0.2 m; at none it scrapes the road).
+    pub fn fast_car(bodies: &mut Bodies, low: [i32; 3], floor: usize) -> u32 {
+        let size = [48usize, 16, 22];
+        let mut cells = shell(size, kind(STEEL, OWN));
+        for y in 0..floor { for z in 0..size[2] { for x in 0..size[0] { cells[x + size[0] * (z + size[2] * y)] = 0; } } }
+        let id = bodies.spawn(cells, size, low, false);
+        let mut numbers = vec![0.0, 0.88, 56.0, 666.7, 0.716, 0.0, 0.0, 0.0, 0.0, 0.0, 120.0];
+        for (x, z, reach, front) in [(38.56, 2.7, 5.94, true), (38.56, 19.3, 5.94, true), (9.62, 2.7, 7.09, false), (9.62, 19.3, 7.09, false)] {
+            numbers.extend([x, 3.88, z, reach, front as u32 as f32, 1.0]);
+        }
+        assert!(bodies.motor(id, &numbers));
+        id
+    }
+
+    /// A level strip of road high over the town, 3 km long and 35 m wide, its top at 2400. Returns where a car's
+    /// low corner goes on it, at x 760.
+    pub fn level(bodies: &mut Bodies) -> [i32; 3] {
+        let runs: Vec<Run> = (2398..2400).flat_map(|y| (3900..4250).map(move |z| Run { x0: 0, x1: 30000, y, z, kind: kind(crate::kinds::ASPHALT, OWN) })).collect();
+        bodies.ground.push(Edit::Runs(runs), false, None);
+        [760, 2403, 4055]
+    }
+
+    /// Where a car's low corner goes on the main street at x 760: the lane between z 4046 and 4094 is clear for a
+    /// kilometre, and climbs 4% to 13%.
+    pub fn street() -> [i32; 3] {
+        [760, city::ground(785, 4065) + 4, 4055]
+    }
+
+    /// How far its lowest point that can meet the world is over the ground under it (cells).
+    pub fn clearance(bodies: &mut Bodies, id: u32) -> f32 {
+        let b = bodies.list.iter().find(|b| b.id == id).unwrap();
+        let points: Vec<V> = b.points.iter().map(|&p| add(b.pos, turn(b.rot, p))).collect();
+        points.iter().map(|p| {
+            let (x, z) = (p[0].floor() as i32, p[2].floor() as i32);
+            let mut y = p[1].floor() as i32 + 2;
+            while y > p[1] as i32 - 40 && !bodies.ground.solid(x, y, z) { y -= 1; }
+            p[1] - (y + 1) as f32
+        }).fold(f32::MAX, f32::min)
+    }
+
+    /// How far its feet are pressed in, on the mean (cells).
+    pub fn pressed(bodies: &Bodies, id: u32) -> f32 {
+        let feet = &the(bodies, id).live.as_ref().unwrap().feet;
+        feet.iter().map(|f| f.pressed).sum::<f32>() / feet.len() as f32
+    }
+
+    /// What a run flat out showed: how fast, how far, how low its lowest point came over the road (and stood at
+    /// rest), how much lower than it stands it rode on its feet over any second, how often it struck the world, how
+    /// far off its line it went.
+    pub struct Drove { pub fastest: f32, pub went: f32, pub seconds: f32, pub lowest: f32, pub rest: f32, pub sank: f32, pub struck: usize, pub broke: bool, pub off: f32 }
+
+    /// Left to stand for 2 s, then flat out along +x for so many seconds, told no turn. With `say`, a line a second.
+    pub fn flat_out(bodies: &mut Bodies, id: u32, seconds: f32, say: bool) -> Drove {
+        run(bodies, 2.0, id, [0.0; 3]);
+        let (rest, stands, from) = (clearance(bodies, id), pressed(bodies, id), the(bodies, id).pos);
+        let mut d = Drove { fastest: 0.0, went: 0.0, seconds: 0.0, lowest: rest, rest, sank: 0.0, struck: 0, broke: false, off: 0.0 };
+        let mut sunk = Vec::new();
+        for k in 1..=(seconds * 60.0) as usize {
+            bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            d.struck += records(&bodies.out, STRUCK).iter().filter(|s| s[0] == id && s[1] == 0).count();
+            if !bodies.list.iter().any(|b| b.id == id && b.live.is_some()) {
+                d.broke = true;
+                break;
+            }
+            d.seconds = k as f32 / 60.0;
+            let low = clearance(bodies, id);
+            d.lowest = d.lowest.min(low);
+            sunk.push(pressed(bodies, id) - stands);
+            if sunk.len() >= 60 {
+                d.sank = d.sank.max(sunk[sunk.len() - 60..].iter().sum::<f32>() / 60.0);
+            }
+            let b = the(bodies, id);
+            let speed = dot(b.vel, b.vel).sqrt();
+            d.fastest = d.fastest.max(speed);
+            d.off = d.off.max((b.pos[2] - from[2]).abs());
+            d.went = b.pos[0] - from[0];
+            if say && k % 60 == 0 {
+                let feet: Vec<f32> = b.live.as_ref().unwrap().feet.iter().map(|f| (f.pressed * 10.0).round() / 10.0).collect();
+                eprintln!("  {:4.0} s: {:4.0} km/h at x {:5.0}, its lowest point {low:.2} over the road, {:5.1} off its line, feet pressed {feet:?}, tipped {:.1}, {} strikes", d.seconds, speed * 0.36, b.pos[0], b.pos[2] - from[2], tipped(b), d.struck);
+            }
+        }
+        d
     }
 
     pub fn tipped(b: &Body) -> f32 {
@@ -1059,6 +1285,188 @@ pub mod tests {
         let b = the(&bodies, id);
         assert!(b.asleep, "a thing whose driver has gone stops: speed {:?}", b.vel);
         assert!(b.pos[0] - (X as f32 + 21.0) < 120.0, "within a few metres: {:?}", b.pos);
+    }
+
+    #[test]
+    fn a_car_drives_flat_out_up_the_main_street() {
+        // The engine's own car, and one as fast as a real one, 20 s flat out up the town's main street (4% to 13%),
+        // told no turn. They neither strike the road nor ride low on their feet (each foot followed the road a
+        // riser at a time and damped against all the speed up, and both cars struck the road and broke: the engine's
+        // at 58 km/h, the fast one at 46).
+        for (name, fast, far) in [("the engine's car", false, 250.0), ("a fast car", true, 500.0)] {
+            let mut bodies = Bodies::new();
+            let id = if fast { fast_car(&mut bodies, street(), 2) } else { car(&mut bodies, street()) };
+            let d = flat_out(&mut bodies, id, 20.0, false);
+            eprintln!("{name}: {:.0} m in {:.1} s, fastest {:.0} km/h, its lowest point {:.2} over the road (at rest {:.2}), on its feet {:.2} lower at most for a second, {} strikes, {:.2} m off its line", d.went / 10.0, d.seconds, d.fastest * 0.36, d.lowest, d.rest, d.sank, d.struck, d.off / 10.0);
+            assert!(!d.broke && d.seconds >= 20.0, "{name} is whole after 20 s");
+            assert!(d.went > far * 10.0, "{name} goes up the street: {:.0} m", d.went / 10.0);
+            assert!(d.struck == 0 && d.lowest > 0.1, "{name} never meets the road: lowest {:.2}, {} strikes", d.lowest, d.struck);
+            assert!(d.sank < 0.5, "{name} rides no more than half a cell lower than it stands: {:.2}", d.sank);
+            assert!(d.off < 10.0, "and keeps to its lane: {:.2} m off its line", d.off / 10.0);
+        }
+    }
+
+    #[test]
+    fn a_car_holds_its_line_on_the_level_and_stands_clear_of_the_road() {
+        for (name, fast) in [("the engine's car", false), ("a fast car", true)] {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = if fast { fast_car(&mut bodies, low, 2) } else { car(&mut bodies, low) };
+            run(&mut bodies, 2.0, id, [0.0; 3]);
+            // Every cell of it, its wheels too, is over the road: only its feet reach it.
+            let b = the(&bodies, id);
+            let mut under = f32::MAX;
+            for (i, &k) in b.cells.iter().enumerate() {
+                if k != 0 {
+                    let (x, z, y) = (i % b.size[0], i / b.size[0] % b.size[2], i / (b.size[0] * b.size[2]));
+                    let p = add(b.pos, turn(b.rot, sub([x as f32 + 0.5, y as f32, z as f32 + 0.5], b.com)));
+                    under = under.min(p[1] - 2400.0);
+                }
+            }
+            let d = flat_out(&mut bodies, id, 20.0, false);
+            eprintln!("{name}: its lowest cell {under:.2} over the road at rest; {:.0} m in 20 s, {:.2} m off its line", d.went / 10.0, d.off / 10.0);
+            assert!(under > 0.3, "{name} stands clear of the road: {under:.2}");
+            // With its left feet always pushing first, the engine's car went 5 m off its line in 335 m.
+            assert!(d.went > 3000.0 && d.off < 2.0, "{name} holds its line: {:.2} m off in {:.0} m", d.off / 10.0, d.went / 10.0);
+        }
+    }
+
+    #[test]
+    fn a_car_brakes_with_every_foot() {
+        // The engine's car drives its rear two feet. From speed on the level, told to go back, it stops about as short as
+        // its grip allows (speed squared over twice the grip): with only the driving feet braking it took twice that.
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        flat_out(&mut bodies, id, 8.0, false);
+        let (from, speed) = (the(&bodies, id).pos, dot(the(&bodies, id).vel, the(&bodies, id).vel).sqrt());
+        let mut went = 0.0;
+        for _ in 0..600 {
+            bodies.drive(id, -1.0, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let b = the(&bodies, id);
+            // Stopped (before it would start to back away).
+            if dot(b.vel, turn(b.rot, FRONTS[0])) < 2.0 {
+                went = sub(b.pos, from).iter().map(|v| v * v).sum::<f32>().sqrt();
+                break;
+            }
+        }
+        let grip = the(&bodies, id).live.as_ref().unwrap().grip;
+        let least = speed * speed / (2.0 * grip * G);
+        eprintln!("from {:.0} km/h it stops in {:.1} m; its grip alone would stop it in {:.1} m", speed * 0.36, went / 10.0, least / 10.0);
+        assert!(went > 0.0 && went < least * 1.35, "it brakes with every foot: {:.1} m against {:.1} m by grip", went / 10.0, least / 10.0);
+    }
+
+    #[test]
+    fn a_lopsided_car_holds_its_line_on_the_level() {
+        // 200 cells of steel along one side inside its lower shell move its middle of mass a quarter of a cell to that
+        // side: no foot then has a twin across it, and with twins alone holding it straight it went 3.7 m off its line
+        // in 335 m. Its feet now push together and grip together.
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = laden(&mut bodies, low, 200);
+        let com = the(&bodies, id).com;
+        let d = flat_out(&mut bodies, id, 20.0, false);
+        eprintln!("a lopsided car (its middle at z {:.2}): {:.0} m in 20 s, {:.2} m off its line", com[2], d.went / 10.0, d.off / 10.0);
+        assert!(com[2] > 9.2 && d.went > 3000.0 && d.off < 10.0, "it holds its line: {:.2} m off in {:.0} m", d.off / 10.0, d.went / 10.0);
+    }
+
+    /// A short steel cart 7 by 4 by 7 on four feet 4 cells apart that reach 4, set down on the level with its low
+    /// corner at `low` and told nothing, woken each second for 5 s. Returns how far it is tipped and how far it moved.
+    pub fn cart_left(bodies: &mut Bodies, low: [i32; 3]) -> (f32, V) {
+        let id = bodies.spawn(vec![kind(STEEL, OWN); 7 * 4 * 7], [7, 4, 7], low, false);
+        let mut numbers = vec![0.0, 1.0, 30.0, 60.0, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0, 120.0];
+        for (x, z, front) in [(1.5, 1.5, false), (1.5, 5.5, false), (5.5, 1.5, true), (5.5, 5.5, true)] {
+            numbers.extend([x, 0.0, z, 4.0, front as u32 as f32, !front as u32 as f32]);
+        }
+        assert!(bodies.motor(id, &numbers));
+        let from = the(bodies, id).pos;
+        for _ in 0..5 {
+            bodies.list.iter_mut().find(|b| b.id == id).unwrap().asleep = false;
+            run(bodies, 1.0, id, [0.0; 3]);
+        }
+        let b = the(bodies, id);
+        (tipped(b), [b.pos[0] - from[0], b.pos[1] - from[1], b.pos[2] - from[2]])
+    }
+
+    #[test]
+    fn a_short_cart_astride_a_step_stays_on_its_feet() {
+        // Its front feet on a step 3 cells high, its back feet on the road below. With every spring pushing along one
+        // grade worked out for the whole body (and clamped at one in one), at each place it went onto its roof; with
+        // them pushing straight up, it went over too. Pushed along its own up, it rests on its feet.
+        let mut rests = Vec::new();
+        for onto in [0, 1, 2] {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let edge = low[0] + 10;
+            let step: Vec<Run> = (2400..2403).flat_map(|y| (3900..4250).map(move |z| Run { x0: edge, x1: 30000, y, z, kind: kind(crate::kinds::ASPHALT, OWN) })).collect();
+            bodies.ground.push(Edit::Runs(step), false, None);
+            let (tilt, moved) = cart_left(&mut bodies, [edge - 5 + onto, 2404, low[2]]);
+            eprintln!("a cart with its front feet {}.5 cells onto a step: tipped {tilt:.0}, moved {moved:?}", onto);
+            rests.push((tilt, moved[0]));
+        }
+        assert!(rests.iter().all(|&(tilt, slid)| tilt < 60.0 && slid.abs() < 1.0), "it stays on its feet where it was set: {rests:?}");
+    }
+
+    #[test]
+    fn a_car_parked_on_the_steep_street_stays_there() {
+        // Driven up the 13% of the main street and told nothing, it stops; kept awake for 20 s (so that sleep does not
+        // hold it), it stays where it stopped.
+        let mut bodies = Bodies::new();
+        let id = car(&mut bodies, [3300, city::ground(3321, 4064) + 4, 4055]);
+        run(&mut bodies, 2.0, id, [1.0, 0.0, 0.0]);
+        run(&mut bodies, 3.0, id, [0.0; 3]);
+        let from = the(&bodies, id).pos;
+        for _ in 0..20 * 60 {
+            let b = bodies.list.iter_mut().find(|b| b.id == id).unwrap();
+            b.asleep = false;
+            b.live.as_mut().unwrap().quiet = 0.0;
+            bodies.drive(id, 0.0, 0.0, 0.0, false, false);
+            bodies.advance(1.0 / 60.0);
+        }
+        let moved = sub(the(&bodies, id).pos, from);
+        eprintln!("parked on the steep street at x {:.0} for 20 s it moved {moved:?}, tipped {:.1}", from[0], tipped(the(&bodies, id)));
+        assert!(dot(moved, moved).sqrt() < 1.0, "it stays where it stopped: moved {moved:?}");
+    }
+
+    #[test]
+    fn a_hill_costs_a_car_speed() {
+        // Held up square to the road, a car climbs by its own push: up the 12% of the main street it goes slower
+        // than along the level (held straight up, it went as fast up a hill as on the level).
+        let mut speeds = Vec::new();
+        for on_level in [true, false] {
+            let mut bodies = Bodies::new();
+            let low = if on_level { level(&mut bodies) } else { street() };
+            let id = car(&mut bodies, low);
+            flat_out(&mut bodies, id, 20.0, false);
+            speeds.push(dot(the(&bodies, id).vel, the(&bodies, id).vel).sqrt() * 0.36);
+        }
+        eprintln!("after 20 s flat out: {:.0} km/h on the level, {:.0} km/h up the street", speeds[0], speeds[1]);
+        assert!(speeds[1] < speeds[0] * 0.9 && speeds[1] > speeds[0] * 0.6, "a hill slows it, and it still climbs: {speeds:?}");
+    }
+
+    #[test]
+    fn a_car_that_scrapes_a_step_goes_up_over_it() {
+        // A car whose floor is half a cell over the road meets a step a cell high across it, slowly and at 75 km/h:
+        // it scrapes up over it. (Pushed back out of the step's face, it stuck at the slow one and broke at the fast.)
+        for at in [850, 1300] {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let step: Vec<Run> = (3900..4250).map(|z| Run { x0: at, x1: 30000, y: 2400, z, kind: kind(crate::kinds::ASPHALT, OWN) }).collect();
+            bodies.ground.push(Edit::Runs(step), false, None);
+            let id = fast_car(&mut bodies, low, 1);
+            let mut numbers = vec![0.0, 0.88, 56.0, 666.7, 0.716, 0.0, 0.0, 0.0, 0.0, 0.0, 120.0];
+            for (x, z) in [(38.56, 2.7), (38.56, 19.3), (9.62, 2.7), (9.62, 19.3)] {
+                numbers.extend([x, 3.88, z, 5.6, (x > 20.0) as u32 as f32, 1.0]);
+            }
+            assert!(bodies.motor(id, &numbers));
+            let d = flat_out(&mut bodies, id, 5.0, false);
+            let b = bodies.list.iter().find(|b| b.id == id);
+            eprintln!("a step at x {at}: broke {}, went {:.0} m, fastest {:.0} km/h, now at {:?}", d.broke, d.went / 10.0, d.fastest * 0.36, b.map(|b| b.pos));
+            // Along the level with no step it goes 64 m in the 5 s.
+            assert!(!d.broke && d.went > 550.0 && b.is_some_and(|b| b.pos[1] - b.com[1] > 2400.0), "it is whole, on, and up on the step at x {at}: {:.0} m", d.went / 10.0);
+        }
     }
 
     #[test]
@@ -1587,6 +1995,56 @@ mod tune {
             let live = b.live.as_ref().unwrap();
             let mine = bodies.touches.iter().filter(|t| bodies.list[t.a].id == id || (t.b != NONE && bodies.list[t.b].id == id)).map(|t| (t.ra.map(|v| v.round()), t.n.map(|v| (v * 10.0).round() / 10.0), t.depth, if t.b == NONE { 0 } else { bodies.list[t.b].id })).collect::<Vec<_>>();
             eprintln!("{k}: at {:?} vel {:?} on {} pressed {:?} tipped {:.0} bodies {} touches {:?}", b.pos.map(|v| v.round()), b.vel.map(|v| v.round()), live.on, live.feet.iter().map(|f| (f.pressed * 10.0).round() / 10.0).collect::<Vec<_>>(), tipped(b), bodies.list.len(), mine);
+        }
+    }
+
+    /// The town's main street from x 760, z 4065 eastward: how high, how steep, and whether the lane is clear.
+    /// `cargo test --release the_main_street -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn the_main_street() {
+        let mut bodies = Bodies::new();
+        let mut line = String::new();
+        for k in 0..60 {
+            let x = 760 + k * 150;
+            let g = city::ground(x, 4065);
+            let blocked = (4046..4094).step_by(4).filter(|&z| (1..20).any(|y| bodies.ground.solid(x, city::ground(x, z) + y, z))).count();
+            let slope = (city::ground(x + 50, 4065) - city::ground(x - 50, 4065)) as f32 / 100.0;
+            line += &format!("x {x}: {g} ({:.1}%) blocked {blocked}\n", slope * 100.0);
+        }
+        eprintln!("{line}");
+    }
+
+    /// Flat out up the main street, and on a level strip: `cargo test --release up_the_main_street -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn up_the_main_street() {
+        for (name, fast) in [("the engine's car", false), ("a fast car", true)] {
+            for flat in [false, true] {
+                let mut bodies = Bodies::new();
+                let low = if flat { level(&mut bodies) } else { street() };
+                let id = if fast { fast_car(&mut bodies, low, 2) } else { car(&mut bodies, low) };
+                eprintln!("{name}{}:", if flat { " on the level" } else { " up the main street" });
+                let d = flat_out(&mut bodies, id, 25.0, true);
+                eprintln!("  fastest {:.0} km/h, went {:.0} m in {:.1} s, its lowest point {:.2} over the road (at rest {:.2}), on its feet {:.2} lower at most for a second, {} strikes, broke {}, {:.1} m off its line", d.fastest * 0.36, d.went / 10.0, d.seconds, d.lowest, d.rest, d.sank, d.struck, d.broke, d.off / 10.0);
+            }
+        }
+    }
+
+    /// How far a car goes off its line on the level as it is made lopsided:
+    /// `cargo test --release lopsided_lines -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn lopsided_lines() {
+        let whole = { let mut bodies = Bodies::new(); let id = car(&mut bodies, [760, 2403, 4055]); the(&bodies, id).cells.iter().filter(|&&k| k != 0).count() };
+        // A third more on one side than the other: (half + x) / (half) = 4 / 3 with x laid on that side.
+        for load in [0, 100, 200, whole / 6] {
+            let mut bodies = Bodies::new();
+            let low = level(&mut bodies);
+            let id = laden(&mut bodies, low, load);
+            let com = the(&bodies, id).com;
+            let d = flat_out(&mut bodies, id, 20.0, false);
+            eprintln!("{load} cells more on one side (of {whole}; its middle at z {:.2}): {:.0} m, {:.2} m off its line", com[2], d.went / 10.0, d.off / 10.0);
         }
     }
 

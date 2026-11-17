@@ -41,7 +41,7 @@ specifications, and the probes in `engine/probe` and `engine/test`.
 
 - A backtick inside a WGSL comment ends the TypeScript template string round it.
 - Avoid names WGSL may reserve (`patch`, `half`, `far`, `filter`, `sample`): use others.
-- `cast` is reserved too. A `let` declares one name: `let a = 1.0, b = 2.0;` does not parse.
+- `cast`, `pass` and `from` are reserved too (#163: a field named `pass` and a `var from` failed the march's compile). A `let` declares one name: `let a = 1.0, b = 2.0;` does not parse.
 - A picture's depth can be read in a later pass (`texture_depth_2d`, `textureLoad`) if its texture has `TEXTURE_BINDING` and that pass has no depth attachment: `depthFor` gives it (#246). From depth `d`, how far along the eye's forward is `NEAR / (1 - d * (FAR - NEAR) / FAR)`; good to about a twentieth of a cell at 100 m.
 - `vec3f` followed by one `f32` packs into 16 bytes; a struct array in a uniform must start
   on a multiple of 16. Write uniforms through one `ArrayBuffer` with float, uint and int views.

@@ -152,6 +152,27 @@ ${marks ? `    let r00 = textureLoad(sunMap, low & wrap, L, 0).r;
 `
 export const SUNLIT = sunlitText(false)
 
+/**
+ * Glass (#163), for the world and for bodies: how much of what is behind a pane comes through it, and how much of
+ * what is across from it the pane throws back. Needs `looks`.
+ */
+export const GLASS = /* wgsl */ `
+// What comes through glass: tinted a little by its colour (its hue, not how dark its paint is), the more the more
+// glass the look crosses (thick, in the world's cells). A pane also loses a little at its faces (pane, below).
+fn glassTint(kind: u32, thick: f32) -> vec3f {
+  let ci = (kind >> 8u) & 255u;
+  var base = looks.material[11].colour;
+  if (ci != 0u) { base = looks.palette[ci].rgb; }
+  let hue = base / max(max(base.r, base.g), max(base.b, 0.001));
+  return pow(mix(vec3f(1.0), hue, 0.25), vec3f(thick));
+}
+// How much a pane mirrors: a little face on (its two sides), most of all along it.
+fn glassMirror(rd: vec3f, n: vec3f) -> f32 {
+  let facing = 1.0 - clamp(dot(-rd, n), 0.0, 1.0);
+  return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
+}
+`
+
 /** How a face is lit and how light becomes a picture: the same for the world and for bodies. */
 export const LIGHT = /* wgsl */ `
 // The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
@@ -161,14 +182,18 @@ export const LIGHT = /* wgsl */ `
 // Without it a room was lit as any shadow is, and a room of dark wood came out black by day.
 // How strong that is, against the sun straight on: dark wood reads at about 40 of 255 with it (10 without).
 const ROOM_LIGHT = 1.6;
+// Once a look has gone through glass (#163) it sees the other side of a wall: from a room, the outside, which is not
+// lit as the room is (roomLit 0); from outside, a room or a cabin, which less of the sky reaches (skyLit under 1).
+var<private> roomLit: f32 = 1.0;
+var<private> skyLit: f32 = 1.0;
 fn shade(albedo: vec3f, n: vec3f, rd: vec3f, sun: vec3f, direct: f32, open: f32, rough: f32, glow: f32) -> vec3f {
   let above = 0.5 + 0.5 * n.y;
   let skylight = mix(vec3f(0.12, 0.118, 0.115) * g.lightFill.a, g.lightFill.rgb, above);
   let bounce = vec3f(0.24, 0.2, 0.15) * (0.6 - 0.4 * n.y) * (0.5 + 0.5 * max(-dot(n, sun), 0.0)) * g.lightSun.a;
   let SUN_LIGHT = g.lightSun.rgb;
   // (Only where the sun does not fall: a street seen out of the doorway keeps its sunlit fronts as they were.)
-  let room = SUN_LIGHT * g.lightSun.a * g.weather.w * ROOM_LIGHT * (1.0 - smoothstep(0.0, 0.15, direct));
-  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + (skylight + bounce + room) * open);
+  let room = SUN_LIGHT * g.lightSun.a * g.weather.w * roomLit * ROOM_LIGHT * (1.0 - smoothstep(0.0, 0.15, direct));
+  var col = albedo * (SUN_LIGHT * direct * 3.6 * (0.75 + 0.25 * open) + ((skylight + bounce) * skyLit + room) * open);
   let hv = normalize(sun - rd);
   col += SUN_LIGHT * pow(max(dot(n, hv), 0.0), 2.0 / max(rough * rough, 0.002)) * direct * (1.0 - rough) * 0.6;
   col += albedo * glow * 3.2;
@@ -339,7 +364,7 @@ fn fineWord(entry: u32, c: vec3i) -> u32 {
 
 const REFINE = /* wgsl */ `
 // What a ray met inside a cell of finer cells: kind 0 where it passed between them, and where it leaves the cell.
-struct Fine { t: f32, kind: u32, n: vec3f, leave: f32 }
+struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32 }
 fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   let lv = g.level[hit.level];
   let c = hit.cell - lv.cells;
@@ -367,6 +392,7 @@ fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   for (var j = 0; j < 24; j++) {
     let bit = u32(sub.x + side * (sub.z + side * sub.y));
     if (((pool[block + (bit >> 5u)] >> (bit & 31u)) & 1u) != 0u) {
+      r.out = min(next.x, min(next.y, next.z));
       let one = pool[block + words];
       if ((one & UNIFORM) != 0u) { r.kind = (one & 0xffffu) | 64u; return r; }
       // Its kind is as far along as there are cells before it.
@@ -394,7 +420,7 @@ fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rou
     // A cell of finer cells narrower than the ray is taken whole, as any node is.
     if ((wide + spread * hit.t) * g.level[hit.level].scale >= 1.0) { break; }
     let f = finer(ro, rd, hit);
-    if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; break; }
+    if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; hit.out = f.out; break; }
     // Between them: on from the cell's far side. The last of many such cells is taken whole.
     hit = march(ro, rd, f.leave, hit.level, most, wide, spread, rough, false, eyed);
     if ((hit.kind & 64u) == 0u) { break; }
@@ -410,6 +436,16 @@ fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rou
  */
 const MARCHED = (bricks: boolean | undefined) => /* wgsl */ `var hit = march(ro, rd, t0, level0, most, wide, spread, rough, through, eyed);${!bricks ? '' : `
   if ((hit.kind & 64u) != 0u && !through) { hit = refine(ro, rd, hit, most, wide, spread, rough, eyed); }`}`
+
+/** How many pixels wide a cell of a pane must be for the look to go through it (`through`, for measuring). */
+const THROUGH = Number(new URLSearchParams(globalThis.location?.search ?? '').get('through') ?? 2).toFixed(2)
+/**
+ * How many panes of glass a look may meet (#163, `panes` for measuring): it goes through all but the last, which is
+ * drawn with what is likely behind it (a dim room, or from inside, the day outside). 1 is none. Past one pane, a
+ * look out of a tower to the next one cost three quarters of the frame again, and the far side of a car or a room
+ * is seldom made out through two tints.
+ */
+const PANES = Number(new URLSearchParams(globalThis.location?.search ?? '').get('panes') ?? 2)
 
 const INLOOP = new URLSearchParams(globalThis.location?.search ?? '').get('walk') === 'loop'
 
@@ -475,8 +511,9 @@ const ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64)
 const BLOCK_ROOFS = ${grid[0] * grid[1] * grid[2] + (grid[0] * grid[1] * grid[2] / 64) * 2 + grid[0] * grid[2]}u;
 const UNIFORM = 0x80000000u;
 
-// left: the ray went out through the far side of the last box (it did not run out of steps).
-struct Hit { t: f32, kind: u32, n: vec3f, level: u32, cell: vec3i, left: bool }
+// left: the ray went out through the far side of the last box (it did not run out of steps). out: where it leaves
+// what it met when that is a finer cell (refine says; 0 otherwise), so a look can go on through glass (#163).
+struct Hit { t: f32, kind: u32, n: vec3f, level: u32, cell: vec3i, left: bool, out: f32 }
 // How many steps this pixel's rays have taken, all told.
 var<private> work: u32;
 
@@ -727,7 +764,13 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
         } else {
           t = side.z; side.z += each.z; cell.z += toward.z; n = vec3f(0.0, 0.0, -f32(toward.z));
         }
-        if (full${world.options.bricks && INLOOP ? ' && through' : ''}) { hit.t = t; hit.kind = 1u; }
+        if (full${world.options.bricks && INLOOP ? ' && through' : ''}) {
+          // Glass lets the sun through (#163): a ray sent through (a line of a sun map) does not stop at it, so a window
+          // lights the room behind it and casts no wall's shadow. Only in the two finest boxes, the copies with rooms in
+          // them: further off a house or a tower of glass is solid, and its glass stands for all of it.
+          let nth = before(leafLo, leafHi, bit);
+          if (((pool[leafChild + (nth >> 1u)] >> (16u * (nth & 1u))) & 15u) != 11u || L > 1u) { hit.t = t; hit.kind = 1u; }
+        }
         if (any((cell >> vec3u(2u)) != leaf)) { break; }
         work++;
       }
@@ -743,7 +786,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
     }
     let out = ((vec3f(low) + ahead * f32(size)) - q0) * k;
     let next = min(out.x, min(out.y, out.z));
-    if (kind != 0u) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
+    if (kind != 0u && ((kind & 15u) != 11u || L > 1u)) { hit.t = max(next, t); hit.kind = kind & 0xffffu; }
     n = -sign(rd) * vec3f(out <= vec3f(next));
     // Not past where the ray leaves the box: 4 x 4 x 4 sectors with nothing in them are stepped over as one, and
     // they are counted from the box's own slots, so the step can reach outside it.
@@ -784,6 +827,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 }
 
 ${LIGHT}
+${GLASS}
 ${PAINT}
 // The sky without sun or cloud: what the air between is the colour of.
 fn skyBase(rd: vec3f) -> vec3f {
@@ -903,6 +947,43 @@ fn solidAt(c: vec3i, L: u32) -> bool {
   return solidIn(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
 }
 
+// What a cell of box L is (its kind; 1 for a part of a sector that is all one solid kind, which midOf does not say).
+fn kindAt(c: vec3i, L: u32) -> u32 {
+  let entry = sectorOf(c, L);
+  if (entry == 0u) { return 0u; }
+  if ((entry & UNIFORM) != 0u) { return entry & 0xffffu; }
+  let mid = midOf(entry, pool[entry], pool[entry + 1u], pool[entry + 2u], c);
+  if (mid < 2u) { return mid; }
+  let cl = vec3u(c >> vec3u(2u)) & vec3u(3u);
+  let midLo = pool[mid]; let midHi = pool[mid + 1u];
+  let bit = cl.x + 4u * cl.z + 16u * cl.y;
+  if (!has(midLo, midHi, bit)) { return 0u; }
+  let leaf = entry + (pool[mid + 2u] & 0xfffffu) + 4u * before(midLo, midHi, bit);
+  if ((pool[leaf + 3u] & UNIFORM) != 0u) { return pool[leaf + 3u] & 0xffffu; }
+  let leafLo = pool[leaf]; let leafHi = pool[leaf + 1u];
+  let cc = vec3u(c) & vec3u(3u);
+  let cell = cc.x + 4u * cc.z + 16u * cc.y;
+  if (!has(leafLo, leafHi, cell)) { return 0u; }
+  let nth = before(leafLo, leafHi, cell);
+  return (pool[entry + pool[leaf + 2u] + (nth >> 1u)] >> (16u * (nth & 1u))) & 0xffffu;
+}
+// Where a look leaves a pane it came into at a cell of glass (#163): a pane crossed aslant is two or three cells of
+// glass one after another, walked here cell by cell (a march begun again for each cost a fifth of the street).
+fn paneEnd(rd: vec3f, hit: Hit, leave: f32) -> f32 {
+  let lv = g.level[hit.level];
+  let q0 = (g.eye - lv.boxMin) * lv.scale;
+  let k = (1.0 / rd) / lv.scale;
+  let ahead = max(sign(rd), vec3f(0.0));
+  var out = leave;
+  for (var j = 0; j < 3; j++) {
+    let c = vec3i(floor(q0 + rd * (out * lv.scale)));
+    if (any(c < vec3i(0)) || any(c >= vec3i(lv.boxSize)) || (kindAt(c, hit.level) & 15u) != 11u) { break; }
+    let side = ((vec3f(c) + ahead) - q0) * k;
+    out = max(min(side.x, min(side.y, side.z)), out) + 0.002 / lv.scale;
+  }
+  return out;
+}
+
 // How open a point on a face is to the sky round it: 1 in the open, less where the cells beside the face stand
 // up round it. The four cells beside the one in front of the face are asked, and the four corners of the face are
 // weighed by where on it the point is: so a corner darkens smoothly into the wall. (Asking the four diagonal ones
@@ -958,6 +1039,20 @@ fn inBlock(fine: vec3i) -> vec2f {
   return vec2f(f32(fine.x - i32(floor(f32(fine.x) / 1280.0)) * 1280), f32(fine.z - i32(floor(f32(fine.z) / 800.0)) * 800));
 }
 
+// How far along a ray it leaves the cell it met (or the finer cell, for a cell of finer cells): where a look through
+// glass goes on from (#163). whole: the way out of the whole cell, for a cell of finer cells too.
+fn leaving(ro: vec3f, rd: vec3f, hit: Hit, whole: bool) -> f32 {
+  let lv = g.level[hit.level];
+  let fine = (hit.kind & 64u) != 0u && !whole;
+  if (fine && hit.out > hit.t) { return hit.out + 0.0003 / lv.scale; }
+  // A finer cell whose way out was not said: the way out of the eighth of the cell it is in.
+  let size = select(1.0, 0.125, fine);
+  let q0 = (ro - lv.boxMin) * lv.scale / size;
+  let c = floor(q0 + rd * (hit.t * lv.scale / size) + rd * 0.001);
+  let out = ((c + max(sign(rd), vec3f(0.0))) - q0) * ((size / rd) / lv.scale);
+  return max(min(out.x, min(out.y, out.z)), hit.t) + 0.002 * size / lv.scale;
+}
+
 // What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
 // 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
 fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
@@ -994,11 +1089,24 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     // (Without a branch: one here made every lit pixel a hundredth dearer.)
     at += g.sun * (1.8 * f32((hit.kind >> 6u) & 1u));` : ''}
     if (g.sunMaps != 0u) { sunny = sunlit(at, n, hit.level); }
-    if (sunny < 0.0 && shadows == 1u) {
-      // No map drawn here yet: ask the world itself.
-      let lift = 0.05 / g.level[hit.level].scale;
-      let s = trace(at + n * lift, g.sun, 0.0, hit.level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false, false);
-      sunny = select(1.0, 0.0, s.t >= 0.0);
+    // (Past a pane and in a mirror, only the maps are asked: but with the maps off, K, the world is asked there too, or
+    // everything seen through glass was in shadow.)
+    if (sunny < 0.0 && (shadows == 1u || g.sunMaps == 0u)) {
+      // No map drawn here yet (or K: every shadow traced): ask the world itself. Through glass in the two finest boxes,
+      // as the maps let the sun through it: up to 23 cells of it, a cell at a time (a pane crossed aslant is two to
+      // four, a lump of glass a metre across twenty). Walked a pane at a time (paneEnd) it was a second copy of that
+      // walk in the shader, and every picture was a percent or two dearer.
+      let o = at + n * (0.05 / g.level[hit.level].scale);
+      var past = 0.0;
+      var level = hit.level;
+      sunny = 1.0;
+      for (var k = 0; k < 24; k++) {
+        let s = trace(o, g.sun, past, level, 96u, hit.t * g.pixel * 2.0, 0.04, true, false, false);
+        if (s.t < 0.0) { break; }
+        if ((s.kind & 15u) != 11u || s.level > 1u || k == 23) { sunny = 0.0; break; }
+        past = leaving(o, g.sun, s, false);
+        level = s.level;
+      }
     }
     direct *= max(sunny, 0.0);
   }
@@ -1139,17 +1247,20 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
   return col;
 }
 
-fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
-  // dist is in the finest cells: the air thickens over kilometres. It is thickest by the sea and thins upward (to a
-  // third in 1.3 km), so a mountain stands clear over the haze its foot is lost in: what counts is the air along
-  // the look, from the eye's height to the height of what is seen.
+// How much of what is dist along a look from the eye is lost in the air: dist is in the finest cells, and the air
+// thickens over kilometres. It is thickest by the sea and thins upward (to a third in 1.3 km), so a mountain stands
+// clear over the haze its foot is lost in: what counts is the air along the look, from the eye's height to the
+// height of what is seen.
+fn haze(rd: vec3f, dist: f32) -> f32 {
   let low = (g.eye.y - g.sea) / 12000.0;
   let rise = rd.y * dist / 12000.0;
   var thick = exp(-max(low, 0.0));
   if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
-  let f = 1.0 - exp(-dist * 0.00003 * thick);
-  return mix(col, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6, f);
+  return 1.0 - exp(-dist * 0.00003 * thick);
 }
+// The colour of that air.
+fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
+fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f { return mix(col, hazeColour(rd), haze(rd, dist)); }
 
 // One texel of a sun map: along the line to the sun through it, how far towards the sun the last solid thing is.
 @fragment fn fs_sun(@builtin(position) at: vec4f) -> @location(0) vec4f {
@@ -1173,6 +1284,9 @@ fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
   return vec4f(bitcast<f32>((bitcast<u32>(dot(o, g.sun) + hit.t + g.sunFar) & 0xfffffffeu) | u32(marked)), 0.0, 0.0, 1.0);` : 'return vec4f(dot(o, g.sun) + hit.t + g.sunFar, 0.0, 0.0, 1.0);'}
 }
 
+// How much of the sky's light a room or a cabin looked into from outside gets (#163): a room is darker than the street.
+const INDOORS = 0.45;
+
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
   let p = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
   return vec4f(p * 2.0 - 1.0, 0.5, 1.0);
@@ -1181,7 +1295,14 @@ fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
 // How far off a thing is, as the depth other drawing is tested against: nearer than a cell is 0, further than 10 km is 1.
 const NEAR = 1.0;
 const FAR = 100000.0;
-struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
+// What a pixel draws: its colour; how far off the first pane it looks through is with what that pane lets through of
+// what is behind it (panes, #163: for what is drawn after the march, the wand among them; all 0 where no pane is
+// looked through); and the depth of what it sees, behind any pane.
+struct Drawn { @location(0) colour: vec4f, @location(1) panes: vec4f, @builtin(frag_depth) depth: f32 }
+// Mirrors on (the M key, ?mirrors=0 turns them off). The march with mirrors off is a pipeline of its own with this
+// false: none of what looks past what is met (a mirror, a pane) is in it, and with mirrors off it costs what it did
+// before glass was seen through (the same text with only a test of a flag made those pictures 5 to 17% dearer).
+override MIRRORS: bool = true;
 
 @fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
   let uv = (at.xy / g.res) * 2.0 - 1.0;
@@ -1192,100 +1313,206 @@ struct Drawn { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   // shader has these lines: measured by swapping them in and out of one page, they cost a far view 1 ms in 43.
   let toward = dot(rd, g.starts.xyz);
   let begins = select(0.0, max(0.0, (g.starts.w - dot(g.eye, g.starts.xyz)) / toward), toward != 0.0);` : 'let begins = 0.0;'}
-  var hit = trace(g.eye, rd, begins, 0u, g.most, 0.0, g.pixel * g.detail, false, false, true);
-  // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
-  if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
+  // Glass is seen through (#163): a look that meets a pane goes on through it, tinted a little, and shows what it
+  // meets beyond (past one pane, what is likely there); the pane adds what it mirrors (a little face on, most along it) and, at
+  // night, the light of a room with someone home. What is seen through glass is the other side of a wall.
+  // One march, one lit() and one look across in the loop, each written once: every call of trace or lit is a copy
+  // of it in the compiled shader, and with a copy for each pane the street cost 40% more whether glass was in view or not.
+  var col = vec3f(0.0);
+  var keep = vec3f(1.0);
   var depth = 1.0;
-  if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
-  if ((g.flags & 16u) != 0u) {
-    // Asked what is under one point: how far (in eighths of a cell), what it is made of, what colour.
-    var v = 0u;
-    if (hit.t >= 0.0) { v = (u32(clamp(hit.t, 0.0, 131071.0) * 8.0) & 0xfffffu) | ((hit.kind & 15u) << 20u) | (((hit.kind >> 8u) & 255u) << 24u); }
-    return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, depth);
-  }
-  var col: vec3f;
-  if ((g.flags & 128u) != 0u) { col = deep(rd, hit, shadows, fract(52.9829189 * fract(dot(at.xy, vec2f(0.06711056, 0.00583715))))); }
-  else if (hit.t < 0.0) { col = sky(rd); } else {
-    let m = looks.material[hit.kind & 15u];
-    col = lit(g.eye, rd, hit, shadows);
-    // A window lit from within at night shows its light, not what is across from it.
-    let lot = inBlock(hit.cell * i32(1u << hit.level));
-    let glows = g.weather.z > 0.0 && (hit.kind & 15u) == 11u && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(hit.cell * i32(1u << hit.level)) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u);
-    // Road and paving that are wet mirror too: a film of water everywhere, puddles where it gathers.
+  var first = -1.0;
+  var t0 = begins;
+  var level0 = 0u;
+  var panes = 0u;
+  var last = -1.0;
+  var seenThrough = vec4f(0.0);
+  // The air's colour along this look (worked out once: inside the loop as well as after it, it was 2% dearer).
+  let airColour = hazeColour(rd);
+  // Past a pane the look is marched more coarsely (what is two pixels wide is taken whole), for fewer steps, and
+  // what it meets is lit without its corners darkened or a shadow traced where the sun's maps cannot say (as what is
+  // seen in a mirror is): it is seen through a tint, and a room's back wall had cost as much as the front of the house.
+  var spread = g.pixel * g.detail;
+  var most = g.most;
+  var lights = shadows;
+  for (var i = 0u; i < select(1u, ${PANES * 2}u, MIRRORS); i++) {
+    var hit = trace(g.eye, rd, t0, level0, most, select(0.0, t0 * spread, i > 0u), spread, false, false, true);
+    if (i == 0u) {
+      // From under the sea nothing over its top is seen: what a look met after it went out through the top is not met.
+      if ((g.flags & 128u) != 0u && rd.y > 0.0 && hit.t > (g.sea - g.eye.y) / rd.y) { hit.t = -1.0; }
+      first = hit.t;
+      if ((g.flags & 16u) != 0u) {
+        // Asked what is under one point: how far (in eighths of a cell), what it is made of, what colour.
+        var v = 0u;
+        if (hit.t >= 0.0) { v = (u32(clamp(hit.t, 0.0, 131071.0) * 8.0) & 0xfffffu) | ((hit.kind & 15u) << 20u) | (((hit.kind >> 8u) & 255u) << 24u); }
+        if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
+        return Drawn(vec4f(f32(v & 255u), f32((v >> 8u) & 255u), f32((v >> 16u) & 255u), f32(v >> 24u)) / 255.0, vec4f(0.0), depth);
+      }
+      if ((g.flags & 128u) != 0u) {
+        if (hit.t >= 0.0) { depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0); }
+        col = deep(rd, hit, shadows, fract(52.9829189 * fract(dot(at.xy, vec2f(0.06711056, 0.00583715)))));
+        break;
+      }
+    }
+    if (hit.t < 0.0) { col += keep * sky(rd); depth = 1.0; break; }
+    depth = clamp(FAR / (FAR - NEAR) * (1.0 - NEAR / max(hit.t * dot(rd, g.forward), NEAR)), 0.0, 1.0);
+    let stuff = hit.kind & 15u;
+    // With mirrors off (the M key, ?mirrors=0: no look beyond what is met) glass is a face as any other, as it was.
+    let glass = stuff == 11u && MIRRORS;
+    let scale = g.level[hit.level].scale;
+    var leave = 0.0;
+    if (glass) {
+      // A pane of finer cells (#259) that the look past it would take whole, as it takes any cell narrower than it:
+      // left whole, or the look met the pane's own cell again and drew it, or the frame in it, for the room.
+      let whole = (hit.kind & 64u) != 0u && hit.t * g.pixel * max(g.detail, 2.0) * 2.0 * scale >= 1.0;
+      leave = leaving(g.eye, rd, hit, whole);
+      if ((hit.kind & 64u) == 0u || whole) { leave = paneEnd(rd, hit, leave); }
+      // A pane a look crosses aslant is two or three cells of glass one after another: one pane, thicker.
+      if (hit.t <= last + 0.01 / scale && i + 1u < ${PANES * 2}u) {
+        keep *= glassTint(hit.kind, max(leave - hit.t, 0.0));
+        last = leave; t0 = leave; level0 = hit.level;
+        continue;
+      }
+    }
+    let m = looks.material[stuff];
+    // A pane's own light is a tenth of what it shows: it is lit from the sun's maps alone, as what a mirror shows is.
+    // (Not lit at all for a pane seen through another, a branch round this call, the street was 3% dearer.)
+    var own = lit(g.eye, rd, hit, select(lights, lights * 2u, glass));
+    var n = hit.n;
+    if (dot(n, n) < 0.5) { n = -rd; }
+    let p = g.eye + rd * hit.t;
+    let across = 1.0 / (scale * max(hit.t, 1.0) * g.pixel);
+    // How much of what is across from it the face shows, and whether that is asked of the world.
     var mirror = m.mirror;
+    var ask = false;
+    var goes = false;
+    var lamp = 0.0;
     // Polished by a spell (kinds.rs POLISHED, bit 7): it mirrors, whatever it is made of. Bit 6 is the mark of a
     // finer cell (the march sets it itself): read here, every finer cell was a mirror.
-    if ((hit.kind & 128u) != 0u) { mirror = max(mirror, 0.62); }
-    if (g.weather.y > 0.0 && ((hit.kind & 15u) == 6u || (hit.kind & 15u) == 7u) && hit.n.y > 0.5) {
-      let place = vec2f((hit.cell * i32(1u << hit.level)).xz);
-      mirror = g.weather.y * (0.45 + 0.5 * smoothstep(0.42, 0.6, noise2(place * 0.023)));
-      col *= 1.0 - 0.35 * g.weather.y;
-    }
-    if (mirror > 0.0 && (g.flags & 2u) != 0u && !glows) {
-      // Water and glass show what is across from them.
-      var n = hit.n;
-      if (dot(n, n) < 0.5) { n = -rd; }
-      let p = g.eye + rd * hit.t;
-      if ((hit.kind & 15u) == 6u || (hit.kind & 15u) == 7u) {
+    let polished = (hit.kind & 128u) != 0u;
+    if (glass) {
+      panes++;
+      // A window with someone home at night is lit from within: its blind is drawn and its light shows, not the room.
+      let fine = hit.cell * i32(1u << hit.level);
+      let lot = inBlock(fine);
+      if (g.weather.z > 0.0 && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      mirror = glassMirror(rd, n);
+      // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
+      if (polished) { mirror = max(mirror, 0.62); }
+      mirror *= 1.0 - lamp;
+      // Its own faint film, or a lit room's light.
+      own *= mix(0.1, 1.0, lamp);
+      // Looked through in the two finest boxes, which have rooms (further off a house is solid), where a cell is
+      // two pixels or more (as what a pane mirrors is asked only there), and not past the last pane a look may cross.
+      // A pane asks the world one thing: what is behind it while it lets most through, what is across from it once
+      // it mirrors more than a third (looked at along it), with a dim room behind. Up the side of a tower of glass
+      // asking both cost half as much again as the old mirror did.
+      goes = hit.level <= 1u && across >= ${THROUGH} && panes < ${PANES}u && i + 1u < ${PANES * 2}u && mirror < 0.33;
+      // Face on a pane mirrors a tenth, and the sky a little darker stands in for what is across.
+      ask = !goes && across >= 2.0 && mirror * max(keep.r, max(keep.g, keep.b)) > 0.12;
+    } else {
+      if (polished) { mirror = max(mirror, 0.62); }
+      // Road and paving that are wet mirror too: a film of water everywhere, puddles where it gathers.
+      if (g.weather.y > 0.0 && (stuff == 6u || stuff == 7u) && hit.n.y > 0.5) {
+        let place = vec2f((hit.cell * i32(1u << hit.level)).xz);
+        mirror = g.weather.y * (0.45 + 0.5 * smoothstep(0.42, 0.6, noise2(place * 0.023)));
+        own *= 1.0 - 0.35 * g.weather.y;
         // Wet road is not flat: what it mirrors is drawn out into streaks towards the eye.
         n = normalize(n + vec3f(noise2(p.xz * 0.23) - 0.5, 0.0, noise2(p.zx * 0.29) - 0.5) * 0.022);
       }
-      if ((hit.kind & 15u) == 5u) {
+      if (stuff == 5u) {
         // Small waves, drawn as themselves only near: further off there are many to a pixel and they are noise.
         let ripple = vec2f(noise2(p.xz * 0.11 + vec2f(g.time * 0.5, g.time * 0.31)), noise2(p.zx * 0.13 - vec2f(g.time * 0.43, g.time * 0.27))) - 0.5
           + (vec2f(noise2(p.xz * 0.37 - vec2f(g.time * 0.9, 0.0)), noise2(p.zx * 0.41 + vec2f(0.0, g.time * 0.8))) - 0.5) * 0.5;
         n = normalize(n + vec3f(ripple.x, 0.0, ripple.y) * 0.16 * clamp(600.0 / hit.t, 0.0, 1.0));
       }
+      let fresnel = 0.04 + 0.96 * pow(1.0 - max(dot(-rd, n), 0.0), 5.0);
+      mirror = clamp(mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0);
+      // What is across is asked of the world only where it can be made out: a face two pixels or more, water within
+      // 600 m. From high up every window of the town was a mirror a pixel wide, and asking for each was a third of
+      // the picture's cost there.
+      ask = (stuff == 5u && hit.t < 6000.0) || (stuff != 5u && across >= 2.0);
+    }
+    var add = own;
+    if (mirror > 0.0 && MIRRORS) {
       var back = reflect(rd, n);
       // A wave tilted towards the eye would send the look down into the water it came off, a dark speck: seen
       // from low over water the waves hide those sides of each other, and what shows is sky.
-      if ((hit.kind & 15u) == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
+      if (stuff == 5u && back.y < 0.02) { back = normalize(vec3f(back.x, 0.02, back.z)); }
       var safe = select(back, vec3f(0.00001), abs(back) < vec3f(0.00001));
       // What the sea mirrors is kept on the look's own side of both ways across: a wave can tip it a little over,
       // and it is then marched with the roofs of the quarter the look is in.
-      if ((hit.kind & 15u) == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
-      let lift = 0.05 / g.level[hit.level].scale;
-      // What is across is asked of the world only where it can be made out: glass a pane of which is two pixels or
-      // more, water within 600 m. Further off it shows the sky. From high up every window of the town is a mirror a
-      // pixel wide, and asking for each was a third of the picture's cost there.
-      let across = 1.0 / (g.level[hit.level].scale * max(hit.t, 1.0) * g.pixel);
+      if (stuff == 5u) { safe = vec3f(abs(safe.x) * select(-1.0, 1.0, rd.x > 0.0), safe.y, abs(safe.z) * select(-1.0, 1.0, rd.z > 0.0)); }
       // Unasked, it is the sky a little darker: half of what is across from a far window is town.
       var seen = sky(safe) * 0.8;
-      if (((hit.kind & 15u) == 5u && hit.t < 6000.0) || ((hit.kind & 15u) != 5u && across >= 2.0)) {
+      if (ask) {
         // What water mirrors is seen through its ripples, so it is asked for coarsely: three times as coarse as
         // what a pane of glass mirrors, and every other box.
-        let coarse = select(2.0, 6.0, (hit.kind & 15u) == 5u);
-        let far = trace(p + n * lift, safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, (hit.kind & 15u) == 5u, false, (hit.kind & 15u) == 5u);
+        let coarse = select(2.0, 6.0, stuff == 5u);
+        let far = trace(p + n * (0.05 / scale), safe, 0.0, hit.level, 64u, hit.t * g.pixel * coarse, g.pixel * coarse, stuff == 5u, false, stuff == 5u);
         seen = sky(safe);
         if (far.t >= 0.0) { seen = air(lit(p, safe, far, shadows * 2u), safe, far.t); }
       }
-      // The sun's path on water, or the moon's: all the small waves together smear its image into a streak that runs
-      // over the water towards it, narrow across and long, glinting. It is light thrown back, not a picture in a
-      // mirror, so it shows however steeply the water is looked at.
-      var path = 0.0;
-      if ((hit.kind & 15u) == 5u) {
+      if (glass) { add += seen * mirror; } else { add = mix(own, seen, mirror); }
+      if (stuff == 5u) {
+        // The sun's path on water, or the moon's: all the small waves together smear its image into a streak that
+        // runs over the water towards it, narrow across and long, glinting. It is light thrown back, not a picture
+        // in a mirror, so it shows however steeply the water is looked at.
         let flat = reflect(rd, vec3f(0.0, 1.0, 0.0));
-        let across = dot(normalize(flat.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a));
+        let toward = dot(normalize(flat.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a));
         let rise = flat.y - g.sun.y;
         let glint = 0.35 + 1.3 * noise2(p.xz * 0.05 + vec2f(g.time * 1.1, g.time * 0.8)) * noise2(p.zx * 0.21 - vec2f(g.time * 0.7, g.time * 1.3));
-        path = pow(max(across, 0.0), 300.0) * exp(-rise * rise * 5.0) * glint;
+        add += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 3.6, g.day) * pow(max(toward, 0.0), 300.0) * exp(-rise * rise * 5.0) * glint;
       }
-      let facing = 1.0 - max(dot(-rd, n), 0.0);
-      let fresnel = 0.04 + 0.96 * pow(facing, 5.0);
-      col = mix(col, seen, clamp(mirror * (0.25 + 0.75 * fresnel), 0.0, 1.0));
-      col += mix(vec3f(0.8, 0.86, 1.0) * 0.25, g.lightSun.rgb * 3.6, g.day) * path;
     }
-    col = air(col, rd, hit.t);
+    // The air: everything is lost in it by its own distance, what is seen through a pane too (a hill far off seen out
+    // of a window is as hazy as beside it). The whole picture is given the air as far as the first thing met, after
+    // the loop; what is past a pane is given here what more it loses beyond that. (Kept through the loop instead, as
+    // how much air each thing adds, it made every picture 2 to 5% dearer.)
+    if (i > 0u) { add = mix(add, airColour, 1.0 - (1.0 - haze(rd, hit.t)) / max(1.0 - haze(rd, first), 0.0001)); }
+    if (!glass) { col += keep * add; break; }
+    var through = glassTint(hit.kind, max(leave - hit.t, 0.0) + 0.5) * 0.94 * (1.0 - mirror) * (1.0 - lamp);
+    // How much of what is behind is looked through: none where the pane is not, and less towards each edge of where it
+    // is (as near as two pixels a cell, the far side of the second box, a mirror of a third), so that a face of windows
+    // straddling one of them has no line across it and none comes and goes as the eye moves: the rest is what is
+    // likely there. (Hard edges showed as a line across a tower at each, and the tower's look jumped as the eye passed.)
+    var fade = 0.0;
+    if (goes) {
+      let lv = g.level[hit.level];
+      let q = (p - lv.boxMin) * lv.scale;
+      let side = min(q, lv.boxSize - q);
+      let edge = select(1e9, min(side.x, min(side.y, side.z)), hit.level == 1u);
+      fade = smoothstep(${THROUGH}, ${THROUGH} * 1.5, across) * smoothstep(0.0, 48.0, edge) * smoothstep(0.33, 0.26, mirror);
+    }
+    if (fade < 1.0) {
+      // What is likely behind a pane not looked through: from outside, a room about as bright as near rooms come out
+      // by day; seen through another pane, the day outside, a little darker than the haze.
+      let room = (g.lightFill.rgb * 0.3 + g.lightSun.rgb * g.lightSun.a * 0.12) * 0.35 * INDOORS;
+      add += through * (1.0 - fade) * select(room, skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 0.7, panes > 1u);
+      through *= fade;
+    }
+    col += keep * add;
+    keep *= through;
+    // The first pane looked through: how far off, and what it lets through (what is drawn after the march tints by it).
+    if (fade > 0.0 && panes == 1u) { seenThrough = vec4f(keep, hit.t); }
+    if (max(keep.r, max(keep.g, keep.b)) < 0.02) { break; }
+    last = leave; t0 = leave; level0 = hit.level;
+    spread = g.pixel * max(g.detail, 2.0);
+    most = min(g.most, 128u);
+    lights = shadows * 2u;
+    roomLit = 0.0;
+    skyLit = mix(INDOORS, 1.0, g.weather.w);
   }
+  if ((g.flags & 128u) == 0u && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
   if ((g.flags & 4u) != 0u) {
     // How hard each pixel was: steps as heat.
     let h = f32(work) / 128.0;
-    return Drawn(vec4f(h, h * h, pow(h, 4.0), 1.0), depth);
+    return Drawn(vec4f(h, h * h, pow(h, 4.0), 1.0), seenThrough, depth);
   }
-  if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), depth); }
+  if ((g.flags & 8u) != 0u) { return Drawn(vec4f(f32(work & 255u) / 255.0, f32(work >> 8u) / 255.0, 0.0, 1.0), seenThrough, depth); }
   // Beside the colour, how far brighter than any lit surface the pixel is (a lamp, a sign, a fire), as one less
   // that: the last pass spreads those into a glow at night, which the colour alone, cut off at white, cannot say.
-  return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)), depth);
+  return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)), seenThrough, depth);
 }
 `
 
@@ -1302,6 +1529,8 @@ export interface View {
 /** PLAIN: no skip over empty air but from node to node. Slower and never wrong: what the skips are checked against. */
 /** UNDER: the eye is under the sea. The marcher sets it itself, from `under`. */
 export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64, UNDER = 128
+/** What the march leaves for what is drawn after it (Marcher.panes). */
+export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
 const SUN_TILES_A_FRAME = 8
 
@@ -1325,6 +1554,13 @@ export interface Marcher {
   readonly looks: GPUBuffer
   /** What the shaders are told of the view, the boxes and the sun's maps (GLOBALS), for whatever else is lit by them. */
   readonly globals: GPUBuffer
+  /**
+   * What the march leaves beside its picture for what is drawn after it (#163), for a picture of this size: where a
+   * pane is looked through, what it lets through (rgb) and how far off it is along the look (a, finest cells); all 0
+   * elsewhere. The depth the march writes is of what is behind the pane, so that what stands in a room is drawn
+   * there; what aims at what is met (the wand) and what is tinted by the pane read this.
+   */
+  panes(size: readonly [number, number]): GPUTextureView
   /** Whether the maps are used for shadows (they are, unless a check wants every shadow traced). */
   maps: boolean
   /** What is straight ahead of a view: how far in the finest cells, what it is made of, its colour in the palette. Null for sky. */
@@ -1350,10 +1586,30 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The sun stands in the south-west, two fifths of the way up.
   const sunMaps = new SunMaps(device, world.levels.length, [0.52, 0.62, 0.59])
   let maps = true
-  // The two pipelines of a shader module. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
-  const marching = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'march', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', targets: [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
+  // The pipelines of a shader module: the march with mirrors and without (MIRRORS), and the sun's maps. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
+  // One layout for both, so that one binding serves either.
+  const F = GPUShaderStage.FRAGMENT
+  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] })] })
+  const marchingAs = (module: GPUShaderModule, mirrors: boolean) => device.createRenderPipelineAsync({ label: mirrors ? 'march' : 'march without mirrors', layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
+  const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
-  let pipeline = await marching(module)
+  let [pipeline, plainPipeline] = await marching(module)
+  // The panes beside each size of picture the march draws (a few: the page's, a measure's, the one pixel a pick asks).
+  const panesKept = new Map<string, GPUTexture>()
+  const panesFor = (size: readonly [number, number]) => {
+    const key = `${size[0]}x${size[1]}`
+    let t = panesKept.get(key)
+    if (!t) {
+      if (panesKept.size >= 4) { const [oldest, gone] = panesKept.entries().next().value!; gone.destroy(); panesKept.delete(oldest) }
+      t = device.createTexture({ size: [size[0], size[1]], format: PANES_FORMAT, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+      panesKept.set(key, t)
+    }
+    return t
+  }
+  const panesViews = new WeakMap<GPUTexture, GPUTextureView>()
+  // Those a march with mirrors has written: one without them (which writes none) clears them first.
+  const panesWritten = new WeakSet<GPUTexture>()
+  const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
@@ -1481,6 +1737,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get sun() { return sunMaps },
     get looks() { return looks },
     get globals() { return globals },
+    panes: panesView,
     get maps() { return maps },
     set maps(v: boolean) { maps = v },
     tend(encoder, view, ready) {
@@ -1503,20 +1760,25 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     rebind() { bind = binding(); sunBind = sunBinding() },
     async reshade(change) {
       const began = performance.now(), next = await shader(device, 'march', change(code(world, behind)))
-      const compiled = performance.now() - began, [a, b] = await Promise.all([marching(next), sunning(next)])
+      const compiled = performance.now() - began, [[a, plain], b] = await Promise.all([marching(next), sunning(next)])
       // Between two frames: the pipelines, and everything bound by their layouts.
-      pipeline = a; sunPipeline = b; bind = binding(); sunBind = sunBinding()
+      pipeline = a; plainPipeline = plain; sunPipeline = b; bind = binding(); sunBind = sunBinding()
       for (const t of sunTiles) t.bind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: t.buffer } }] })
       return { compiled, ms: performance.now() - began }
     },
     draw(encoder, to, view, flags, time, timing, only, starts) {
       tell(view, to.size, flags, time, starts)
+      // With mirrors off no pane is looked through, and the march writes no panes (writing them was 1 to 2% of its time with mirrors off).
+      const mirrors = (flags & MIRRORS) !== 0, panes = panesFor(to.size)
+      if (mirrors) panesWritten.add(panes)
+      else if (panesWritten.has(panes)) { encoder.beginRenderPass({ colorAttachments: [{ view: panesView(to.size), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] }] }).end(); panesWritten.delete(panes) }
       const pass = encoder.beginRenderPass({
-        colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }],
+        colorAttachments: [{ view: to.color, loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] }, ...(mirrors ? [{ view: panesView(to.size), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] } as const] : [])],
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
         ...(timing ? { timestampWrites: timing } : {}),
       })
-      pass.setPipeline(pipeline)
+      // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
+      pass.setPipeline(mirrors ? pipeline : plainPipeline)
       pass.setBindGroup(0, bind)
       if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)

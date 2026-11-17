@@ -76,6 +76,8 @@ struct U {
 ${GLOBALS}
 @group(1) @binding(0) var<uniform> g: Globals;
 @group(1) @binding(1) var sunMap: texture_2d_array<f32>;
+// Where the march looked through a pane of glass: what it lets through, and how far off it is (march.ts panes, #163).
+@group(1) @binding(2) var panes: texture_2d<f32>;
 ${SUNLIT}
 ${LIGHT}
 struct Out {
@@ -238,7 +240,9 @@ struct Lit { @location(0) colour: vec4f, @builtin(frag_depth) depth: f32 }
   // Wet cloth is darker, and shines a little towards the light.
   col *= 1.0 - 0.18 * g.weather.y * select(1.0, 0.0, made == ${SKIN}u);
   var lit: Lit;
-  lit.colour = vec4f(tone(col), 1.0);
+  // Seen through a pane of the world's glass (someone in a room, from the street), tinted as the pane tints.
+  let pane = textureLoad(panes, vec2i(in.pos.xy), 0);
+  lit.colour = vec4f(tone(col) * select(vec3f(1.0), pow(pane.rgb, vec3f(0.4545)), pane.a > 0.0 && length(seen) > pane.a), 1.0);
   let deep = max(dot(seen, u.forward), NEAR);
   lit.depth = FAR / (FAR - NEAR) * (1.0 - NEAR / deep);
   return lit;
@@ -761,7 +765,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const layout = device.createPipelineLayout({
     bindGroupLayouts: [
       device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }] }),
-      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] }),
+      device.createBindGroupLayout({ entries: [{ binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: {} }, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'unfilterable-float' } }] }),
     ],
   })
   const floats = (n: number, from: number): GPUVertexAttribute[] => Array.from({ length: n }, (_, i) => ({ shaderLocation: i, offset: from + i * 16, format: 'float32x4' as const }))
@@ -783,7 +787,12 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
   const boxes = device.createBuffer({ size: MOST * EACH * 4, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const lain = device.createBuffer({ size: 1024 * 32, usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
   const view0 = device.createBindGroup({ layout: bodies.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniforms } }] })
-  const lit = device.createBindGroup({ layout: bodies.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }] })
+  // Bound again whenever the picture is another size: the march's panes are of the picture's size.
+  let lit: { panes: GPUTextureView; group: GPUBindGroup } | null = null
+  const litFor = (panes: GPUTextureView) => {
+    if (lit?.panes !== panes) lit = { panes, group: device.createBindGroup({ layout: bodies.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: march.globals } }, { binding: 1, resource: march.sun.all }, { binding: 2, resource: panes }] }) }
+    return lit.group
+  }
   const packed = new Float32Array(MOST * EACH), shade = new Float32Array(1024 * 8)
   // Names and words: each is drawn once into a slot of the sheet, and the slot longest unused is the next to go.
   const signs = await shader(device, 'people signs', SIGN)
@@ -900,7 +909,7 @@ export async function people(device: GPUDevice, format: GPUTextureFormat, march:
         depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' },
       })
       pass.setBindGroup(0, view0)
-      pass.setBindGroup(1, lit)
+      pass.setBindGroup(1, litFor(march.panes(to.size)))
       if (lies) {
         pass.setPipeline(shadows)
         pass.setVertexBuffer(0, lain)

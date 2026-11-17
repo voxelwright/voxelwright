@@ -68,8 +68,8 @@ export const FONT = {
  * RECORD_FIELDS, or throws an Error whose message the model can be told. A key nobody has named is still refused.
  * What a check returns is data like the rest: the world's server keeps it as JSON and runs none of it.
  */
-export const RECORD_FIELDS = ['parts', 'behaviour', 'controls', 'seats', 'sounds']
-const FIELDS = new Map()
+export const RECORD_FIELDS = ['parts', 'behaviour', 'controls', 'seats', 'sounds', 'facts']
+export const FIELDS = new Map()
 export function field(key, { brief, check }) {
   if (['name', 'size', 'parts'].includes(key) || !/^[a-z]{2,20}$/.test(key)) throw new Error(`"${key}" cannot be a key of a reply`)
   FIELDS.set(key, { brief, check })
@@ -78,6 +78,24 @@ export function field(key, { brief, check }) {
 export const fieldKeys = () => [...FIELDS.keys()]
 /** What the model is told of the keys lanes have named, to go after the brief; nothing if there are none. */
 export const fieldsBrief = () => [...FIELDS].map(([key, f]) => `\n\n"${key}" (a further key of the reply)\n${f.brief}`).join('')
+
+/**
+ * What a reply may say of a thing meant to be driven (the `drives` key of parts and cells, `drives()` in a
+ * program): { front: "-z" | "+z" | "-x" | "+x", top_kmh, zero_to_100_s }, each optional. In the thing's own space
+ * (x left to right as seen from its front, z from the front at 0 to the back). Returns it checked, or throws why.
+ */
+export function drivesOf(v) {
+  if (v === true) return {}
+  if (!v || typeof v !== 'object' || Array.isArray(v)) throw new Error('drives is { front, top_kmh, zero_to_100_s }')
+  const out = {}
+  for (const [key, x] of Object.entries(v)) {
+    if (key === 'front') { if (!['-z', '+z', '-x', '+x'].includes(x)) throw new Error('drives.front is "-z" (its nose at z 0), "+z", "-x" or "+x"'); out.front = x }
+    else if (key === 'top_kmh') { if (typeof x !== 'number' || !(x >= 3 && x <= 450)) throw new Error('drives.top_kmh is 3 to 450'); out.top_kmh = x }
+    else if (key === 'zero_to_100_s') { if (typeof x !== 'number' || !(x >= 1.5 && x <= 60)) throw new Error('drives.zero_to_100_s is 1.5 to 60'); out.zero_to_100_s = x }
+    else throw new Error(`"${String(key).slice(0, 20)}" is not part of drives: front, top_kmh, zero_to_100_s are`)
+  }
+  return out
+}
 
 class Refused extends Error {}
 const no = (why) => { throw new Refused(why) }
@@ -104,7 +122,11 @@ export function read(reply, { lenient = false, most = SIZE_MOST } = {}) {
     try { if (!lenient || a < 0 || b <= a) throw 0; thing = JSON.parse(text.slice(a, b + 1)); left.push('there were words round the JSON') } catch { no('the reply is not JSON alone') }
   }
   if (!thing || typeof thing !== 'object' || Array.isArray(thing)) no('the reply is not an object')
-  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts'].includes(key) && !FIELDS.has(key)) if (lenient) left.push(`"${key.slice(0, 20)}" is not part of the form`); else no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', ...FIELDS.keys()].join(', ')} are`)
+  for (const key of Object.keys(thing)) if (!['name', 'size', 'parts', 'drives'].includes(key) && !FIELDS.has(key)) if (lenient) left.push(`"${key.slice(0, 20)}" is not part of the form`); else no(`"${key.slice(0, 20)}" is not part of the form: only ${['name', 'size', 'parts', 'drives', ...FIELDS.keys()].join(', ')} are`)
+  // A thing meant to be driven says so, and what the cells cannot say of it (make/drivable.mjs brings it to life).
+  let drives
+  // One that does not say so validly ("drives": false, "no", a figure out of range) is not driven: read leniently, it is left out and said.
+  if (thing.drives !== undefined) { try { drives = drivesOf(thing.drives) } catch (e) { if (lenient) left.push(`"drives" left out: ${e.message}`); else no(`"drives": ${e.message}`) } }
   if (typeof thing.name !== 'string' || !thing.name || thing.name.length > 60) { if (lenient) thing.name = typeof thing.name === 'string' && thing.name ? thing.name.slice(0, 60) : 'a thing'; else no('name is a few words') }
   const size = thing.size
   if (!Array.isArray(size) || size.length !== 3 || !size.every((v, a) => whole(v, 1, most[a]))) no(`size is [wide, high, deep] in cells, at most ${most.join(' by ')}`)
@@ -189,7 +211,7 @@ export function read(reply, { lenient = false, most = SIZE_MOST } = {}) {
   if (crumbs) for (let i = 0; i < cells.length; i++) if (cells[i] && !seen[i]) cells[i] = 0
   if (lenient && filled - crumbs <= 0) no('nothing of it reaches the ground')
   // `left` says what a lenient reading left out; `kept` how much of what the reply described is still there, 0 to 1.
-  const out = { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts, record: {}, left, kept: (1 - skipped / thing.parts.length) * ((filled - crumbs) / filled) }
+  const out = { name: thing.name, size, cells, by, filled: filled - crumbs, crumbs, parts: thing.parts.length, said: thing.parts, record: {}, left, kept: (1 - skipped / thing.parts.length) * ((filled - crumbs) / filled), ...(drives ? { drives } : {}) }
   // The other lanes' keys, each by its own check, last: a check may ask what the cells are.
   for (const [key, f] of FIELDS) {
     if (thing[key] === undefined) continue

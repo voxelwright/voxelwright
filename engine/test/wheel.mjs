@@ -28,7 +28,8 @@ const helper = createServer((req, res) => {
   if (req.method === 'OPTIONS') { res.writeHead(204, cors); return res.end() }
   let body = ''
   req.on('data', (c) => { body += c })
-  req.on('end', () => { if (req.method === 'POST') asked.push(req.url); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(req.method === 'POST' ? '{"stage":"done","state":"refused","why":"a check"}\n' : '{"helper":1}') })
+  // What was asked to be made or done: not what the ask bar asks about as words are typed (`/kept`: what is kept for them, #220).
+  req.on('end', () => { if (req.method === 'POST' && !req.url.startsWith('/kept')) asked.push(req.url); res.writeHead(200, { ...cors, 'Content-Type': 'application/json' }); res.end(req.method === 'POST' ? '{"stage":"done","state":"refused","why":"a check"}\n' : '{"helper":1}') })
 })
 await new Promise((r) => helper.listen(0, '127.0.0.1', r))
 const browser = await chrome()

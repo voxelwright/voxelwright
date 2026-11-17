@@ -101,8 +101,12 @@ function live(id, value, rows, fresh, name = '') {
   new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
   const n = core.living_spawn(g.size[0], g.size[1], g.size[2], g.low[0], g.low[1], g.low[2], fresh ? 1 : 0), body = core.living_last()
   if (!body) return
-  alive.set(id, { body, controls, name, pose: null, awake: true })
-  set(body)
+  // A motor the core will not take (a number past what it reads) is no living thing: the body is taken out again, and nothing is said to be alive with a motor it does not have.
+  if (!set(body)) { told(n, false); told(core.living_vanish(body), false); return }
+  // `born`: where it is until the core says it has moved (its middle where it was made, or where it last slept), for
+  // `livesNow` only. It is not its pose: a pose is written into its record as where it sleeps.
+  const born = !fresh && controls.rest ? { at: controls.rest.at, rot: controls.rest.rot } : { at: g.low.map((v, a) => v + g.size[a] / 2), rot: [0, 0, 0, 1] }
+  alive.set(id, { body, controls, name, pose: null, born, size: g.size, awake: true })
   if (!fresh && controls.rest) core.living_place(body, ...controls.rest.at, ...controls.rest.rot)
   told(n, false)
   parentPort.postMessage({ living: { thing: id, body } })
@@ -122,6 +126,17 @@ function rests(now) {
     a.controls = { ...a.controls, rest: { at, rot } }
     parentPort.postMessage({ echo: { by: 'the world', thing: { id, controls: a.controls } } })
   }
+}
+/**
+ * Writes into a living thing's record that it has been got on or driven (`controls.driven`), the first time it is,
+ * by a rider or a rule: in the world's file, so it holds after the world starts again (make.mjs `asPut` goes by it).
+ */
+function rode(a) {
+  if (!a || a.controls.driven) return
+  const id = [...alive].find(([, x]) => x === a)?.[0]
+  if (!id) return
+  a.controls = { ...a.controls, driven: true }
+  parentPort.postMessage({ echo: { by: 'the world', thing: { id, controls: a.controls } } })
 }
 /** What the core said, for the living: where each is, which broke (it lives no more, and its record goes), which fell asleep (where is written in its record). */
 function heed(words) {
@@ -486,7 +501,7 @@ function people(id) {
 /** Whether someone's helper answers for this world's people now: the server says when it changes (mind/door.mjs). */
 let voiced = false
 /** Living things as rules have them (rules/things.mjs): told of, and driven. */
-const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0), tell: (p) => tell(p), happen: (event, e) => ruled.happen(event, e), stand: (x, z) => stand(x, z), changed: () => body.say(),
+const driven = livingThings({ alive, folk, drive: (a, go, turn, rise, jump) => { if (go || turn || rise || jump) rode(a); return core.living_drive(a.body, go, turn, rise, 0, jump ? 1 : 0) }, tell: (p) => tell(p), happen: (event, e) => ruled.happen(event, e), stand: (x, z) => stand(x, z), changed: () => body.say(),
   // A kept thing is brought in as any made thing is: its record and its cells together in one ask of the world's own, so it is in the world's file and every page has it. Then it is turned to face as asked.
   bring: ({ id, rule, thing, low, yaw }) => {
     const rows = keptRows(thing, low), mid = [low[0] + thing.size[0] / 2, low[1] + thing.size[1] / 2 + 2, low[2] + thing.size[2] / 2]
@@ -671,7 +686,7 @@ does.set('show', hand.show)
 // loaded when the world starts and swapped while it runs. Rules wait for a load that is under way: a rule is told
 // what it may do with every call, and one started again must find what it used.
 // What rules have built (rules/built.mjs, the BUILD lane): cells a rule put into the world, and what each replaced, so that they can be taken out again. Its edits are done as an ask's are: echoed, put into the core, and what they left unheld let fall.
-const builds = built({ core: () => core, folk, lives: () => [...alive.values()].map((a) => a.pose?.at), footing, stand, tell, busy: () => !!swapping, apply: (echo) => { parentPort.postMessage({ echo }); edit(echo.edit) }, settle: (at) => { told(at ? core.bodies_release(at[0], at[1], at[2], 0) : 0, true); nudged = true } })
+const builds = built({ core: () => core, folk, lives: () => livesNow().map((l) => l.at), footing, stand, tell, busy: () => !!swapping, apply: (echo) => { parentPort.postMessage({ echo }); edit(echo.edit) }, settle: (at) => { told(at ? core.bodies_release(at[0], at[1], at[2], 0) : 0, true); nudged = true } })
 const plug = plugger({ does, dir: workerData.plugins, post: (m) => parentPort.postMessage(m), doors: { builds, core: () => core, folk, living: (id) => alive.get(id)?.pose?.at ?? null, text, tell, release, look, stand, tall: TALL, happen: (event, e) => ruled.happen(event, e), hear: (rule, event, e) => ruled.happen(event, e, rule) } })
 let plugging = Promise.resolve()
 /** What a rule wants done, a thing at a time. What is not as it should be is left out and said (`error`): the rest is done. */
@@ -722,13 +737,32 @@ let nudged = false
 /** The first thing down each column of a rectangle of the ground, looked for from a height: how high it is (or null) and what it is. One question in place of a look a column. */
 function tops([x0, z0, x1, z1], from) {
   const high = [], kinds = []
+  // A living thing's cells are not in the world while it lives: where its body is now stands in for them (#220), so
+  // that what is made is not stood inside a car, which would break it as soon as it woke.
+  const bodies = livesNow().filter(({ at, reach }) => at[0] + reach >= x0 && at[0] - reach <= x1 && at[2] + reach >= z0 && at[2] - reach <= z1)
   for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) {
     let y = from, kind = 0
     // No further down than a tall thing and a slope under it: asked from far above, a column is not looked down for ever.
     for (; y > from - 400 && !(kind = core.world_kind(x, y, z)); y--);
+    for (const b of bodies) if (b.over(x + 0.5, z + 0.5) && b.top > (kind ? y : -Infinity)) { y = Math.min(Math.floor(b.top), from); kind = LIVING_KIND }
     high.push(kind ? y : null); kinds.push(kind)
   }
   return { high, kinds }
+}
+/** What a column a living thing stands over is said to be by `tops`: a solid kind, not water. */
+const LIVING_KIND = 1
+/**
+ * Where each living thing is now: its middle (`at`), how far its box reaches from it across the ground (`reach`),
+ * its top, and `over(x, z)`: whether a column is under its box as it is turned now, with a cell to spare round it.
+ */
+function livesNow() {
+  return [...alive.values()].filter((a) => (a.pose ?? a.born) && a.size).map(({ pose, born, size }) => {
+    const { at, rot: [qx, qy, qz, qw] } = pose ?? born
+    // The body's own x and z axes, as it is turned now (a quaternion's first and third columns), on the ground.
+    const ax = [1 - 2 * (qy * qy + qz * qz), 2 * (qx * qz - qw * qy)], az = [2 * (qx * qz + qw * qy), 1 - 2 * (qx * qx + qy * qy)]
+    const hx = size[0] / 2 + 1, hz = size[2] / 2 + 1
+    return { at, reach: Math.hypot(hx, hz), top: at[1] + Math.max(...size) / 2, over: (x, z) => { const dx = x - at[0], dz = z - at[2]; return Math.abs(dx * ax[0] + dz * ax[1]) <= hx && Math.abs(dx * az[0] + dz * az[1]) <= hz } }
+  })
 }
 parentPort.on('message', (said) => {
   const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle } = said
@@ -781,9 +815,9 @@ parentPort.on('message', (said) => {
   if (rule) return void plugging.then(() => { actorsBack(rule.id, kept?.actors, Date.now()); getting.back(rule.id, kept?.marks); ruled.put(rule, 'restart', kept?.keep && typeof kept.keep === 'object' && !Array.isArray(kept.keep) ? kept.keep : undefined) })
   if (area) return parentPort.postMessage({ id, ...tops(area.box, area.from) })
   // What a living thing's rider asks of it: never kept, and nothing if it is not there.
-  if (drive?.on !== undefined) return driven.rides(drive.by, drive.id, drive.on, Date.now())
+  if (drive?.on !== undefined) { if (drive.on) rode(alive.get(drive.id)); return driven.rides(drive.by, drive.id, drive.on, Date.now()) }
   if (drive && driven.held(drive.id)) return
-  if (drive) { const a = alive.get(drive.id); if (a) { a.ridden = Date.now(); a.asked = drive.go } if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
+  if (drive) { const a = alive.get(drive.id); if (a) { a.ridden = Date.now(); a.asked = drive.go; if (drive.go || drive.turn || drive.rise || drive.roll || drive.jump) rode(a) } if (a && core.living_drive(a.body, drive.go, drive.turn, drive.rise, drive.roll ? 1 : 0, drive.jump ? 1 : 0)) nudged = true; return }
   // A world started again: each thing that lived gets up where it last slept.
   if (revive) return live(revive.id, revive.controls, revive.rows, false, text(revive.name ?? '', 40))
   // Someone has joined: where everything is is said once more, for what sleeps says nothing by itself.
@@ -813,8 +847,16 @@ parentPort.on('message', (said) => {
   // Someone throws what they hold, themselves: nothing of the ask is kept (the thing's going is, when it leaves the hand).
   if (ask.throw !== undefined) { blow.toss(ask.by, ask.to); return }
   if (ask.hold !== undefined && grasp.of(ask.by)) lay({ by: ask.by, put: true })
-  if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why } }) }
+  if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why, ...(ask.hold !== undefined ? { hold: ask.hold } : {}) } }) }
   parentPort.postMessage({ echo: ask })
+  // A thing taken out that lives: its body goes, wherever it has gone, as a rule's thing taken away does. (Its record goes with the echo.)
+  if (ask.gone && !ask.edit) {
+    const a = alive.get(ask.gone)
+    // (Its rule hears it broke: the core says so of a body that vanishes, and `heed` tells the rule.)
+    if (a) { told(core.living_vanish(a.body), false); alive.delete(ask.gone); parentPort.postMessage({ living: { thing: ask.gone, body: 0 } }); nudged = true }
+    if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: 0 })
+    return
+  }
   // A rule put in or taken out, or what the realm is called: kept as every ask is, and nothing of the cells' to do.
   if (ask.rule) return void plugging.then(() => ruled.put(ask.rule, ruled.has(ask.rule.id) ? 'changed' : 'put'))
   if (ask.unrule) return drop(ask.unrule)
@@ -828,7 +870,10 @@ parentPort.on('message', (said) => {
     // A thing that comes with its controls lives at once: before the world is asked what the edit left unheld, or a
     // car set down on a sloping street would be let fall as loose cells first.
     if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, ask.edit.slice(2), true, text(ask.thing.name ?? '', 40))
-    told(core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0), true)
+    const before = core.bodies_count(), n = core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0)
+    // Asked to say how it went (an ask with `wait`, make/place.mjs `send`): how many bodies the edit left loose, now that it is laid.
+    if (id !== undefined) parentPort.postMessage({ id, laid: true, loose: Math.max(0, core.bodies_count() - before), ...(ask.thing?.controls !== undefined ? { alive: alive.has(ask.thing.id) } : {}) })
+    told(n, true)
   }
   // A thing that is there, given controls with a motor, lives from now on (the server sent its cells with the ask).
   else if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true, text(ask.thing.name ?? '', 40))

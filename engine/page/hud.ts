@@ -29,8 +29,21 @@ export interface Hud {
     onsubmit: ((text: string) => void) | null
     /** What is done with a wish: words, a picture, a link, or any of them together. */
     onask: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null
-    /** Adds someone who may take a wish before it is made (the wand: words that call a known spell). True if it took it. */
-    take(taker: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean): void
+    /**
+     * Hears the words of a wish as they are typed (the ghost of what is kept, page/kept.ts): every change, with `sent`
+     * false; the words when Enter sends them, with `sent` true; and '' when the bar is put away without.
+     */
+    ontyped: ((text: string, sent: boolean) => void) | null
+    /**
+     * Whether words set to be made would be said instead, as they stand (page/making.ts `says`): the bar then reads
+     * "Say" while they are typed, so that it never says it will make what Enter says. Tab makes them a thing after all.
+     */
+    means: ((text: string) => Promise<boolean>) | null
+    /**
+     * Adds someone who may take a wish before it is made (the wand: words that call a known spell). True if it took
+     * it; with `dry`, whether it would, doing nothing. While it would take what is typed the bar reads `label`.
+     */
+    take(taker: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>, dry?: boolean) => boolean, label?: string): void
     /** Wishes offered to start from while the line is empty. */
     starters: readonly string[]
     readonly open: boolean
@@ -49,7 +62,7 @@ export interface Hud {
   /** A short notice that goes by itself. */
   notice(text: string, ms?: number): void
   /** The card of controls (while mounted): a title and pairs of key and what it does. Null takes it away. */
-  card(card: { title: string; rows: readonly (readonly [string, string])[] } | null): void
+  card(card: { title: string; note?: string; rows: readonly (readonly [string, string])[] } | null): void
   /** A cue beside a place in the world, kept there as the eye moves until it is removed. `at` is asked every frame. With `tap` it can be touched or clicked, and does that: on a phone there is no E. */
   cue(text: string, at: () => readonly [number, number, number] | null, tap?: () => void): { text: string; remove(): void }
   /** An empty element of a lane's own in the layer, by name (the same name gives the same element). Style it by `[data-panel="name"]`. */
@@ -84,6 +97,8 @@ export function hud(input: Input): Hud {
 
   // The ask bar. While it is open the page is in a text mode: keys are letters, not steps.
   let leave: (() => void) | null = null, wantsToSay = false
+  /** The words typed would be said though the bar is set to make (`means`), and whether Tab has had them made all the same. */
+  let heardAsSaid = false, makeAnyway = false, hearing = 0
   /** Whether what is typed is said, not made: only where there is someone to say it to, and always where nothing can be made. */
   const isSaying = () => (self.onask ? !!self.onsubmit && wantsToSay : true)
   let picture: { picture: NonNullable<Ask['picture']>; shown: string } | null = null, link = ''
@@ -91,9 +106,14 @@ export function hud(input: Input): Hud {
   const draw = () => {
     const saying = isSaying()
     const both = !!self.onask && !!self.onsubmit
-    which.hidden = !both
-    which.textContent = saying ? 'Say' : 'Make'
-    ask.dataset.which = saying ? 'say' : 'make'
+    // What Enter will do with what is typed now: said if the bar is set to say; else taken by whoever would take
+    // it first (the wand casts a spell it calls); else said if these words would be said; else made.
+    const taker = saying ? undefined : takers.find((t) => t.take(asking(line.value).asked, true))
+    const says = saying || (!taker && heardAsSaid && !makeAnyway)
+    which.hidden = !both && !taker
+    which.textContent = taker ? taker.label : says ? 'Say' : 'Make'
+    which.title = !saying && says ? 'These words will be said to whoever is here: Tab makes them a thing' : 'Make a thing, or say something: Tab changes it'
+    ask.dataset.which = says ? 'say' : 'make'
     line.placeholder = saying ? self.placeholder : leave ? 'A thing, a picture, a link' : 'Make something' + (camera.hidden ? '  (Enter)' : '')
     library.hidden = saying
     camera.hidden = saying || !matchMedia('(pointer: coarse)').matches
@@ -101,8 +121,8 @@ export function hud(input: Input): Hud {
     ask.classList.toggle('open', leave !== null)
     // What was given with the wish, each with a way to take it back.
     given.replaceChildren()
-    if (!saying && picture) { const chip = document.createElement('span'), img = document.createElement('img'), x = button('', 'Take the picture away', '\u00d7'); img.src = picture.shown; img.alt = 'The picture given'; x.addEventListener('click', () => { drop(); draw(); line.focus() }); chip.append(img, x); given.append(chip) }
-    if (!saying && link) { const chip = document.createElement('span'), x = button('', 'Take the link away', '\u00d7'); chip.append(link.replace(/^https?:\/\//, '').slice(0, 40), x); x.addEventListener('click', () => { link = ''; draw(); line.focus() }); given.append(chip) }
+    if (!saying && picture) { const chip = document.createElement('span'), img = document.createElement('img'), x = button('', 'Take the picture away', '\u00d7'); img.src = picture.shown; img.alt = 'The picture given'; x.addEventListener('click', () => { drop(); draw(); void hear(); line.focus() }); chip.append(img, x); given.append(chip) }
+    if (!saying && link) { const chip = document.createElement('span'), x = button('', 'Take the link away', '\u00d7'); chip.append(link.replace(/^https?:\/\//, '').slice(0, 40), x); x.addEventListener('click', () => { link = ''; draw(); void hear(); line.focus() }); given.append(chip) }
     given.hidden = !given.childElementCount
     // Somewhere to start from, while there is nothing yet.
     starters.hidden = !(leave && !saying && !line.value && !picture && !link && self.starters.length)
@@ -110,14 +130,20 @@ export function hud(input: Input): Hud {
   }
   const drop = () => { if (picture) URL.revokeObjectURL(picture.shown); picture = null }
   const takes = { say: null as ((text: string) => void) | null, ask: null as ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null }
+  /** Who hears the words as they are typed, and what it was last told: told again only when they change. */
+  let typed: ((text: string, sent: boolean) => void) | null = null, told = ''
+  const tell = (text: string, sent = false) => { if (!typed || (text === told && !sent)) return; told = sent ? '' : text; typed(text, sent) }
   const self = {
     placeholder: '',
+    get ontyped() { return typed },
+    set ontyped(f: ((text: string, sent: boolean) => void) | null) { typed = f },
     // The bar is there as soon as anything takes what is typed: it is drawn again when either is given.
     get onsubmit() { return takes.say },
     set onsubmit(f: ((text: string) => void) | null) { takes.say = f; draw() },
+    means: null as ((text: string) => Promise<boolean>) | null,
     get onask() { return takes.ask },
     set onask(f: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => void) | null) { takes.ask = f; draw() },
-    take(taker: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean) { takers.push(taker) },
+    take(take: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>, dry?: boolean) => boolean, label = 'Make') { takers.push({ take, label }) },
     starters: [] as readonly string[],
     get open() { return leave !== null },
     show() {
@@ -130,6 +156,9 @@ export function hud(input: Input): Hud {
       if (!leave) return
       leave(); leave = null
       line.value = ''
+      heardAsSaid = makeAnyway = false
+      hearing++
+      tell('')
       link = ''
       drop()
       draw()
@@ -141,30 +170,50 @@ export function hud(input: Input): Hud {
       if (typeof what === 'string') { const found = ADDRESS.exec(what)?.[0]; if (!found) return; link = found }
       else { try { const made = await small(what); drop(); picture = made } catch (e) { notice(e instanceof Error ? e.message : 'that is not a picture') ; return } }
       self.show()
+      void hear()
     },
   }
-  const takers: ((ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>) => boolean)[] = []
+  const takers: { take: (ask: Pick<Ask, 'wish' | 'picture' | 'link' | 'fresh'>, dry?: boolean) => boolean; label: string }[] = []
+  /** What is typed, as it is asked for: an address among the words is a link, and the rest is the wish. */
+  const asking = (text: string, fresh = false) => {
+    const found = link || ADDRESS.exec(text)?.[0] || '', wish = (found ? text.replace(found, ' ') : text).replace(/\s+/g, ' ').trim()
+    // Words that would be said, which Tab asked to have made: a thing all the same (page/making.ts reads `thing:`).
+    const made = wish && heardAsSaid && makeAnyway ? `thing: ${wish}` : wish
+    return { wish, found, asked: { ...(made ? { wish: made } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}), ...(fresh ? { fresh } : {}) } }
+  }
   /** `fresh` (Shift with Enter): make it anew, even if one like it was made before. */
   const submit = (fresh = false) => {
     const text = line.value.trim()
     if (isSaying()) { self.hide(); if (text) self.onsubmit?.(text); return }
-    // An address among the words is a link, and the rest is the wish.
-    const found = link || ADDRESS.exec(text)?.[0] || '', wish = (found ? text.replace(found, ' ') : text).replace(/\s+/g, ' ').trim()
+    const { wish, found, asked } = asking(text, fresh)
     if (!wish && !picture && !found) { self.hide(); return }
-    const asked = { ...(wish ? { wish } : {}), ...(picture ? { picture: picture.picture } : {}), ...(found ? { link: found } : {}), ...(fresh ? { fresh } : {}) }
+    if (wish && !picture && !found && !fresh) tell(wish, true)
     self.hide()
-    if (takers.some((taker) => taker(asked))) return
+    if (takers.some((taker) => taker.take(asked))) return
     self.onask?.(asked)
   }
   line.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) submit(e.shiftKey)
     else if (e.key === 'Escape') self.hide()
-    else if (e.key === 'Tab' && self.onask && self.onsubmit) { e.preventDefault(); wantsToSay = !isSaying(); draw() }
+    else if (e.key === 'Tab' && self.onask && self.onsubmit) { e.preventDefault(); turn(); draw(); void hear() }
   })
-  line.addEventListener('input', draw)
+  /** Tab: from making to saying and back; words that would be said though set to make are made instead. */
+  const turn = () => { if (!isSaying() && heardAsSaid && !makeAnyway) makeAnyway = true; else { wantsToSay = !isSaying(); makeAnyway = false } }
+  /**
+   * Asks what Enter would do with what is there now (`means`), the newest answer only: from the words Enter would
+   * send (without an address among them), and never said with a picture or a link, which are made. Asked again
+   * whenever that can change: a key, Tab, a picture or a link given or taken away.
+   */
+  const hear = async () => {
+    const n = ++hearing, { wish, found } = asking(line.value)
+    const said = !!self.means && !isSaying() && !picture && !found && !!wish && (await self.means(wish).catch(() => false))
+    if (n !== hearing) return
+    if (said !== heardAsSaid) { heardAsSaid = said; draw() }
+  }
+  line.addEventListener('input', () => { draw(); void hear(); if (!isSaying() && !picture && !link) tell(line.value) })
   line.addEventListener('focus', () => self.show())
   send.addEventListener('click', () => submit())
-  which.addEventListener('click', () => { wantsToSay = !isSaying(); self.show() })
+  which.addEventListener('click', () => { turn(); self.show(); void hear() })
   library.addEventListener('click', () => picked.click())
   camera.addEventListener('click', () => taken.click())
   for (const f of [picked, taken]) f.addEventListener('change', () => { const file = f.files?.[0]; f.value = ''; if (file) void self.give(file) })
@@ -254,7 +303,11 @@ export function hud(input: Input): Hud {
       if (!c) return
       const title = document.createElement('h2')
       title.textContent = c.title
-      card.replaceChildren(title, ...c.rows.map(([key, what]) => { const p = document.createElement('p'), k = document.createElement('kbd'); k.textContent = key; p.append(k, what); return p }))
+      // One line under the title (a car's top speed and 0 to 100), when there is one.
+      const note = document.createElement('p')
+      note.className = 'note'
+      note.textContent = c.note ?? ''
+      card.replaceChildren(title, ...(c.note ? [note] : []), ...c.rows.map(([key, what]) => { const p = document.createElement('p'), k = document.createElement('kbd'); k.textContent = key; p.append(k, what); return p }))
     },
     cue(text, at, tap) {
       const e = document.createElement('p'), cue = { text, at, el: e }

@@ -69,8 +69,8 @@ export async function site(world, thing, spot, facing, back = [0, 0], { clear = 
     if (base - 1 - Math.min(...stood) > steep * 2) { why = 'the ground is too steep there'; continue }
     const made = rows(thing, [x, base, z], facing, level ? undefined : (cx, cz) => feet.get(`${cx},${cz}`) ?? base - 1)
     if (made.length > most) throw Object.assign(new Error(`it comes to ${made.length} runs and the most is ${most}: fewer separate pieces, wider bands, or smaller`), { form: true })
-    // `moved`: how far from the place asked for it stands, in cells.
-    return { origin: [x, base, z], rows: made, moved: Math.round(Math.hypot(ox, oz) * 4) }
+    // `moved`: how far from the place asked for it stands, in cells. `flat`: every foot is on ground one cell under it, nothing carried down, nothing over a hollow.
+    return { origin: [x, base, z], rows: made, moved: Math.round(Math.hypot(ox, oz) * 4), flat: stood.every((v) => v === base - 1) }
   }
   throw Object.assign(new Error(why), { place: true })
 }
@@ -134,19 +134,35 @@ export async function counted(world, cells, kind) {
  * Sends the thing: one ask. Resolves to 'there' once the world's own cells are the thing's and stay so, 'fell'
  * if they were and then were not, 'not there' if they never were, and 'unknown' if the world could not be asked.
  * `gone`: the id of a made thing to take out, cells and record on one ask: the world empties the cells it keeps for it (`made` only says where to ask after them).
+ * `replaces`: the id of a made thing this one is sent in place of: it is taken out on the same ask, which the world does whole or refuses whole.
  * It never sends twice: after a send whose answer was lost it asks the world what is there, and says.
  */
-export async function send(world, made, by, { kind, thing, gone, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
+export async function send(world, made, by, { kind, thing, gone, replaces, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
   // A thing of finer cells (`fine`: { grain, rows }) is sent as those rows; `made` is then its stand-in in the
   // world's cells, which says where to ask after it: a cell of the world that holds any of it is no longer air.
   const cells = samples(made).map((c) => (fine ? [c[0], c[1], c[2], kind === 0 ? 0 : -1] : c))
-  let sent = 'lost'
+  let sent = 'lost', laid = null
   try {
-    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify(gone ? { by, gone, release: beside(made) } : { by, edit: fine ? edit(fine.rows, kind, fine.grain) : edit(made, kind), release: beside(made), thing }) })
+    // Cells are sent with `wait`: the world answers once it has laid them, with how many pieces they left unheld.
+    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify(gone ? { by, gone, release: beside(made), wait: true } : { by, edit: fine ? edit(fine.rows, kind, fine.grain) : edit(made, kind), release: beside(made), thing, ...(replaces ? { gone: replaces } : {}), wait: true }) })
     if (res.status !== 202) return { state: 'not there', why: `the world refused it (${res.status}): ${(await res.text()).slice(0, 160)}` }
     sent = 'taken'
+    try { const said = await res.json(); if (said.laid) laid = said } catch { /* said nothing more */ }
   } catch { /* the answer was lost: whether the ask arrived is not known, so the world is asked */ }
   try {
+    // Taken out: the world emptied the very rows it kept for the thing, and says it has (a cell of it that lay in the
+    // land is the land again, so its cells are not looked at).
+    if (gone && laid) return { state: 'there' }
+    // A living thing (make/alive.mjs): its cells leave the world as it is brought to life, so they are not looked
+    // for. The world says whether it lives.
+    if (thing?.controls) return laid ? (laid.alive ? { state: 'there' } : { state: 'not there', why: 'the world could not bring it to life' }) : { state: 'unknown', why: sent === 'lost' ? 'the world could not be reached when it was sent' : 'the world did not say whether it lives' }
+    // Pieces came loose somewhere round it (they may be its own or not): it is watched as before, until it settles.
+    // Laid, and nothing came loose: it stands as it was put, and one look at its cells says the world took all of it
+    // (a sector that holds too many finer cells takes none of them). Nothing is waited for.
+    if (laid?.loose === 0) {
+      const seen = await counted(world, cells, kind)
+      if (seen === cells.length) return { state: 'there' }
+    }
     let seen = 0
     for (const began = Date.now(); Date.now() - began < wait;) {
       seen = await counted(world, cells, kind)

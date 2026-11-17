@@ -37,11 +37,13 @@ export interface Thing {
   parts?: unknown
   behaviour?: unknown
   controls?: unknown
+  /** What it was asked to do and measured doing ({asked, measured}: names of numbers; make/alive.mjs): data, checked where it is shown. */
+  facts?: unknown
   seats?: unknown
   sounds?: unknown
 }
 /** The fields other lanes own: the only ones a change to a thing may set. */
-export const OPEN = ['parts', 'behaviour', 'controls', 'seats', 'sounds'] as const
+export const OPEN = ['parts', 'behaviour', 'controls', 'seats', 'sounds', 'facts'] as const
 
 export interface Things {
   readonly all: ReadonlyMap<string, Thing>

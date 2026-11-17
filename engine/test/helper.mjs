@@ -286,6 +286,27 @@ try {
   await page.waitForFunction((n) => engine.things.all.size === n + 1, madeBefore, { timeout: 30_000 })
   check(rulesAsked === rulesBefore, 'and "make a tea crate" still makes one')
   await page.waitForFunction(() => engine.asker.busy === 0)
+  // What the bar says it will do is what it does (#220): plain words that name nothing kept are said, and the bar
+  // reads "Say" while they are typed; plain words that name something kept ("sword") are made, and it reads "Make".
+  await page.keyboard.press('Enter'); await page.keyboard.type('open sesame')
+  await page.waitForFunction(() => document.querySelector('#ask-which').textContent === 'Say', null, { timeout: 5000 })
+  await page.keyboard.press('Escape')
+  // Typed and sent at once: an answer to the words that comes after the bar is put away leaves it reading "Make".
+  await page.keyboard.press('Enter'); await page.keyboard.type('hold the door'); await page.keyboard.press('Enter')
+  await page.waitForFunction(() => document.querySelector('#said')?.textContent.includes('Ada: hold the door'), null, { timeout: 5000 })
+  await page.waitForTimeout(500)
+  await page.keyboard.press('Enter')
+  check(await page.evaluate(() => document.querySelector('#ask-which').textContent === 'Make'), 'words sent at once leave the bar reading "Make" when it is opened again')
+  await page.keyboard.press('Escape')
+  await page.evaluate(() => { engine.pose.x += 5 })
+  const swordFrom = asked
+  await page.keyboard.press('Enter'); await page.keyboard.type('sword')
+  await page.waitForFunction(() => engine.kept.shown?.name === 'knightly longsword', null, { timeout: 5000 })
+  const swordSays = await page.evaluate(() => document.querySelector('#ask-which').textContent)
+  await page.keyboard.press('Enter')
+  await page.waitForFunction((n) => engine.things.all.size === n + 2, madeBefore, { timeout: 30_000 })
+  check(swordSays === 'Make' && asked === swordFrom, `in a world with rules, "open sesame" reads "Say" on the bar; "sword", a thing kept, reads "${swordSays}", shows its ghost and is made from what is kept, with no model`)
+  await page.waitForFunction(() => engine.asker.busy === 0)
   // A rule that asks for a thing by words (world.make): said aloud to the rule, made by this page's own helper for
   // the one who said it, where they look.
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', rule: { id: 'giver', name: 'giver', source: "on('said', (world, e) => { if (/sesame/i.test(e.text)) world.make({ wish: 'a tea crate', for: e.by }) })" } }) })
@@ -293,7 +314,7 @@ try {
   await page.evaluate(() => { engine.pose.x += 5 })
   const askedBefore = asked
   await page.keyboard.press('Enter'); await page.keyboard.type('open sesame'); await page.keyboard.press('Enter')
-  await page.waitForFunction((n) => engine.things.all.size === n + 2, madeBefore, { timeout: 30_000 })
+  await page.waitForFunction((n) => engine.things.all.size === n + 3, madeBefore, { timeout: 30_000 })
   check(await page.evaluate(() => [...engine.things.all.values()].at(-1).by === 'Ada') && asked <= askedBefore + 1, 'a rule that hears a word asks for a thing, and the page of the one who said it has it made by its own helper')
   await page.waitForFunction(() => engine.asker.busy === 0)
   await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'tester', unrule: 'giver' }) })
@@ -403,7 +424,7 @@ try {
   await new Promise((r) => setTimeout(r, 300))
   server = await serve('/dev/null', ['--world', file])
   const back = await (await fetch(`${server.url}/world/things`)).json(), cellsBack = await (await fetch(`${server.url}/world/things?id=${went.done.id}`)).json()
-  check(back.length === 9 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
+  check(back.length === 10 && back[0].name === 'tea crate' && back[0].sounds?.knock && cellsBack.cells.length === one.cells.length, 'after the world\'s server is started again the record is there, the lane\'s fields and the cells with it')
   check((await fetch(`${server.url}/world/ask`, { method: 'POST', body: JSON.stringify({ by: 'x', gone: went.done.id }) })).status === 202, 'it can be forgotten')
   // The world does asks in its own time: it is gone when the world says so.
   for (let i = 0; i < 50 && (await (await fetch(`${server.url}/world/things`)).json()).some((t) => t.id === went.done.id); i++) await new Promise((r) => setTimeout(r, 100))

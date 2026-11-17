@@ -1543,6 +1543,12 @@ impl Bodies {
                     ploughed.push(cell);
                     continue;
                 }
+                // What rides on feet goes up over the top of a step it meets low down, as a wheel would: pushed back
+                // out of the riser's face, a car at 190 km/h that grazed one with a corner was stopped dead and broke.
+                if r[1] < 0.0 && self.list[i].live.as_ref().is_some_and(|live| live.rides()) && !self.ground.solid(cell[0], cell[1] + 1, cell[2]) {
+                    found.push((r, [0.0; 3], [0.0, 1.0, 0.0], (cell[1] + 1) as f32 - p[1]));
+                    continue;
+                }
                 // Shut in deep: out is back towards the body's own middle.
                 let ground = &mut self.ground;
                 let out_of = if self.list[i].live.is_some() { r } else { [0.0; 3] };

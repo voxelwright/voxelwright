@@ -9,7 +9,7 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 - `page/`: the city, flown through. `main.ts` (the page), `world.ts` (boxes of sectors round
   the camera), `worker.ts` (makes sectors), `march.ts` (the ray marcher), `sun.ts` (the sun's shadows kept in maps), `edits.ts`,
   `mover.ts` (the worker that moves what has come loose and burns what burns), `told.ts` (what it says), `pieces.ts` (a body on its way), `crumbs.ts`, `puffs.ts` (fire, smoke and dust),
-  `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `moves.ts` (what a figure does with its limbs, as data), `wear.ts` (what it wears and carries, as data), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
+  `flight.ts` (the flight that measures a device), `input.ts` (the one owner of keys, pointer and touch: a stack of modes, each taken off by its own owner alone), `hud.ts` (the one layer of DOM over the picture: the ask bar, cues, a controls card, notices, lanes' panels), `things.ts` (the made things' records, as the world tells of them), `ask.ts` (one ask, and the one function that sends it to the helper), `people.ts` (everyone's figure, drawn in one call), `moves.ts` (what a figure does with its limbs, as data), `wear.ts` (what it wears and carries, as data), `residents.ts` (who is out on the pavements, by rule), `presence.ts` (the others in a shared world, their names and what they say).
 - `probe/`: a bare page that reports what a device can draw.
 - `serve.mjs`: serves the pages' TypeScript with Node's type stripper and keeps what pages
   report in `~/.village/engine/reports.jsonl`. With `--world file` it also keeps one shared world, home, and any
@@ -29,7 +29,7 @@ npm run serve       # http://127.0.0.1:5740/city to fly; / runs the measuring fl
 Fly with WASD, the mouse after a click, Space and C for up and down, Shift for fast, the
 wheel for speed. A click uses the tool picked on what is ahead; keys 1 to 7 or the bar pick it: a hammer, a charge, a big charge, a cannon, a torch, a cutter (a level cut 9 m across), a brick. F sets what is ahead alight whatever is picked. On a phone the left
 thumb moves, the right thumb looks, and the red button uses the tool picked. H shows how many steps each
-pixel took, L and M turn shadows and mirrors off, K traces every shadow instead of using the sun's maps.
+pixel took, L and M turn shadows and mirrors off (M also what glass lets through), K traces every shadow instead of using the sun's maps.
 
 A shared world: `node serve.mjs --world ~/.village/engine/world/some.log`, then `/city?shared=1` in as many
 windows as you like (`&name=Ada` to be called something; Enter opens a line to say something). Everyone there sees
@@ -38,6 +38,53 @@ done to the world across restarts, not who was there or what was said. Anything 
 says how: a body of its own that walks, turns, speaks and is told what is around it (the seat an agent lives in the
 world by), what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit. Nobody is asked
 who they are: whoever can reach the server can change that world, and can use any name, another's included.
+
+## Glass (#163)
+
+Glass is seen through. A look that meets a pane goes on through it and shows what is behind, tinted a little by the
+glass's colour and by how much glass it crosses: the street from a room or a car, the room or the cabin from the
+street, darker than the day outside (less of the sky reaches in). A pane keeps a little of the mirror: a tenth face
+on, most of it along the pane, where it shows what is across from it.
+
+- One pane is looked through. A pane behind it (the far side of a car, the next tower) shows what is likely there: the
+  day outside, a little darker than the haze. So does a pane further off than where its cells are two pixels wide, or
+  in the coarser copies of the town, where a house is solid; those have a dim room behind them. A pane looked at
+  along it mirrors and is not looked through. Towards each of those edges the look through fades into what is likely
+  there over a band, so a face of windows has no line across it and does not change at one step as the eye moves.
+- What is seen through a pane is lost in the air by its own distance: a hill far off is as hazy through a window as
+  beside it.
+- A pane of finer cells (`?bricks=1`) that the look past it would take whole (two to four pixels a cell) is left whole,
+  so the room behind it shows and not the pane's own cells.
+- Polished glass (a spell) is a mirror: it is not looked through, and has a dim room behind it.
+- At night a window with someone home (the lit-window rule, `litWindow`) is lit from within: its blind is drawn and
+  its light shows, not the room. A window with nobody home shows its dark room. A shop's window is always lit.
+- The sun comes through glass in the two finest boxes: a window lights the room behind it and casts no shadow.
+  Further off a pane stands for a whole house or tower, and it casts that shadow. Traced shadows (where the sun's maps
+  are not drawn yet, and everywhere with K) pass up to 23 cells of glass, as the maps pass all of it.
+- Seen through glass that stands free (a shelter, a car's windows) the street is lit as a room is, a little darker
+  than beside it. Left so: telling a room from the street there would need a look up from what is behind the pane.
+- The march leaves beside its picture how far off the first pane it looks through is and what it lets through
+  (`march.panes`). The wand stops at that pane as a pick does: its ring is drawn on a window, and a thing behind glass
+  is lit on the glass. People and bodies behind a pane are tinted by it. Crumbs, smoke and water are drawn over it
+  untinted; they would each need to read `march.panes` too. Where a pane is not looked through (far off, a lit blind)
+  what stands behind it is hidden, as by a wall.
+- Bodies and things drawn beside the world (`page/pieces.ts`): their glass is drawn after everything solid, the face
+  of each pane towards the eye, tinting what is behind it and adding the sky it mirrors. A body keeps its glass faces
+  apart from its solid ones from when it is made. Every pane's tint is drawn before every pane's glint, so a far
+  pane's glint is not dimmed by a near one; at a glancing angle it did not show. Mending it would take the panes in
+  order from the back, a pane at a time.
+- Mirrors off (M, `?mirrors=0`) is no look beyond what is met: glass is a pale face again, the world's and a body's.
+  It is a pipeline of its own with none of the glass and mirror text in it (`MIRRORS`), and writes no panes.
+- What it costs, paired against the engine before glass (2560 x 1440): with mirrors off -2% to +1.5% at the bench's
+  five places; everything on -5% to +3% (before the fade at a pane's edges, which added up to a percent). Against
+  glass as first merged, the mends here cost 0 to 5% with everything on (`node test/paired.mjs --other <checkout>`, `--flags 1` for mirrors off). When first merged: out of a tower 10%,
+  out of a room's window 24% (3.6 ms), right under a glass tower looking up 29% (9 ms); not measured again.
+- `node test/glass.mjs` is the check: a lamp seen through the yard office's glass wall from outside and from inside,
+  and through a living box of glass from outside (both its sides) and from inside; with mirrors off, the lamp hidden
+  behind both; the wand's ring whole on a window; the ground under a lump of glass in the sun as bright with every
+  shadow traced as from the maps. Smoke and dust are not drawn while it measures: the yard chimney's smoke drifting
+  across the look made it read 0.53 to 1.00. `?panes=1` (no pane looked through), `?panes=3` and `?through=4`
+  (pixels a pane's cell must be) are for measuring.
 
 ## The wand (#246)
 
@@ -76,6 +123,8 @@ node serve.mjs --port 5741 --world ~/.village/engine/world/try.log    # a world 
 node make.mjs "a market stall with a striped awning" --world http://127.0.0.1:5741 --me   # in front of you (the page's eye)
 node make.mjs "a red telephone box" --world http://127.0.0.1:5741 --at 700,4070           # at a place, in cells
 node make.mjs --undo --world http://127.0.0.1:5741                                        # takes the last one out again
+node make.mjs "a car" --world http://127.0.0.1:5741 --at 700,4070 --times                 # made before: from what is kept, no model; --times says each stage
+node make.mjs "a bus" --world http://127.0.0.1:5741 --at 700,4070 --cells --reply bus.json  # a reply of cells (below) stands in for a model
 ```
 
 - **The model is your own Claude Code**, run once on your machine on your subscription (`--model opus` by default;
@@ -87,7 +136,9 @@ node make.mjs --undo --world http://127.0.0.1:5741                              
 - **A reply is data.** It is a list of boxes, bars, balls, slopes, stripes and words in named materials and colours
   (`make/form.mjs`). Anything else is refused; nothing in it is run; no kind number is taken from it. It is turned
   into cells here, checked to be joined to the ground, stood in a core of the maker's own to see that nothing of it
-  would fall, and only then sent. A reply that cannot be used is asked for again, told why, up to three times.
+  would fall, and only then sent. The world answers once it has laid the cells (`"wait": true` on the ask), with how
+  many pieces came loose round it: none, and one look at its cells says it is all there, with no wait; some (its own
+  or a neighbour's: the world cannot tell), and it is watched until it settles, as before. A reply that cannot be used is asked for again, told why, up to three times.
 - **Where**: on the ground only, facing whoever asked, its feet carried down to a sloping street, near the place
   if the place itself is taken. A thing is at most 64 by 80 by 64 cells and 13,107 runs (one edit: 65,536 numbers, raised from 16,384 on November 13 so that a house wall along z can change in one go).
 - What was made is written in `~/.village/engine/made.jsonl` before it is sent and after, so `--undo` can take it
@@ -106,20 +157,64 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
   it in front of you. A picture can be pasted, dropped anywhere on the page, or picked with the bar's button (on a
   phone: the library, or the camera with the second button); an address among the words, or dropped, is a link. A
   picture or a link needs no words. Tab turns the bar to saying something to the others there, and back.
+  In a world with rules, plain words (no verb of making, no article) are said to whoever is there unless they name
+  something kept, wherever the eye is ("car", "sword" are made, even where there is no place for them; "open sesame"
+  is said), and while such words are typed the bar reads "Say", not "Make" (`page/making.ts` `says`). Tab then makes
+  them a thing after all. With the wand in hand, words that call a known spell read "Cast" and are cast. The label is
+  worked out again after Tab and when a picture or a link is given or taken away, from the words Enter would send
+  (an address among them is a link, and a picture or a link is always made). What the bar
+  reads is what Enter does, in a world with rules or without, wand or not: `node test/said.mjs` types each kind of
+  words in Chrome, reads the bar, presses Enter and sees what was done.
 - **A wish is kept to.** What of a reply cannot be used is left out and the rest made: words round the JSON, a part
   that is not the form's, cells that touch nothing, and whatever the core's rule says would fall (taken off from the
   top down until what is left stands). The model is asked again only when more than fifteen in a hundred would be
   lost, and after the third asking the best of its replies is made. A place that is not ground (a roof, a car, the
-  sky) means the ground nearest it; a place that is taken means the nearest that is not, out to eight metres, and
+  sky) means the ground nearest it; a place that is taken (by cells, or by a living thing's body wherever it is now: its cells are not in the world while it lives, so the world's `/world/tops` answers for it) means the nearest that is not, out to eight metres, and
   the page says how far. When no place near will take it, the thing is **held**, not dropped: the page asks whether
   to clear the space for it (its box is emptied first; what stood on that falls), to put it where you look next,
   or to let it go. A link that cannot be read does not stop a wish that has words or a picture. What is still
   refused: a model that cannot be run, three replies nothing can be made of, more runs than an edit may be, a link
   alone that cannot be read, no ground within six metres.
 - **Made before, made at once** (`make/library.mjs`): the helper keeps the reply each thing of words alone was made
-  from, in `~/.village/engine/library/` on your own machine. The same wish, or one whose words are three parts in
-  four the same, is made from it with no model: read, checked, stood and placed as a fresh reply is. Shift with
-  Enter asks for it anew. A picture or a link is never a key and never kept.
+  from, in `~/.village/engine/library/` on your own machine. What typed words mean of what is kept is one rule,
+  `make/library.mjs` `meant`, used by the ghost as words are typed and by Enter (#220, November 16): the scorer the
+  ghost has had since #244 (how sure, how far ahead of the next, a rarer word weighing more, the last word half
+  typed, a letter out or two swapped forgiven), with four differences. A word said whole that the answer lacks makes
+  it nothing ("bmw m2" is not the BMW X3, "f1 car" not the saloon, "a red car" not the blue car); a last word still
+  being typed counts as whole once it begins none of the answer's words. One word alone that lacks more than two
+  letters of the answer's word means nothing, for the ghost as for Enter ("water" is not the waterball, "waterba"
+  is); after other words a half-typed word is still read ("a car sal" is the saloon car). A space after the last word changes nothing (Enter sends
+  the words without it). So Enter never makes what no ghost showed. A wish is filed under the words it always was, joining words and all: they are left out only of
+  what is typed. A wish to change a thing ("paint it red", "make that a castle") is not answered from
+  what is kept and is not kept; it goes to the model. "make it drivable" and words like it that point at the thing
+  looked at, when that is the asker's own made thing and not alive, go to the helper, which brings it to life
+  (below, "A made car is driven"). Pointing and joining words say nothing: "those trees" and
+  "make these flowers" are trees and flowers, and "the" or "with" alone mean nothing. A lone word that shows a ghost
+  makes it on Enter: "tesla", "model", "x3", "stall", "striped". What is nothing kept goes to the model. `make.mjs`
+  looks there first too (`--fresh`: not). Shift with Enter asks for it anew. A picture or a link is never a key and
+  never kept. `node test/words.mjs` compares the answers for some 3,100 phrasings (each thing's words alone, in
+  pairs, with an article, half typed, a letter out, a foreign word added or in place), as the ghost reads them and
+  as Enter does, on what comes with the engine and on a made-up shelf, with what the base (70f526e9) answered
+  (`test/words-base.json`, made by `node test/words-base.mjs`): any difference but those four fails.
+- **Kept as cells** (#220): a thing made by a program is kept with the cells it came to (`made`, the cells form
+  below), so it is never run again, and with what was proved of them once (`proved`): every cell is joined to the
+  ground, and it stood whole. On ground that is level under every foot such a thing is not stood in the maker's core
+  again; on any other ground it is. Where it goes, what is under it, what is in the way and what the world says
+  when it lays it are checked every time. An entry of your own kept before this is given its cells the first time
+  it is made. `node make/library.mjs --cells --world URL` gives `make/kept/` theirs (done for the nine there: the
+  tree and the street lamp lose a few cells in the core, so they are always stood there).
+- **How long a kept thing takes**, the car of `make/kept/` (257,000 cells of 2.5 cm), `make.mjs --times`, its own
+  world, November 15 (before it was alive: since November 16 it is a living car, below, "A made car is driven"):
+
+  | | before | now |
+  | --- | --- | --- |
+  | the program run in QuickJS | 6.3 s | none: its cells are read, 8 ms (35 ms with its stand-in) |
+  | where it goes (`ground`, `site`) | 0.1 s | 35 to 55 ms |
+  | stood in the maker's core | 0.15 s | 0.16 s on a slope; none on level ground |
+  | sent, laid by the world, seen | 4 to 4.5 s (a wait of 4 s to see it stand) | 0.13 to 0.16 s (the world says nothing came loose) |
+  | all, from the wish to its cells in the world | 8.2 to 10.8 s (the whole process) | 0.38 to 0.42 s (0.43 to 0.51 s the whole process) |
+
+  The tree is 9.4 s of QuickJS before and 16 ms of reading now.
 - **A space to fill**: an ask aimed at a box (the wand's area) makes the thing that big, in the box's middle. Up to
   12.8 m a side it is built whole in 10 cm cells; past that the model builds a model of it and every cell becomes a
   block (`make.mjs --fill w,h,d --grow cap|scale` tries either). Real runs, November 13: an oak 10 by 12 by 10 m,
@@ -172,6 +267,34 @@ node helper.mjs --world http://127.0.0.1:5761     # prints an address: open it o
 - `node test/helper.mjs` checks who the helper answers, which links it will fetch, asks from the real page's bar in
   Chrome with a made-up picture pasted and dropped, the record across a restart, and that keys have one owner: **a kept reply stands in for the model.**
 
+- **What is kept, as you type** (`page/kept.ts`): while words are typed on the ask bar the helper is asked what of
+  what is kept (your shelf and `make/kept/`) they mean so far (`POST /kept`), by the rule above. "a ca" is the
+  car, "a tre" the tree, "chiar" the chair; "st" is a street lamp or a striped stall, so nothing yet; "a car sal" is
+  still the car.
+  The page draws it where it would stand, as a ghost (pale, every other pixel), from the first key that makes it
+  clear, and takes it away when the words stop meaning it ("a carpet"). Its faces are made by the helper ahead of
+  time, each way it may face (`make/shown.mjs`, with the page's own `faces`): the page hands them to the GPU. Enter
+  makes that very thing (`kept` on the ask), with no model. The ghost and Enter read words by the one rule, so what
+  a ghost shows is what Enter makes, and words sent before the ghost shows make the same thing as words sent after;
+  the helper also checks a ghost's id against the words sent. Words that mean a kept thing with no place for it
+  where the eye is show no ghost and are still that thing. Matching takes 1 ms. In Chrome (`node test/kept.mjs`,
+  "a car" typed at 11 keys a second into a shared world on its own server, three runs): the ghost shows at the 4th
+  key ("a ca"), 56 to 77 ms from that key to the frame that shows it; Enter to the frame in which the car stands,
+  336 to 465 ms (November 15, when it was cells; it is a living car now and was not timed again). The bench's 30 ms was a page with its own core: here the words go to the helper, the place is
+  asked of the world, and the world lays the thing and streams it back.
+- **Cells as a reply** (`make/cells.mjs`): the third form, beside parts and a program, for what arrives as cells
+  already (a picture carved into cells) and for what is kept. Data only:
+  `{"form": "cells", "name", "size": [w, h, d], "cm": 10 | 5 | 2.5 | 1.25, "palette": [[material, colour], ...], "runs": base64}`,
+  at most 256 cells a side and 255 pairs, by name only. `runs` is the grid (x, then z, then y) as runs, each a count
+  and a pair (0 is air) as LEB128 numbers: the car is 23,601 runs in 90 KB of text. Read, checked joined to the
+  ground and kept like any reply; a further key a lane named (`field`) is read as in parts and kept with it. With
+  `living` it is a living thing (below, "A living thing made at once").
+- **Bigger than 6.4 m** (a bus is 11 m): 256 cells of 2.5 cm is 6.4 m. Built at 5 cm, it stands in the world's own
+  cells of 10 cm, each the kind most of its eight are. Why not finer cells of 5 cm: a fine thing that size reaches
+  many sectors, each held to 16,384 of the world's cells that hold finer ones, and fine things in view are paid for
+  in picture size (#367); a grain of 2 would be a third tag of edits through the core, the march and every page. At
+  10 cm a bus keeps its windows, doors and wheels.
+
 ### Fidelity: a thing as a program, in cells as fine as 1.25 cm (#372)
 
 ```sh
@@ -206,10 +329,11 @@ node test/fine.mjs                                 # the check: kept programs st
   cost half as much again and are for `?finesun=1`. A house front at 10 cm costs nothing. Numbers: #367.
 - **Fine things do not crowd** (agreed on #367): where a thing of finer cells bigger than a hand's (1.6 m) stands
   within 20 m, the next is made as its stand-in, in the world's own cells: of a row of cars the first is fine and
-  the rest are the same cars at 10 cm. What is held does not count.
+  the rest are the same cars at 10 cm. What is held does not count. A living car is not counted and not made
+  plainer: its look of 2.5 cm rides on its body whatever stands near (#245; not yet measured against #367's bound).
 - **Taken out whole**: a thing's cells and its record go on one ask (`{gone: id, release: [x, y, z]}`): the world
   empties the cells it keeps for the thing, never rows the asker sends, so a thing of any size can be undone and
-  replaced by its better. Not while it is held or alive. A new thing's cells must lie where its record says it stands.
+  replaced by its better. Not while it is held. A living thing is taken out wherever it has gone (its body goes). A new thing's cells must lie where its record says it stands.
 - **What the maker will not send**: a fine thing that reaches more than 16,384 of the world's cells in one sector
   (the core would refuse it there: build it as a shell), and one the world took only part of or that came apart is
   taken out again. The brief says both, and how the world holds things up (at 10 cm, by the commonest material).
@@ -272,9 +396,184 @@ left thumb drives and a button gets off.
 In a shared world (`?shared=1`) the same call makes it a made thing with a record, and the world's own process moves
 it: every page sees it, whoever gets on drives it, and `POST /world/drive` drives it from anything that can send a
 request (`GET /world/` says how). Where it sleeps is written into its record (`controls.rest`), so a server started
-again stands it up there. A thing lives once its record's `controls` has a motor (`page/living.ts` `Controls`).
+again stands it up there; and, the first time anyone gets on it or drives it (a rider or a rule), `controls.driven`. A thing lives once its record's `controls` has a motor (`page/living.ts` `Controls`).
 `node test/living.mjs --out dir` drives it in Chrome and films it; `node test/driven.mjs` is the shared world's check;
 `cargo test --release living` proves the car, a broom that hovers, flies and rolls, and a frog that hops, natively.
+
+**A look in finer cells.** The body that moves is cells of 10 cm, and a car made from a picture is 2.5 cm outside and
+1.25 cm in its cabin. So a living thing may wear a look: `Making.fine`, a list of parts, each `{size: [w, h, d], per,
+low: [x, y, z], cells}` (`page/living.ts` `Fine`). `per` of its cells lie along one of the body's (4 or 8), `low` is
+the part's low corner in the body's own cells (it may be fractional), and `cells` are kinds laid
+`cells[(y * d + z) * w + x]`, as `page/fine.ts` takes them (base64 of the 16-bit kinds when a string). Each part is a
+piece (`pieces.ts`) put where the body is every frame, before it is drawn, and the body's own cells are not drawn. When
+the thing breaks the look goes, and its pieces are drawn as they always were. `/city?fly=0&living=finecar` stands the
+hand-written car in a look of 2.5 cm (`fineCar`: a body, glass on pillars, wheels, and inside two seats, a bench, a
+dash and a wheel).
+
+In a shared world the record does not hold the cells: a car's parts are megabytes, and its `controls` are written again
+each time it sleeps. The page sends each part's cells first to `POST /world/fine`, which keeps them gzipped by their
+sha256 beside the world's file and answers `{kept}`. The record's `controls.fine` then says `{size, per, low, kept}`,
+a few hundred bytes for a car, and every page there fetches `GET /world/fine/<kept>` once and draws the look.
+
+**The driver's seat.** Riding, V changes between the eye behind and the eye in the seat (the card says
+`V  look from the seat`; on a phone a "seat" button). In the seat the eye is at `Controls.eye` (`Making.eye`), in the
+body's own cells from its low corner; without one, the first seat with a sitting person's eye 1.2 m over it. The
+whole frame turns and leans with the thing (`pose.tilt`), the head still turns with the mouse, and the rider's own
+figure is not drawn. Its glass is seen through from the seat, as from the street (#163).
+
+**The shade under it** (`page/under.ts`). Pieces cast nothing into the sun's maps, and a car stood on the road as if
+pasted on it. Under each living thing the ground is darkened softly over its footprint, moved a little the way the
+sun throws its shadow, fading as it rises off the ground and at night. It costs nothing that can be measured (the
+check times it). A shadow thrown across the street by a low sun would need the body's cells in the sun's maps.
+
+`node test/fine-living.mjs --out dir` is the check: the look stands and goes where the body is, its own cells are not
+drawn, V puts the eye in the seat and it stays there at speed, a blast takes the look away, and in a shared world the
+record says where the cells are and a page that joins later draws the look. With `--out`, pictures from beside it,
+from behind and from the seat.
+
+**Fast, up hills and straight** (#245). A car built from a photograph (a BMW X3 with its measured motor: 240 km/h,
+0 to 100 in 6.3 s) struck the road and broke going up the main street at 46 km/h, and the engine's own car at 58.
+What changed, all in `bodies/living.rs` unless it says otherwise:
+
+- A rolling foot follows the road as a wheel does. It keeps how high the road under it is and how fast that rises,
+  so it goes smoothly over each riser and has no lag at all up a steady hill. Its spring is damped against how fast
+  it closes on the road, not against all the speed up: climbing is not the spring opening. Before, a car rode
+  0.23 s of its rate of climb lower than it stands, and a foot that took each riser over a thirtieth of a second
+  rode lower again.
+- Pressed in further than it stands, a rolling foot stiffens, as a car's spring meets its stop. Where the street
+  steepens at speed, the fast car rode up to 0.88 cells low for a second without it, 0.45 with it.
+- What rolls is held up square to the road, read from the road under its feet front and back. A climb costs it
+  speed and a descent gives it some: flat out, the engine's car does 72 km/h on the level and 59 up the 12% end of
+  the main street. Held straight up, a hill cost nothing, which made every street the same.
+- The feet push one after another, each meeting the body as the one before left it, so the first had the edge. A
+  car whose left feet always pushed first turned right, steadily: the engine's car went 5 m off its line in 335 m,
+  the X3 48 m in 1.26 km. Every other step each foot's place in the order now goes to its twin across the body. Both
+  cars now hold their line within 0.1 m over 300 m and more on the level.
+- A low corner of what rolls that meets a riser one cell high goes up over it (`bodies.rs`). Pushed back out of the
+  step's face, a car whose floor was half a cell over the road stuck on a step it met under 25 km/h and broke on
+  one at 75 km/h.
+- The engine's car (`page/living.ts` `car`, and `tests::car`, now the same car) reaches 6 cells from each wheel's
+  middle, so its wheels stand 0.6 cells over the road and nothing of it but its feet meets the road.
+
+Flat out up the main street from x 760, z 4065, told no turn: the engine's car goes 295 m in 20 s, reaches 63 km/h,
+never meets the road and rides at most 0.19 cells low; a car with the X3's motor goes 598 m and reaches 168 km/h, its
+lowest point never under 0.43 cells over the road, 0.45 cells low at most for a second. `cargo test --release
+up_the_main_street -- --ignored --nocapture` prints it a second at a time for 25 s, on the street and on the level
+(in 25 s the fast car goes 846 m and reaches 189 km/h, still clear of the road).
+
+**A living thing made at once** (#245). A car is typed on the ask bar like anything kept: its ghost shows as it is
+typed, and Enter stands it, alive. E gets on, V looks from the seat, W drives it with its own motor.
+
+```sh
+node make/import.mjs ~/.village/engine/fast-voxels/library/bmw_x3.json --twin ~/.village/engine/fast-voxels/out/world/x3_twin.json
+node helper.mjs --world http://127.0.0.1:5741      # then type "bmw x3" on the ask bar
+node make.mjs "a bmw x3" --world http://127.0.0.1:5741 --at 760,4065 --times      # or from here
+```
+
+- **The reply** (`make/alive.mjs`) is a reply of cells whose body is in the world's own cells (`cm` 10), with
+  `living`: `{scheme, motor, seats, eye, look, facts}`. Every place is in the body's own cells from its low corner,
+  as the solver takes it (`page/living.ts` `Controls`). `look` is up to 8 parts, each
+  `{size, per: 4 | 8, low, palette, runs}`: the same runs and named pairs as the body, so no kind number is taken
+  from it, and no more than a page will draw (`fineWithin`, 1.5 million filled cells). `facts` is
+  `{asked, measured}`, up to 16 named numbers each and 1 KB. The core clamps the motor; feet, seats, the eye and
+  the look are held to the body and 8 cells round it. A key nobody named is refused, as in any reply.
+- **Made**: it is turned whole to face the asker, a quarter turn at a time: its cells, its front, its feet, seats,
+  eye and look. (The placing's own turn mirrors what it lays: a car so laid would be driven from the wrong side.)
+  It stands level, set over the ground by as much as its feet reach, in one edit of the usual size. Each part of its
+  look is sent to the world first (`POST /world/fine`), unless the world says it has it (`HEAD /world/fine/<sha256>`).
+  Then its body goes as the thing's cells with `controls` (the look by its sha256) and `facts` in its record, and the
+  world answers once it lives (`alive` on the ask's answer). It arrives whole or not at all: a look the world will
+  not keep is not made, and one the world could not bring to life is taken out again.
+- **Taken out** (`make.mjs --undo`): wherever it has been driven. Its body goes, and whoever rides it is set down.
+  One that broke is cells where it broke, and is not looked for.
+- **Kept and shown**: kept like anything made, as cells with what was proved. Its ghost on the ask bar is the first
+  part of its look (its outside), turned as it will stand, not its body of 10 cm. When the ghost shows, the helper
+  sends the look to the world, so Enter sends the body and its record alone.
+- **Its figures** travel in its record (`facts`): the riding card says them on one line under its name, as
+  measured or else as asked ("240 km/h, 0 to 100 in 6.3 s").
+- **The importer** (`make/import.mjs`) turns a living build of the fast-voxels bench into such a reply and keeps it
+  on the asker's own shelf (`--shelf dir` for another; never `make/kept/`). The bench's library leaves the cabin's
+  cells out: `--twin` gives them. Kinds are turned back into named materials and colours; one with no name is
+  refused. The X3 is 0.68 MB on the shelf, the Model 3 0.50 MB (5 to 6 MB in the bench's library).
+- **How long**, the X3 imported, typed on the ask bar of a world of its own (by hand, November 15, three runs): a
+  key to its ghost 61 to 82 ms ("bm" is enough). Enter to the car standing in its look: 563 to 615 ms for the first
+  in a page, 61 to 76 ms for a second of its kind. The helper makes it in 120 to 270 ms: reading 30 ms, placing
+  30 ms, sending it and the world's word that it lives 60 to 190 ms. Its look (9.6 MB of cells) was sent while the
+  ghost showed: 66 ms to send, 3 ms to ask when the world has it. The record reaches the page 50 to 90 ms after
+  Enter. The rest is the page making the look's faces: 4.8 million cells, half a second on the page's own thread,
+  which is a hitch of that length. They are made once for each kind, so a second car makes none. On the main street
+  W takes it from 0 to 100 km/h in 6.0 s and 97 m (it was measured at 6.32 s).
+- `node test/kept-car.mjs --out dir` is the check, with no model: the engine's own fine car written as a bench build,
+  imported, typed a key at a time, Enter, E, the card's figures, W, V, and `--undo` while it is ridden.
+  `node test/make.mjs` checks what a living reply may not be, that turning keeps body, feet and look together for
+  each facing, and imports both of the bench's cars when they are on the machine.
+
+**A made car is driven** (#245, November 16). A car a model makes is a car one drives: E gets on, W drives it,
+V looks from its seat, as with an imported car. `node test/made-cars.mjs --out dir` is the check, in Chrome, with
+stand-ins for the models (a reply of parts in `test/made-cars/hatchback.json`, a program in `roadster.js`).
+`node test/drivable.mjs` checks in node, with no Chrome, what it must not do: the words, the replies, tables,
+the card, the front (cars nosed every way a model may lay them, made facing each way, driven), what is kept for
+the words, whose it is, the one ask that swaps it, and a driven car's better version.
+
+- **What the model says** (`make/brief.mjs`, both briefs): a thing one gets into and drives on wheels carries
+  `"drives": {"front": "-z", "top_kmh": 180, "zero_to_100_s": 9}` (parts and cells) or calls
+  `drives({...})` (a program). Only what the cells cannot say: which way its nose points in its own space, and how
+  fast such a thing goes. It is checked (`make/form.mjs` `drivesOf`): a wrong front or a figure out of bounds is
+  refused, or, read leniently, left out and said, and the thing is then not driven (`"drives": false`, `"no"` and
+  `drives("no")` are not driven; `"drives": true` and `drives()` are, as a plain car). It is not a lane's `field`: naming one would make every kept
+  entry stale (`library.find` drops entries whose `fields` lack it).
+- **What is worked out from the cells** (`make/drivable.mjs`): the body is the thing's own cells at 10 cm (a cell
+  filled where a quarter of its finer cells are), its look its own finer cells. Its wheels are the groups of cells
+  that touch the ground, measured slice by slice across each: a group longer than a third of the thing is a skirt,
+  not a wheel, and a leg or a post is not one either: a wheel that is grown into its flank is its own kind, no
+  taller than a wheel may be and about as long along the ground as it is tall. Its length is along the front the
+  model said; else the way it rolls on its wheels (its longer side tried first), else its longer side, so its
+  wheels are found before its front is looked for. Its front is what the model said; else what its cells say
+  plainly, its lamps (white ahead, red behind: right on the saloon of `make/kept/` as it was before `drives` was
+  added, made facing each way; read only along its length as found above, so a thing with no wheels whose lamps are
+  on its shorter sides is not read by them); else, for "make it drivable", the way it was made to face if that lies along its length. When
+  nothing says, it goes the way its high parts are not over, and the place says nobody could tell ("which end is
+  its front could not be told: if it goes the wrong way, turn it round"). Its seat is the most room over a floor on the driver's line between its axles (the left of what is
+  wider than 1.5 m between them), the eye 0.8 m over it, under any roof. Front wheels steer and every wheel drives,
+  with grip enough for the sprint asked.
+- **Its motor and its figures**: its top speed is what was asked (180 km/h when nothing was), and its power is
+  tried in the engine's own solver (`page/core.wasm`, in node, on a level strip of its own: 0.2 to 0.4 s) until it
+  reaches 100 km/h in the time asked. `facts.asked` holds only what the model said; `facts.measured` only the
+  0 to 100 of the last run, with the motor as it is kept. The card says each figure as measured or else as asked.
+- **What does not roll** (no wheels on both sides, or only legs and posts: a boat, a broom, a table, a stall): it
+  is driven all the same on four small wheels of 0.3 m under its corners, and the place says so. Too big to be a body (over 9.6 m a side): it stands as it is, and
+  the place says why. Flying, hovering and riding things (`SCHEMES`) are not made from words yet.
+- **"make it drivable"** (and "make this driveable", "let me drive it", "can I ride that one?": `page/living.ts`
+  `asksToDrive`). Only words that point at the thing looked at and say nothing more, and only when what the eye
+  meets (its box and half a metre round it, the nearest) is the asker's own made thing, by the name it was made
+  under, and not alive (`make.mjs` `aimed`, the one rule: the helper uses it, and the page's bar asks it by
+  `POST /drivable` before it says what Enter will do). Aimed at anything else (a realm's own horse, another's thing,
+  a living car, nothing made) the words do what they did before: in a realm they are said to it. "make the dragon
+  alive" is a new thing the model makes. The helper reads the thing's cells from the world
+  (`GET /world/things?id=`), works out what makes it live as above (its lamps, else the way it was made to face),
+  and sends the living one in its place on one ask that also takes the old one out (`POST /world/ask` with
+  `gone`): the world's server checks both before it does either, and takes both or refuses both. So an answer that
+  is lost or comes late leaves one of them where it stood, never two and never none, and nothing is put back. While
+  one ask has a thing (to make it again, take it out or pick it up) a second is refused until the world's process
+  has done the first: two at once were both taken. Not held: inside the server it is two things told to the world's
+  process, one after the other, and two entries in the world's file. A server that stops in the moment between them
+  comes back with the old thing gone and the new one not there. And if the world took the swap but could not bring
+  the new thing to life, the place would say it could not be done while the old thing is gone (not seen to happen:
+  the same body has run in the solver before it is sent). No model is
+  asked, so its figures are a plain car's. It is an act on that thing: what is kept for its words is not changed,
+  and the same words make what they made before. The place says what was done ("Your Formula 1 car is alive: walk
+  up to it and press E"), or that the world did not say and to look first. Undo by an id takes out only the
+  asker's own.
+- **At once, then better**: the better car takes the quick one's place, alive, unless anyone has got on or driven
+  the quick one, a rider or a rule: the world writes that into its record the first time (`controls.driven`, in the
+  world's file, so it holds after a restart; before it is written, `GET /world/things?id=` says `ridden` for a
+  rider's drives). It is then only kept, and the next asker of the words gets it.
+- **What ships**: the saloon of `make/kept/` says `drives({ front: "-x", top_kmh: 190, zero_to_100_s: 9.5 })`
+  (added by hand; its nose is at low x) and is kept as a living reply: "a car" on the bar is driven, 0 to 100 in
+  9.4 s as measured. Its cells were made again from its program as `make/library.mjs --cells` makes them (`make`,
+  dry), from a script: on November 16 that command stopped at once here ("unsettled top-level await": make.mjs and
+  library.mjs import each other).
+- A stand-in proves the joining. Whether a real model says `drives`, and says its front right, is for a real run.
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?bricks=1` (with `&finesun=0`, `&walk=loop`) and `?fine=1` or `2` (#259, experiments in shape finer than a cell: the cell-engine skill says what each is, and what an edit of finer cells may be; without `bricks=1` such an edit is refused whole) `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=0` (no music) `?name=Ada` (in a shared world).
@@ -1166,8 +1465,8 @@ Checks from different threads share one GPU, so whatever opens a browser takes a
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks
-further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/spells.mjs` (known spells with no model: pink, shiny, steel that does not burn, twice as large, a fireball seen on its way, a change too big for one edit done as several), `test/hands.mjs` (what a realm's rule offers becomes keys, buttons and wand entries; the rule hears who did which and whether the aim met a person, an actor or cells; what it shows is a line, meters, a score and a choice on the screen, as text), `test/hold.mjs` (a made thing picked up, carried in the figure's hand, used, put down, given and taken by a rule, put down for whoever leaves, standing after a restart), `test/conjure.mjs` (a rule has a thing made into the asker's hand; a kept reply, no model), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/falls.mjs`
-(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/sounded.mjs` (a rule makes a sound: a clock strikes, a smith hammers an anvil of the rule's own, rubbish is refused, a page hears each from where it is), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/person.mjs` (a person's own body: walks, runs, jumps, is stopped by what is built, seen by others and by a rule where its feet are), `test/powers.mjs` (a rule sets what a person's body can do, and the world's clock), `test/ghost.mjs` (a ghost keeps up with a runner), `test/blows.mjs` (a thrown ball strikes a person and an actor and the rule hears it; a push, the ground, a car), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/lineup.mjs` (no check: the same six people in eleven poses from five eyes, as pictures; run on two commits they are the pairs a change to the figure is judged by), `test/flight.mjs` (the measuring flight, then a tree
+further than a wall), `test/tools.mjs` (each tool on the bar does what it says), `test/chain.mjs` (three drums of the kind that goes up when hit set each other off), `test/wand.mjs` (the wand's aim: a car is one thing and none of the street, a part and a side of it, a house taken a part at a time, an area on the ground, keys, wheel and a phone's buttons), `test/spells.mjs` (known spells with no model: pink, shiny, steel that does not burn, twice as large, a fireball seen on its way, a change too big for one edit done as several), `test/hands.mjs` (what a realm's rule offers becomes keys, buttons and wand entries; the rule hears who did which and whether the aim met a person, an actor or cells; what it shows is a line, meters, a score and a choice on the screen, as text), `test/hold.mjs` (a made thing picked up, carried in the figure's hand, used, put down, given and taken by a rule, put down for whoever leaves, standing after a restart), `test/conjure.mjs` (a rule has a thing made into the asker's hand; a kept reply, no model), `test/aims.mjs` (the board's shots face their things), `test/shadows.mjs` (the sun's maps against traced shadows), `test/glass.mjs` (a lamp seen through glass, from inside and out, in the world's cells and through a body), `test/falls.mjs`
+(a cut tree goes over and lies as cells), `test/make.mjs` (a made thing arrives whole or not at all; kept replies, no model, no Chrome), `test/sound.mjs` (the synthesiser measured in Node: true to material, in tune, under its ceiling whatever a patch says, what it costs), `test/music.mjs` (the music's rules measure what they say, the search beats chance, a handover leaves no hole), `test/played.mjs` (instruments by real keys and touches: in tune, heard 3 ms after the key, held as long as the key; one stood in a shared world is offered, taken up, played and put away), `test/sounded.mjs` (a rule makes a sound: a clock strikes, a smith hammers an anvil of the rule's own, rubbish is refused, a page hears each from where it is), `test/heard.mjs` (the real page's sound tapped: a hammer blow, a blast heard late by its distance, a front coming down, rain, the sea overhead), `test/kept.mjs` (a kept wish typed a key at a time: its ghost from a key to the frame, Enter to the frame it stands in; no model), `test/helper.mjs` (the helper answers only the world's own page with the secret; an ask from the page becomes a thing with a record that outlives a restart; keys have one owner; a kept reply, no model), `test/far.mjs` (far from the town the cells have sea where the planet seen from space has it), `test/shared.mjs` (two pages, a plain request and two seats in one world: all see the same, after a reload and a restart too; a seat walks, is stopped by a wall, is heard, is knocked down and gets up), `test/living.mjs` (a car brought to life is got on with E and driven: it goes, stops and sleeps, breaks brick and says what it struck, backs off and turns), `test/driven.mjs` (a living thing in a shared world: a page that joins later finds it, one drives and the other sees, a plain request drives it, it stands where it slept after a restart), `test/fine-living.mjs` (a living thing that wears a look in finer cells: where the body is, from the seat, broken, in a shared world), `test/kept-car.mjs` (a living car kept on a shelf by the importer, typed on the ask bar: its ghost is its look, Enter stands it alive, E, its figures on the card, W, V, `--undo` while it is ridden; no model), `test/keys-stay.mjs` (in one page of a shared world, E gets on a car and G picks up a made thing after a ride, after B twice and after a trip to another realm and back: taking a mode off takes that mode alone; no model), `test/person.mjs` (a person's own body: walks, runs, jumps, is stopped by what is built, seen by others and by a rule where its feet are), `test/powers.mjs` (a rule sets what a person's body can do, and the world's clock), `test/ghost.mjs` (a ghost keeps up with a runner), `test/blows.mjs` (a thrown ball strikes a person and an actor and the rule hears it; a push, the ground, a car), `test/people.mjs` (the residents' rule: the same people whenever asked, nobody standing in anything, what a blast does to them, what they cost a frame), `test/lineup.mjs` (no check: the same six people in eleven poses from five eyes, as pictures; run on two commits they are the pairs a change to the figure is judged by), `test/flight.mjs` (the measuring flight, then a tree
 cut and a house front broken; `--phone` as a phone), `test/probe.mjs`. Each but `make` drives the real page
 in the installed Chrome and stubs nothing; `make` puts kept replies in a model's place and says so. They share one server and one browser and run
 three at a time, so the times they print are not for quoting: `test/bench.mjs` measures.
