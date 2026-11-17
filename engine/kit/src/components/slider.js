@@ -47,6 +47,7 @@ export const slider = {
     // while the pointer is down the thumb follows the value exactly: no easing
     on(input, 'input', () => { cue('tick'); live.invalidate(); });
     on(input, 'change', () => live.invalidate());
+    on.heed(input, 'value', () => live.invalidate()); // set from code
     on(input, 'pointerdown', () => { press.to(-1.5, 1500, 76); live.invalidate(); });
     on(window, 'pointerup', () => { if (press.target !== 0) { press.to(0, 620, 34); live.invalidate(); } });
     on.watch(input, { attributes: true, attributeFilter: ['disabled', 'min', 'max', 'value'] }, () => live.rebuild());

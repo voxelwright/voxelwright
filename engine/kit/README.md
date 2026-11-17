@@ -41,6 +41,8 @@ const stage = await ready();   // the stage, or null if the page stays plain
 | `closeDialog(el, value)` | Close a dialog the way its own buttons do |
 | `sound(on)`, `cue(name)` | Turn sound on from a user gesture; play a cue |
 | `plant(part, opts)`, `pot(part, …)`, `stageOf(g)` | The plant generator |
+| `refresh(el)` | Redraw a part after changing what it is drawn from (values set from code are heard without it) |
+| `use(renderer)`, `ready()` | Hand the kit another renderer; know when the page is live |
 | `defineMaterial(name, def)`, `MATERIALS`, `LIGHTS` | Materials and light |
 | `Model`, `Part`, `Spring`, `assemble`, `crumble` | The pieces parts are made from |
 

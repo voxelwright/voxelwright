@@ -16,6 +16,7 @@ import { dialog } from './components/dialog.js';
 import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
+import { behave, unbehave } from './plain.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
@@ -81,11 +82,12 @@ export function adopt(root = document) {
     return null;
   }
   const st = getStage();
-  if (!st) return null;
+  // plain: no voxels, but tabs, dialogs and menus still get their behaviour
+  if (!st) { behave(root); return null; }
   for (const def of components) {
     const found = root.querySelectorAll ? [...root.querySelectorAll(def.selector)] : [];
     if (root.matches?.(def.selector)) found.unshift(root);
-    for (const el of found) st.add(el, def);
+    for (const el of found) { unbehave(el); st.add(el, def); }
   }
   return st;
 }
@@ -94,7 +96,16 @@ export function adopt(root = document) {
 export function release(root = document) {
   if (pending) { waiting.push([release, root]); return; }
   if (!stage) return;
-  for (const el of [...stage.lives.keys()]) if (root === document || root === el || root.contains(el)) stage.remove(el);
+  for (const el of [...stage.lives.keys()]) if (root === document || root === el || root.contains(el)) { stage.remove(el); behave(el); }
+}
+
+/**
+ * Say that an element changed in a way the kit cannot hear. Setting a slider's value or a
+ * switch's checked from code is heard by itself; call this after changing anything else that a
+ * part is drawn from (its text, its attributes, its children). It rebuilds the part.
+ */
+export function refresh(el) {
+  stage?.lives.get(el)?.rebuild();
 }
 
 /** The live model behind an element, for code that wants to play an effect on it. */

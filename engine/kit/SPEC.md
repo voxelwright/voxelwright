@@ -186,6 +186,10 @@ Decide by how often it happens (from the site-craft rules):
 - Hit targets are at least 11 voxels (44 px) tall.
 - Lettering in voxels (the sign, and headings set with `data-vx-board="none"`) keeps its text in
   the DOM for readers, wraps to fit its column and balances its lines.
+- A dialog may be modal (`showModal()`) or not (`show()`, when the page behind must stay usable
+  while a setting changes). Both build and crumble the same way; only a modal one has a backdrop.
+- A value set from code (`input.value = 3`, `input.checked = true`) is drawn at once, with no
+  sound and no slide: the hand did not move it. `vx-change` fires only when a person chooses.
 - Toasts are `role="status"`, or `role="alert"` for a failure. Their clock stops on hover and
   while the tab is hidden.
 - **Less motion** (`prefers-reduced-motion: reduce`): the voxels stay; travel goes. Builds and
@@ -201,6 +205,12 @@ Decide by how often it happens (from the site-craft rules):
   `release()` gives it back.
 - The plain version uses the same tokens, sizes and focus rules, so switching changes the surface
   and nothing else.
+
+- **Behaviour without voxels.** Tabs, a dialog's `data-vx-close` buttons and a menu need script
+  to behave. `adopt()` wires that behaviour when the page is plain too (it draws nothing), so a
+  plain page needs no handlers of its own. With no script at all, tabs are buttons that do
+  nothing: put the first panel's content where it can be read.
+- A trigger whose panel is open (`aria-expanded="true"`) stays pressed, plain or live.
 
 ## 12. How it is drawn
 

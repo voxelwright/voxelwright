@@ -183,7 +183,7 @@
   z-index: -1;
   pointer-events: none;
 }
-.vx-button:not([data-vx-live]):active:not(:disabled) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
+.vx-button:not([data-vx-live]):is(:active, [aria-expanded="true"]):not(:disabled) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
 
 /* ---------- Shared ---------- */
 
@@ -297,6 +297,8 @@
   -webkit-tap-highlight-color: transparent;
 }
 .vx-tabs > [role="tab"] .vx-label { display: inline-block; }
+/* For a narrow column (four words in a phone-wide dialog): tighter seats, smaller labels, the same height to hit. */
+.vx-tabs[data-vx-size="small"] > [role="tab"] { padding-inline: calc(var(--vx) * 2); font-size: 0.875rem; }
 .vx-tabs > [role="tab"][aria-selected="true"] { color: var(--vx-ink); }
 .vx-tabs > [role="tab"] .vx-label { padding-block-start: 0.3em; }
 .vx-tabs > [role="tab"]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
@@ -335,6 +337,10 @@ dialog.vx-dialog {
   inline-size: min(calc(var(--vx) * 112), calc(100vw - 32px));
   max-block-size: calc(100dvh - 64px);
 }
+/* A page's own rules for header, footer or :focus-visible must not reach in. The dialog itself
+   takes focus when it opens with nothing to focus; it shows no ring, its controls show theirs. */
+.vx-dialog > :is(header, footer) { margin: 0; border: 0; background: none; }
+dialog.vx-dialog:focus-visible { outline: none; }
 .vx-dialog::backdrop { background: rgb(10 15 61 / 0.5); }
 .vx-dialog > header { padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 3.5); font-weight: 700; font-size: 1.125rem; line-height: 1.25; color: var(--vx-on-enamel); }
 .vx-dialog-body { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); line-height: 1.55; overflow: auto; }

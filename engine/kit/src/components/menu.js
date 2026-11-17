@@ -4,6 +4,7 @@
 //         <div class="vx-menu" id="m" popover role="menu"><button role="menuitem">…</button>…</div>
 
 import { listeners, wrapLabel } from './util.js';
+import { keyTarget } from '../plain.js';
 
 export const menu = {
   name: 'menu',
@@ -68,8 +69,9 @@ export const menu = {
     on(el, 'keydown', (e) => {
       const items = live.state.items, n = items.length;
       if (!n) return;
-      const i = live.state.active;
-      const to = e.key === 'ArrowDown' ? (i + 1) % n : e.key === 'ArrowUp' ? (i - 1 + n) % n : e.key === 'Home' ? 0 : e.key === 'End' ? n - 1 : -1;
+      // from the item that has focus; the pointer may be resting somewhere else
+      const focused = items.indexOf(document.activeElement);
+      const to = keyTarget(e.key, focused >= 0 ? focused : live.state.active, n, ['ArrowDown', 'ArrowUp']);
       if (to < 0) return;
       e.preventDefault();
       items[to].focus();

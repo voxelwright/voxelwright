@@ -61,6 +61,8 @@ export const toggle = {
       cue('slide');
       live.invalidate();
     });
+    // set from code: the knob goes there at once, without a sound
+    on.heed(input, 'checked', () => { at.snap(input.checked ? 1 : 0); live.invalidate(); });
     on.watch(input, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
     return on.done;
   },
