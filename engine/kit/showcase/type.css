@@ -151,3 +151,7 @@ body.solo-pair section { margin: 0; }
 .pairing .vx-list > li, .pairing .vx-row, .pairing .vx-toast { line-height: calc(var(--vx) * 6); }
 .pairing .vx-toggle { line-height: calc(var(--vx) * 6); }
 @media (max-width: 52rem) { .pairing .rule { grid-template-columns: minmax(0, 1fr); } }
+
+/* this page's own headings are set in the recommended lettering */
+.type-top > .vx-lettering { margin: 0; }
+section > h2.vx-lettering { margin-block: 0 clamp(2rem, 4vw, 3rem); }

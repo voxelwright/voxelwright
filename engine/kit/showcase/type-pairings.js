@@ -3,14 +3,14 @@
 const Q = new URLSearchParams(location.search);
 
 export const PAIRINGS = [
-  { id: 'vox', name: 'Block, Plex and legends',
+  { id: 'plex', name: 'Recommended. Block and Plex',
+    say: 'The same lettering in voxels. All text in IBM Plex Sans, including labels; code in IBM Plex Mono. Nothing of our own outside the voxels, and it is ready today, Ukrainian included.',
+    board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',
+    files: ['vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
+  { id: 'vox', name: 'Alternative. Block, Plex and legends',
     say: 'Vox Block on the board and for headings. What is written on a key (buttons, tabs, menu items) in Vox Text, the voxel glyphs laid flat, five voxels to the em so one text cell is half a voxel. Everything you read or type in IBM Plex Sans, code in IBM Plex Mono.',
     board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'Vox Text', text: 'IBM Plex Sans', mono: 'IBM Plex Mono', cells: true,
     files: ['vox-text/vox-text-400-normal.woff2', 'vox-text/vox-text-700-normal.woff2', 'vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
-  { id: 'plex', name: 'Block and Plex',
-    say: 'The same lettering in voxels. All text in IBM Plex Sans, including labels; code in IBM Plex Mono. Nothing of our own outside the voxels, and it is ready today, Ukrainian included.',
-    board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',
-    files: ['ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
   { id: 'plain', name: 'Refine what is there',
     say: 'Vox Sign 2 everywhere in voxels, capitals only. All text in IBM Plex Sans, code in IBM Plex Mono. Nothing of our own outside the voxels.',
     board: 'sign', boardMax: 3, h2: 'sign', h2Scale: 2, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',
