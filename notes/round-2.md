@@ -56,4 +56,4 @@ that live in this repo.
 
 ## Still waiting on the owner
 
-- Which view: Potrero Hill (recommended) or Treasure Island.
+- Which view: he leans to Potrero Hill over Treasure Island, but asked for 3 more views, one close to the skyscrapers (round 2 of the experiment is running).
