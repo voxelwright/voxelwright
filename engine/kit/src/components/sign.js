@@ -177,6 +177,6 @@ export const sign = {
       el.dispatchEvent(new CustomEvent('vx-poke', { bubbles: true }));
     };
     on(el, 'pointerdown', poke);
-    return on.done;
+    return () => { on.done(); el.style.inlineSize = ''; el.style.blockSize = ''; };
   },
 };

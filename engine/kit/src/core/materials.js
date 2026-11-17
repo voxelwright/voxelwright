@@ -31,7 +31,7 @@ const defs = {
   soil: { day: '#3d2a20', night: '#2a1c15', jitter: 0.07 },
   petal: { day: '#ff5c8a', night: '#ff6f98', jitter: 0.04 },
   // Brick: destructive actions and failures.
-  brick: { day: '#e0331f', night: '#ff5340', jitter: 0.025 },
+  brick: { day: '#d42c18', night: '#ff5340', jitter: 0.025 },
   // Lamp: a light source. Warm, always on at night.
   lamp: { day: '#fff3c4', night: '#ffe9a0', jitter: 0.01, glow: 1 },
   // Ink: lettering set into a surface.

@@ -25,7 +25,8 @@ export const button = {
     else { cap.slab(0, 0, 0, W, H, depth - 1, mat, 1); cap.slab(1, 1, depth - 1, W - 2, H - 2, 1, mat, 1); }
     const name = el.dataset.vxIcon;
     if (name && ICONS[name]) {
-      const g = ICONS[name], on = mat === 'enamel' || mat === 'brick' || mat === 'walnut' ? 'ivory' : 'ink';
+      const night = live.theme === 'night';
+      const g = ICONS[name], on = mat === 'enamel' || mat === 'walnut' || (mat === 'brick' && !night) ? 'ivory' : mat === 'brick' ? 'slate' : 'ink';
       icon(cap, name, W - g[0].length - 5, Math.round((H - g.length) / 2), depth, off ? 'slate' : on);
     }
     live.state.off = off;

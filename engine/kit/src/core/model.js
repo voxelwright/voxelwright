@@ -4,8 +4,8 @@
 import { MATERIALS, MATERIAL_IDS, hash3 } from './materials.js';
 import { layout } from './font.js';
 
-const OFF = 512;
-const key = (x, y, z) => ((x + OFF) << 20) | ((y + OFF) << 10) | (z + OFF);
+// x: 11 bits (-1024..1023), y: 13 bits (-4096..4095, so a long list fits), z: 8 bits (-128..127)
+const key = (x, y, z) => ((x + 1024) << 21) | ((y + 4096) << 8) | (z + 128);
 
 // Face order must match the cube geometry in gl.js: +x, -x, +y, -y, +z, -z.
 // For each face: its normal and the two in-plane axes used for corner occlusion.
@@ -116,7 +116,7 @@ export class Part {
     const occ = (x, y, z) => (grounded && z < 0 && !this.sunk) || cells.has(key(x, y, z));
     const pos = [], col = [], ao = [], mats = [], births = [];
     for (const [k, id] of cells) {
-      const x = (k >>> 20) - OFF, y = ((k >>> 10) & 1023) - OFF, z = (k & 1023) - OFF;
+      const x = (k >>> 21) - 1024, y = ((k >>> 8) & 8191) - 4096, z = (k & 255) - 128;
       // exposed at all?
       if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) continue;
       let lo = 0, hi = 0;

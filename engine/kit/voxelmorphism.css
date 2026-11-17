@@ -47,7 +47,10 @@
   --vx-walnut-top: #9a6238;
   --vx-walnut-side: #5f3920;
   --vx-leaf: #23a84b;
-  --vx-brick: #e0331f;
+  --vx-brick: #d42c18;
+  --vx-on-brick: #ffffff;
+  --vx-knob: #fbfcff;
+  --vx-danger-text: #d42c18;
   --vx-shadow: rgb(10 18 97 / 0.3);
   --vx-focus: #0e22ff;
 
@@ -60,7 +63,7 @@
     --vx-theme: night;
     --vx-ground: #080b28;
     --vx-ink: #eceefb;
-    --vx-ink-quiet: #b4b9e2;
+    --vx-ink-quiet: #c2c7ec;
     --vx-enamel: #2b3dff;
     --vx-enamel-top: #5f6dff;
     --vx-enamel-side: #1c2ac4;
@@ -75,6 +78,9 @@
     --vx-walnut-side: #402515;
     --vx-leaf: #2ec25c;
     --vx-brick: #ff5340;
+    --vx-on-brick: #0a0f3d;
+    --vx-knob: #ccd1f2;
+    --vx-danger-text: #ffb3a8;
     --vx-shadow: rgb(0 0 12 / 0.55);
     --vx-focus: #fff600;
     --vx-link: #9aa5ff;
@@ -84,7 +90,7 @@
   --vx-theme: night;
   --vx-ground: #080b28;
   --vx-ink: #eceefb;
-  --vx-ink-quiet: #b4b9e2;
+  --vx-ink-quiet: #c2c7ec;
   --vx-enamel: #2b3dff;
   --vx-enamel-top: #5f6dff;
   --vx-enamel-side: #1c2ac4;
@@ -99,6 +105,9 @@
   --vx-walnut-side: #402515;
   --vx-leaf: #2ec25c;
   --vx-brick: #ff5340;
+  --vx-on-brick: #0a0f3d;
+  --vx-knob: #ccd1f2;
+  --vx-danger-text: #ffb3a8;
   --vx-shadow: rgb(0 0 12 / 0.55);
   --vx-focus: #fff600;
   --vx-link: #9aa5ff;
@@ -145,7 +154,7 @@
 .vx-button[data-vx-material="signal"] { --_face: var(--vx-signal); --_top: var(--vx-signal-top); --_side: var(--vx-signal-side); --_on: var(--vx-on-signal); }
 .vx-button[data-vx-material="chalk"] { --_face: var(--vx-chalk); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--vx-ink); }
 .vx-button[data-vx-material="walnut"] { --_face: var(--vx-walnut); --_top: var(--vx-walnut-top); --_side: var(--vx-walnut-side); --_on: #fff; }
-.vx-button[data-vx-material="brick"] { --_face: var(--vx-brick); --_top: color-mix(in oklab, var(--vx-brick), #fff 25%); --_side: color-mix(in oklab, var(--vx-brick), #000 22%); --_on: #fff; }
+.vx-button[data-vx-material="brick"] { --_face: var(--vx-brick); --_top: color-mix(in oklab, var(--vx-brick), #fff 25%); --_side: color-mix(in oklab, var(--vx-brick), #000 22%); --_on: var(--vx-on-brick); }
 .vx-button[data-vx-material="leaf"] { --_face: var(--vx-leaf); --_top: color-mix(in oklab, var(--vx-leaf), #fff 25%); --_side: color-mix(in oklab, var(--vx-leaf), #000 22%); --_on: #06260f; }
 .vx-button:disabled, .vx-button[aria-disabled="true"] { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink); --_lift: 0px; cursor: default; }
 .vx-button:disabled .vx-label, .vx-button[aria-disabled="true"] .vx-label { opacity: 0.6; }
@@ -205,7 +214,7 @@
 .vx-switch:not([data-vx-live]) { background: var(--vx-slate); box-shadow: inset 0 0 0 var(--vx) var(--vx-steel); }
 .vx-switch:not([data-vx-live])::after {
   content: ""; position: absolute; inset-block: var(--vx); inset-inline-start: var(--vx);
-  inline-size: calc(var(--vx) * 6); background: var(--vx-chalk);
+  inline-size: calc(var(--vx) * 6); background: var(--vx-knob);
   box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow);
   transition: transform 160ms var(--vx-ease-out);
 }
@@ -287,7 +296,7 @@
 .vx-tabs > [role="tab"] .vx-label { padding-block-start: 0.3em; }
 .vx-tabs > [role="tab"]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
 .vx-tabs:not([data-vx-live]) { background: var(--vx-slate); }
-.vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-signal); }
+.vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-signal); color: var(--vx-on-signal); }
 
 /* ---------- Meter ---------- */
 
@@ -309,7 +318,7 @@
   margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
   font: 500 1rem/1.2 var(--vx-font); color: inherit; text-align: start; cursor: pointer;
 }
-.vx-menu [role^="menuitem"][data-vx-kind="danger"] { color: var(--vx-brick); }
+.vx-menu [role^="menuitem"][data-vx-kind="danger"] { color: var(--vx-danger-text); }
 .vx-menu [role^="menuitem"][data-vx-active] { color: var(--vx-on-enamel); }
 .vx-menu:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow); }
 .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible) { background: var(--vx-enamel); color: var(--vx-on-enamel); }

@@ -1,5 +1,5 @@
 // Screenshots for the look loop. Usage: node tools/shots.mjs <page> <name> [--dark] [--w 1280] [--h 800] [--press #id] [--scale 2]
-import { chromium } from 'playwright';
+import { chromium, webkit } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const args = process.argv.slice(2);
@@ -11,7 +11,7 @@ const port = process.env.PORT || 5985;
 const w = Number(flag('w', 1280)), h = Number(flag('h', 800)), scale = Number(flag('scale', 2));
 
 await mkdir('shots', { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = has('webkit') ? await webkit.launch() : await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: scale, colorScheme: has('dark') ? 'dark' : 'light', reducedMotion: has('reduced') ? 'reduce' : 'no-preference' });
 const page = await ctx.newPage();
 const errors = [];
