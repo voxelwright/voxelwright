@@ -382,6 +382,9 @@ import path from "node:path";
 const tryIt = (fn) => { try { fn(); return "DONE"; } catch (e) { return e.code ?? "ERR"; } };
 const got = {
   varTmp: tryIt(() => fs.readFileSync(${JSON.stringify(path.join(outside, "secret.txt"))})),
+  // the same places by their other name: the data volume is also mounted under /System, which the build may read
+  varTmpByVolume: tryIt(() => fs.readFileSync(${JSON.stringify(path.join("/System/Volumes/Data", outside, "secret.txt"))})),
+  homeByVolume: tryIt(() => fs.readdirSync(${JSON.stringify(path.join("/System/Volumes/Data", os.homedir()))})),
   opt: tryIt(() => fs.readdirSync("/opt")),
   library: tryIt(() => fs.readdirSync("/Library/Preferences")),
   nodeHome: tryIt(() => fs.readdirSync(path.resolve(process.execPath, "../../lib"))),
@@ -397,7 +400,7 @@ export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
   const kept = r.text.match(/Delete (\S+) when you are done/)[1];
   const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
   remove(kept);
-  assert.deepEqual(got, { varTmp: "EPERM", opt: "EPERM", library: "EPERM", nodeHome: "EPERM", terminal: terminal ? "EPERM" : "NONE", devTty: "EPERM", child: "EPERM" });
+  assert.deepEqual(got, { varTmp: "EPERM", varTmpByVolume: "EPERM", homeByVolume: "EPERM", opt: "EPERM", library: "EPERM", nodeHome: "EPERM", terminal: terminal ? "EPERM" : "NONE", devTty: "EPERM", child: "EPERM" });
 });
 
 test("nothing a tried feature leaves in its output can break the proof's lines, hang it, or outlive it", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
