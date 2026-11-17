@@ -28,7 +28,7 @@ await tab('Day'); await wait(700);
 await page.evaluate(() => document.querySelector('#kit').scrollIntoView({ behavior: 'instant', block: 'start' }));
 await wait(500);
 const press = async (sel, hold = 220) => { const b = await page.locator(sel).first().boundingBox(); await glide(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await wait(hold); await page.mouse.up(); await wait(350); };
-await press('#kit .vx-button'); await press('#kit .vx-button[data-vx-material="signal"]');
+await press('#kit .vx-button'); await press('#kit .vx-button[data-vx-material="chalk"]');
 await press('#kit .vx-toggle:nth-of-type(2)', 60); await press('#kit .vx-toggle:nth-of-type(1)', 60); await press('#kit .vx-toggle:nth-of-type(1)', 60);
 await page.evaluate(() => document.querySelector('#open-dialog').scrollIntoView({ behavior: 'instant', block: 'center' }));
 await wait(300);
@@ -46,7 +46,13 @@ await wait(500);
 await page.mouse.move(g.x + g.width - 4, g.y + g.height / 2, { steps: 110 });
 await wait(400);
 await page.mouse.up();
-await wait(1400);
+await wait(1600);
+
+// break a card and build it again
+await page.evaluate(() => document.querySelector('#build-card').scrollIntoView({ behavior: 'instant', block: 'center' }));
+await wait(400);
+await press('#break', 100); await wait(900);
+await press('#build', 100); await wait(1400);
 await ctx.close();
 await browser.close();
 const f = (await readdir('shots/clip')).filter((n) => n.endsWith('.webm')).sort().pop();
