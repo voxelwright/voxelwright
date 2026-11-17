@@ -11,3 +11,5 @@ dist-*/
 !.env.example
 .DS_Store
 .dev-writing/
+writing/node_modules/
+writing/worker/node_modules/
