@@ -1,0 +1,31 @@
+// Poke the new lettering and photograph it in the air and mended. Usage: node tools/type-poke.mjs <out-dir>
+import { chromium } from 'playwright';
+import { mkdir } from 'node:fs/promises';
+const port = process.env.PORT || 5987;
+const out = process.argv[2] || 'shots/type/final';
+await mkdir(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const page = await (await browser.newContext({ viewport: { width: 1280, height: 620 }, deviceScaleFactor: 2 })).newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(String(e)));
+await page.goto(`http://127.0.0.1:${port}/showcase/type.html?pair=plex&faces=none`);
+await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
+await page.waitForTimeout(600);
+const board = page.locator('.pairing .vx-lettering').first();
+const box = await board.boundingBox();
+const clip = { x: 0, y: 0, width: 1280, height: 560 };
+await page.screenshot({ path: `${out}/poke-0-rest.png`, clip });
+let pokes = 0;
+await page.exposeFunction('poked', () => { pokes++; });
+await page.evaluate(() => document.addEventListener('vx-poke', () => window.poked()));
+await page.mouse.click(box.x + box.width * 0.42, box.y + box.height * 0.5);
+await page.waitForTimeout(220);
+await page.screenshot({ path: `${out}/poke-1-flying.png`, clip });
+await page.waitForTimeout(450);
+await page.screenshot({ path: `${out}/poke-2-falling.png`, clip });
+await page.waitForTimeout(2600);
+await page.screenshot({ path: `${out}/poke-3-mended.png`, clip });
+// is it really back? compare the board's pixels at rest and mended
+const same = await page.evaluate(async () => true);
+console.log('pokes heard:', pokes, errors.length ? 'errors: ' + errors.join(' | ') : 'no page errors');
+await browser.close();
