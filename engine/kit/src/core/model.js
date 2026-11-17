@@ -2,7 +2,7 @@
 // Axes: x right, y down, z toward the viewer. z = 0 is the page; nothing goes below it.
 
 import { MATERIALS, MATERIAL_IDS, hash3 } from './materials.js';
-import { layout } from './font.js';
+import { FONTS, raster } from './fonts/index.js';
 
 // x: 11 bits (-1024..1023), y: 13 bits (-4096..4095, so a long list fits), z: 8 bits (-128..127)
 const key = (x, y, z) => ((x + 1024) << 21) | ((y + 4096) << 8) | (z + 128);
@@ -98,11 +98,14 @@ export class Part {
     return this;
   }
 
-  /** Lettering in Vox Sign. scale is voxels per glyph cell. Returns the width used. */
-  text(str, x, y, z, d, mat, scale = 1) {
-    const { cells, width } = layout(str);
-    for (const [cx, cy] of cells) this.box(x + cx * scale, y + cy * scale, z, scale, scale, d, mat);
-    return width * scale;
+  /**
+   * Lettering. y is the cap line; scale is voxels per glyph cell; font is a glyph set's id
+   * ("block", "sign", "sentence"). Returns the width used, in voxels.
+   */
+  text(str, x, y, z, d, mat, scale = 1, font = 'sign') {
+    const { cells, width } = raster(FONTS[font], str, scale);
+    for (const [cx, cy] of cells) this.box(x + cx, y + cy, z, 1, 1, d, mat);
+    return width;
   }
 
   has(x, y, z) {

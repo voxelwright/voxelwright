@@ -5,7 +5,7 @@ import { FONTS } from '../packages/voxelmorphism/src/core/fonts/index.js';
 import '../packages/voxelmorphism/src/core/fonts/sign.js';
 import '../packages/voxelmorphism/src/core/fonts/sentence.js';
 import '../packages/voxelmorphism/src/core/fonts/block.js';
-import { layout as oldLayout } from '../packages/voxelmorphism/src/core/font.js';
+import { layout as oldLayout } from './type-old-sign.js';
 
 function counters(rows) {
   const h = rows.length, w = rows[0].length, ink = (c, r) => rows[r]?.[c] === '#';

@@ -14,18 +14,18 @@ import { meter } from './components/meter.js';
 import { menu } from './components/menu.js';
 import { dialog } from './components/dialog.js';
 import { toastDef, makeToast } from './components/toast.js';
-import { sign } from './components/sign.js';
+import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
-export { layout as layoutText, measure as measureText } from './core/font.js';
+export { FONTS, registerFont, makeFont, layout as layoutText, measure as measureText } from './core/fonts/index.js';
 
 export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
-export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, sign, block];
+export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block];
 let stage = null;
 
 // The renderer. By default the kit makes its own (WebGL2). use() hands it another.

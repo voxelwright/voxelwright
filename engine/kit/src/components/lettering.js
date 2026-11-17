@@ -1,10 +1,12 @@
-// Lettering. The sign, with a choice of glyph set: voxel lettering on an enamel board, or bare
-// as a heading. It is the sign component with three things changed, and is meant to replace it:
-//   1. the glyph set comes from core/fonts/ (data-vx-font="block sign": the first that fits wins),
-//   2. spacing, kerning and line gaps are the glyph set's own, in whole cells,
-//   3. depth follows scale, and at 2 or more voxels per cell diagonals are redrawn, not enlarged.
-// Markup: <h2 class="vx-lettering" data-vx-font="sentence" data-vx-board="none">The rules</h2>
-// Poke it and the letters under the pointer break off, fall, and mend themselves.
+// Lettering: words built from voxels, on an enamel board (a sign) or bare as a heading.
+//   <h1 class="vx-sign">Voxelmorphism</h1>                     a board
+//   <h2 class="vx-sign" data-vx-board="none">The rules</h2>    a heading
+// data-vx-font names glyph sets from core/fonts/, first that fits wins (default "block sign":
+// Vox Block, and Vox Sign where the column is too narrow for it). data-vx-scale fixes the voxels
+// per glyph cell; otherwise a board takes the largest of data-vx-max (default 2) that fits, and
+// a heading is one voxel per cell. Spacing, kerning and line gaps are the glyph set's own, in
+// whole cells; depth follows scale; at two or more voxels per cell diagonals are redrawn, not
+// enlarged. Poke it and the letters under the pointer break off, fall, and mend themselves.
 
 import { FONTS, measure, layout, voxels } from '../core/fonts/index.js';
 import '../core/fonts/sign.js';
@@ -24,8 +26,8 @@ export function fit(el, vx) {
   const room = (el.parentElement?.clientWidth || innerWidth) / vx;
   const words = text.split(' ');
   const fixed = Number(el.dataset.vxScale);
-  const want = fixed || Number(el.dataset.vxMax || 4);
-  const fonts = (el.dataset.vxFont || 'sign').split(/\s+/).map((id) => FONTS[id]).filter(Boolean);
+  const want = fixed || Number(el.dataset.vxMax || (bare ? 1 : 2));
+  const fonts = (el.dataset.vxFont || 'block sign').split(/\s+/).map((id) => FONTS[id]).filter(Boolean);
   let last = null;
   for (const font of fonts) {
     const m = bare ? 0 : margin(font);
@@ -135,7 +137,7 @@ function physics(part) {
 
 export const lettering = {
   name: 'lettering',
-  selector: '.vx-lettering',
+  selector: '.vx-sign, .vx-lettering',
   pad: 14,
 
   build(live, m) {
@@ -189,6 +191,6 @@ export const lettering = {
       el.dispatchEvent(new CustomEvent('vx-poke', { bubbles: true }));
     };
     on(el, 'pointerdown', poke);
-    return on.done;
+    return () => { on.done(); el.style.inlineSize = ''; el.style.blockSize = ''; };
   },
 };
