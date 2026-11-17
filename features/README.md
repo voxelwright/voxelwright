@@ -14,18 +14,45 @@ A feature folder may hold:
 - `static/`, copied into the site root when the flag is on. It cannot replace a file that is
   already there.
 
-Everything a feature ships must come from its own folder. If a change needs an edit outside
-`features/<name>/`, that edit has to leave the output unchanged while the flag is off.
+Everything a feature ships must come from its own folder. A person may also edit outside
+`features/<name>/` as long as the output is unchanged while the flag is off; a build made by an
+agent may not (see `--strict` below).
 
 To look at a feature before turning it on: `SITE_FLAGS=<name> npm run dev`. Only a dev build
 reads `SITE_FLAGS`; a production build ships what `site.config.mjs` says and nothing else.
 
-To prove a branch changes nothing while its flag is off:
+## Proving a flag is off
 
 ```sh
 npm run flag-proof -- <base commit or branch>
 ```
 
-It builds the base and this checkout into temporary folders and compares them file for file. It
-also fails if `package.json` or `package-lock.json` differ from the base. Turning a flag on is
-the owner's step, in `site.config.mjs`.
+It builds the base and this checkout into temporary folders and compares the built site file for
+file. It also fails if the dependency sections of `package.json` or the lock file differ. It
+exits 0 when they are identical, 1 when they differ, 2 when it could not run.
+
+For a change made by an agent, run the proof from the main checkout against the agent's
+worktree, with `--strict`:
+
+```sh
+node scripts/flag-proof.mjs <base> --candidate .seeds/<worktree> --strict
+```
+
+Run this way, the proof that is trusted is the main checkout's, not the copy in the worktree, and
+nothing from the worktree's `package.json` is used. Strict reads the change before running any
+of it and refuses unless all of this holds:
+
+- the change is committed and descends from the base;
+- it only adds or changes plain files inside `features/<name>/` (no links, no executables);
+- in `site.config.mjs` nothing differs except new names set to `false` in the one-line `flags`
+  literal.
+
+So the Worker, the deploy config, `package.json`, the tests, this folder's README and the proof
+itself cannot change in a strict build, and with the flag off none of the new code is loaded.
+
+To see a feature working before its flag is on, add `--try <name>`: after the proof passes it
+builds once more with the flag on and lists what the feature adds or changes. That build runs
+with no network and can write only to its own temporary folder (macOS `sandbox-exec`; on a
+system without it `--try` refuses to run). It is the safe way to run a feature's code.
+
+Turning a flag on is the owner's step, in `site.config.mjs`.

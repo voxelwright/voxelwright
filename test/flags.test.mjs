@@ -109,6 +109,20 @@ test("SITE_FLAGS turns a feature on in a dev build only", async () => {
   assert.match(flagsOn({ flags: {} }, { dev: true, env: { SITE_FLAGS: "../x" } }).errors[0], /not a flag name/);
 });
 
+test("a feature cannot replace a page through another spelling of its address", async () => {
+  for (const route of ["/blog//", "/nested/../blog/", "/Blog/"]) {
+    const root = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: ${JSON.stringify(route)}, title: "Mine", html: "<h1>Mine</h1>", markdown: "# Mine\\n" }] };` });
+    try {
+      // "/Blog/" only collides where the file system ignores case; elsewhere it is simply another page
+      const sensitive = route === "/Blog/" && !fs.existsSync(root.toUpperCase());
+      if (sensitive) continue;
+      await assert.rejects(run(root, { grab: true }), (e) => e instanceof ContentError && /written twice|already exists/.test(e.message), route);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("a feature cannot replace a page or a file the site already has", async () => {
   const page = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: "/blog/", title: "Mine", html: "", markdown: "" }] };` });
   const file = fixture({ "features/grab/static/style.css": "nope" });

@@ -129,6 +129,9 @@ function walk(dir, rel = "") {
 
 function write(outDir, rel, content) {
   const file = path.join(outDir, rel);
+  // Two routes can name one file (/blog// and /blog/, or /Blog/ where case does not count).
+  // The build writes each file once, so the second is a mistake, never a replacement.
+  if (fs.existsSync(file)) throw new ContentError(`Build failed:\n  ${rel} would be written twice: two pages, or a page and a file, have the same address.`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, content);
 }
