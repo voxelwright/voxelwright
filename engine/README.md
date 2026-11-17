@@ -1504,3 +1504,32 @@ the review the owner linked, a frame of theirs and a repeatable shot of ours, st
 frames a second and the picture size the page held by itself. A row's state changes only when
 both have been looked at side by side by someone who did not make ours. The films live in
 `~/.village/engine/ref/`, never in the repo.
+
+## The landing world (#421)
+
+The front door of the owner's site: a corner of the town with the site's menu on its roofs as billboards, served
+from plain files and laid under a plain home page. It is built on the player (#419) and on the stage they share
+(`player/stage.ts`: the world drawn and what comes loose moved, with the eye, the input and any extra pass left to
+whoever stands on it).
+
+```sh
+npm run landing            # builds dist/ and serves it: http://127.0.0.1:5950/landing/site/index.html
+node landing/block.mjs     # writes the scene again (landing/scenes/corner.json, places.json) after a change to the block
+node test/landing.mjs      # checks and measures it in Chrome and Playwright's WebKit; --clip films a run
+node landing/shots.mjs     # pictures of the page and the street, for looking at (--size 390x844, --do blog,face)
+```
+
+- `landing/site/`: a stand-in for the site's home page (its real links, made-up words), the switch between
+  **Plain page** and **Street**, and the seam (`home.js`). The page is the document; every sign is one of its links.
+  Which is shown: the visitor's kept choice, then `?view=2d` or `3d`, then less motion asked for, then no WebGPU
+  adapter, then the street's own first two seconds of frames.
+- `landing/index.html`, `landing.ts`: the street, in a frame. What it tells its holder and is told is at the top of
+  `landing.ts`. It names the sign that was chosen and never an address: the page follows its own link.
+- `landing/block.mjs`: the corner, written as cells: four billboards on glass feet, a crate table on glass legs, a
+  frame on a wall. What is glass gives.
+- `landing/face.ts`: the face in the frame, a sheet of points on springs. What is drawn on it is a stand-in;
+  `?face=<image>` on the street's address is the slot for a picture.
+- A tap throws a ball, a hold throws it hard, a drag looks round, a tap on a sign flies there and goes in. Left and
+  right go from sign to sign, Enter goes in, Escape comes home, F finds the face, R mends at once. Six seconds after
+  the last thing stops moving the corner is as it was (`stage.restore`: the world's `swap` and the mover's `forget`).
+- It makes no model call and asks no server anything.

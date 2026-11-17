@@ -1,0 +1,9 @@
+# zahynailo.dev
+
+> A stand-in (#421) for the llms.txt the site's generator writes. The home page has a 3D street over it; every sign on the street is one of the links below, and this file and the Markdown pages need none of it.
+
+- [Home](index.md)
+- [Blog](blog/index.html)
+- [Village](tags/village/index.html)
+- [Tags](tags/index.html)
+- [Feed](feed.xml)

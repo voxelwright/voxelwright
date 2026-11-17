@@ -25,7 +25,8 @@ rmSync(out, { recursive: true, force: true })
 const put = (path, body) => { mkdirSync(dirname(join(out, path)), { recursive: true }); writeFileSync(join(out, path), body) }
 
 // Every module the player's page reaches, each stripped once. Imports of types alone are gone with the types, so they bring nothing in.
-const pages = ['player/index.html', 'player/host.html'], modules = new Set(), todo = []
+// The landing world (#421) is built beside the player: its pages, and the plain files they ask for.
+const pages = ['player/index.html', 'player/host.html', 'landing/index.html'], modules = new Set(), todo = []
 const reach = (from, text) => { for (const [, , , path] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(from), `${path}.ts`)); if (!modules.has(to)) { modules.add(to); todo.push(to) } } }
 for (const page of pages) { const text = readFileSync(join(root, page), 'utf8'); reach(page, text); put(page, js(text)) }
 while (todo.length) {
@@ -36,6 +37,8 @@ while (todo.length) {
 if (!existsSync(join(root, 'page/core.wasm'))) { console.error('page/core.wasm is not built: npm run core'); process.exit(1) }
 cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
 cpSync(join(root, 'player/scenes'), join(out, 'player/scenes'), { recursive: true })
+cpSync(join(root, 'landing/scenes'), join(out, 'landing/scenes'), { recursive: true })
+if (existsSync(join(root, 'landing/site'))) cpSync(join(root, 'landing/site'), join(out, 'landing/site'), { recursive: true })
 
 // What was written, and what it weighs as a host would send it.
 const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))

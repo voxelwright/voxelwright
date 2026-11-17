@@ -9,7 +9,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.wasm': 'application/wasm' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml', '.png': 'image/png', '.svg': 'image/svg+xml' }
 /**
  * A host of plain files, as a static site's is: each file with its usual type, an ETag, and leave to keep it ten
  * minutes (what GitHub Pages sends). No header of the page server's: no COOP, no COEP, no CSP. `asked` is every
@@ -34,5 +34,5 @@ export async function plain(dir, host = '127.0.0.1', port = 0) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
   const site = await plain(resolve(dirname(dirname(fileURLToPath(import.meta.url))), arg('dir', 'dist')), '127.0.0.1', Number(arg('port', '5760')))
-  console.log(`the player on ${site.url}/player/index.html, two in a page on ${site.url}/player/host.html`)
+  console.log(`the player on ${site.url}/player/index.html, two in a page on ${site.url}/player/host.html\nthe landing (#421): the home page over the street on ${site.url}/landing/site/index.html, the street alone on ${site.url}/landing/index.html`)
 }
