@@ -53,9 +53,23 @@ export function use(renderer) {
   return mine;
 }
 
-/** Resolves once it is known whether the page is live: to the stage, or to null if it is plain. */
+// The fonts for the words on keys. A menu's items are not drawn until it first opens, so without
+// this their font would arrive mid-build, resize the menu and cut its assembly short.
+let keyFonts = null;
+function loadKeyFonts() {
+  if (keyFonts || typeof document === 'undefined' || !document.fonts?.load) return keyFonts ?? Promise.resolve();
+  const family = getComputedStyle(document.documentElement).getPropertyValue('--vx-key-font').trim();
+  keyFonts = family ? Promise.all([400, 700].map((w) => document.fonts.load(`${w} 20px ${family}`).catch(() => {}))) : Promise.resolve();
+  return keyFonts;
+}
+
+/**
+ * Resolves once it is known whether the page is live, and the fonts for key labels are in:
+ * to the stage, or to null if the page is plain.
+ */
 export function ready() {
-  return pending ? pending.then(() => ready()) : Promise.resolve(getStage());
+  if (pending) return pending.then(() => ready());
+  return loadKeyFonts().then(() => getStage());
 }
 
 /** True while the CSS stands alone: by choice, for want of a renderer, or while one is on its way. */
@@ -81,6 +95,7 @@ export function adopt(root = document) {
     waiting.push([adopt, root]);
     return null;
   }
+  loadKeyFonts();
   const st = getStage();
   // plain: no voxels, but tabs, dialogs and menus still get their behaviour
   if (!st) { behave(root); return null; }

@@ -1,4 +1,4 @@
-import { adopt, release, live, toast, sound, stageOf, getStage } from '/packages/voxelmorphism/src/index.js';
+import { adopt, release, live, toast, sound, stageOf, getStage, ready } from '/packages/voxelmorphism/src/index.js';
 
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;
@@ -96,4 +96,4 @@ grow(0.55);
 
 if (!root.hasAttribute('data-vx-plain')) adoptAll();
 window.vx = { live, toast, get stage() { return getStage(); } };
-root.dataset.ready = '1';
+ready().then(() => { root.dataset.ready = '1'; });

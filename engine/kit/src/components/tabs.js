@@ -25,7 +25,9 @@ export const tabs = {
     const index = Math.max(0, tabsEl.findIndex((t) => t.getAttribute('aria-selected') === 'true'));
     live.state.index = index;
     const xs = live.state.xs = tabsEl.map((t) => Math.round(t.offsetLeft / vx) + 1);
-    const s = live.spring('x', xs[index] ?? 1, SLIDE.k, SLIDE.c);
+    // a little stiffer than a switch: a seat is wider than a knob's travel, and the block must
+    // still land inside 420 ms
+    const s = live.spring('x', xs[index] ?? 1, SLIDE.k * 1.25, SLIDE.c * 1.12);
     s.snap(xs[index] ?? 1);
     // Labels keep one baseline. The block is set back by its own height, so its face lands
     // exactly on the seat it marks.
