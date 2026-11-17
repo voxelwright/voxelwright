@@ -52,7 +52,7 @@ html { font-synthesis: none; }
 .screen pre { margin: 0; font-size: 0.82rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 body.solo { padding: 16px; max-inline-size: none; }
-body.solo .type-top, body.solo .screen:not([data-solo]), body.solo #lettering, body.solo .foot { display: none; }
+body.solo .type-top, body.solo .screen:not([data-solo]), body.solo #lettering, body.solo #pairings, body.solo .foot { display: none; }
 body.solo .screens { display: block; }
 body.solo section { margin: 0; }
 body.solo #text > h2, body.solo #text > .intro { display: none; }
@@ -73,7 +73,7 @@ body.solo #text > h2, body.solo #text > .intro { display: none; }
    heading has the same footprint with and without voxels and nothing moves when they arrive.
    Ten cells to the em: font-size is ten voxels times the scale. The box is trimmed to the cap
    line and the baseline, which is exactly the box the voxels are given. */
-.vx-lettering:not([data-vx-live]) { --_s: 1; font-weight: 400; font-synthesis: none; letter-spacing: 0; text-wrap: balance; color: var(--vx-ink); cursor: default;
+.vx-lettering:not([data-vx-live]) { --_s: 1; font-weight: 400; font-synthesis: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; letter-spacing: 0; text-wrap: balance; color: var(--vx-ink); cursor: default;
   font-size: calc(var(--vx) * 10 * var(--_s)); text-box: trim-both cap alphabetic; }
 .vx-lettering[data-vx-scale="2"]:not([data-vx-live]) { --_s: 2; }
 .vx-lettering[data-vx-scale="3"]:not([data-vx-live]) { --_s: 3; }
@@ -89,7 +89,7 @@ body.solo #text > h2, body.solo #text > .intro { display: none; }
 @media (min-width: 66rem) { .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); } }
 
 body.solo-lettering { padding: 24px; }
-body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
+body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering #pairings, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
 body.solo-lettering section { margin: 0; }
 
 /* ---------- pairings ---------- */
@@ -116,11 +116,12 @@ body.solo-lettering section { margin: 0; }
 /* One set of cells: label text is five voxels to the em, so its cell is half a voxel and every
    edge of every letter lands on a pixel. It scales with --vx like the rest of the kit. */
 .pairing[data-cells] { --cell: calc(var(--vx) / 2); --label: calc(var(--vx) * 5); }
-.pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"], .vx-toggle, .vx-list > li, .vx-row, .vx-field-label, .vx-row-meta, .vx-menu [role^="menuitem"], .vx-dialog > header) {
-  font-family: var(--vx-font); font-size: var(--label); letter-spacing: 0; line-height: calc(var(--vx) * 7);
+/* Legends. What is written on a key is cut from the same cells as the key: buttons, tabs and menu
+   items are set in Vox Text. Everything else, the words you read and the words you type, is print. */
+.pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"], .vx-menu [role^="menuitem"]) {
+  font-family: var(--vx-font); font-size: var(--label); letter-spacing: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
 }
-/* what you read or type stays in the text face */
-.pairing[data-cells] :is(.vx-well :is(input, textarea), .vx-toast) { font-family: var(--text-font); }
+.pairing[data-cells] :is(.vx-toggle, .vx-list, .vx-field, .vx-toast, .vx-dialog) { font-family: var(--text-font); }
 .pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; }
 .pairing[data-cells] :is(.vx-button .vx-label, .vx-tabs > [role="tab"] .vx-label) { padding-block-start: 0; }
 
@@ -149,5 +150,4 @@ body.solo-pair section { margin: 0; }
 .pairing .vx-field-hint { line-height: calc(var(--vx) * 5); margin-block-start: 0; }
 .pairing .vx-list > li, .pairing .vx-row, .pairing .vx-toast { line-height: calc(var(--vx) * 6); }
 .pairing .vx-toggle { line-height: calc(var(--vx) * 6); }
-.pairing[data-cells] :is(.vx-list > li, .vx-row, .vx-toggle, .vx-field-label) { line-height: calc(var(--vx) * 7); }
 @media (max-width: 52rem) { .pairing .rule { grid-template-columns: minmax(0, 1fr); } }

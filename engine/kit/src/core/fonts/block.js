@@ -11,7 +11,7 @@ const CAPS = `
 A
 ..###..
 .#####.
-###.###
+##...##
 ##...##
 ##...##
 ##...##
@@ -245,17 +245,17 @@ R
 ##...##
 
 S
-.######
+.#####.
 #######
-##.....
+##...##
 ##.....
 .#####.
 .#####.
 .....##
 .....##
-.....##
+##...##
 #######
-######.
+.#####.
 
 T
 ########
@@ -288,13 +288,13 @@ V
 ##...##
 ##...##
 ##...##
-##...##
-##...##
-##...##
 ###.###
-.#####.
+.##.##.
+.##.##.
 .#####.
 ..###..
+..###..
+...#...
 
 W
 ##.....##
@@ -654,5 +654,6 @@ export const block = registerFont(makeFont({
   cap: 11, descent: 2, gap: 2, space: 3, lineGap: 4, upper: true, maxKern: 3, kernKeep: 2,
   depth: (scale) => scale, // half as deep as its stroke is wide: counters stay open
   src: CAPS + DIGITS + MARKS,
-  kern: { LT: -3, LY: -3, LV: -2, TA: -1, AT: -1, AV: -1, VA: -1, AY: -1, YA: -1 },
+  // by hand: an L tucks under what overhangs it; a comma or full stop never tucks under a T, P, F or Y
+  kern: { LT: -3, LY: -3, LV: -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0 },
 }));

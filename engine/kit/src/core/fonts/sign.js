@@ -599,5 +599,5 @@ export const sign = registerFont(makeFont({
   depth: (scale) => (scale < 3 ? scale : scale - 1), // one cell deep, but never a slab at display sizes
   src: CAPS + DIGITS + MARKS,
   // by hand: an L may tuck fully under what overhangs it
-  kern: { LT: -2, LY: -2, LV: -1, "L'": -2 },
+  kern: { LT: -2, LY: -2, LV: -1, "L'": -2, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0 },
 }));

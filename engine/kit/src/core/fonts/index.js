@@ -83,9 +83,11 @@ const glyphOf = (font, ch) => font.glyphs[ch] ?? font.glyphs[ch.toUpperCase()] ?
 export function measure(font, text) {
   let x = 0, prev = null;
   for (const ch of chars(font, text)) {
+    // a space is a width, not a glyph: it is never kerned, and nothing is kerned across it
+    if (ch === ' ') { if (prev !== null) x += font.gap; x += font.space; prev = ' '; continue; }
     const g = glyphOf(font, ch);
     if (prev !== null) x += font.gap + kern(font, prev, g.ch);
-    x += ch === ' ' ? font.space : g.w;
+    x += g.w;
     prev = g.ch;
   }
   return x;
@@ -99,10 +101,11 @@ export function layout(font, text) {
   const out = [];
   let x = 0, prev = null, top = 0, bottom = font.cap;
   for (const ch of chars(font, text)) {
+    if (ch === ' ') { if (prev !== null) x += font.gap; x += font.space; prev = ' '; continue; }
     const g = glyphOf(font, ch);
     if (prev !== null) x += font.gap + kern(font, prev, g.ch);
-    if (ch !== ' ') { out.push({ g, x }); top = Math.min(top, g.top); bottom = Math.max(bottom, g.bottom); }
-    x += ch === ' ' ? font.space : g.w;
+    out.push({ g, x }); top = Math.min(top, g.top); bottom = Math.max(bottom, g.bottom);
+    x += g.w;
     prev = g.ch;
   }
   return { glyphs: out, width: x, top, bottom };

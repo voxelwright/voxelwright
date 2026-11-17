@@ -8,9 +8,9 @@ const DIRECTIONS = [
   { id: 'sign', name: 'Direction 1. Vox Sign 2: the five by seven, refined', font: 'sign',
     say: 'The same grid and the same voice. Every corner follows one rule, the M, N, W, G, J and 2 are redrawn, the I is a single post, the comma hangs below the line, pairs are kerned in whole cells, depth follows scale, and at two or three voxels per cell diagonals are redrawn as single steps.' },
   { id: 'block', name: 'Direction 2. Vox Block: the billboard', font: 'block', bigScale: 1,
-    say: 'Ten cells tall with a stroke two cells wide. A corner can lose one cell and still be a corner, so it is already detailed at one voxel per cell. Capitals only; it wants room.' },
+    say: 'Eleven cells tall, the height of a button, with a stroke two cells wide. A corner can lose one cell and still be a corner, so it is already detailed at one voxel per cell and never needs enlarging. Capitals only; it wants room.' },
   { id: 'sentence', name: 'Direction 3. Vox Sentence: capitals and lowercase', font: 'sentence',
-    say: 'Vox Sign 2 with a lowercase: x-height five, descenders two, lowercase four cells wide. A heading can be a sentence, and it sets about a seventh shorter than capitals.' },
+    say: 'Vox Sign 2 with a lowercase: x-height five, descenders two, lowercase four cells wide. A heading can be a sentence, and it sets about a seventh shorter than capitals. Laid flat, this set is Vox Text.' },
 ];
 
 const Q = new URLSearchParams(location.search);

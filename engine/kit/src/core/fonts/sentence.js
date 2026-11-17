@@ -260,5 +260,5 @@ export const sentence = registerFont(makeFont({
   cap: 7, xHeight: 5, descent: 2, gap: 1, space: 2, lineGap: 4, upper: false, maxKern: 2, kernKeep: 1,
   depth: (scale) => (scale < 3 ? scale : scale - 1), // one cell deep, but never a slab at display sizes
   src: CAPS + CAP_I + DIGITS + MARKS + LOW_MARKS + LOWER,
-  kern: { LT: -2, LY: -2, "L'": -2, rn: 0, rm: 0 },
+  kern: { LT: -2, LY: -2, "L'": -2, rn: 0, rm: 0, 'T,': 0, 'T.': 0, 'P,': 0, 'P.': 0, 'F,': 0, 'F.': 0, 'Y,': 0, 'Y.': 0, 'V,': 0, 'V.': 0, 'r,': -1, 'r.': -1 },
 }));

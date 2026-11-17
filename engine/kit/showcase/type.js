@@ -86,7 +86,7 @@ for (const face of FACES) await build(face);
 // ----- pairings
 try {
   const m = await import('./type-pairings.js');
-  await m.default({ host: $('#pairings-host'), solo: q.get('pair') });
+  if (!q.get('lettering') && !q.get('face')) await m.default({ host: $('#pairings-host'), solo: q.get('pair') });
 } catch (e) { console.error(e); }
 
 // ----- lettering directions (filled in by lettering.js when it exists)
