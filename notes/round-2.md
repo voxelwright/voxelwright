@@ -73,3 +73,10 @@ that live in this repo.
   `controls.js:50` (`?vx=live`) needs this. The sky lane was told on Nov 17.
 - The kit has its own thread, "Voxelmorphism: the UI kit" (plant-a-seed branch `kit`). It coordinates with #423 on UI
   on building surfaces, and it tells the engine lane before it changes the renderer.
+- The landing menu lane is not started yet. It starts once the Ina camera is solved and #424 has landed. It builds the
+  interaction against an interface with a placeholder skin, and adopts the kit's winning system once the owner picks
+  one. The kit thread has been told what the lane needs (Nov 17).
+- The owner calls the blue and yellow billboard street the "old prototype": design nothing there and show nothing
+  there. Judge everything against the Ina Coolbrith view.
+- The owner is choosing among five candidate design systems in the kit thread: cube-grid buttons, cards and bars that
+  depress or shatter, menus and cursors inside the engine in the world's own light, and parts that glow at night.
