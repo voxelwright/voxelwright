@@ -135,6 +135,18 @@ test("--try builds with the flag on and says what the feature adds", { skip: !ma
   fs.rmSync(kept, { recursive: true, force: true });
 });
 
+test("a feature's code cannot start another program when tried", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  for (const program of ["/usr/bin/security", "/bin/sh", "/usr/bin/curl"]) {
+    const dir = candidate((d) => {
+      put(d, "features/hello/feature.mjs", `import { execFileSync } from "node:child_process";\nexecFileSync(${JSON.stringify(program)}, ["--version"], { stdio: "ignore" });\nexport default {};\n`);
+      edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }');
+    });
+    const r = proof(dir, "--strict", "--try", "hello");
+    assert.equal(r.code, 2, `${program}: ${r.text}`);
+    assert.match(r.text, /EPERM|operation not permitted/i, program);
+  }
+});
+
 test("a feature's code cannot write outside the sandbox or reach the network when tried", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
   const marker = path.join(repo, "written-by-a-feature.txt");
   const dir = candidate((d) => {

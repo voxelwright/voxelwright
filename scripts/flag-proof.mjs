@@ -17,7 +17,7 @@
 //                      to run a feature's code before the owner turns it on.
 //
 // The builds run with no network, an empty environment, and (on macOS) write access to one
-// temporary folder only. Exit 0: identical. Exit 1: different, or a strict rule broken.
+// temporary folder only and no other program to start. Exit 0: identical. Exit 1: different, or a strict rule broken.
 // Exit 2: could not run.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -181,7 +181,11 @@ await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.f
 }
 process.exit(code);
 
-/** A macOS sandbox profile: no network, writes only under dir, a few private folders unreadable. */
+/**
+ * A macOS sandbox profile: no network, writes only under dir, a few private folders unreadable,
+ * and no program may be started except node itself. Without the last rule a build could run
+ * `security` and read a keychain item, then leave it in its output for whoever reads that.
+ */
 function sandboxFor(dir) {
   const q = (p) => JSON.stringify(p);
   const home = os.homedir();
@@ -191,7 +195,9 @@ function sandboxFor(dir) {
 (deny network*)
 (deny file-write*)
 (allow file-write* (subpath ${q(dir)}) (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty") (literal "/dev/dtracehelper"))
-(deny file-read* ${secret})`;
+(deny file-read* ${secret})
+(deny process-exec*)
+(allow process-exec* (literal ${q(process.execPath)}) (literal ${q(fs.realpathSync(process.execPath))}))`;
 }
 
 function hash(file) {

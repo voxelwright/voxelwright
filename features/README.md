@@ -54,7 +54,7 @@ itself cannot change in a strict build, and with the flag off none of the new co
 
 To see a feature working before its flag is on, add `--try <name>`: after the proof passes it
 builds once more with the flag on and lists what the feature adds or changes. That build runs
-with no network and can write only to its own temporary folder (macOS `sandbox-exec`; on a
-system without it `--try` refuses to run). It is the safe way to run a feature's code.
+with no network, can write only to its own temporary folder, and can start no other program
+(macOS `sandbox-exec`; on a system without it `--try` refuses to run). It is the safe way to run a feature's code.
 
 Turning a flag on is the owner's step, in `site.config.mjs`.
