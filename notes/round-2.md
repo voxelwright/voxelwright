@@ -37,17 +37,22 @@ that live in this repo.
 4. **Social links.** X, LinkedIn, YouTube, and optionally Twitch. This waits on the owner's handles.
 5. **Console greeting** on the 2D page. Shared with #426.
 
-## Waiting on the owner
+## Decided by the owner (Nov 17)
 
-- His face photo, and where its middle sits.
-- Whether one tap on a sign opens the page, or selects it first.
-- Whether billboard letters are cells or drawn type.
-- What the LOG page holds.
-- Which blog look, and how the skeuomorphic/unbiased pair folds into that choice.
-- His social handles.
-- The Mapillary conflict:
-  - The handoff lists the token for reuse.
-  - The site note excluded Mapillary because it is share-alike.
-  - For now, it is used for reference only.
-- Where the support button's real contact route points.
-- Whether lanes may push draft PRs.
+- Engine lanes run in their own Village threads. Lanes may open PRs and push, to their own branch or to main.
+- One tap on a sign flies there and opens the page.
+- Billboards are voxels and break into pieces. The B breaks off BLOG to leave LOG, and the LOG page is a site
+  changelog.
+- The support button has no real contact anywhere: that is the joke. Keep the button itself keyboard- and
+  screen-reader-friendly.
+- The blog look is iter-1 ("Ink"); site.config.mjs is set.
+- His face photo is the cropped selfie at `~/.village/site/face/owner-face.jpg` (private, mode 600). Use only this
+  crop, never the original group photo. Do not send it to outside services without asking him.
+- Socials: X `pasha_knz`, LinkedIn `pavlo-zahynailo`, Twitch `p_bender`, no YouTube for now. They can be logos on
+  office buildings rather than billboards.
+- Mapillary: he leans to using assets derived from it. I explained the share-alike terms (see the chat), so this is
+  pending his final word.
+
+## Still waiting on the owner
+
+- Which view: Potrero Hill (recommended) or Treasure Island.
