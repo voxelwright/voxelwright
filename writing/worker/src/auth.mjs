@@ -63,9 +63,11 @@ export function originOk(req, env) {
 
 async function newChallenge(env, kind, challenge) {
   const id = random(16);
-  await env.DB.prepare("INSERT INTO challenges (id, challenge, kind, expires_at) VALUES (?, ?, ?, ?)")
-    .bind(id, challenge, kind, Date.now() + CHALLENGE_SECONDS * 1000)
-    .run();
+  // Expired challenges are swept on every new one, so unauthenticated calls cannot grow the table.
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM challenges WHERE expires_at < ?").bind(Date.now()),
+    env.DB.prepare("INSERT INTO challenges (id, challenge, kind, expires_at) VALUES (?, ?, ?, ?)").bind(id, challenge, kind, Date.now() + CHALLENGE_SECONDS * 1000),
+  ]);
   return setCookie(CHALLENGE_COOKIE, id, CHALLENGE_SECONDS);
 }
 
@@ -145,6 +147,7 @@ export async function loginVerify(req, env, body) {
   if (!result.verified) return [401, { error: "sign-in not accepted" }];
   await env.DB.prepare("UPDATE credentials SET counter = ? WHERE id = ?").bind(result.authenticationInfo.newCounter, row.id).run();
   const token = random(32);
+  await env.DB.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(Date.now()).run();
   await env.DB.prepare("INSERT INTO sessions (token_hash, credential_id, created_at, expires_at) VALUES (?, ?, ?, ?)")
     .bind(await sha256(token), row.id, Date.now(), Date.now() + SESSION_SECONDS * 1000)
     .run();
@@ -187,11 +190,11 @@ export async function verifyAccessJwt(token, env, now = Date.now() / 1000) {
   const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, b64url.decode(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
   if (!ok) return null;
   const aud = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-  if (!aud.includes(env.ACCESS_AUD)) return null;
+  if (!env.ACCESS_AUD || !aud.includes(env.ACCESS_AUD)) return null;
   if (claims.iss !== env.ACCESS_ISSUER) return null;
   if (typeof claims.exp !== "number" || claims.exp < now - 30) return null;
   if (typeof claims.nbf === "number" && claims.nbf > now + 30) return null;
-  if (env.OWNER_EMAIL && claims.email !== env.OWNER_EMAIL) return null;
+  if (!env.OWNER_EMAIL || claims.email !== env.OWNER_EMAIL) return null;
   return claims.email ?? null;
 }
 

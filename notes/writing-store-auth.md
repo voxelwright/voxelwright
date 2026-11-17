@@ -86,20 +86,27 @@ under 20 seconds matters enough to pay for a Container builder.
 request at the edge before our code runs, leaves about 40 lines of security-critical code instead
 of about 200, and gives logs and revocation for free. Use a Google identity with a passkey on it
 to get Face ID sign-in without owning WebAuthn. The passkey code stays in the spike, tested, as
-the fallback if he would rather depend on no identity provider. The Access application covers
-`/edit*`, `/api/*` and the MCP server's `/authorize`; `aud`, `iss` and `OWNER_EMAIL` are Worker
-settings.
+the fallback if he would rather depend on no identity provider. `aud`, `iss` and `OWNER_EMAIL` are
+Worker settings, and the check fails closed when any is missing.
+
+**The editor gets its own origin: `edit.zahynailo.dev`, not `/edit` on the public host** (Sentinel,
+finding 2). Posts are Markdown with raw HTML allowed and the public site sends no CSP, so a script
+that reaches a published post (most plausibly through content an AI client was tricked into
+publishing over MCP) would run on the same origin as the API, pass the Origin check, and carry the
+owner's cookie. On a separate origin it can do neither. The Access application, `ORIGIN` and the
+passkey `RP_ID` all move to that hostname, and the MCP server lives there too.
 
 ## How Access would sit in front of /edit (not created)
 
-1. Zero Trust → Access → Applications → Self-hosted: domain `zahynailo.dev`, paths `/edit`, `/api/`,
-   and later `/mcp/authorize`. Session duration 24 hours.
+1. Zero Trust → Access → Applications → Self-hosted: domain `edit.zahynailo.dev`, every path
+   (the MCP server's `/authorize` included). Session duration 24 hours.
 2. One policy: Allow, include emails = the owner's address. Login methods: Google (or one-time PIN).
 3. Copy the application's AUD tag into the Worker as `ACCESS_AUD`; set `ACCESS_ISSUER` to
    `https://<team>.cloudflareaccess.com` and `OWNER_EMAIL`; set `AUTH_MODE=access`.
 4. The Worker fetches the signing keys from `<issuer>/cdn-cgi/access/certs` (cached 10 minutes) and
    checks every request's `Cf-Access-Jwt-Assertion`. It never trusts `Cf-Access-Authenticated-User-Email`.
-5. Writes keep the Origin check. The public site's pages and files stay outside the application.
+5. Writes keep the Origin check. The public site (`zahynailo.dev`) stays outside the application and
+   never routes `/edit` or `/api/`.
 
 ## GitHub App flow (documented, not created)
 
@@ -114,3 +121,20 @@ settings.
 5. A fine-grained personal access token (one repo, contents read/write, 90-day expiry) works the
    same way and is simpler to start with, but it is tied to the person and expires; the App is the
    long-term choice.
+
+## Review (Sentinel lens, November 16, 2026)
+
+Run by a fresh agent with the reviewer's own instructions on `main..writing-1`. Each finding was
+reproduced before fixing.
+
+| # | Finding | Status |
+|---|---|---|
+| 1 High | The `assignment` rule missed `DB_PASSWORD=…`, `{"password": "…"}`, `--password …`, `export OPENAI_API_KEY=…` | Fixed with the reviewer's two rules; test added |
+| 2 Medium | `/edit` and `/api/` on the public origin: raw HTML in a post could publish as the owner | Decided: separate origin `edit.zahynailo.dev` (above). Not yet: rejecting raw HTML outside embeds in the gate |
+| 3 Medium | The server-side gate skipped phones, IPs and UUIDs, and never redacts | Fixed: the gate checks every rule. Names are still only redacted at import (see 9) |
+| 4 Low | Unauthenticated challenge rows were never deleted; no rate limit | Fixed: expired challenges and sessions are swept. Not yet: a Rate Limiting binding on `/auth/*` |
+| 5 Low | Access check passed when `OWNER_EMAIL` or `ACCESS_AUD` was unset | Fixed: fails closed |
+| 6 Low | An invalid session timezone let an unescaped date into the page | Fixed: escaped, and the format rejects an unknown time zone |
+| 7 Low | `<ai-session src="../x">` read outside the post folder; JSON errors quoted the file into logs | Fixed: src must be a file in the folder; the error no longer quotes content |
+| 8 Unsure | Whether Access attaches its JWT to a same-origin `fetch` from injected script | Moot with the separate origin; to settle on a test Access app if it ever shares an origin |
+| 9 Unsure | The server has no list of real names, so a session sent over the API is not checked for them | Open: a `PRIVATE_NAMES` Worker secret passed to the gate |

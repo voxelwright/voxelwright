@@ -186,3 +186,17 @@ test("the Markdown twin of the demo fixture names every model", () => {
   const md = sessionMarkdown(s, { src: "https://example.org/s.json" });
   assert.match(md, /Opus 5\.5 \(Anthropic\), Fable 5\.2 \(Anthropic\)/);
 });
+
+test("secrets in env files, JSON and command flags are redacted and caught by the gate", () => {
+  const r = makeRedactor({ machine: false });
+  for (const s of ["DB_PASSWORD=hunter2hunter", '{"password": "hunter2hunter"}', "--password hunter2hunter", "export OPENAI_API_KEY=abc123xyz789", "MY_TOKEN=abcdef123456"]) {
+    assert.ok(findLeaks(s).length, `gate missed ${s}`);
+    assert.doesNotMatch(r.text(s), /hunter2|abc123xyz|abcdef123456/);
+  }
+  assert.equal(r.text("the password protects everything"), "the password protects everything");
+  assert.deepEqual(findLeaks("call +1 415 555 0134 at 203.0.113.7").sort(), ["ip address", "phone"]);
+});
+
+test("a session src outside the post folder fails the build", async () => {
+  await assert.rejects(buildWith(sample(), `<ai-session src="../s.session.json">`), (e) => e instanceof ContentError && /must be a file in the post folder/.test(e.message));
+});

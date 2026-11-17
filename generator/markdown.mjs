@@ -215,6 +215,10 @@ function validateEmbed(meta, env) {
   for (const attr of spec.files) {
     const value = meta.attrs[attr];
     if (!value || isExternal(value) || value.startsWith("/")) continue;
+    if (meta.name === "ai-session" && value !== path.basename(value)) {
+      errors.push(`${where} ${attr} must be a file in the post folder.`);
+      continue;
+    }
     if (!fs.existsSync(path.join(ctx.dir, value))) {
       errors.push(`${where} ${attr}="${value}" does not exist in ${path.relative(process.cwd(), ctx.dir) || "."}.`);
     }
@@ -228,7 +232,7 @@ function validateEmbed(meta, env) {
 /** Reads, validates and leak-checks a session file; the parsed session rides on the token. */
 function loadSession(meta, ctx, errors, where) {
   const src = meta.attrs.src;
-  if (!src || isExternal(src) || src.startsWith("/")) {
+  if (!src || isExternal(src) || src.startsWith("/") || src !== path.basename(src)) {
     if (src) errors.push(`${where} src must be a file in the post folder.`);
     return;
   }
@@ -238,7 +242,7 @@ function loadSession(meta, ctx, errors, where) {
   try {
     session = JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (e) {
-    errors.push(`${where} ${src} is not valid JSON: ${e.message}`);
+    errors.push(`${where} ${src} is not valid JSON.`); // the parser's message quotes the file
     return;
   }
   const problems = validateSession(session);
