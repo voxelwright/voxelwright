@@ -53,18 +53,22 @@ body.solo { padding: 16px; max-inline-size: none; }
 body.solo .type-top, body.solo .screen:not([data-solo]), body.solo #lettering, body.solo .foot { display: none; }
 body.solo .screens { display: block; }
 body.solo section { margin: 0; }
-body.solo #text > h2 { display: none; }
+body.solo #text > h2, body.solo #text > .intro { display: none; }
 
 /* ---------- lettering ---------- */
 
 .directions { display: grid; gap: 4.5rem; }
-.direction { display: grid; gap: 1.75rem; justify-items: start; min-inline-size: 0; }
+.direction { display: grid; gap: 1.75rem; min-inline-size: 0; }
 .direction > header { display: grid; gap: 0.35rem; max-inline-size: 44em; }
 .direction > header b { font-size: 1.3rem; line-height: 1.2; font-weight: 700; }
 .direction > header span { color: var(--vx-ink-quiet); }
-.direction .set { display: grid; gap: 1.5rem; justify-items: start; max-inline-size: 100%; }
+.direction .set { display: grid; gap: 1.5rem; min-inline-size: 0; }
 .direction .cap { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); margin-block-end: -0.75rem; }
 
-.vx-lettering { display: block; margin: 0; cursor: pointer; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; max-inline-size: 100%; }
+.vx-lettering { position: relative; isolation: isolate; display: block; margin: 0; cursor: pointer; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; max-inline-size: 100%; }
 .vx-lettering[data-vx-live] { font-size: 0; line-height: 0; color: transparent; }
 .vx-lettering:not([data-vx-live]) { font: 700 2.5rem/1.1 var(--vx-font); }
+
+body.solo-lettering { padding: 24px; }
+body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
+body.solo-lettering section { margin: 0; }
