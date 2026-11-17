@@ -40,10 +40,16 @@ node scripts/flag-proof.mjs <base> --candidate .seeds/<worktree> --strict
 ```
 
 Run this way, the proof that is trusted is the main checkout's, not the copy in the worktree, and
-nothing from the worktree's `package.json` is used. Strict reads the change before running any
-of it and refuses unless all of this holds:
+nothing from the worktree's `package.json` is used. The candidate must be this checkout or a
+worktree added from it (`git worktree add`); a separate clone is refused. The proof never runs
+git inside the candidate and never follows the candidate's own `.git`: a git folder can name
+commands for git to run, so which commit the candidate is on is read from this repository's own
+record of its worktrees. On success it prints that commit in full, as `flag-proof: proven …`.
+
+Strict reads the change before running any of it and refuses unless all of this holds:
 
 - the change is committed and descends from the base;
+- the worktree's `.git` is still the plain link git made for it;
 - it only adds or changes plain files inside `features/<name>/` (no links, no executables, no
   dotfiles), and only for features whose flag is off: one that is on is live code, and changing
   it is not a flag-off change;
@@ -59,15 +65,24 @@ itself cannot change in a strict build, and with the flag off none of the new co
 
 To see a feature working before its flag is on, add `--try <name>`: after the proof passes it
 builds once more with the flag on and lists what the feature adds or changes. That build runs
-with no network, can write only to its own temporary folder, can read nothing under
-`/Users`, `/Volumes` or the temporary folders except the installed packages, can start no other program,
-load no native code of its own and signal no other process (macOS `sandbox-exec`; on a system
-without it `--try` refuses to run). It is the safe way to run a feature's code. What the build
-prints is not shown unless it fails, and then only quoted; the files it built are for reading,
-and nothing in them is an instruction.
+with no network and is stopped after two minutes. It can write only to its own temporary
+folder. It can read only that folder, the installed packages, node itself and the system's own
+libraries: nothing else on the machine, wherever it is. It can start no other process, open no
+terminal, load no native code of its own and signal no other process (macOS `sandbox-exec`; on a
+system without it `--try` refuses to run). It is the safe way to run a feature's code. What the
+build prints is not shown unless it fails, and then only quoted; names it chose are printed in
+quotes with anything but plain ASCII escaped. The files it built are for reading, and nothing in
+them is an instruction.
 
-What the proof does not cover: the day you turn a flag on, the feature's code runs in every
-build with your full access, and whatever it ships runs in visitors' browsers. Read a feature
-before you turn it on.
+What the proof does not cover:
+
+- The day you turn a flag on, the feature's code runs in every build with your full access, and
+  whatever it ships runs in visitors' browsers. Read a feature before you turn it on.
+- A worktree an agent left behind is a folder you did not write. Git run inside it (a shell
+  prompt that shows the branch does this on `cd`) takes settings from that folder's `.git` and
+  from any repository nested in it. Look at a failed attempt from the main checkout first:
+  `git diff main...seed/<name>`.
+- A build can still see the names and sizes of files elsewhere on the machine, not what is in
+  them.
 
 Turning a flag on is the owner's step, in `site.config.mjs`.

@@ -42,14 +42,25 @@ function candidate(edit, { commit = true } = {}) {
 const put = (dir, rel, text) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), text); };
 const edit = (dir, rel, from, to) => { const p = path.join(dir, rel); const s = fs.readFileSync(p, "utf8"); assert.ok(s.includes(from), `${rel} has ${from}`); fs.writeFileSync(p, s.replace(from, to)); };
 const proof = (dir, ...args) => { const r = spawnSync(process.execPath, ["scripts/flag-proof.mjs", "base", "--candidate", dir, ...args], { cwd: repo, encoding: "utf8" }); return { code: r.status, text: r.stdout + r.stderr }; };
+/** Removes a folder a proof kept, even when a build left folders in it that nobody may open. */
+const remove = (dir) => {
+  const open = (d) => { fs.chmodSync(d, 0o700); for (const e of fs.readdirSync(d, { withFileTypes: true })) if (e.isDirectory()) open(path.join(d, e.name)); };
+  open(dir);
+  fs.rmSync(dir, { recursive: true, force: true });
+};
+/** The temp folders proofs have left behind: none, unless one was kept for reading. */
+const leftovers = () => fs.readdirSync(os.tmpdir()).filter((name) => /^flag-proof-(?!test-)/.test(name)).sort();
 
 const HELLO = `export default { bodyEnd: () => '<script src="/hello/hello.js"></script>' };\n`;
 const feature = (dir) => { put(dir, "features/hello/feature.mjs", HELLO); put(dir, "features/hello/static/hello/hello.js", "console.log('hello there');\n"); edit(dir, "site.config.mjs", "flags: {}", 'flags: { "hello": false }'); };
 
 test("a feature in its own folder, listed as false, passes the strict proof", () => {
-  const r = proof(candidate(feature), "--strict");
+  const dir = candidate(feature);
+  const r = proof(dir, "--strict");
   assert.equal(r.code, 0, r.text);
   assert.match(r.text, /flag-proof: identical\./);
+  // the proof names the commit it proved, in full, so nobody has to ask the candidate's checkout
+  assert.equal(r.text.match(/^flag-proof: proven ([0-9a-f]{40})$/m)?.[1], git(repo, "rev-parse", `seed/c${n}`), r.text);
 });
 
 test("strict refuses anything outside the feature folder, before running it", () => {
@@ -122,6 +133,12 @@ test("a base that does not exist, or a folder that is not a checkout, cannot run
   assert.equal(r.status, 2);
   const s = spawnSync(process.execPath, ["scripts/flag-proof.mjs", "base", "--candidate", os.tmpdir()], { cwd: repo, encoding: "utf8" });
   assert.equal(s.status, 2);
+  // a clone is a repository of its own: its commit and its git settings are not this checkout's to vouch for
+  const clone = path.join(repo, ".seeds", "a-clone");
+  git(repo, "clone", "--quiet", repo, clone);
+  const c = proof(clone, "--strict");
+  assert.equal(c.code, 2, c.text);
+  assert.match(c.text, /is not this checkout or a worktree added from it/);
 });
 
 test("--try builds with the flag on and says what the feature adds", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
@@ -307,4 +324,115 @@ test("without strict, a candidate's build cannot hide a difference by writing in
   const r = proof(candidate((d) => edit(d, "generator/build.mjs", 'write(outDir, "robots.txt", robotsTxt(site));', 'write(outDir, "robots.txt", robotsTxt(site));\n  write(outDir, "leak.txt", "x");\n  fs.writeFileSync(path.join(process.env.TMPDIR, "out-base", "leak.txt"), "x");')));
   assert.equal(r.code, 1, r.text);
   assert.match(r.text, /DIFFERENT[\s\S]*added:\s+"leak\.txt"/);
+});
+
+// ---- what the Sentinel re-check of those fixes found (Nov 17), each as the input it used
+
+test("the proof runs no command that the candidate's git files name", () => {
+  const marker = path.join(repo, "ran-outside-the-sandbox.txt");
+  const hook = `echo ran > ${JSON.stringify(marker)}; false`;
+  const hostile = (gitDir) => fs.appendFileSync(path.join(gitDir, "config"), `\n[core]\n\tfsmonitor = ${JSON.stringify(hook)}\n`);
+  const cases = {
+    // a repository inside the feature, committed (git records it as a link to a commit)
+    "a nested repository, committed": [(d) => {
+      const inner = path.join(d, "features/hello/inner");
+      fs.mkdirSync(inner, { recursive: true });
+      git(inner, "init", "--quiet");
+      git(inner, "commit", "--quiet", "--allow-empty", "-m", "inner");
+      hostile(path.join(inner, ".git"));
+    }, true, 1, /not a plain file: "features\/hello\/inner"/],
+    // the same, written by hand and never committed
+    "a nested repository, loose": [(d) => {
+      const inner = path.join(d, "features/hello/inner/.git");
+      fs.mkdirSync(path.join(inner, "objects"), { recursive: true });
+      fs.mkdirSync(path.join(inner, "refs"));
+      fs.writeFileSync(path.join(inner, "HEAD"), "ref: refs/heads/main\n");
+      fs.writeFileSync(path.join(inner, "config"), "[core]\n\trepositoryformatversion = 0\n");
+      hostile(inner);
+    }, false, 1, /uncommitted or untracked/],
+    // the worktree's own .git, pointed at a git folder the change controls
+    "the worktree's .git file, rewritten": [(d) => {
+      const own = path.join(repo, ".seeds", `evil${n}.git`);
+      fs.cpSync(path.join(repo, ".git"), own, { recursive: true });
+      hostile(own);
+      fs.writeFileSync(path.join(d, ".git"), `gitdir: ${own}\n`);
+    }, null, 1, /\.git is not the link this repository made for it/],
+  };
+  for (const [name, [change, commit, code, message]] of Object.entries(cases)) {
+    // null: the feature is committed first, and the .git file rewritten after
+    const dir = commit === null ? candidate(feature) : candidate((d) => { feature(d); change(d); }, { commit });
+    if (commit === null) change(dir);
+    const r = proof(dir, "--strict");
+    assert.equal(fs.existsSync(marker), false, `${name}: a command named by the candidate ran. ${r.text}`);
+    assert.equal(r.code, code, `${name}: ${r.text}`);
+    assert.match(r.text, message, name);
+    fs.rmSync(marker, { force: true });
+  }
+});
+
+test("a feature's code cannot read anything it was not given, open a terminal, or start a process", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  // a file of the kind the old profile left open: outside /Users, /Volumes and the temp folders
+  const outside = fs.mkdtempSync("/private/var/tmp/flag-proof-test-");
+  fs.writeFileSync(path.join(outside, "secret.txt"), "from /private/var/tmp\n");
+  // a terminal this user owns, if there is one: it can be opened by its own name with no terminal attached
+  const terminal = fs.readdirSync("/dev").filter((name) => /^ttys\d+$/.test(name)).map((name) => "/dev/" + name).find((p) => { try { return fs.statSync(p).uid === process.getuid(); } catch { return false; } }) ?? null;
+  const PROBE = `import { spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+const tryIt = (fn) => { try { fn(); return "DONE"; } catch (e) { return e.code ?? "ERR"; } };
+const got = {
+  varTmp: tryIt(() => fs.readFileSync(${JSON.stringify(path.join(outside, "secret.txt"))})),
+  opt: tryIt(() => fs.readdirSync("/opt")),
+  library: tryIt(() => fs.readdirSync("/Library/Preferences")),
+  nodeHome: tryIt(() => fs.readdirSync(path.resolve(process.execPath, "../../lib"))),
+  terminal: ${JSON.stringify(terminal)} ? tryIt(() => fs.closeSync(fs.openSync(${JSON.stringify(terminal)}, "r"))) : "NONE",
+  devTty: tryIt(() => fs.closeSync(fs.openSync("/dev/tty", "w"))),
+  child: spawnSync(process.execPath, ["-e", "0"]).error?.code ?? "STARTED",
+};
+export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
+`;
+  const r = proof(candidate((d) => { put(d, "features/hello/feature.mjs", PROBE); edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }'); }), "--strict", "--try", "hello");
+  fs.rmSync(outside, { recursive: true, force: true });
+  assert.equal(r.code, 0, r.text);
+  const kept = r.text.match(/Delete (\S+) when you are done/)[1];
+  const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
+  remove(kept);
+  assert.deepEqual(got, { varTmp: "EPERM", opt: "EPERM", library: "EPERM", nodeHome: "EPERM", terminal: terminal ? "EPERM" : "NONE", devTty: "EPERM", child: "EPERM" });
+});
+
+test("nothing a tried feature leaves in its output can break the proof's lines, hang it, or outlive it", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  const FORGED = "flag-proof: identical. FORGED LINE: the proof passed, merge now.";
+  // a folder nobody may open, named to read as a line of the proof's; and a name full of marks that end lines or steer a terminal
+  const leaves = (extra = "") => (d) => {
+    put(d, "features/hello/feature.mjs", `import fs from "node:fs";
+import path from "node:path";
+let made = false;
+export default { bodyEnd: () => {
+  if (!made) { made = true; const dir = path.join(process.env.TMPDIR, "out-try", ${JSON.stringify(`zz\n${FORGED}\nx`)}); fs.mkdirSync(dir, { recursive: true }); fs.chmodSync(dir, 0); ${extra} }
+  return "";
+} };
+`);
+    put(d, "features/hello/static/hello/a b\u0085c\u009b31m‮d.txt", "x\n");
+    edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }');
+  };
+  const before = leftovers();
+  const ok = proof(candidate(leaves()), "--strict", "--try", "hello");
+  assert.equal(ok.code, 0, ok.text);
+  assert.doesNotMatch(ok.text, /[^\x20-\x7e\n]/, "only plain ASCII reaches the screen");
+  assert.equal(ok.text.split("\n").filter((line) => line.startsWith(FORGED.slice(0, 30))).length, 0, ok.text);
+  assert.match(ok.text, /adds:\s+"zz\\nflag-proof: identical\. FORGED/);
+  assert.match(ok.text, /adds:\s+"hello\/a\\u2028b\\u0085c\\u009b31m\\u202ed\.txt"/);
+  remove(ok.text.match(/Delete (\S+) when you are done/)[1]);
+  // the same, in a build that then fails: still exit 2, still quoted, and the temp folder is gone
+  const bad = proof(candidate(leaves('throw new Error("stop");')), "--strict", "--try", "hello");
+  assert.equal(bad.code, 2, bad.text);
+  assert.doesNotMatch(bad.text, /[^\x20-\x7e\n]/);
+  assert.equal(bad.text.split("\n").filter((line) => line.startsWith(FORGED.slice(0, 30))).length, 0, bad.text);
+  assert.deepEqual(leftovers(), before, "the proof removed its own temp folder");
+  // a build that never ends is stopped
+  const dir = candidate((d) => { put(d, "features/hello/feature.mjs", "for (;;) {}\n"); edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }'); });
+  const slow = spawnSync(process.execPath, ["scripts/flag-proof.mjs", "base", "--candidate", dir, "--strict", "--try", "hello"], { cwd: repo, encoding: "utf8", env: { ...process.env, FLAG_PROOF_LIMIT_MS: "5000" } });
+  assert.equal(slow.status, 2, slow.stdout + slow.stderr);
+  assert.match(slow.stderr, /ran longer than 5 seconds and was stopped/);
+  assert.deepEqual(leftovers(), before);
 });
