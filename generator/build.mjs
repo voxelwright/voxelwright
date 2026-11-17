@@ -111,6 +111,8 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
     if (!f.staticDir) continue;
     for (const rel of walk(f.staticDir)) {
       if (fs.existsSync(path.join(outDir, rel))) taken.push(`features/${f.name}/static/${rel} would replace a file the site already has.`);
+      // _headers, _redirects, .assetsignore and their kind are read by the host as rules for the whole site
+      if (/^[._]/.test(rel.split(path.sep)[0])) taken.push(`features/${f.name}/static/${rel}: a name that starts with "." or "_" at the top of the site is configuration for the host, not a file to publish.`);
     }
     if (!taken.length) fs.cpSync(f.staticDir, outDir, { recursive: true });
   }
