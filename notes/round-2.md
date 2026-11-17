@@ -13,7 +13,8 @@ that live in this repo.
 | 5970-5974 | Tsundere support button, this repo |
 | 5975      | Blog look preview switcher (`designs/iterations/serve.mjs`), already running |
 | 5976-5980 | Writing: editor, AI-session block, store and auth spike, this repo |
-| 5981-5989 | Spare: easter eggs, blog MCP |
+| 5981-5984 | Landmark heroes and far-tile fix (#423), Village |
+| 5985-5989 | Spare: landing menu, easter eggs, blog MCP |
 
 ## Lanes in this repo
 
