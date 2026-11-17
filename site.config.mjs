@@ -22,6 +22,10 @@ export default {
   // In `npm run dev`, add ?look=<name> to a URL to try another look for that tab.
   look: "iter-1",
 
+  // Features behind flags: a folder in features/<name>/ is built in only when its name is true
+  // here. Off is the default. Turning one on is the owner's step. See features/README.md.
+  flags: {},
+
   // Home page sections.
   intro: "TODO: a short intro, written by the owner.",
   projects: [
