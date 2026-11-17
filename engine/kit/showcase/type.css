@@ -121,7 +121,7 @@ body.solo-lettering section { margin: 0; }
 .pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"], .vx-menu [role^="menuitem"]) {
   font-family: var(--vx-font); font-size: var(--label); letter-spacing: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
 }
-.pairing[data-cells] :is(.vx-toggle, .vx-list, .vx-field, .vx-toast, .vx-dialog) { font-family: var(--text-font); }
+.pairing[data-cells] :is(.vx-toggle, .vx-list, .vx-field, .vx-well :is(input, textarea), .vx-toast, .vx-dialog) { font-family: var(--text-font); }
 .pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; }
 .pairing[data-cells] :is(.vx-button .vx-label, .vx-tabs > [role="tab"] .vx-label) { padding-block-start: 0; }
 
