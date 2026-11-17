@@ -2,21 +2,33 @@
 // With --engine every page is handed the Village engine's renderer before its own script runs,
 // so the same pages and the same tools run on WebGPU: PORT=5986 node tools/serve.mjs --engine
 import { createServer } from 'node:http';
-import { readFile, stat } from 'node:fs/promises';
+import { appendFile, readFile, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.env.PORT || 5985);
 const engine = process.argv.includes('--engine');
-// module scripts run in document order, so this one runs before the page's own
-const HAND = `<script type="module">import { use } from '/packages/voxelmorphism/src/index.js'; import { renderer } from '/packages/voxelmorphism/src/engine.js'; use(renderer());</script>\n`;
+// module scripts run in document order, so this one runs before the page's own.
+// It also tells this server what ended up drawing the page, so a phone's answer can be read here.
+const HAND = `<script type="module">import { use, ready } from '/packages/voxelmorphism/src/index.js'; import { renderer } from '/packages/voxelmorphism/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname)).catch(() => {})));</script>\n`;
+const seen = join(root, 'milestones', 'seen.log');
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8' };
 
 createServer(async (req, res) => {
   try {
-    let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
-    if (path === '/') path = '/showcase/';
+    const url = new URL(req.url, 'http://x');
+    let path = decodeURIComponent(url.pathname);
+    // the pages name their own files by relative address, so the root has to move, not just answer
+    if (path === '/') { res.writeHead(302, { location: '/showcase/' + url.search, 'cache-control': 'no-store' }).end(); return; }
+    if (engine && path === '/__seen') {
+      const by = ['engine', 'webgl2', 'plain'].find((b) => b === url.searchParams.get('by')) || '?';
+      const ua = String(req.headers['user-agent'] || '');
+      const device = (/iPhone|iPad|Macintosh|Android|Linux|Windows/.exec(ua) || ['?'])[0] + ' ' + (/HeadlessChrome|Chrome|Firefox|Safari/.exec(ua) || ['?'])[0];
+      const page = String(url.searchParams.get('page') || '').replace(/[^\w./-]/g, '').slice(0, 80);
+      await appendFile(seen, `${new Date().toISOString()} ${by} ${device} ${page}\n`).catch(() => {});
+      res.writeHead(204).end(); return;
+    }
     if (path.endsWith('/')) path += 'index.html';
     const file = normalize(join(root, path));
     if (!file.startsWith(root + '/') || /\/(node_modules|\.git)\//.test(file)) { res.writeHead(403).end('no'); return; }
