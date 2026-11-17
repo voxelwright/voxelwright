@@ -113,7 +113,7 @@ export class Part {
   bake(theme) {
     const cells = this.cells;
     const grounded = this.grounded;
-    const occ = (x, y, z) => (grounded && z < 0) || cells.has(key(x, y, z));
+    const occ = (x, y, z) => (grounded && z < 0 && !this.sunk) || cells.has(key(x, y, z));
     const pos = [], col = [], ao = [], mats = [], births = [];
     for (const [k, id] of cells) {
       const x = (k >>> 20) - OFF, y = ((k >>> 10) & 1023) - OFF, z = (k & 1023) - OFF;

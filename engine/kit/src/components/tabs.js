@@ -18,7 +18,8 @@ export const tabs = {
     const seat = live.state.seat = tabsEl.length ? Math.round(tabsEl[0].offsetWidth / vx) : W;
     const block = m.part('block');
     block.grounded = false;
-    block.slab(0, 1, 1, seat - 2, H - 2, 2, 'signal', 1);
+    block.slab(0, 1, 1, seat - 2, H - 2, 2, 'chalk', 1);
+    block.box(1, 1, 3, seat - 4, 2, 1, 'signal');
     live.faceZ = 1;
     const index = Math.max(0, tabsEl.findIndex((t) => t.getAttribute('aria-selected') === 'true'));
     live.state.index = index;

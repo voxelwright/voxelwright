@@ -1,8 +1,11 @@
-// Text field. A well cut into a slab: you type on the floor of it. The rim changes material
-// when the field has focus (enamel) or holds something invalid (brick).
+// Text field. A well cut into the page: you type on the floor of it, two voxels down. The page's
+// own edge throws a shadow onto the floor along the top and left, which is what says "sunk".
+// The walls change material when the field has focus (enamel) or holds something invalid (brick).
 // Markup: <label class="vx-field"><span class="vx-field-label">Idea</span><span class="vx-well"><input></span></label>
 
 import { listeners } from './util.js';
+
+const DEPTH = 2;
 
 export const field = {
   name: 'field',
@@ -12,10 +15,16 @@ export const field = {
   build(live, m) {
     const { W, H, el } = live;
     const input = el.querySelector('input, textarea');
-    const rim = input?.matches(':focus') ? 'enamel' : input?.getAttribute('aria-invalid') === 'true' ? 'brick' : input?.disabled ? 'steel' : 'slate';
-    m.part('rim').slab(0, 0, 0, W, H, 2, rim, 1).carve(1, 1, 0, W - 2, H - 2, 2);
-    m.part('floor').box(1, 1, 0, W - 2, H - 2, 1, input?.disabled ? 'slate' : 'chalk');
-    live.faceZ = 1;
+    const wall = input?.matches(':focus') ? 'enamel' : input?.getAttribute('aria-invalid') === 'true' ? 'brick' : 'slate';
+    // walls stand around the hole, below the page; only their inner faces can be seen through it
+    const walls = m.part('walls');
+    walls.sunk = true;
+    walls.box(-1, -1, -DEPTH, W + 2, H + 2, DEPTH, wall).carve(0, 0, -DEPTH, W, H, DEPTH);
+    const floor = m.part('floor');
+    floor.sunk = true;
+    floor.box(0, 0, -DEPTH - 1, W, H, 1, input?.disabled ? 'slate' : 'chalk');
+    live.well = [0, 0, W, H];
+    live.faceZ = 0; // the hole is where the element is; the floor shows through it, a voxel up and left
   },
 
   bind(live) {

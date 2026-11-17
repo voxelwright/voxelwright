@@ -43,8 +43,10 @@ This file is the rule book. `voxelmorphism.css` and `src/` implement it; `showca
 
 ## 3. Projection
 
-- Axes: x right, y down, z toward the viewer. `z = 0` is the page. **Nothing goes below the page**;
-  a well is cut into a slab that stands on it. Anything pushed below `z = 0` is hidden by the page.
+- Axes: x right, y down, z toward the viewer. `z = 0` is the page. The page is solid: anything
+  pushed below `z = 0` is hidden by it. The one exception is a **well**, a hole cut in the page
+  for a text field: its floor is two voxels down, and you see it, and the inner faces of its far
+  walls, only through the hole. A well casts no shadow on the page, because nothing stands on it.
 - Cabinet projection: a point at height `z` is drawn `z / 2` voxels to the right and `z / 2` down.
   The viewer stands up and to the left, so you see the top and the left side of everything.
 - The face that carries a label lands exactly on the element's box when the control is at rest.
@@ -60,9 +62,9 @@ from the next), and whether it glows at night.
 |---|---|---|---|
 | Enamel | `#0e22ff` | `#2b3dff` | Things you act on: the main button, a picked menu item, a slider thumb, a focused rim |
 | Signal | `#fff600` | `#fff600`, glows | Where you are and what is on: the chosen tab, a lit track, the current row |
-| Chalk | `#fbfcff` | `#303a7c` | Surfaces that carry content: cards, dialogs, menus, the floor of a field |
-| Slate | `#c3c9de` | `#161c4f` | Trays, tracks and rims |
-| Steel | `#aab1c9` | `#59629c` | Housings, and anything switched off |
+| Chalk | `#fbfcff` | `#3a4692` | Surfaces that carry content: cards, dialogs, menus, the floor of a field |
+| Slate | `#c3c9de` | `#222963` | Trays, tracks and rims |
+| Steel | `#aab1c9` | `#33375a` | Housings, and anything switched off |
 | Ivory | `#fbfcff` | `#ccd1f2` | The knob of a switch, and icons on enamel: it stays light at night so it can be found |
 | Walnut | `#7c4a29` | `#5a3520` | Structure that carries other things: shelves, frames |
 | Leaf | `#23a84b` | `#2ec25c` | Growth, progress, "it went well" |
@@ -73,7 +75,10 @@ from the next), and whether it glows at night.
 - Text on enamel and brick is white. Text on signal is ink `#0a0f3d` in both themes. Text on chalk
   is `--vx-ink`. Body text contrast is 7:1 or better; quiet text is 4.5:1 or better.
 - One enamel thing per group: enamel marks the main action. Secondary buttons are chalk.
-- Signal is never decoration. If nothing is on or current, nothing is yellow.
+- Signal is state, never an action and never decoration: no yellow buttons. If nothing is on or
+  current, nothing is yellow.
+- At night, order by lightness is ground, slate, steel, chalk: a disabled control (steel) is
+  always duller than a live one beside it.
 - Add a material with `defineMaterial(name, { day, night, jitter, glow })`. Give it one job.
 
 ## 5. Light
@@ -97,14 +102,14 @@ from the next), and whether it glows at night.
 
 | State | Height of the face | Meaning |
 |---|---|---|
-| Rest | 3 voxels | Can be pressed |
-| Hover (mouse only) | 3.5 | You are on it |
+| Rest | 4 voxels | Can be pressed |
+| Hover (mouse only) | 4.5 | You are on it |
 | Pressed | 1 | Is being pressed |
 | Disabled | 1, in steel | Cannot be pressed |
 | Card, list tile | 2 | Holds content, is not pressed |
 | Menu, toast | 4 | Floats over the page for a moment |
 | Dialog | 6 | In front of everything, over a scrim of ink at 50% |
-| Well (field) | floor 1 below its rim | Takes input |
+| Well (field) | floor 2 below the page | Takes input |
 
 - A button is a keycap: a body, and a top one voxel smaller all round. The step is what makes it
   read as a block at arm's length. Shadow length follows height, so the scale above is visible.
@@ -127,19 +132,23 @@ Decide by how often it happens (from the site-craft rules):
 | Rarely | The sign, a bloom | Delight lives here |
 
 - **Assembly** marks the moment a thing is made: a dialog opens, a toast arrives, a note is added.
-  Voxels are set in place lowest layer first, in a front that sweeps outward from an origin, each
-  dropping in from the viewer's side with 5 to 10% overshoot and growing from nothing over 75 ms.
-  One voxel takes 140 to 200 ms; the whole build takes 200 ms (menu), 300 ms (toast), 460 ms
-  (dialog). The first block lands on the frame of the input. Gaps shrink toward the end, and 5%
-  noise keeps the front from being a wipe. Words appear once there is a slab to carry them.
-- **Origin.** A menu is built out of the corner nearest its trigger. A dialog is built from its
-  centre. A toast is built from its stripe.
-- **Crumble** marks removal: voxels fall down the page, spinning, and shrink away. 280 to 340 ms,
-  always shorter than the build. Content fades out in 80 ms first, so text is never seen breaking.
+  The thing rises out of the page in **bricks**: voxels are grouped into bricks of 2 to 7 voxels,
+  laid in a running bond, and each brick moves as one piece. A brick grows up through the page's
+  surface, overshoots by about 8% and settles; the page hides whatever is still below it, so
+  nothing is ever suddenly there and no frame is noise. One brick takes 170 ms; the whole build
+  takes 200 ms (menu), 300 ms (toast), 460 ms (dialog). The first brick moves on the frame of the
+  input. Words appear once there is a slab to carry them (340 ms into a dialog).
+- **Order.** By default courses are laid from the bottom-left corner upward. A menu is built out
+  of the corner nearest its trigger, a dialog from its centre, a toast from its stripe.
+- **Crumble** marks removal: the thing breaks into the same bricks, which fall down the page
+  turning as they go and shrink away at the end. 270 to 340 ms, always shorter than the build.
+  Content fades out in 80 ms first, so text is never seen breaking.
+- Never build or break in single voxels. A cloud of single voxels reads as static, not as blocks.
 - **Never** assemble something because it scrolled into view, and never on page load except one
   orchestrated moment the page chooses. Nothing moves while someone reads.
-- **Break and mend** (the sign): a poke knocks the lettering under the pointer loose; pieces fly
-  for 0.55 to 1.05 s, then are pulled home by a critically damped spring. It can be poked again
+- **Break and mend** (the sign): a poke knocks the lettering under the pointer loose. It breaks
+  along its own joints: each glyph cell is one block. Blocks fly for 0.5 to 1.15 s, then are pulled
+  home by a critically damped spring. It can be poked again
   at any time; nothing is a keyframe.
 - **Growth.** A plant's voxels each have a birth between 0 and 1. Showing the plant at `g` shows
   every voxel born by then; each takes 140 ms to appear once its moment has come, however fast the
@@ -172,7 +181,7 @@ Decide by how often it happens (from the site-craft rules):
   `progress`. Names, roles, states and keyboard behaviour come from the HTML.
 - The canvas is `aria-hidden`, takes no pointer events and is never focusable.
 - Focus is a 2 px outline with an offset, in enamel by day and signal by night, on every focusable
-  part, using `:focus-visible`. A focused field also changes its rim to enamel.
+  part, using `:focus-visible`. A focused field also changes its walls to enamel.
 - Keyboard-driven changes do not animate: arrow keys in tabs and menus move at once.
 - Hit targets are at least 11 voxels (44 px) tall.
 - Lettering in voxels (the sign, and headings set with `data-vx-board="none"`) keeps its text in

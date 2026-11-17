@@ -78,7 +78,7 @@
   <article class="rule">
     <div class="say">
       <h3>Material says what it is for</h3>
-      <p>Colour is never chosen for looks. Enamel is something you act on. Signal is where you are and what is on, and it glows at night. Chalk carries content. Slate is the floor of a well or a track. Steel is switched off. Walnut carries other things. Leaf has gone well and brick has not.</p>
+      <p>Colour is never chosen for looks. Enamel is the thing to press. Signal is where you are and what is on, and it glows at night. Chalk carries content. Slate is the floor of a well or a track. Steel is switched off. Walnut carries other things. Leaf has gone well and brick has not.</p>
     </div>
     <div class="show">
       <ul class="swatches">
@@ -107,7 +107,7 @@
         <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="12"></span>12</li>
         <li><span class="vx-block" data-vx-material="signal" data-vx-depth="6"></span>Signal, 6</li>
       </ul>
-      <div class="bench"><button class="vx-button" data-vx-material="signal">Hold me down and watch the shadow</button></div>
+      <div class="bench"><button class="vx-button">Hold me down and watch the shadow</button></div>
     </div>
   </article>
 
@@ -137,8 +137,7 @@
     <figure><div class="bench wrap">
       <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
       <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
-      <button class="vx-button" data-vx-material="signal">Let it bloom</button>
-      <button class="vx-button" data-vx-material="brick">Pull it up</button>
+      <button class="vx-button" data-vx-material="brick" data-vx-icon="cross">Pull it up</button>
       <button class="vx-button" disabled>Asleep</button>
     </div><figcaption>Button</figcaption></figure>
 
@@ -163,7 +162,7 @@
         <button role="menuitem">Water it</button>
         <button role="menuitem">Move to another shelf</button>
         <button role="menuitem">Show the session</button>
-        <button role="menuitem">Pull it up</button>
+        <button role="menuitem" data-vx-kind="danger">Pull it up</button>
       </div>
     </div><figcaption>Menu</figcaption></figure>
 
@@ -223,7 +222,7 @@
         <span class="vx-block plank" data-vx-material="walnut" data-vx-depth="7" data-vx-round="0"></span>
         <span class="vx-meter" data-vx-kind="growth" data-vx-seed="2" data-vx-petal="petal"><progress value="0.55">55%</progress></span>
         <span class="vx-meter" data-vx-kind="growth" data-vx-seed="5" data-vx-petal="signal"><progress value="0.55">55%</progress></span>
-        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="9" data-vx-petal="chalk"><progress value="0.55">55%</progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="9" data-vx-petal="ivory"><progress value="0.55">55%</progress></span>
         <span class="vx-meter" data-vx-kind="growth" data-vx-seed="4" data-vx-petal="enamel"><progress value="0.55">55%</progress></span>
       </div>
     </div>
@@ -240,7 +239,7 @@
     <div class="show">
       <div class="bench wrap" data-plain>
         <button class="vx-button">Plant a seed</button>
-        <button class="vx-button" data-vx-material="signal">Let it bloom</button>
+        <button class="vx-button" data-vx-material="chalk">Not yet</button>
         <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
         <label class="vx-field grow"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="Plain HTML"></span></label>
       </div>
@@ -278,7 +277,7 @@
   <div class="vx-dialog-body"><p>A coding session will start on your Mac. It reads every watering, makes the change, tests it and shows you a preview.</p></div>
   <footer>
     <button class="vx-button" data-vx-material="chalk" data-vx-close="no">Not yet</button>
-    <button class="vx-button" data-vx-material="signal" data-vx-close="yes">Let it bloom</button>
+    <button class="vx-button" data-vx-close="yes">Let it bloom</button>
   </footer>
 </dialog>
 

@@ -27,7 +27,7 @@ const FLOWER = [
   '.PPPPP.',
   '..PPP..',
 ];
-const PETALS = ['petal', 'signal', 'chalk', 'enamel', 'brick'];
+const PETALS = ['petal', 'signal', 'ivory', 'enamel', 'brick'];
 
 /**
  * Fill a part with a plant. opts: { x, base, z, seed, height (voxels, default 17), petal }

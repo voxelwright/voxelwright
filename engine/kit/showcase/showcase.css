@@ -91,7 +91,7 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 .kit figcaption { order: -1; font-weight: 800; font-size: 1.3rem; line-height: 1.2; letter-spacing: -0.01em; }
 .kit .bench { min-block-size: 0; }
 .kit .vx-tabs { justify-self: start; }
-.kit .bench.stack:has(.tabcard) { gap: calc(var(--vx) * 2); }
+.kit .bench.stack:has(.tabcard) { gap: 0; }
 .tabcard { min-block-size: calc(var(--vx) * 22); }
 
 /* ---------- growth ---------- */
@@ -116,6 +116,8 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 800; letter-spacing: -0.0
 }
 @media (max-width: 34rem) {
   .code { white-space: pre-wrap; overflow-wrap: anywhere; }
+  h2.vx-sign { --vx: 3px; }
+  .swatches.heights { font-size: 0.8rem; }
 }
 @media (max-width: 26rem) {
   .controls { gap: 1rem 1.5rem; }

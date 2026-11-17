@@ -13,11 +13,11 @@ const defs = {
   // Signal yellow: where you are, what is on, what wants attention. It glows at night.
   signal: { day: '#fff600', night: '#fff600', jitter: 0.025, glow: 1 },
   // Chalk: surfaces that hold content.
-  chalk: { day: '#fbfcff', night: '#303a7c', jitter: 0.006 },
+  chalk: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
-  slate: { day: '#c3c9de', night: '#161c4f', jitter: 0.012 },
+  slate: { day: '#c3c9de', night: '#222963', jitter: 0.012 },
   // Steel: neutral parts and anything switched off.
-  steel: { day: '#aab1c9', night: '#59629c', jitter: 0.018 },
+  steel: { day: '#aab1c9', night: '#33375a', jitter: 0.018 },
   // Ivory: the knob of a switch. It stays light at night so the knob can always be found.
   ivory: { day: '#fbfcff', night: '#ccd1f2', jitter: 0.006 },
   // Walnut: structure that carries other things (shelves, frames, trays).

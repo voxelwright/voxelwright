@@ -63,10 +63,15 @@ uniform vec3 uHighlight;
 uniform float uSeam;
 uniform float uGlow;
 uniform float uPx;          // device px per voxel
+uniform vec4 uWell;         // the hole in the page, on the page plane: x0, y0, x1, y1 (voxels)
+uniform vec2 uWellShear;
 ${SHADOW_FN}
 out vec4 o;
 void main() {
-  if (vP.z < -0.001) discard; // the page hides whatever sinks into it
+  if (vP.z < -0.001) { // the page hides whatever sinks into it, except through a well cut for it
+    vec2 s = vP.xy + uWellShear * vP.z;
+    if (s.x < uWell.x || s.y < uWell.y || s.x > uWell.z || s.y > uWell.w) discard;
+  }
   vec3 n = normalize(vN);
   vec3 n2 = n * n;
   float amb = n2.x * uAmbient.z
@@ -88,7 +93,7 @@ void main() {
   c *= 1.0 - seam * uSeam;
   // Voxels that glow keep their colour whatever the light does.
   float g = vColor.a * uGlow;
-  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.5);
+  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.36);
   o = vec4(c, 1.0);
 }`;
 
@@ -364,7 +369,7 @@ export class Renderer {
     gl.useProgram(this.ground.p);
     gl.uniform4fv(this.ground.u.uView, view);
     gl.uniform2f(this.ground.u.uSize, wpx, hpx);
-    gl.uniform4fv(this.ground.u.uShadowColor, light.shadow);
+    gl.uniform4f(this.ground.u.uShadowColor, light.shadow[0], light.shadow[1], light.shadow[2], light.shadow[3] * (frame.groundShadow ?? 1));
     gl.uniform1i(this.ground.u.uShadow, 0);
     gl.uniform2f(this.ground.u.uLShear, lsx, lsy);
     gl.uniform4fv(this.ground.u.uLRect, lrect);
@@ -389,6 +394,8 @@ export class Renderer {
       gl.uniform1f(u.uSeam, light.seam);
       gl.uniform1f(u.uGlow, light.glow);
       gl.uniform1f(u.uPx, frame.s);
+      gl.uniform4fv(u.uWell, frame.well ?? [0, 0, -1, -1]);
+      gl.uniform2fv(u.uWellShear, frame.shear);
       gl.uniform1i(u.uShadow, 0);
       gl.uniform2f(u.uLShear, lsx, lsy);
       gl.uniform4fv(u.uLRect, lrect);

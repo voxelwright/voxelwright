@@ -41,7 +41,7 @@ export const dialog = {
       leaving = true;
       el.setAttribute('data-vx-leaving', '');
       cue('break');
-      await live.play('crumble', null, { duration: 0.3 });
+      await live.play('crumble', null, { duration: 0.27 });
       el.close(value);
       el.removeAttribute('data-vx-leaving');
       for (const p of live.model.parts) p.hidden = false;

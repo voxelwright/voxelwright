@@ -41,6 +41,7 @@ export class Live {
     this.H = Math.max(1, Math.floor(h / this.vx + 0.01));
     this.pad = def.pad ?? 6;
     this.faceZ = 0;
+    this.well = null;
     this.model = new Model();
     this.labels.length = 0;
     def.build(this, this.model);
@@ -97,7 +98,11 @@ export class Live {
   /** Run a per-voxel effect on one part, or all. Returns a promise that resolves when it ends. */
   play(effect, parts, opts = {}) {
     const list = parts ? [].concat(parts).map((p) => (typeof p === 'string' ? this.model.byName[p] : p)).filter(Boolean) : this.model.parts;
-    const make = reducedMotion() ? (p) => settle(p, { out: effect === 'crumble' }) : effect === 'crumble' ? (p) => crumble(p, opts) : (p) => assemble(p, opts);
+    // every part builds on one grid of bricks, so the whole thing rises as one
+    let top = 1;
+    for (const p of this.model.parts) for (let i = 0; i < p.count; i++) top = Math.max(top, p.rest[i * 3 + 2] + 0.5);
+    const shared = { W: this.W, H: this.H, top, ...opts };
+    const make = reducedMotion() ? (p) => settle(p, { out: effect === 'crumble' }) : effect === 'crumble' ? (p) => crumble(p, shared) : (p) => assemble(p, shared);
     let longest = 0;
     for (const p of list) { p.fx = make(p); p.hidden = false; longest = Math.max(longest, p.fx.end); }
     this.invalidate();
@@ -150,6 +155,7 @@ export class Live {
       pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: LIGHTS[this.theme], shear: SHEAR, glows: this.glows,
       soft: this.def.soft, glowRadius: this.def.glowRadius, glowStrength: this.def.glowStrength,
+      well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx);
     // labels follow their faces
     const k = this.vx;

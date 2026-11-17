@@ -47,62 +47,77 @@ function fit(el, vx) {
   }
 }
 
-function physics(part) {
+// The lettering breaks into its glyph cells: each cell is one block of scale x scale voxels, and
+// a block flies, turns and comes home as one piece.
+function physics(part, scale) {
   const n = part.count, rest = part.rest;
-  const off = new Float32Array(n * 3), vel = new Float32Array(n * 3), ang = new Float32Array(n), spin = new Float32Array(n), free = new Float32Array(n), axis = new Float32Array(n * 3);
+  const of = new Int32Array(n), index = new Map(), sums = [];
+  for (let i = 0; i < n; i++) {
+    const k = Math.floor(rest[i * 3 + 1] / scale) * 4096 + Math.floor(rest[i * 3] / scale);
+    let c = index.get(k);
+    if (c === undefined) { c = sums.length; index.set(k, c); sums.push([0, 0, 0, 0]); }
+    of[i] = c;
+    const t = sums[c];
+    t[0] += rest[i * 3]; t[1] += rest[i * 3 + 1]; t[2] += rest[i * 3 + 2]; t[3]++;
+  }
+  const m = sums.length;
+  const centre = new Float32Array(m * 3);
+  sums.forEach((t, c) => { centre[c * 3] = t[0] / t[3]; centre[c * 3 + 1] = t[1] / t[3]; centre[c * 3 + 2] = t[2] / t[3]; });
+  const off = new Float32Array(m * 3), vel = new Float32Array(m * 3), ang = new Float32Array(m), spin = new Float32Array(m), free = new Float32Array(m), axis = new Float32Array(m * 3), quat = new Float32Array(m * 4);
   return {
-    kind: 'physics', t: 0, last: 0, end: Infinity, busy: false,
+    kind: 'physics', t: 0, last: 0, end: Infinity,
     poke(x, y, radius, force) {
-      for (let i = 0; i < n; i++) {
-        const dx = rest[i * 3] - x, dy = rest[i * 3 + 1] - y, d = Math.hypot(dx, dy);
+      for (let c = 0; c < m; c++) {
+        const dx = centre[c * 3] - x, dy = centre[c * 3 + 1] - y, d = Math.hypot(dx, dy);
         if (d > radius) continue;
-        const k = 1 - d / radius, r = hash3(i, Math.round(x * 7), Math.round(y * 5)), r2 = hash3(Math.round(y * 3), i, 9);
-        vel[i * 3] += (dx / (d + 0.5)) * force * k * (0.5 + r) + (r2 - 0.5) * 8;
-        vel[i * 3 + 1] += (dy / (d + 0.5)) * force * k * (0.5 + r2) - force * 0.45 * k;
-        vel[i * 3 + 2] += force * (0.5 + r) * k;
-        spin[i] = (r - 0.5) * 26;
-        axis[i * 3] = r - 0.5; axis[i * 3 + 1] = r2 - 0.5; axis[i * 3 + 2] = 0.3;
-        free[i] = 0.55 + r2 * 0.5 + (1 - k) * 0.2; // seconds in the air before it mends
+        const k = 1 - d / radius, r = hash3(c, Math.round(x * 7), Math.round(y * 5)), r2 = hash3(Math.round(y * 3), c, 9);
+        vel[c * 3] += (dx / (d + 0.5)) * force * k * (0.5 + r) + (r2 - 0.5) * 8;
+        vel[c * 3 + 1] += (dy / (d + 0.5)) * force * k * (0.5 + r2) - force * 0.45 * k;
+        vel[c * 3 + 2] += force * (0.5 + r) * k;
+        spin[c] = (r - 0.5) * 16;
+        axis[c * 3] = r - 0.5; axis[c * 3 + 1] = r2 - 0.5; axis[c * 3 + 2] = 0.3;
+        free[c] = 0.5 + r2 * 0.45 + (1 - k) * 0.2; // seconds in the air before it mends
       }
-      this.busy = true;
     },
     write(pos, o, part) {
       const dt = Math.min(0.04, Math.max(0, this.t - this.last));
       this.last = this.t;
       let busy = false;
-      for (let i = 0; i < n; i++, o += 8) {
-        let ox = off[i * 3], oy = off[i * 3 + 1], oz = off[i * 3 + 2];
-        if (free[i] > 0) {
-          free[i] -= dt;
-          vel[i * 3 + 1] += 95 * dt;
-          ox += vel[i * 3] * dt; oy += vel[i * 3 + 1] * dt; oz += vel[i * 3 + 2] * dt;
-          vel[i * 3 + 2] -= 30 * dt;
-          if (oz < 0.2) { oz = 0.2; vel[i * 3 + 2] *= -0.3; }
-          ang[i] += spin[i] * dt;
+      for (let c = 0; c < m; c++) {
+        let ox = off[c * 3], oy = off[c * 3 + 1], oz = off[c * 3 + 2];
+        if (free[c] > 0) {
+          free[c] -= dt;
+          vel[c * 3 + 1] += 95 * dt;
+          ox += vel[c * 3] * dt; oy += vel[c * 3 + 1] * dt; oz += vel[c * 3 + 2] * dt;
+          vel[c * 3 + 2] -= 30 * dt;
+          if (oz < 0.2) { oz = 0.2; vel[c * 3 + 2] *= -0.3; }
+          ang[c] += spin[c] * dt;
           busy = true;
-        } else if (ox || oy || oz || ang[i]) {
+        } else if (ox || oy || oz || ang[c]) {
           // mend: a critically damped pull home
-          const k = 150, c = 24;
-          for (let a = 0; a < 3; a++) {
-            const x = a === 0 ? ox : a === 1 ? oy : oz;
-            vel[i * 3 + a] += (-k * x - c * vel[i * 3 + a]) * dt;
-          }
-          ox += vel[i * 3] * dt; oy += vel[i * 3 + 1] * dt; oz += vel[i * 3 + 2] * dt;
-          ang[i] *= Math.exp(-9 * dt);
-          if (Math.abs(ox) + Math.abs(oy) + Math.abs(oz) < 0.02 && Math.abs(vel[i * 3]) + Math.abs(vel[i * 3 + 1]) + Math.abs(vel[i * 3 + 2]) < 0.3) {
-            ox = oy = oz = 0; ang[i] = 0; vel[i * 3] = vel[i * 3 + 1] = vel[i * 3 + 2] = 0;
+          const k = 150, d = 24;
+          vel[c * 3] += (-k * ox - d * vel[c * 3]) * dt;
+          vel[c * 3 + 1] += (-k * oy - d * vel[c * 3 + 1]) * dt;
+          vel[c * 3 + 2] += (-k * oz - d * vel[c * 3 + 2]) * dt;
+          ox += vel[c * 3] * dt; oy += vel[c * 3 + 1] * dt; oz += vel[c * 3 + 2] * dt;
+          ang[c] *= Math.exp(-9 * dt);
+          if (Math.abs(ox) + Math.abs(oy) + Math.abs(oz) < 0.02 && Math.abs(vel[c * 3]) + Math.abs(vel[c * 3 + 1]) + Math.abs(vel[c * 3 + 2]) < 0.3 && Math.abs(ang[c]) < 0.01) {
+            ox = oy = oz = 0; ang[c] = 0; vel[c * 3] = vel[c * 3 + 1] = vel[c * 3 + 2] = 0;
           } else busy = true;
         }
-        off[i * 3] = ox; off[i * 3 + 1] = oy; off[i * 3 + 2] = oz;
-        pos[o] = rest[i * 3] + part.tx + ox; pos[o + 1] = rest[i * 3 + 1] + part.ty + oy; pos[o + 2] = rest[i * 3 + 2] + part.tz + oz;
-        pos[o + 3] = 1;
-        const a = ang[i];
-        if (a) {
-          const l = Math.hypot(axis[i * 3], axis[i * 3 + 1], axis[i * 3 + 2]) || 1, s = Math.sin(a / 2) / l;
-          pos[o + 4] = axis[i * 3] * s; pos[o + 5] = axis[i * 3 + 1] * s; pos[o + 6] = axis[i * 3 + 2] * s; pos[o + 7] = Math.cos(a / 2);
-        } else { pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1; }
+        off[c * 3] = ox; off[c * 3 + 1] = oy; off[c * 3 + 2] = oz;
+        const a = ang[c], l = Math.hypot(axis[c * 3], axis[c * 3 + 1], axis[c * 3 + 2]) || 1, sn = a ? Math.sin(a / 2) / l : 0;
+        quat[c * 4] = axis[c * 3] * sn; quat[c * 4 + 1] = axis[c * 3 + 1] * sn; quat[c * 4 + 2] = axis[c * 3 + 2] * sn; quat[c * 4 + 3] = a ? Math.cos(a / 2) : 1;
       }
-      this.busy = busy;
+      for (let i = 0; i < n; i++, o += 8) {
+        const c = of[i], qx = quat[c * 4], qy = quat[c * 4 + 1], qz = quat[c * 4 + 2], qw = quat[c * 4 + 3];
+        const vx = rest[i * 3] - centre[c * 3], vy = rest[i * 3 + 1] - centre[c * 3 + 1], vz = rest[i * 3 + 2] - centre[c * 3 + 2];
+        const tx = qy * vz - qz * vy + qw * vx, ty = qz * vx - qx * vz + qw * vy, tz = qx * vy - qy * vx + qw * vz;
+        pos[o] = centre[c * 3] + part.tx + off[c * 3] + vx + 2 * (qy * tz - qz * ty);
+        pos[o + 1] = centre[c * 3 + 1] + part.ty + off[c * 3 + 1] + vy + 2 * (qz * tx - qx * tz);
+        pos[o + 2] = centre[c * 3 + 2] + part.tz + off[c * 3 + 2] + vz + 2 * (qx * ty - qy * tx);
+        pos[o + 3] = 1; pos[o + 4] = qx; pos[o + 5] = qy; pos[o + 6] = qz; pos[o + 7] = qw;
+      }
       return !busy;
     },
   };
@@ -127,9 +142,10 @@ export const sign = {
     const letters = m.part('letters');
     letters.grounded = bare;
     const block = (lines.length * 7 + (lines.length - 1) * f.gap) * scale;
-    let y = Math.round((H - block) / 2);
+    let y = Math.round((H - block) / 2 / scale) * scale;
     for (const line of lines) {
-      const x = bare ? 0 : Math.round((W - measure(line) * scale) / 2);
+      // letters sit on a grid of whole glyph cells, so a poke breaks them along their own joints
+      const x = bare ? 0 : Math.round((W - measure(line) * scale) / 2 / scale) * scale;
       letters.text(line, x, y, z, bare ? 2 : Math.max(2, scale), el.dataset.vxInk || (bare ? 'ink' : 'signal'), scale);
       y += (7 + f.gap) * scale;
     }
@@ -154,7 +170,7 @@ export const sign = {
       const r = el.getBoundingClientRect();
       const x = (e.clientX - r.left) / live.vx, y = (e.clientY - r.top) / live.vx;
       const letters = live.model.byName.letters;
-      if (!letters.fx || letters.fx.kind !== 'physics') letters.fx = physics(letters);
+      if (!letters.fx || letters.fx.kind !== 'physics') letters.fx = physics(letters, live.state.scale);
       letters.fx.poke(x, y, 5 + live.state.scale * 2.2, 34);
       cue('poke');
       live.invalidate();

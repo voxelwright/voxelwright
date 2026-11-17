@@ -49,57 +49,75 @@ function quat(out, o, ax, ay, az, angle) {
   out[o] = ax * s; out[o + 1] = ay * s; out[o + 2] = az * s; out[o + 3] = Math.cos(angle / 2);
 }
 
+// Things are built and broken in bricks, not in dust: voxels are grouped into bricks laid in a
+// running bond, and every voxel of a brick moves as one piece. Returns the brick of each voxel
+// and each brick's centre.
+function bricks(part, size) {
+  const n = part.count, rest = part.rest;
+  const of = new Int32Array(n), index = new Map();
+  const sum = [];
+  for (let i = 0; i < n; i++) {
+    const row = Math.floor(rest[i * 3 + 1] / size);
+    const col = Math.floor((rest[i * 3] + (row & 1 ? size / 2 : 0)) / size);
+    const k = row * 4096 + col;
+    let b = index.get(k);
+    if (b === undefined) { b = sum.length; index.set(k, b); sum.push([0, 0, 0, 0, col, row]); }
+    of[i] = b;
+    const t = sum[b];
+    t[0] += rest[i * 3]; t[1] += rest[i * 3 + 1]; t[2] += rest[i * 3 + 2]; t[3]++;
+  }
+  const centre = new Float32Array(sum.length * 3), cell = new Int32Array(sum.length * 2);
+  sum.forEach((t, b) => { centre[b * 3] = t[0] / t[3]; centre[b * 3 + 1] = t[1] / t[3]; centre[b * 3 + 2] = t[2] / t[3]; cell[b * 2] = t[4]; cell[b * 2 + 1] = t[5]; });
+  return { of, centre, cell, count: sum.length };
+}
+
+const brickSize = (w, h) => Math.max(2, Math.min(7, Math.round(Math.min(w, h) / 2.6)));
+
 /**
- * Assembly: voxels are set in place, lowest layer first, each arriving from the viewer's side.
- * It marks the moment a thing is made. It is not for things scrolling into view.
- * opts: { duration (s, whole build), each (s, one voxel), from: [x, y] build origin in voxels,
- *         delay (s), seed }
+ * Assembly: the thing rises out of the page, brick by brick, in courses. The page hides whatever
+ * is below it, so nothing is ever suddenly there: each brick grows up through the surface, goes a
+ * little too far, and settles. It marks the moment a thing is made, never arrival on screen.
+ * opts: { duration (s, whole build), each (s, one brick), from: [x, y] where the build starts
+ *         (default: the bottom-left corner, so courses are laid upward), W, H, top (the model's
+ *         size in voxels, so several parts build as one), brick (voxels), delay (s) }
  */
 export function assemble(part, opts = {}) {
   const n = part.count, rest = part.rest;
-  const each = opts.each ?? 0.2;
-  const total = Math.max(each, opts.duration ?? 0.52);
+  let w = opts.W, h = opts.H, top = opts.top;
+  if (w === undefined || top === undefined) {
+    w = 1; h = 1; top = 1;
+    for (let i = 0; i < n; i++) { w = Math.max(w, rest[i * 3] + 0.5); h = Math.max(h, rest[i * 3 + 1] + 0.5); top = Math.max(top, rest[i * 3 + 2] + 0.5); }
+  }
+  const size = opts.brick ?? brickSize(w, h);
+  const B = bricks(part, size);
+  const each = opts.each ?? 0.17;
+  const total = Math.max(each, opts.duration ?? 0.4);
+  const from = opts.from ?? [0, h];
+  const delay = new Float32Array(B.count);
+  let dmax = 0;
+  const far = Math.max(Math.hypot(from[0], from[1]), Math.hypot(w - from[0], from[1]), Math.hypot(from[0], h - from[1]), Math.hypot(w - from[0], h - from[1])) || 1;
+  for (let b = 0; b < B.count; b++) {
+    // courses first (rows count for more than columns), then along the course
+    const dx = (B.centre[b * 3] - from[0]) / far, dy = (B.centre[b * 3 + 1] - from[1]) / far;
+    delay[b] = Math.hypot(dx * 0.55, dy);
+    dmax = Math.max(dmax, delay[b]);
+  }
+  let dmin = Infinity;
+  for (let b = 0; b < B.count; b++) dmin = Math.min(dmin, delay[b]);
   const spread = total - each;
-  const from = opts.from ?? null;
-  const seed = opts.seed ?? 1;
-  // rank: layer first, then distance from the origin, then a little noise so it is not a wipe
-  let zmin = Infinity, zmax = -Infinity, dmax = 0;
-  const d = new Float32Array(n);
-  for (let i = 0; i < n; i++) {
-    const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
-    zmin = Math.min(zmin, z); zmax = Math.max(zmax, z);
-    d[i] = from ? Math.hypot(x - from[0], y - from[1]) : x + y * 0.6;
-    dmax = Math.max(dmax, d[i]);
-  }
-  const delay = new Float32Array(n), start = new Float32Array(n * 3), rank = new Float32Array(n);
-  let dmin = Infinity, rmin = Infinity, rmax = -Infinity;
-  for (let i = 0; i < n; i++) dmin = Math.min(dmin, d[i]);
-  for (let i = 0; i < n; i++) {
-    const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
-    const r = hash3(x + seed, y, z), r2 = hash3(x, y + seed, z), r3 = hash3(x, y, z + seed);
-    const layer = zmax > zmin ? (z - zmin) / (zmax - zmin) : 0;
-    const dist = dmax > dmin ? (d[i] - dmin) / (dmax - dmin) : 0;
-    rank[i] = layer * 0.38 + dist * 0.57 + r * 0.05; // a front, with just enough noise not to be a wipe
-    rmin = Math.min(rmin, rank[i]); rmax = Math.max(rmax, rank[i]);
-    start[i * 3] = (r2 - 0.5) * 1.2;
-    start[i * 3 + 1] = (r3 - 0.5) * 1.2 - 0.6;
-    start[i * 3 + 2] = 3 + r * 4;
-  }
-  // the first block lands on the frame of the input: nothing waits for a slot that no voxel fills
-  for (let i = 0; i < n; i++) delay[i] = (opts.delay ?? 0) + spread * Math.pow(rmax > rmin ? (rank[i] - rmin) / (rmax - rmin) : 0, 0.75);
+  for (let b = 0; b < B.count; b++) delay[b] = (opts.delay ?? 0) + spread * Math.pow(dmax > dmin ? (delay[b] - dmin) / (dmax - dmin) : 0, 0.8);
+  const rise = top + 0.5;
   return {
     kind: 'assemble', t: 0, end: (opts.delay ?? 0) + total,
     write(pos, o, part) {
       const t = this.t;
       for (let i = 0; i < n; i++, o += 8) {
-        const p = clamp01((t - delay[i]) / each);
-        if (p <= 0) { pos[o + 3] = 0; continue; }
-        const e = easeOutBack(p, 1.1), k = 1 - e;
-        pos[o] = rest[i * 3] + part.tx + start[i * 3] * k;
-        pos[o + 1] = rest[i * 3 + 1] + part.ty + start[i * 3 + 1] * k;
-        pos[o + 2] = rest[i * 3 + 2] + part.tz + start[i * 3 + 2] * k;
-        pos[o + 3] = clamp01((t - delay[i]) / 0.075); // grows from nothing over 75 ms: a block is never suddenly there
-        pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
+        const p = clamp01((t - delay[B.of[i]]) / each);
+        const e = p <= 0 ? 0 : easeOutBack(p, 1.35);
+        pos[o] = rest[i * 3] + part.tx;
+        pos[o + 1] = rest[i * 3 + 1] + part.ty;
+        pos[o + 2] = rest[i * 3 + 2] + part.tz - rise * (1 - e);
+        pos[o + 3] = 1; pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
       }
       return t >= this.end;
     },
@@ -107,40 +125,53 @@ export function assemble(part, opts = {}) {
 }
 
 /**
- * Crumble: the thing comes apart and falls off the page. Exits are shorter than entrances.
- * opts: { duration (s), from: [x, y] where the break starts, seed }
+ * Crumble: the thing breaks into its bricks, which fall off the page turning as they go.
+ * Exits are shorter than entrances.
+ * opts: { duration (s), from: [x, y] where the break starts, W, H, brick, seed }
  */
 export function crumble(part, opts = {}) {
   const n = part.count, rest = part.rest;
+  let w = opts.W, h = opts.H;
+  if (w === undefined) { w = 1; h = 1; for (let i = 0; i < n; i++) { w = Math.max(w, rest[i * 3] + 0.5); h = Math.max(h, rest[i * 3 + 1] + 0.5); } }
+  const B = bricks(part, opts.brick ?? brickSize(w, h));
   const total = opts.duration ?? 0.34;
   const seed = opts.seed ?? 7;
-  const from = opts.from ?? null;
-  const vel = new Float32Array(n * 3), axis = new Float32Array(n * 3), delay = new Float32Array(n), spin = new Float32Array(n);
-  let dmax = 1;
-  if (from) for (let i = 0; i < n; i++) dmax = Math.max(dmax, Math.hypot(rest[i * 3] - from[0], rest[i * 3 + 1] - from[1]));
-  for (let i = 0; i < n; i++) {
-    const x = rest[i * 3], y = rest[i * 3 + 1], z = rest[i * 3 + 2];
-    const r = hash3(x + seed, y, z), r2 = hash3(x, y + seed, z), r3 = hash3(x, y, z + seed);
-    vel[i * 3] = (r - 0.5) * 22;
-    vel[i * 3 + 1] = -6 - r2 * 16;
-    vel[i * 3 + 2] = 4 + r3 * 18;
-    axis[i * 3] = r2 - 0.5; axis[i * 3 + 1] = r3 - 0.5; axis[i * 3 + 2] = r - 0.5;
-    spin[i] = (r3 - 0.5) * 18;
-    delay[i] = from ? 0.09 * (Math.hypot(x - from[0], y - from[1]) / dmax) : r2 * 0.05;
+  const from = opts.from ?? [w / 2, 0];
+  const vel = new Float32Array(B.count * 3), axis = new Float32Array(B.count * 3), delay = new Float32Array(B.count), spin = new Float32Array(B.count);
+  const far = Math.hypot(w, h) || 1;
+  for (let b = 0; b < B.count; b++) {
+    const cx = B.cell[b * 2], cy = B.cell[b * 2 + 1];
+    const r = hash3(cx + seed, cy, 1), r2 = hash3(cx, cy + seed, 2), r3 = hash3(cx, cy, 3 + seed);
+    vel[b * 3] = (r - 0.5) * 26;
+    vel[b * 3 + 1] = -4 - r2 * 14;
+    vel[b * 3 + 2] = 5 + r3 * 14;
+    axis[b * 3] = r2 - 0.5; axis[b * 3 + 1] = r3 - 0.5; axis[b * 3 + 2] = (r - 0.5) * 0.6;
+    spin[b] = (r3 - 0.5) * 11;
+    delay[b] = 0.1 * Math.hypot(B.centre[b * 3] - from[0], B.centre[b * 3 + 1] - from[1]) / far + r2 * 0.02;
   }
-  const G = 150; // voxels per second squared, down the page
+  let first = Infinity;
+  for (let b = 0; b < B.count; b++) first = Math.min(first, delay[b]);
+  for (let b = 0; b < B.count; b++) delay[b] -= first; // the first brick lets go on the frame of the input
+  const G = 300; // voxels per second squared, down the page
+  const q = [0, 0, 0, 1];
   return {
-    kind: 'crumble', t: 0, end: total + 0.09,
+    kind: 'crumble', t: 0, end: total + 0.1,
     write(pos, o, part) {
       const t = this.t;
       for (let i = 0; i < n; i++, o += 8) {
-        const s = Math.max(0, t - delay[i]);
+        const b = B.of[i];
+        const s = Math.max(0, t - delay[b]);
         const p = clamp01(s / total);
-        pos[o] = rest[i * 3] + part.tx + vel[i * 3] * s;
-        pos[o + 1] = rest[i * 3 + 1] + part.ty + vel[i * 3 + 1] * s + 0.5 * G * s * s;
-        pos[o + 2] = rest[i * 3 + 2] + part.tz + vel[i * 3 + 2] * s;
-        pos[o + 3] = 1 - easeOut(clamp01((p - 0.35) / 0.65)) ;
-        quat(pos, o + 4, axis[i * 3], axis[i * 3 + 1], axis[i * 3 + 2], spin[i] * s);
+        quat(q, 0, axis[b * 3], axis[b * 3 + 1], axis[b * 3 + 2], spin[b] * s);
+        // the voxel keeps its place in its brick while the brick turns
+        const vx = rest[i * 3] - B.centre[b * 3], vy = rest[i * 3 + 1] - B.centre[b * 3 + 1], vz = rest[i * 3 + 2] - B.centre[b * 3 + 2];
+        const tx = q[1] * vz - q[2] * vy + q[3] * vx, ty = q[2] * vx - q[0] * vz + q[3] * vy, tz = q[0] * vy - q[1] * vx + q[3] * vz;
+        const shrink = 1 - easeOut(clamp01((p - 0.7) / 0.3));
+        pos[o] = B.centre[b * 3] + part.tx + vel[b * 3] * s + (vx + 2 * (q[1] * tz - q[2] * ty)) * shrink;
+        pos[o + 1] = B.centre[b * 3 + 1] + part.ty + vel[b * 3 + 1] * s + 0.5 * G * s * s + (vy + 2 * (q[2] * tx - q[0] * tz)) * shrink;
+        pos[o + 2] = Math.max(0.5, B.centre[b * 3 + 2] + part.tz + vel[b * 3 + 2] * s + (vz + 2 * (q[0] * ty - q[1] * tx)) * shrink);
+        pos[o + 3] = shrink;
+        pos[o + 4] = q[0]; pos[o + 5] = q[1]; pos[o + 6] = q[2]; pos[o + 7] = q[3];
       }
       return t >= this.end;
     },

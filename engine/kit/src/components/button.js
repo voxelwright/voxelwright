@@ -6,8 +6,8 @@ import { cue } from '../core/sound.js';
 import { icon, ICONS } from '../core/icons.js';
 import { wrapLabel } from './util.js';
 
-const CAP = 3;       // voxels the cap stands above its socket
-const TRAVEL = 2;    // how far a press pushes it down
+const CAP = 4;       // voxels the cap stands above the page
+const TRAVEL = 3;    // how far a press pushes it down
 
 export const button = {
   name: 'button',
