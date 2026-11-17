@@ -3,7 +3,7 @@
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5985;
 const path = process.argv[2] || 'showcase/index.html';
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
 for (const w of [390, 768, 1280]) for (const mode of ['plain', 'live']) {
   const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();

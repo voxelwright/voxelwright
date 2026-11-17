@@ -8,7 +8,7 @@ const port = process.env.PORT || 5987;
 const pair = process.argv[2] || 'plex';
 const lang = process.env.TYPE_LANG ? `&lang=${process.env.TYPE_LANG}` : '';
 const only = process.argv[3]; // fonts | voxels | pixels, or nothing for all three
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const SEL = '.pairing .vx-lettering, .pairing .lede, .pairing h3, .pairing .say p, .pairing .vx-button, .pairing .vx-toggle, .pairing .vx-tabs, .pairing .vx-list, .pairing .vx-field, .pairing .vx-card, .pairing .vx-toast';
 const boxes = async (w, q, block) => {
   const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();

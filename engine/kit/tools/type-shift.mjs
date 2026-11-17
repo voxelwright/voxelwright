@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5987;
 const pair = process.argv[2] || 'vox';
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 for (const w of [390, 768, 1280]) {
   const boxes = {};
   for (const mode of ['plain', 'live']) {

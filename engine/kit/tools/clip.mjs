@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 const port = process.env.PORT || 5985;
 await mkdir('shots/clip', { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2, recordVideo: { dir: 'shots/clip', size: { width: 1280, height: 720 } } });
 const page = await ctx.newPage();
 await page.goto(`http://127.0.0.1:${port}/showcase/`);

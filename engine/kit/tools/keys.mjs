@@ -1,6 +1,6 @@
 // A keyboard pass over the showcase: tab order, focus rings, arrows in tabs and the menu, Escape.
 import { chromium } from 'playwright';
-const b = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const b = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const p = await (await b.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 })).newPage();
 await p.goto(`http://127.0.0.1:${process.env.PORT || 5985}/showcase/`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1');

@@ -216,10 +216,16 @@ Decide by how often it happens (from the site-craft rules):
 
 ## 12. How it is drawn
 
-- One WebGL2 context serves the whole page. Each part is drawn into a corner of that context's
-  canvas and copied to the part's own small 2D canvas, which sits behind the part's content. So
-  parts need no context of their own, layer correctly inside dialogs and popovers, and scroll with
-  the page for free.
+- Each part has its own small canvas, which sits behind the part's content. So parts layer
+  correctly inside dialogs and popovers and scroll with the page for free.
+- **Two renderers draw into those canvases, and they draw the same picture.** The Village
+  engine's (WebGPU, `src/engine.js`) draws straight into each part's canvas. The kit's own
+  (WebGL2, `src/core/gl.js`) draws into one hidden canvas and copies. The engine's is the one the
+  kit is going to: `use(renderer())` hands it over, and `gl.js` goes once the engine's has been
+  seen on an iPhone. `src/engine/` is a copy of the engine's built modules, made by
+  `node tools/sync-engine.mjs <Village engine folder>`; `ENGINE.json` there says which commit.
+  `PORT=5986 node tools/serve.mjs --engine` serves every page on it, and every tool runs
+  against that port unchanged.
 - At rest nothing runs: no frame loop, no timers. A part is redrawn only when its state changes.
   Parts off screen are not drawn until they come near.
 - Voxels are instanced cubes with per-voxel colour, corner occlusion and a seam; one extra pass

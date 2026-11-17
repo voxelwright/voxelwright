@@ -2,7 +2,7 @@
 // node tools/behave.mjs   (needs the showcase server)
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5985;
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
 const check = (mode, name, ok, got) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${mode.padEnd(5)} ${name}${ok ? '' : '  got ' + JSON.stringify(got)}`); };
 for (const mode of ['plain', 'live']) {

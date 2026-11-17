@@ -3,7 +3,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5987;
 await mkdir('shots/type/walk', { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 for (const w of [1280, 390]) {
   const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
   const errors = [];

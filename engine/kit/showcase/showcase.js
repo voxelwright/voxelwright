@@ -12,7 +12,9 @@ const store = {
 // The plain bench in "The plain version" is never adopted.
 const adoptAll = () => {
   adopt();
-  for (const el of document.querySelectorAll('[data-plain] [data-vx-live]')) release(el);
+  // by container, not by what is live now: with a renderer still on its way nothing is live yet,
+  // and the kit keeps the release to replay after the adopt
+  for (const el of document.querySelectorAll('[data-plain]')) release(el);
 };
 
 // ----- light

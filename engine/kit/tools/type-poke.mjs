@@ -4,7 +4,7 @@ import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5987;
 const out = process.argv[2] || 'shots/type/final';
 await mkdir(out, { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 620 }, deviceScaleFactor: 2 })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));

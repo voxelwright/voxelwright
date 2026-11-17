@@ -20,11 +20,13 @@ A design language where every control is a small solid built from voxels. The ru
 There is no build step and no dependency. The stylesheet alone is the plain version; `adopt()`
 adds the voxels where WebGL2 exists. Give the page `overflow-x: clip` (see Bleed in the spec).
 
-To draw with another backend, hand it over before the first `adopt()`:
+To draw with the Village engine's WebGPU renderer (a copy lives in `src/engine/`), or any other
+backend, hand it over before the first `adopt()`:
 
 ```js
 import { use, adopt, ready } from './voxelmorphism/src/index.js';
-use(makeRenderer());   // a renderer with draw(frame, ctx2d), or a promise for one
+import { renderer } from './voxelmorphism/src/engine.js';
+use(renderer());       // a promise for a renderer; null where there is no WebGPU, and the page stays plain
 adopt();               // remembered until the renderer arrives; the page is plain meanwhile
 const stage = await ready();   // the stage, or null if the page stays plain
 ```

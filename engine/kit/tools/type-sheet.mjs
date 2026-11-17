@@ -13,7 +13,7 @@ const themes = flag('themes', 'light,dark').split(',');
 const scales = flag('scales', '2').split(',').map(Number);
 const dir = `shots/type/${round}`;
 await mkdir(dir, { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 for (const scale of scales) for (const theme of themes) {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 900 }, deviceScaleFactor: scale, colorScheme: theme === 'dark' ? 'dark' : 'light' });
   for (const face of faces) for (const size of sizes) {

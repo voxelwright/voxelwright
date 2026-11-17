@@ -9,7 +9,7 @@ const flag = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : ar
 const has = (n) => args.includes('--' + n);
 const [url, out] = args;
 await mkdir(dirname(out), { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const ctx = await browser.newContext({ viewport: { width: Number(flag('w', 1280)), height: Number(flag('h', 800)) }, deviceScaleFactor: Number(flag('scale', 2)), colorScheme: has('dark') ? 'dark' : 'light' });
 const page = await ctx.newPage();
 const errors = [];

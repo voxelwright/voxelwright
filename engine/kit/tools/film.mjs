@@ -40,7 +40,7 @@ const SCENES = {
 
 const names = wanted.length ? wanted : Object.keys(SCENES);
 await mkdir('shots/film', { recursive: true });
-const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let faults = 0;
 
 for (const name of names) {
