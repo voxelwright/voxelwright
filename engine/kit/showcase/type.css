@@ -19,8 +19,12 @@
 @font-face { font-family: "Departure Mono"; src: url("/packages/voxelmorphism/fonts/departure-mono/departure-mono-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Vox Text"; src: url("/packages/voxelmorphism/fonts/vox-text/vox-text-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Vox Text"; src: url("/packages/voxelmorphism/fonts/vox-text/vox-text-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
-@font-face { font-family: "Vox Block"; src: url("/packages/voxelmorphism/fonts/vox-block/vox-block-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
-@font-face { font-family: "Vox Sign"; src: url("/packages/voxelmorphism/fonts/vox-sign/vox-sign-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Vox Block"; src: url("data:font/woff2;base64,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") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Vox Sign"; src: url("data:font/woff2;base64,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") format("woff2"); font-weight: 400; font-display: block; }
+
+/* Vox Block and Vox Sign are inlined above (about 2 KB each): a heading must never be drawn in a
+   fallback of another height, because its box is the box the voxels will take.
+   Rebuild them with tools/vox-text-build.py and tools/type-inline.py after changing a glyph. */
 
 /* No faux bold, no faux italic: a missing weight must show as missing. */
 html { font-synthesis: none; }
@@ -83,10 +87,13 @@ body.solo #text > h2, body.solo #text > .intro { display: none; }
 /* a board: the lettering, a margin, and a frame one voxel in */
 .vx-lettering:not([data-vx-board="none"]):not([data-vx-live]) { display: inline-block; inline-size: fit-content; white-space: nowrap; padding: calc(var(--vx) * 5 * var(--_s) + var(--vx)); background: var(--vx-enamel); color: var(--vx-signal);
   box-shadow: inset 0 0 0 var(--vx) var(--vx-enamel), inset 0 0 0 calc(var(--vx) * 2) var(--vx-signal), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow); }
-/* the board cannot ask its script which glyph set fits, so the plain version decides by width */
+/* The board cannot ask its script which glyph set fits, so the plain version decides by the width
+   of its column, with the script's own sums: lettering + margins + frame, in voxels, times 4 px.
+   These two widths are for the word on this board; a page sets them for its own word. */
+.pairing .page { container-type: inline-size; }
 .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; padding: calc(var(--vx) * 4); }
-@media (min-width: 36rem) { .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); } }
-@media (min-width: 66rem) { .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); } }
+@container (min-width: 496px) { .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); } }
+@container (min-width: 984px) { .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); } }
 
 body.solo-lettering { padding: 24px; }
 body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering #pairings, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
@@ -123,7 +130,6 @@ body.solo-lettering section { margin: 0; }
 }
 .pairing[data-cells] :is(.vx-toggle, .vx-list, .vx-field, .vx-well :is(input, textarea), .vx-toast, .vx-dialog) { font-family: var(--text-font); }
 .pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; }
-.pairing[data-cells] :is(.vx-button .vx-label, .vx-tabs > [role="tab"] .vx-label) { padding-block-start: 0; }
 
 body.solo-pair { padding: 16px; }
 body.solo-pair .type-top, body.solo-pair #text, body.solo-pair #lettering, body.solo-pair .foot, body.solo-pair #pairings > h2, body.solo-pair #pairings > .intro, body.solo-pair .pairing .tag { display: none; }
@@ -132,24 +138,28 @@ body.solo-pair section { margin: 0; }
 
 /* ---------- the page on the voxel grid ----------
    A pixel face is only sharp when its box starts on a whole pixel, and so is a voxel. So inside a
-   pairing every gap, padding and line height is a whole number of voxels: round() does it for the
-   fluid ones. Nothing here is a fraction of a block. */
-.pairing .page { gap: calc(var(--vx) * 6); line-height: calc(var(--vx) * 7); }
+   pairing every gap, padding and line height is a whole number of voxels: round() does it for
+   anything that follows the text size or the window. Nothing here is a fraction of a block. */
+.pairing .page { gap: calc(var(--vx) * 6); line-height: round(1.6em, var(--vx)); }
 .pairing .page .lede { line-height: round(1.45em, var(--vx)); margin-block-end: calc(var(--vx) * 2); }
 .pairing .page > h2 { margin: calc(var(--vx) * 6) 0 calc(var(--vx) * 2); }
 .pairing .rule { grid-template-columns: minmax(0, calc(var(--vx) * 115)) minmax(0, 1fr); gap: calc(var(--vx) * 8) round(clamp(2rem, 6vw, 5rem), var(--vx)); }
 .pairing .say { gap: calc(var(--vx) * 4); }
 .pairing .show { gap: calc(var(--vx) * 7); }
 .pairing .show .row { gap: calc(var(--vx) * 5) calc(var(--vx) * 7); }
-.pairing h3 { font-size: 1.3rem; line-height: calc(var(--vx) * 7); margin: 0; }
-.pairing .meta { line-height: calc(var(--vx) * 5); }
-.pairing .vx-card { line-height: calc(var(--vx) * 6); }
+.pairing h3 { font-size: 1.3rem; line-height: round(1.25em, var(--vx)); margin: 0; }
+.pairing .meta { line-height: round(1.4em, var(--vx)); }
+.pairing .vx-card { line-height: round(1.45em, var(--vx)); }
 .pairing .vx-card > p + p { margin-block-start: calc(var(--vx) * 1); }
 .pairing .vx-field { gap: calc(var(--vx) * 2); }
-.pairing .vx-field-label { line-height: calc(var(--vx) * 5); }
-.pairing .vx-field-hint { line-height: calc(var(--vx) * 5); margin-block-start: 0; }
-.pairing .vx-list > li, .pairing .vx-row, .pairing .vx-toast { line-height: calc(var(--vx) * 6); }
-.pairing .vx-toggle { line-height: calc(var(--vx) * 6); }
+.pairing .vx-field-label { line-height: round(1.35em, var(--vx)); }
+.pairing .vx-field-hint { line-height: round(1.4em, var(--vx)); margin-block-start: 0; }
+.pairing .vx-well :is(input, textarea) { line-height: round(1.5em, var(--vx)); }
+.pairing .vx-list > li, .pairing .vx-row, .pairing .vx-toast { line-height: round(1.4em, var(--vx)); }
+.pairing .vx-toggle { line-height: round(1.4em, var(--vx)); }
+/* The kit nudges every label down by 0.12em because Overpass draws its capitals high in its box.
+   A face that sits level (Plex is 0.4 px low at 16 px, Overpass 1.6 px high) does not want it. */
+.pairing[data-level] :is(.vx-button .vx-label, .vx-tabs > [role="tab"] .vx-label) { padding-block-start: 0; }
 @media (max-width: 52rem) { .pairing .rule { grid-template-columns: minmax(0, 1fr); } }
 
 /* this page's own headings are set in the recommended lettering */

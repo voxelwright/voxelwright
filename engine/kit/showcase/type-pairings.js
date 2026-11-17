@@ -4,13 +4,17 @@ const Q = new URLSearchParams(location.search);
 
 export const PAIRINGS = [
   { id: 'plex', name: 'Recommended. Block and Plex',
-    say: 'The same lettering in voxels. All text in IBM Plex Sans, including labels; code in IBM Plex Mono. Nothing of our own outside the voxels, and it is ready today, Ukrainian included.',
+    say: 'Vox Block on the board and for headings. All text in IBM Plex Sans, including labels; code in IBM Plex Mono. Nothing of our own outside the voxels. Only Latin is installed here: Ukrainian Cyrillic for Plex adds 29 KB for text and 8 KB for code, and Vox Block has no Cyrillic yet.',
     board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',
     files: ['vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
   { id: 'vox', name: 'Alternative. Block, Plex and legends',
     say: 'Vox Block on the board and for headings. What is written on a key (buttons, tabs, menu items) in Vox Text, the voxel glyphs laid flat, five voxels to the em so one text cell is half a voxel. Everything you read or type in IBM Plex Sans, code in IBM Plex Mono.',
     board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'Vox Text', text: 'IBM Plex Sans', mono: 'IBM Plex Mono', cells: true,
     files: ['vox-text/vox-text-400-normal.woff2', 'vox-text/vox-text-700-normal.woff2', 'vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
+  { id: 'over', name: 'Block and Overpass',
+    say: 'The control for the text face: the same Vox Block lettering and the same layout, with the text left as it is today, in Overpass and Overpass Mono.',
+    board: 'block sign', boardMax: 2, h2: 'block', h2Scale: 1, label: 'Overpass', text: 'Overpass', mono: 'Overpass Mono', nudge: true,
+    files: ['vox-block/vox-block-400-normal.woff2', 'vox-sign/vox-sign-400-normal.woff2', 'overpass/overpass-latin-wght-normal.woff2', 'overpass-mono/overpass-mono-latin-wght-normal.woff2'] },
   { id: 'plain', name: 'Refine what is there',
     say: 'Vox Sign 2 everywhere in voxels, capitals only. All text in IBM Plex Sans, code in IBM Plex Mono. Nothing of our own outside the voxels.',
     board: 'sign', boardMax: 3, h2: 'sign', h2Scale: 2, label: 'IBM Plex Sans', text: 'IBM Plex Sans', mono: 'IBM Plex Mono',
@@ -21,12 +25,13 @@ export const PAIRINGS = [
     files: ['chakra-petch/chakra-petch-latin-400-normal.woff2', 'chakra-petch/chakra-petch-latin-500-normal.woff2', 'chakra-petch/chakra-petch-latin-600-normal.woff2', 'chakra-petch/chakra-petch-latin-700-normal.woff2', 'ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2'] },
   { id: 'today', name: 'Today',
     say: 'For reference: Vox Sign as it is, Overpass and Overpass Mono.',
-    today: true, label: 'Overpass', text: 'Overpass', mono: 'Overpass Mono',
+    today: true, label: 'Overpass', text: 'Overpass', mono: 'Overpass Mono', nudge: true,
     files: ['overpass/overpass-latin-wght-normal.woff2', 'overpass-mono/overpass-mono-latin-wght-normal.woff2'] },
 ];
 
 const F = '/packages/voxelmorphism/fonts/';
-const WRONG = '"Zapfino", "Papyrus", fantasy';
+// ?fallback=real uses the stack a real page would ship, so font loading can be measured
+const WRONG = Q.get('fallback') === 'real' ? 'Arial, "Helvetica Neue", sans-serif' : '"Zapfino", "Papyrus", fantasy';
 const kb = (n) => (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
 
 export default async function ({ host, solo }) {
@@ -36,6 +41,7 @@ export default async function ({ host, solo }) {
     const el = tpl.content.firstElementChild.cloneNode(true);
     el.dataset.pair = p.id;
     if (p.cells) el.dataset.cells = '';
+    if (!p.nudge) el.dataset.level = ''; // the kit nudges labels down 0.12em to suit Overpass; other faces sit level without it
     el.style.setProperty('--vx-font', `"${p.label}", ${WRONG}`);
     el.style.setProperty('--text-font', `"${p.text}", ${WRONG}`);
     el.style.setProperty('--vx-mono', `"${p.mono}", ${WRONG}`);
