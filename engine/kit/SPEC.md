@@ -150,6 +150,11 @@ Decide by how often it happens (from the site-craft rules):
   into single voxels, the one place single voxels fly. They fly for 0.5 to 1.15 s, then are pulled
   home by a critically damped spring. It can be poked again
   at any time; nothing is a keyframe.
+- **Brush.** While the pointer stays down the lettering keeps breaking under it, so it can be
+  brushed: whatever rests between where the pointer was and where it is comes loose once a
+  frame, and whatever is already loose there stays loose until the pointer has moved on. A kick
+  sets a speed and never adds to one, so holding still throws nothing further. The letters mend
+  behind the brush. `vx-poke` fires once for each press that breaks, however long it is held.
 - **Growth.** A plant's voxels each have a birth between 0 and 1. Showing the plant at `g` shows
   every voxel born by then; each takes 140 ms to appear once its moment has come, however fast the
   value moves. The value itself follows a calm spring (`k = 170, c = 26`).
@@ -186,6 +191,18 @@ Decide by how often it happens (from the site-craft rules):
 - Hit targets are at least 11 voxels (44 px) tall.
 - Lettering in voxels (the sign, and headings set with `data-vx-board="none"`) keeps its text in
   the DOM for readers, wraps to fit its column and balances its lines.
+- **Lettering is text first.** With voxels its words sit in a transparent box of the same
+  glyphs, laid over the voxel letters line for line, so they can be selected, copied and found
+  on the page like any heading. Every gesture a device already uses to select text still
+  selects; play takes what is left.
+  - Mouse: a drag, a double click, a triple click and a Shift-click select. A click breaks.
+    Press and hold (200 ms without moving) and it brushes until it is let go.
+  - Touch: a resting thumb selects and a thumb moving up or down scrolls, and neither breaks
+    anything. A tap breaks. A thumb moved sideways brushes.
+  - A board is an object more than a line of text, so on a board every mouse press is play: it
+    breaks on the press and brushes at once, and its text is selected by dragging in from
+    outside it. `data-vx-press="text"` on a board, or `"play"` on a heading, swaps this.
+  - `node tools/select.mjs` checks all of it with real pointer input, in two browsers.
 - A dialog may be modal (`showModal()`) or not (`show()`, when the page behind must stay usable
   while a setting changes). Both build and crumble the same way; only a modal one has a backdrop.
 - A value set from code (`input.value = 3`, `input.checked = true`) is drawn at once, with no
@@ -193,8 +210,8 @@ Decide by how often it happens (from the site-craft rules):
 - Toasts are `role="status"`, or `role="alert"` for a failure. Their clock stops on hover and
   while the tab is hidden.
 - **Less motion** (`prefers-reduced-motion: reduce`): the voxels stay; travel goes. Builds and
-  breaks become a 160 ms change of scale in place, the sign does not break, springs still give
-  press feedback because that explains a state.
+  breaks become a 160 ms change of scale in place, the sign does not break (lettering is then
+  plain text to every gesture), springs still give press feedback because that explains a state.
 
 ## 11. The plain version
 

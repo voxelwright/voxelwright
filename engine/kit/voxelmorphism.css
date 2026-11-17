@@ -219,7 +219,7 @@
   font-family: var(--vx-font);
   color: var(--vx-ink);
 }
-:where(.vx-switch, .vx-slider, .vx-well, .vx-card, .vx-list, .vx-tabs, .vx-meter, .vx-toast, .vx-sign, .vx-block) {
+:where(.vx-switch, .vx-slider, .vx-well, .vx-card, .vx-list, .vx-tabs, .vx-meter, .vx-toast, .vx-sign, .vx-lettering, .vx-block) {
   position: relative;
   isolation: isolate;
 }
@@ -419,8 +419,29 @@ dialog.vx-dialog:focus-visible { outline: none; }
 
 /* ---------- Lettering: a sign, or a heading ---------- */
 
-:is(.vx-sign, .vx-lettering) { display: block; margin: 0; max-inline-size: 100%; cursor: pointer; user-select: none; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-:is(.vx-sign, .vx-lettering)[data-vx-live] { font-size: 0; line-height: 0; color: transparent; }
+:is(.vx-sign, .vx-lettering) { display: block; margin: 0; max-inline-size: 100%; -webkit-tap-highlight-color: transparent; }
+/* With voxels: a thumb moving up or down still scrolls the page; sideways is left to the part. */
+:is(.vx-sign, .vx-lettering)[data-vx-live] { font-size: 0; line-height: 0; color: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
+/* The words are still text. They sit in a transparent box of the same glyphs, laid over the
+   voxel letters, so they can be selected, copied and found. The part sets what it chose: the
+   glyph set, the voxels per cell (--_s), the cells between glyphs (--_gap, which a flat line
+   carries at its end and the voxels do not), the line height and the board's margin. */
+.vx-lettering-text {
+  position: absolute; inset-block-start: 0; inset-inline-start: 0; box-sizing: border-box;
+  inline-size: calc(100% + var(--vx) * var(--_gap, 0) * var(--_s, 1));
+  padding: calc(var(--vx) * var(--_pt, 0)) calc(var(--vx) * var(--_pi, 0)) 0;
+  font: 400 calc(var(--vx) * 10 * var(--_s, 1))/var(--_lh, 1.5) "Vox Block", var(--vx-font); font-synthesis: none; letter-spacing: 0;
+  text-box: trim-both cap alphabetic; white-space: normal; text-wrap: wrap; color: transparent;
+  user-select: text; -webkit-user-select: text;
+}
+/* While lettering is being brushed nothing on the page can be selected: the same drag would
+   otherwise go on selecting, in the lettering's own text too. */
+:root[data-vx-brushing], :root[data-vx-brushing] * { user-select: none !important; -webkit-user-select: none !important; }
+.vx-lettering-text[data-vx-caps] { text-transform: uppercase; }
+.vx-lettering-text[data-vx-set="sign"] { font-family: "Vox Sign", var(--vx-font); }
+:is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text { text-align: center; }
+.vx-lettering-text::selection, .vx-lettering-text ::selection { color: transparent; background: color-mix(in oklab, var(--vx-link) 38%, transparent); }
+:is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text::selection, :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text ::selection { background: color-mix(in oklab, white 40%, transparent); }
 /* The plain version is the same glyphs as a flat font, one voxel per cell: ten cells to the em,
    so the size is ten voxels times the scale, and the box is trimmed to the cap line and the
    baseline, which is exactly the box the voxels are given. Nothing moves when they arrive. */

@@ -35,6 +35,12 @@ const SCENES = {
   'break': { el: '#build-card', frames: 32, pad: 60, expect: [200, 460], act: async (p) => { await p.click('#break'); } },
   'build': { el: '#build-card', frames: 40, pad: 60, expect: [300, 560], before: async (p) => { await p.click('#break'); await p.clock.runFor(900); }, act: async (p) => { await p.click('#build'); } },
   'poke': { el: '.top .vx-sign', frames: 110, every: 5, pad: 60, expect: [600, 2200], act: async (p, b) => { await p.mouse.click(b.x + b.width * 0.42, b.y + b.height / 2); } },
+  // a held pointer drawn across the sign: it breaks on the press, keeps breaking under the pointer, and mends behind it
+  'brush': { el: '.top .vx-sign', frames: 170, every: 6, pad: 60, expect: [1700, 2900], act: async (p, b) => { await p.mouse.move(b.x + b.width * 0.12, b.y + b.height / 2); await p.mouse.down(); },
+    each: async (p, f, b) => { if (f < 80) await p.mouse.move(b.x + b.width * (0.12 + 0.78 * f / 80), b.y + b.height / 2); else if (f === 80) await p.mouse.up(); } },
+  // the same on a heading, where a press must be held a moment before it brushes
+  'brush-heading': { el: '#kit-h', frames: 150, every: 6, pad: 60, late: true, expect: [1500, 2600], act: async (p) => { const b = await p.locator('#kit-h').boundingBox(); await p.mouse.move(b.x + 8, b.y + b.height / 2); await p.mouse.down(); },
+    each: async (p, f) => { const b = await p.locator('#kit-h').boundingBox(); if (f >= 14 && f < 64) await p.mouse.move(b.x + 8 + (b.width - 12) * (f - 14) / 50, b.y + b.height / 2); else if (f === 64) await p.mouse.up(); } },
   'grow': { el: '#shelf .vx-meter:nth-of-type(3)', frames: 90, every: 4, pad: 20, expect: [400, 1400], act: async (p) => { await p.evaluate(() => { const g = document.querySelector('#grow'); g.value = 100; g.dispatchEvent(new Event('input', { bubbles: true })); }); } },
 };
 
@@ -98,6 +104,7 @@ for (const name of names) {
   const every = sc.every || 1;
   for (let f = 0; f < sc.frames; f++) {
     if (sc.mid && f === sc.mid.at) { await sc.mid.act(page); await page.waitForTimeout(40); }
+    if (sc.each) await sc.each(page, f, box);
     await page.clock.runFor(FRAME);
     await page.evaluate((dt) => window.vx.stage.advance(dt), 1 / 60);
     const m = await measure();
