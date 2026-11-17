@@ -51,7 +51,14 @@ export interface Offscreen extends Target {
   destroy(): void
 }
 
-export const depthFor = (device: GPUDevice, size: readonly [number, number]) => device.createTexture({ size: [size[0], size[1]], format: 'depth24plus', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
+/** What a Target's depth tells apart, cells: nearer than NEAR is 0, further than FAR is 1. (Each pass of the world still writes the pair itself in its shader: #430 says which.) */
+export const NEAR = 1, FAR = 100000
+/** What a Target's depth is kept as. */
+export const DEPTH: GPUTextureFormat = 'depth24plus'
+/** Over this much of full, the last pass makes a pixel glow (glow.ts). */
+export const GLOWS_OVER = 0.8
+
+export const depthFor = (device: GPUDevice, size: readonly [number, number]) => device.createTexture({ size: [size[0], size[1]], format: DEPTH, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
 
 export function offscreen(gpu: Gpu, size: readonly [number, number]): Offscreen {
   const texture = gpu.device.createTexture({ size: [size[0], size[1]], format: gpu.format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING })

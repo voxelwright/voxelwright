@@ -29,6 +29,8 @@ const put = (path, body) => { mkdirSync(dirname(join(out, path)), { recursive: t
 const pages = ['player/index.html', 'player/host.html', 'landing/index.html'], modules = new Set(), todo = []
 const reach = (from, text) => { for (const [, , , path] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(from), `${path}.ts`)); if (!modules.has(to)) { modules.add(to); todo.push(to) } } }
 for (const page of pages) { const text = readFileSync(join(root, page), 'utf8'); reach(page, text); put(page, js(text)) }
+// The Voxelmorphism kit's renderer (#430) is built beside them: a page that uses the kit imports blocks/renderer.js.
+modules.add('blocks/renderer.ts'); todo.push('blocks/renderer.ts')
 while (todo.length) {
   const path = todo.pop(), text = stripTypeScriptTypes(readFileSync(join(root, path), 'utf8'))
   reach(path, text)

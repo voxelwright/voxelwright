@@ -2,7 +2,7 @@
 // it (fire, the sun's edge, lamps, a white wall in the sun) and its corners a little darker.
 // The glow is the bright part of the picture at a quarter of its size, spread twice, added back.
 // Three small passes and the stretch: under half a millisecond at the sizes the page holds.
-import { shader, type Gpu, type Offscreen } from '../probe/gpu.ts'
+import { shader, type Gpu, type Offscreen, GLOWS_OVER } from '../probe/gpu.ts'
 
 const CODE = /* wgsl */ `
 @group(0) @binding(0) var picture: texture_2d<f32>;
@@ -26,7 +26,7 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   for (var k = 0; k < 4; k++) {
     let c = textureSampleLevel(picture, smooth_, in.uv + (vec2f(f32(k & 1), f32(k >> 1)) - 0.5) * u.step * 2.0, 0.0);
     let most = max(c.r, max(c.g, c.b));
-    sum += c.rgb * (smoothstep(0.8, 1.0, most) + (1.0 - c.a) * u.strength * 10.0);
+    sum += c.rgb * (smoothstep(${GLOWS_OVER}, 1.0, most) + (1.0 - c.a) * u.strength * 10.0);
   }
   return vec4f(sum * 0.25, 1.0);
 }

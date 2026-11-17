@@ -78,6 +78,7 @@ const checks = [
   ['step', 'node', ['test/step.mjs'], true],
   ['about', 'node', ['test/about.mjs'], false],
   ['apart', 'node', ['test/apart.mjs'], false],
+  ['blocks', 'node', ['test/blocks.mjs'], true],
   ['upright', 'node', ['test/upright.mjs'], false],
   ['able', 'node', ['test/able.mjs'], false],
   ['mind', 'node', ['test/mind.mjs'], true],

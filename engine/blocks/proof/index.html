@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sixty parts, one device</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/kit/packages/voxelmorphism/voxelmorphism.css">
+<style>
+  *, *::before, *::after { box-sizing: border-box; }
+  html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); overflow-x: clip; }
+  body { margin: 0; padding: 20px 24px 60px; }
+  h1 { font-size: 1.1rem; margin: 0 0 4px; }
+  #what { margin: 0 0 14px; color: var(--vx-ink-quiet); max-width: 70em; }
+  #bench { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; max-width: 1380px; }
+  #bench .wide { flex: 0 0 300px; }
+  #odd { display: flex; gap: 28px; align-items: flex-start; margin-top: 22px; }
+  #scroller { height: 96px; width: 300px; overflow: auto; border: 1px dashed var(--vx-ink-quiet); padding: 10px 16px; }
+  #scroller .tall { height: 220px; }
+  #turned { transform: rotate(-3deg) scale(1.08); transform-origin: left top; padding: 10px 16px; }
+  figure { margin: 0; } figcaption { font-size: 0.8rem; color: var(--vx-ink-quiet); margin-top: 6px; }
+  pre { font: 12px/1.45 ui-monospace, Menlo, monospace; white-space: pre-wrap; margin-top: 22px; max-width: 110em; }
+</style>
+</head>
+<body>
+<h1>Sixty parts, one device</h1>
+<p id="what">The kit's own parts, drawn by the route named in the address. The page measures itself and says what it found below.</p>
+<div id="bench"></div>
+<div id="odd">
+  <figure><div id="scroller"><button class="vx-button" id="scrolled">In a scroller</button><div class="tall"></div><button class="vx-button" data-vx-material="chalk">Below the fold</button></div><figcaption>Inside a box that scrolls</figcaption></figure>
+  <figure><div id="turned"><button class="vx-button" id="tilted">Turned and scaled</button></div><figcaption>Under a transform</figcaption></figure>
+  <figure><button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="menu" aria-haspopup="menu" aria-expanded="false" id="menu-button">A menu</button>
+    <div class="vx-menu" id="menu" popover role="menu"><button role="menuitem">Water it</button><button role="menuitem">Move to another shelf</button><button role="menuitem" data-vx-kind="danger">Pull it up</button></div><figcaption>A popover, in the top layer</figcaption></figure>
+</div>
+<dialog class="vx-dialog" id="dlg" aria-labelledby="dlg-h">
+  <header id="dlg-h">Let it bloom?</header>
+  <div class="vx-dialog-body"><p>A coding session will start on your Mac. It reads every watering, makes the change, tests it and shows you a preview.</p></div>
+  <footer><button class="vx-button" data-vx-material="chalk" data-vx-close="no">Not yet</button><button class="vx-button" data-vx-close="yes">Let it bloom</button></footer>
+</dialog>
+<pre id="said">measuring…</pre>
+<script type="module" src="proof.js"></script>
+</body>
+</html>

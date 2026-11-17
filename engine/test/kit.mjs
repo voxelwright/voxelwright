@@ -5,12 +5,15 @@ import { spawn } from 'node:child_process'
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chromium } from 'playwright'
+import { chromium, webkit } from 'playwright'
 
 export const here = new URL('..', import.meta.url).pathname
 export const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 export const has = (name) => process.argv.includes(`--${name}`)
 export const CHROME = { channel: 'chrome', headless: !has('headed'), args: ['--enable-unsafe-webgpu', '--use-angle=metal'] }
+
+/** The browsers a check may draw with, by name. Take a turn first (`turn`, `quiet`). */
+export const browsers = { chrome: () => chromium.launch(CHROME), webkit: () => webkit.launch({ headless: CHROME.headless }) }
 
 // One GPU, and every thread's checks draw on it. Whatever opens a browser to draw takes a turn first: one of a few
 // places, for this whole machine, held until the process ends. Without it four lanes' checks at once took 90 s to

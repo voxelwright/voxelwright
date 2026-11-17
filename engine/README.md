@@ -1624,3 +1624,131 @@ node landing/shots.mjs     # pictures of the page and the street, for looking at
   right go from sign to sign, Enter goes in, Escape comes home, F finds the face, R mends at once. Six seconds after
   the last thing stops moving the corner is as it was (`stage.restore`: the world's `swap` and the mover's `forget`).
 - It makes no model call and asks no server anything.
+
+## Blocks: the Voxelmorphism kit drawn by the engine (#430)
+
+The Voxelmorphism kit (`~/Developer/plant-a-seed`, `packages/voxelmorphism`) builds every control from small cubes
+and calls one function for a part whenever it changes: `renderer.draw(frame, canvas)`. `blocks/` is the engine's
+side of that:
+
+- `pass.ts`, the block pass: it draws such parts with a cabinet projection, the kit's light, shadows from a map of
+  depths, seams, halos at night, the page hiding what is under it, and the shadow on the transparent page. A part
+  is placed by a matrix, so the same pass draws into a page's picture or into the world's (`world: true`).
+- `stage.ts`, the page stage: one device and the block pass and nothing of the world. No town, sky, ground or
+  worker, and no frame of its own: something is drawn when a part is put, and at rest nothing runs. Parts put in
+  one turn are drawn together onto as few sheets as hold them and each copied to its own canvas on the GPU. Four seconds after the
+  last part it lets go of the textures it draws through. A lost device is opened again and every part asked for
+  again (`onrestore`).
+- `renderer.ts`: the kit's renderer on the stage. `use(renderer())` in the kit; it resolves to null where there is
+  no WebGPU or no adapter, and the page then stays plain CSS.
+- `proof/`: the measurements below. The two routes not taken are not kept: `copy` as last measured is
+  `proof/routes.ts` at 4343413a and `page` at c9d8be93, both commits of PR 431's branch (`feature/430-page-stage`,
+  kept).
+
+```sh
+npm run player && node blocks/serve.mjs --port 5991 --as kit    # the kit's own pages drawn by the engine: http://127.0.0.1:5991/showcase/ (?gl: by its WebGL2)
+node blocks/proof/showcase.mjs           # every part of the kit's showcase against WebGL2, by day and night
+(cd ~/.village/engine/blocks/film && PORT=5991 node ~/Developer/plant-a-seed/tools/film.mjs)   # the kit's own film, on the engine
+node blocks/serve.mjs                    # the proof on http://127.0.0.1:5990/blocks/proof/ (the kit under /kit/, read only)
+node blocks/proof/run.mjs --only chrome,webkit --routes gl,own [--shots] [--dark] [--rest] [--motion] [--lose]
+open -g -a Safari 'http://127.0.0.1:5990/blocks/proof/?run=own,gl&auto&frames=60'   # real Safari says what it found to /report
+```
+
+**How a part's picture reaches the page was tried three ways** (November 17, 2026), on 59 of the kit's parts in view
+at once (51,000 cubes, 5.9 megapixels of pictures), against the kit's own WebGL2 renderer (`gl`). The machine was
+busy throughout, so read the ratios. Frames are the middle gap between frames, ms, with ms on the page's thread in
+brackets.
+
+| Real Safari 27.2 | one button a frame | a dialog a frame (8,246 cubes) | all 59 a frame | what breaks |
+|---|---|---|---|---|
+| `gl`: the kit today | 17 (1) | 16 (1) | 378 (380) | |
+| `copy-each`: one canvas nobody sees, `drawImage` to each part's 2D canvas | 17 (10) | 17 (16) | 159 (305) | the page's thread waits for the GPU on every part |
+| `copy`: the same, parts of one frame drawn together | 17 (3) | 17 (5) | 231 (441) | wrong pictures: half to all of a part's pixels |
+| `own`: each part's canvas shows the device's picture | 17 (0) | 17 (0) | 29 (1) | |
+| `page`: one canvas under the window | 40 | 44 | 40 | every change draws everything; cubes cannot be between two layers of HTML |
+
+Safari's window was behind others for that table. With it in front (and the stage as it now is), all 59 a frame:
+`own` 18 (1), with 21 of 90 frames late; `gl` 146 (143).
+
+| Chrome 158 | one button | a dialog | all 59 a frame | as fast as it goes, all 59 |
+|---|---|---|---|---|
+| `gl` | 16.7 | 16.7 | 117 to 183 | 135 to 307 ms |
+| `copy` | 16.7 | 16.7 | 150 to 233 | 130 to 172 ms |
+| `own` | 16.7 | 16.7 | 17 to 33 | 14 to 28 ms |
+
+`own` is the route taken, and is what `stage.ts` does.
+
+**Its picture against WebGL2's**, pixel by pixel (`run.mjs --motion`; a pixel is off when any channel differs by 3
+of 255 or more):
+
+- At rest by day, of a button, a switch, a card, a field with its well, a slider and a list: one pixel of the
+  slider, by 3. Chrome, Playwright's WebKit and real Safari agree.
+- At rest by night: up to five pixels of a part, by up to 29, beside cubes that glow.
+- While bricks turn (a card broken, a dialog or a menu built): 0.02 to 1.8% of a part's pixels, all along the edges
+  of turned bricks, the worst of them one sample of four.
+- **Why: WebGL2 holds its picture upside down, so its four samples a pixel lie mirrored.** Drawn upside down here
+  too and turned back (`look.mjs --part switch --dark` at c2ba6c07 on PR 431's branch, where `pass.draw` took `upsideDown`), the night
+  switch, slider and list and the day slider have no pixel off, and a card eight frames into breaking has 7 off
+  where it had 2,711. Those 7 are the next line.
+- The page hiding what is under it is done here by depth, and by throwing pixels away in the kit: the same at rest,
+  and finer here along the line where a turning brick meets the page.
+
+**The kit's own showcase** (`proof/showcase.mjs`, Chrome, November 17): 66 parts and 13.5 million pixels, each part
+drawn from the same frame by both. By day 28 pixels are off (21 of them in the meters that grow a plant, whose
+cubes are not whole sizes), by night 156 (lettering, blocks and switches that glow), the worst by 36 of 255. The
+kit's film (`tools/film.mjs`, eleven scenes) ends `rehearsal passed` on the engine, and the engine says how much it
+drew while it was filmed. The renderer is plain modules in `dist/blocks/` after `npm run player`: a page imports
+`blocks/renderer.js` and nothing is built for it.
+
+**At rest** it draws nothing, and its pictures stay when the page is scrolled away and back with nothing drawn
+again (Chrome, Playwright's WebKit, real Safari). A dialog and a menu in the top layer are right.
+
+**A lost device** (`device.destroy()`, `run.mjs --lose`): a new one is open and all 59 parts are drawn again, the
+same picture, 86 ms later in Chrome, 311 in WebKit, 245 in real Safari.
+
+**Memory**, by its own count: 110 MB just after all 59 parts are drawn in one turn (a texture of four samples a
+pixel is kept for each of the last four sheet sizes), 46 MB at the end of the proof, and 25 MB more of the parts'
+own canvases (a guess at WebGL2's: 40 MB and the same 25). Four seconds after the last part, 0.9 MB.
+
+### In the world
+
+`blocks/world.ts` stands a panel of the kit's parts in a stage's world: `stand(on, kit, where)`. The panel is real
+HTML in the kit's markup, laid out by the browser and seen by nobody; where the kit would paint a part its cubes
+are kept, and one of the stage's `passes` draws them with the world's eye and depth. A part on another stands on
+that one's face. The light is the kit's own, turned to where the world's sun stands and as strong as the hour
+(`march.day`), and the kit's night colours and halos come on when it is night.
+
+```sh
+npm run player && node blocks/serve.mjs --port 5991 --as kit
+open 'http://127.0.0.1:5991/engine/landing/index.html?kit=/packages/voxelmorphism/&hour=10.4'   # the landing street with a panel on it
+node blocks/proof/stand.mjs --hours 10.4,17.8,22     # pictures in ~/.village/engine/blocks/world
+```
+
+What is rough there:
+
+- Words that are HTML (a button's label, a switch's) are not in the world: only the kit's voxel lettering and icons.
+- Nothing in the world can be pressed yet: the HTML takes no pointer, and a place on the picture is not turned
+  into a place on the panel.
+- The world's own shadows do not fall on the panel, and it throws none on the world. Its colours are the kit's
+  times 0.8, so that white stays under the last pass's glow; they then go through the world's grade.
+- Every cube is sent to the GPU again every frame, and a panel must fit one lot (64 parts, one map of depths at
+  6 texels a cube; room is made for however many cubes it has): a part too many is left out, with a warning.
+- The panel floats where `landing.ts` puts it. Its frame cost is not measured: the GPU was never quiet.
+
+### What it costs
+
+`node blocks/proof/cost.mjs` (November 17):
+
+- **Bytes.** The kit's renderer on the engine is four plain modules, 48 KB as written, 13.7 KB brotli (the block
+  pass is 7.1 of them; `probe/gpu.js` comes with it for one function). The WebGL2 renderer it replaces is 4.8 KB
+  brotli. Standing parts in the world is 2.2 KB more.
+- **Start-up.** A device opens in 1 to 17 ms, and the five pipelines are made in 7 to 60 ms in Chrome. The page
+  stage is ready 13 ms after it is asked for in Chrome and 68 ms in Playwright's WebKit, and a first part is drawn
+  and done by the GPU at 19 and 78 ms. Real Safari took 10 to 25 ms for the pipelines when it had seen the shader
+  before and 0.2 to 1.3 s when it had not; the page is plain CSS until then.
+- **No WebGPU, or no adapter:** `renderer()` resolves to null and the kit's page stays plain CSS, with no part
+  made live and no canvas added (Chrome and WebKit, the kit's own showcase).
+
+Not tested: an iPhone; a tab really hidden and come back to; Firefox.
+
+Facts paid for are in `.agents/skills/raw-webgpu` ("Many small transparent pictures").

@@ -120,6 +120,19 @@ export async function land(tell: Tell): Promise<void> {
   const head = await makeFace(on.gpu.device, on.gpu.format, march, places.face, blue, yellow, photo)
   on.passes.push((encoder, to, v) => head.draw(encoder, to, v))
 
+  // ── A panel of the kit's parts, standing by the table (#430) ────────────
+  // `?kit=` gives the address of the folder the Voxelmorphism kit's package is in. Without it there is no panel.
+  // The panel stands on the paving before the row, facing the street.
+  const standing = {
+    at: [places.row.x0 + 34, places.street.ground + 58, places.row.front + 34] as const, right: [1, 0, 0] as const, down: [0, -1, 0] as const, out: [0, 0, 1] as const, cube: 0.8,
+    html: '<article class="vx-card" data-vx-edge="signal" style="inline-size: calc(var(--vx) * 64)"><h2 class="vx-sign" data-vx-board="none" data-vx-scale="1">The street</h2><p><label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span></label> <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span></label></p><p><button class="vx-button" data-vx-icon="check" aria-label="Keep"></button> <button class="vx-button" data-vx-material="chalk" data-vx-icon="plus" aria-label="More"></button> <button class="vx-button" data-vx-material="brick" data-vx-icon="cross" aria-label="Close"></button></p></article>',
+  }
+  const kit = query.get('kit')
+  if (kit) {
+    const { stand } = await import('../blocks/world.ts')
+    await stand(on, kit, standing).catch(failed)
+  }
+
   // ── Choosing ────────────────────────────────────────────────────────────
   const signOf = (id: string) => places.signs.find((s) => s.id === id)
   /** Flies to a place and stays there. */
@@ -330,7 +343,7 @@ export async function land(tell: Tell): Promise<void> {
     return [canvas.clientWidth / 2 + (dot(v.right) / far / v.tanHalf) * h, h - (dot(v.up) / far / v.tanHalf) * h]
   }
   // For whoever measures and for the console: nothing of the page's own reads it.
-  Object.assign(globalThis, { landing: { on, places, head, look, choose, mend, skip, toss, shot, view, spot, get where() { return where }, get flying() { return !!flight }, get dirty() { return dirty }, get cam() { return cam }, set cam(to: Shot) { cam = to; flight = null } } })
+  Object.assign(globalThis, { landing: { on, places, standing, head, look, choose, mend, skip, toss, shot, view, spot, get where() { return where }, get flying() { return !!flight }, get dirty() { return dirty }, get cam() { return cam }, set cam(to: Shot) { cam = to; flight = null } } })
   pace()
   on.start()
   tell('seen')

@@ -1,0 +1,40 @@
+// The page stage (#430), checked: blocks/stage.ts and blocks/pass.ts in the installed Chrome with WebGPU, nothing
+// stubbed, on parts made by hand (blocks/proof/check.html), so that no other checkout is needed. It holds the stage
+// to what the Voxelmorphism kit is promised:
+//
+//   a material's front face comes out as the colour it was given, and the picture is clear where nothing is
+//   parts drawn together in one turn are the parts drawn each alone
+//   the page hides what is under it, except through a well
+//   at rest nothing is drawn, and the textures parts are drawn through are let go
+//   a lost device is opened again, whoever put the parts is told, and the picture is the same
+//
+//   node test/blocks.mjs
+import { chrome } from './kit.mjs'
+import { serve } from '../blocks/serve.mjs'
+
+const failures = []
+const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
+const site = await serve(0), browser = await chrome()
+try {
+  const page = await (await browser.newContext({ viewport: { width: 1200, height: 800 }, deviceScaleFactor: 2 })).newPage()
+  page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
+  await page.goto(`${site.url}/blocks/proof/check.html`)
+  await page.waitForFunction(() => globalThis.check)
+  const said = await page.evaluate(() => globalThis.check())
+  if (said.none) failures.push('this browser gave no WebGPU device')
+  else {
+    check(Math.max(...[14, 34, 255, 255].map((v, i) => Math.abs(v - said.front[i]))) <= 1, `enamel's front face is #0e22ff (${said.front})`)
+    check(said.corner.every((v) => v === 0), `the picture is clear where nothing is (${said.corner})`)
+    check(said.filled && said.aloneApart <= 2, `40 parts drawn in one turn, on ${said.sheets} sheet${said.sheets === 1 ? '' : 's'}, are the same drawn each alone (apart by ${said.aloneApart} of 255 at most)`)
+    check(said.underPage === 0 && said.throughWell === 255, `a slab under the page is not seen (${said.underPage}), and is seen through a well (${said.throughWell})`)
+    check(said.drawnAtRest.every((n) => n === 0) && said.heldAtRest < said.heldDrawing / 4, `at rest nothing is drawn (${said.drawnAtRest}), and ${(said.heldDrawing / 2 ** 20).toFixed(1)} MB held while drawing is ${(said.heldAtRest / 2 ** 20).toFixed(1)} MB`)
+    check(said.lost.times === 1 && said.lost.told === 1 && said.lost.apart >= 0 && said.lost.apart <= 2, `a lost device is opened again, the parts are asked for once, and the picture is the same (${JSON.stringify(said.lost)})`)
+    check(said.faults.length === 0, `the device reported no fault (${said.faults.join('; ')})`)
+  }
+} catch (e) {
+  failures.push(String(e))
+}
+await browser.close()
+site.stop()
+if (failures.length) { console.error(`FAILED:\n  ${failures.join('\n  ')}`); process.exit(1) }
+console.log('PASSED')

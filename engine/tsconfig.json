@@ -12,5 +12,5 @@
     "verbatimModuleSyntax": true,
     "skipLibCheck": true
   },
-  "include": ["probe", "page", "player", "plugins", "test", "serve.mjs"]
+  "include": ["probe", "page", "player", "landing", "blocks", "plugins", "test", "serve.mjs"]
 }

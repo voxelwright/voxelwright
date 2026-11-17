@@ -1,6 +1,6 @@
 ---
 name: raw-webgpu
-description: Verified facts, recipes and traps for raw WebGPU and WGSL in Village's engine pages (#140), with no scene library: opening a device, timing honestly on a busy or frame-capped device, WGSL and layout traps, serving TypeScript with Node's type stripper, driving Chrome and Safari. Load before changing engine/probe, engine/page shaders or pipelines, or any timing claim.
+description: Verified facts, recipes and traps for raw WebGPU and WGSL in Village's engine pages (#140), with no scene library: opening a device, timing honestly on a busy or frame-capped device, WGSL and layout traps, serving TypeScript with Node's type stripper, driving Chrome and Safari. Load before changing engine/probe, engine/page or engine/blocks shaders or pipelines, or any timing claim.
 ---
 
 # Raw WebGPU in the engine's pages
@@ -15,6 +15,7 @@ specifications, and the probes in `engine/probe` and `engine/test`.
 - Ask for the limits you use by name (`requiredLimits`), copied from the adapter. A device
   opened with none has the specification's lowest, which understates every machine
   (`probe/gpu.ts` `openGpu`).
+- `maxTextureDimension2D` is 8192 on a device opened with no limits. A long list at 8 px a cube is taller (#430).
 - `timestamp-query` is optional: ask for it only when the adapter has it. Both browsers on
   the Mac offer it. Do not design round other optional features until a device's own report
   lists them (`node test/read.mjs --all`).
@@ -95,6 +96,44 @@ specifications, and the probes in `engine/probe` and `engine/test`.
   first touch.
 - `navigator.hardwareConcurrency` said 4.
 
+## Many small transparent pictures in a page (#430, November 17, 2026)
+
+Measured with the Voxelmorphism kit's parts (`engine/blocks`, `engine/blocks/proof`): Chrome 158, Playwright
+WebKit 27.2 and real Safari 27.2 on the M1 Pro. Playwright's WebKit showed none of the Safari faults below, so test
+real Safari (`open -g -a Safari`, the page posts what it found).
+The kit must be at plant-a-seed 37c271f or later (`ownsCanvas`).
+
+- **One device can show its picture in many canvases.** 64 canvases each with a `GPUCanvasContext` on one
+  device (`alphaMode: 'premultiplied'`, usage `RENDER_ATTACHMENT | COPY_DST`) worked in all three. Draw every
+  part that changed onto one texture in two passes, then `copyTextureToTexture` each part's area into its
+  canvas's current texture: no pixel leaves the GPU.
+- **A shown canvas keeps its picture** until `getCurrentTexture` is next called on it: nothing need be drawn at
+  rest, and it stayed through scrolling away and back.
+- **A shown canvas cannot be read back later.** `drawImage` of it into a 2D canvas gave nothing once its frame
+  had been shown (Chrome). Read it in the turn it was drawn in, or compare screenshots. In Playwright's WebKit it can be read once
+  a turn: a second `drawImage` of it in the same turn, after drawing into it again, gave nothing.
+- **`drawImage` from a WebGPU canvas into a 2D canvas** is as fast as WebGL2's in Chrome. In real Safari it
+  makes the page's thread wait for the GPU (10 ms for a button, 16 for a dialog), and with a source rectangle
+  inside a larger canvas it copied the wrong pixels.
+- **`discard` on a target of 4 samples is ruinous in Safari.** A fragment shader that may `discard`, and reads
+  the shadow map 25 times, drew 8,000 cubes in 70 ms; the same without the `discard` in 6 (Chrome's time did not change).
+  Hide by depth: draw what hides into the depth alone first (colour `writeMask: 0`).
+- **Safari takes 0.2 to 1.3 s to make a pipeline from shader text it has not seen**, and 10 to 25 ms when it has
+  (it keeps them between visits). Chrome: 7 to 60 ms.
+- **What is cleared and resolved is the whole attachment**, however little is drawn (there is no scissor on a
+  load or a store): keep the texture parts are drawn onto as small as what is laid on it.
+- Parts written into the same buffers in several batches need a `submit` after each batch: see the `writeBuffer` trap above.
+- **A device can be lost on purpose**: `device.destroy()` resolves `device.lost` (reason `destroyed`). A canvas
+  context is told its new device with `configure` again; a new device with its pipelines was drawing 86 to 311 ms
+  later.
+- **Edges at any angle do not match WebGL2's to the pixel**, though both have four samples: WebGL2 holds its
+  picture upside down, so its samples lie mirrored. Along the edges of turned cubes up to 1.8% of pixels differ by
+  one sample, and a few beside halos at night. Drawn upside down and turned back, they match (2,711 pixels off
+  became 7). Pictures of things at rest on whole pixels match either way.
+- A shadow map sampled with `textureSampleCompareLevel` may be called inside `if` and loops;
+  `textureSampleCompare` may not.
+
 ## Not verified
 
 - Compute shaders. Workers that draw. A phone held sideways, or for more than a minute.
+- Many canvases on one device on an iPhone, in Firefox, or in a tab hidden and come back to.

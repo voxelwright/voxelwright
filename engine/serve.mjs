@@ -28,6 +28,7 @@ import { CHANNELS, KEYS_MOST, NAMED as MOVES } from './page/moves.ts'
 import { CARRIED, WORN } from './page/wear.ts'
 import { OWN } from './page/keys.ts'
 import { found as pluginsFound } from './plugins.mjs'
+import { foreign, named } from './guard.mjs'
 import { RULES_MOST, SOURCE_MOST } from './rules/run.mjs'
 import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
@@ -1059,10 +1060,6 @@ function gapsAll() {
   return out.sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, GAPS_KEPT)
 }
 
-/** Whether a request names this server as this machine or as a machine of a tailnet (`tailscale serve`): a name someone else points at 127.0.0.1 is neither. */
-const named = (host) => { const name = String(host ?? '').replace(/:\d+$/, ''); return name === '127.0.0.1' || name === 'localhost' || name.endsWith('.ts.net') }
-/** A page from somewhere else may not act here through the browser of someone who can reach this. */
-const foreign = (req) => !!req.headers.origin && URL.parse(req.headers.origin)?.host !== req.headers.host
 let topsAsked = 0, topsSince = Date.now()
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')

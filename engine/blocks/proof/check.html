@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>The page stage, checked</title>
+<link rel="icon" href="data:,">
+<style>html { background: #e4e8f4 } canvas { margin: 4px }</style>
+<!-- Parts made here by hand, not the kit's: what test/blocks.mjs holds the page stage to needs no other checkout. -->
+<script type="module">
+import { pageStage } from '../stage.ts'
+
+const light = { toLight: [-0.4767, -0.6674, 0.572], sun: 0.9, ambient: { top: 0.64, front: 0.485, side: 0.33, under: 0.26 }, ambientTint: [0.9, 0.93, 1], highlight: [1, 1, 0.98], shadow: [0.04, 0.07, 0.38, 0.3], seam: 0.05, glow: 0 }
+const S = 8, PAD = 6
+/** A slab of cubes w by h by d, its back on z0, of one colour, as the kit would hand it over. */
+const slab = (w, h, d, rgb, z0 = 0, more = {}) => {
+  const n = w * h * d, pos = new Float32Array(n * 8), col = new Float32Array(n * 4), ao = new Uint32Array(n * 2)
+  let i = 0
+  for (let x = 0; x < w; x++) for (let y = 0; y < h; y++) for (let z = 0; z < d; z++, i++) { pos.set([x + 0.5, y + 0.5, z0 + z + 0.5, 1, 0, 0, 0, 1], i * 8); col.set([rgb[0] / 255, rgb[1] / 255, rgb[2] / 255, 0], i * 4) }
+  return { pos, col, ao, count: n, wpx: (w + 2 * PAD) * S, hpx: (h + 2 * PAD) * S, ox: PAD * S, oy: PAD * S, s: S, bounds: [-PAD, -PAD, w + PAD, h + PAD], light, shear: [0.5, 0.5], ...more }
+}
+const canvasFor = (frame) => { const c = Object.assign(document.createElement('canvas'), { width: frame.wpx, height: frame.hpx }); c.style.width = `${frame.wpx / 2}px`; document.body.append(c); return c }
+const read = (c) => { const t = Object.assign(document.createElement('canvas'), { width: c.width, height: c.height }), x = t.getContext('2d', { willReadFrequently: true }); x.drawImage(c, 0, 0); return x.getImageData(0, 0, c.width, c.height).data }
+const apart = (a, b) => { let worst = 0; for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i])); return worst }
+const frame = () => new Promise((r) => requestAnimationFrame(r))
+
+globalThis.check = async () => {
+  const stage = await pageStage(), out = {}
+  if (!stage) return { none: true }
+  /** Puts parts in one turn and reads each as it then stands: a canvas the device shows can be read only in the turn it was drawn in. */
+  const drawn = (parts) => { for (const [f, c] of parts) stage.put(f, c); void stage.settle(); return parts.map(([, c]) => read(c)) }
+
+  // A material's front face comes out as the colour it was given.
+  const enamel = slab(6, 4, 2, [14, 34, 255]), ec = canvasFor(enamel)
+  const [picture] = drawn([[enamel, ec]]), at = ((enamel.oy + (2.5 + 1) * S) * enamel.wpx + enamel.ox + (3.5 + 1) * S) * 4
+  out.front = [...picture.slice(at, at + 4)]
+  out.corner = [...picture.slice(0, 4)]
+
+  // Parts drawn together in one turn are the parts drawn each alone.
+  const colours = [[14, 34, 255], [255, 246, 0], [251, 252, 255], [195, 201, 222], [224, 51, 31], [35, 168, 75]]
+  const parts = Array.from({ length: 40 }, (_, i) => { const f = slab(4 + (i * 7) % 23, 3 + (i * 5) % 9, 1 + (i % 4), colours[i % 6]); return [f, canvasFor(f)] })
+  const before = stage.stats.flushes, together = drawn(parts)
+  out.sheets = stage.stats.flushes - before
+  await stage.settle()
+  out.aloneApart = 0
+  for (const [i, p] of parts.entries()) { out.aloneApart = Math.max(out.aloneApart, apart(drawn([p])[0], together[i])); await stage.settle() }
+  out.filled = together.map((d) => { let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n }).every((n) => n > 0)
+
+  // The page hides what is under it, except through a well cut for it.
+  const sunk = slab(4, 4, 1, [224, 51, 31], -2), sc = canvasFor(sunk)
+  const most = (d) => { let m = 0; for (let i = 3; i < d.length; i += 4) m = Math.max(m, d[i]); return m }
+  out.underPage = most(drawn([[sunk, sc]])[0])
+  await stage.settle()
+  out.throughWell = most(drawn([[{ ...sunk, well: [0, 0, 4, 4], groundShadow: 0 }, sc]])[0])
+
+  // At rest nothing is asked of the device, and what it drew through is let go.
+  await stage.settle()
+  out.heldDrawing = stage.bytes()
+  const draws = stage.stats.draws, flushes = stage.stats.flushes
+  await new Promise((r) => setTimeout(r, 4600))
+  out.heldAtRest = stage.bytes()
+  out.drawnAtRest = [stage.stats.draws - draws, stage.stats.flushes - flushes]
+
+  // A lost device is opened again, and whoever put the parts is told to put them again.
+  let told = 0
+  stage.onrestore = () => { told++ }
+  stage.device.destroy()
+  for (let i = 0; i < 600 && !told; i++) await frame()
+  out.lost = { times: stage.stats.lost, told, apart: told ? apart(drawn([parts[3]])[0], together[3]) : -1 }
+  out.faults = stage.stats.faults.filter((f) => !f.startsWith('lost: '))
+  return out
+}
+</script>
+</html>
