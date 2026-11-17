@@ -1,5 +1,5 @@
 // Voxelmorphism. Plain HTML and CSS carry the interface; this turns each control into voxels
-// where WebGL2 is available. Without it, or with data-vx-plain on <html>, the CSS stands alone.
+// where a renderer is available. Without one, or with data-vx-plain on <html>, the CSS stands alone.
 
 import { Stage } from './core/stage.js';
 import { Renderer } from './core/gl.js';
@@ -28,19 +28,58 @@ export { sound, cue } from './core/sound.js';
 export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, sign, block];
 let stage = null;
 
+// The renderer. By default the kit makes its own (WebGL2). use() hands it another.
+let given;          // undefined: the default; null: none, the page stays plain; else a renderer
+let pending = null; // a promise while a handed renderer is still on its way
+let waiting = [];   // what adopt() and release() were asked for meanwhile, in order
+
+/**
+ * Hand the kit a renderer: anything with draw(frame, ctx2d), or a promise for one (a WebGPU
+ * device takes a moment). Call it before adopt(). While the promise is open the page is plain and
+ * adopt() remembers what it was asked for; if it settles on nothing, the page stays plain.
+ * Returns a promise for the stage, or null.
+ */
+export function use(renderer) {
+  if (stage) throw new Error('voxelmorphism: use() must come before the first adopt()');
+  const mine = (pending = Promise.resolve(renderer).catch(() => null).then((r) => {
+    if (pending !== mine) return stage; // a later use() replaced this one
+    given = r && typeof r.draw === 'function' ? r : null;
+    pending = null;
+    const roots = waiting; waiting = [];
+    for (const [act, root] of roots) if (root === document || root.isConnected) act(root);
+    return stage;
+  }));
+  return mine;
+}
+
+/** Resolves once it is known whether the page is live: to the stage, or to null if it is plain. */
+export function ready() {
+  return pending ? pending.then(() => ready()) : Promise.resolve(getStage());
+}
+
+/** True while the CSS stands alone: by choice, for want of a renderer, or while one is on its way. */
 export function plain() {
-  return document.documentElement.hasAttribute('data-vx-plain') || !Renderer.supported();
+  if (document.documentElement.hasAttribute('data-vx-plain') || pending) return true;
+  return given === undefined ? !Renderer.supported() : given === null;
 }
 
 /** The stage, made on first use. Null when the page is plain. */
 export function getStage() {
   if (stage || plain()) return stage;
-  try { stage = new Stage(); } catch { stage = null; }
+  try { stage = new Stage(given ?? new Renderer()); } catch { stage = null; }
   return stage;
 }
 
-/** Turn every Voxelmorphism element under root into voxels. Safe to call again after adding nodes. */
+/**
+ * Turn every Voxelmorphism element under root into voxels. Safe to call again after adding nodes.
+ * Returns the stage, or null if the page is plain (if a renderer is on its way, the call is kept
+ * and made when it arrives).
+ */
 export function adopt(root = document) {
+  if (pending && !document.documentElement.hasAttribute('data-vx-plain')) {
+    waiting.push([adopt, root]);
+    return null;
+  }
   const st = getStage();
   if (!st) return null;
   for (const def of components) {
@@ -53,6 +92,7 @@ export function adopt(root = document) {
 
 /** Give an element, and everything under it, back to plain CSS. */
 export function release(root = document) {
+  if (pending) { waiting.push([release, root]); return; }
   if (!stage) return;
   for (const el of [...stage.lives.keys()]) if (root === document || root === el || root.contains(el)) stage.remove(el);
 }

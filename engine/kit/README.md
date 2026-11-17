@@ -20,6 +20,15 @@ A design language where every control is a small solid built from voxels. The ru
 There is no build step and no dependency. The stylesheet alone is the plain version; `adopt()`
 adds the voxels where WebGL2 exists. Give the page `overflow-x: clip` (see Bleed in the spec).
 
+To draw with another backend, hand it over before the first `adopt()`:
+
+```js
+import { use, adopt, ready } from './voxelmorphism/src/index.js';
+use(makeRenderer());   // a renderer with draw(frame, ctx2d), or a promise for one
+adopt();               // remembered until the renderer arrives; the page is plain meanwhile
+const stage = await ready();   // the stage, or null if the page stays plain
+```
+
 ## What it exports
 
 | Name | What it does |

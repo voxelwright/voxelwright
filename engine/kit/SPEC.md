@@ -215,8 +215,11 @@ Decide by how often it happens (from the site-craft rules):
 - **Bleed.** A part's canvas is larger than its box by 5 to 16 voxels a side, for its shadow and
   for pieces in flight. Give the page `overflow-x: clip` so bleed never widens it, and do not put a
   part inside `overflow: hidden` unless you mean to cut its shadow.
-- The renderer is behind one call, `Renderer.draw(frame, ctx2d)`. Another backend (the Village
-  engine, WebGPU) can replace it without touching a part.
+- The renderer is behind one call, `draw(frame, ctx2d)`. `use(renderer)` hands the kit another
+  backend (the Village engine, WebGPU) without touching a part. It takes a renderer or a promise
+  for one, because a WebGPU device takes a moment to arrive: until it does the page is plain,
+  `adopt()` and `release()` are remembered in order, and `ready()` resolves to the stage, or to
+  null if no renderer came. A part is never marked live before something can draw it.
 
 ## 13. Writing a part
 

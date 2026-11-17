@@ -1,7 +1,6 @@
 // The stage keeps one live voxel model per adopted element, and draws only what changed.
 // At rest nothing runs: no frame loop, no timers.
 
-import { Renderer } from './gl.js';
 import { Model } from './model.js';
 import { LIGHTS } from './materials.js';
 import { Spring, assemble, crumble, settle, reducedMotion } from './motion.js';
@@ -194,8 +193,9 @@ export class Live {
 }
 
 export class Stage {
-  constructor() {
-    this.renderer = new Renderer();
+  /** renderer: anything with draw(frame, ctx2d); it may call its onrestore after losing its context. */
+  constructor(renderer) {
+    this.renderer = renderer;
     this.renderer.onrestore = () => { for (const l of this.lives.values()) l.invalidate(); };
     this.lives = new Map();
     this.awake = new Set();
