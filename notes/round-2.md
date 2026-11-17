@@ -62,4 +62,4 @@ that live in this repo.
 
 ## Still waiting on the owner
 
-- Which view: he leans to Potrero Hill over Treasure Island, but asked for 3 more views, one close to the skyscrapers (round 2 of the experiment is running).
+- View: DECIDED, Ina Coolbrith Park, matching the Schulenburg photo; a screenshot overlaid on it must line up (lane feature/423-ina).
