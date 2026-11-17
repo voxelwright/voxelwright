@@ -95,13 +95,23 @@ body.solo #text > h2, body.solo #text > .intro { display: none; }
    of its column, with the script's own sums: (lettering + margins + frame) in voxels, times 4 px.
    The widths are for the word on this board, in each language; a page sets them for its own word.
    "Voxelmorphism" is 112 cells in Vox Block: 496 px at one voxel per cell, 984 px at two.
-   "Вокселморфізм" is 116 cells: 512 px and 1016 px. */
+   "Вокселморфізм" is 116 cells: 512 px and 1016 px.
+   The last letter's advance carries one letter gap (one cell in Vox Sign, two in Vox Block), which
+   the voxel board does not have, so the plain board's right padding is that much less. */
 .pairing .page { container-type: inline-size; }
-.vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; padding: calc(var(--vx) * 4); }
-@container (min-width: 496px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); } }
-@container (min-width: 984px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); } }
-@container (min-width: 512px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); } }
-@container (min-width: 1016px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); } }
+.vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; padding: calc(var(--vx) * 4); padding-inline-end: calc(var(--vx) * 3); }
+@container (min-width: 496px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
+@container (min-width: 984px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+@container (min-width: 512px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
+@container (min-width: 1016px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+/* Narrow phones. In Vox Sign 2 the word needs 81 voxels of column in English (324 px) and 83 in
+   Ukrainian (332 px). Below that the board, and only the board, is built from a smaller voxel:
+   3 px, then 2 px. Its letters, margin, frame and shadow all follow, in the voxels and in the
+   plain version alike, because both read the board's own --vx. The word is never broken. */
+@container (width < 324px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 3px; } }
+@container (width < 243px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 2px; } }
+@container (width < 332px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 3px; } }
+@container (width < 249px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 2px; } }
 
 body.solo-lettering { padding: 24px; }
 body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering #pairings, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
