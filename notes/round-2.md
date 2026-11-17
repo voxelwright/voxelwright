@@ -63,3 +63,13 @@ that live in this repo.
 ## Still waiting on the owner
 
 - View: DECIDED, Ina Coolbrith Park, matching the Schulenburg photo; a screenshot overlaid on it must line up (lane feature/423-ina).
+
+## Voxelmorphism kit in Village
+
+- Village holds a copy of the kit, taken from plant-a-seed with `engine/landing/site/sync-voxelmorphism.mjs`. It sits on
+  branch feature/424-sky.
+- Since plant-a-seed `0ac4a76`, `adopt()` alone asks for the engine's WebGPU renderer. Before the first `adopt()`,
+  call `use(<the world's renderer>)` or `use(null)`; otherwise a page asks for a second WebGPU device.
+  `controls.js:50` (`?vx=live`) needs this. The sky lane was told on Nov 17.
+- The kit has its own thread, "Voxelmorphism: the UI kit" (plant-a-seed branch `kit`). It coordinates with #423 on UI
+  on building surfaces, and it tells the engine lane before it changes the renderer.
