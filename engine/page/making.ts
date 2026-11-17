@@ -32,17 +32,25 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     // Beside the place once it is known; until then (a second or so) a notice says it was heard.
     const cue = hud.cue(`Making ${what}`, () => at)
     let heard = false
+    // A thing being drawn (#245): what is being done, and for how long so far: the drawing takes some ten seconds.
+    let drawing: 'no' | 'drawing' | 'carving' = 'no', ticks = 0
+    const drawn = () => { cue.text = `Drawing ${name} from five sides · ${Math.round((performance.now() - ticks) / 1000)} s` }
+    let ticker: ReturnType<typeof setInterval> | undefined
     const each = (stage: Stage) => {
       for (const one of told) one(stage, ask)
       if (stage.stage === 'waiting') hud.notice(`${what}: after ${stage.ahead === 1 ? 'the one being made' : `the ${stage.ahead} before it`}`)
       else if (stage.stage === 'reading') { cue.text = 'Reading the link'; if (!heard) hud.notice('Reading the link', 2500); heard = true }
       else if (stage.stage === 'note') hud.notice(stage.why[0].toUpperCase() + stage.why.slice(1), 5000)
-      else if (stage.stage === 'place') { at = [stage.at[0], stage.at[1] + 12, stage.at[2]]; cue.text = `Making ${name}` }
+      else if (stage.stage === 'drawing') { drawing = 'drawing'; ticks = performance.now(); drawn(); ticker = setInterval(drawn, 1000) }
+      else if (stage.stage === 'carving') { drawing = 'carving'; clearInterval(ticker); cue.text = `Carving ${name = stage.name} from the drawing` }
+      else if (stage.stage === 'place') { at = [stage.at[0], stage.at[1] + 12, stage.at[2]]; if (drawing === 'no') cue.text = `Making ${name}` }
+      // Not drawn after all (make/drawn.mjs could not): it is made as any wish is, and the cue says so, with no alarm.
+      else if (stage.stage === 'asking' && drawing !== 'no') { drawing = 'no'; clearInterval(ticker); cue.text = `Making ${name}` }
       else if (stage.stage === 'asking' && stage.try > 1) cue.text = `Making ${what}: another go`
-      else if (stage.stage === 'shaped' || stage.stage === 'known') cue.text = name = stage.name
+      else if (stage.stage === 'shaped' || stage.stage === 'known') { name = stage.name; if (drawing === 'drawing') drawn(); else if (drawing === 'no') cue.text = name }
       else if (stage.stage === 'sending') { at = [stage.at[0], stage.at[1] + stage.size[1] + 4, stage.at[2]]; cue.text = stage.name }
     }
-    let done = await asker.ask(ask, each)
+    let done = await asker.ask(ask, each).finally(() => clearInterval(ticker))
     // It is made and no place near there would take it. It is the asker's to say where: there, with what is in the
     // way cleared; where they look next; or not at all. Asked until it stands or is let go.
     while (done.state === 'held') {
@@ -237,8 +245,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     if (ask.picture || ask.link || !ask.wish) return thing(ask)
     const what = await meaning(ask.wish), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
     // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
-    if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words }) }
-    return what === 'undo' ? undo() : what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words })
+    if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words, typed: true }) }
+    return what === 'undo' ? undo() : what === 'realm' ? realm(words) : what === 'director' ? director(words) : what === 'rule' ? happen(words) : thing({ ...ask, wish: words, typed: true })
   }
 
   return Object.assign(asked, { thing, director, makes: async (text: string) => !!text.trim() && !/^(rule|play|say|said):/i.test(text) && (/^thing:/i.test(text) || (await meaning(text)) === 'thing'), says: async (text: string) => !!text.trim() && (await meaning(text)) === 'said', on: (each: (stage: Stage, ask: Ask) => void) => { told.add(each); return () => told.delete(each) } })

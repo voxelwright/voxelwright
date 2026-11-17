@@ -25,6 +25,8 @@ export interface Ask {
   target?: Target
   /** The kept thing to make (the ghost the ask bar showed for the words: `Asker.guess`): made from what was kept, with no model. */
   kept?: string
+  /** A person typed these words on the bar (making.ts sets it). Only such a wish may be drawn (#245): a rule's `world.make` is not one, and spends nothing. */
+  typed?: boolean
 }
 
 /** What is kept for words being typed, and where it would stand (the helper's `/kept`): drawn with `Asker.faces`. */
@@ -37,6 +39,9 @@ export type Stage =
   | { stage: 'known'; name: string }
   | { stage: 'place'; at: [number, number, number]; facing: string }
   | { stage: 'asking'; try: number }
+  /** A wish nothing kept answers is being drawn from five sides (#245, make/drawn.mjs), and then carved from the drawing. */
+  | { stage: 'drawing' }
+  | { stage: 'carving'; name: string }
   | { stage: 'shaped'; name: string; size: [number, number, number]; facing: string }
   | { stage: 'refused'; why: string }
   | { stage: 'note'; why: string }

@@ -61,7 +61,7 @@ const REACH = 64
  * for where it was aimed: on a roof, at the sky, at a car, it is taken to mean the ground nearest that.
  * Resolves to { spot, eye, wall } or { why } when there is no ground within reach (the open sea).
  */
-async function ground(world, where) {
+export async function ground(world, where) {
   // Ground is a top: near the land's own height, with air over it. The foot of a wall is near it too, with wall over it.
   const land = async (c) => c && c[1] <= (await at(world, c)).ground + ON_GROUND && (await at(world, [c[0], c[1] + 1, c[2]])).material === 0 && (await at(world, c)).material !== 5
   const down = async (x, z) => (await look(world, [x, (await at(world, [x, 0, z])).ground + 60, z], [0, -1, 0])).at

@@ -54,10 +54,12 @@ export function bodyOf({ size: [w, h, d], cells }) {
  * Cells (in a body's own axes: x, z, y as the world's, laid (y * d + z) * w + x) brought to life. `cm` is a cell's
  * side (10, 5, 2.5 or 1.25); `front` the way its nose points (0 to 3) if its maker said it; `faced` the way it was
  * made to face (0 to 3), taken only when its cells do not say and it lies along it; `asked` how it should go.
+ * `open`: it has no inside to sit in (a thing carved from a drawing is a shell with nothing in it, make/drawn.mjs): what
+ * is under its top is taken as solid, so its seat is in what its top dips to (a cockpit) or on its top, never in its hollow.
  * Resolves to { text: a reply of cells with living, said: [what was worked out, in words], wheels, front, unsure: why
  * its front is not known (or ''), facts }, or throws an Error with why it cannot live (too big).
  */
-export async function driven({ name, size, cm, cells, front, faced, asked = {}, core = join(here, '..', 'page', 'core.wasm') }) {
+export async function driven({ name, size, cm, cells, front, faced, asked = {}, open = false, core = join(here, '..', 'page', 'core.wasm') }) {
   const [w, h, d] = size, per = Math.round(10 / cm), said = []
   const at = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= w || y >= h || z >= d ? 0 : cells[(y * d + z) * w + x])
   // The body, in cells of 10 cm.
@@ -218,7 +220,8 @@ export async function driven({ name, size, cm, cells, front, faced, asked = {}, 
   for (let l = Math.round(lo + (hi - lo) * 0.1); l <= Math.round(hi - (hi - lo) * 0.1); l++) {
     let y = 0
     while (y < h && !cell(l, y, c)) y++
-    while (y < h && cell(l, y, c)) y++
+    if (open) y = y < h ? topOf(l, c) : h
+    else while (y < h && cell(l, y, c)) y++
     if (y >= h) continue
     // Room: air over the floor up to a roof, or up to the highest of what is round it (a cockpit's rim). A roof counts for more.
     let roof = y

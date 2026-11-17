@@ -575,6 +575,97 @@ the words, whose it is, the one ask that swaps it, and a driven car's better ver
   library.mjs import each other).
 - A stand-in proves the joining. Whether a real model says `drives`, and says its front right, is for a real run.
 
+**A thing drawn and carved** (#245, November 17). A wish that nothing kept answers is drawn first: an image model
+draws one sheet of the thing from five sides (left, right, front, rear, top, no perspective), and the builder carves
+and paints cells from those views. A car so drawn stands alive and is driven nose first. Typed again, it stands from
+the shelf at once.
+
+```sh
+node helper.mjs --world http://127.0.0.1:5741      # draws when this machine has a fal key; --no-draw draws nothing
+node helper.mjs --world URL --sheets dir --facts sonnet    # keeps each sheet drawn, to look at; which model says the facts
+```
+
+- **The drawer** is fal.ai's `fal-ai/nano-banana-2`, through its sync API, about 8 cents a sheet
+  (`.agents/skills/fal-model-api`). It is sent the typed words alone, never a picture or a link. The key is
+  `FAL_KEY` or the login Keychain's `village-fal`, read by the helper for each call and sent only to fal. fal is asked
+  to keep no request history (`X-Fal-Store-IO: 0`), and the picture comes back in the answer (`sync_mode`). With no
+  key, nothing is drawn and the helper says so when it starts.
+- **A drawing is paid for**, so the helper holds to three things. Only words a person typed on the bar are drawn
+  (`typed` in an ask, set by `page/making.ts`): a rule's `world.make` reaches the same helper with words nobody typed,
+  and is made as before. Words whose drawing was paid for and did not stand are not drawn again while the helper
+  runs, but for Shift with Enter. And a day has its most: `--draw-most 40` (the count is the running helper's own,
+  and starts again when it does). fal's answer is data: it is read up to a size, and a picture is fetched only from
+  fal's own store (`fal.media`), with no redirect followed.
+- **What the picture cannot say comes from a model at the same time** (`make/drawn.mjs` `FACTS`): the asker's own
+  Claude Code (sonnet by default), asked for one line of JSON. It gives whether this is a thing to draw at all, a
+  name, its size in metres, the one material it is mostly made of, and, for a thing one drives on wheels, its top
+  speed and 0 to 100. It answers in about 2 s, long before the picture. Sonnet answered as fast as haiku in one try
+  each (1.5 and 2.2 s) and gave the better name.
+- **Which wishes are drawn**: plain typed words that nothing kept answers. A change to a thing ("paint it red",
+  `asksAChange`), a thing for a hand, a space to fill, a picture or a link are not drawn, and neither is anything that
+  goes to rules, realms or spells. Of the rest, the model says no for several things or a place, a building one
+  goes inside, and a thing that must work in a way a picture cannot give it (light up, open, pour, fly). Those are
+  made as before. The picture has been asked for by then, and its cost is lost.
+- **The builder** (`draw/`, the bench's `sheet5.py` taken in as the engine's own) runs in Python (numpy, scipy,
+  Pillow) through `uv`, as `ears/` does. Porting its label, opening, erosion and distance work to JS would be a second
+  copy to keep right, and a wrong build costs more than the start. It is started when the wish is, so its imports are
+  done while the picture is drawn, and it gets the sheet when it arrives: 0.2 to 0.4 s for the build. `uv` makes its
+  environment on first use (a network fetch once).
+  - **Size**: the thing is carved with as many cells along its longest side as the model's size gives, in cells of
+    1.25 cm (up to 1.6 m), 2.5 cm (up to 6.4 m), 5 cm or 10 cm (up to 25.6 m). Colours are the world's 255, matched in
+    OKLab (`page/march.ts` `palette`); the material is the model's, one for every cell.
+  - **Front**: the view from above is asked to be drawn with the front to the left, and the builder notes which way
+    it laid that view to agree with the sides. The thing is turned half round (x and z, so it is not mirrored) when
+    the front ended up at the far end, and the front and rear pictures then paint the ends they show (until November 17
+    the front picture painted the rear: the horse below was made so). The side views ignored the asked direction now
+    and then (the bench's red F1 sheet, the horse), and the view from above kept to it. When the top view was drawn
+    turned a quarter round, the front is not known, and for a car `make/drivable.mjs` says so and the person is told (a note at the place). `draw/check.py` (run by
+    the check) builds the racer sheet with its side views drawn the other way and finds the same front end.
+  - **Six or seven views**: the drawer often draws a view twice or adds one in perspective. Of the seven biggest, the
+    five that pair up best (sides with sides, ends with ends) are kept. A sheet that will not read as five views, or
+    whose views carve to nothing, is not built.
+  - **Checked against the model**: the carved thing's height and its longer and shorter sides along the ground must be
+    within a factor of 1.8 of the model's size. A drawing whose views disagree, that was drawn at two scales, or that
+    shows something else comes out another shape and is not made. Then nothing is sent, and the wish goes on as
+    before.
+- **A drawn car** is brought to life from its cells (`make/drivable.mjs`), with its front at the nose the drawing
+  gave and its figures from the model. A drawing has no inside to sit in, only a shell, so it is made `open`: what is
+  under its top counts as solid, and the seat is where its top dips (a cockpit) or on top, with the eye 0.3 m over the
+  rim. V sees the road over its bonnet. A cabin of its own would need a second picture. The living reply is what is
+  kept, so the shelf's copy and the ghost have the same eye.
+- **The wait** (`page/making.ts`): at once, "Drawing … from five sides" with the seconds counting, while the loose
+  cells gather at the place (`page/gather.ts`). About 2 s in, the model's size closes them into a box of that size and
+  the name is known. Then "Carving … from the drawing", then the thing. When it is not drawn after all, the cue says
+  "Making …" and it is made as before, with no warning shown.
+- **Kept**: as a reply of cells (living, for a car) with `grade: "best"`, so no better model is started over it.
+  Shift with Enter draws it anew.
+- **How long** (by hand, November 17, a world of its own, the real drawer and the owner's sonnet, seconds from Enter
+  to the thing standing; the page has it in the same moment):
+
+  | wish | picture | facts (alongside) | build | rest (place, send, world) | all | what came of it |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | a blue pickup truck | 9.4 | 2.0 | 0.4 | 1.1 | 10.9 | stands alive, driven 43 m in 4.7 s; 0 to 100 in 8.4 s as measured |
+  | a bronze horse statue | 10.4 | 1.9 | 0.3 | 0.6 | 11.3 | stands, 2.6 m long, in 2.5 cm cells |
+  | a stone park bench | 11.0 | 1.9 | 0.4 | 17.6 | 29.0 | not drawn (side views as wide as the front), made as a program instead |
+  | a bicycle | 10.2 | 2.7 | 0.2 | 58.5 | 68.9 | not drawn (four views, drawn over each other), made as a program, asked twice |
+  | a tall saguaro cactus | 11.4 | 1.6 | 0.3 | 24.8 | 36.5 | not drawn (side views at another scale, arms all round), made as a program |
+
+  The builder as it is now does the same with each of those five sheets and the facts given then (replayed, no fal
+  and no model). Typed again, the truck stood from the shelf in 0.31 s. Through fal a sheet took 8.6 to 11.4 s (ten sheets).
+- **What is weak**: three of five real wishes were not drawn. The drawer keeps the layout for cars and less often
+  for other things: of ten sheets, three drew six views, one seven, one overlapping views, one side views as wide as
+  the front and one its views at two scales. The cars and the horse kept to it. Things drawn photoreal come out mottled (the horse's bronze patina is camouflage at 2.5 cm), and thin
+  parts (spokes, slats) come out thick or lost. One material for all of it: glass and tyres are paint. A sheet may
+  carry a real maker's badge (the truck's). The extra words added to the prompt on November 17 ended the labels and
+  did not end the extra views (two sheets).
+- `node test/drawn.mjs --out dir` is the check, in Chrome, with stand-ins for the drawer (`test/drawn/racer.jpg` and
+  `hydrant.jpg`, two sheets fal drew for made-up words) and for the model. The builder is the real one. A drawn
+  racing car stands alive, E gets on, W takes it the way its low nose points (read from its look, not from its
+  motor), and from its seat nothing of it is met straight ahead or 10 degrees down. Typed again, it stands from the
+  shelf with no drawer or model asked. A hydrant stands as tall as the model said. A drawer that fails, words the
+  model says are no thing to draw, a helper with no drawer and "paint it red" are made as before, with nothing
+  alarming said. A stand-in proves the joining, not what fal draws or what a real model says.
+
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
 `?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?bricks=1` (with `&finesun=0`, `&walk=loop`) and `?fine=1` or `2` (#259, experiments in shape finer than a cell: the cell-engine skill says what each is, and what an edit of finer cells may be; without `bricks=1` such an edit is refused whole) `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=0` (no music) `?name=Ada` (in a shared world).
 

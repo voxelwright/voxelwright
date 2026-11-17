@@ -16,6 +16,9 @@
 //   --workshop-project dir --t3 file    the workshop (workshop/route.mjs): which T3 Code project a development session is started in, and T3 Code's command
 //   --workshop-provider id --workshop-model slug    which model a development session runs on (needed when the project in T3 Code has no default)
 //   --workshop-checkout dir    the checkout the game's server runs from: when a session's pull request is merged its plugins are brought to main there (as node plug.mjs --at does)
+//   --no-draw          draw nothing (#245): by default a wish nothing kept answers is drawn by fal when this machine has a fal key
+//                      (make/drawn.mjs); --facts sonnet is which of your models says its size and how it goes; --sheets dir keeps each sheet drawn;
+//                      --draw-most 40 is how many drawings a day it will pay for (about 8 cents each)
 //   --reply file       a reply kept in a file stands in for the model (no model is run); --wait 20 makes it take that many seconds
 //
 // Who may ask. It starts a model on your subscription, so it answers only: a request to this machine's own name
@@ -35,7 +38,8 @@
 //     "kept": "<id>" }                                 make this kept thing (POST /kept named it for the words), with no model
 // All of it is data for the model, never instruction to this program or to it. The answer is lines of JSON as it
 // goes: {stage: "reading"} (a link is being fetched), {stage: "place", at, facing}, {stage: "asking", try}, {stage: "shaped", name, size, facing} (a reply could be read),
-// {stage: "refused", why} (it is asked again),
+// {stage: "refused", why} (it is asked again), {stage: "drawing"} and {stage: "carving", name} (a wish drawn and carved: make/drawn.mjs; its "shaped" comes from the model
+// beside the drawing, before the picture; an "asking" after "drawing" means it was not drawn after all, and is made as below),
 // {stage: "sending", id, name, at, size, facing}, and last {stage: "done", state, why, id, name, at, size, ms, tries}:
 // state "there" if it stands in the world. State "held": it is made and no place near would take it; `held` is a
 // token for POST /put {held, from, clear, by, target}, which stands it where the asker now looks, or (clear) at that very
@@ -51,12 +55,13 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { fileURLToPath } from 'node:url'
-import { JOURNAL, aimed as aimedAt, enliven, kept as keptThing, make, placing, put } from './make.mjs'
+import { JOURNAL, aimed as aimedAt, enliven, ground, kept as keptThing, make, placing, put } from './make.mjs'
 import { asksToDrive } from './page/living.ts'
 import { keepLook, turned } from './make/alive.mjs'
 import { shown } from './make/shown.mjs'
 import { fieldKeys } from './make/form.mjs'
-import { LIBRARY, library } from './make/library.mjs'
+import { LIBRARY, asksAChange, library } from './make/library.mjs'
+import { drawn, falDrawer } from './make/drawn.mjs'
 import { wished } from './make/best.mjs'
 import { fetched, notFetched } from './make/link.mjs'
 import { reply } from './make/model.mjs'
@@ -82,8 +87,8 @@ const text = (v, most) => (typeof v === 'string' ? v.replace(/[\u0000-\u001f\u00
 /** An ask with nothing in it but what one may hold, or (a string) why it is not one. */
 export function shaped(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return 'an ask is an object'
-  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh', 'realm', 'hand', 'kept'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
-  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true, hand: body.hand === true }
+  for (const key of Object.keys(body)) if (!['wish', 'picture', 'link', 'target', 'from', 'by', 'fresh', 'realm', 'hand', 'kept', 'typed'].includes(key)) return `"${key.slice(0, 20)}" is not part of an ask`
+  const ask = { wish: text(body.wish, WISH_MOST), by: text(body.by, 24) || 'someone', fresh: body.fresh === true, hand: body.hand === true, typed: body.typed === true }
   if (body.realm !== undefined) { if (typeof body.realm !== 'string' || !REALM.test(body.realm)) return 'a realm is named by its id'; ask.realm = body.realm }
   if (body.wish !== undefined && typeof body.wish !== 'string') return 'a wish is words'
   if (body.kept !== undefined) { if (typeof body.kept !== 'string' || !/^[0-9a-f]{24}[ms][0-9a-f]{8}$/.test(body.kept)) return 'what is kept is named by its id'; ask.kept = body.kept }
@@ -159,9 +164,12 @@ const same = (a, b) => timingSafeEqual(createHash('sha256').update(String(a)).di
  * Starts the helper. `world` is the one world it makes things in, fixed here: no request can name another.
  * `origins` are further pages that may ask (the world's own always may). Resolves to { url, secret, link, close }.
  */
-export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, first, best, cannot, voice = null , shop: shopWith = {} }) {
+export async function helper({ world, port = 5762, origins = [], hosts = [], page, reach, reachPort = 0, only, secret = randomBytes(24).toString('base64url'), model = (q) => reply(q), journal = JOURNAL, say = () => {}, resolve, grow = 'cap', kept = LIBRARY, quick = model, first, best, cannot, voice = null , shop: shopWith = {}, draw = null, know = quick, sheets, drawMost = 40 }) {
   /** What was made before, kept on this machine: a wish made before is made again with no model. `kept: null` keeps none. */
   const shelf = kept ? library(kept) : null
+  /** Drawing (#245) is paid for: the words whose drawing did not stand, and how many were drawn today. */
+  const undrawn = new Set(), day = { on: '', n: 0 }
+  const mayDraw = () => { const on = new Date().toDateString(); if (day.on !== on) { day.on = on; day.n = 0 } if (day.n < drawMost) return true; say(`  not drawn: ${drawMost} drawings today already (--draw-most)`); return false }
   world = world.replace(/\/$/, '')
   const at = new URL(world), loopback = ['127.0.0.1', 'localhost'].includes(at.hostname)
   // The world's page may be open under either name of this machine.
@@ -468,6 +476,23 @@ export async function helper({ world, port = 5762, origins = [], hosts = [], pag
         const named = ask.kept && shelf && !ask.hand && !fill ? await shelf.byId(ask.kept, fieldKeys()) : null
         const chosen = named && !ask.fresh && (await shelf.find(ask.wish ?? '', '', fieldKeys()))?.id === named.id ? named : null
         if (named && !chosen) say(`  the ghost was ${named.name}, which "${ask.wish}" does not name as it stands: made as the words say`)
+        // Words that nothing kept answers are drawn, when a drawer is to hand (#245, make/drawn.mjs): a picture of the
+        // thing from five sides, carved into cells, its size and how it goes said by the quick model beside it. Not a
+        // change to a thing, nor what is for a hand, nor a space to fill. When it is not drawn (no drawer, a drawer that
+        // failed, a drawing that will not build, a model that says it is no thing to draw) nothing was sent, and the
+        // wish goes on as below. Shift with Enter (`fresh`) draws it anew.
+        // Each drawing is paid for (about 8 cents), so: only words a person typed on the bar (`typed`: never a rule's
+        // `world.make`, whose words nobody typed); words whose drawing was paid for and did not stand are not drawn again
+        // while this helper runs, but for Shift with Enter; and a day has its most (`drawMost`).
+        // (The words as they were typed, but for case and spaces: "a dog chasing a cat" is not "a cat chasing a dog".)
+        const said = (ask.wish ?? '').toLowerCase().replace(/\s+/g, ' ').trim()
+        if (draw && ask.typed && ask.wish && !picture && !page && !ask.hand && !fill && !chosen && !asksAChange(ask.wish) && (ask.fresh || (!undrawn.has(said) && !(await shelf?.find(ask.wish, '', fieldKeys())))) && mayDraw()) {
+          let paid = false, d = null
+          // Remembered however it ended, a throw too: only a thing that stands or is held is on the shelf to answer the words next time.
+          try { d = await drawn({ wish: ask.wish, world: here, where, facing, by: ask.by, journal, draw: (w, signal) => { paid = true; day.n++; return draw(w, signal) }, know, make, ground, shelf, sheets, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) } }) } finally { if (paid && !['there', 'held'].includes(d?.made?.state)) undrawn.add(said) }
+          if (d.made) { say(`  drawn: the picture at ${(d.times.picture / 1000).toFixed(1)} s, the facts at ${(d.times.model / 1000).toFixed(1)} s, built at ${(d.times.build / 1000).toFixed(1)} s, standing at ${(d.times.made / 1000).toFixed(1)} s`); return ended(d.made, line) }
+          say(`  not drawn: ${d.why}`)
+        }
         if ((first || chosen) && !fill) {
           if (chosen) line({ stage: 'chosen', id: chosen.id, name: chosen.name })
           const w = await wished({ wish: asked, picture, page, fresh: ask.fresh, world: here, where, facing, by: ask.by, journal, first, best, shelf, known: chosen ?? undefined, say: (words, stage) => { say(`  ${words}`); if (stage) line(stage) }, told: line })
@@ -515,8 +540,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (!world) { console.error('say which world: node helper.mjs --world http://127.0.0.1:port (a server started with --world file)'); process.exit(2) }
   const canned = flag('reply')
   const model = canned ? async () => (await new Promise((r) => setTimeout(r, Number(flag('wait') ?? 0) * 1000)), { text: await readFile(canned, 'utf8'), model: `a reply kept in ${canned} (no model was run)`, ms: 0, cost: 0 }) : (q) => reply({ ...q, model: flag('model') ?? 'opus', binary: flag('claude') ?? 'claude' })
-  const h = await helper({ world, port: Number(flag('port') ?? 5762), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), first: canned ? undefined : (q) => reply({ ...q, model: flag('first') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), best: canned || flag('best') === 'none' ? undefined : (q) => reply({ ...q, model: flag('best') ?? 'claude-fable-5-2', binary: flag('claude') ?? 'claude', limit: 1_200_000 }), cannot: flag('cannot'), shop: { ...(flag('workshop-project') ? { project: flag('workshop-project') } : {}), ...(flag('t3') ? { t3: flag('t3') } : {}), provider: flag('workshop-provider'), model: flag('workshop-model'), checkout: flag('workshop-checkout') }, journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') || canned ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(`${new Date().toTimeString().slice(0, 8)} ${s}`) })
+  // The drawer (#245, make/drawn.mjs): fal, when this machine has its key (FAL_KEY, or the login Keychain's village-fal), and not with --reply or --no-draw.
+  // --facts sonnet is which of your models says what the picture cannot (size, material, how it goes); --sheets dir keeps each sheet drawn, to look at.
+  const drawer = canned || args.includes('--no-draw') ? null : await falDrawer()
+  const h = await helper({ world, port: Number(flag('port') ?? 5762), draw: drawer, drawMost: Number(flag('draw-most') ?? 40), know: (q) => reply({ ...q, model: flag('facts') ?? 'sonnet', binary: flag('claude') ?? 'claude', limit: 45_000 }), sheets: flag('sheets'), quick: canned ? undefined : (q) => reply({ ...q, model: flag('quick') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), first: canned ? undefined : (q) => reply({ ...q, model: flag('first') ?? 'sonnet', binary: flag('claude') ?? 'claude' }), best: canned || flag('best') === 'none' ? undefined : (q) => reply({ ...q, model: flag('best') ?? 'claude-fable-5-2', binary: flag('claude') ?? 'claude', limit: 1_200_000 }), cannot: flag('cannot'), shop: { ...(flag('workshop-project') ? { project: flag('workshop-project') } : {}), ...(flag('t3') ? { t3: flag('t3') } : {}), provider: flag('workshop-provider'), model: flag('workshop-model'), checkout: flag('workshop-checkout') }, journal: flag('journal') ?? JOURNAL, kept: flag('library') ?? LIBRARY, grow: flag('grow') ?? 'cap', page: flag('page'), reach: flag('reach'), reachPort: Number(flag('reach-port') ?? 5763), only: flag('only'), model, voice: args.includes('--no-voice') || canned ? null : { name: flag('voice') ?? 'sonnet', binary: flag('claude') ?? 'claude', most: Number(flag('voice-most') ?? 40), warm: Number(flag('voice-warm') ?? 2) }, say: (s) => console.log(`${new Date().toTimeString().slice(0, 8)} ${s}`) })
   console.log(`the helper listens on ${h.url}, on this machine only, and makes things in ${world}${canned ? ' from a kept reply (no model is run)' : ' with your own Claude Code'}`)
+  console.log(drawer ? 'what nothing kept answers is drawn first, by fal (typed words only), and carved into cells' : 'nothing is drawn: no fal key here (FAL_KEY, or the Keychain\'s village-fal), or --no-draw or --reply')
   if (h.voiced) console.log(`it also answers for the people of that world when a rule asks one to think, with your own Claude Code (${flag('voice') ?? 'sonnet'}), at most ${Number(flag('voice-most') ?? 40)} answers a minute: --no-voice turns that off`)
   console.log(`open this once, in the browser you play in. It carries the secret, which is kept by that page from then on:\n\n  ${h.link}\n`)
 }
