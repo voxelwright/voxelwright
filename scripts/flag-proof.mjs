@@ -25,6 +25,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import fs from "node:fs";
+import { builtinModules } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { FLAG_NAME } from "../lib/flags.mjs";
@@ -132,6 +133,9 @@ class Refused extends Error { constructor(code, message) { super(message); this.
 const stopAfter = (code, message) => { throw new Refused(code, message); }; // leaves through the finally, which clears the temp folder
 const canSandbox = process.platform === "darwin" && fs.existsSync("/usr/bin/sandbox-exec");
 if (!canSandbox && opts.try) stop(2, "flag-proof: --try runs the feature's own code, and this system has no sandbox to run it in (it needs macOS sandbox-exec). Not run.");
+// The sandbox keeps a build from loading native code of its own. This node has no other way to
+// call into the system; one that does (a foreign-function module) needs the profile looked at again.
+if (opts.try && builtinModules.includes("ffi")) stop(2, "flag-proof: this node has a foreign-function module, which the sandbox for --try was not written for. Not run.");
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flag-proof-")));
 let keep = false;
 let code = 2;
@@ -184,11 +188,8 @@ await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.f
     if (JSON.stringify(want) !== JSON.stringify(got)) stopAfter(1, `flag-proof: NOT ALLOWED. ${what}:\n  the export of the candidate does not hold exactly the files of its commit (an export-ignore attribute?)`);
   }
 
-  const outBase = path.join(tmp, "out-base");
-  const outHere = path.join(tmp, "out-candidate");
-  run(baseDir, outBase);
-  run(candDir, outHere);
-
+  // Everything below is read before the next build runs. A build can write anywhere in the
+  // temp folder, so whatever it could reach is taken down first and never read again.
   const differences = [];
   // Without --strict the candidate may change package.json (a new script, say), but not what is installed.
   const deps = (dir) => {
@@ -198,19 +199,26 @@ await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.f
   if (deps(baseDir) !== deps(candDir)) differences.push("dependencies in package.json differ from the base");
   const lock = (dir) => (fs.existsSync(path.join(dir, "package-lock.json")) ? hash(path.join(dir, "package-lock.json")) : null);
   if (lock(baseDir) !== lock(candDir)) differences.push("package-lock.json differs from the base");
-  differences.push(...compare(listing(outBase), listing(outHere), ["missing:  ", "changed:  ", "added:    "]));
+
+  const outBase = path.join(tmp, "out-base");
+  const outHere = path.join(tmp, "out-candidate");
+  run(baseDir, outBase);
+  const builtBase = listing(outBase);
+  run(candDir, outHere);
+  const builtHere = listing(outHere);
+  differences.push(...compare(builtBase, builtHere, ["missing:  ", "changed:  ", "added:    "]));
 
   const how = `${sandbox ? "sandboxed" : "NOT sandboxed (no sandbox-exec on this system)"}${opts.strict ? ", strict" : ""}`;
   if (differences.length) {
     console.error(`flag-proof: DIFFERENT. ${what} (${how}):\n  ${differences.slice(0, 40).join("\n  ")}${differences.length > 40 ? `\n  and ${differences.length - 40} more` : ""}`);
     code = 1;
   } else {
-    console.log(`flag-proof: identical. ${what} (${how}): ${listing(outBase).size} files, same names and same bytes; dependencies unchanged.`);
+    console.log(`flag-proof: identical. ${what} (${how}): ${builtBase.size} files, same names and same bytes; dependencies unchanged.`);
     code = 0;
     if (opts.try) {
       const outTry = path.join(tmp, "out-try");
       run(candDir, outTry, opts.try);
-      const delta = compare(listing(outHere), listing(outTry), ["removes:  ", "changes:  ", "adds:     "]);
+      const delta = compare(builtHere, listing(outTry), ["removes:  ", "changes:  ", "adds:     "]);
       keep = true;
       console.log(`flag-proof: with "${opts.try}" on, the site ${delta.length ? `differs in ${delta.length} file${delta.length === 1 ? "" : "s"}:\n  ${delta.slice(0, 60).join("\n  ")}${delta.length > 60 ? `\n  and ${delta.length - 60} more` : ""}` : "is still identical: the flag changes nothing"}`);
       console.log(`Built in ${outTry} for you to read. Delete ${tmp} when you are done.`);

@@ -285,3 +285,26 @@ export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
   assert.deepEqual(got, { home: "EPERM", checkout: "EPERM", otherTemp: "EPERM", slashTmp: "EPERM", trusted: "EPERM", signal: "EPERM", nativeHere: haveLib ? "REFUSED" : "NONE", nativeCopy: haveLib ? "REFUSED" : "NONE" }, haveLib ? "" : `no library was built: ${cc.stderr}`);
   assert.ok(haveLib, `the native-code check needs a C compiler: ${cc.stderr || cc.error}`);
 });
+
+test("a tried feature cannot hide what it adds by writing into the folder it is compared with", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  const r = proof(candidate((d) => {
+    put(d, "features/hello/feature.mjs", `import fs from "node:fs";
+import path from "node:path";
+// the same file the feature publishes, planted in the outputs it is compared with
+for (const out of ["out-candidate", "out-base"]) fs.writeFileSync(path.join(process.env.TMPDIR, out, "sneak.txt"), "x\\n");
+export default {};
+`);
+    put(d, "features/hello/static/sneak.txt", "x\n");
+    edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }');
+  }), "--strict", "--try", "hello");
+  assert.equal(r.code, 0, r.text);
+  assert.match(r.text, /adds:\s+"sneak\.txt"/);
+  fs.rmSync(r.text.match(/Delete (\S+) when you are done/)[1], { recursive: true, force: true });
+});
+
+test("without strict, a candidate's build cannot hide a difference by writing into the base's output", { skip: !macOS && "needs macOS sandbox-exec" }, () => {
+  // the candidate changes the generator: it publishes an extra file, and plants the same file in the base's output
+  const r = proof(candidate((d) => edit(d, "generator/build.mjs", 'write(outDir, "robots.txt", robotsTxt(site));', 'write(outDir, "robots.txt", robotsTxt(site));\n  write(outDir, "leak.txt", "x");\n  fs.writeFileSync(path.join(process.env.TMPDIR, "out-base", "leak.txt"), "x");')));
+  assert.equal(r.code, 1, r.text);
+  assert.match(r.text, /DIFFERENT[\s\S]*added:\s+"leak\.txt"/);
+});
