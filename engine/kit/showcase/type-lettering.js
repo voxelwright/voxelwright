@@ -44,5 +44,5 @@ export default async function ({ define, host, solo }) {
     sec.append(set);
     host.append(sec);
   }
-  if (solo) document.body.classList.add('solo-lettering');
+  if (solo && solo !== 'none') document.body.classList.add('solo-lettering');
 }
