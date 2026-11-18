@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Date picker</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .form { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
@@ -92,8 +92,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { calendar } from '/packages/voxelmorphism/src/components/calendar.js';
-  import { datePicker } from '/packages/voxelmorphism/src/components/date-picker.js';
+  import { calendar } from '../../src/components/calendar.js';
+  import { datePicker } from '../../src/components/date-picker.js';
   show(calendar, datePicker);
 </script>
 </body>

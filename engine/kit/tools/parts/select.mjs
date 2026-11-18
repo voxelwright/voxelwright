@@ -28,7 +28,7 @@ for (const mode of ['live', 'live, no :open', 'plain']) {
   const voxels = mode !== 'plain';
   if (mode === 'live, no :open') await p.addInitScript(() => { const m = Element.prototype.matches; Element.prototype.matches = function (q) { if (String(q).includes(':open')) throw new DOMException('not a valid selector', 'SyntaxError'); return m.call(this, q); }; });
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/select.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/select.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);

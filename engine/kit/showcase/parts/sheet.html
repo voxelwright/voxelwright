@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sheet</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -148,7 +148,7 @@
 
 <script type="module">
   import { show } from './parts.js';
-  import { sheet } from '/packages/voxelmorphism/src/components/sheet.js';
+  import { sheet } from '../../src/components/sheet.js';
   const $ = (id) => document.getElementById(id);
   const said = { apply: 'Filters applied', reset: 'Showing every deploy', cancel: 'Filters left as they were' };
   $('filters').addEventListener('close', () => { $('result').textContent = said[$('filters').returnValue] ?? 'Filters left as they were'; });

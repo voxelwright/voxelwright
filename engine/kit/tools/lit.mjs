@@ -21,7 +21,7 @@ for (const theme of ['light', 'dark']) {
   const p = await ctx.newPage();
   p.on('pageerror', (e) => problems.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/${page}${page.includes('?') ? '&' : '?'}theme=${theme}`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/${page}${page.includes('?') ? '&' : '?'}theme=${theme}`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 }).catch(() => problems.push('never became ready'));
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(900);

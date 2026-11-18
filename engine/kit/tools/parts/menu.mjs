@@ -12,14 +12,14 @@ p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 
-await p.goto(`http://127.0.0.1:${port}/showcase/parts/menu.html?theme=light`);
+await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/menu.html?theme=light`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.vx);
 await p.evaluate(() => document.fonts.ready);
 await p.waitForTimeout(900);
 
 // what a menu's model holds: its parts and what they are made of, where the mark is, what is being built
 const read = (id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const el = document.getElementById(id), l = window.vx.live(el), { panel, pick } = l.model.byName;
   const made = (q) => [...new Set(q.mats)].map(name).sort().join('+');

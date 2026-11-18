@@ -14,7 +14,7 @@ p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 const open = async (query = '') => {
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/navs.html?theme=light${query}`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/navs.html?theme=light${query}`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(800);
@@ -23,7 +23,7 @@ await open();
 
 // what a nav is, and where its mark is drawn (px from the nav's corner), read from its model
 const read = (id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const el = document.getElementById(id), l = window.vx.live(el);
   const links = [...el.querySelectorAll('a')], cur = links.find((a) => a.hasAttribute('aria-current'));

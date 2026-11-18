@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scroll spy</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .docs { display: grid; grid-template-columns: calc(var(--vx) * 44) var(--vx) minmax(0, 1fr); column-gap: calc(var(--vx) * 6); inline-size: 100%; }
@@ -141,8 +141,8 @@ pnpm harbor init</pre>
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { scrollSpy } from '/packages/voxelmorphism/src/components/scroll-spy.js';
-  import { scrollArea } from '/packages/voxelmorphism/src/components/scroll-area.js';
+  import { scrollSpy } from '../../src/components/scroll-spy.js';
+  import { scrollArea } from '../../src/components/scroll-area.js';
   show(scrollSpy, scrollArea);
 </script>
 </body>

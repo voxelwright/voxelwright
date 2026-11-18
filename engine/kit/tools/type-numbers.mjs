@@ -6,11 +6,11 @@ import { chromium } from 'playwright';
 const port = process.env.PORT || 5987;
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 900, height: 700 }, deviceScaleFactor: 1 })).newPage();
-await page.goto(`http://127.0.0.1:${port}/showcase/type.html?faces=none&lettering=none`);
+await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?faces=none&lettering=none`);
 await page.waitForFunction(() => window.vx, null, { timeout: 9000 });
 const rows = await page.evaluate(async () => {
   const FACES = window.vx.FACES;
-  const F = '/packages/voxelmorphism/fonts/';
+  const F = '/kit/fonts/';
   const text = 'One voxel is 4 px. Every size is a whole number of voxels: a button is 11 tall, a switch is 16 by 8, a gap is 1. Nothing is a fraction of a block, so nothing looks nearly right.';
   const out = [];
   const lum = (r, g, b) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };

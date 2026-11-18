@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Popover</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* room under a key for what it opens, so the page's picture shows both */
@@ -70,7 +70,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { popover } from '/packages/voxelmorphism/src/components/popover.js';
+  import { popover } from '../../src/components/popover.js';
   // the popover is a form: Save and Enter in the field both submit it, and it closes
   const input = document.getElementById('rename-input'), box = document.getElementById('rename');
   box.addEventListener('submit', (e) => { e.preventDefault(); const v = input.value.trim(); if (v) document.getElementById('service-name').textContent = v; box.hidePopover(); });

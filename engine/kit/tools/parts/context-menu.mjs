@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/context-menu.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/context-menu.html`;
 await mkdir('shots/parts/context-menu', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const errors = [];
@@ -33,7 +33,7 @@ const read = (p, id) => p.evaluate(async (id) => {
   const el = document.getElementById(id), l = window.vx?.live?.(el), r = el.getBoundingClientRect();
   let made = null;
   if (l) {
-    const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+    const { MATERIALS } = await import('/kit/src/index.js');
     const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
     const of = (q) => (q ? [...new Set(q.mats)].map(name).sort().join('+') : 'none');
     made = { panel: of(l.model.byName.panel), cubes: l.model.byName.panel?.count ?? 0, top: l.faceZ, float: l.look.float, fx: l.model.byName.panel?.fx?.kind ?? null, active: l.state.active, mark: !l.model.byName.pick?.hidden, lift: l.faceZ * l.vx / 2 };

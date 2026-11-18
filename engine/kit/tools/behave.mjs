@@ -8,7 +8,7 @@ const check = (mode, name, ok, got) => { if (!ok) bad++; console.log(`${ok ? 'ok
 for (const mode of ['plain', 'live']) {
   const page = await (await browser.newContext({ viewport: { width: 390, height: 844 } })).newPage();
   const errors = []; page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`http://127.0.0.1:${port}/showcase/behave.html${mode === 'plain' ? '?plain' : ''}`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/behave.html${mode === 'plain' ? '?plain' : ''}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   const q = (fn, arg) => page.evaluate(fn, arg);
   check(mode, 'the page is ' + mode, (await q(() => document.querySelectorAll('[data-vx-live]').length > 0)) === (mode === 'live'));

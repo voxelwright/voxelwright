@@ -1,4 +1,4 @@
-import { adopt, release, live, toast, sound, stageOf, getStage, ready } from '/packages/voxelmorphism/src/index.js';
+import { adopt, release, live, toast, sound, stageOf, getStage, ready } from '../src/index.js';
 
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;

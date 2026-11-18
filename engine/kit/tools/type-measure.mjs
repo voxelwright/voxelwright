@@ -6,10 +6,10 @@ const rows = [];
 for (const w of [390, 1280]) {
   const ctx = await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
-  await page.goto(`http://127.0.0.1:${port}/showcase/type.html?faces=none`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?faces=none`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 });
   const out = await page.evaluate(async () => {
-    const { fit } = await import('/packages/voxelmorphism/src/components/lettering.js');
+    const { fit } = await import('/kit/src/components/lettering.js');
     const host = document.querySelector('#directions');
     const res = [];
     for (const [font, scale] of [['sign', 2], ['sign', 1], ['block', 1], ['sentence', 2], ['sentence', 1]]) {

@@ -16,7 +16,7 @@ const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'}
 const mid = async (sel, fx = 0.5, fy = 0.5) => { const b = await p.locator(sel).first().boundingBox(); return [b.x + b.width * fx, b.y + b.height * fy]; };
 const press = async (sel) => { const [x, y] = await mid(sel); await p.mouse.move(x, y, { steps: 8 }); await p.mouse.down(); await p.waitForTimeout(90); await p.mouse.up(); };
 
-await p.goto(`http://127.0.0.1:${port}/showcase/lit.html?theme=light`);
+await p.goto(`http://127.0.0.1:${port}/kit/showcase/lit.html?theme=light`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.lit);
 await p.evaluate(() => document.fonts.ready);
 await p.waitForTimeout(1200);

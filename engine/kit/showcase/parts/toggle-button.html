@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toggle button</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -61,7 +61,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { toggleButton } from '/packages/voxelmorphism/src/components/toggle-button.js';
+  import { toggleButton } from '../../src/components/toggle-button.js';
   const log = document.getElementById('log');
   document.getElementById('times').addEventListener('vx-change', (e) => log.toggleAttribute('data-times', e.detail.pressed));
   document.getElementById('wrap').addEventListener('vx-change', (e) => log.toggleAttribute('data-wrap', e.detail.pressed));

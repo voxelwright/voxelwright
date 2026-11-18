@@ -7,7 +7,8 @@ import { chromium, webkit } from 'playwright';
 
 const port = process.env.PORT || 5985;
 const path = process.argv[2] || 'showcase/';
-const url = `http://127.0.0.1:${port}/${path}`;
+const base = `http://127.0.0.1:${port}/kit/`;
+const url = base + path;
 let bad = 0;
 const say = (ok, what, got) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}: ${got}`); };
 
@@ -18,7 +19,7 @@ const COUNT = () => {
   if (gpu) { const real = gpu.requestAdapter.bind(gpu); gpu.requestAdapter = (...a) => { window.__asked++; return real(...a); }; }
 };
 const read = (p) => p.evaluate(async () => {
-  const kit = await import('/packages/voxelmorphism/src/index.js');
+  const kit = await import('/kit/src/index.js');
   const st = await kit.ready();
   return { by: st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain', live: document.querySelectorAll('[data-vx-live]').length, canvases: document.querySelectorAll('.vx-canvas').length, asked: window.__asked, gpu: !!navigator.gpu };
 });
@@ -46,7 +47,7 @@ const gpu = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', 
 {
   const p = await gpu.newPage();
   await p.addInitScript(COUNT);
-  await p.goto(`http://127.0.0.1:${port}/showcase/seam.html?none`);
+  await p.goto(base + 'showcase/seam.html?none');
   await p.waitForSelector('html[data-ready]');
   const r = await p.evaluate(() => ({ live: document.querySelectorAll('[data-vx-live]').length, asked: window.__asked }));
   say(r.live === 0 && r.asked === 0, 'use(null)', `${r.live} parts, ${r.asked} adapter requests`);

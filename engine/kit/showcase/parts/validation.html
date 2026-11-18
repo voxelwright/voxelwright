@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Field with error and validation</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .form { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 100); justify-items: stretch; }
@@ -89,7 +89,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { validation } from '/packages/voxelmorphism/src/components/validation.js';
+  import { validation } from '../../src/components/validation.js';
   show(validation);
   const form = document.getElementById('invite'), said = document.getElementById('said');
   form.addEventListener('submit', (e) => {

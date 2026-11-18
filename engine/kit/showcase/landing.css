@@ -28,6 +28,13 @@ html[data-theme="dark"] .view img { filter: brightness(0.3) saturate(0.7) contra
 .far a { position: absolute; }
 .far .crown { --vx: 2px; }
 
+/* Without the city capture, keep all six signs together. */
+.no-city .what, .no-city img { display: none; }
+.no-city .window { block-size: auto; background: transparent; overflow: visible; }
+.no-city .view { position: static; inline-size: auto; block-size: auto; }
+.no-city .far { position: static; display: flex; flex-wrap: wrap; align-items: center; gap: 32px; padding: 24px; }
+.no-city .far a { position: static; }
+
 /* After flying in: the wall of the long white building, close. */
 .wall { padding: 72px 56px; background: linear-gradient(#e9edf0, #dfe5e9); display: grid; }
 html[data-theme="dark"] .wall { background: linear-gradient(#141926, #0e121c); }

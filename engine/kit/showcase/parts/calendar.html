@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Calendar</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .plan { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 6) calc(var(--vx) * 12); align-items: start; }
@@ -91,7 +91,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { calendar } from '/packages/voxelmorphism/src/components/calendar.js';
+  import { calendar } from '../../src/components/calendar.js';
   // the words under the first calendar say what it holds
   const input = document.getElementById('deploy-day'), said = document.getElementById('deploy-said');
   const tell = () => {

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toggle group</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -90,8 +90,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { toggleButton } from '/packages/voxelmorphism/src/components/toggle-button.js';
-  import { toggleGroup } from '/packages/voxelmorphism/src/components/toggle-group.js';
+  import { toggleButton } from '../../src/components/toggle-button.js';
+  import { toggleGroup } from '../../src/components/toggle-group.js';
   const said = document.getElementById('said'), range = document.getElementById('range'), kinds = document.getElementById('kinds');
   const say = () => {
     const on = [...kinds.querySelectorAll('[aria-pressed="true"]')].map((b) => b.dataset.value);

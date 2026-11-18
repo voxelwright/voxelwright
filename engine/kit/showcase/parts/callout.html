@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Callout</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* the page's own: a few lines of a product round the callout */
@@ -74,7 +74,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { callout } from '/packages/voxelmorphism/src/components/callout.js';
+  import { callout } from '../../src/components/callout.js';
   show(callout);
   // the page's own story: running it again turns the failure into a note that it is at work
   document.getElementById('again').addEventListener('click', () => {

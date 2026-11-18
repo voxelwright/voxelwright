@@ -3,28 +3,41 @@
 A design language where every control is a small solid built from voxels. The rules are in
 [SPEC.md](SPEC.md). Not published and not open source yet.
 
+## Showcase
+
+Start the showcase from the Village checkout.
+
+```sh
+cd engine/kit
+PORT=5989 node tools/serve.mjs
+```
+
+Open [the showcase](http://127.0.0.1:5989/kit/showcase/). The bare server address redirects there.
+Run `PORT=5989 node tools/links.mjs` from the same directory to check all the pages.
+
 ## Use
 
+A page in the engine root can use the kit directly.
+
 ```html
-<link rel="stylesheet" href="voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="kit/voxelmorphism.css">
 
 <button class="vx-button">Plant a seed</button>
 <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Water daily</label>
 
 <script type="module">
-  import { adopt } from './voxelmorphism/src/index.js';
+  import { adopt } from './kit/src/index.js';
   adopt();            // call again with a node after you add markup
 </script>
 ```
 
-There is no build step and no dependency. The stylesheet alone is the plain version; `adopt()`
-adds the voxels. Give the page `overflow-x: clip` (see Bleed in the spec).
+The stylesheet alone is the plain version. Calling `adopt()` adds the voxels. Give the page `overflow-x: clip` (see Bleed in the spec).
 
-The voxels are drawn by the Village engine's WebGPU renderer (a copy lives in `src/engine/`).
+The kit's `src/engine.js` imports the Village WebGPU renderer from `../../blocks/renderer.ts`. The engine servers strip TypeScript types for the browser.
 Its device takes a moment to arrive, so a page is plain first and `ready()` says when it is live:
 
 ```js
-import { adopt, ready } from './voxelmorphism/src/index.js';
+import { adopt, ready } from './kit/src/index.js';
 adopt();                       // remembered until the renderer arrives; the page is plain meanwhile
 const stage = await ready();   // the stage, or null if the page stays plain
 ```

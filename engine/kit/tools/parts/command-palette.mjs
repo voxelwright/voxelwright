@@ -7,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5989;
 await mkdir('shots/parts/command-palette', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
-const url = `http://127.0.0.1:${port}/showcase/parts/command-palette.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/command-palette.html?theme=light`;
 let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 1 })).newPage();
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };
@@ -26,7 +26,7 @@ const CHORD = mac ? 'Meta+k' : 'Control+k';
 
 // a palette as a person finds it
 const read = (id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const list = document.getElementById(id), dialog = list.closest('dialog'), input = document.querySelector(`[aria-controls="${id}"]`);
   const opts = [...list.querySelectorAll('[role="option"]')], seen = opts.filter((o) => o.getClientRects().length > 0);

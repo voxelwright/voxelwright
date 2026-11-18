@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/alert-dialog.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/alert-dialog.html`;
 await mkdir('shots/parts/alert-dialog', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const errors = [];
@@ -30,7 +30,7 @@ const read = (p, id) => p.evaluate(async (id) => {
   const el = document.getElementById(id), l = window.vx?.live?.(el);
   let made = null;
   if (l) {
-    const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+    const { MATERIALS } = await import('/kit/src/index.js');
     const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
     const of = (q) => (q ? [...new Set(q.mats)].map(name).sort().join('+') : 'none');
     const keys = [...el.querySelectorAll('footer .vx-button')].map((k) => { const kl = window.vx.live(k); return { word: k.textContent.trim(), light: of(kl?.model.byName.light), cap: of(kl?.model.byName.cap) }; });

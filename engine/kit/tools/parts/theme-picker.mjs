@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/theme-picker.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/theme-picker.html?theme=light`;
 await mkdir('shots/parts/theme-picker', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
@@ -35,7 +35,7 @@ const press = async (p, sel) => { const l = p.locator(sel).first(); await l.scro
 const seat = (picker, bank, value) => `${picker} [data-vx-pick="${bank}"] label:has(input[value="${value}"])`;
 // what the page is, read from everything a choice is written to
 const state = (p) => p.evaluate(async () => {
-  const d = document.documentElement, kit = await import('/packages/voxelmorphism/src/index.js');
+  const d = document.documentElement, kit = await import('/kit/src/index.js');
   const chosen = (sel, bank) => [...document.querySelectorAll(`${sel} [data-vx-pick="${bank}"] input`)].filter((r) => r.checked).map((r) => r.value).join(',');
   let kept = {}; try { kept = JSON.parse(localStorage.getItem('vx-theme')) || {}; } catch {}
   return {
@@ -129,7 +129,7 @@ for (const plain of [false, true]) {
   say(s.time === 'dark' && s.night, `${tag}: Arrow Right there makes it night`);
 
   // from code
-  await p.evaluate(async () => { const { pick } = await import('/packages/voxelmorphism/src/components/theme-picker.js'); await pick({ theme: 'dusk', time: 'light' }); });
+  await p.evaluate(async () => { const { pick } = await import('/kit/src/components/theme-picker.js'); await pick({ theme: 'dusk', time: 'light' }); });
   await p.waitForTimeout(400);
   s = await state(p);
   say(s.theme === 'dusk' && s.time === 'light' && s.header.join() === 'dusk,light' && s.written.join() === 'dusk,light' && s.kept.theme === 'dusk', `${tag}: pick({ theme: 'dusk', time: 'light' }) from code: every picker shows it, and it is remembered`);
@@ -166,7 +166,7 @@ for (const plain of [false, true]) {
   say(s.theme === 'bay' && s.accent === s.want.bay && s.header[0] === 'bay' && s.kept.theme === 'bay', `${tag}: a remembered theme the site no longer has: back to the kit's own (${s.theme}, ${s.accent})`);
 
   // the early script on the page is the one the part gives
-  const same = await p.evaluate(async () => { const { EARLY } = await import('/packages/voxelmorphism/src/components/theme-picker.js'); return [document.head.querySelector('script').textContent === EARLY, EARLY.length]; });
+  const same = await p.evaluate(async () => { const { EARLY } = await import('/kit/src/components/theme-picker.js'); return [document.head.querySelector('script').textContent === EARLY, EARLY.length]; });
   say(same[0] && same[1] < 500, `${tag}: the script in the page's head is the part's EARLY, ${same[1]} bytes`);
 
   const small = await p.evaluate(() => [...document.querySelectorAll('.vx-theme-picker label')].map((l) => l.getBoundingClientRect()).filter((r) => r.width < 44 || r.height < 44).length);

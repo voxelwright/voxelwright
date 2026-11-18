@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Notice</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .notes { gap: calc(var(--vx) * 5); padding-block: calc(var(--vx) * 2); }
@@ -41,8 +41,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS, toast, live } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  import { LOOKS, toast, live } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const $ = (id) => document.getElementById(id);
   $('deploy').addEventListener('click', () => toast('Deployed harbor-api', { kind: 'done' }));

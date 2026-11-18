@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Message scroller</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* this page's own: a chat (a thread and a composer under it), and a grid of states */
@@ -157,12 +157,12 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { adopt } from '/packages/voxelmorphism/src/index.js';
-  import { bubble } from '/packages/voxelmorphism/src/components/bubble.js';
-  import { attachment } from '/packages/voxelmorphism/src/components/attachment.js';
-  import { questionnaire } from '/packages/voxelmorphism/src/components/questionnaire.js';
-  import { trace } from '/packages/voxelmorphism/src/components/trace.js';
-  import { messageScroller } from '/packages/voxelmorphism/src/components/message-scroller.js';
+  import { adopt } from '../../src/index.js';
+  import { bubble } from '../../src/components/bubble.js';
+  import { attachment } from '../../src/components/attachment.js';
+  import { questionnaire } from '../../src/components/questionnaire.js';
+  import { trace } from '../../src/components/trace.js';
+  import { messageScroller } from '../../src/components/message-scroller.js';
 
   // the page's own: messages to fill the small threads with, and to let arrive
   const said = [

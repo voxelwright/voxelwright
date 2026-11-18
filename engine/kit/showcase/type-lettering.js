@@ -1,6 +1,6 @@
 // The lettering half of the type study: each direction as real voxels, at 1, 2 and 3 voxels per cell.
 
-import { lettering } from '/packages/voxelmorphism/src/components/lettering.js';
+import { lettering } from '../src/components/lettering.js';
 
 const DIRECTIONS = [
   { id: 'today', name: 'Vox Sign, as it is today', tag: 'vx-sign',

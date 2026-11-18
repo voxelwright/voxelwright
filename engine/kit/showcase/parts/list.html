@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>List</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -48,8 +48,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   // the current row follows the link that was pressed
   document.getElementById('projects').addEventListener('click', (e) => {

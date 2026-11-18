@@ -8,7 +8,7 @@ let bad = 0;
 for (const w of [390, 768, 1280]) for (const mode of ['plain', 'live']) {
   const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
   if (mode === 'plain') await page.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await page.goto(`http://127.0.0.1:${port}/${path}`);
+  await page.goto(`http://127.0.0.1:${port}/kit/${path}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(500);

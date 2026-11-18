@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Slider</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .knobs { display: grid; gap: calc(var(--vx) * 3); inline-size: min(100%, calc(var(--vx) * 96)); }
@@ -48,8 +48,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const say = (id, fn) => { const i = document.getElementById(id), o = document.getElementById(id + '-out'); i.addEventListener('input', () => { o.textContent = fn(i.value); }); };
   say('inst', (v) => v);

@@ -21,7 +21,7 @@ for (const mode of ['live', 'plain']) {
     return { invalid: i.getAttribute('aria-invalid'), tied: (i.getAttribute('aria-describedby') || '').split(/\s+/).includes(note.id), words: note.textContent.trim(), shown: seen(note), hint: seen(hint), focus: document.activeElement === i, tall: document.documentElement.scrollHeight };
   }, id);
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/validation.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/validation.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);
@@ -47,7 +47,7 @@ for (const mode of ['live', 'plain']) {
   say(m.tall === tall, `nothing below moved (the page is ${m.tall} px tall, was ${tall})`);
   say(await p.evaluate(() => document.getElementById('said').textContent) === '', 'and nothing was sent');
   if (mode === 'live') {
-    const red = await p.evaluate(async () => { const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS['light-stop'].id; });
+    const red = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS['light-stop'].id; });
     say(red, "the well's rim is the red light");
   }
   await p.screenshot({ path: `shots/parts/validation/hand-${mode}-wrong.png` });
@@ -61,7 +61,7 @@ for (const mode of ['live', 'plain']) {
   say(m.invalid === null && !m.tied && !m.shown && m.words === '', 'a whole address clears the mark, the message and the tie at once');
   if (mode === 'live') {
     await p.waitForTimeout(200);
-    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS.light.id; });
+    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS.light.id; });
     say(lit, 'and the rim is the accent again: it has focus');
   }
 

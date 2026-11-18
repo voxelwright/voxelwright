@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Menubar</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .app { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; }
@@ -91,7 +91,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { menubar } from '/packages/voxelmorphism/src/components/menubar.js';
+  import { menubar } from '../../src/components/menubar.js';
   const $ = (id) => document.getElementById(id);
   $('bar').addEventListener('click', (e) => { const it = e.target.closest('[role="menu"] [role="menuitem"]'); if (it) $('done').textContent = `Done: ${it.textContent.trim()}.`; });
   await show(menubar);

@@ -14,13 +14,13 @@ const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'}
 const mid = async (sel) => { const b = await p.locator(sel).first().boundingBox(); return [b.x + b.width / 2, b.y + b.height / 2]; };
 const press = async (sel) => { const [x, y] = await mid(sel); await p.mouse.move(x, y, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(70); await p.mouse.up(); };
 
-await p.goto(`http://127.0.0.1:${port}/showcase/parts/dialog.html?theme=light`);
+await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/dialog.html?theme=light`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.vx);
 await p.evaluate(() => document.fonts.ready);
 await p.waitForTimeout(900);
 
 const read = (id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const el = document.getElementById(id), l = window.vx.live(el), { panel, groove } = l.model.byName;
   const made = (q) => (q ? [...new Set(q.mats)].map(name).sort().join('+') : 'none');

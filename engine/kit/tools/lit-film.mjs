@@ -23,7 +23,7 @@ const page = await ctx.newPage();
 const problems = [];
 page.on('pageerror', (e) => problems.push(String(e)));
 page.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
-await page.goto(`http://127.0.0.1:${port}/showcase/lit.html?still=1&only=${which}&theme=${dark ? 'dark' : 'light'}${accent ? '&accent=' + accent : ''}`);
+await page.goto(`http://127.0.0.1:${port}/kit/showcase/lit.html?still=1&only=${which}&theme=${dark ? 'dark' : 'light'}${accent ? '&accent=' + accent : ''}`);
 await page.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.lit);
 await page.evaluate(() => document.fonts.ready);
 await page.waitForTimeout(700);

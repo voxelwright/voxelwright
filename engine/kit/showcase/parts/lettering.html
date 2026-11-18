@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Lettering and block</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* Plain, a board cannot ask the script which scale fits its column, so the page says it: two
@@ -54,8 +54,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   window.pokes = 0;
   document.addEventListener('vx-poke', () => { window.pokes++; });

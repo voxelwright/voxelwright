@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Carousel</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .week { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; max-inline-size: calc(var(--vx) * 130); }
@@ -177,7 +177,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { carousel } from '/packages/voxelmorphism/src/components/carousel.js';
+  import { carousel } from '../../src/components/carousel.js';
   const q = new URLSearchParams(location.search), tips = document.getElementById('rotating');
   // for a check with a real hand: ?auto=1200 makes the one that goes by itself quicker, ?still takes that away
   if (q.has('auto')) tips.dataset.vxAuto = q.get('auto');

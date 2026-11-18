@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Select</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .form { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 6) calc(var(--vx) * 9); margin: 0; max-inline-size: 100%; }
@@ -91,7 +91,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { select } from '/packages/voxelmorphism/src/components/select.js';
+  import { select } from '../../src/components/select.js';
   show(select);
   const form = document.getElementById('build'), said = document.getElementById('said');
   const text = (el) => el.selectedOptions[0].textContent.trim();

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Questionnaire</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* this page's own */
@@ -135,7 +135,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { questionnaire } from '/packages/voxelmorphism/src/components/questionnaire.js';
+  import { questionnaire } from '../../src/components/questionnaire.js';
   const said = document.getElementById('said');
   window.answers = [];
   document.addEventListener('vx-answer', (e) => {

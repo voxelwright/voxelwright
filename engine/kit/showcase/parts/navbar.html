@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navbar</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* the site's own bar: across the top of the page, as wide as the page's sheet */
@@ -122,8 +122,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { navs } from '/packages/voxelmorphism/src/components/navs.js';
-  import { navbar } from '/packages/voxelmorphism/src/components/navbar.js';
+  import { navs } from '../../src/components/navs.js';
+  import { navbar } from '../../src/components/navbar.js';
   // The page stands in for a router: a link that is followed becomes the current one.
   document.addEventListener('click', (e) => {
     const a = e.target.closest?.('.vx-nav a[href]');

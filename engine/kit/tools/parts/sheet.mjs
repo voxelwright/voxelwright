@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/sheet.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/sheet.html`;
 await mkdir('shots/parts/sheet', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const errors = [];
@@ -32,7 +32,7 @@ const read = (p, sel) => p.evaluate(async (sel) => {
   const l = window.vx?.live?.(el);
   let made = null;
   if (l) {
-    const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+    const { MATERIALS } = await import('/kit/src/index.js');
     const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
     const of = (q) => (q ? [...new Set(q.mats)].map(name).sort().join('+') : 'none');
     made = { panel: of(l.model.byName.panel), cubes: l.model.byName.panel?.count ?? 0, groove: of(l.model.byName.groove), top: l.faceZ, slab: l.look.slab, edge: l.state.edge, seen: l.visible, drawn: !l.dirty, bolts: !!l.model.byName.bolts, light: !!l.model.byName.light };

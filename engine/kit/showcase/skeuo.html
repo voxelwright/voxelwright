@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voxelmorphism: three readings of one panel</title>
 <meta name="description" content="One design system on the Voxelmorphism kit: keys that stand on their own light, one surface a region, lit grooves, and wells a level below. Shown as a deploy panel and a personal blog.">
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../voxelmorphism.css">
 <link rel="stylesheet" href="lit.css">
 <script>
   (function () {
@@ -111,11 +111,11 @@ ship(pack)</code></pre></div>
 <script type="module">
   // ?engine=spike draws with a throwaway copy of the engine's renderer kept in shots/engine-spike/
   // (not in the repository), where shading is being tried before it goes to the engine at its source
-  // ?engine=dist draws with the engine's own build, served under /engine/ (ENGINE_DIST), not the kit's copy
+  // ?engine=dist draws with the engine's own build, served under /engine/ when ENGINE_DIST is set
   const which = new URLSearchParams(location.search).get('engine');
   if (which === 'spike' || which === 'dist') {
-    const { use } = await import('/packages/voxelmorphism/src/index.js');
-    const { renderer } = await import(which === 'dist' ? '/engine/blocks/renderer.js' : '/shots/engine-spike/blocks/renderer.js');
+    const { use } = await import('../src/index.js');
+    const { renderer } = await import(which === 'dist' ? '/engine/blocks/renderer.js' : '../shots/engine-spike/blocks/renderer.js');
     use(renderer());
   }
   await import('./skeuo-look.js');

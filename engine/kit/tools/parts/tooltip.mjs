@@ -18,7 +18,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   if (plain) await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/tooltip.html?theme=light&hand`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/tooltip.html?theme=light&hand`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);

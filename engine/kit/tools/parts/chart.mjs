@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/chart.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/chart.html?theme=light`;
 await mkdir('shots/parts/chart', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
@@ -29,7 +29,7 @@ async function open({ width = 1180, plain = false, reduced = false, wait = 700 }
 // One chart as it is now: the table's numbers, the scale's words, and what is drawn (in voxels:
 // read from the model's own cells; plain: from the painted marks), all in voxels of the window.
 const read = (p, id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const fig = document.getElementById(id), win = fig.querySelector('.vx-chart-window'), table = fig.querySelector('table');
   const vx = 4, wr = win.getBoundingClientRect();
   const value = (c) => { const t = (c.dataset.vxValue ?? c.textContent).trim(); return t === '' ? null : Number(t); };

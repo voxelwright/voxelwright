@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/carousel.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/carousel.html`;
 const dir = 'shots/parts/carousel';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
@@ -17,7 +17,8 @@ const errors = [];
 const countTimers = () => {
   // every timer but the renderer's: the engine keeps one of its own now and then, which is not the part's
   const live = window.__timers = new Set();
-  const mine = () => !/\/src\/engine\//.test(new Error().stack.split('\n').slice(2, 4).join(' '));
+  const renderer = location.origin + '/blocks/';
+  const mine = () => !new Error().stack.split('\n').slice(2, 4).some((line) => line.includes(renderer));
   const st = window.setTimeout, ct = window.clearTimeout, si = window.setInterval, ci = window.clearInterval;
   window.setTimeout = (fn, ms, ...a) => { const id = st(() => { live.delete(id); fn(...a); }, ms); if (mine()) live.add(id); return id; };
   window.clearTimeout = (id) => { live.delete(id); ct(id); };

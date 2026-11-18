@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Data table</title>
 <!-- the part's own CSS, until it is in the kit's stylesheet. It comes first on purpose: its rules must hold by what they name, not by coming later -->
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -165,10 +165,10 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { checkbox } from '/packages/voxelmorphism/src/components/checkbox.js';
-  import { pagination } from '/packages/voxelmorphism/src/components/pagination.js';
-  import { table } from '/packages/voxelmorphism/src/components/table.js';
-  import { dataTable } from '/packages/voxelmorphism/src/components/data-table.js';
+  import { checkbox } from '../../src/components/checkbox.js';
+  import { pagination } from '../../src/components/pagination.js';
+  import { table } from '../../src/components/table.js';
+  import { dataTable } from '../../src/components/data-table.js';
 
   // what the page does with what is chosen
   const deploys = document.getElementById('deploys'), go = document.getElementById('redeploy'), heard = document.getElementById('heard');

@@ -67,7 +67,7 @@ function ukrainian(el) {
   el.querySelector('.vx-toast-text').textContent = UK.toast;
 }
 
-const F = '/packages/voxelmorphism/fonts/';
+const F = '../fonts/';
 // ?fallback=real uses the stack a real page would ship, so font loading can be measured
 const WRONG = Q.get('fallback') === 'real' ? 'Arial, "Helvetica Neue", sans-serif' : '"Zapfino", "Papyrus", fantasy';
 const kb = (n) => (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';

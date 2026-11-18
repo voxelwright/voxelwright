@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Drawer</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -115,7 +115,7 @@
 
 <script type="module">
   import { show } from './parts.js';
-  import { drawer } from '/packages/voxelmorphism/src/components/drawer.js';
+  import { drawer } from '../../src/components/drawer.js';
   const $ = (id) => document.getElementById(id);
   $('deploy').addEventListener('close', () => { $('result').textContent = $('deploy').returnValue === 'rollback' ? 'Rolled back to deploy 212' : 'Nothing rolled back'; });
   show(drawer);

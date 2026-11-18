@@ -1,7 +1,8 @@
 # Building a part
 
 For whoever adds a part to the kit: a person or an agent. Read all of it once. It is short on
-purpose, and every rule has its reason beside it.
+purpose, and every rule has its reason beside it. Run commands from `engine/kit`.
+Open the parts at `http://127.0.0.1:5989/kit/showcase/parts/`.
 
 ## 1. What this is
 
@@ -189,10 +190,10 @@ headings that break under the pointer), groove, recess, lamp, pointer, checkbox 
 A part is three files that you own, and nothing else:
 
 ```
-packages/voxelmorphism/src/components/<name>.js     the part
-packages/voxelmorphism/css/<name>.css               its CSS: layout, the plain version (tools/css.mjs puts it in the kit's one stylesheet)
-showcase/parts/<name>.html                          its own page
-tools/parts/<name>.mjs                              (if it has behaviour) a check with real input
+src/components/<name>.js     the part
+css/<name>.css               its CSS: layout, the plain version (tools/css.mjs puts it in the kit's one stylesheet)
+showcase/parts/<name>.html   its own page
+tools/parts/<name>.mjs       (if it has behaviour) a check with real input
 ```
 
 Copy the checkbox: `src/components/checkbox.js`, `css/checkbox.css`, `showcase/parts/checkbox.html`.
@@ -302,7 +303,7 @@ no WebGPU, or a page with `data-vx-plain`, shows. It does not have to be pretty 
 ## 7. Hard rules
 
 - **Only your own files.** Never edit `voxelmorphism.css` by hand, `css/_kit.css`, `src/index.js`,
-  `src/looks/lit.js`, `src/core/*`, `src/engine/*`, another part's files, or anything outside
+  `src/looks/lit.js`, `src/core/*`, `src/engine.js`, another part's files, or anything outside
   this worktree. If a
   shared file needs a change, write the exact change in your report; the coordinator makes it.
 - **No git.** Do not commit, stash, switch branch or push. The coordinator commits.

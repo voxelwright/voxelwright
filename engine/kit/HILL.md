@@ -9,10 +9,11 @@ set of parts is built in it. The plain web version is made after, from the settl
 
 ## 1. The floor
 
-A round may not break any of these. Run them against your own server; a pass on another port
-proves nothing.
+A round must pass these gates. Run them from `engine/kit` against the showcase at `http://127.0.0.1:5989/kit/showcase/`.
+To start that server, run `PORT=5989 node tools/serve.mjs` in that directory.
 
 ```sh
+cd engine/kit
 PORT=5989 node tools/shift.mjs      # nothing moves when voxels take over from plain
 PORT=5989 node tools/board.mjs      # the board and tab strips fit narrow screens
 PORT=5989 node tools/behave.mjs     # the same behaviour plain and live

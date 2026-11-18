@@ -7,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5989;
 await mkdir('shots/parts/combobox', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
-const url = (q = '') => `http://127.0.0.1:${port}/showcase/parts/combobox.html?theme=light${q}`;
+const url = (q = '') => `http://127.0.0.1:${port}/kit/showcase/parts/combobox.html?theme=light${q}`;
 let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 1 })).newPage();
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };
@@ -24,7 +24,7 @@ await open('&closed');
 
 // a combobox as a person finds it, and what its float's model holds
 const read = (id) => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const box = document.getElementById(id), input = box.querySelector('[role="combobox"]'), float = box.querySelector('.vx-combobox-float');
   const list = document.getElementById(input.getAttribute('aria-controls')), opts = [...list.querySelectorAll('[role="option"]')];

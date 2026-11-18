@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/resizable.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/resizable.html?theme=light`;
 const dir = 'shots/parts/resizable';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
@@ -28,7 +28,7 @@ async function open({ plain = false, width = 1180, script = true, touch = false,
 // one container: its panes' sizes along the split, its grooves and what they say, and how each is drawn
 const read = (p, id) => p.evaluate(async (id) => {
   const root = document.getElementById(id), down = root.dataset.vxWay === 'down';
-  const { MATERIAL_IDS } = await import('/packages/voxelmorphism/src/core/materials.js');
+  const { MATERIAL_IDS } = await import('/kit/src/core/materials.js');
   const len = (n) => n.getBoundingClientRect()[down ? 'height' : 'width'];
   const kids = (c) => [...root.children].filter((n) => n.classList.contains(c));
   const gs = kids('vx-resizable-groove');

@@ -9,7 +9,7 @@ for (const w of [1280, 390]) {
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => { if (m.type() === 'error' && !/404/.test(m.text())) errors.push(m.text()); });
-  await page.goto(`http://127.0.0.1:${port}/showcase/type.html`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 15000 });
   const height = await page.evaluate(() => document.documentElement.scrollHeight);
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - innerWidth);

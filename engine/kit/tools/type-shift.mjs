@@ -7,7 +7,7 @@ for (const w of [390, 768, 1280]) {
   const boxes = {};
   for (const mode of ['plain', 'live']) {
     const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
-    await page.goto(`http://127.0.0.1:${port}/showcase/type.html?pair=${pair}&faces=none${mode === 'plain' ? '&plain=1' : ''}`);
+    await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?pair=${pair}&faces=none${mode === 'plain' ? '&plain=1' : ''}`);
     await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 });
     await page.waitForTimeout(400);
     boxes[mode] = await page.evaluate(() => [...document.querySelectorAll('.pairing .vx-lettering, .pairing .vx-sign, .pairing h3, .pairing .show')].map((e) => { const r = e.getBoundingClientRect(); return { t: (e.dataset.role || e.tagName) + ' ' + e.textContent.trim().slice(0, 12), x: Math.round(r.left), y: Math.round(r.top + scrollY), w: Math.round(r.width), h: Math.round(r.height) }; }));

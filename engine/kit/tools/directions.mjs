@@ -6,6 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir, writeFile } from 'node:fs/promises';
 
 const port = process.env.PORT || 5985;
+const url = `http://127.0.0.1:${port}/kit/showcase/directions.html`;
 const LOOKS = ['today', 'chunky', 'paper'];
 const dir = 'shots/directions';
 await mkdir(dir, { recursive: true });
@@ -17,7 +18,7 @@ async function open(query, w, h, scale) {
   const p = await ctx.newPage();
   p.on('pageerror', (e) => problems.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') problems.push(m.text()); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/directions.html?${query}`);
+  await p.goto(`${url}?${query}`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 }).catch(() => problems.push('never became ready'));
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(800);
@@ -79,7 +80,7 @@ const html = `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="v
   h1 { font-size: 1.4rem; margin: 0 0 4px; } h2 { font-size: 1.05rem; margin: 40px 0 12px; } p { margin: 0 0 16px; color: #a9adba; }
   .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; } .one { grid-template-columns: 1fr; }
   figure { margin: 0; } figcaption { font-size: 12px; color: #a9adba; margin-bottom: 4px; } img { display: block; max-width: 100%; height: auto; }
-</style><h1>Three directions, in pictures</h1><p>${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC. Columns: today, chunky, paper. The live page is <a style="color:#9aa5ff" href="/showcase/directions.html">/showcase/directions.html</a>.</p>
+</style><h1>Three directions, in pictures</h1><p>${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC. Columns: today, chunky, paper. The live page is <a style="color:#9aa5ff" href="${url}">/kit/showcase/directions.html</a>.</p>
 ${group('Side by side at 1400 wide, as a laptop shows it', (f) => f.startsWith('wide-'), 'one')}
 ${group('At rest and held, day', (f) => /^(rest|press)-day/.test(f))}
 ${group('At rest and held, night', (f) => /^(rest|press)-night/.test(f))}

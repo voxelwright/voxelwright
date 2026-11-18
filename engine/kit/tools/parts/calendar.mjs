@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/calendar.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/calendar.html`;
 const dir = 'shots/parts/calendar';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });

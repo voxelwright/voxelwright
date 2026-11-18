@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Landing: links as signs in the city</title>
 <meta name="description" content="A prototype: a personal site's links as different kinds of sign on the buildings of a voxel San Francisco.">
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../voxelmorphism.css">
 <link rel="stylesheet" href="landing.css">
 <script>document.documentElement.classList.add("js"); setTimeout(function () { document.documentElement.dataset.ready = "1"; }, 3000);</script>
 </head>
@@ -20,11 +20,12 @@
   <p class="note" id="said" role="status">Nothing pressed yet.</p>
 </header>
 
-<h2>In the view, at its true size</h2>
+<section class="no-city">
+<h2>Site signs at their true size</h2>
 <p class="what">The city is the place's own render. The signs are the kit's real voxel lettering, laid over it where the walls are (a composite: the engine does not draw them there yet). The night is a stand-in: the place has no night of its own yet.</p>
 <div class="window">
   <div class="view" id="view">
-    <img src="/shots/view/ina-painted-day.png" width="2018" height="864" alt="A voxel San Francisco: the skyline from a hill, with a long white building in the middle distance.">
+    <img onload="this.closest('section').classList.remove('no-city')" src="../shots/view/ina-painted-day.png" width="2018" height="864" alt="A voxel San Francisco: the skyline from a hill, with a long white building in the middle distance.">
     <nav class="signs far" aria-label="Site">
       <a class="vx-lettering sign-letters" style="left: 690px; top: 501px" data-vx-board="none" data-vx-font="sign" data-vx-ink="tube" data-vx-depth="1" data-vx-press="play" href="#blog" data-opens="/blog">Blog</a>
       <a class="vx-sign sign-board" style="left: 692px; top: 548px" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#garden" data-opens="/garden">Garden</a>
@@ -35,8 +36,9 @@
     </nav>
   </div>
 </div>
+</section>
 
-<h2>After flying in</h2>
+<h2>The signs up close</h2>
 <p class="what">The same three links, as close as a tap brings them. This is where the cubes, the depth and the break can be seen.</p>
 <div class="wall">
   <nav class="signs near" aria-label="Site, close">

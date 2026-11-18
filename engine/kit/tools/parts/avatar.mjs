@@ -18,7 +18,7 @@ async function open({ width = 1180, plain = false, reduced = false } = {}) {
   p.on('pageerror', (e) => p.errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') p.errors.push(m.text()); });
   if (plain) await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/avatar.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/avatar.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);

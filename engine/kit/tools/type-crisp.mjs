@@ -6,7 +6,7 @@ const sizes = (process.argv[2] || '14,16,17,20,22').split(',').map(Number);
 await mkdir('shots/type/probe', { recursive: true });
 const browser = await chromium.launch();
 const page = await (await browser.newContext({ viewport: { width: 900, height: 400 }, deviceScaleFactor: 1 })).newPage();
-await page.goto(`http://127.0.0.1:${port}/showcase/type.html?faces=none&lettering=none`);
+await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?faces=none&lettering=none`);
 await page.waitForFunction(() => window.vx, null, { timeout: 9000 });
 const faces = await page.evaluate(async () => {
   const ok = [];

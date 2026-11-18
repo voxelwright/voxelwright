@@ -1,7 +1,7 @@
 // Contrast of every text and surface pair the kit uses, read from voxelmorphism.css. Body text
 // needs 7:1, quiet text and labels on controls 4.5:1. Exit 1 if any pair falls short.
 import { readFileSync } from 'node:fs';
-const css = readFileSync(new URL('../packages/voxelmorphism/voxelmorphism.css', import.meta.url), 'utf8');
+const css = readFileSync(new URL('../voxelmorphism.css', import.meta.url), 'utf8');
 const block = (re) => Object.fromEntries([...css.match(re)[1].matchAll(/(--vx-[\w-]+):\s*(#[0-9a-f]{6})/gi)].map((m) => [m[1], m[2]]));
 const day = block(/:root \{([\s\S]*?)\n\}/);
 const night = { ...day, ...block(/:root\[data-theme="dark"\] \{([\s\S]*?)\n\}/) };

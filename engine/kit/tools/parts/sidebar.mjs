@@ -7,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5989;
 await mkdir('shots/parts/sidebar', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
-const url = `http://127.0.0.1:${port}/showcase/parts/sidebar.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/sidebar.html?theme=light`;
 let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 1 })).newPage();
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };

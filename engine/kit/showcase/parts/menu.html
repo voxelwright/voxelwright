@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Dropdown menu</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -53,8 +53,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   document.getElementById('project-menu').addEventListener('click', (e) => { const it = e.target.closest('[role="menuitem"]'); if (it) document.getElementById('chosen').textContent = 'Chosen: ' + it.textContent.trim(); });
   await show();

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Combobox</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -116,7 +116,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { combobox } from '/packages/voxelmorphism/src/components/combobox.js';
+  import { combobox } from '../../src/components/combobox.js';
   const $ = (id) => document.getElementById(id);
   $('use-q').addEventListener('vx-choose', (e) => { $('chosen').textContent = `Chosen: ${e.detail.value}.`; });
   await show(combobox);

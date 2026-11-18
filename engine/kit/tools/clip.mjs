@@ -8,7 +8,7 @@ await mkdir('shots/clip', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 2, recordVideo: { dir: 'shots/clip', size: { width: 1280, height: 720 } } });
 const page = await ctx.newPage();
-await page.goto(`http://127.0.0.1:${port}/showcase/`);
+await page.goto(`http://127.0.0.1:${port}/kit/showcase/`);
 await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
 const wait = (ms) => page.waitForTimeout(ms);
 const glide = async (x, y, steps = 18) => { await page.mouse.move(x, y, { steps }); };

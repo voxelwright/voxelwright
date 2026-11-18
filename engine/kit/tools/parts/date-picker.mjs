@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/date-picker.html`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/date-picker.html`;
 const dir = 'shots/parts/date-picker';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });

@@ -1,8 +1,8 @@
 // Write a glyph set from core/fonts/ as JSON, for tools/vox-text-build.py. Usage: node tools/vox-text-export.mjs sentence > glyphs.json
-import { FONTS, kern } from '../packages/voxelmorphism/src/core/fonts/index.js';
-import '../packages/voxelmorphism/src/core/fonts/sign.js';
-import '../packages/voxelmorphism/src/core/fonts/sentence.js';
-import '../packages/voxelmorphism/src/core/fonts/block.js';
+import { FONTS, kern } from '../src/core/fonts/index.js';
+import '../src/core/fonts/sign.js';
+import '../src/core/fonts/sentence.js';
+import '../src/core/fonts/block.js';
 
 const font = FONTS[process.argv[2] || 'sentence'];
 const chars = Object.keys(font.glyphs);

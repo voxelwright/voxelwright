@@ -13,7 +13,7 @@ const SEL = '.pairing .vx-lettering, .pairing .lede, .pairing h3, .pairing .say 
 const boxes = async (w, q, block) => {
   const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
   if (block) await page.route('**/*.woff2', (r) => r.abort());
-  await page.goto(`http://127.0.0.1:${port}/showcase/type.html?pair=${pair}&faces=none&fallback=real${lang}${q}`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?pair=${pair}&faces=none&fallback=real${lang}${q}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
   await page.waitForTimeout(500);
   const out = await page.evaluate((sel) => [...document.querySelectorAll(sel)].map((e) => { const r = e.getBoundingClientRect(); return { t: (e.dataset.role || e.className.split(' ')[0] || e.tagName) + ' ' + e.textContent.trim().slice(0, 10), x: r.left, y: r.top + scrollY, w: r.width, h: r.height }; }), SEL);
@@ -32,7 +32,7 @@ if (!only || only === 'voxels') console.log(`== ${pair}: when the voxels take ov
 if (!only || only === 'pixels') console.log(`== ${pair}: whole pixels, by text size`);
 for (const size of !only || only === 'pixels' ? [14, 16, 17, 20] : []) for (const w of [390, 1280]) {
   const page = await (await browser.newContext({ viewport: { width: w, height: 1800 }, deviceScaleFactor: 1 })).newPage();
-  await page.goto(`http://127.0.0.1:${port}/showcase/type.html?pair=${pair}&faces=none${lang}&size=${size}`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?pair=${pair}&faces=none${lang}&size=${size}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
   await page.waitForTimeout(700);
   const off = await page.evaluate(() => [...document.querySelectorAll('.pairing .vx-label, .pairing .vx-row a, .pairing .vx-field-label, .pairing .vx-lettering, .pairing .vx-button, .pairing .vx-tabs, .pairing .vx-list, .pairing .vx-well, .pairing .vx-card, .pairing .vx-toast, .pairing .vx-switch')].map((e) => { const r = e.getBoundingClientRect(); return { n: e.textContent.trim().slice(0, 12) || e.className, x: r.left, y: r.top + scrollY }; }).filter((o) => Math.abs(o.x - Math.round(o.x)) > 0.01 || Math.abs(o.y - Math.round(o.y)) > 0.01).map((o) => `${o.n} at ${o.x.toFixed(2)}, ${o.y.toFixed(2)}`));

@@ -7,7 +7,7 @@ const port = process.env.PORT || 5987;
 const pair = process.argv[2] || 'vox';
 const extra = process.argv[3] || '';
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
-const url = (lang, plain) => `http://127.0.0.1:${port}/showcase/type.html?pair=${pair}&faces=none${lang ? '&lang=' + lang : ''}${plain ? '&plain=1' : ''}${extra}`;
+const url = (lang, plain) => `http://127.0.0.1:${port}/kit/showcase/type.html?pair=${pair}&faces=none${lang ? '&lang=' + lang : ''}${plain ? '&plain=1' : ''}${extra}`;
 const read = () => {
   const b = document.querySelector('.pairing [data-role="board"]');
   const r = b.getBoundingClientRect(), p = b.parentElement.getBoundingClientRect();

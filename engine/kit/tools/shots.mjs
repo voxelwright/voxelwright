@@ -17,7 +17,7 @@ const page = await ctx.newPage();
 const errors = [];
 page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') errors.push(m.text()); });
 page.on('pageerror', (e) => errors.push(String(e)));
-await page.goto(`http://127.0.0.1:${port}/${page_}`);
+await page.goto(`http://127.0.0.1:${port}/kit/${page_}`);
 await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 8000 }).catch(() => errors.push('never became ready'));
 await page.evaluate(() => document.fonts.ready);
 await page.waitForTimeout(Number(flag('wait', 900)));

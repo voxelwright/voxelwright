@@ -6,7 +6,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/data-table.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/data-table.html?theme=light`;
 await mkdir('shots/parts/data-table', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;

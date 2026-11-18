@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Resizable panels</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* what is in a pane is the page's own: words, in rows a whole number of voxels high */
@@ -144,7 +144,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { resizable } from '/packages/voxelmorphism/src/components/resizable.js';
+  import { resizable } from '../../src/components/resizable.js';
   // the page hears each change, as an app would to remember the split
   const said = document.getElementById('said');
   document.getElementById('use').addEventListener('vx-resize', (e) => { said.textContent = `The list has ${e.detail.value}% of the room.`; });

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navigation menu</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .site { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); inline-size: 100%; }
@@ -93,7 +93,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { navigationMenu, navigationMenuFloat } from '/packages/voxelmorphism/src/components/navigation-menu.js';
+  import { navigationMenu, navigationMenuFloat } from '../../src/components/navigation-menu.js';
   // The page stands in for a router: a link that is followed becomes the current one.
   document.addEventListener('click', (e) => {
     const a = e.target.closest?.('.vx-navigation-menu a[href]');

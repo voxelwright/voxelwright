@@ -11,7 +11,7 @@ p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 p.on('pageerror', (e) => errors.push(String(e)));
 const requests = [];
 p.on('request', (r) => { if (!r.url().startsWith('http://127.0.0.1')) requests.push(r.url()); });
-await p.goto(`http://127.0.0.1:${process.env.PORT || 5985}/${args[0] && !args[0].startsWith('--') ? args[0] : 'showcase/'}`);
+await p.goto(`http://127.0.0.1:${process.env.PORT || 5985}/kit/${args[0] && !args[0].startsWith('--') ? args[0] : 'showcase/'}`);
 await p.waitForTimeout(1200);
 const r = await p.evaluate(() => {
   const de = document.documentElement;

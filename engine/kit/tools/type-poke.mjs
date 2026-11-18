@@ -8,7 +8,7 @@ const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gp
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 620 }, deviceScaleFactor: 2 })).newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
-await page.goto(`http://127.0.0.1:${port}/showcase/type.html?pair=plex&faces=none`);
+await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?pair=plex&faces=none`);
 await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
 await page.waitForTimeout(600);
 const board = page.locator('.pairing .vx-lettering').first();

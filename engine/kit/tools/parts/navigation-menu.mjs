@@ -7,7 +7,7 @@ import { mkdir } from 'node:fs/promises';
 const port = process.env.PORT || 5989;
 await mkdir('shots/parts/navigation-menu', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
-const url = (q = '&closed') => `http://127.0.0.1:${port}/showcase/parts/navigation-menu.html?theme=light${q}`;
+const url = (q = '&closed') => `http://127.0.0.1:${port}/kit/showcase/parts/navigation-menu.html?theme=light${q}`;
 let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }, deviceScaleFactor: 1 })).newPage();
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };
@@ -23,7 +23,7 @@ const open = async (q) => {
 await open();
 
 const read = (id = 'site') => p.evaluate(async (id) => {
-  const { MATERIALS } = await import('/packages/voxelmorphism/src/index.js');
+  const { MATERIALS } = await import('/kit/src/index.js');
   const name = (i) => Object.keys(MATERIALS).find((k) => MATERIALS[k].id === i);
   const el = document.getElementById(id), btns = [...el.querySelectorAll(':scope > ul > li > button')];
   const outB = btns.find((b) => document.getElementById(b.getAttribute('popovertarget')).matches(':popover-open'));

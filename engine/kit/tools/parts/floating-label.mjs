@@ -27,7 +27,7 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   const focused = (id) => p.evaluate((id) => document.activeElement?.id === id, id);
   const tall = () => p.evaluate(() => [document.documentElement.scrollHeight, document.getElementById('mail').closest('.vx-field').getBoundingClientRect().height]);
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/floating-label.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/floating-label.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);

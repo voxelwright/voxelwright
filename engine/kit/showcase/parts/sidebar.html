@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sidebar</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* a window: the sidebar and what it is beside, in one row on the sheet's own surface */
@@ -126,8 +126,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { navs } from '/packages/voxelmorphism/src/components/navs.js';
-  import { sidebar } from '/packages/voxelmorphism/src/components/sidebar.js';
+  import { navs } from '../../src/components/navs.js';
+  import { sidebar } from '../../src/components/sidebar.js';
   // The page stands in for a router: a link that is followed becomes the current one.
   document.addEventListener('click', (e) => {
     const a = e.target.closest?.('.vx-nav a[href]');

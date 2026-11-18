@@ -34,7 +34,7 @@ async function open(w, h, dark) {
   const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 2, colorScheme: dark ? 'dark' : 'light' });
   const p = await ctx.newPage();
   p.on('pageerror', (e) => problems.push(String(e)));
-  await p.goto(`http://127.0.0.1:${port}/${path}`);
+  await p.goto(`http://127.0.0.1:${port}/kit/${path}`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 8000 }).catch(() => problems.push('never became ready'));
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);

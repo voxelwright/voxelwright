@@ -15,7 +15,7 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${tag}: ${what}`); };
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/label.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/label.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);

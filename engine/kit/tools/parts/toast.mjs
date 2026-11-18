@@ -13,7 +13,7 @@ async function open(opts = {}, plain = false) {
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   if (plain) await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/toast.html?theme=light`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/toast.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.vx);
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(700);

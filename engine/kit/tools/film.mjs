@@ -56,7 +56,7 @@ for (const name of names) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`http://127.0.0.1:${port}/${flag('page', 'showcase/')}`);
+  await page.goto(`http://127.0.0.1:${port}/kit/${flag('page', 'showcase/')}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(500);

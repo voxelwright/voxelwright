@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Scroll area</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .build { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
@@ -141,8 +141,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { scrollArea } from '/packages/voxelmorphism/src/components/scroll-area.js';
-  import { skeleton } from '/packages/voxelmorphism/src/components/skeleton.js';
+  import { scrollArea } from '../../src/components/scroll-area.js';
+  import { skeleton } from '../../src/components/skeleton.js';
   // two hundred lines, so the key would be a sliver if it were only as long as its share
   document.querySelector('#long .vx-scroll-view').innerHTML = Array.from({ length: 200 }, (_, i) => `<div><span class="at">${String(i + 1).padStart(3, '0')}</span>Test: case ${i + 1} passed</div>`).join('');
   show(scrollArea, skeleton);

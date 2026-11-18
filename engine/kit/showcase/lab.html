@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voxelmorphism lab</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../voxelmorphism.css">
 <style>
   html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); }
   body { margin: 0; padding: 40px 48px 120px; max-width: 1180px; }
@@ -80,7 +80,7 @@
   </dialog>
 
   <script type="module">
-    import { adopt, live, toast } from '/packages/voxelmorphism/src/index.js';
+    import { adopt, live, toast } from '../src/index.js';
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });

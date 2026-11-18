@@ -20,7 +20,7 @@ for (const scale of scales) for (const theme of themes) {
     const page = await ctx.newPage();
     const errors = [];
     page.on('pageerror', (e) => errors.push(String(e)));
-    await page.goto(`http://127.0.0.1:${port}/showcase/type.html?face=${face}&size=${size}&theme=${theme}`);
+    await page.goto(`http://127.0.0.1:${port}/kit/showcase/type.html?face=${face}&size=${size}&theme=${theme}`);
     await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 }).catch(() => errors.push('never ready'));
     const there = await page.locator('.screen[data-solo]').count();
     if (!there) { await page.close(); continue; }

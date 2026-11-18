@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tooltip</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* room over and under a key for its words, so the page's picture shows them all */
@@ -57,7 +57,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { tooltip } from '/packages/voxelmorphism/src/components/tooltip.js';
+  import { tooltip } from '../../src/components/tooltip.js';
   await show(tooltip);
   // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
   if (!new URLSearchParams(location.search).has('hand')) for (const id of ['t-back', 'ts-above', 'ts-below', 'ts-long', 'ts-edge']) document.getElementById(id).showPopover();

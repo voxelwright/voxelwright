@@ -7,7 +7,7 @@
 <!-- the part's early script, as a site pastes it: what is remembered, set before the first paint -->
 <script>(function(){try{var d=document.documentElement,s=JSON.parse(localStorage.getItem('vx-theme'))||{},k;if(s.time=='light'||s.time=='dark')d.setAttribute('data-theme',s.time);else if(s.time=='system')d.removeAttribute('data-theme');if(s.theme)d.setAttribute('data-vx-theme',s.theme);for(k in s.vars)if(k.indexOf('--lit-')==0)d.style.setProperty(k,s.vars[k])}catch(e){}})()</script>
 <!-- the part's own CSS, until it is in the kit's stylesheet. It comes first on purpose: in that stylesheet it comes before the trench's own file -->
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // this page's own: ?theme=dark or ?theme=light fixes the time of day for someone who has chosen
@@ -134,8 +134,8 @@ adopt();</code></pre></div>
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { THEMES } from '/packages/voxelmorphism/src/index.js';
-  import { themePicker, EARLY } from '/packages/voxelmorphism/src/components/theme-picker.js';
+  import { THEMES } from '../../src/index.js';
+  import { themePicker, EARLY } from '../../src/components/theme-picker.js';
 
   // a theme of the site's own: the picker reads THEMES, so it only has to be there before adopt()
   THEMES.tide = {

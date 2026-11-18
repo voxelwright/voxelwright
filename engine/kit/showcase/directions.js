@@ -1,7 +1,7 @@
 // Three directions for the kit, on the real parts. Each column stands in its own look
 // (data-vx-look, which directions.css turns into --vx-look and a voxel size); the kit draws each
 // part from the look it finds itself in. An experiment: the chosen direction moves into the kit.
-import { adopt, ready, getStage, live, defineLook, wrapLabel, SLIDE } from '/packages/voxelmorphism/src/index.js';
+import { adopt, ready, getStage, live, defineLook, wrapLabel, SLIDE } from '../src/index.js';
 
 const root = document.documentElement;
 

@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Trace</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* this page's own */
@@ -117,7 +117,7 @@ queue/backoff: timed out after 5000 ms</pre>
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { trace } from '/packages/voxelmorphism/src/components/trace.js';
+  import { trace } from '../../src/components/trace.js';
   // the page's own: the run goes on to its end, a step at a time. The seconds of the step in
   // progress tick, and are not read out; each change of state is, once.
   const ship = document.getElementById('ship'), steps = [...ship.children];

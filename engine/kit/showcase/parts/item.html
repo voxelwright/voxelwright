@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Item</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* the page's own: the people of a team, one under another */
@@ -85,7 +85,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { avatar } from '/packages/voxelmorphism/src/components/avatar.js';
+  import { avatar } from '../../src/components/avatar.js';
   show(avatar); // the item is words: the wells and the lamps in it are other parts
   // the page's own: what a press does here
   document.getElementById('press').addEventListener('click', (e) => { const t = document.getElementById('pressed'); t.textContent = t.textContent === 'Closed' ? 'Open' : 'Closed'; });

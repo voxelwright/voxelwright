@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Attachment</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* this page's own: a composer, and a grid of states */
@@ -115,8 +115,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { adopt } from '/packages/voxelmorphism/src/index.js';
-  import { attachment } from '/packages/voxelmorphism/src/components/attachment.js';
+  import { adopt } from '../../src/index.js';
+  import { attachment } from '../../src/components/attachment.js';
   const waiting = document.getElementById('waiting'), said = document.getElementById('said');
   const first = waiting.innerHTML;
   window.removed = [];

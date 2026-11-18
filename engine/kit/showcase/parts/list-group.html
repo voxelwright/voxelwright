@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>List group</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   /* the page's own: a settings screen, its sections down the side */
@@ -110,7 +110,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { listGroup } from '/packages/voxelmorphism/src/components/list-group.js';
+  import { listGroup } from '../../src/components/list-group.js';
   show(listGroup);
   // the page's own router: a press on a section makes it the current one
   const WORDS = { general: 'The name, the branch that is built, and where it runs.', domains: 'Addresses that answer for harbor-api.', secrets: 'Values the build can read and nobody can see.', people: 'Who can deploy, and who can only look.', billing: 'This month so far, and the card on file.' };

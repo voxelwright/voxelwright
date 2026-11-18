@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Context menu</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -77,9 +77,9 @@
 
 <script type="module">
   import { show } from './parts.js';
-  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
-  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
-  import { contextMenu } from '/packages/voxelmorphism/src/components/context-menu.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
+  import { contextMenu } from '../../src/components/context-menu.js';
   Object.assign(LOOKS.lit.parts, parts);
   const $ = (id) => document.getElementById(id);
   // the menu is for the log it was opened on

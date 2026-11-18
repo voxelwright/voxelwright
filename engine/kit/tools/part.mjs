@@ -31,7 +31,7 @@ for (const w of [1280, 390]) for (const theme of ['light', 'dark']) for (const m
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   p.on('response', (r) => { if (r.status() >= 400) errors.push(`${r.status()} ${new URL(r.url()).pathname}`); });
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/${name}.html?theme=${theme}`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/${name}.html?theme=${theme}`);
   const ready = await p.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 9000 }).then(() => true, () => false);
   if (!ready) fail(`${tag}: not ready`);
   await p.evaluate(() => document.fonts.ready);

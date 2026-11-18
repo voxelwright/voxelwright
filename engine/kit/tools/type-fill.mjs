@@ -1,10 +1,10 @@
 // The fill-in gate. A letter built from cubes shows the top and left side of every cube, so each
 // counter loses a strip half the depth wide along its right and bottom edges. This prints, per glyph
 // set, scale and depth, how much of the tightest closed counter is still open ground.
-import { FONTS } from '../packages/voxelmorphism/src/core/fonts/index.js';
-import '../packages/voxelmorphism/src/core/fonts/sign.js';
-import '../packages/voxelmorphism/src/core/fonts/sentence.js';
-import '../packages/voxelmorphism/src/core/fonts/block.js';
+import { FONTS } from '../src/core/fonts/index.js';
+import '../src/core/fonts/sign.js';
+import '../src/core/fonts/sentence.js';
+import '../src/core/fonts/block.js';
 import { layout as oldLayout } from './type-old-sign.js';
 
 function counters(rows) {

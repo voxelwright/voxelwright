@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Hover card</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .sheet a { color: var(--vx-link); text-underline-offset: 0.15em; }
@@ -72,7 +72,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { hoverCard } from '/packages/voxelmorphism/src/components/hover-card.js';
+  import { hoverCard } from '../../src/components/hover-card.js';
   await show(hoverCard);
   // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
   if (!new URLSearchParams(location.search).has('hand')) for (const id of ['c-mina', 'c-up']) document.getElementById(id).showPopover();

@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kit behaviour</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../voxelmorphism.css">
 <style>html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); } body { padding: 2rem 1rem; display: grid; gap: 2rem; justify-items: start; max-inline-size: 390px; } footer { margin: 3rem; } :focus-visible { outline: 3px dashed red; }</style>
 <!-- A test page for behaviour that must be the same with voxels and without (?plain). -->
 <div class="vx-tabs" role="tablist" aria-label="Quality" data-vx-size="small" id="tabs">
@@ -20,14 +20,14 @@
 <button class="vx-button" id="open">Open</button>
 <dialog class="vx-dialog" id="dlg" aria-labelledby="dh"><header id="dh">Settings</header><div class="vx-dialog-body"><p>Body.</p></div><footer><button class="vx-button" data-vx-close value="done">Done</button></footer></dialog>
 <script type="module">
-  import { adopt, plain, live } from '/packages/voxelmorphism/src/index.js';
+  import { adopt, plain, live, ready } from '../src/index.js';
   if (new URLSearchParams(location.search).has('plain')) document.documentElement.setAttribute('data-vx-plain', '');
   window.changes = [];
   document.addEventListener('vx-change', (e) => window.changes.push(e.detail.index));
   document.getElementById('open').onclick = () => document.getElementById('dlg').show();
   adopt();
   window.vx = { plain, live };
-  await new Promise((r) => setTimeout(r, 300));
+  await ready();
   document.documentElement.dataset.ready = '1';
 </script>
 </html>

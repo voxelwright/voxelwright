@@ -3,7 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Renderer seam</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../voxelmorphism.css">
 <style>html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); } body { padding: 3rem; display: grid; gap: 2rem; justify-items: start; }</style>
 <!-- A test page: the kit is handed its renderer late, the way a WebGPU backend will hand it.
      ?late=ms sets the delay, ?none makes the promise settle on nothing, ?fail makes it reject. -->
@@ -11,8 +11,8 @@
 <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Switch</label>
 <div id="later"></div>
 <script type="module">
-  import { use, adopt, ready, plain, release } from '/packages/voxelmorphism/src/index.js';
-  import { Renderer } from '/packages/voxelmorphism/src/core/gl.js';
+  import { use, adopt, ready, plain, release } from '../src/index.js';
+  import { Renderer } from '../src/core/gl.js';
   const q = new URLSearchParams(location.search);
   const late = Number(q.get('late') ?? 300);
   const log = (window.seam = { before: null, after: null, calls: 0 });

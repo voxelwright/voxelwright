@@ -1,9 +1,9 @@
-import { adopt, define, live, getStage } from '/packages/voxelmorphism/src/index.js';
+import { adopt, define, live, getStage } from '../src/index.js';
 
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;
 const q = new URLSearchParams(location.search);
-const F = '/packages/voxelmorphism/fonts/';
+const F = '../fonts/';
 
 // The text faces. wrong: a fallback nobody could mistake for the face, so a failed load is seen.
 const WRONG = '"Zapfino", "Papyrus", fantasy';

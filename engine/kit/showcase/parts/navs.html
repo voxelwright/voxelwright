@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Navs</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .project { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; }
@@ -104,7 +104,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { navs } from '/packages/voxelmorphism/src/components/navs.js';
+  import { navs } from '../../src/components/navs.js';
   // The page stands in for a router: a link that is followed becomes the current one. The part
   // only reads aria-current.
   const words = { Overview: 'what harbor-api is and who looks after it', Deploys: '212 so far; the last one went live four minutes ago', Logs: 'the newest line is at the bottom', Settings: 'the branch it follows and its secrets' };

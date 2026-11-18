@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/popover.html?theme=light&hand`;
 const dir = 'shots/parts/popover';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
@@ -18,7 +19,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   if (plain) await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/popover.html?theme=light&hand`);
+  await p.goto(url);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);
@@ -187,7 +188,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
 {
   const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, javaScriptEnabled: false });
   const p = await ctx.newPage();
-  await p.goto(`http://127.0.0.1:${port}/showcase/parts/popover.html?theme=light&hand`);
+  await p.goto(url);
   await p.waitForTimeout(500);
   const key = await p.locator('#rename-key').boundingBox();
   await p.mouse.move(key.x + key.width / 2, key.y + key.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(70); await p.mouse.up();

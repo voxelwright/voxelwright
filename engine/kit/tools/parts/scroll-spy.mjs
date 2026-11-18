@@ -4,7 +4,7 @@
 import { chromium } from 'playwright';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/scroll-spy.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/scroll-spy.html?theme=light`;
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };

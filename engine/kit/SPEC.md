@@ -5,7 +5,8 @@ control is a small solid made of voxels, lit by one light. It continues the roof
 the zahynailo.dev landing world, which are voxels that break and mend, and commits to the idea for
 a whole interface.
 
-This file is the rule book. `voxelmorphism.css` and `src/` implement it; `showcase/` shows it.
+This file is the rule book. Its paths and commands start in `engine/kit`.
+`voxelmorphism.css` and `src/` implement it. Open the examples at `http://127.0.0.1:5989/kit/showcase/`.
 
 ## 1. Principles
 
@@ -202,7 +203,7 @@ Decide by how often it happens (from the site-craft rules):
   - A board is an object more than a line of text, so on a board every mouse press is play: it
     breaks on the press and brushes at once, and its text is selected by dragging in from
     outside it. `data-vx-press="text"` on a board, or `"play"` on a heading, swaps this.
-  - `node tools/select.mjs` checks all of it with real pointer input, in two browsers.
+  - `PORT=5989 node tools/select.mjs` checks all of it with real pointer input, in two browsers.
 - A dialog may be modal (`showModal()`) or not (`show()`, when the page behind must stay usable
   while a setting changes). Both build and crumble the same way; only a modal one has a backdrop.
 - A value set from code (`input.value = 3`, `input.checked = true`) is drawn at once, with no
@@ -238,14 +239,14 @@ Decide by how often it happens (from the site-craft rules):
 - **The Village engine's renderer draws them** (WebGPU, `src/engine.js`), straight into each
   part's canvas. It is the default: a page calls `adopt()` and nothing else. A WebGPU device
   takes a moment to arrive, so every page starts plain and becomes voxels when it does, and
-  nothing moves when that happens. `src/engine/` is a copy of the engine's built modules, made
-  by `node tools/sync-engine.mjs <Village engine folder>`; `ENGINE.json` there says which commit.
+  nothing moves when that happens. `src/engine.js` re-exports the renderer from
+  `../blocks/renderer.ts` in the same Village checkout.
 - **Where there is no WebGPU** the kit's own WebGL2 renderer (`src/core/gl.js`) still stands in,
   drawing into one hidden canvas and copying. It draws the same picture. It goes when the plain
   version looks right; a browser without WebGPU then gets the plain page. A real iPhone drew the
   engine page on 17 November 2026, which was the condition for this.
 - A page that is plain by choice (`data-vx-plain` on the root) asks for no GPU device.
-  `node tools/default.mjs` checks who draws in each case.
+  `PORT=5989 node tools/default.mjs` checks who draws in each case.
 - At rest nothing runs: no frame loop, no timers. A part is redrawn only when its state changes.
   Parts off screen are not drawn until they come near.
 - Voxels are instanced cubes with per-voxel colour, corner occlusion and a seam; one extra pass
@@ -297,8 +298,8 @@ adopt();
 Looking at one screenshot misses motion. Before a motion is done, film it and read every frame.
 
 ```sh
-node tools/film.mjs                 # every scene
-node tools/film.mjs dialog-open --dark
+PORT=5989 node tools/film.mjs                 # every scene
+PORT=5989 node tools/film.mjs dialog-open --dark
 ```
 
 - Time is stepped by hand (`stage.manual = true`, `stage.advance(1 / 60)`), so the film is the same
@@ -332,7 +333,7 @@ text face on top of them.
   set), sized ten voxels to the em and trimmed to the cap line and baseline. A heading therefore
   has the same box with and without voxels, and nothing moves when they arrive. A board cannot
   ask the script which glyph set fits, so a page that knows its own word sets the steps with a
-  container query (see the showcase). `node tools/shift.mjs <page>` measures what moves.
+  container query (see the showcase). `PORT=5989 node tools/shift.mjs <page>` measures what moves.
 - **Text** is IBM Plex Sans, with IBM Plex Mono for code: sturdy at 14 to 20 px, level in its
   box, with a 1 that has a foot. Weights 400 to 700 only; nothing is faux bold. Everything you
   read or type is text.
@@ -348,7 +349,7 @@ text face on top of them.
   `unicode-range`, fetched only by a page that has Cyrillic in it.
 - Lowercase in lettering exists as a set (Vox Sentence) and is not used: headings are capitals.
 - Chosen by the owner after a study with five review rounds on real parts
-  (`showcase/type.html`, and `?lang=uk` for Ukrainian).
+  (`/kit/showcase/type.html`, and `?lang=uk` for Ukrainian).
 
 ## 16. The kit
 

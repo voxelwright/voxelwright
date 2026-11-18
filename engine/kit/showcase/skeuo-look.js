@@ -4,7 +4,7 @@
 //   lit-o   object: the same, and three parts are modelled on real devices: the switch is a slide
 //           switch in a bezel with a ridged knob, the bar is a row of lamps, the panel is bolted.
 // Nothing here is in the kit. What the owner picks moves into src/looks/lit.js.
-import { defineLook, LOOKS, ring, hole, lightName, kindOf } from '/packages/voxelmorphism/src/index.js';
+import { defineLook, LOOKS, ring, hole, lightName, kindOf } from '../src/index.js';
 
 const lit = LOOKS.lit;
 

@@ -10,7 +10,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
 
 const port = process.env.PORT || 5989;
-const url = `http://127.0.0.1:${port}/showcase/parts/direction.html?theme=light`;
+const url = `http://127.0.0.1:${port}/kit/showcase/parts/direction.html?theme=light`;
 await mkdir('shots/parts/direction', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
@@ -171,7 +171,7 @@ const faces = async (sel) => { const { root } = await cdp.send('DOM.getDocument'
 await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
 const en = await faces(ltr('p-button', '.vx-button .vx-label')), ar = await faces(rtl('p-button', '.vx-button .vx-label')), body = await faces(rtl('p-empty', '.vx-empty-text'));
 say(/Vox Text/.test(en), `a legend in English is drawn in the key face (${en})`);
-say(/Vox Text/.test(ar), `a legend in Arabic belongs in a key face too; it is drawn in ${ar}, the system's, because Vox Text has no Arabic (nor Hebrew) glyphs. Mend: packages/voxelmorphism/fonts/vox-text (the glyph set), or name a face for these scripts in --vx-key-font at voxelmorphism.css:58`);
+say(/Vox Text/.test(ar), `a legend in Arabic belongs in a key face too; it is drawn in ${ar}, the system's, because Vox Text has no Arabic (nor Hebrew) glyphs. Mend: fonts/vox-text (the glyph set), or name a face for these scripts in --vx-key-font at voxelmorphism.css:58`);
 note(`reading text in Arabic is drawn in ${body}: IBM Plex Sans is shipped in Latin and Cyrillic only (voxelmorphism.css:5-26), so Arabic and Hebrew are the system's face`);
 await p.context().close();
 

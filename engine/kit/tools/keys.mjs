@@ -2,7 +2,7 @@
 import { chromium } from 'playwright';
 const b = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const p = await (await b.newContext({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 })).newPage();
-await p.goto(`http://127.0.0.1:${process.env.PORT || 5985}/showcase/`);
+await p.goto(`http://127.0.0.1:${process.env.PORT || 5985}/kit/showcase/`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
 await p.waitForTimeout(600);
 const active = () => p.evaluate(() => { const a = document.activeElement; return a ? (a.id ? '#' + a.id : a.tagName.toLowerCase() + (a.getAttribute('role') ? `[${a.getAttribute('role')}]` : '') + ' "' + (a.textContent || a.getAttribute('aria-label') || '').trim().slice(0, 24) + '"') : 'none'; });

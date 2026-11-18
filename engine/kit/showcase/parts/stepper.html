@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Number stepper</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -82,7 +82,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { stepper } from '/packages/voxelmorphism/src/components/stepper.js';
+  import { stepper } from '../../src/components/stepper.js';
   const said = document.getElementById('said');
   const words = { replicas: (v) => `${v} replicas`, memory: (v) => `${v} MB each`, timeout: (v) => `Requests end after ${v} s` };
   document.querySelector('.scale').addEventListener('change', (e) => { const f = words[e.target.closest('.vx-stepper')?.id]; if (f) said.textContent = f(e.target.value); });

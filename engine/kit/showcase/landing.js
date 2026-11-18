@@ -1,7 +1,7 @@
 // A prototype of the landing: a personal site's links as signs of different kinds on the
 // buildings of the city. The signs are the kit's own lettering part; this page gives them two
 // materials of a sign's kind and says what a press would open.
-import { adopt, ready, getStage, live, refresh, defineMaterial } from '/packages/voxelmorphism/src/index.js';
+import { adopt, ready, getStage, live, refresh, defineMaterial } from '../src/index.js';
 
 const root = document.documentElement;
 

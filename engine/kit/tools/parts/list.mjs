@@ -12,7 +12,7 @@ p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 
-await p.goto(`http://127.0.0.1:${port}/showcase/parts/list.html?theme=light`);
+await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/list.html?theme=light`);
 await p.waitForFunction(() => document.documentElement.dataset.ready === '1' && window.vx);
 await p.evaluate(() => document.fonts.ready);
 await p.waitForTimeout(600);

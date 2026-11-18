@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chart</title>
 <!-- the part's own CSS, until it is in the kit's stylesheet -->
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -132,7 +132,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { chart } from '/packages/voxelmorphism/src/components/chart.js';
+  import { chart } from '../../src/components/chart.js';
 
   // the page's own: the week before, and back. The chart hears its table change.
   const weeks = [

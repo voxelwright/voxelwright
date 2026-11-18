@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Command palette</title>
-<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -113,7 +113,7 @@
 </dialog>
 <script type="module">
   import { show } from './parts.js';
-  import { commandPalette } from '/packages/voxelmorphism/src/components/command-palette.js';
+  import { commandPalette } from '../../src/components/command-palette.js';
   const $ = (id) => document.getElementById(id);
   $('cmds').addEventListener('vx-choose', (e) => { $('done').textContent = `Done: ${e.detail.value}.`; });
   await show(commandPalette);
