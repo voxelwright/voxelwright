@@ -45,11 +45,32 @@ const currentOf = (p, list) => p.evaluate((list) => [...document.querySelectorAl
 // where the mark is drawn (voxels) or painted (plain): the row it is on, by its top edge
 const markOf = (p, list, plain) => p.evaluate(([list, plain]) => {
   const ul = document.querySelector(list), rows = [...ul.children].filter((n) => n.tagName === 'LI');
-  if (plain) return rows.map((li, i) => (getComputedStyle(li, '::before').content !== 'none' ? i : -1)).filter((i) => i >= 0).join(',');
-  const l = window.vx.live(ul);
-  if (!l.well) return '';
-  const y = l.well[1] * l.vx, yy = l.well[3] * l.vx;
-  return rows.map((li, i) => (y >= li.offsetTop && yy <= li.offsetTop + li.offsetHeight ? i : -1)).filter((i) => i >= 0).join(',') + (l.well[0] === 1 ? '' : ` (x ${l.well[0]})`);
+  if (plain) {
+    const swatch = document.createElement('span');
+    swatch.style.color = 'var(--lit-accent, var(--vx-enamel))';
+    ul.append(swatch);
+    const accent = getComputedStyle(swatch).color;
+    swatch.remove();
+    return rows.flatMap((li, i) => {
+      const lens = getComputedStyle(li, '::before');
+      if (lens.content === 'none' || parseFloat(lens.width) <= 0) return ['missing lens'];
+      return lens.backgroundColor === accent ? [i] : [];
+    }).join(',');
+  }
+  const live = window.vx.live(ul);
+  const lens = live.model.byName.lens;
+  if (!lens) return 'missing lenses';
+  return rows.flatMap((li, row) => {
+    let fitted = false, lit = false;
+    for (let i = 0; i < lens.count; i++) {
+      const y = lens.rest[i * 3 + 1] * live.vx;
+      if (y < li.offsetTop || y >= li.offsetTop + li.offsetHeight) continue;
+      fitted = true;
+      if (lens.col[i * 4 + 3] > 0) lit = true;
+    }
+    if (!fitted) return ['missing lens'];
+    return lit ? [row] : [];
+  }).join(',');
 }, [list, plain]);
 
 for (const plain of [false, true]) {
@@ -107,7 +128,7 @@ for (const plain of [false, true]) {
   // right to left: the mark is at the start of the line, which is the right
   await p.evaluate(() => document.querySelector('#sections').setAttribute('dir', 'rtl'));
   await p.waitForTimeout(300);
-  const rtl = await p.evaluate((plain) => { const ul = document.querySelector('#sections'); if (plain) { const li = ul.querySelector('li:has([aria-current])'), b = getComputedStyle(li, '::before'); return parseFloat(b.right); } const l = window.vx.live(ul); return (l.W - 1 - l.well[0]) * l.vx; }, plain);
+  const rtl = await p.evaluate((plain) => { const ul = document.querySelector('#sections'); if (plain) { const li = ul.querySelector('li:has([aria-current])'), b = getComputedStyle(li, '::before'); return parseFloat(b.right); } const l = window.vx.live(ul); return (l.W - 1 - Math.floor(l.model.byName.lens.rest[0])) * l.vx; }, plain);
   say(rtl === 4, `${tag}: right to left, the mark is one voxel in from the right (${rtl} px)`);
 
   const small = await p.evaluate(() => [...document.querySelectorAll('.vx-list-group > li')].filter((li) => li.querySelector('a, button') && li.getBoundingClientRect().height < 44).length);
