@@ -164,7 +164,9 @@ export class Live {
     const ok = this.stage.renderer.draw({
       pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
-      soft: this.form.soft, glowRadius: this.form.glowRadius, glowStrength: this.form.glowStrength,
+      soft: this.form.soft,
+      // a part may turn its own light up and down as it is used (live.glowStrength, live.glowRadius)
+      glowRadius: this.glowRadius ?? this.form.glowRadius, glowStrength: this.glowStrength ?? this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx ?? this.canvas);
     // labels follow their faces
