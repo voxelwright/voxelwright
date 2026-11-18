@@ -53,6 +53,12 @@ try {
       const released = await depths();
       for (const name of moving) assert(Math.abs(released[name] - rest[name]) < .1, name + ' must return with the lamp still lit');
     }
+    await page.keyboard.down('Enter');
+    assert.equal(await key.getAttribute('aria-pressed'), 'false');
+    await page.keyboard.down('Enter');
+    assert.equal(await key.getAttribute('aria-pressed'), 'false', 'holding Enter switches the lamp once');
+    await page.keyboard.up('Enter');
+    await page.keyboard.press('Enter');
     await key.evaluate(el => el.setAttribute('aria-disabled', 'true'));
     await page.keyboard.press('Enter');
     assert.equal(await key.getAttribute('aria-pressed'), 'true');
@@ -66,6 +72,22 @@ try {
     await page.waitForSelector('html[data-ready]');
     assert.equal(await page.locator('#caps').inputValue(), 'carbon');
     assert.equal(await page.getByRole('button', { name: 'Lilac', exact: true }).getAttribute('aria-pressed'), 'true');
+    if (plain) {
+      await page.locator('#caps').selectOption('opal');
+      const capPaint = () => key.evaluate(el => {
+        const cap = getComputedStyle(el, '::before');
+        return [cap.backgroundColor, cap.backgroundImage, cap.borderBottomColor, cap.borderBottomWidth, cap.boxShadow];
+      });
+      const unlit = await capPaint();
+      await page.getByRole('button', { name: 'Amber' }).click();
+      assert.deepEqual(await capPaint(), unlit, 'an unpowered opal key must keep its resin color');
+      await key.click();
+      assert.notEqual((await capPaint())[1], unlit[1]);
+      await page.getByRole('radio', { name: 'Low', exact: true }).check();
+      const low = await capPaint();
+      await page.getByRole('radio', { name: 'Sculpted', exact: true }).check();
+      assert(parseFloat((await capPaint())[3]) > parseFloat(low[3]));
+    }
     assert.deepEqual(errors, []);
     await page.close();
     console.log(plain ? 'PASS plain Tide tester and saved desk build' : 'PASS native voxel Tide tester and saved desk build');

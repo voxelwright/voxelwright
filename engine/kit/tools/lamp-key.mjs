@@ -19,7 +19,7 @@ const browser = await chromium.launch({
 async function geometry(key) {
   return key.evaluate((el) => {
     const live = window.vx.live(el);
-    const { cap, pilot, emitter, diffuser, plate, floor, walls } = live.model.byName;
+    const { cap, stem, guide, pilot, emitter, diffuser, plate, floor, walls } = live.model.byName;
     const cells = (part) =>
       Array.from(part.cells.keys(), (k) => [(k >>> 21) - 1024, ((k >>> 8) & 8191) - 4096, (k & 255) - 128]);
     const body = cells(cap);
@@ -46,7 +46,16 @@ async function geometry(key) {
       }
       return true;
     }).length;
-    const fixed = [plate, walls, floor, emitter, diffuser].map((p) => [p.tx, p.ty, p.tz, ...p.cells.keys()]);
+    const carrierFits = [emitter, diffuser].every(part => cells(part).every(([x, y, z]) => {
+      for (let xx = x + 1; xx <= x1; xx++) if (!walls.has(xx, y, z)) return false;
+      return true;
+    }));
+    const bore = cells(guide).map(cell => cell[2]);
+    const shaft = cells(stem);
+    const stemBottom = Math.min(...shaft.map(cell => cell[2])) + stem.tz;
+    const guided = stem.tz === cap.tz && stemBottom > Math.min(...bore) && stemBottom <= Math.max(...bore) &&
+      shaft.every(([x, y, z]) => !guide.has(x, y, z + stem.tz) && !floor.has(x, y, z + stem.tz));
+    const fixed = [plate, walls, floor, guide, emitter, diffuser].map((p) => [p.tx, p.ty, p.tz, ...p.cells.keys()]);
     const fitting = [emitter, diffuser, pilot].map((p) => [...p.col.slice(0, 4)]);
     const bottom = Math.min(...body.map((cell) => cell[2])) + cap.tz;
     return {
@@ -58,6 +67,7 @@ async function geometry(key) {
       tz: cap.tz,
       pilotZ: pilot.tz,
       exposed,
+      guided, carrierFits,
       skirtFits: body.every(([x, y]) => x >= x0 && x < x1 && y >= y0 && y < y1),
       plateIsOpen: !plate.has(x0, y0, 0) && plate.has(x0 - 1, y0, 0) && plate.has(x1, y0, 0),
       wallDepth: Math.min(...cells(walls).map((c) => c[2])),
@@ -110,6 +120,7 @@ async function exercise(backend) {
       const rest = await geometry(key);
       assert.equal(rest.backend, backend);
       assert.ok(rest.plateIsOpen && rest.skirtFits && rest.shoulderWidth < rest.footWidth && rest.dish >= 1);
+      assert(rest.carrierFits && rest.guided, 'the LED must connect to the liner and the stem must engage the guide');
       assert.equal(rest.bottom, 0);
       const off = await shot('rest');
       const box = await key.boundingBox();
@@ -118,6 +129,7 @@ async function exercise(backend) {
       await settle();
       const held = await geometry(key);
       assert.equal(held.bottom, -rest.travel);
+      assert(held.guided && held.carrierFits, 'the stem must clear the housing at bottom-out');
       assert.ok(held.floorZ < held.wallDepth && held.wallDepth < held.bottom);
       assert.deepEqual(held.fixed, rest.fixed);
       assert.deepEqual(held.fitting, rest.fitting);

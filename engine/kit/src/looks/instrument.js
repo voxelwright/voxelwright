@@ -93,6 +93,7 @@ export function instrument(s, root, stage) {
     delete look._table;
   }
   vars['--vx-key'] = look.materials.key.day;
+  vars['--vx-lamp-resin'] = cap.key;
   for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
   root.dataset.rail = s.rail;
   root.dataset.shell = s.shell;

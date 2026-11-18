@@ -56,7 +56,7 @@ function mould(live, cap, x, y, w, h, rise) {
 
 // Direct, short-range light from the side diffuser. Sample only the receiving
 // cells in its pocket. Opaque plastic blocks the ray, opal transmits a fraction.
-function spill(cap, plate, source, receiver, travel, transmission) {
+function spill(cap, plate, walls, source, receiver, travel, transmission) {
   const [x, y, z] = receiver;
   const sx = source.x + 0.5,
     sy = Math.max(source.y + 0.5, Math.min(source.end - 0.5, y)),
@@ -72,7 +72,7 @@ function spill(cap, plate, source, receiver, travel, transmission) {
     const xx = Math.floor(sx + dx * f),
       yy = Math.floor(sy + dy * f),
       zz = sz + dz * f;
-    if (plate.has(xx, yy, Math.floor(zz))) return 0;
+    if (plate.has(xx, yy, Math.floor(zz)) || walls.has(xx, yy, Math.floor(zz - walls.tz))) return 0;
     if (cap.has(xx, yy, Math.floor(zz - travel))) {
       if (!transmission) return 0;
       light *= transmission;
@@ -84,7 +84,7 @@ function spill(cap, plate, source, receiver, travel, transmission) {
 function lighting(live, source, faceWindow, width) {
   const { cap, plate, walls, floor, emitter, diffuser, pilot } = live.model.byName;
   const through = live.look.materials['lamp-cap']?.transmission ?? 0;
-  const dark = [0.2, 0.23, 0.21];
+  const dark = [0.2, 0.23, 0.21], unlitPilot = [0.33, 0.37, 0.34];
   let revision, power, pilotPower, depth, receivers;
   return () => {
     const on = !live.state.off && live.el.getAttribute('aria-pressed') === 'true';
@@ -115,13 +115,14 @@ function lighting(live, source, faceWindow, width) {
     const rgb = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16) / 255);
     for (const lens of [emitter, diffuser, pilot]) {
       const supply = lens === pilot ? pilotLevel : level;
+      const glass = lens === pilot ? unlitPilot : dark;
       for (let i = 0; i < lens.count; i++) {
-        for (let j = 0; j < 3; j++) lens.col[i * 4 + j] = dark[j] * (1 - supply) + rgb[j] * supply;
+        for (let j = 0; j < 3; j++) lens.col[i * 4 + j] = glass[j] * (1 - supply) + rgb[j] * supply;
         lens.col[i * 4 + 3] = supply;
       }
     }
     for (const { part, i, x, y, z, base, frost } of receivers) {
-      const direct = level && spill(cap, plate, source, [x, y, z + (part === cap ? travel : 0)], travel, through);
+      const direct = level && spill(cap, plate, walls, source, [x, y, z + (part === cap ? travel : 0)], travel, through);
       const amount = pilotLevel * frost + level * direct;
       for (let j = 0; j < 3; j++) part.col[i * 4 + j] = base[j] + (rgb[j] - base[j]) * amount;
     }
@@ -157,7 +158,21 @@ export const lampKey = {
     const rise = Math.max(3, Math.min(high ? 10 : 5, Math.round(h * (high ? 0.24 : 0.14))));
     m.keyTravel = high ? rise - 1 : Math.max(2, rise - 2);
     const depth = m.keyTravel + 2;
-    hole(live, m, { x: rim, y: rim, w, h, depth, wall: 'key-liner', floor: 'key-bed' });
+    const { walls, floor } = hole(live, m, { x: rim, y: rim, w, h, depth, wall: 'key-liner', floor: 'key-bed' });
+    // The fixed switch housing passes through the floor. Its open bore guides
+    // the stem even at rest and leaves clearance at the bottom of the stroke.
+    const shaft = Math.max(2, Math.round(Math.min(w, h) * 0.15));
+    const x = Math.floor((W - shaft) / 2), y = Math.floor((H - shaft) / 2);
+    const boreBottom = -depth - m.keyTravel - 2;
+    const guideTop = -m.keyTravel;
+    const guide = m.part('guide');
+    guide.grounded = false;
+    floor.carve(x - 2, y - 2, -depth - 1, shaft + 4, shaft + 4, 1);
+    guide.box(x - 2, y - 2, boreBottom, shaft + 4, shaft + 4, guideTop - boreBottom, 'key-liner');
+    guide.carve(x - 1, y - 1, boreBottom + 1, shaft + 2, shaft + 2, guideTop - boreBottom - 1);
+    const stem = m.part('stem');
+    stem.grounded = false;
+    stem.box(x, y, -depth, shaft, shaft, depth, 'steel');
     const plate = m.part('plate');
     plate.box(0, 0, 0, W, H, 1, 'key-plate').carve(rim, rim, 0, w, h, 1);
     // The diode lies one course below the lip, alongside the skirt. As the
@@ -165,6 +180,8 @@ export const lampKey = {
     const kerf = Math.max(1, Math.round(Math.min(w, h) * 0.055));
     const source = { x: rim + w - kerf, y: rim + Math.floor(h * 0.42), z: -2 };
     source.end = source.y + Math.max(2, Math.round(h * 0.21));
+    // A carrier on the liner holds the two-cell LED package beside the cap.
+    walls.box(source.x + 1, source.y, source.z - 1, kerf - 1, source.end - source.y, 2, 'key-liner');
     for (const [name, z] of [
       ['emitter', source.z - 1],
       ['diffuser', source.z],
@@ -188,8 +205,8 @@ export const lampKey = {
   },
   pose(live) {
     if (!live.state.lightPocket) return;
-    const { cap, pilot } = live.model.byName;
-    cap.tz = pilot.tz = live.state.off ? 0 : Math.max(-live.model.keyTravel, Math.min(0, live.spring('press').x));
+    const { cap, stem, pilot } = live.model.byName;
+    cap.tz = stem.tz = pilot.tz = live.state.off ? 0 : Math.max(-live.model.keyTravel, Math.min(0, live.spring('press').x));
     live.state.lightPocket();
   },
 };

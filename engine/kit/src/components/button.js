@@ -42,7 +42,10 @@ function wireStroke(el, on, { push, lift, momentary } = {}) {
   on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
   on(el, 'pointercancel', e => up(e.pointerId, false));
   on(el, 'pointerleave', e => up(e.pointerId, false));
-  on(el, 'keydown', e => { if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key); });
+  on(el, 'keydown', e => {
+    if (momentary && e.repeat && e.key === 'Enter') e.preventDefault();
+    if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key);
+  });
   on(el, 'keyup', e => up(e.key, true));
   on(el, 'blur', () => up(held, false));
   return () => { held = null; };
