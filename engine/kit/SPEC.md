@@ -41,7 +41,9 @@ the construction rules in the numbered sections.
 
 ## 1. Principles
 
-1. **The voxel is the unit.** Every size is a whole number of voxels. Nothing is a fraction of a block.
+1. **The voxel is the unit.** Size every part in whole voxels. Build the cap, mount and light
+   fittings from cells in the shared model. Highlights can soften a face, and a spring can move it between grid
+   positions. Magnifying a stationary control must still reveal the blocks that make up its shape.
 2. **The front face sits on the pixel grid.** The view is a fixed projection, not a camera, so text
    stays sharp and a control is where its box says it is.
 3. **Height says what you can do.** Proud means press me. A well means type here. Low means off.
