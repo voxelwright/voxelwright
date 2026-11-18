@@ -65,7 +65,7 @@ await settle(p);
 s = await read(p, '#deploy');
 say(s.made.edge === 'right' && Math.abs(s.right - s.vw) < 0.5 && s.top === 0 && Math.abs(s.bottom - s.vh) < 0.5, `wide: it rests against the end of the window, top to bottom (${s.left} to ${s.right})`);
 say(!s.handle && s.made.pull === 'none', 'wide: no handle and no pull: at the side it is not needed');
-say(s.made.panel === 'chalk' && s.made.top === s.made.slab, `wide: it is the sheet's slab of chalk, ${s.made.top} voxels thick`);
+say(s.made.panel === 'panel' && s.made.top === s.made.slab, `wide: it is the sheet's reading plate, ${s.made.top} voxels thick`);
 say(s.inside && s.focus === 'Close deploy 213', `wide: the focus is inside it, on its close key (${s.focus})`);
 await p.keyboard.press('Escape'); await settle(p);
 s = await read(p, '#deploy');

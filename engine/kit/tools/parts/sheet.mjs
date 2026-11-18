@@ -52,7 +52,7 @@ let p = await open();
 // the four that stand open on the page, one at each edge of a small window
 const stand = {};
 for (const [edge, n] of [['right', 0], ['left', 1], ['top', 2], ['bottom', 3]]) stand[edge] = await read(p, `.frames > div:nth-child(${n + 1}) dialog`);
-say(Object.entries(stand).every(([edge, s]) => s.made?.edge === edge && s.made.panel === 'chalk' && s.made.cubes > 500), `a sheet is a slab of chalk at its edge (${Object.entries(stand).map(([e, s]) => `${e}: ${s.made?.panel}, ${s.made?.cubes} cubes`).join('; ')})`);
+say(Object.entries(stand).every(([edge, s]) => s.made?.edge === edge && s.made.panel === 'panel' && s.made.cubes > 500), `a sheet is a reading plate at its edge (${Object.entries(stand).map(([e, s]) => `${e}: ${s.made?.panel}, ${s.made?.cubes} cubes`).join('; ')})`);
 say(Object.values(stand).every((s) => s.made.top === s.made.slab && !s.made.bolts && !s.made.light), `it is as thick as a surface (${stand.right.made.top} voxels), with no bolts (it moves) and no light of its own`);
 say(Object.values(stand).every((s) => s.made.groove === 'light-warm'), 'a groove of the room\'s light parts its header from what is below');
 
@@ -66,7 +66,7 @@ await press(p, '#open-filters');
 await p.waitForTimeout(70);
 let s = await read(p, '#filters');
 say(s.open && s.modal && s.moved !== '0', `a press on Filters opens it as a modal dialog, and it is on its way in (${s.moved} to go)`);
-say(s.made.seen && s.made.cubes > 5000 && s.made.panel === 'chalk', `its voxels are there from the start (${s.made.cubes} cubes of ${s.made.panel})`);
+say(s.made.seen && s.made.cubes > 5000 && s.made.panel === 'panel', `its voxels are there from the start (${s.made.cubes} cubes of ${s.made.panel})`);
 await settle(p);
 s = await read(p, '#filters');
 say(s.moved === '0' && Math.abs(s.right - s.vw) < 0.5 && s.top === 0 && Math.abs(s.bottom - s.vh) < 0.5 && s.made.drawn, `then it rests against the end of the window, from top to bottom (${s.left} to ${s.right} of ${s.vw})`);

@@ -37,7 +37,7 @@ const focusId = () => p.evaluate(() => document.activeElement.id || document.act
 
 // the one shown open on the page
 let m = await read('still-menu');
-say(m.open && m.panelCubes > 200 && m.panel === 'key+light' && m.pick === 'light', `the panel and the mark are voxels: a slab of ${m.panel} (${m.panelCubes} cubes), a mark of ${m.pick} (${m.pickCubes})`);
+say(m.open && m.panelCubes > 200 && m.panel === 'light+panel' && m.pick === 'light', `the panel and the mark are voxels: a slab of ${m.panel} (${m.panelCubes} cubes), a mark of ${m.pick} (${m.pickCubes})`);
 say(m.top === m.float, `it stands at the height of a float (${m.top} voxels)`);
 say(m.active === 1 && m.shown && m.markY === m.rowY[1], `its second row is active, and the mark is beside it (${m.markY} px down for a row at ${m.rowY[1]})`);
 await over('still-menu', 2);
@@ -54,7 +54,7 @@ await p.mouse.down(); await p.waitForTimeout(60); await p.mouse.up();
 await p.waitForTimeout(40);
 m = await read('project-menu');
 say(m.open && m.building === 'assemble', 'a press on its key opens it, and it is being built');
-say(!m.parts.split(',').includes('light') && m.panel === 'key+light', 'its light is part of what is built, so light and slab rise out of the corner together');
+say(!m.parts.split(',').includes('light') && m.panel === 'light+panel', 'its light is part of what is built, so light and slab rise out of the corner together');
 say(Math.abs(m.rect.left - t.x) < 1 && m.rect.top > t.y + t.height, `it opens under its key, from the key's corner (left ${m.rect.left} for ${t.x})`);
 await p.waitForTimeout(450);
 m = await read('project-menu');

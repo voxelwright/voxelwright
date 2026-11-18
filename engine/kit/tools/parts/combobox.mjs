@@ -56,7 +56,7 @@ await press('#use-q');
 m = await read('use');
 say(m.open && m.expanded === 'true' && m.focus && m.shown.length === 9 && m.active === null, `a press in the field opens the rows (${m.shown.length}), marks none, and the focus stays in the field`);
 say(m.under >= 4 && m.under <= 24 && m.sameW && m.left === 0, `the float lies under the well, as wide as it (${m.under} px under)`);
-say(m.body === 'key' && m.light === 'light' && m.pick === 'light', `it is a float: a plate of ${m.body} on a ring of ${m.light}, and a mark of ${m.pick}`);
+say(m.body === 'panel' && m.light === 'light' && m.pick === 'light', `it is a float: a plate of ${m.body} on a ring of ${m.light}, and a mark of ${m.pick}`);
 
 // typing: what matches, and the first marked
 await p.keyboard.type('fe', { delay: 40 }); await p.waitForTimeout(400);

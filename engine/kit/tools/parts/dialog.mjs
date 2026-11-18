@@ -40,7 +40,7 @@ const result = () => p.evaluate(() => document.getElementById('result').textCont
 
 // the one that stands open on the page
 let d = await read('still');
-say(d.open && d.panel === 'chalk+light' && d.top === d.height, `a float at dialog height (${d.top} voxels) on the accent's light: a slab of ${d.panel}`);
+say(d.open && d.panel === 'light+panel' && d.top === d.height, `a float at dialog height (${d.top} voxels) on the accent's light: a slab of ${d.panel}`);
 say(d.groove === 'light-warm' && Math.abs(d.grooveY - (d.headEnd - 4)) < 0.5, `a groove of the room's light parts header from body: the header's last row of voxels (${d.grooveY} px down, the header ends at ${d.headEnd})`);
 say(d.headInk && d.headBand === 'rgba(0, 0, 0, 0)' && d.headH % 4 === 0, `its header is words in ink with no band behind them, ${d.headH / 4} voxels high`);
 say(d.keys.length === 2 && d.keys.filter((k) => k.kind === 'main').length === 1 && d.keys.every((k) => k.lit), `its keys stand on light, and one is main (${d.keys.map((k) => k.kind + ':' + k.cap).join(', ')})`);

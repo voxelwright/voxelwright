@@ -57,7 +57,7 @@ let m = await read(p, 'log-menu');
 const anchoredY = y + (m.bottom - m.top) + m.made.lift > m.vh - 12 ? m.bottom : m.top;
 say(m.open && Math.abs(m.left - x) <= 1 && Math.abs(anchoredY - y) <= 1, `a right press on deploy-212.log opens the menu with its corner at the pointer (${m.left}, ${m.top} for ${x}, ${y})`);
 say(m.said === 'kept', 'and the browser\'s own menu does not open over it');
-say(m.made.panel === 'key+light' && m.made.top === m.made.float && m.made.fx === 'assemble', `it is the kit's menu: a float ${m.made.top} voxels high on the accent's light, being built (${m.made.cubes} cubes)`);
+say(m.made.panel === 'light+panel' && m.made.top === m.made.float && m.made.fx === 'assemble', `it is the kit's menu: a float ${m.made.top} voxels high on the accent's light, being built (${m.made.cubes} cubes)`);
 say(m.label === 'deploy-212.log', `the page heard which log it is for (${m.label})`);
 say(m.focus === 'MENU', `the focus is in the menu (${m.focus})`);
 await p.waitForTimeout(400);
