@@ -1,124 +1,136 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-vx-look="lit">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Voxelmorphism: every part</title>
-<style>
-  html { background: #121318; color: #e8e9ee; font: 16px/1.5 ui-sans-serif, system-ui, sans-serif; }
-  body { margin: 0 auto; max-width: 1240px; padding: 28px 16px 96px; }
-  h1 { font-size: 1.5rem; margin: 0 0 6px; } h2 { font-size: 1.05rem; margin: 44px 0 12px; } p { margin: 0 0 14px; color: #a9adba; max-width: 48em; }
-  a { color: #9db8ff; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
-  figure { margin: 0; background: #1b1d25; padding: 10px; }
-  figcaption { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; font-weight: 600; }
-  figcaption a + a { font-weight: 400; }
-  .missing-sheet > a, .missing-sheet figcaption a + a { display: none; }
-  .missing-sheet figcaption { margin-bottom: 0; }
-  img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: left top; background: #0c0d12; }
-</style>
-<noscript><style>
-  figure > a, figcaption a + a { display: none; }
-  figcaption { margin-bottom: 0; }
-</style></noscript>
-<script>
-  document.addEventListener('error', (e) => {
-    if (e.target instanceof HTMLImageElement) e.target.closest('figure')?.classList.add('missing-sheet');
-  }, true);
-</script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Parts catalog · Voxelmorphism</title>
+  <link rel="stylesheet" href="../../voxelmorphism.css">
+  <link rel="stylesheet" href="catalog.css">
 </head>
 <body>
-<h1>Every part</h1>
-<p>Open a part to try it. After <code>tools/part.mjs</code> runs, each picture is the part's page in voxels by day and at night, and "sheet" opens the full sheet: voxels and plain, by day and at night, on a laptop above and a phone below.</p>
-<h2>The look's own</h2>
-<div class="grid">
-  <figure><figcaption><a href="checkbox.html">Checkbox</a><a href="../../shots/parts/checkbox/sheet.png">sheet</a></figcaption><a href="../../shots/parts/checkbox/sheet.png"><img src="../../shots/parts/checkbox/thumb.jpg" alt="Checkbox: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="slider.html">Slider</a><a href="../../shots/parts/slider/sheet.png">sheet</a></figcaption><a href="../../shots/parts/slider/sheet.png"><img src="../../shots/parts/slider/thumb.jpg" alt="Slider: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="list.html">List</a><a href="../../shots/parts/list/sheet.png">sheet</a></figcaption><a href="../../shots/parts/list/sheet.png"><img src="../../shots/parts/list/thumb.jpg" alt="List: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="menu.html">Menu</a><a href="../../shots/parts/menu/sheet.png">sheet</a></figcaption><a href="../../shots/parts/menu/sheet.png"><img src="../../shots/parts/menu/thumb.jpg" alt="Menu: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="dialog.html">Dialog</a><a href="../../shots/parts/dialog/sheet.png">sheet</a></figcaption><a href="../../shots/parts/dialog/sheet.png"><img src="../../shots/parts/dialog/thumb.jpg" alt="Dialog: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="toast.html">Toast</a><a href="../../shots/parts/toast/sheet.png">sheet</a></figcaption><a href="../../shots/parts/toast/sheet.png"><img src="../../shots/parts/toast/thumb.jpg" alt="Toast: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="lettering.html">Lettering</a><a href="../../shots/parts/lettering/sheet.png">sheet</a></figcaption><a href="../../shots/parts/lettering/sheet.png"><img src="../../shots/parts/lettering/thumb.jpg" alt="Lettering: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Forms</h2>
-<div class="grid">
-  <figure><figcaption><a href="radio.html">Radio</a><a href="../../shots/parts/radio/sheet.png">sheet</a></figcaption><a href="../../shots/parts/radio/sheet.png"><img src="../../shots/parts/radio/thumb.jpg" alt="Radio: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="select.html">Select</a><a href="../../shots/parts/select/sheet.png">sheet</a></figcaption><a href="../../shots/parts/select/sheet.png"><img src="../../shots/parts/select/thumb.jpg" alt="Select: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="label.html">Label</a><a href="../../shots/parts/label/sheet.png">sheet</a></figcaption><a href="../../shots/parts/label/sheet.png"><img src="../../shots/parts/label/thumb.jpg" alt="Label: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="validation.html">Validation</a><a href="../../shots/parts/validation/sheet.png">sheet</a></figcaption><a href="../../shots/parts/validation/sheet.png"><img src="../../shots/parts/validation/thumb.jpg" alt="Validation: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="floating-label.html">Floating label</a><a href="../../shots/parts/floating-label/sheet.png">sheet</a></figcaption><a href="../../shots/parts/floating-label/sheet.png"><img src="../../shots/parts/floating-label/thumb.jpg" alt="Floating label: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="input-group.html">Input group</a><a href="../../shots/parts/input-group/sheet.png">sheet</a></figcaption><a href="../../shots/parts/input-group/sheet.png"><img src="../../shots/parts/input-group/thumb.jpg" alt="Input group: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="stepper.html">Stepper</a><a href="../../shots/parts/stepper/sheet.png">sheet</a></figcaption><a href="../../shots/parts/stepper/sheet.png"><img src="../../shots/parts/stepper/thumb.jpg" alt="Stepper: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="toggle-button.html">Toggle button</a><a href="../../shots/parts/toggle-button/sheet.png">sheet</a></figcaption><a href="../../shots/parts/toggle-button/sheet.png"><img src="../../shots/parts/toggle-button/thumb.jpg" alt="Toggle button: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="toggle-group.html">Toggle group</a><a href="../../shots/parts/toggle-group/sheet.png">sheet</a></figcaption><a href="../../shots/parts/toggle-group/sheet.png"><img src="../../shots/parts/toggle-group/thumb.jpg" alt="Toggle group: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="button-group.html">Button group</a><a href="../../shots/parts/button-group/sheet.png">sheet</a></figcaption><a href="../../shots/parts/button-group/sheet.png"><img src="../../shots/parts/button-group/thumb.jpg" alt="Button group: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="close-button.html">Close button</a><a href="../../shots/parts/close-button/sheet.png">sheet</a></figcaption><a href="../../shots/parts/close-button/sheet.png"><img src="../../shots/parts/close-button/thumb.jpg" alt="Close button: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Reading</h2>
-<div class="grid">
-  <figure><figcaption><a href="prose.html">Prose</a><a href="../../shots/parts/prose/sheet.png">sheet</a></figcaption><a href="../../shots/parts/prose/sheet.png"><img src="../../shots/parts/prose/thumb.jpg" alt="Prose: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="code-block.html">Code block</a><a href="../../shots/parts/code-block/sheet.png">sheet</a></figcaption><a href="../../shots/parts/code-block/sheet.png"><img src="../../shots/parts/code-block/thumb.jpg" alt="Code block: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="kbd.html">Kbd</a><a href="../../shots/parts/kbd/sheet.png">sheet</a></figcaption><a href="../../shots/parts/kbd/sheet.png"><img src="../../shots/parts/kbd/thumb.jpg" alt="Kbd: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="table.html">Table</a><a href="../../shots/parts/table/sheet.png">sheet</a></figcaption><a href="../../shots/parts/table/sheet.png"><img src="../../shots/parts/table/thumb.jpg" alt="Table: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="figure.html">Figure</a><a href="../../shots/parts/figure/sheet.png">sheet</a></figcaption><a href="../../shots/parts/figure/sheet.png"><img src="../../shots/parts/figure/thumb.jpg" alt="Figure: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="aspect-ratio.html">Aspect ratio</a><a href="../../shots/parts/aspect-ratio/sheet.png">sheet</a></figcaption><a href="../../shots/parts/aspect-ratio/sheet.png"><img src="../../shots/parts/aspect-ratio/thumb.jpg" alt="Aspect ratio: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="separator.html">Separator</a><a href="../../shots/parts/separator/sheet.png">sheet</a></figcaption><a href="../../shots/parts/separator/sheet.png"><img src="../../shots/parts/separator/thumb.jpg" alt="Separator: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="badge.html">Badge</a><a href="../../shots/parts/badge/sheet.png">sheet</a></figcaption><a href="../../shots/parts/badge/sheet.png"><img src="../../shots/parts/badge/thumb.jpg" alt="Badge: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="callout.html">Callout</a><a href="../../shots/parts/callout/sheet.png">sheet</a></figcaption><a href="../../shots/parts/callout/sheet.png"><img src="../../shots/parts/callout/thumb.jpg" alt="Callout: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="avatar.html">Avatar</a><a href="../../shots/parts/avatar/sheet.png">sheet</a></figcaption><a href="../../shots/parts/avatar/sheet.png"><img src="../../shots/parts/avatar/thumb.jpg" alt="Avatar: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="item.html">Item</a><a href="../../shots/parts/item/sheet.png">sheet</a></figcaption><a href="../../shots/parts/item/sheet.png"><img src="../../shots/parts/item/thumb.jpg" alt="Item: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="breadcrumb.html">Breadcrumb</a><a href="../../shots/parts/breadcrumb/sheet.png">sheet</a></figcaption><a href="../../shots/parts/breadcrumb/sheet.png"><img src="../../shots/parts/breadcrumb/thumb.jpg" alt="Breadcrumb: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="pagination.html">Pagination</a><a href="../../shots/parts/pagination/sheet.png">sheet</a></figcaption><a href="../../shots/parts/pagination/sheet.png"><img src="../../shots/parts/pagination/thumb.jpg" alt="Pagination: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="list-group.html">List group</a><a href="../../shots/parts/list-group/sheet.png">sheet</a></figcaption><a href="../../shots/parts/list-group/sheet.png"><img src="../../shots/parts/list-group/thumb.jpg" alt="List group: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="skeleton.html">Skeleton</a><a href="../../shots/parts/skeleton/sheet.png">sheet</a></figcaption><a href="../../shots/parts/skeleton/sheet.png"><img src="../../shots/parts/skeleton/thumb.jpg" alt="Skeleton: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="spinner.html">Spinner</a><a href="../../shots/parts/spinner/sheet.png">sheet</a></figcaption><a href="../../shots/parts/spinner/sheet.png"><img src="../../shots/parts/spinner/thumb.jpg" alt="Spinner: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="empty-state.html">Empty state</a><a href="../../shots/parts/empty-state/sheet.png">sheet</a></figcaption><a href="../../shots/parts/empty-state/sheet.png"><img src="../../shots/parts/empty-state/thumb.jpg" alt="Empty state: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="scroll-area.html">Scroll area</a><a href="../../shots/parts/scroll-area/sheet.png">sheet</a></figcaption><a href="../../shots/parts/scroll-area/sheet.png"><img src="../../shots/parts/scroll-area/thumb.jpg" alt="Scroll area: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="scroll-spy.html">Scroll spy</a><a href="../../shots/parts/scroll-spy/sheet.png">sheet</a></figcaption><a href="../../shots/parts/scroll-spy/sheet.png"><img src="../../shots/parts/scroll-spy/thumb.jpg" alt="Scroll spy: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="direction.html">Direction</a><a href="../../shots/parts/direction/sheet.png">sheet</a></figcaption><a href="../../shots/parts/direction/sheet.png"><img src="../../shots/parts/direction/thumb.jpg" alt="Direction: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Overlays</h2>
-<div class="grid">
-  <figure><figcaption><a href="accordion.html">Accordion</a><a href="../../shots/parts/accordion/sheet.png">sheet</a></figcaption><a href="../../shots/parts/accordion/sheet.png"><img src="../../shots/parts/accordion/thumb.jpg" alt="Accordion: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="collapsible.html">Collapsible</a><a href="../../shots/parts/collapsible/sheet.png">sheet</a></figcaption><a href="../../shots/parts/collapsible/sheet.png"><img src="../../shots/parts/collapsible/thumb.jpg" alt="Collapsible: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="tooltip.html">Tooltip</a><a href="../../shots/parts/tooltip/sheet.png">sheet</a></figcaption><a href="../../shots/parts/tooltip/sheet.png"><img src="../../shots/parts/tooltip/thumb.jpg" alt="Tooltip: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="popover.html">Popover</a><a href="../../shots/parts/popover/sheet.png">sheet</a></figcaption><a href="../../shots/parts/popover/sheet.png"><img src="../../shots/parts/popover/thumb.jpg" alt="Popover: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="hover-card.html">Hover card</a><a href="../../shots/parts/hover-card/sheet.png">sheet</a></figcaption><a href="../../shots/parts/hover-card/sheet.png"><img src="../../shots/parts/hover-card/thumb.jpg" alt="Hover card: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="alert-dialog.html">Alert dialog</a><a href="../../shots/parts/alert-dialog/sheet.png">sheet</a></figcaption><a href="../../shots/parts/alert-dialog/sheet.png"><img src="../../shots/parts/alert-dialog/thumb.jpg" alt="Alert dialog: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="sheet.html">Sheet</a><a href="../../shots/parts/sheet/sheet.png">sheet</a></figcaption><a href="../../shots/parts/sheet/sheet.png"><img src="../../shots/parts/sheet/thumb.jpg" alt="Sheet: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="drawer.html">Drawer</a><a href="../../shots/parts/drawer/sheet.png">sheet</a></figcaption><a href="../../shots/parts/drawer/sheet.png"><img src="../../shots/parts/drawer/thumb.jpg" alt="Drawer: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="context-menu.html">Context menu</a><a href="../../shots/parts/context-menu/sheet.png">sheet</a></figcaption><a href="../../shots/parts/context-menu/sheet.png"><img src="../../shots/parts/context-menu/thumb.jpg" alt="Context menu: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Navigation</h2>
-<div class="grid">
-  <figure><figcaption><a href="navbar.html">Navbar</a><a href="../../shots/parts/navbar/sheet.png">sheet</a></figcaption><a href="../../shots/parts/navbar/sheet.png"><img src="../../shots/parts/navbar/thumb.jpg" alt="Navbar: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="navs.html">Navs</a><a href="../../shots/parts/navs/sheet.png">sheet</a></figcaption><a href="../../shots/parts/navs/sheet.png"><img src="../../shots/parts/navs/thumb.jpg" alt="Navs: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="navigation-menu.html">Navigation menu</a><a href="../../shots/parts/navigation-menu/sheet.png">sheet</a></figcaption><a href="../../shots/parts/navigation-menu/sheet.png"><img src="../../shots/parts/navigation-menu/thumb.jpg" alt="Navigation menu: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="menubar.html">Menubar</a><a href="../../shots/parts/menubar/sheet.png">sheet</a></figcaption><a href="../../shots/parts/menubar/sheet.png"><img src="../../shots/parts/menubar/thumb.jpg" alt="Menubar: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="sidebar.html">Sidebar</a><a href="../../shots/parts/sidebar/sheet.png">sheet</a></figcaption><a href="../../shots/parts/sidebar/sheet.png"><img src="../../shots/parts/sidebar/thumb.jpg" alt="Sidebar: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="command-palette.html">Command palette</a><a href="../../shots/parts/command-palette/sheet.png">sheet</a></figcaption><a href="../../shots/parts/command-palette/sheet.png"><img src="../../shots/parts/command-palette/thumb.jpg" alt="Command palette: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="combobox.html">Combobox</a><a href="../../shots/parts/combobox/sheet.png">sheet</a></figcaption><a href="../../shots/parts/combobox/sheet.png"><img src="../../shots/parts/combobox/thumb.jpg" alt="Combobox: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Heavy</h2>
-<div class="grid">
-  <figure><figcaption><a href="calendar.html">Calendar</a><a href="../../shots/parts/calendar/sheet.png">sheet</a></figcaption><a href="../../shots/parts/calendar/sheet.png"><img src="../../shots/parts/calendar/thumb.jpg" alt="Calendar: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="date-picker.html">Date picker</a><a href="../../shots/parts/date-picker/sheet.png">sheet</a></figcaption><a href="../../shots/parts/date-picker/sheet.png"><img src="../../shots/parts/date-picker/thumb.jpg" alt="Date picker: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="carousel.html">Carousel</a><a href="../../shots/parts/carousel/sheet.png">sheet</a></figcaption><a href="../../shots/parts/carousel/sheet.png"><img src="../../shots/parts/carousel/thumb.jpg" alt="Carousel: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="resizable.html">Resizable</a><a href="../../shots/parts/resizable/sheet.png">sheet</a></figcaption><a href="../../shots/parts/resizable/sheet.png"><img src="../../shots/parts/resizable/thumb.jpg" alt="Resizable: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="code-input.html">Code input</a><a href="../../shots/parts/code-input/sheet.png">sheet</a></figcaption><a href="../../shots/parts/code-input/sheet.png"><img src="../../shots/parts/code-input/thumb.jpg" alt="Code input: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="data-table.html">Data table</a><a href="../../shots/parts/data-table/sheet.png">sheet</a></figcaption><a href="../../shots/parts/data-table/sheet.png"><img src="../../shots/parts/data-table/thumb.jpg" alt="Data table: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="chart.html">Chart</a><a href="../../shots/parts/chart/sheet.png">sheet</a></figcaption><a href="../../shots/parts/chart/sheet.png"><img src="../../shots/parts/chart/thumb.jpg" alt="Chart: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="theme-picker.html">Theme picker</a><a href="../../shots/parts/theme-picker/sheet.png">sheet</a></figcaption><a href="../../shots/parts/theme-picker/sheet.png"><img src="../../shots/parts/theme-picker/thumb.jpg" alt="Theme picker: its sheet" loading="lazy"></a></figure>
-</div>
-<h2>Conversation</h2>
-<div class="grid">
-  <figure><figcaption><a href="message.html">Message</a><a href="../../shots/parts/message/sheet.png">sheet</a></figcaption><a href="../../shots/parts/message/sheet.png"><img src="../../shots/parts/message/thumb.jpg" alt="Message: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="bubble.html">Bubble</a><a href="../../shots/parts/bubble/sheet.png">sheet</a></figcaption><a href="../../shots/parts/bubble/sheet.png"><img src="../../shots/parts/bubble/thumb.jpg" alt="Bubble: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="message-scroller.html">Message scroller</a><a href="../../shots/parts/message-scroller/sheet.png">sheet</a></figcaption><a href="../../shots/parts/message-scroller/sheet.png"><img src="../../shots/parts/message-scroller/thumb.jpg" alt="Message scroller: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="attachment.html">Attachment</a><a href="../../shots/parts/attachment/sheet.png">sheet</a></figcaption><a href="../../shots/parts/attachment/sheet.png"><img src="../../shots/parts/attachment/thumb.jpg" alt="Attachment: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="marker.html">Marker</a><a href="../../shots/parts/marker/sheet.png">sheet</a></figcaption><a href="../../shots/parts/marker/sheet.png"><img src="../../shots/parts/marker/thumb.jpg" alt="Marker: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="questionnaire.html">Questionnaire</a><a href="../../shots/parts/questionnaire/sheet.png">sheet</a></figcaption><a href="../../shots/parts/questionnaire/sheet.png"><img src="../../shots/parts/questionnaire/thumb.jpg" alt="Questionnaire: its sheet" loading="lazy"></a></figure>
-  <figure><figcaption><a href="trace.html">Trace</a><a href="../../shots/parts/trace/sheet.png">sheet</a></figcaption><a href="../../shots/parts/trace/sheet.png"><img src="../../shots/parts/trace/thumb.jpg" alt="Trace: its sheet" loading="lazy"></a></figure>
-</div>
+<main>
+  <a class="back" href="../">← Showcase</a>
+  <h1>Parts catalog</h1>
+  <div class="vx-card specimens">
+    <article>
+      <div class="tray"><div class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd><kbd class="vx-kbd">Shift</kbd><kbd class="vx-kbd">K</kbd></div></div>
+      <h2><a href="kbd.html">Keycaps</a></h2>
+    </article>
+    <article>
+      <div class="tray"><span class="vx-slider"><input id="level" aria-label="Fader level" type="range" min="0" max="100" value="62"></span></div>
+      <h2><a href="slider.html">Faders</a><output for="level" id="level-out">62%</output></h2>
+    </article>
+    <article>
+      <div class="tray"><div class="vx-toggle-group" data-vx-size="small" role="radiogroup" aria-label="Monitor mode">
+        <label><input type="radio" name="monitor" checked>Mono</label>
+        <label><input type="radio" name="monitor">Stereo</label>
+      </div></div>
+      <h2><a href="toggle-group.html">Latching keys</a></h2>
+    </article>
+  </div>
+  <div class="toolbar" hidden>
+    <label class="search">Find a part <input type="search" id="query" placeholder="Name or category"></label>
+    <label class="sheets"><input type="checkbox" id="sheets"> Show test sheets</label>
+    <output id="count" aria-live="polite"></output>
+  </div>
+  <section class="group"><h2>Controls</h2>
+    <ul>
+      <li><a href="checkbox.html">Checkbox</a></li>
+      <li><a href="slider.html">Slider</a></li>
+      <li><a href="list.html">List</a></li>
+      <li><a href="menu.html">Menu</a></li>
+      <li><a href="dialog.html">Dialog</a></li>
+      <li><a href="toast.html">Toast</a></li>
+      <li><a href="lettering.html">Lettering</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Forms</h2>
+    <ul>
+      <li><a href="radio.html">Radio</a></li>
+      <li><a href="select.html">Select</a></li>
+      <li><a href="label.html">Label</a></li>
+      <li><a href="validation.html">Validation</a></li>
+      <li><a href="floating-label.html">Floating label</a></li>
+      <li><a href="input-group.html">Input group</a></li>
+      <li><a href="stepper.html">Stepper</a></li>
+      <li><a href="toggle-button.html">Toggle button</a></li>
+      <li><a href="toggle-group.html">Toggle group</a></li>
+      <li><a href="button-group.html">Button group</a></li>
+      <li><a href="close-button.html">Close button</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Reading</h2>
+    <ul>
+      <li><a href="prose.html">Prose</a></li>
+      <li><a href="code-block.html">Code block</a></li>
+      <li><a href="kbd.html">Kbd</a></li>
+      <li><a href="table.html">Table</a></li>
+      <li><a href="figure.html">Figure</a></li>
+      <li><a href="aspect-ratio.html">Aspect ratio</a></li>
+      <li><a href="separator.html">Separator</a></li>
+      <li><a href="badge.html">Badge</a></li>
+      <li><a href="callout.html">Callout</a></li>
+      <li><a href="avatar.html">Avatar</a></li>
+      <li><a href="item.html">Item</a></li>
+      <li><a href="breadcrumb.html">Breadcrumb</a></li>
+      <li><a href="pagination.html">Pagination</a></li>
+      <li><a href="list-group.html">List group</a></li>
+      <li><a href="skeleton.html">Skeleton</a></li>
+      <li><a href="spinner.html">Spinner</a></li>
+      <li><a href="empty-state.html">Empty state</a></li>
+      <li><a href="scroll-area.html">Scroll area</a></li>
+      <li><a href="scroll-spy.html">Scroll spy</a></li>
+      <li><a href="direction.html">Direction</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Overlays</h2>
+    <ul>
+      <li><a href="accordion.html">Accordion</a></li>
+      <li><a href="collapsible.html">Collapsible</a></li>
+      <li><a href="tooltip.html">Tooltip</a></li>
+      <li><a href="popover.html">Popover</a></li>
+      <li><a href="hover-card.html">Hover card</a></li>
+      <li><a href="alert-dialog.html">Alert dialog</a></li>
+      <li><a href="sheet.html">Sheet</a></li>
+      <li><a href="drawer.html">Drawer</a></li>
+      <li><a href="context-menu.html">Context menu</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Navigation</h2>
+    <ul>
+      <li><a href="navbar.html">Navbar</a></li>
+      <li><a href="navs.html">Navs</a></li>
+      <li><a href="navigation-menu.html">Navigation menu</a></li>
+      <li><a href="menubar.html">Menubar</a></li>
+      <li><a href="sidebar.html">Sidebar</a></li>
+      <li><a href="command-palette.html">Command palette</a></li>
+      <li><a href="combobox.html">Combobox</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Data & tools</h2>
+    <ul>
+      <li><a href="calendar.html">Calendar</a></li>
+      <li><a href="date-picker.html">Date picker</a></li>
+      <li><a href="carousel.html">Carousel</a></li>
+      <li><a href="resizable.html">Resizable</a></li>
+      <li><a href="code-input.html">Code input</a></li>
+      <li><a href="data-table.html">Data table</a></li>
+      <li><a href="chart.html">Chart</a></li>
+      <li><a href="theme-picker.html">Theme picker</a></li>
+    </ul>
+  </section>
+  <section class="group"><h2>Conversation</h2>
+    <ul>
+      <li><a href="message.html">Message</a></li>
+      <li><a href="bubble.html">Bubble</a></li>
+      <li><a href="message-scroller.html">Message scroller</a></li>
+      <li><a href="attachment.html">Attachment</a></li>
+      <li><a href="marker.html">Marker</a></li>
+      <li><a href="questionnaire.html">Questionnaire</a></li>
+      <li><a href="trace.html">Trace</a></li>
+    </ul>
+  </section>
+</main>
+<script type="module" src="catalog.js"></script>
 </body>
 </html>
