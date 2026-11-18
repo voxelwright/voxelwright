@@ -49,8 +49,9 @@ const gone = (p) => p.waitForTimeout(700);
 // ---------------------------------------------------------------------------------------------
 let p = await open();
 let d = await read(p, 'still');
-say(d.made.part === 'dialog' && d.made.panel === 'chalk+light' && d.made.top === d.made.dialog, `it is the kit's dialog: drawn by the dialog part, a float ${d.made.top} voxels high on its light (${d.made.panel})`);
-say(d.made.keys[0].light === 'light' && d.made.keys[1].light === 'light-stop' && d.made.keys.every((k) => k.cap === 'key'), `its keys: "${d.made.keys[0].word}" on the accent's light, "${d.made.keys[1].word}" an ordinary cap on a red light (${d.made.keys.map((k) => k.cap + '/' + k.light).join(', ')})`);
+say(d.made.part === 'dialog' && d.made.panel === 'light+panel' && d.made.top === d.made.dialog, `it is the kit's dialog: drawn by the dialog part, a float ${d.made.top} voxels high on its light (${d.made.panel})`);
+say(d.made.keys[0].light === 'backlight' && d.made.keys[1].light === 'light-stop' &&
+  d.made.keys.every(k => k.cap === 'cap-inlay+cap-ridge+key'), `its keys: "${d.made.keys[0].word}" on the case backlight, "${d.made.keys[1].word}" an ordinary cap on a red light (${d.made.keys.map((k) => k.cap + '/' + k.light).join(', ')})`);
 
 await press(p, '#open-delete'); await p.waitForTimeout(80);
 d = await read(p, 'delete');
