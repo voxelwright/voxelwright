@@ -18,7 +18,7 @@ import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
 import { groove, recess, lamp, pointer, applyTheme } from './looks/lit.js';
-import { behave, unbehave } from './plain.js';
+import { behave, unbehave, plainPart } from './plain.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
@@ -181,9 +181,12 @@ export function theme(t) {
   return th;
 }
 
-/** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step? }. */
+/** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step?, plain? }. */
 export function define(def) {
+  if (components.includes(def)) return;
   components.push(def);
+  // what it must do with no voxels at all (keys, opening, closing): def.plain(el, on)
+  if (def.plain) plainPart(def.selector, def.plain);
 }
 
 /** Show a toast: toast('Watered.', { kind: 'done' | 'failed' | 'note', duration }). Works plain too. */
