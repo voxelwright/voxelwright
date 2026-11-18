@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alert dialog</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .people { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
+  /* the ones shown open stand in the page's own flow, so the page has room for them */
+  .stand { grid-template-columns: minmax(0, 1fr); }
+  .stand dialog[open] { position: relative; margin: calc(var(--vx) * 4) 0 calc(var(--vx) * 6); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Alert dialog</h1>
+    <p class="what">The dialog, asking before something is destroyed. It is modal and must be answered: a press outside does nothing, Escape is "no". The focus starts on the key that destroys nothing; the key that destroys is on a red light.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the settings of harbor-api</h2>
+    <div class="people">
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Mina</span><span class="vx-item-line">Owner, since March</span></span></div>
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Ada</span><span class="vx-item-line">Can deploy, since last week</span></span><span class="vx-item-trail"><button class="vx-button" id="open-revoke" type="button">Remove</button></span></div>
+    </div>
+    <div class="row">
+      <button class="vx-button" data-vx-kind="danger" id="open-delete" type="button">Delete project</button>
+      <span class="chosen" id="result" role="status">Nothing deleted</span>
+    </div>
+  </section>
+  <section class="stand">
+    <h2>Every state</h2>
+    <p class="what">Shown open on the page so that it can be looked at, here not modal. Its words wrap; its keys keep their order when they do.</p>
+    <dialog class="vx-dialog vx-alert-dialog" role="alertdialog" id="still" open aria-labelledby="still-h" aria-describedby="still-p">
+      <header id="still-h" lang="uk">Видалити розгортання на сервері?</header>
+      <div class="vx-dialog-body"><p id="still-p" lang="uk">Розгортання 212 гілки fogline-cache зникне разом із журналами. Це не можна скасувати.</p></div>
+      <footer>
+        <button class="vx-button" data-vx-close="cancel" lang="uk">Залишити</button>
+        <button class="vx-button" data-vx-kind="danger" data-vx-close="delete" lang="uk">Видалити</button>
+      </footer>
+    </dialog>
+    <button class="vx-button" id="open-still" type="button">Show it again</button>
+  </section>
+</main>
+
+<dialog class="vx-dialog vx-alert-dialog" role="alertdialog" id="delete" aria-labelledby="delete-h" aria-describedby="delete-p">
+  <header id="delete-h">Delete harbor-api?</header>
+  <div class="vx-dialog-body"><p id="delete-p">Its 213 deploys, its logs and its address go with it. This cannot be undone.</p></div>
+  <footer>
+    <button class="vx-button" data-vx-close="cancel" autofocus>Keep it</button>
+    <button class="vx-button" data-vx-kind="danger" data-vx-close="delete">Delete harbor-api</button>
+  </footer>
+</dialog>
+
+<dialog class="vx-dialog vx-alert-dialog" role="alertdialog" id="revoke" aria-labelledby="revoke-h" aria-describedby="revoke-p">
+  <header id="revoke-h">Remove Ada from harbor-api?</header>
+  <div class="vx-dialog-body"><p id="revoke-p">Ada can no longer deploy it or read its logs. You can ask her back at any time.</p></div>
+  <footer>
+    <button class="vx-button" data-vx-close="cancel" autofocus>Cancel</button>
+    <button class="vx-button" data-vx-kind="danger" data-vx-close="remove">Remove Ada</button>
+  </footer>
+</dialog>
+
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS } from '../../src/index.js';
+  import { parts } from '../../src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  const $ = (id) => document.getElementById(id);
+  $('open-delete').addEventListener('click', () => $('delete').showModal());
+  $('open-revoke').addEventListener('click', () => $('revoke').showModal());
+  $('open-still').addEventListener('click', () => $('still').show());
+  const said = { delete: 'harbor-api deleted', remove: 'Ada removed', cancel: 'Nothing deleted' };
+  for (const id of ['delete', 'revoke', 'still']) $(id).addEventListener('close', () => { $('result').textContent = said[$(id).returnValue] ?? 'Nothing deleted'; });
+  show();
+</script>
+</body>
+</html>

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Landing: links as signs in the city</title>
+<meta name="description" content="A prototype: a personal site's links as different kinds of sign on the buildings of a voxel San Francisco.">
+<link rel="stylesheet" href="../voxelmorphism.css">
+<link rel="stylesheet" href="landing.css">
+<script>document.documentElement.classList.add("js"); setTimeout(function () { document.documentElement.dataset.ready = "1"; }, 3000);</script>
+</head>
+<body>
+<header class="top">
+  <h1>Links as signs in the city</h1>
+  <p class="lede">A personal site's landing is a handful of links. Here each one is a sign of its own kind, as a real city has them: cut-out letters on a roof, a digital board on a wall, small boards on office crowns for the socials. Press one: it breaks, and that is the tap that opens the page.</p>
+  <div class="hours" role="radiogroup" aria-label="Time of day">
+    <label><input type="radio" name="hour" value="light" checked> Day</label>
+    <label><input type="radio" name="hour" value="dark"> Night</label>
+  </div>
+  <p class="note" id="said" role="status">Nothing pressed yet.</p>
+</header>
+
+<section class="no-city">
+<h2>Site signs at their true size</h2>
+<p class="what">The city is the place's own render. The signs are the kit's real voxel lettering, laid over it where the walls are (a composite: the engine does not draw them there yet). The night is a stand-in: the place has no night of its own yet.</p>
+<div class="window">
+  <div class="view" id="view">
+    <img onload="this.closest('section').classList.remove('no-city')" src="../shots/view/ina-painted-day.png" width="2018" height="864" alt="A voxel San Francisco: the skyline from a hill, with a long white building in the middle distance.">
+    <nav class="signs far" aria-label="Site">
+      <a class="vx-lettering sign-letters" style="left: 690px; top: 501px" data-vx-board="none" data-vx-font="sign" data-vx-ink="tube" data-vx-depth="1" data-vx-press="play" href="#blog" data-opens="/blog">Blog</a>
+      <a class="vx-sign sign-board" style="left: 692px; top: 548px" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#garden" data-opens="/garden">Garden</a>
+      <a class="vx-lettering sign-letters" style="left: 556px; top: 509px" data-vx-board="none" data-vx-font="sign" data-vx-ink="tube" data-vx-depth="1" data-vx-press="play" href="#tags" data-opens="/tags">Tags</a>
+      <a class="vx-sign sign-board crown" style="left: 1262px; top: 251px" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#code" data-opens="the code host" aria-label="Code">GH</a>
+      <a class="vx-sign sign-board crown" style="left: 1515px; top: 359px" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#video" data-opens="the video channel" aria-label="Video">YT</a>
+      <a class="vx-sign sign-board crown" style="left: 372px; top: 364px" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#feed" data-opens="the feed" aria-label="Feed">RSS</a>
+    </nav>
+  </div>
+</div>
+</section>
+
+<h2>The signs up close</h2>
+<p class="what">The same three links, as close as a tap brings them. This is where the cubes, the depth and the break can be seen.</p>
+<div class="wall">
+  <nav class="signs near" aria-label="Site, close">
+    <a class="vx-lettering sign-letters" data-vx-board="none" data-vx-font="sign" data-vx-ink="tube" data-vx-depth="3" data-vx-press="play" href="#blog" data-opens="/blog">Blog</a>
+    <a class="vx-sign sign-board" data-vx-font="sign" data-vx-max="1" data-vx-material="screen" data-vx-frame="none" data-vx-ink="pixel" data-vx-press="play" href="#garden" data-opens="/garden">Garden</a>
+    <a class="vx-lettering sign-letters" data-vx-board="none" data-vx-font="sign" data-vx-ink="tube" data-vx-depth="3" data-vx-press="play" href="#tags" data-opens="/tags">Tags</a>
+  </nav>
+</div>
+
+<script type="module" src="landing.js"></script>
+</body>
+</html>

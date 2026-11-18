@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Aspect ratio</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own: grids to put the shapes in, and the pictures (drawn here) */
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  .previews { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: calc(var(--vx) * 6); inline-size: 100%; }
+  .shapes { display: flex; flex-wrap: wrap; align-items: flex-end; gap: calc(var(--vx) * 6); inline-size: 100%; }
+  .shapes > .vx-figure { inline-size: calc(var(--vx) * 44); }
+  .shapes > .upright { inline-size: calc(var(--vx) * 28); }
+  .shapes > .long { inline-size: calc(var(--vx) * 72); }
+  .none { display: grid; place-items: center; padding: calc(var(--vx) * 3); text-align: center; color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: 1.4; }
+  svg.pixels { shape-rendering: crispEdges; }
+  @media (max-width: 600px) { .previews { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<!-- the pictures, drawn once and used below: a harbour at first light, and a page of a site -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <g id="harbour">
+      <rect width="80" height="6" fill="#27335f"/><rect y="6" width="80" height="6" fill="#4a4478"/><rect y="12" width="80" height="5" fill="#8a5a84"/><rect y="17" width="80" height="4" fill="#c76b6a"/><rect y="21" width="80" height="3" fill="#ec9a6a"/><rect y="24" width="80" height="2" fill="#f6c283"/>
+      <rect x="36" y="13" width="8" height="1" fill="#ffe2ae"/><rect x="34" y="14" width="12" height="2" fill="#ffe2ae"/><rect x="33" y="16" width="14" height="10" fill="#ffe2ae"/>
+      <rect y="20" width="10" height="6" fill="#3a3560"/><rect x="10" y="22" width="8" height="4" fill="#3a3560"/><rect x="18" y="24" width="6" height="2" fill="#3a3560"/><rect x="56" y="23" width="6" height="3" fill="#3a3560"/><rect x="62" y="21" width="18" height="5" fill="#3a3560"/>
+      <rect y="26" width="80" height="19" fill="#2c4468"/><rect y="26" width="80" height="1" fill="#f6c283" opacity=".55"/>
+      <rect x="35" y="27" width="10" height="1" fill="#ffe2ae" opacity=".85"/><rect x="37" y="29" width="6" height="1" fill="#ffe2ae" opacity=".8"/><rect x="34" y="31" width="12" height="1" fill="#ffe2ae" opacity=".7"/><rect x="38" y="33" width="4" height="1" fill="#ffe2ae" opacity=".6"/><rect x="36" y="35" width="8" height="1" fill="#ffe2ae" opacity=".5"/>
+      <rect y="24" width="30" height="1" fill="#fff" opacity=".35"/><rect x="48" y="25" width="32" height="1" fill="#fff" opacity=".3"/><rect x="8" y="29" width="18" height="1" fill="#fff" opacity=".14"/><rect x="50" y="32" width="22" height="1" fill="#fff" opacity=".12"/>
+      <rect x="44" y="9" width="21" height="2" fill="#ffe2ae" opacity=".28"/>
+      <rect x="62" y="28" width="12" height="2" fill="#1b2238"/><rect x="60" y="30" width="16" height="3" fill="#1b2238"/>
+      <rect x="66" y="12" width="5" height="16" fill="#f3efe4"/><rect x="66" y="16" width="5" height="2" fill="#c5402e"/><rect x="66" y="22" width="5" height="2" fill="#c5402e"/><rect x="65" y="9" width="7" height="3" fill="#1b2238"/><rect x="67" y="10" width="3" height="1" fill="#ffe2ae"/><rect x="66" y="8" width="5" height="1" fill="#c5402e"/><rect x="67" y="7" width="3" height="1" fill="#c5402e"/>
+      <rect y="37" width="24" height="8" fill="#1b2238"/><rect y="37" width="24" height="1" fill="#3b4668"/><rect x="5" y="35" width="2" height="2" fill="#1b2238"/><rect x="15" y="35" width="2" height="2" fill="#1b2238"/>
+      <rect x="40" y="33" width="1" height="5" fill="#1b2238"/><rect x="36" y="36" width="5" height="3" fill="#f3efe4"/><rect x="32" y="39" width="14" height="2" fill="#c5402e"/><rect x="34" y="41" width="10" height="1" fill="#1b2238"/>
+    </g>
+    <!-- a page of a site, as a preview shows it: its colours come from the <use> that draws it -->
+    <g id="site">
+      <rect width="80" height="45" fill="var(--paper, #f4f1ea)"/>
+      <rect width="80" height="6" fill="var(--bar, #1b2238)"/><rect x="3" y="2" width="10" height="2" fill="var(--paper, #f4f1ea)"/><rect x="58" y="2" width="5" height="2" fill="var(--paper, #f4f1ea)" opacity=".6"/><rect x="65" y="2" width="5" height="2" fill="var(--paper, #f4f1ea)" opacity=".6"/><rect x="72" y="2" width="5" height="2" fill="var(--mark, #c5402e)"/>
+      <rect x="6" y="12" width="34" height="4" fill="var(--bar, #1b2238)"/><rect x="6" y="18" width="26" height="4" fill="var(--bar, #1b2238)"/>
+      <rect x="6" y="26" width="30" height="1" fill="var(--bar, #1b2238)" opacity=".5"/><rect x="6" y="29" width="28" height="1" fill="var(--bar, #1b2238)" opacity=".5"/><rect x="6" y="32" width="20" height="1" fill="var(--bar, #1b2238)" opacity=".5"/>
+      <rect x="6" y="37" width="12" height="4" fill="var(--mark, #c5402e)"/>
+      <rect x="48" y="11" width="26" height="28" fill="var(--block, #2c4468)"/><rect x="52" y="25" width="6" height="14" fill="var(--paper, #f4f1ea)" opacity=".8"/><rect x="60" y="19" width="6" height="20" fill="var(--paper, #f4f1ea)" opacity=".8"/><rect x="68" y="15" width="3" height="24" fill="var(--mark, #c5402e)"/>
+    </g>
+  </defs>
+</svg>
+
+<main class="vx-card sheet">
+  <header>
+    <h1>Aspect ratio</h1>
+    <p class="what">Layout only: a place that keeps its shape whatever its width, and what is in it fills it. Nothing of its own is drawn.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: previews of the last three deploys</h2>
+    <div class="previews" id="use">
+      <figure class="vx-figure">
+        <div class="vx-recess"><div class="vx-ratio" data-vx-ratio="16:9"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The front page of fog-site."><use href="#site"/></svg></div></div>
+        <figcaption><strong>fog-site</strong> <small>Sat, 16:02 by Ada</small></figcaption>
+      </figure>
+      <figure class="vx-figure">
+        <div class="vx-recess"><div class="vx-ratio" data-vx-ratio="16:9"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The front page of fog-site, with a dark bar and a blue mark."><use href="#site" style="--bar: #27335f; --mark: #2f5bff; --block: #8a5a84"/></svg></div></div>
+        <figcaption><strong>fog-site</strong> <small>Fri, 11:40 by Mina</small></figcaption>
+      </figure>
+      <figure class="vx-figure">
+        <div class="vx-recess"><div class="vx-ratio" data-vx-ratio="16:9"><div class="none">No preview: the build failed</div></div></div>
+        <figcaption><strong>fog-site</strong> <small>Fri, 09:30 by Mina</small></figcaption>
+      </figure>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>The shapes it knows by name (data-vx-ratio)</h3>
+    <div class="shapes" id="named">
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="1:1"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, square."><use href="#harbour"/></svg></div></div><figcaption>1:1</figcaption></figure>
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="4:3"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, four by three."><use href="#harbour"/></svg></div></div><figcaption>4:3</figcaption></figure>
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="3:2"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, three by two."><use href="#harbour"/></svg></div></div><figcaption>3:2</figcaption></figure>
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, sixteen by nine."><use href="#harbour"/></svg></div></div><figcaption>16:9, the default</figcaption></figure>
+      <figure class="vx-figure long"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="21:9"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, twenty-one by nine."><use href="#harbour"/></svg></div></div><figcaption>21:9</figcaption></figure>
+    </div>
+    <h3>Upright</h3>
+    <div class="shapes" id="upright">
+      <figure class="vx-figure upright"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="3:4"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMaxYMid slice" role="img" aria-label="The lighthouse, three by four."><use href="#harbour"/></svg></div></div><figcaption>3:4</figcaption></figure>
+      <figure class="vx-figure upright"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="2:3"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMaxYMid slice" role="img" aria-label="The lighthouse, two by three."><use href="#harbour"/></svg></div></div><figcaption>2:3</figcaption></figure>
+      <figure class="vx-figure upright"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="9:16"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMaxYMid slice" role="img" aria-label="The lighthouse, nine by sixteen."><use href="#harbour"/></svg></div></div><figcaption>9:16</figcaption></figure>
+    </div>
+    <h3>Any other shape (--vx-ratio: 5 / 2), as wide as its place</h3>
+    <figure class="vx-figure wide" id="custom"><div class="vx-recess"><div class="vx-ratio" style="--vx-ratio: 5 / 2"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMidYMid slice" role="img" aria-label="The harbour, five by two."><use href="#harbour"/></svg></div></div><figcaption>5 / 2</figcaption></figure>
+    <h3>An img of another shape: cropped to fill, or all of it shown (data-vx-fit="contain"); and words</h3>
+    <div class="shapes" id="fits">
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="1:1"><img alt="The lighthouse, cropped to a square." src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30' width='400' height='300' shape-rendering='crispEdges'%3E%3Crect width='40' height='8' fill='%2327335f'/%3E%3Crect y='8' width='40' height='6' fill='%234a4478'/%3E%3Crect y='14' width='40' height='5' fill='%238a5a84'/%3E%3Crect y='19' width='40' height='3' fill='%23c76b6a'/%3E%3Crect y='22' width='40' height='8' fill='%232c4468'/%3E%3Crect y='22' width='40' height='1' fill='%23f6c283' opacity='.5'/%3E%3Crect x='0' y='6' width='17' height='3' fill='%23ffe2ae' opacity='.25'/%3E%3Crect x='12' y='23' width='18' height='2' fill='%231b2238'/%3E%3Crect x='9' y='25' width='24' height='5' fill='%231b2238'/%3E%3Crect x='18' y='9' width='6' height='14' fill='%23f3efe4'/%3E%3Crect x='18' y='12' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='18' y='18' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='17' y='5' width='8' height='4' fill='%231b2238'/%3E%3Crect x='19' y='6' width='4' height='2' fill='%23ffe2ae'/%3E%3Crect x='18' y='4' width='6' height='1' fill='%23c5402e'/%3E%3Crect x='19' y='3' width='4' height='1' fill='%23c5402e'/%3E%3C/svg%3E"></div></div><figcaption>4:3 in 1:1, cropped</figcaption></figure>
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="1:1" data-vx-fit="contain"><img alt="The lighthouse, all of it, in a square." src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30' width='400' height='300' shape-rendering='crispEdges'%3E%3Crect width='40' height='8' fill='%2327335f'/%3E%3Crect y='8' width='40' height='6' fill='%234a4478'/%3E%3Crect y='14' width='40' height='5' fill='%238a5a84'/%3E%3Crect y='19' width='40' height='3' fill='%23c76b6a'/%3E%3Crect y='22' width='40' height='8' fill='%232c4468'/%3E%3Crect y='22' width='40' height='1' fill='%23f6c283' opacity='.5'/%3E%3Crect x='0' y='6' width='17' height='3' fill='%23ffe2ae' opacity='.25'/%3E%3Crect x='12' y='23' width='18' height='2' fill='%231b2238'/%3E%3Crect x='9' y='25' width='24' height='5' fill='%231b2238'/%3E%3Crect x='18' y='9' width='6' height='14' fill='%23f3efe4'/%3E%3Crect x='18' y='12' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='18' y='18' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='17' y='5' width='8' height='4' fill='%231b2238'/%3E%3Crect x='19' y='6' width='4' height='2' fill='%23ffe2ae'/%3E%3Crect x='18' y='4' width='6' height='1' fill='%23c5402e'/%3E%3Crect x='19' y='3' width='4' height='1' fill='%23c5402e'/%3E%3C/svg%3E"></div></div><figcaption>4:3 in 1:1, all of it</figcaption></figure>
+      <figure class="vx-figure"><div class="vx-recess"><div class="vx-ratio" data-vx-ratio="1:1"><div class="none" lang="uk">Ще немає зображення</div></div></div><figcaption>Words, in the middle</figcaption></figure>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

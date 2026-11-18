@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navbar</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the site's own bar: across the top of the page, as wide as the page's sheet */
+  .site { max-inline-size: calc(var(--vx) * 190); margin: 0 auto calc(var(--vx) * 8); }
+  .states { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); align-content: start; }
+  .state > .vx-groove { margin-block-start: calc(var(--vx) * -2); }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .narrow { max-inline-size: calc(var(--vx) * 84); }
+  .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 9); align-items: start; }
+  .under { color: var(--vx-ink-quiet); font-size: 0.9375rem; padding-block-start: calc(var(--vx) * 3); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<header class="vx-card vx-navbar-surface site" data-vx-bolts="none">
+  <div class="vx-navbar" id="site">
+    <a class="vx-navbar-brand" href="#top">fogline</a>
+    <button class="vx-button vx-navbar-key" id="site-key" type="button" aria-expanded="false" aria-controls="site-links">Menu</button>
+    <div class="vx-navbar-fold" id="site-links">
+      <nav class="vx-nav" data-vx-mark="groove" aria-label="Main">
+        <a href="#deploys" aria-current="page">Deploys</a>
+        <a href="#logs">Logs</a>
+        <a href="#team">Team</a>
+        <a href="#docs">Docs</a>
+      </nav>
+      <a class="vx-button" data-vx-kind="main" href="#new">New project</a>
+    </div>
+  </div>
+</header>
+<main class="vx-card sheet">
+  <header>
+    <h1>Navbar</h1>
+    <p class="what">The bar across the top of a site or an app: one surface, a name, links that are words, and one key at the end. Where the bar is narrow the links fold away behind one more key.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the bar at the top of this page</h2>
+    <p class="what" id="where" role="status">You are on Deploys. Follow a link in the bar and the groove goes with you. Make the window narrow and the links go behind a key.</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <p>In a window that is a surface already: the bar has none of its own, and a groove parts it from what is under it</p>
+        <div class="vx-navbar" id="app">
+          <a class="vx-navbar-brand" href="#top">harbor-api</a>
+          <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="app-links">Menu</button>
+          <div class="vx-navbar-fold" id="app-links">
+            <nav class="vx-nav" data-vx-mark="groove" aria-label="harbor-api">
+              <a href="#overview">Overview</a>
+              <a href="#builds" aria-current="page">Builds</a>
+              <a href="#settings">Settings</a>
+            </nav>
+          </div>
+        </div>
+        <div class="vx-groove" role="separator"></div>
+        <p class="under">Build 4f2c9a1 went live four minutes ago.</p>
+      </div>
+      <div class="pair">
+        <div class="state narrow">
+          <p>Narrow: the links are behind the key</p>
+          <div class="vx-navbar" id="shut">
+            <a class="vx-navbar-brand" href="#top">fogline</a>
+            <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="shut-links">Menu</button>
+            <div class="vx-navbar-fold" id="shut-links">
+              <nav class="vx-nav" data-vx-mark="groove" aria-label="Main, folded">
+                <a href="#deploys" aria-current="page">Deploys</a>
+                <a href="#logs">Logs</a>
+                <a href="#team">Team</a>
+              </nav>
+              <a class="vx-button" data-vx-kind="main" href="#new">New project</a>
+            </div>
+          </div>
+          <div class="vx-groove" role="separator"></div>
+        </div>
+        <div class="state narrow">
+          <p>Narrow, and out: a column under the bar</p>
+          <div class="vx-navbar" id="out">
+            <a class="vx-navbar-brand" href="#top">fogline</a>
+            <button class="vx-button vx-navbar-key" type="button" aria-expanded="true" aria-controls="out-links">Menu</button>
+            <div class="vx-navbar-fold" id="out-links">
+              <nav class="vx-nav" data-vx-mark="groove" aria-label="Main, out">
+                <a href="#deploys">Deploys</a>
+                <a href="#logs" aria-current="page">Logs</a>
+                <a href="#uk" lang="uk">Розгорнути на сервері</a>
+              </nav>
+              <a class="vx-button" data-vx-kind="main" href="#new">New project</a>
+            </div>
+          </div>
+          <div class="vx-groove" role="separator"></div>
+        </div>
+      </div>
+      <div class="state" dir="rtl" lang="ar">
+        <p>من اليمين إلى اليسار</p>
+        <div class="vx-navbar" id="rtl">
+          <a class="vx-navbar-brand" href="#top">فوغلاين</a>
+          <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="rtl-links">القائمة</button>
+          <div class="vx-navbar-fold" id="rtl-links">
+            <nav class="vx-nav" data-vx-mark="groove" aria-label="الرئيسية">
+              <a href="#ar-deploys" aria-current="page">النشر</a>
+              <a href="#ar-logs">السجلات</a>
+              <a href="#ar-team">الفريق</a>
+            </nav>
+            <a class="vx-button" data-vx-kind="main" href="#ar-new">مشروع جديد</a>
+          </div>
+        </div>
+        <div class="vx-groove" role="separator"></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { navs } from '../../src/components/navs.js';
+  import { navbar } from '../../src/components/navbar.js';
+  // The page stands in for a router: a link that is followed becomes the current one.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('.vx-nav a[href]');
+    if (!a) return;
+    for (const other of a.closest('.vx-nav').querySelectorAll('a')) if (other === a) other.setAttribute('aria-current', 'page'); else other.removeAttribute('aria-current');
+    if (a.closest('#site')) document.getElementById('where').textContent = `You are on ${a.textContent.trim()}. Follow a link in the bar and the groove goes with you. Make the window narrow and the links go behind a key.`;
+  });
+  show(navs, navbar);
+</script>
+</body>
+</html>

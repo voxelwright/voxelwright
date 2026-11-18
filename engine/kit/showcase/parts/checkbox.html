@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Checkbox</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Checkbox</h1>
+    <p class="what">A latching push-button with its lamp in its cap, in a steel collar. Ticked, it is latched down and its lamp is on.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: what a deploy does</h2>
+    <div class="col">
+      <label class="vx-check"><input type="checkbox" id="tests" checked><span class="vx-box"></span>Run the tests first</label>
+      <label class="vx-check"><input type="checkbox" id="post"><span class="vx-box"></span>Post to the team channel</label>
+      <label class="vx-check"><input type="checkbox" id="keep" checked><span class="vx-box"></span>Keep the last three builds</label>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row">
+      <label class="vx-check"><input type="checkbox" id="s-empty"><span class="vx-box"></span>Empty</label>
+      <label class="vx-check"><input type="checkbox" checked><span class="vx-box"></span>Ticked</label>
+      <label class="vx-check"><input type="checkbox" id="some"><span class="vx-box"></span>Some of them</label>
+      <label class="vx-check"><input type="checkbox" id="off" disabled><span class="vx-box"></span>Off</label>
+      <label class="vx-check"><input type="checkbox" id="off-on" checked disabled><span class="vx-box"></span>Off, ticked</label>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { checkbox } from '../../src/components/checkbox.js';
+  document.getElementById('some').indeterminate = true;
+  show(checkbox);
+</script>
+</body>
+</html>

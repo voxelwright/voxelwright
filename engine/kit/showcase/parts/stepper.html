@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Number stepper</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* this page's own: a name beside each stepper, and what it was last set to */
+  .scale { display: grid; grid-template-columns: auto auto; align-items: center; gap: calc(var(--vx) * 5) calc(var(--vx) * 8); }
+  .scale .name { font-weight: 600; font-size: 0.9375rem; }
+  .scale .name small { display: block; font-weight: 400; font-size: 0.875rem; color: var(--vx-ink-quiet); }
+  .said { color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; min-block-size: 1.55em; }
+  /* a caption stands four voxels above what it names: a keycap's side and the light at its foot are drawn two and a half voxels above its face, and a bezel reaches two past its slot */
+  .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  @media (max-width: 600px) { .scale { grid-template-columns: 1fr; gap: calc(var(--vx) * 2); } .scale .vx-stepper { margin-block-end: calc(var(--vx) * 3); } }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Number stepper</h1>
+    <p class="what">A window for the number, and a small keycap each side of it: fewer, and more. Hold a key and it goes on stepping. In the field, type, or use the arrow keys.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: scaling harbor-api</h2>
+    <div class="scale">
+      <span class="name" id="n-replicas">Replicas<small>1 to 12</small></span>
+      <div class="vx-stepper" role="group" aria-labelledby="n-replicas" id="replicas">
+        <button class="vx-button" type="button" data-vx-step="down" aria-label="One replica fewer" tabindex="-1">-</button>
+        <span class="vx-well"><input type="number" min="1" max="12" step="1" value="3" aria-labelledby="n-replicas"></span>
+        <button class="vx-button" type="button" data-vx-step="up" aria-label="One replica more" tabindex="-1">+</button>
+      </div>
+      <span class="name" id="n-memory">Memory, MB<small>in steps of 256</small></span>
+      <div class="vx-stepper" role="group" aria-labelledby="n-memory" id="memory">
+        <button class="vx-button" type="button" data-vx-step="down" aria-label="256 MB less" tabindex="-1">-</button>
+        <span class="vx-well"><input type="number" min="256" max="4096" step="256" value="1024" aria-labelledby="n-memory"></span>
+        <button class="vx-button" type="button" data-vx-step="up" aria-label="256 MB more" tabindex="-1">+</button>
+      </div>
+      <span class="name" id="n-timeout">Timeout, seconds<small>in steps of a half</small></span>
+      <div class="vx-stepper" role="group" aria-labelledby="n-timeout" id="timeout">
+        <button class="vx-button" type="button" data-vx-step="down" aria-label="Half a second less" tabindex="-1">-</button>
+        <span class="vx-well"><input type="number" min="0.5" max="30" step="0.5" value="2.5" aria-labelledby="n-timeout"></span>
+        <button class="vx-button" type="button" data-vx-step="up" aria-label="Half a second more" tabindex="-1">+</button>
+      </div>
+    </div>
+    <p class="said" id="said" role="status">3 replicas</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row">
+      <div class="state"><span>In the middle</span>
+        <div class="vx-stepper" role="group" aria-label="Seats"><button class="vx-button" type="button" data-vx-step="down" aria-label="One seat fewer" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" max="10" value="5" aria-label="Seats"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One seat more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>At the least</span>
+        <div class="vx-stepper" role="group" aria-label="Seats, at the least" id="least"><button class="vx-button" type="button" data-vx-step="down" aria-label="One seat fewer" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" max="10" value="0" aria-label="Seats, at the least"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One seat more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>At the most</span>
+        <div class="vx-stepper" role="group" aria-label="Seats, at the most" id="most"><button class="vx-button" type="button" data-vx-step="down" aria-label="One seat fewer" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" max="10" value="10" aria-label="Seats, at the most"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One seat more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>Empty, no limits</span>
+        <div class="vx-stepper" role="group" aria-label="Any number" id="any"><button class="vx-button" type="button" data-vx-step="down" aria-label="One less" tabindex="-1">-</button><span class="vx-well"><input type="number" placeholder="0" aria-label="Any number"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>Not valid</span>
+        <div class="vx-stepper" role="group" aria-label="Seats, too many"><button class="vx-button" type="button" data-vx-step="down" aria-label="One seat fewer" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" max="10" value="14" aria-invalid="true" aria-label="Seats, too many"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One seat more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>Off</span>
+        <div class="vx-stepper" role="group" aria-label="Seats, off"><button class="vx-button" type="button" data-vx-step="down" aria-label="One seat fewer" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" max="10" value="5" disabled aria-label="Seats, off"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="One seat more" tabindex="-1">+</button></div>
+      </div>
+      <div class="state"><span>Wide, for a long number</span>
+        <div class="vx-stepper" data-vx-size="wide" role="group" aria-label="Budget"><button class="vx-button" type="button" data-vx-step="down" aria-label="A thousand less" tabindex="-1">-</button><span class="vx-well"><input type="number" min="0" step="1000" value="1250000" aria-label="Budget"></span><button class="vx-button" type="button" data-vx-step="up" aria-label="A thousand more" tabindex="-1">+</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { stepper } from '../../src/components/stepper.js';
+  const said = document.getElementById('said');
+  const words = { replicas: (v) => `${v} replicas`, memory: (v) => `${v} MB each`, timeout: (v) => `Requests end after ${v} s` };
+  document.querySelector('.scale').addEventListener('change', (e) => { const f = words[e.target.closest('.vx-stepper')?.id]; if (f) said.textContent = f(e.target.value); });
+  show(stepper);
+</script>
+</body>
+</html>

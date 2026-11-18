@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bubble</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* this page's own */
+  .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .state > .vx-message { inline-size: 100%; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Bubble</h1>
+    <p class="what">A message set as a bubble. Theirs is set a level into the panel; yours stands a voxel above it. Neither has a light: a bubble is read, not pressed.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: Ada asks before she ships</h2>
+    <div class="talk" role="log" aria-label="Ada Lindqvist" id="talk">
+      <article class="vx-message" aria-labelledby="a1-who a1-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">AL</span></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Ada Lindqvist</span><time class="vx-message-when" id="a1-when" datetime="2026-11-17T16:02">16:02</time></header>
+          <div class="vx-bubble" id="first"><p>Build 214 is green. Can it go out before the backup?</p></div>
+          <div class="vx-bubble"><p>The notes are on <a href="#talk">the release page</a>.</p></div>
+        </div>
+      </article>
+      <article class="vx-message" data-vx-from="me" aria-labelledby="a2-who a2-when">
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a2-who">You</span><time class="vx-message-when" id="a2-when" datetime="2026-11-17T16:04">16:04</time></header>
+          <div class="vx-bubble" id="reply"><p>Yes. Ship it at six, and I will watch the health check.</p></div>
+        </div>
+      </article>
+      <article class="vx-message" aria-labelledby="a3-who a3-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">AL</span></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a3-who">Ada Lindqvist</span><time class="vx-message-when" id="a3-when" datetime="2026-11-17T16:05">16:05</time></header>
+          <div class="vx-bubble"><p>Six it is.</p></div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state"><span>Theirs, on its own</span>
+        <div class="vx-bubble" id="theirs"><p>The runners are warm again.</p></div>
+      </div>
+      <div class="state"><span>Yours, on its own</span>
+        <div class="vx-bubble" data-vx-from="me" id="mine"><p>Thank you. Starting the build now.</p></div>
+      </div>
+      <div class="state"><span>One word</span>
+        <div class="vx-bubble"><p>Ok</p></div>
+      </div>
+      <div class="state"><span>Several paragraphs: it is no wider than its column</span>
+        <div class="vx-bubble" id="long">
+          <p>The cache is keyed on the lockfile now, so a change to <code>pnpm-lock.yaml</code> is the only thing that empties it. Everything else is restored in about four seconds.</p>
+          <p>The health check asks whether the service can take traffic, not only whether it is up.</p>
+        </div>
+      </div>
+      <div class="state"><span>A link and a word longer than the line: they wrap</span>
+        <div class="vx-bubble" id="wide"><p>Timings: <a href="#wide">https://fogline.example/harbor-api/builds/214/timings?compare=213&amp;view=waterfall</a> and the file harbor-api-4f2c9a1d7e03b85c6a9f1e2d3c4b5a69788f0e1d.tar.zst</p></div>
+      </div>
+      <div class="state"><span>Ukrainian, yours</span>
+        <div class="vx-bubble" data-vx-from="me" lang="uk"><p>Розгорнути на сервері можна після перевірки.</p></div>
+      </div>
+      <div class="state"><span>Theirs quoted in yours: the bubble's own side wins</span>
+        <article class="vx-message" data-vx-from="me" aria-labelledby="q-who q-when">
+          <div class="vx-message-body">
+            <header class="vx-message-head"><span class="vx-message-who" id="q-who">You</span><time class="vx-message-when" id="q-when" datetime="2026-11-17T16:10">16:10</time></header>
+            <div class="vx-bubble" data-vx-from="them" id="quoted"><p>Six it is.</p></div>
+            <div class="vx-bubble"><p>Make it half past: the backup starts early today.</p></div>
+          </div>
+        </article>
+      </div>
+      <div class="state" dir="rtl" lang="ar"><span>من اليمين إلى اليسار</span>
+        <article class="vx-message" aria-labelledby="r-who r-when">
+          <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">م</span></span>
+          <div class="vx-message-body">
+            <header class="vx-message-head"><span class="vx-message-who" id="r-who">مينا</span><time class="vx-message-when" id="r-when" datetime="2026-11-17T16:12">16:12</time></header>
+            <div class="vx-bubble"><p>النسخة 214 جاهزة للنشر.</p></div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { bubble } from '../../src/components/bubble.js';
+  show(bubble);
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+/* ---------- Tooltip ---------- */
+
+/* A few words on a small low slab. It is a popover (popover="manual"), so nothing clips it and it
+   lies above everything; the part shows it and puts it by its trigger. Its width is its words',
+   up to a limit, wherever it is. */
+.vx-tooltip {
+  box-sizing: border-box;
+  inline-size: max-content;
+  max-inline-size: min(calc(var(--vx) * 64), calc(100vw - var(--vx) * 6));
+  min-block-size: calc(var(--vx) * 8);
+  padding: calc(var(--vx) * 1.5) calc(var(--vx) * 3);
+  border: 0;
+  overflow: visible;
+  isolation: isolate;
+  background: none;
+  color: var(--vx-ink);
+  font: 500 0.875rem/calc(var(--vx) * 5) var(--vx-font);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  user-select: none;
+}
+/* for the moment the part measures it, just before it shows */
+.vx-tooltip[data-vx-measure] { display: block; visibility: hidden; }
+
+/* plain: a painted slab */
+.vx-tooltip:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: inset 0 0 0 1px var(--vx-slate), calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow);
+}

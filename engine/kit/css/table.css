@@ -1,0 +1,90 @@
+/* ---------- Table ----------
+   Words on the surface, in rows and columns. Tool: none. One groove between the head and the
+   body (src/components/table.js cuts it; with no script it is the head's own bottom border, in
+   the same place). Rows are parted by a hairline in --vx-slate. No box round it, no stripes.
+     <div class="vx-table">
+       <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="deploys-caption">
+         <table>
+           <caption id="deploys-caption">Deploys this week <small>What it is, said quietly</small></caption>
+           <thead><tr><th scope="col">Service</th><th scope="col" class="vx-num">Builds</th></tr></thead>
+           <tbody><tr><th scope="row">harbor-api</th><td class="vx-num">14</td></tr></tbody>
+           <tfoot>…</tfoot>
+         </table>
+       </div>
+     </div>
+   A table wider than its place scrolls inside .vx-table-scroll, which takes focus so the arrow
+   keys can move it; the page never moves sideways. A cell keeps to one line, so a table too wide
+   for its place scrolls before its words are broken up; .vx-wrap on a cell lets a sentence in it
+   wrap. .vx-num on a cell: a number, set to the end. data-vx-size="small" on .vx-table: rows
+   closer together.
+   Every row of the caption and the head is a whole number of voxels tall, so the groove lands on
+   the grid. */
+
+/* as wide as its place: it is a container (the caption is sized by it), so it has no width of its
+   own to fall back on in a row or a grid */
+.vx-table { position: relative; isolation: isolate; display: block; box-sizing: border-box; inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; container-type: inline-size; --_pad: calc(var(--vx) * 3); }
+.vx-table[data-vx-size="small"] { --_pad: calc(var(--vx) * 2); }
+.vx-table-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--vx-steel) transparent; }
+.vx-table-scroll:focus { outline: 0; }
+.vx-table:has(.vx-table-scroll:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+
+.vx-table table {
+  inline-size: 100%;
+  border-collapse: separate; /* each cell's border is its own: the head's is where the groove is cut */
+  border-spacing: 0;
+  color: var(--vx-ink);
+  font: 400 0.9375rem/1.4 var(--vx-font);
+  line-height: round(up, 1.3em, var(--vx)); /* 20 px: five voxels a line */
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+  white-space: nowrap; /* a cell is one line; the table scrolls before its words are broken up */
+  overflow-wrap: normal;
+}
+
+.vx-table caption {
+  caption-side: top;
+  padding: 0 0 calc(var(--vx) * 2);
+  text-align: start;
+  font-size: 1rem;
+  line-height: 1.5;
+  line-height: round(up, 1.5em, var(--vx)); /* 24 px: six voxels a line */
+  font-weight: 650;
+  color: var(--vx-ink);
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  /* the caption keeps to the place the table is shown in, and stays put while the table scrolls */
+  position: sticky;
+  inset-inline-start: 0;
+  max-inline-size: 100cqi;
+}
+/* what the table is, said quietly under its name */
+.vx-table caption small { display: block; font-size: 0.875rem; line-height: 1.4; line-height: round(up, 1.4em, var(--vx)); font-weight: 400; color: var(--vx-ink-quiet); text-wrap: pretty; }
+
+.vx-table :is(th, td) { padding: var(--_pad) calc(var(--vx) * 3); text-align: start; vertical-align: top; font-weight: 400; }
+/* with no box round the table, the first and last columns stand on the edge of the words above */
+.vx-table :is(th, td):first-child { padding-inline-start: 0; }
+.vx-table :is(th, td):last-child { padding-inline-end: 0; }
+.vx-table .vx-num { text-align: end; }
+.vx-table .vx-wrap { white-space: normal; min-inline-size: calc(var(--vx) * 50); text-wrap: pretty; }
+
+/* the head: quiet words, then the groove */
+.vx-table thead th {
+  padding-block: calc(var(--vx) * 2);
+  vertical-align: bottom;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  line-height: round(up, 1.5em, var(--vx)); /* 20 px */
+  font-weight: 600;
+  color: var(--vx-ink-quiet);
+}
+.vx-table thead tr:last-child th { border-block-end: var(--vx) solid color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-table[data-vx-live] thead tr:last-child th { border-block-end-color: transparent; }
+
+/* the body: the first cell of a row names it; rows are parted by a hairline */
+.vx-table tbody th { font-weight: 600; }
+.vx-table tbody tr + tr > :is(th, td) { border-block-start: 1px solid var(--vx-slate); }
+.vx-table td small, .vx-table tbody th small { display: block; font-size: 0.8125rem; font-weight: 400; color: var(--vx-ink-quiet); }
+
+/* the foot: what the rows come to, under a hairline of its own */
+.vx-table tfoot :is(th, td) { border-block-start: 1px solid var(--vx-steel); font-weight: 600; }

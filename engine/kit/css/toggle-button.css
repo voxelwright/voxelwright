@@ -1,0 +1,68 @@
+/* ---------- Toggle button ---------- */
+
+/* The kit's key (.vx-button under the lit look), box for box: it must not be told from one at
+   rest. What is its own is at the end: on. */
+.vx-toggle-button {
+  --_face: var(--vx-key, var(--vx-chalk));
+  --_top: var(--vx-chalk-top);
+  --_side: var(--vx-chalk-side);
+  --_on: var(--lit-legend, var(--vx-ink));
+  --_lift: calc(var(--vx) * 1.5);
+
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11);
+  min-inline-size: calc(var(--vx) * 11);
+  padding: 0 calc(var(--vx) * 5);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--_on);
+  font: 400 var(--vx-key-size)/1 var(--vx-key-font);
+  letter-spacing: 0;
+  white-space: nowrap; /* a key carries one line */
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-toggle-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); --_lift: 0px; cursor: default; }
+.vx-toggle-button:is(:disabled, [aria-disabled="true"]) .vx-label { opacity: 0.6; }
+.vx-toggle-button .vx-label { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); position: relative; }
+.vx-toggle-button:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
+
+/* at night the legend shines through, as a key's does; --lit is set by the part, and is held
+   above nothing while the key is on */
+[data-vx-look="lit"] .vx-toggle-button[data-vx-live]:not(:disabled, [aria-disabled="true"]) .vx-label {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+
+/* plain: the face is a painted box; two borders stand in for the top and the side */
+.vx-toggle-button:not([data-vx-live]) { background: var(--_face); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow); }
+.vx-toggle-button:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
+  border-top: var(--_lift) solid var(--_top);
+  border-left: var(--_lift) solid var(--_side);
+  border-right: var(--_lift) solid transparent;
+  border-bottom: var(--_lift) solid transparent;
+  box-sizing: border-box;
+  z-index: -1;
+  pointer-events: none;
+}
+/* plain, down: while it is held, and for as long as it is on */
+.vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"]) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
+/* plain: painted down, it lies a voxel up and left of its own box. What can be hit stays where the box is. */
+.vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"])::after { content: ""; position: absolute; inset: 0 calc(var(--vx) * -1) calc(var(--vx) * -1) 0; }
+/* plain, on: the accent's light all round its foot */
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]) { --_top: var(--lit-accent, var(--vx-enamel)); --_side: var(--lit-accent, var(--vx-enamel)); box-shadow: 0 0 0 calc(var(--vx) * 0.5) var(--lit-accent, var(--vx-enamel)); }
+/* plain, off while on: a dent, no light */
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:is(:disabled, [aria-disabled="true"]) { box-shadow: inset 0 0 0 calc(var(--vx) * 0.5) var(--vx-slate); }

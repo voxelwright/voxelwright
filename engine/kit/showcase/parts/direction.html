@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direction</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* One row a part: its name, then the same thing left to right and right to left. The light
+     stays where it is in both: upper left, shadows right and down. Only the reading turns. */
+  .sheet { max-inline-size: calc(var(--vx) * 250); }
+  .rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 8); inline-size: 100%; }
+  .part { display: grid; grid-template-columns: calc(var(--vx) * 34) minmax(0, 1fr) minmax(0, 1fr); gap: calc(var(--vx) * 3) calc(var(--vx) * 9); align-items: start; }
+  .part > h3 { font-size: 0.9375rem; line-height: 1.3; font-weight: 600; padding-block-start: calc(var(--vx) * 3); }
+  .part > h3 small { display: block; font: 400 0.8125rem/1.4 var(--vx-font); color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 1); }
+  .side { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); justify-items: start; align-content: start; min-inline-size: 0; }
+  .side > * { max-inline-size: 100%; }
+  .heads { display: grid; grid-template-columns: calc(var(--vx) * 34) minmax(0, 1fr) minmax(0, 1fr); gap: calc(var(--vx) * 9); color: var(--vx-ink-quiet); font-size: 0.9375rem; font-weight: 600; }
+  .keys { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 5); }
+  .wide { inline-size: 100%; }
+  .field { inline-size: 100%; max-inline-size: calc(var(--vx) * 76); }
+  .build { display: grid; gap: calc(var(--vx) * 2); inline-size: 100%; max-inline-size: calc(var(--vx) * 76); }
+  .build-top { display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9375rem; }
+  .build-top span + span { color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+  .build .vx-meter { block-size: calc(var(--vx) * 5); }
+  .quote { display: flex; gap: calc(var(--vx) * 5); }
+  .quote p { font-size: 1.0625rem; line-height: 1.45; font-weight: 500; padding-block: calc(var(--vx) * 1); }
+  /* a list of words; the current row is marked by an accent groove at its start (logical, so it turns) */
+  .words { display: grid; gap: calc(var(--vx) * 1); margin: 0; padding: 0; list-style: none; inline-size: 100%; max-inline-size: calc(var(--vx) * 52); }
+  .words li { position: relative; display: flex; align-items: center; min-block-size: calc(var(--vx) * 10); padding-inline: calc(var(--vx) * 5) calc(var(--vx) * 2); color: var(--vx-ink-quiet); font-weight: 500; }
+  .words li[aria-current] { color: var(--vx-ink); font-weight: 650; }
+  .words .mark { position: absolute; inset-inline-start: calc(var(--vx) * 1); inset-block: calc(var(--vx) * 2); block-size: auto; }
+  .tiles { inline-size: 100%; max-inline-size: calc(var(--vx) * 64); }
+  .range { display: grid; gap: calc(var(--vx) * 1); inline-size: 100%; max-inline-size: calc(var(--vx) * 76); font-weight: 600; font-size: 0.9375rem; }
+  .loading { display: flex; align-items: center; gap: calc(var(--vx) * 3); font-weight: 600; }
+  .notes p + p { margin-block-start: calc(var(--vx) * 3); }
+  @media (max-width: 900px) {
+    .part, .heads { grid-template-columns: minmax(0, 1fr); }
+    .heads { display: none; }
+    .part > h3 { padding-block-start: 0; }
+    .side::before { content: attr(data-way); color: var(--vx-ink-quiet); font-size: 0.8125rem; direction: ltr; justify-self: start; }
+  }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Direction</h1>
+    <p class="what">Every part twice: left to right, and right to left in Arabic. What reads should turn with the language; the light should not. What does not turn is listed by <code>tools/parts/direction.mjs</code>.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>The kit's parts</h2>
+    <div class="rows">
+      <div class="heads"><span>Part</span><span>Left to right</span><span>Right to left</span></div>
+
+      <div class="part" id="p-button">
+        <h3>Button</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="keys"><button class="vx-button" data-vx-kind="main">Deploy</button><button class="vx-button">Roll back</button><button class="vx-button" data-vx-icon="chevron">More</button></div></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="keys"><button class="vx-button" data-vx-kind="main">نشر</button><button class="vx-button">تراجع</button><button class="vx-button" data-vx-icon="chevron">المزيد</button></div></div>
+      </div>
+
+      <div class="part" id="p-switch">
+        <h3>Switch</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Deploy on push</label><label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Keep the logs</label></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>النشر عند الدفع</label><label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>الاحتفاظ بالسجلات</label></div>
+      </div>
+
+      <div class="part" id="p-field">
+        <h3>Text field</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><label class="vx-field field"><span class="vx-field-label">Project name</span><span class="vx-well"><input type="text" value="harbor-api"></span></label><label class="vx-field field"><span class="vx-field-label">Notes</span><span class="vx-well"><input type="text" placeholder="What changed in this build"></span></label></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><label class="vx-field field"><span class="vx-field-label">اسم المشروع</span><span class="vx-well"><input type="text" value="واجهة الميناء"></span></label><label class="vx-field field"><span class="vx-field-label">ملاحظات</span><span class="vx-well"><input type="text" placeholder="ما الذي تغيّر في هذا البناء"></span></label><label class="vx-field field"><span class="vx-field-label">البريد الإلكتروني</span><span class="vx-well"><input type="email" dir="ltr" value="mina@saltmarsh.example"></span></label></div>
+      </div>
+
+      <div class="part" id="p-tabs">
+        <h3>Tabs</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="vx-tabs" role="tablist" aria-label="Project"><button role="tab" aria-selected="true" aria-controls="l-t1">Overview</button><button role="tab" aria-selected="false" aria-controls="l-t2">Logs</button><button role="tab" aria-selected="false" aria-controls="l-t3">Settings</button></div><p id="l-t1" role="tabpanel">Live since 10:43.</p><p id="l-t2" role="tabpanel" hidden>Built in 45 s.</p><p id="l-t3" role="tabpanel" hidden>Follows main.</p></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="vx-tabs" role="tablist" aria-label="المشروع"><button role="tab" aria-selected="true" aria-controls="r-t1">نظرة عامة</button><button role="tab" aria-selected="false" aria-controls="r-t2">السجلات</button><button role="tab" aria-selected="false" aria-controls="r-t3">الإعدادات</button></div><p id="r-t1" role="tabpanel">يعمل منذ 10:43.</p><p id="r-t2" role="tabpanel" hidden>اكتمل البناء في 45 ثانية.</p><p id="r-t3" role="tabpanel" hidden>يتبع الفرع main.</p></div>
+      </div>
+
+      <div class="part" id="p-meter">
+        <h3>Meter</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="build"><div class="build-top"><span>Build</span><span>30%</span></div><span class="vx-meter"><progress value="0.3" max="1">30%</progress></span></div></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="build"><div class="build-top"><span>البناء</span><span>30%</span></div><span class="vx-meter"><progress value="0.3" max="1">30%</progress></span></div></div>
+      </div>
+
+      <div class="part" id="p-slider">
+        <h3>Slider</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><label class="range">Builds to keep: 20 of 100<span class="vx-slider"><input type="range" min="0" max="100" value="20"></span></label></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><label class="range">النسخ المحفوظة: 20 من 100<span class="vx-slider"><input type="range" min="0" max="100" value="20"></span></label></div>
+      </div>
+
+      <div class="part" id="p-check">
+        <h3>Checkbox</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><label class="vx-check"><input type="checkbox" checked><span class="vx-box"></span>Run the tests first</label><label class="vx-check"><input type="checkbox"><span class="vx-box"></span>Post to the team channel</label></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><label class="vx-check"><input type="checkbox" checked><span class="vx-box"></span>تشغيل الاختبارات أولاً</label><label class="vx-check"><input type="checkbox"><span class="vx-box"></span>الإرسال إلى قناة الفريق</label></div>
+      </div>
+
+      <div class="part" id="p-groove">
+        <h3>Groove <small>beside a quote</small></h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="quote"><span class="vx-groove" data-vx-way="down"></span><p>Finish the small thing. Then send it.</p></div></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="quote"><span class="vx-groove" data-vx-way="down"></span><p>أنهِ الشيء الصغير، ثم أرسله.</p></div></div>
+      </div>
+
+      <div class="part" id="p-words">
+        <h3>Words <small>the current row marked by an accent groove</small></h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><ul class="words"><li aria-current="true"><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent"></span>Projects</li><li>Team</li><li>Billing</li></ul></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><ul class="words"><li aria-current="true"><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent"></span>المشاريع</li><li>الفريق</li><li>الفواتير</li></ul></div>
+      </div>
+
+      <div class="part" id="p-list">
+        <h3>List <small>the kit's tray of rows</small></h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><ul class="vx-list tiles"><li aria-current="true"><a href="#p-list">Projects</a></li><li><a href="#p-list">Team</a></li><li><a href="#p-list">Billing</a></li></ul></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><ul class="vx-list tiles"><li aria-current="true"><a href="#p-list">المشاريع</a></li><li><a href="#p-list">الفريق</a></li><li><a href="#p-list">الفواتير</a></li></ul></div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>The reading parts of this batch</h2>
+    <div class="rows">
+      <div class="part" id="p-skeleton">
+        <h3>Skeleton <small>the light passes the way the words run</small></h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="vx-skeleton wide" aria-busy="true"><span class="vx-bone" data-vx-bone="title" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 72"></span><span class="vx-bone" style="--vx-bone-w: 52"></span></div></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="vx-skeleton wide" aria-busy="true"><span class="vx-bone" data-vx-bone="title" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 72"></span><span class="vx-bone" style="--vx-bone-w: 52"></span></div></div>
+      </div>
+
+      <div class="part" id="p-spinner">
+        <h3>Spinner</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><p class="loading" role="status"><span class="vx-spinner" aria-hidden="true"></span>Building harbor-api</p></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><p class="loading" role="status"><span class="vx-spinner" aria-hidden="true"></span>جارٍ بناء واجهة الميناء</p></div>
+      </div>
+
+      <div class="part" id="p-empty">
+        <h3>Empty state</h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right"><div class="vx-empty" data-vx-align="start"><h4 class="vx-empty-title">No deploys yet</h4><p class="vx-empty-text">Push to main, or deploy by hand.</p><button class="vx-button">Deploy now</button></div></div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left"><div class="vx-empty" data-vx-align="start"><h4 class="vx-empty-title">لا توجد عمليات نشر بعد</h4><p class="vx-empty-text">ادفع إلى main أو انشر يدويًا.</p><button class="vx-button">انشر الآن</button></div></div>
+      </div>
+
+      <div class="part" id="p-scroll">
+        <h3>Scroll area and scroll spy <small>the bar at the far edge; the groove under the current link</small></h3>
+        <div class="side" dir="ltr" lang="en" data-way="Left to right">
+          <nav class="vx-spy" data-vx-way="across" aria-label="Versions"><span class="vx-groove vx-spy-mark" data-vx-light="accent" aria-hidden="true"></span><a href="#l-v24" aria-current="location">2.4</a><a href="#l-v23">2.3</a><a href="#l-v22">2.2</a></nav>
+          <div class="vx-scroll" style="--vx-scroll-h: 36"><div class="vx-recess vx-scroll-well"><div class="vx-scroll-view notes" tabindex="0" role="region" aria-label="Release notes">
+            <div id="l-v24"><p><strong>2.4</strong></p><p>Deploys keep the last three builds, so a roll back is one press away.</p><p>The health check has its own route.</p></div>
+            <div id="l-v23"><p><strong>2.3</strong></p><p>The queue retries a failed job three times, waiting longer each time.</p><p>Builds are named by their commit.</p></div>
+            <div id="l-v22"><p><strong>2.2</strong></p><p>Secrets are read from the environment.</p><p>A build that fails leaves what was live in place.</p></div>
+          </div></div><span class="vx-scroll-bar" aria-hidden="true"></span></div>
+        </div>
+        <div class="side" dir="rtl" lang="ar" data-way="Right to left">
+          <nav class="vx-spy" data-vx-way="across" aria-label="الإصدارات"><span class="vx-groove vx-spy-mark" data-vx-light="accent" aria-hidden="true"></span><a href="#r-v24" aria-current="location">2.4</a><a href="#r-v23">2.3</a><a href="#r-v22">2.2</a></nav>
+          <div class="vx-scroll" style="--vx-scroll-h: 36"><div class="vx-recess vx-scroll-well"><div class="vx-scroll-view notes" tabindex="0" role="region" aria-label="ملاحظات الإصدار">
+            <div id="r-v24"><p><strong>2.4</strong></p><p>تحتفظ عمليات النشر بآخر ثلاث نسخ، فيصبح التراجع بضغطة واحدة.</p><p>لفحص السلامة مسار خاص به.</p></div>
+            <div id="r-v23"><p><strong>2.3</strong></p><p>تعيد قائمة الانتظار محاولة المهمة الفاشلة ثلاث مرات، وتنتظر مدة أطول في كل مرة.</p><p>تُسمّى النسخ باسم الإيداع الذي بُنيت منه.</p></div>
+            <div id="r-v22"><p><strong>2.2</strong></p><p>تُقرأ الأسرار من البيئة.</p><p>البناء الفاشل يُبقي ما كان يعمل في مكانه.</p></div>
+          </div></div><span class="vx-scroll-bar" aria-hidden="true"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { checkbox } from '../../src/components/checkbox.js';
+  import { skeleton } from '../../src/components/skeleton.js';
+  import { spinner } from '../../src/components/spinner.js';
+  import { scrollArea } from '../../src/components/scroll-area.js';
+  import { scrollSpy } from '../../src/components/scroll-spy.js';
+  show(checkbox, skeleton, spinner, scrollArea, scrollSpy);
+</script>
+</body>
+</html>

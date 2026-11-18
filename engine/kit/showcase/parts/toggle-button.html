@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toggle button</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* this page's own */
+  .log-head { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 4); inline-size: 100%; }
+  .log-head .name { font-weight: 600; margin-inline-end: auto; }
+  .log { inline-size: 100%; padding: calc(var(--vx) * 3) calc(var(--vx) * 4); font: 400 0.8125rem/1.7 var(--vx-mono); overflow: hidden; }
+  .log .line { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .log[data-wrap] .line { white-space: normal; overflow-wrap: anywhere; }
+  .log .at { color: var(--vx-ink-quiet); margin-inline-end: 1.5ch; }
+  .log:not([data-times]) .at { display: none; }
+  /* a caption stands four voxels above what it names: a keycap's side and the light at its foot are drawn two and a half voxels above its face, and a bezel reaches two past its slot */
+  .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .row { align-items: start; }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Toggle button</h1>
+    <p class="what">A key that stays down while it is on, with its light held bright. Off, it is a key like any other.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: how a build log is shown</h2>
+    <div class="log-head">
+      <span class="name">Build 214 of harbor-api</span>
+      <button class="vx-toggle-button" type="button" aria-pressed="true" id="times" aria-controls="log">Times</button>
+      <button class="vx-toggle-button" type="button" aria-pressed="false" id="wrap" aria-controls="log">Wrap</button>
+      <button class="vx-button" type="button" id="copy">Copy</button>
+    </div>
+    <div class="vx-recess log" id="log" data-times aria-label="Build log">
+      <div class="line"><span class="at">10:42:17</span>Cloned main at 4f2c9a1 from fogline/harbor-api</div>
+      <div class="line"><span class="at">10:42:31</span>Installed 212 packages, 3 of them with scripts that were not run</div>
+      <div class="line"><span class="at">10:43:02</span>Built in 45 s and uploaded 18 files to the edge</div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row">
+      <div class="state"><span>Off</span><button class="vx-toggle-button" type="button" aria-pressed="false" id="s-off">Follow</button></div>
+      <div class="state"><span>On</span><button class="vx-toggle-button" type="button" aria-pressed="true" id="s-on">Follow</button></div>
+      <div class="state"><span>The kit's key, to compare</span><button class="vx-button" type="button" id="s-key">Follow</button></div>
+      <div class="state"><span>Cannot be changed, off</span><button class="vx-toggle-button" type="button" aria-pressed="false" disabled>Follow</button></div>
+      <div class="state"><span>Cannot be changed, on</span><button class="vx-toggle-button" type="button" aria-pressed="true" disabled>Follow</button></div>
+      <div class="state"><span>On, a green light</span><button class="vx-toggle-button" type="button" aria-pressed="true" data-vx-light="go">Live</button></div>
+      <div class="state"><span>A long name</span><button class="vx-toggle-button" type="button" aria-pressed="true" lang="uk">Розгорнути на сервері</button></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { toggleButton } from '../../src/components/toggle-button.js';
+  const log = document.getElementById('log');
+  document.getElementById('times').addEventListener('vx-change', (e) => log.toggleAttribute('data-times', e.detail.pressed));
+  document.getElementById('wrap').addEventListener('vx-change', (e) => log.toggleAttribute('data-wrap', e.detail.pressed));
+  show(toggleButton);
+</script>
+</body>
+</html>

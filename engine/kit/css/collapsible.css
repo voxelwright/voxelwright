@@ -1,0 +1,55 @@
+/* ---------- Collapsible ---------- */
+
+/* One row of words with a chevron that shows and hides what is under it, on the same surface. It
+   is the browser's own <details>: it opens with no script, by keyboard (Enter, Space), and when
+   find-in-page lands on words inside it. It needs no script.
+     <details class="vx-collapsible"><summary>Older deploys</summary> … </details>
+   Words that change with it: <summary><span data-vx-when="closed">Show older deploys</span>
+                                       <span data-vx-when="open">Hide older deploys</span></summary> */
+.vx-collapsible { min-inline-size: 0; font-family: var(--vx-font); color: var(--vx-ink); interpolate-size: allow-keywords; }
+.vx-collapsible > summary {
+  position: relative; isolation: isolate; display: flex; align-items: center; gap: calc(var(--vx) * 3);
+  box-sizing: border-box; min-block-size: calc(var(--vx) * 11); padding-block: calc(var(--vx) * 2.5);
+  font-weight: 600; font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere;
+  list-style: none; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.vx-collapsible > summary::-webkit-details-marker { display: none; }
+.vx-collapsible > summary:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
+/* The chevron: seven cells of half a voxel, lying on the surface, straight after the words. It
+   turns over when the row is open. */
+.vx-collapsible > summary::after {
+  --_c: calc(var(--vx) / 2);
+  content: ""; flex: none; inline-size: calc(var(--_c) * 7); block-size: calc(var(--_c) * 4);
+  color: var(--vx-ink-quiet);
+  background:
+    linear-gradient(currentColor 0 0) 0 0,
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 6) 0,
+    linear-gradient(currentColor 0 0) var(--_c) var(--_c),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 5) var(--_c),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 2) calc(var(--_c) * 2),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 4) calc(var(--_c) * 2),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 3) calc(var(--_c) * 3);
+  background-size: var(--_c) var(--_c); background-repeat: no-repeat;
+  transition: transform 180ms var(--vx-ease-out);
+}
+.vx-collapsible > summary:hover::after { color: var(--vx-ink); }
+.vx-collapsible[open] > summary::after { transform: scaleY(-1); }
+.vx-collapsible:not([open]) > summary [data-vx-when="open"], .vx-collapsible[open] > summary [data-vx-when="closed"] { display: none; }
+
+/* What opens: words on the surface. The space under it is the last thing's own padding, so the
+   row closes to exactly its summary. */
+.vx-collapsible > :not(summary) { margin: 0; line-height: calc(var(--vx) * 6); }
+.vx-collapsible > :not(summary) + :not(summary) { margin-block-start: calc(var(--vx) * 2); }
+.vx-collapsible > :not(summary):last-child { padding-block-end: calc(var(--vx) * 3); }
+
+/* It opens and closes over a fifth of a second where the browser can (the page below slides, it
+   does not jump); elsewhere, and under reduced motion, at once. */
+.vx-collapsible::details-content {
+  block-size: 0; overflow: clip;
+  transition: block-size 220ms var(--vx-ease-out), content-visibility 220ms allow-discrete;
+}
+.vx-collapsible[open]::details-content { block-size: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-collapsible::details-content, .vx-collapsible > summary::after { transition: none; }
+}

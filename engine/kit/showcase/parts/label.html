@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Label</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 100); }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Label</h1>
+    <p class="what">Words on the surface that name a control. Always a real label: a press on the words lands in the control.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a new project</h2>
+    <div class="form">
+      <div class="vx-field">
+        <label class="vx-field-label" for="p-name">Project name<span class="vx-field-mark" aria-hidden="true">*</span></label>
+        <span class="vx-well"><input id="p-name" value="harbor-api" required autocomplete="off" aria-describedby="p-name-hint"></span>
+        <p class="vx-field-hint" id="p-name-hint">Lower case, with dashes. It becomes the address.</p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="p-team">Team<span class="vx-field-note">optional</span></label>
+        <span class="vx-well"><input id="p-team" placeholder="fogline" autocomplete="off"></span>
+      </div>
+      <div class="vx-field" data-vx-way="across">
+        <label class="vx-field-label" for="p-builds">Builds to keep</label>
+        <span class="vx-well" style="inline-size: calc(var(--vx) * 20)"><input id="p-builds" type="text" inputmode="numeric" value="3" autocomplete="off"></span>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-plain">Plain</label>
+        <span class="vx-well"><input id="s-plain" autocomplete="off"></span>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-must">Must be filled<span class="vx-field-mark" aria-hidden="true">*</span></label>
+        <span class="vx-well"><input id="s-must" required autocomplete="off"></span>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-note">With a quiet word<span class="vx-field-note">optional</span></label>
+        <span class="vx-well"><input id="s-note" autocomplete="off"></span>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-hint">With a line under it</label>
+        <span class="vx-well"><input id="s-hint" autocomplete="off" aria-describedby="s-hint-hint"></span>
+        <p class="vx-field-hint" id="s-hint-hint">Mina and Ada will see this.</p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-off">Switched off</label>
+        <span class="vx-well"><input id="s-off" value="fogline" disabled></span>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-long">Розгорнути на сервері після кожної успішної перевірки</label>
+        <span class="vx-well"><input id="s-long" autocomplete="off"></span>
+      </div>
+      <div class="vx-field" data-vx-way="across">
+        <label class="vx-field-label" for="s-across">Beside its control</label>
+        <span class="vx-well" style="inline-size: calc(var(--vx) * 24)"><input id="s-across" value="eu-west" autocomplete="off"></span>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-area">Over a longer answer</label>
+        <span class="vx-well"><textarea id="s-area">Ships every Friday.</textarea></span>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

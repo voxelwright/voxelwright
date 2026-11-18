@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxelmorphism: directions</title>
+<meta name="description" content="Three directions for the Voxelmorphism kit, side by side on the real parts.">
+<link rel="stylesheet" href="../voxelmorphism.css">
+<link rel="stylesheet" href="directions.css">
+<script>document.documentElement.classList.add("js"); setTimeout(function () { document.documentElement.dataset.ready = "1"; }, 3000);</script>
+</head>
+<body>
+<header class="top">
+  <h1>Three directions</h1>
+  <p class="lede">The same real parts, three ways. Nothing here is polished: pick the direction, and the rounds after it do the polishing. Press things; switch the light.</p>
+  <div class="vx-tabs" role="tablist" aria-label="Light" id="light" data-vx-look="today">
+    <button role="tab" aria-selected="true" data-theme-value="">Auto</button>
+    <button role="tab" aria-selected="false" data-theme-value="light">Day</button>
+    <button role="tab" aria-selected="false" data-theme-value="dark">Night</button>
+  </div>
+</header>
+
+<main class="cols">
+  <section class="col" data-vx-look="today" id="col-today" aria-labelledby="h-today">
+    <h2 id="h-today" class="vx-sign" data-vx-board="none">Today</h2>
+    <p class="what">The shapes as they are. Only the two faults both reviewers found are fixed: no grid on faces you read from, and night content is no longer the action blue.</p>
+
+    <div class="row">
+      <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
+    </div>
+    <div class="row">
+      <button class="vx-button" data-vx-material="brick">Pull it up</button>
+      <button class="vx-button" disabled>Asleep</button>
+    </div>
+
+    <div class="stack">
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
+    </div>
+
+    <label class="knob"><span>Waterings before a bud <output>6</output></span>
+      <span class="vx-slider"><input type="range" min="1" max="10" value="6"></span></label>
+
+    <div class="stack tight">
+      <div class="vx-tabs" role="tablist" aria-label="Garden, Today">
+        <button role="tab" aria-selected="true" aria-controls="tp-today-1">Growing</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-today-2">Bloomed</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-today-3">Wilted</button>
+      </div>
+      <div class="vx-card">
+        <p id="tp-today-1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
+        <p id="tp-today-2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
+        <p id="tp-today-3" role="tabpanel" hidden>Nothing has wilted.</p>
+      </div>
+    </div>
+
+    <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+
+    <article class="vx-card" data-vx-edge="leaf"><p><strong>Watered on 14 November</strong></p><p>Hide the egg in the footer.</p></article>
+
+    <div class="row">
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="menu-today" aria-haspopup="menu" aria-expanded="false">This plant</button>
+      <div class="vx-menu" id="menu-today" popover role="menu">
+        <button role="menuitem">Water it</button>
+        <button role="menuitem">Move to another shelf</button>
+        <button role="menuitem">Show the session</button>
+        <button role="menuitem" data-vx-kind="danger">Pull it up</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="col" data-vx-look="chunky" id="col-chunky" aria-labelledby="h-chunky">
+    <h2 id="h-chunky" class="vx-sign" data-vx-board="none">Chunky</h2>
+    <p class="what">The voxel is twice the size and each control is made of half as many. Shape carries everything; a press goes deep.</p>
+
+    <div class="row">
+      <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
+    </div>
+    <div class="row">
+      <button class="vx-button" data-vx-material="brick">Pull it up</button>
+      <button class="vx-button" disabled>Asleep</button>
+    </div>
+
+    <div class="stack">
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
+    </div>
+
+    <label class="knob"><span>Waterings before a bud <output>6</output></span>
+      <span class="vx-slider"><input type="range" min="1" max="10" value="6"></span></label>
+
+    <div class="stack tight">
+      <div class="vx-tabs" role="tablist" aria-label="Garden, Chunky">
+        <button role="tab" aria-selected="true" aria-controls="tp-chunky-1">Growing</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-chunky-2">Bloomed</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-chunky-3">Wilted</button>
+      </div>
+      <div class="vx-card">
+        <p id="tp-chunky-1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
+        <p id="tp-chunky-2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
+        <p id="tp-chunky-3" role="tabpanel" hidden>Nothing has wilted.</p>
+      </div>
+    </div>
+
+    <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+
+    <article class="vx-card" data-vx-edge="leaf"><p><strong>Watered on 14 November</strong></p><p>Hide the egg in the footer.</p></article>
+
+    <div class="row">
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="menu-chunky" aria-haspopup="menu" aria-expanded="false">This plant</button>
+      <div class="vx-menu" id="menu-chunky" popover role="menu">
+        <button role="menuitem">Water it</button>
+        <button role="menuitem">Move to another shelf</button>
+        <button role="menuitem">Show the session</button>
+        <button role="menuitem" data-vx-kind="danger">Pull it up</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="col" data-vx-look="paper" id="col-paper" aria-labelledby="h-paper">
+    <h2 id="h-paper" class="vx-sign" data-vx-board="none">Paper</h2>
+    <p class="what">Only what you touch is a solid. What you read lies almost flat: up means act, a hole means type, flat means read.</p>
+
+    <div class="row">
+      <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
+    </div>
+    <div class="row">
+      <button class="vx-button" data-vx-material="brick">Pull it up</button>
+      <button class="vx-button" disabled>Asleep</button>
+    </div>
+
+    <div class="stack">
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
+    </div>
+
+    <label class="knob"><span>Waterings before a bud <output>6</output></span>
+      <span class="vx-slider"><input type="range" min="1" max="10" value="6"></span></label>
+
+    <div class="stack tight">
+      <div class="vx-tabs" role="tablist" aria-label="Garden, Paper">
+        <button role="tab" aria-selected="true" aria-controls="tp-paper-1">Growing</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-paper-2">Bloomed</button>
+        <button role="tab" aria-selected="false" aria-controls="tp-paper-3">Wilted</button>
+      </div>
+      <div class="vx-card">
+        <p id="tp-paper-1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
+        <p id="tp-paper-2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
+        <p id="tp-paper-3" role="tabpanel" hidden>Nothing has wilted.</p>
+      </div>
+    </div>
+
+    <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+
+    <article class="vx-card" data-vx-edge="leaf"><p><strong>Watered on 14 November</strong></p><p>Hide the egg in the footer.</p></article>
+
+    <div class="row">
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="menu-paper" aria-haspopup="menu" aria-expanded="false">This plant</button>
+      <div class="vx-menu" id="menu-paper" popover role="menu">
+        <button role="menuitem">Water it</button>
+        <button role="menuitem">Move to another shelf</button>
+        <button role="menuitem">Show the session</button>
+        <button role="menuitem" data-vx-kind="danger">Pull it up</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script type="module" src="directions.js"></script>
+</body>
+</html>

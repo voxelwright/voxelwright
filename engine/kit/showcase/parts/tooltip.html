@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tooltip</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* room over and under a key for its words, so the page's picture shows them all */
+  .service { display: grid; gap: calc(var(--vx) * 13); justify-items: start; }
+  .service strong { font-size: 1.25rem; }
+  .states { display: grid; justify-items: start; padding-block: calc(var(--vx) * 11) calc(var(--vx) * 34); }
+  .states > .vx-button:nth-of-type(2) { margin-block-start: calc(var(--vx) * 18); justify-self: end; }
+  .states > .vx-button:nth-of-type(3) { margin-block-start: calc(var(--vx) * 5); }
+  .states > .vx-button:nth-of-type(4) { margin-block-start: calc(var(--vx) * 15); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Tooltip</h1>
+    <p class="what">A few words about a control, on a small low plate with no light. It comes when the pointer rests on a control or the focus lands on it, and goes on Escape.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a service's keys</h2>
+    <div class="service">
+      <strong>harbor-api</strong>
+      <div class="row" id="keys">
+        <button class="vx-button" id="k-deploy" data-vx-kind="main" aria-describedby="t-deploy">Deploy</button>
+        <span class="vx-tooltip" id="t-deploy" role="tooltip" popover="manual">Builds main and swaps it in</span>
+        <button class="vx-button" id="k-back" aria-describedby="t-back">Roll back</button>
+        <span class="vx-tooltip" id="t-back" role="tooltip" popover="manual">To build 213, from yesterday</span>
+        <button class="vx-button" id="k-logs" aria-describedby="t-logs">Logs</button>
+        <span class="vx-tooltip" id="t-logs" role="tooltip" popover="manual">The last hour, newest first</span>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="wide states">
+      <button class="vx-button" id="s-above" aria-describedby="ts-above">Above</button>
+      <span class="vx-tooltip" id="ts-above" role="tooltip" popover="manual">Above its key, in the middle</span>
+      <button class="vx-button" id="s-edge" aria-describedby="ts-edge">At the edge</button>
+      <span class="vx-tooltip" id="ts-edge" role="tooltip" popover="manual">It keeps inside the window, whatever its key does</span>
+      <button class="vx-button" id="s-below" aria-describedby="ts-below">Below</button>
+      <span class="vx-tooltip" id="ts-below" role="tooltip" popover="manual" data-vx-side="bottom">Under it, where it is asked to be</span>
+      <button class="vx-button" id="s-long" aria-describedby="ts-long">Розгорнути на сервері</button>
+      <span class="vx-tooltip" id="ts-long" role="tooltip" popover="manual" data-vx-side="bottom">Збирає гілку main, запускає тести і замінює поточну збірку новою. Long words wrap: harbor-api-production-eu-central-1.</span>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { tooltip } from '../../src/components/tooltip.js';
+  await show(tooltip);
+  // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
+  if (!new URLSearchParams(location.search).has('hand')) for (const id of ['t-back', 'ts-above', 'ts-below', 'ts-long', 'ts-edge']) document.getElementById(id).showPopover();
+</script>
+</body>
+</html>

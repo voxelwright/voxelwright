@@ -1,0 +1,33 @@
+/* ---------- Field with error and validation ---------- */
+
+/* Tool: the well. Invalid (aria-invalid="true" on the control): the well's rim is red, and the
+   message below it is words beside a red lamp. Valid needs nothing.
+   Markup: <div class="vx-field">
+             <label class="vx-field-label" for="mail">Email</label>
+             <span class="vx-well"><input id="mail" type="email" required></span>
+             <p class="vx-field-hint" id="mail-hint">…</p>                          (optional)
+             <p class="vx-field-error" id="mail-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">…</span></p>
+           </div>
+   The message keeps its line while there is nothing to say, so nothing below moves when it
+   speaks. Where the field has a hint, the hint holds that line and the message takes its place. */
+
+/* (.vx-field > …: a surface resets the margins of the paragraphs on it, and this must hold there) */
+.vx-field > .vx-field-error {
+  position: relative; isolation: isolate;
+  display: flex; align-items: flex-start; gap: calc(var(--vx) * 2);
+  margin: calc(var(--vx) * 1) 0 0; min-block-size: calc(var(--vx) * 5);
+  /* the words are the page's own ink: the lamp and the rim carry the red */
+  color: var(--vx-ink); font: 500 0.875rem/calc(var(--vx) * 5) var(--vx-font);
+  overflow-wrap: anywhere;
+  visibility: hidden;
+}
+.vx-field-error-text { min-inline-size: 0; }
+/* the lamp stands level with the middle of the first line */
+.vx-field-error > .vx-lamp { margin-block-start: calc(var(--vx) * 1.5); }
+
+/* a hint and a message share one line, of one height */
+.vx-field:has(> .vx-field-error) > .vx-field-hint { margin: calc(var(--vx) * 1) 0 0; min-block-size: calc(var(--vx) * 5); line-height: calc(var(--vx) * 5); overflow-wrap: anywhere; }
+.vx-field:has(> .vx-field-hint) > .vx-field-error { display: none; }
+
+.vx-field:has([aria-invalid="true"]) > .vx-field-error { display: flex; visibility: visible; }
+.vx-field:has([aria-invalid="true"]) > .vx-field-hint { display: none; }

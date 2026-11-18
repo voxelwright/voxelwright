@@ -1,0 +1,16 @@
+# What the kit's tools write, and what never belongs in the repository.
+shots/
+milestones/
+.claude/
+.agents/
+node_modules/
+.DS_Store
+*.[pP][nN][gG]
+*.[jJ][pP][gG]
+*.[jJ][pP][eE][gG]
+*.[wW][eE][bB][mM]
+*.[mM][pP]4
+# Left behind in plant-a-seed: the copy of the engine's build, its sync script, and the garden page.
+/src/engine/
+/tools/sync-engine.mjs
+/showcase/garden.*

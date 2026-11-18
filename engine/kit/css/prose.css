@@ -1,0 +1,106 @@
+/* ---------- Prose ----------
+   What an article is set in. One class on a container; everything inside is plain HTML:
+     <article class="vx-prose"> h2 h3 h4, p, a, ul ol dl, blockquote, small, code, hr … </article>
+   Tool: none. Words on the surface, in the text face. The one exception is a quote's rule, which
+   is a standing groove (src/components/prose.js draws it; with no script it is a painted line in
+   the same place).
+   Every line is a whole number of voxels tall, so what follows a paragraph lands on the grid. */
+
+.vx-prose {
+  --vx-measure: 33rem; /* about 65 characters of the text face at this size */
+  max-inline-size: var(--vx-measure);
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-weight: 400;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  line-height: round(up, 1.6em, var(--vx)); /* 28 px: seven voxels */
+  min-inline-size: 0;
+  /* a long word or address wraps, and counts as able to wrap when a grid or a row measures the
+     article: it never pushes the page sideways */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---- rhythm: space above a block, by what the block is ---- */
+
+.vx-prose :is(h2, h3, h4, p, ul, ol, dl, dd, blockquote, pre, figure, table, hr) { margin: 0; }
+.vx-prose :not(.vx-canvas) + :is(p, ul, ol, dl, blockquote, pre, table) { margin-block-start: calc(var(--vx) * 5); }
+/* what is set apart from the words (code, a picture, a table, a rule) gets more room */
+.vx-prose :not(.vx-canvas) + :is(figure, hr) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :not(.vx-canvas) + :where(.vx-code, .vx-figure, .vx-table, .vx-separator, .vx-groove) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :is(figure, hr) + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :is(.vx-code, .vx-figure, .vx-table, .vx-separator, .vx-groove) + :is(p, ul, ol, dl, blockquote, pre, table) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :not(.vx-canvas) + h2 { margin-block-start: calc(var(--vx) * 12); }
+.vx-prose :not(.vx-canvas) + h3 { margin-block-start: calc(var(--vx) * 9); }
+.vx-prose :not(.vx-canvas) + h4 { margin-block-start: calc(var(--vx) * 7); }
+/* a heading belongs to what follows it */
+.vx-prose h2 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 3); }
+.vx-prose h3 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose h4 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 1); }
+
+/* ---- headings: real h2 to h4 (the page's h1 is the page's own) ---- */
+
+.vx-prose :is(h2, h3, h4) { color: var(--vx-ink); font-family: var(--vx-font); text-wrap: balance; }
+.vx-prose h2 { font-size: 1.625rem; line-height: 1.25; line-height: round(up, 1.2em, var(--vx)); font-weight: 700; letter-spacing: -0.02em; }
+.vx-prose h3 { font-size: 1.3125rem; line-height: 1.3; line-height: round(up, 1.25em, var(--vx)); font-weight: 700; letter-spacing: -0.012em; }
+.vx-prose h4 { font-size: 1.0625rem; line-height: 1.6; line-height: round(up, 1.4em, var(--vx)); font-weight: 700; letter-spacing: 0; }
+
+/* ---- words ---- */
+
+.vx-prose :is(strong, b) { font-weight: 650; }
+.vx-prose a { color: var(--vx-link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.2em; text-decoration-skip-ink: auto; }
+.vx-prose a:hover { text-decoration-thickness: 2px; }
+.vx-prose a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; text-decoration-thickness: 2px; }
+/* code in a line of words is words too: the mono face, no box */
+.vx-prose :not(pre) > code { font-family: var(--vx-mono); font-size: 0.9em; overflow-wrap: anywhere; }
+.vx-prose :is(sup, sub) { font-size: 0.75em; line-height: 0; }
+.vx-prose abbr[title] { text-decoration: underline dotted; text-underline-offset: 0.2em; cursor: help; }
+.vx-prose :is(img, svg, video) { max-inline-size: 100%; block-size: auto; }
+
+/* small print: <small>, alone in a paragraph or among other words */
+.vx-prose small { font-size: 0.875rem; color: var(--vx-ink-quiet); }
+.vx-prose p:has(> small:only-child) { max-inline-size: 29rem; font-size: 0.875rem; line-height: 1.5; line-height: round(up, 1.5em, var(--vx)); }
+.vx-prose p:has(> small:only-child) > small { font-size: inherit; }
+
+/* ---- lists ---- */
+
+.vx-prose :is(ul, ol) { padding-inline-start: calc(var(--vx) * 6); }
+.vx-prose ul { list-style: square; }
+.vx-prose li { padding-inline-start: calc(var(--vx) * 1); }
+.vx-prose li::marker { color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.vx-prose li + li { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose li > :is(ul, ol) { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose dt { font-weight: 650; }
+.vx-prose dd { color: var(--vx-ink-quiet); }
+.vx-prose dd + dt { margin-block-start: calc(var(--vx) * 3); }
+
+/* ---- a quote: larger words beside a standing groove ---- */
+
+.vx-prose blockquote {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  padding-block: calc(var(--vx) * 1);
+  padding-inline: calc(var(--vx) * 5) 0;
+  /* the rule, where the groove is cut: the same colour as a groove with no voxels */
+  border-inline-start: var(--vx) solid color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent);
+  font-size: 1.1875rem;
+  line-height: 1.5;
+  line-height: round(up, 1.45em, var(--vx));
+  font-weight: 500;
+}
+.vx-prose blockquote[data-vx-live] { border-inline-start-color: transparent; }
+.vx-prose blockquote > :not(.vx-canvas) + p { margin-block-start: calc(var(--vx) * 3); }
+/* who said it */
+.vx-prose blockquote > :is(footer, cite) { display: block; font-size: 0.9375rem; line-height: 1.5; line-height: round(up, 1.5em, var(--vx)); font-weight: 400; font-style: normal; color: var(--vx-ink-quiet); }
+.vx-prose blockquote > :not(.vx-canvas) + footer { margin-block-start: calc(var(--vx) * 2); }
+
+/* ---- a rule: write <hr class="vx-groove"> for the groove itself; a bare <hr> is the painted line ---- */
+
+.vx-prose hr { block-size: var(--vx); border: 0; overflow: visible; /* a browser clips an hr: the groove's light must not be cut */ }
+.vx-prose hr:not(.vx-groove) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+
+/* a bare <pre> (no code block round it) still keeps to the page: it scrolls inside itself */
+.vx-prose > pre { overflow-x: auto; font: 400 0.875rem/1.45 var(--vx-mono); }

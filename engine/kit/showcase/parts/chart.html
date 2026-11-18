@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chart</title>
+<!-- the part's own CSS, until it is in the kit's stylesheet -->
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own */
+  .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; min-inline-size: 0; }
+  .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 5); }
+  .each h3:first-child { margin-block-start: 0; }
+  .each > * { max-inline-size: 100%; }
+  .two { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 70)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 8); inline-size: 100%; }
+  .top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 3); inline-size: 100%; }
+  .top .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Chart</h1>
+    <p class="what">A window in the panel with the numbers standing in it as light: columns of lamps, or a line of lamps. The numbers are a real table under it, for a screen reader, and for a page with no script.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a project's week</h2>
+    <div class="top">
+      <div class="name">harbor-api</div>
+      <button class="vx-button" type="button" id="week">The week before</button>
+    </div>
+    <div class="two">
+      <figure class="vx-chart" data-vx-kind="bar" id="deploys">
+        <figcaption>Deploys a day <small id="deploys-when">18 to 24 May. Sunday nothing went out.</small></figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Day</th><th scope="col" data-vx-light="go">Went out</th><th scope="col" data-vx-light="stop">Failed</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Mon</th><td>12</td><td>1</td></tr>
+            <tr><th scope="row">Tue</th><td>9</td><td>0</td></tr>
+            <tr><th scope="row">Wed</th><td>15</td><td>2</td></tr>
+            <tr><th scope="row">Thu</th><td>10</td><td>4</td></tr>
+            <tr><th scope="row">Fri</th><td>7</td><td>1</td></tr>
+            <tr><th scope="row">Sat</th><td>3</td><td>0</td></tr>
+            <tr><th scope="row">Sun</th><td>0</td><td>0</td></tr>
+          </tbody>
+        </table>
+      </figure>
+      <figure class="vx-chart" data-vx-kind="line" id="build">
+        <figcaption>Build time, in seconds <small>The median of each day's builds.</small></figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Day</th><th scope="col">Median build</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Mon</th><td data-vx-value="52">52 s</td></tr>
+            <tr><th scope="row">Tue</th><td data-vx-value="48">48 s</td></tr>
+            <tr><th scope="row">Wed</th><td data-vx-value="61">61 s</td></tr>
+            <tr><th scope="row">Thu</th><td data-vx-value="75">1 min 15 s</td></tr>
+            <tr><th scope="row">Fri</th><td data-vx-value="44">44 s</td></tr>
+            <tr><th scope="row">Sat</th><td data-vx-value="40">40 s</td></tr>
+            <tr><th scope="row">Sun</th><td data-vx-value="38">38 s</td></tr>
+          </tbody>
+        </table>
+      </figure>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="each">
+      <h3>Many places: where their names would run into each other (on a phone), only every second or third is written</h3>
+      <figure class="vx-chart" data-vx-kind="bar" id="hours" style="--vx-chart-rows: 30">
+        <figcaption>Builds an hour, Thursday</figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Hour</th><th scope="col">Builds</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">00</th><td>1</td></tr><tr><th scope="row">01</th><td>0</td></tr><tr><th scope="row">02</th><td>0</td></tr><tr><th scope="row">03</th><td>2</td></tr>
+            <tr><th scope="row">04</th><td>0</td></tr><tr><th scope="row">05</th><td>1</td></tr><tr><th scope="row">06</th><td>3</td></tr><tr><th scope="row">07</th><td>6</td></tr>
+            <tr><th scope="row">08</th><td>11</td></tr><tr><th scope="row">09</th><td>17</td></tr><tr><th scope="row">10</th><td>20</td></tr><tr><th scope="row">11</th><td>16</td></tr>
+            <tr><th scope="row">12</th><td>9</td></tr><tr><th scope="row">13</th><td>14</td></tr><tr><th scope="row">14</th><td>18</td></tr><tr><th scope="row">15</th><td>15</td></tr>
+            <tr><th scope="row">16</th><td>12</td></tr><tr><th scope="row">17</th><td>8</td></tr><tr><th scope="row">18</th><td>4</td></tr><tr><th scope="row">19</th><td>3</td></tr>
+            <tr><th scope="row">20</th><td>2</td></tr><tr><th scope="row">21</th><td>1</td></tr><tr><th scope="row">22</th><td>0</td></tr><tr><th scope="row">23</th><td>1</td></tr>
+          </tbody>
+        </table>
+      </figure>
+      <h3>A value missing (no build on Wednesday): the line has a gap. Failures, on the red light. The table is kept on the page as well (data-vx-table="shown")</h3>
+      <figure class="vx-chart" data-vx-kind="line" data-vx-table="shown" id="gaps" style="--vx-chart-rows: 30">
+        <figcaption>Failed tests a build, fog-site</figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Day</th><th scope="col" data-vx-light="stop">Failed tests</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Mon</th><td>3</td></tr>
+            <tr><th scope="row">Tue</th><td>5</td></tr>
+            <tr><th scope="row">Wed</th><td></td></tr>
+            <tr><th scope="row">Thu</th><td>1</td></tr>
+            <tr><th scope="row">Fri</th><td>0</td></tr>
+          </tbody>
+        </table>
+      </figure>
+      <h3>Everything at nought: every column still shows where it stands</h3>
+      <figure class="vx-chart" data-vx-kind="bar" id="zero" style="--vx-chart-rows: 24">
+        <figcaption>Rollbacks a day</figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Day</th><th scope="col">Rollbacks</th></tr></thead>
+          <tbody><tr><th scope="row">Mon</th><td>0</td></tr><tr><th scope="row">Tue</th><td>0</td></tr><tr><th scope="row">Wed</th><td>0</td></tr><tr><th scope="row">Thu</th><td>0</td></tr><tr><th scope="row">Fri</th><td>0</td></tr></tbody>
+        </table>
+      </figure>
+      <h3>A scale fixed by the site (data-vx-max="100"), words in Ukrainian; a value far under the scale (0,4) still has a row of light, so it is not read as nought</h3>
+      <figure class="vx-chart" data-vx-kind="bar" data-vx-max="100" id="uk" lang="uk" style="--vx-chart-rows: 30">
+        <figcaption>Покриття тестами, відсотки</figcaption>
+        <div class="vx-chart-window"></div>
+        <table>
+          <thead><tr><th scope="col">Служба</th><th scope="col">Покриття</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Причал</th><td data-vx-value="82.5">82,5</td></tr>
+            <tr><th scope="row">Туман</th><td>64</td></tr>
+            <tr><th scope="row">Приплив</th><td>91</td></tr>
+            <tr><th scope="row">Маяк</th><td data-vx-value="0.4">0,4</td></tr>
+          </tbody>
+        </table>
+      </figure>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { chart } from '../../src/components/chart.js';
+
+  // the page's own: the week before, and back. The chart hears its table change.
+  const weeks = [
+    { when: '18 to 24 May. Sunday nothing went out.', went: [12, 9, 15, 10, 7, 3, 0], failed: [1, 0, 2, 4, 1, 0, 0] },
+    { when: '11 to 17 May.', went: [8, 11, 6, 13, 9, 2, 1], failed: [0, 1, 0, 1, 3, 0, 0] },
+  ];
+  let w = 0;
+  const key = document.getElementById('week');
+  key.addEventListener('click', () => {
+    w = 1 - w;
+    const rows = document.querySelectorAll('#deploys tbody tr');
+    rows.forEach((r, i) => { r.cells[1].textContent = weeks[w].went[i]; r.cells[2].textContent = weeks[w].failed[i]; });
+    document.getElementById('deploys-when').textContent = weeks[w].when;
+    key.textContent = w ? 'The week after' : 'The week before';
+  });
+  show(chart);
+</script>
+</body>
+</html>

@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Combobox</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; min-inline-size: 0; }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  /* room under a field whose rows are shown open, so that they lie over nothing */
+  .room { min-block-size: calc(var(--vx) * 100); }
+  .short { min-block-size: calc(var(--vx) * 48); }
+  .vx-combobox { inline-size: min(calc(var(--vx) * 80), 100%); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Combobox</h1>
+    <p class="what">A well you type in, and a float of rows under it that holds what matches. The focus stays in the field; the arrow keys move the accent groove down the rows, and Enter takes the marked one.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: which project to deploy</h2>
+    <div class="vx-combobox" id="use">
+      <label class="vx-field-label" for="use-q" id="use-label">Project</label>
+      <span class="vx-well"><input id="use-q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="use-list" autocomplete="off" spellcheck="false" placeholder="Type a name"></span>
+      <div class="vx-combobox-float" popover="manual">
+        <div role="listbox" id="use-list" aria-labelledby="use-label">
+          <div role="option">harbor-api <span class="vx-option-trail">Frankfurt</span></div>
+          <div role="option">fog-site <span class="vx-option-trail">Amsterdam</span></div>
+          <div role="option">tide-worker <span class="vx-option-trail">Warsaw</span></div>
+          <div role="option">ferry-cron <span class="vx-option-trail">Frankfurt</span></div>
+          <div role="option">ledger-sync <span class="vx-option-trail">Amsterdam</span></div>
+          <div role="option">buoy-metrics <span class="vx-option-trail">Warsaw</span></div>
+          <div role="option" lang="uk">Розгорнути на сервері <span class="vx-option-trail">Київ</span></div>
+          <div role="option">lighthouse-auth <span class="vx-option-trail">Frankfurt</span></div>
+          <div role="option" aria-disabled="true">old-pier <span class="vx-option-trail">archived</span></div>
+        </div>
+        <p class="vx-combobox-empty" hidden>No project is called “{q}”.</p>
+      </div>
+    </div>
+    <p class="chosen" id="chosen" role="status">Nothing chosen yet.</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state room">
+        <p>Open, in groups, the second row marked</p>
+        <div class="vx-combobox" id="open">
+          <label class="vx-field-label" for="open-q" id="open-label">Project</label>
+          <span class="vx-well"><input id="open-q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="open-list" autocomplete="off" placeholder="Type a name"></span>
+          <div class="vx-combobox-float" popover="manual">
+            <div role="listbox" id="open-list" aria-labelledby="open-label">
+              <div role="group" aria-label="Yours">
+                <div class="vx-combobox-title" aria-hidden="true">Yours</div>
+                <div role="option" id="open-1">fog-site</div>
+                <div role="option" id="open-2">ferry-cron</div>
+              </div>
+              <div role="group" aria-label="Your team's">
+                <div class="vx-combobox-title" aria-hidden="true">Your team's</div>
+                <div role="option" id="open-3">harbor-api</div>
+                <div role="option" id="open-4">lighthouse-auth</div>
+              </div>
+            </div>
+            <p class="vx-combobox-empty" hidden>No project is called “{q}”.</p>
+          </div>
+        </div>
+      </div>
+      <div class="state short">
+        <p>Nothing matches: said in words</p>
+        <div class="vx-combobox" id="none">
+          <label class="vx-field-label" for="none-q" id="none-label">Region</label>
+          <span class="vx-well"><input id="none-q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="none-list" autocomplete="off" value="Oslo"></span>
+          <div class="vx-combobox-float" popover="manual">
+            <div role="listbox" id="none-list" aria-labelledby="none-label">
+              <div role="option">Amsterdam</div>
+              <div role="option">Frankfurt</div>
+              <div role="option">Warsaw</div>
+            </div>
+            <p class="vx-combobox-empty" hidden>No region is called “{q}”.</p>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <p>Closed, holding a value; and off</p>
+        <div class="vx-combobox" id="held">
+          <label class="vx-field-label" for="held-q" id="held-label">Branch</label>
+          <span class="vx-well"><input id="held-q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="held-list" autocomplete="off" value="main"></span>
+          <div class="vx-combobox-float" popover="manual">
+            <div role="listbox" id="held-list" aria-labelledby="held-label">
+              <div role="option">main</div>
+              <div role="option">release/2.4</div>
+              <div role="option">mina/fog-cache</div>
+            </div>
+          </div>
+        </div>
+        <div class="vx-combobox" id="off">
+          <label class="vx-field-label" for="off-q" id="off-label">Owner</label>
+          <span class="vx-well"><input id="off-q" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="off-list" autocomplete="off" value="Ada" disabled></span>
+          <div class="vx-combobox-float" popover="manual">
+            <div role="listbox" id="off-list" aria-labelledby="off-label"><div role="option">Ada</div><div role="option">Mina</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { combobox } from '../../src/components/combobox.js';
+  const $ = (id) => document.getElementById(id);
+  $('use-q').addEventListener('vx-choose', (e) => { $('chosen').textContent = `Chosen: ${e.detail.value}.`; });
+  await show(combobox);
+  // two are shown open, so that they can be looked at; the part reads aria-expanded and
+  // aria-activedescendant from the markup like any other state. ?closed leaves them shut.
+  if (!new URLSearchParams(location.search).has('closed')) {
+    $('open-q').setAttribute('aria-expanded', 'true');
+    $('open-q').setAttribute('aria-activedescendant', 'open-2');
+    $('none-q').dispatchEvent(new Event('input'));
+  }
+</script>
+</body>
+</html>

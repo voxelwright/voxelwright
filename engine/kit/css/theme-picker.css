@@ -1,0 +1,58 @@
+/* ---------- Theme picker ----------
+   The one place a site's theme is set from: a bank of seats for the theme, each with a lamp of
+   that theme's own accent, and a bank for the time of day. The banks are the kit's trench of
+   seats (.vx-toggle-group, one of many); this file lays the two side by side and sets the lamp
+   in its seat. src/components/theme-picker.js fills the theme bank from THEMES and does the
+   choosing.
+     <div class="vx-theme-picker">
+       <div class="vx-toggle-group" role="radiogroup" aria-label="Theme" data-vx-pick="theme" data-vx-size="small"></div>
+       <div class="vx-toggle-group" role="radiogroup" aria-label="Time of day" data-vx-pick="time" data-vx-size="small">
+         <label><input type="radio" name="time" value="light">Day</label>
+         <label><input type="radio" name="time" value="dark">Night</label>
+         <label><input type="radio" name="time" value="system" checked>System</label>
+       </div>
+     </div>
+   A seat written out by the site (its own words, and no change of width when the script arrives):
+     <label><input type="radio" value="rose"><span class="vx-theme-lamp"></span><span class="vx-label">Rose</span></label>
+   In a settings page each bank may have its name before it, as words:
+     <div class="vx-theme-picker" data-vx-way="down">
+       <span class="vx-theme-picker-name" id="t">Theme</span><div class="vx-toggle-group" role="radiogroup" aria-labelledby="t" data-vx-pick="theme"></div> …
+   Without the script it can do nothing, so it is not shown; the page then follows the system. */
+
+.vx-theme-picker {
+  position: relative; isolation: isolate;
+  display: inline-flex; flex-wrap: wrap; align-items: center;
+  gap: calc(var(--vx) * 3) calc(var(--vx) * 4);
+  min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+/* it keeps its place while the script is on its way, and for good if there is none */
+.vx-theme-picker:not([data-vx-picker]) { visibility: hidden; }
+
+/* in a settings page: a name, then its bank, one under the other */
+.vx-theme-picker[data-vx-way="down"] { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 5); }
+.vx-theme-picker-name { font-weight: 600; font-size: 0.9375rem; line-height: 1.3; }
+@media (max-width: 600px) {
+  .vx-theme-picker[data-vx-way="down"] { grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); }
+  .vx-theme-picker[data-vx-way="down"] > .vx-toggle-group { margin-block-end: calc(var(--vx) * 2); }
+}
+
+/* The theme bank: equal seats, each as wide as the widest, as many to a row as fit, so a
+   theme's name is never broken up (the part measures them and writes the columns on the bank).
+   These rules name the trench's own class as well, so that they hold whichever file comes
+   first in the stylesheet. */
+/* a seat of it: the lamp, then the words, side by side */
+.vx-theme-picker .vx-toggle-group[data-vx-pick="theme"] > label { grid-auto-flow: column; column-gap: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 3); }
+.vx-theme-picker .vx-toggle-group[data-vx-pick="theme"] > label > .vx-label { white-space: nowrap; }
+/* the words stand over the lamp's light, never under it */
+.vx-theme-picker .vx-toggle-group[data-vx-pick] > label > .vx-label { position: relative; }
+
+/* the lamp: two voxels square, in a collar a voxel wide that reaches past its box */
+.vx-theme-lamp { position: relative; isolation: isolate; display: block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); pointer-events: none; }
+
+/* plain: a painted lamp of the theme's accent (the part writes --_day and --_night on it) in a painted collar */
+.vx-theme-lamp:not([data-vx-live]) { background: var(--_day, var(--vx-steel)); box-shadow: 0 0 0 var(--vx) var(--vx-steel); }
+:root[data-theme="dark"] .vx-theme-lamp:not([data-vx-live]) { background: var(--_night, var(--vx-steel)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vx-theme-lamp:not([data-vx-live]) { background: var(--_night, var(--vx-steel)); }
+}

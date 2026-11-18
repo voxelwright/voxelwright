@@ -1,0 +1,33 @@
+/* ---------- Label ---------- */
+
+/* Tool: none. A label is words on the surface, and always a real <label>: for="…" names the
+   control it belongs to, so a press on the words lands in the control and a screen reader says
+   them. It builds on .vx-field and .vx-field-label, which the kit's stylesheet has.
+   Markup: <div class="vx-field">
+             <label class="vx-field-label" for="name">Project name</label>
+             <span class="vx-well"><input id="name"></span>
+             <p class="vx-field-hint" id="name-hint">…</p>      (the input: aria-describedby="name-hint")
+           </div>
+   In a label: <span class="vx-field-mark" aria-hidden="true">*</span> after the words of one that
+   must be filled (the control carries `required`, which is what is announced), or
+   <span class="vx-field-note">optional</span> for the quiet word.
+   data-vx-way="across" on the .vx-field lays the label beside its control, the control at the end. */
+
+.vx-field-label { display: block; max-inline-size: 100%; overflow-wrap: anywhere; cursor: default; }
+/* the hint keeps its voxel of room above it on a surface too, which resets a paragraph's margins */
+.vx-field > .vx-field-hint { margin: calc(var(--vx) * 1) 0 0; overflow-wrap: anywhere; }
+
+/* must be filled: a mark in the words' own ink (red is for what has failed) */
+.vx-field-mark { margin-inline-start: 0.2em; font-weight: 700; }
+/* a quiet word after the name: "optional", a unit, a count */
+.vx-field-note { margin-inline-start: 0.5em; font-weight: 400; color: var(--vx-ink-quiet); }
+
+/* its control is switched off: the label goes quiet with it */
+.vx-field:has(:is(input, select, textarea):disabled) > .vx-field-label,
+.vx-field-label[data-vx-off] { color: var(--vx-ink-quiet); }
+
+/* across: the label and what it names on one line, the control at the far end; they wrap, label
+   first, where the line is too short for both */
+.vx-field[data-vx-way="across"] { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); }
+.vx-field[data-vx-way="across"] > .vx-field-label { flex: 1 1 calc(var(--vx) * 30); min-inline-size: 0; }
+.vx-field[data-vx-way="across"] > .vx-field-hint { flex: 0 0 100%; }

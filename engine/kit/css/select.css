@@ -1,0 +1,66 @@
+/* ---------- Select (native) ---------- */
+
+/* Tool: a key with a chevron. It opens the browser's own picker.
+   Markup: <span class="vx-select"><select id="region">…</select></span>
+           with a real <label for="region"> beside or above it.
+   The key is as wide as its longest choice; give .vx-select an inline-size to make it wider, and
+   a choice too long for it ends in an ellipsis. */
+
+.vx-select {
+  position: relative; isolation: isolate;
+  display: inline-flex; vertical-align: middle;
+  box-sizing: border-box; max-inline-size: 100%; justify-self: start;
+  min-block-size: calc(var(--vx) * 11); min-inline-size: calc(var(--vx) * 22);
+  color: var(--lit-legend, var(--vx-ink));
+}
+/* with voxels the part wraps the select in this span, which goes down with the cap */
+.vx-select-face { display: flex; flex: 1 1 auto; min-inline-size: 0; }
+.vx-select select {
+  appearance: none; -webkit-appearance: none;
+  box-sizing: border-box; flex: 1 1 auto; inline-size: 100%; min-inline-size: 0;
+  min-block-size: calc(var(--vx) * 11);
+  /* The words start five voxels in: four from the edge of the cap's top, which is a voxel
+     smaller all round. The far end keeps room for the chevron: five voxels (four on the top),
+     its 7, and 3 before it. */
+  padding: 0; padding-inline: calc(var(--vx) * 5) calc(var(--vx) * 15);
+  margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
+  color: inherit;
+  /* a legend on a key: the key face */
+  font: 400 var(--vx-key-size)/1 var(--vx-key-font); letter-spacing: 0;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+/* the rows of the picker are read, not pressed: the text face, in the page's ink on its surface
+   (where the browser draws the picker itself; a system picker keeps its own look) */
+.vx-select option, .vx-select optgroup { font: 500 1rem var(--vx-font); color: var(--vx-ink); background: var(--vx-chalk); }
+.vx-select select:disabled { cursor: default; color: var(--vx-ink-quiet); opacity: 1; }
+/* under its label in a field it stands two voxels further down than a well would: a keycap's
+   side and the light at its foot are drawn two and a half voxels above its face, and must not
+   lie on the label's words */
+.vx-field > .vx-select { margin-block-start: calc(var(--vx) * 2); }
+.vx-select:has(select:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
+
+/* at night the legend shines through, and flares with the light as the key goes down (--lit is
+   set by the part, 0 to 1), as on the look's other keys */
+[data-vx-look="lit"] .vx-select[data-vx-live] select:not(:disabled) {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+
+/* plain: a painted cap with a painted chevron, the same box */
+.vx-select:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow), inset 0 0 0 1px var(--vx-chalk-side); }
+.vx-select:not([data-vx-live]):has(select:disabled) { background: var(--vx-steel); box-shadow: none; }
+.vx-select:not([data-vx-live])::after {
+  content: ""; position: absolute; pointer-events: none;
+  inset-inline-end: calc(var(--vx) * 5); inset-block-start: calc(50% - var(--vx) * 2);
+  inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 4);
+  background: currentColor;
+  --_u: var(--vx);
+  clip-path: polygon(
+    0 0, var(--_u) 0, var(--_u) var(--_u), calc(var(--_u) * 2) var(--_u), calc(var(--_u) * 2) calc(var(--_u) * 2), calc(var(--_u) * 3) calc(var(--_u) * 2), calc(var(--_u) * 3) calc(var(--_u) * 3),
+    calc(var(--_u) * 4) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 2), calc(var(--_u) * 5) var(--_u), calc(var(--_u) * 6) var(--_u), calc(var(--_u) * 6) 0, calc(var(--_u) * 7) 0,
+    calc(var(--_u) * 7) var(--_u), calc(var(--_u) * 6) var(--_u), calc(var(--_u) * 6) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 4),
+    calc(var(--_u) * 3) calc(var(--_u) * 4), calc(var(--_u) * 3) calc(var(--_u) * 3), calc(var(--_u) * 2) calc(var(--_u) * 3), calc(var(--_u) * 2) calc(var(--_u) * 2), var(--_u) calc(var(--_u) * 2), var(--_u) var(--_u), 0 var(--_u));
+}
+.vx-select:not([data-vx-live]):has(select:disabled)::after { color: var(--vx-ink-quiet); }
+.vx-select:not([data-vx-live]):has(select:active:not(:disabled)) { translate: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5); box-shadow: inset 0 0 0 1px var(--vx-chalk-side); }

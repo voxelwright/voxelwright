@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navigation menu</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .site { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); inline-size: 100%; }
+  .brand { font-weight: 700; font-size: 1.0625rem; color: var(--vx-ink); text-decoration: none; }
+  .app { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; }
+  .app > .vx-groove { margin-block-start: calc(var(--vx) * -1); }
+  .where { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  /* room under the bar for a float that is shown open, so that it lies over nothing */
+  .room { min-block-size: calc(var(--vx) * 74); align-content: start; }
+  @media (max-width: 600px) { .room { min-block-size: calc(var(--vx) * 96); } }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Navigation menu</h1>
+    <p class="what">A site's top links. Some open a float of more links under them, each with a line saying where it leads. The links are words; the current page has the accent groove under its word.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the top of fogline's site</h2>
+    <div class="app">
+      <div class="site">
+        <a class="brand" href="#top">fogline</a>
+        <nav class="vx-navigation-menu" id="site" aria-label="fogline">
+          <ul>
+            <li>
+              <button type="button" id="product-k" aria-expanded="false" popovertarget="product">Product</button>
+              <div class="vx-navigation-menu-float" id="product" popover>
+                <ul>
+                  <li><a href="#deploys"><span class="vx-nm-name">Deploys</span><span class="vx-nm-about">Ship a branch to a region in one press, and roll it back in another.</span></a></li>
+                  <li><a href="#logs"><span class="vx-nm-name">Logs</span><span class="vx-nm-about">Every line from every build, kept for thirty days.</span></a></li>
+                  <li><a href="#regions"><span class="vx-nm-name">Regions</span><span class="vx-nm-about">Amsterdam, Frankfurt and Warsaw, close to the people who use it.</span></a></li>
+                  <li><a href="#uk" lang="uk"><span class="vx-nm-name">Розгорнути на сервері</span><span class="vx-nm-about">Як працює розгортання, крок за кроком.</span></a></li>
+                </ul>
+              </div>
+            </li>
+            <li>
+              <button type="button" id="docs-k" aria-expanded="false" popovertarget="docs">Docs</button>
+              <div class="vx-navigation-menu-float" id="docs" popover data-vx-narrow>
+                <ul>
+                  <li><a href="#install"><span class="vx-nm-name">Install</span><span class="vx-nm-about">One line, then open harbor.toml.</span></a></li>
+                  <li><a href="#configure" aria-current="page"><span class="vx-nm-name">Configure</span><span class="vx-nm-about">Branches, secrets and the hooks that run.</span></a></li>
+                  <li><a href="#api"><span class="vx-nm-name">The API</span><span class="vx-nm-about">Everything the dashboard does, from a script.</span></a></li>
+                </ul>
+              </div>
+            </li>
+            <li><a href="#pricing">Pricing</a></li>
+            <li><a href="#changes">Changes</a></li>
+          </ul>
+        </nav>
+      </div>
+      <div class="vx-groove" role="separator"></div>
+      <p class="where" id="where" role="status">You are on Configure, in the docs.</p>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="state app room">
+      <p>A float out, with the current page in it marked</p>
+      <nav class="vx-navigation-menu" id="still" aria-label="harbor-api docs">
+        <ul>
+          <li><a href="#s-start">Start</a></li>
+          <li>
+            <button type="button" id="still-k" aria-expanded="false" popovertarget="still-float">Guides</button>
+            <div class="vx-navigation-menu-float" id="still-float" popover="manual">
+              <ul>
+                <li><a href="#s-deploy"><span class="vx-nm-name">Deploy a branch</span><span class="vx-nm-about">From a push to live in Frankfurt.</span></a></li>
+                <li><a href="#s-secrets" aria-current="page"><span class="vx-nm-name">Keep secrets</span><span class="vx-nm-about">Where they live, and who can read them.</span></a></li>
+                <li><a href="#s-rollback"><span class="vx-nm-name">Roll back</span><span class="vx-nm-about">Back to 4f2c9a1 in one press.</span></a></li>
+                <li><a href="#s-team"><span class="vx-nm-name">Ask the team in</span><span class="vx-nm-about">Mina and Ada, with the keys they need.</span></a></li>
+              </ul>
+            </div>
+          </li>
+          <li><a href="#s-api">Reference</a></li>
+        </ul>
+      </nav>
+      <div class="vx-groove" role="separator"></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { navigationMenu, navigationMenuFloat } from '../../src/components/navigation-menu.js';
+  // The page stands in for a router: a link that is followed becomes the current one.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('.vx-navigation-menu a[href]');
+    if (!a) return;
+    const nav = a.closest('.vx-navigation-menu');
+    for (const o of nav.querySelectorAll('a')) if (o === a) o.setAttribute('aria-current', 'page'); else o.removeAttribute('aria-current');
+    if (nav.id === 'site') document.getElementById('where').textContent = `You are on ${(a.querySelector('.vx-nm-name') ?? a).textContent.trim()}.`;
+  });
+  await show(navigationMenu, navigationMenuFloat);
+  // one float is shown out, so that it can be looked at; ?closed leaves it shut
+  const still = document.getElementById('still-float');
+  if (!new URLSearchParams(location.search).has('closed')) still.showPopover();
+</script>
+</body>
+</html>

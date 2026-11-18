@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kit behaviour</title>
+<link rel="stylesheet" href="../voxelmorphism.css">
+<style>html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); } body { padding: 2rem 1rem; display: grid; gap: 2rem; justify-items: start; max-inline-size: 390px; } footer { margin: 3rem; } :focus-visible { outline: 3px dashed red; }</style>
+<!-- A test page for behaviour that must be the same with voxels and without (?plain). -->
+<div class="vx-tabs" role="tablist" aria-label="Quality" data-vx-size="small" id="tabs">
+  <button role="tab" aria-selected="false" aria-controls="p0">Low</button>
+  <button role="tab" aria-selected="true" aria-controls="p1">Medium</button>
+  <button role="tab" aria-selected="false" aria-controls="p2">High</button>
+  <button role="tab" aria-selected="false" aria-controls="p3">Ultra</button>
+</div>
+<p id="p0" hidden>Low</p><p id="p1">Medium</p><p id="p2" hidden>High</p><p id="p3" hidden>Ultra</p>
+<label class="vx-toggle"><input type="checkbox" role="switch" id="sw"><span class="vx-switch"></span>Night</label>
+<span class="vx-slider"><input type="range" min="0" max="10" value="2" id="sl" aria-label="Scale"></span>
+<button class="vx-button" data-vx-material="chalk" popovertarget="menu" id="trigger">Menu</button>
+<div class="vx-menu" popover id="menu" role="menu"><button role="menuitem">One</button><button role="menuitem">Two</button></div>
+<button class="vx-button" id="open">Open</button>
+<dialog class="vx-dialog" id="dlg" aria-labelledby="dh"><header id="dh">Settings</header><div class="vx-dialog-body"><p>Body.</p></div><footer><button class="vx-button" data-vx-close value="done">Done</button></footer></dialog>
+<script type="module">
+  import { adopt, plain, live, ready } from '../src/index.js';
+  if (new URLSearchParams(location.search).has('plain')) document.documentElement.setAttribute('data-vx-plain', '');
+  window.changes = [];
+  document.addEventListener('vx-change', (e) => window.changes.push(e.detail.index));
+  document.getElementById('open').onclick = () => document.getElementById('dlg').show();
+  adopt();
+  window.vx = { plain, live };
+  await ready();
+  document.documentElement.dataset.ready = '1';
+</script>
+</html>

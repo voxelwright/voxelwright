@@ -22,6 +22,7 @@ const NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1
 const js = (text) => text.replace(NAMED, '$1$2$3.js')
 
 rmSync(out, { recursive: true, force: true })
+const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 const put = (path, body) => { mkdirSync(dirname(join(out, path)), { recursive: true }); writeFileSync(join(out, path), body) }
 
 // Every module the player's page reaches, each stripped once. Imports of types alone are gone with the types, so they bring nothing in.
@@ -31,6 +32,22 @@ const reach = (from, text) => { for (const [, , , path] of text.matchAll(NAMED))
 for (const page of pages) { const text = readFileSync(join(root, page), 'utf8'); reach(page, text); put(page, js(text)) }
 // The Voxelmorphism kit's renderer (#430) is built beside them: a page that uses the kit imports blocks/renderer.js.
 modules.add('blocks/renderer.ts'); todo.push('blocks/renderer.ts')
+// The kit itself (#434) beside its renderer: its modules with their .ts addresses written .js (the renderer they import is
+// reached above), and its stylesheet and fonts as they are. Its showcase, tools and notes stay out.
+for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
+  const text = readFileSync(join(root, file), 'utf8')
+  if (file.endsWith('.js')) { reach(file, text); put(file, js(text)) } else put(file, text)
+}
+// Of the fonts only the files the stylesheet names, with each family's licence where it has one. The kit's own faces
+// (Vox Text, and Vox Block and Vox Sign inside the stylesheet) have no licence yet: this folder is for looking at on
+// this machine, and goes to no host until the owner says so.
+const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
+put('kit/voxelmorphism.css', sheet)
+for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {
+  cpSync(join(root, 'kit', font), join(out, 'kit', font))
+  const licence = join('kit', dirname(font), 'OFL.txt')
+  if (existsSync(join(root, licence))) cpSync(join(root, licence), join(out, licence))
+}
 while (todo.length) {
   const path = todo.pop(), text = stripTypeScriptTypes(readFileSync(join(root, path), 'utf8'))
   reach(path, text)
@@ -43,7 +60,6 @@ cpSync(join(root, 'landing/scenes'), join(out, 'landing/scenes'), { recursive: t
 if (existsSync(join(root, 'landing/site'))) cpSync(join(root, 'landing/site'), join(out, 'landing/site'), { recursive: true })
 
 // What was written, and what it weighs as a host would send it.
-const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 let raw = 0, gz = 0, br = 0
 for (const file of files(out)) { const body = readFileSync(file); raw += statSync(file).size; gz += gzipSync(body, { level: 9 }).length; br += brotliCompressSync(body).length }
 const kb = (n) => `${(n / 1024).toFixed(0)} KB`

@@ -1,0 +1,46 @@
+/* ---------- Scroll spy ---------- */
+
+/* Words that lead to the sections of a page. The one being read is marked with aria-current, and
+   an accent groove stands beside it (in a column) or lies under it (in a row). */
+.vx-spy {
+  position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start;
+  margin: 0; padding: 0; list-style: none;
+  font-family: var(--vx-font); color: var(--vx-ink-quiet); font-weight: 500; line-height: 1.3;
+}
+.vx-spy :is(ul, ol) { display: contents; margin: 0; padding: 0; list-style: none; }
+.vx-spy li { display: contents; }
+.vx-spy a {
+  position: relative; display: flex; align-items: center; box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 4) calc(var(--vx) * 2);
+  color: inherit; text-decoration: none; overflow-wrap: anywhere; -webkit-tap-highlight-color: transparent;
+}
+.vx-spy a:hover, .vx-spy a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+.vx-spy a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* a deeper level: set in by its place in the list */
+.vx-spy a[data-vx-level="2"] { padding-inline-start: calc(var(--vx) * 8); }
+
+/* in a row: the links side by side, the groove under the current one */
+.vx-spy[data-vx-way="across"] { display: flex; flex-wrap: wrap; column-gap: calc(var(--vx) * 2); }
+.vx-spy[data-vx-way="across"] a { padding-inline: calc(var(--vx) * 2); }
+
+/* the groove: placed and sized by the script, moved only by translate (its size changes at once,
+   so it is rebuilt once and not on every frame of the way) */
+.vx-spy .vx-spy-mark {
+  position: absolute; inset-block-start: 0; left: 0; z-index: 1; pointer-events: none;
+  inline-size: var(--_w, var(--vx)); block-size: var(--_h, var(--vx));
+  translate: var(--_x, 0px) var(--_y, 0px);
+  transition: translate 220ms var(--vx-ease-out), opacity 160ms var(--vx-ease-out);
+}
+/* before the script has placed it, and when no section is being read, it is not there */
+.vx-spy:not([data-vx-on]) .vx-spy-mark { visibility: hidden; }
+.vx-spy[data-vx-none] .vx-spy-mark { opacity: 0; }
+/* no script: the link marked in the markup carries a painted mark of the same size */
+.vx-spy:not([data-vx-on]) a[aria-current]:not([aria-current="false"])::before {
+  content: ""; position: absolute; inset-block: calc(var(--vx) * 2); inset-inline-start: 0; inline-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-spy[data-vx-way="across"]:not([data-vx-on]) a[aria-current]:not([aria-current="false"])::before { inset-block: auto 0; inset-inline: 0; inline-size: auto; block-size: var(--vx); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-spy .vx-spy-mark { transition: none; }
+}

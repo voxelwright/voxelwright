@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Breadcrumb</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the page's own: the top of a settings screen */
+  .screen { display: grid; gap: calc(var(--vx) * 1); inline-size: 100%; }
+  .screen .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+  .screen p { color: var(--vx-ink-quiet); max-inline-size: 56ch; margin-block-start: calc(var(--vx) * 2); }
+  .trails { display: grid; inline-size: 100%; }
+  .narrow { inline-size: 100%; max-inline-size: calc(var(--vx) * 60); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Breadcrumb</h1>
+    <p class="what">Words parted by chevrons. The last one is where you are.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the top of a settings screen</h2>
+    <div class="screen">
+      <nav class="vx-breadcrumb" aria-label="Breadcrumb" id="trail">
+        <ol>
+          <li><a href="#fogline">fogline</a></li>
+          <li><a href="#projects">Projects</a></li>
+          <li><a href="#harbor-api">harbor-api</a></li>
+          <li><a href="#domains" aria-current="page">Domains</a></li>
+        </ol>
+      </nav>
+      <div class="name">Domains</div>
+      <p>Addresses that answer for harbor-api. The first one is where the others send people.</p>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="trails">
+      <nav class="vx-breadcrumb" aria-label="Two levels">
+        <ol>
+          <li><a href="#projects">Projects</a></li>
+          <li><span aria-current="page">tide-worker</span></li>
+        </ol>
+      </nav>
+      <nav class="vx-breadcrumb" aria-label="The middle left out">
+        <ol>
+          <li><a href="#fogline">fogline</a></li>
+          <li><span class="vx-breadcrumb-more"><span aria-hidden="true">…</span><span class="vx-breadcrumb-aloud">three levels left out</span></span></li>
+          <li><a href="#logs">Logs</a></li>
+          <li><a href="#logs-today" aria-current="page">Today</a></li>
+        </ol>
+      </nav>
+      <nav class="vx-breadcrumb" aria-label="One level">
+        <ol>
+          <li><a href="#fogline" aria-current="page">fogline</a></li>
+        </ol>
+      </nav>
+    </div>
+  </section>
+  <section>
+    <h2>A long trail, and a narrow place</h2>
+    <nav class="vx-breadcrumb" aria-label="A long trail" id="long">
+      <ol>
+        <li><a href="#fogline">fogline</a></li>
+        <li><a href="#projects">Projects</a></li>
+        <li><a href="#harbor-api">harbor-api</a></li>
+        <li><a href="#deploys">Deployments</a></li>
+        <li><a href="#production">Production</a></li>
+        <li><a href="#d418">Deploy 418</a></li>
+        <li><a href="#log">Build log</a></li>
+        <li><a href="#step3" aria-current="page">Step 3: bundling the server</a></li>
+      </ol>
+    </nav>
+    <div class="narrow">
+      <nav class="vx-breadcrumb" aria-label="Ukrainian, and one long name" id="tight">
+        <ol>
+          <li><a href="#p">Проєкти</a></li>
+          <li><a href="#r">Розгортання на сервері</a></li>
+          <li><a href="#f" aria-current="page">harbor-api-production-eu-central-frankfurt-2</a></li>
+        </ol>
+      </nav>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show(); // words only: nothing to draw
+</script>
+</body>
+</html>

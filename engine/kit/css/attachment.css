@@ -1,0 +1,57 @@
+/* ---------- Attachment ---------- */
+
+/* A file on a message, or waiting in the composer: a low tile with its name and its size on it,
+   and, where it can be taken away, the kit's close key beside it. Removed, it shatters.
+   Markup: <ul class="vx-attachments" aria-label="Attached files" data-vx-return="attach">
+             <li class="vx-attachment">
+               <span class="vx-attachment-tile">
+                 <span class="vx-attachment-name">build-214.log</span>
+                 <span class="vx-attachment-size">Log, 48 KB</span>
+               </span>
+               <button class="vx-button vx-close" type="button" aria-label="Remove build-214.log">×</button>
+             </li>
+           </ul>
+   The name and the size are words, and the key is named for what it removes. The second line
+   may say a state instead, in words, with a lamp before them:
+     <span class="vx-attachment-size"><span class="vx-lamp" data-vx-light="stop" aria-hidden="true"></span>Too large: 31 MB of 25</span>
+   A name too long for the tile is cut short with an ellipsis; give the whole of it in title.
+   data-vx-return on the list is the id of what takes focus when the last file is removed. */
+
+.vx-attachments { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 3); box-sizing: border-box; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
+.vx-attachments:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+.vx-attachment { display: inline-flex; align-items: center; min-inline-size: 0; max-inline-size: 100%; font-family: var(--vx-font); color: var(--vx-ink); }
+
+/* the tile: two lines (five voxels and four) and a voxel above and below: eleven voxels, as
+   tall as a key's target, so the key beside it stands level with it */
+.vx-attachment-tile {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  box-sizing: border-box;
+  min-inline-size: calc(var(--vx) * 20);
+  max-inline-size: calc(var(--vx) * 64);
+  min-block-size: calc(var(--vx) * 11);
+  padding: calc(var(--vx) * 1) calc(var(--vx) * 4);
+}
+.vx-attachment-name { overflow: hidden; font-size: 0.9375rem; font-weight: 600; line-height: calc(var(--vx) * 5); white-space: nowrap; text-overflow: ellipsis; color: inherit; }
+a.vx-attachment-name { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a.vx-attachment-name:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: -2px; }
+.vx-attachment-size { display: flex; align-items: center; gap: calc(var(--vx) * 2); overflow: hidden; font-size: 0.8125rem; line-height: calc(var(--vx) * 4); white-space: nowrap; text-overflow: ellipsis; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+/* the key stands a voxel from the tile: its own margin is two, and one is taken back */
+.vx-attachment > .vx-button.vx-close { margin-inline-start: calc(var(--vx) * 1); }
+
+/* going: its words go at once, and nothing in it answers a press while the bricks fall */
+.vx-attachment[data-vx-leaving] { pointer-events: none; }
+.vx-attachment[data-vx-leaving] :is(.vx-attachment-name, .vx-attachment-size, .vx-label) { opacity: 0; transition: opacity 100ms ease; }
+.vx-attachment[data-vx-leaving] .vx-button:not([data-vx-live]) { visibility: hidden; }
+
+/* plain: a painted plate with its shadow */
+.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
+.vx-attachment[data-vx-leaving] .vx-attachment-tile:not([data-vx-live]) { visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-attachment[data-vx-leaving] :is(.vx-attachment-name, .vx-attachment-size, .vx-label) { transition: none; }
+}

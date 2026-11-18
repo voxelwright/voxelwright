@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prose</title>
+<link rel="stylesheet" href="../../voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Prose</h1>
+    <p class="what">What an article is set in. One class on a container; inside it, plain HTML. Words on the surface, with one groove: a quote's rule.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a post on the fogline blog</h2>
+    <div class="wide"><article class="vx-prose" id="post">
+      <p>Last spring a deploy of harbor-api took eleven minutes, and nobody could say why. This is what we found when we went looking, and what we changed.</p>
+      <h2>Where the time went</h2>
+      <p>Most of it was not the build. The build took 45 seconds. The rest was waiting: for a runner, for a cache that was never warm, and for a health check that <a href="#post">asked the wrong question</a> of a service that had been ready for minutes.</p>
+      <blockquote>
+        <p>A deploy that takes eleven minutes is a deploy people put off until Friday.</p>
+        <footer>Mina, in the review</footer>
+      </blockquote>
+      <h3>What we changed</h3>
+      <ul>
+        <li>The cache is keyed on the lockfile, not on the branch.</li>
+        <li>The health check asks <code>/ready</code>, which answers as soon as the service can take traffic.</li>
+        <li>Runners stay warm during working hours.</li>
+      </ul>
+      <h4>What it cost</h4>
+      <p>Two afternoons, and one evening when the warm runners <strong>would not go cold again</strong>. A deploy now takes under two minutes. Ada wrote up the runner change in <a href="#post">a note of its own</a>.</p>
+      <p><small>Times are medians over the thirty deploys before and after the change.</small></p>
+    </article></div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="wide"><article class="vx-prose" id="all">
+      <h2>A second-level heading, long enough that it has to wrap onto another line</h2>
+      <p>A paragraph under it. Links come <a href="#all">in the middle of a line</a>, and sometimes a link is an address with nowhere to break: <a href="#all">https://deploys.fogline.example/harbor-api/builds/4f2c9a1e7b03d5586c2a/logs?step=health-check</a>.</p>
+      <h3>A third-level heading</h3>
+      <p>Words can be <strong>strong</strong>, <em>stressed</em>, or <code>code --in-a-line</code>, with a note<sup>1</sup> after them. A word with no gaps wraps where it must: Donaudampfschifffahrtsgesellschaftskapitänsmützenabzeichen.</p>
+      <h4>A fourth-level heading</h4>
+      <p lang="uk">Український текст тримає той самий ритм: «Розгорнути на сервері» вміщується в рядок, а довге слово на кшталт «інтернаціоналізація» переноситься разом з усім іншим.</p>
+      <ol>
+        <li>Numbered steps, in order.</li>
+        <li>A step with steps of its own:
+          <ul>
+            <li>the first of them,</li>
+            <li>and the second, which runs long enough to show how a second line sits under the first.</li>
+          </ul>
+        </li>
+        <li>The last step.</li>
+      </ol>
+      <dl>
+        <dt>Runner</dt>
+        <dd>The machine a build runs on.</dd>
+        <dt>Warm</dt>
+        <dd>Already started, with the cache in place.</dd>
+      </dl>
+      <blockquote>
+        <p>A quote can run to more than one paragraph. The rule beside it is a groove, as tall as the quote.</p>
+        <p>The second paragraph stands under the first.</p>
+        <footer>Ada, <cite>Notes on runners</cite></footer>
+      </blockquote>
+      <hr class="vx-groove">
+      <p><small>1. Small print: what the note above points to, and anything else that is said quietly. <a href="#all">A link in small print</a> is still a link.</small></p>
+    </article></div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { prose } from '../../src/components/prose.js';
+  show(prose);
+</script>
+</body>
+</html>
