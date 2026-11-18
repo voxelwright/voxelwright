@@ -82,7 +82,15 @@ try {
       await page.getByRole('button', { name: 'Amber' }).click();
       assert.deepEqual(await capPaint(), unlit, 'an unpowered opal key must keep its resin color');
       await key.click();
-      assert.notEqual((await capPaint())[1], unlit[1]);
+      const poweredOpal = (await capPaint())[1];
+      assert.notEqual(poweredOpal, unlit[1]);
+      const bank = page.locator('#lamp-bank');
+      await bank.evaluate(el => el.dataset.caps = 'carbon');
+      assert.equal((await capPaint())[1], 'none', 'the inner carbon keybed must mask the outer opal finish');
+      await bank.evaluate(el => el.dataset.caps = 'field');
+      assert((await capPaint())[1].includes('155%'), 'the nearest field finish supplies its own printed artwork');
+      await bank.evaluate(el => delete el.dataset.caps);
+      assert.equal((await capPaint())[1], poweredOpal);
       await page.getByRole('radio', { name: 'Low', exact: true }).check();
       const low = await capPaint();
       await page.getByRole('radio', { name: 'Sculpted', exact: true }).check();

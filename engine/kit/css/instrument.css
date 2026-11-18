@@ -177,15 +177,17 @@
   background: linear-gradient(var(--_strip,#414a42),var(--_strip,#414a42)) right 6% center / var(--vx) 19% no-repeat,#1c211d;
   box-shadow: inset 0 0 0 var(--vx) #343a34;
 }
-:root .vx-button[data-lamp]:not([data-vx-live])::before {
+.vx-button[data-lamp]:not([data-vx-live])::before {
   content: ""; position: absolute; inset: 7% 7% 8%; z-index: -1;
   background: var(--_resin); border: 0;
   border-inline: calc(var(--vx) * 1.5) solid var(--_apron);
   border-bottom: calc(var(--vx) * var(--vx-lamp-apron,3)) solid var(--_apron);
   box-shadow: inset 1px 1px 0 var(--_shoulder);
 }
-[data-caps="field"] .vx-button[data-lamp]:not([data-vx-live])::before {
-  background: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%),var(--_resin);
+@scope ([data-caps="field"]) to ([data-caps]) {
+  .vx-button[data-lamp]:not([data-vx-live])::before {
+    background: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%),var(--_resin);
+  }
 }
 .vx-button[data-lamp]:not([data-vx-live])::after {
   content: ""; position: absolute; top: 31%; left: 29%; width: 12%; height: var(--vx);
@@ -194,9 +196,11 @@
 .vx-button[data-lamp][aria-pressed="true"]:not(:disabled,[aria-disabled="true"]) {
   --_strip: color-mix(in srgb,var(--case-lamp,#71e2cd) calc(100% * var(--lamp-level,1)),#414a42);
 }
-[data-caps="opal"] .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
-  background-image: radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp) calc(24% * var(--vx-pilot-level,var(--lamp-level,1))),transparent),transparent 52%),
-    radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp) calc(32% * var(--lamp-level,1)),transparent),transparent 44%);
+@scope ([data-caps="opal"]) to ([data-caps]) {
+  .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
+    background-image: radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp) calc(24% * var(--vx-pilot-level,var(--lamp-level,1))),transparent),transparent 52%),
+      radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp) calc(32% * var(--lamp-level,1)),transparent),transparent 44%);
+  }
 }
 .vx-button[data-vx-pilot="status"] { --vx-pilot-level: 1; }
 .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::after {
