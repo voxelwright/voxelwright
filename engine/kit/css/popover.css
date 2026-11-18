@@ -1,0 +1,41 @@
+/* ---------- Popover ---------- */
+
+/* The browser's own popover. With no script it opens in the middle of the window (the browser's
+   own place for one); the part puts it by its key. Its width never depends on where it is, so it
+   can be measured before it is placed. */
+.vx-popover {
+  box-sizing: border-box;
+  inline-size: min(calc(var(--vx) * 76), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 76), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+  padding: calc(var(--vx) * 5);
+  border: 0;
+  overflow: visible;
+  isolation: isolate;
+  background: none;
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: calc(var(--vx) * 6);
+  overflow-wrap: anywhere;
+}
+/* Open, what is in it is a column with a gap: a page's own margins for p and h3 do not reach in.
+   (Closed, it has no box at all, so `display` is named only for the open one.) */
+.vx-popover:is(:popover-open, [data-vx-measure]) { display: grid; gap: calc(var(--vx) * 3); align-content: start; }
+/* for the moment the part measures it, just before it opens */
+.vx-popover[data-vx-measure] { visibility: hidden; }
+.vx-popover:focus-visible { outline: none; } /* what is in it shows the focus */
+.vx-popover::backdrop { background: none; }
+
+.vx-popover > :is(h2, h3, h4, p) { margin: 0; min-inline-size: 0; }
+.vx-popover > :where(h2, h3, h4) { font-size: 1rem; font-weight: 600; line-height: calc(var(--vx) * 6); }
+.vx-popover > :where(p) { color: var(--vx-ink-quiet); font-size: 0.9375rem; text-wrap: pretty; }
+/* the words that follow the heading sit close under it */
+.vx-popover > :is(h2, h3, h4) + p { margin-block-start: calc(var(--vx) * -2); }
+/* its keys: at the end, a little further from what is above them */
+.vx-popover-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--vx) * 4); margin-block-start: calc(var(--vx) * 2); }
+
+/* plain: a painted slab; the accent's line is at its left and top, where the light shows */
+.vx-popover:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}

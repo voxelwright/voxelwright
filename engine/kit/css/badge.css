@@ -1,0 +1,31 @@
+/* ---------- Badge ---------- */
+
+/* A lamp and a word. A count is words. No box: a badge is read, not pressed, so nothing of it
+   stands up. The lamp is the kit's own (.vx-lamp); its light says the state (go: done or live,
+   stop: failed, accent: at work), and the word says it again, so the colour is never the only
+   sign. A state that is none of these (paused, a draft) has no lamp: the warm light is the
+   room's own and says nothing.
+   Markup: <span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span>
+           <span class="vx-badge">12<span class="vx-badge-aloud"> unread</span></span>   a count */
+
+.vx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--vx) * 2);
+  min-inline-size: 0;
+  font-family: var(--vx-font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: calc(var(--vx) * 5);
+  font-variant-numeric: tabular-nums;
+  color: var(--vx-ink-quiet);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+/* the lamp stays on the first line when a long word wraps under it */
+.vx-badge > .vx-lamp { align-self: flex-start; margin-block-start: calc(var(--vx) * 1.5); }
+/* beside a title, or wherever it is the thing being read */
+.vx-badge[data-vx-size="large"] { font-size: 1rem; line-height: calc(var(--vx) * 6); }
+.vx-badge[data-vx-size="large"] > .vx-lamp { margin-block-start: calc(var(--vx) * 2); }
+/* words for a screen reader only: what a bare number counts */
+.vx-badge-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

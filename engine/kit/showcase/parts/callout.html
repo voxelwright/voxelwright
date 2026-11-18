@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Callout</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/callout.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the page's own: a few lines of a product round the callout */
+  .deploy { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .deploy .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+  .deploy .when { color: var(--vx-ink-quiet); font-size: 0.9375rem; margin-block-start: calc(var(--vx) * -3); }
+  .kinds { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .vx-callout code { font: 400 0.875em/1 var(--vx-mono); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Callout</h1>
+    <p class="what">Words on the surface, with a standing groove at their start in the light of its kind. Not a card.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a deploy that did not go through</h2>
+    <div class="deploy">
+      <div class="name">harbor-api</div>
+      <div class="when">Deploy 418, started by Mina at 10:42</div>
+      <div class="vx-callout" data-vx-kind="failed" role="alert" id="failed">
+        <p class="vx-callout-title">The build failed</p>
+        <p>Step 3 of 5 ran out of memory while bundling. Nothing was changed on the server: deploy 417 is still live.</p>
+        <div class="vx-callout-actions">
+          <button class="vx-button" id="again">Run it again</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every kind</h2>
+    <div class="kinds">
+      <aside class="vx-callout" data-vx-kind="note" aria-labelledby="note-title">
+        <h3 class="vx-callout-title" id="note-title">Note: builds start on a push to main</h3>
+        <p>Other branches build only when you ask. Change this under Settings, Branches.</p>
+      </aside>
+      <div class="vx-callout" data-vx-kind="done" role="status">
+        <p class="vx-callout-title">Done: harbor-api is live</p>
+        <p>Deployed in 45 s. Ada and Tomas were told in the team channel.</p>
+      </div>
+      <div class="vx-callout" data-vx-kind="warning" role="status">
+        <p class="vx-callout-title">Warning: the certificate ends in 9 days</p>
+        <p>Renew it before June 2, or <code>api.fogline.example</code> will stop answering over HTTPS.</p>
+      </div>
+      <div class="vx-callout" data-vx-kind="failed" role="alert">
+        <p class="vx-callout-title">Failed: tide-worker did not start</p>
+        <p>It stopped three times in a minute and was switched off.</p>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>One line, and a long one in Ukrainian</h2>
+    <div class="kinds">
+      <div class="vx-callout" data-vx-kind="note"><p>Deploys are paused while the team is on leave.</p></div>
+      <div class="vx-callout" data-vx-kind="warning" role="status">
+        <p class="vx-callout-title">Увага: сертифікат закінчується через дев'ять днів</p>
+        <p>Поновіть його до другого червня, інакше api.fogline.example/v2/deployments/harbor-api/production перестане відповідати.</p>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { callout } from '/packages/voxelmorphism/src/components/callout.js';
+  show(callout);
+  // the page's own story: running it again turns the failure into a note that it is at work
+  document.getElementById('again').addEventListener('click', () => {
+    const c = document.getElementById('failed');
+    c.dataset.vxKind = 'note';
+    c.setAttribute('role', 'status');
+    c.querySelector('.vx-callout-title').textContent = 'Building again';
+    c.querySelector('p:not(.vx-callout-title)').textContent = 'Deploy 419 has started. This takes about a minute.';
+    c.querySelector('.vx-callout-actions').remove();
+  });
+</script>
+</body>
+</html>

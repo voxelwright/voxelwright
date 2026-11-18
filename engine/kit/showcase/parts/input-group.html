@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Input group</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/input-group.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); justify-items: stretch; margin: 0; }
+  .said { margin: 0; color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 5); min-block-size: calc(var(--vx) * 5); overflow-wrap: anywhere; }
+  .states { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Input group</h1>
+    <p class="what">One well holding the input and its add-on words. A key that belongs to it stands beside the well, not in it.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: where harbor-api will live</h2>
+    <form class="form" id="claim">
+      <div class="vx-field">
+        <label class="vx-field-label" for="site">Address</label>
+        <div class="vx-input-group">
+          <span class="vx-well">
+            <label class="vx-addon" for="site">https://</label>
+            <input id="site" name="site" value="harbor-api" autocomplete="off" autocapitalize="none" spellcheck="false">
+            <label class="vx-addon" for="site">.fogline.app</label>
+          </span>
+          <button class="vx-button" type="submit" id="check">Check</button>
+        </div>
+        <p class="said" id="said" role="status"></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="cap">Spend no more than</label>
+        <div class="vx-input-group" style="max-inline-size: calc(var(--vx) * 60)">
+          <span class="vx-well">
+            <label class="vx-addon" for="cap">$</label>
+            <input id="cap" name="cap" value="250" inputmode="decimal" autocomplete="off">
+            <label class="vx-addon" for="cap">a month</label>
+          </span>
+        </div>
+      </div>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-before">Words before</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><label class="vx-addon" for="s-before">@</label><input id="s-before" value="mina" autocomplete="off"></span>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-after">Words after</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><input id="s-after" value="45" inputmode="numeric" autocomplete="off"><label class="vx-addon" for="s-after">seconds</label></span>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-both">Words on both sides, empty</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><label class="vx-addon" for="s-both">https://</label><input id="s-both" placeholder="name" autocomplete="off"><label class="vx-addon" for="s-both">.fogline.app</label></span>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-key">With a key beside it</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><input id="s-key" value="ada@saltmarsh.dev" autocomplete="off"><label class="vx-addon" for="s-key">can edit</label></span>
+          <button class="vx-button" type="button">Invite</button>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-main">With the main key</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><label class="vx-addon" for="s-main">#</label><input id="s-main" placeholder="a tag" autocomplete="off"></span>
+          <button class="vx-button" data-vx-kind="main" type="button">Add</button>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-bad">Wrong</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><label class="vx-addon" for="s-bad">https://</label><input id="s-bad" value="Harbor API" aria-invalid="true" autocomplete="off"><label class="vx-addon" for="s-bad">.fogline.app</label></span>
+          <button class="vx-button" type="button">Check</button>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-off">Switched off</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><label class="vx-addon" for="s-off">https://</label><input id="s-off" value="fogline" disabled><label class="vx-addon" for="s-off">.fogline.app</label></span>
+          <button class="vx-button" type="button" disabled>Check</button>
+        </div>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-long">Адреса сервера</label>
+        <div class="vx-input-group">
+          <span class="vx-well"><input id="s-long" value="harbor" autocomplete="off"><label class="vx-addon" for="s-long">.сервер.укр</label></span>
+          <button class="vx-button" type="button">Розгорнути на сервері</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+  const form = document.getElementById('claim'), said = document.getElementById('said');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = form.elements.site.value.trim();
+    said.textContent = /^[a-z0-9-]{2,}$/.test(name) ? `${name}.fogline.app is free.` : 'Lower case, digits and dashes only.';
+  });
+  form.addEventListener('input', () => { said.textContent = ''; });
+</script>
+</body>
+</html>

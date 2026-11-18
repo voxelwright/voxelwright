@@ -1,0 +1,56 @@
+/* ---------- Accordion ---------- */
+
+/* Rows of words with a chevron, parted by grooves; what opens is on the same surface. Each row is
+   the browser's own <details>, so it opens with no script, by keyboard, and when find-in-page
+   lands on words inside it. The same `name` on every <details> keeps one open at a time.
+     <div class="vx-accordion">
+       <details name="faq" open><summary>What a deploy does</summary><p>…</p></details>
+       <div class="vx-groove"></div>
+       <details name="faq"><summary>…</summary><p>…</p></details>
+     </div> */
+.vx-accordion { position: relative; isolation: isolate; display: grid; font-family: var(--vx-font); color: var(--vx-ink); }
+.vx-accordion > details { min-inline-size: 0; interpolate-size: allow-keywords; }
+.vx-accordion > details > summary {
+  display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 4);
+  box-sizing: border-box; min-block-size: calc(var(--vx) * 11); padding-block: calc(var(--vx) * 2.5);
+  font-weight: 600; font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere;
+  list-style: none; cursor: pointer; user-select: none; -webkit-tap-highlight-color: transparent;
+}
+.vx-accordion > details > summary::-webkit-details-marker { display: none; }
+.vx-accordion > details > summary:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
+/* The chevron: seven cells of half a voxel, lying on the surface. It turns over when the row is open. */
+.vx-accordion > details > summary::after {
+  --_c: calc(var(--vx) / 2);
+  content: ""; flex: none; inline-size: calc(var(--_c) * 7); block-size: calc(var(--_c) * 4);
+  color: var(--vx-ink-quiet);
+  background:
+    linear-gradient(currentColor 0 0) 0 0,
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 6) 0,
+    linear-gradient(currentColor 0 0) var(--_c) var(--_c),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 5) var(--_c),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 2) calc(var(--_c) * 2),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 4) calc(var(--_c) * 2),
+    linear-gradient(currentColor 0 0) calc(var(--_c) * 3) calc(var(--_c) * 3);
+  background-size: var(--_c) var(--_c); background-repeat: no-repeat;
+  transition: transform 180ms var(--vx-ease-out);
+}
+.vx-accordion > details > summary:hover::after { color: var(--vx-ink); }
+.vx-accordion > details[open] > summary::after { transform: scaleY(-1); }
+
+/* What opens: words on the surface. The space under it is the last thing's own padding, so the
+   row closes to exactly its summary. */
+.vx-accordion > details > :not(summary) { margin: 0; line-height: calc(var(--vx) * 6); max-inline-size: 68ch; text-wrap: pretty; }
+.vx-accordion > details > :not(summary) + :not(summary) { margin-block-start: calc(var(--vx) * 2); }
+.vx-accordion > details > :not(summary):last-child { padding-block-end: calc(var(--vx) * 4); }
+
+/* It opens and closes over a fifth of a second where the browser can (the page below slides, it
+   does not jump); elsewhere, and under reduced motion, at once. */
+.vx-accordion > details::details-content {
+  block-size: 0; overflow: clip;
+  transition: block-size 220ms var(--vx-ease-out), content-visibility 220ms allow-discrete;
+}
+.vx-accordion > details[open]::details-content { block-size: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-accordion > details::details-content, .vx-accordion > details > summary::after { transition: none; }
+}

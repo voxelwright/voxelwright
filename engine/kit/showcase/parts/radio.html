@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radio group</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/radio.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 6); justify-items: start; margin: 0; max-inline-size: 100%; }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Radio group</h1>
+    <p class="what">Small wells with a stepped corner. The chosen one is full of light. Arrow keys move the choice.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: where harbor-api runs</h2>
+    <form class="form" id="run">
+      <fieldset class="vx-radios" role="radiogroup" id="where">
+        <legend>Deploy to</legend>
+        <label class="vx-radio"><input type="radio" name="where" value="fra" checked><span class="vx-dot"></span><span>Frankfurt<small>Nearest to Mina and Ada</small></span></label>
+        <label class="vx-radio"><input type="radio" name="where" value="iad"><span class="vx-dot"></span><span>Virginia<small>Nearest to most visitors</small></span></label>
+        <label class="vx-radio"><input type="radio" name="where" value="sin"><span class="vx-dot"></span><span>Singapore<small>Opens in March</small></span></label>
+      </fieldset>
+      <fieldset class="vx-radios" role="radiogroup" data-vx-way="across" id="when">
+        <legend>Deploy</legend>
+        <label class="vx-radio"><input type="radio" name="when" value="push" checked><span class="vx-dot"></span>On every push</label>
+        <label class="vx-radio"><input type="radio" name="when" value="ask"><span class="vx-dot"></span>Only when I ask</label>
+      </fieldset>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <fieldset class="vx-radios" role="radiogroup" id="s-each">
+        <legend>Each choice</legend>
+        <label class="vx-radio"><input type="radio" name="s-each" value="a"><span class="vx-dot"></span>Not chosen</label>
+        <label class="vx-radio"><input type="radio" name="s-each" value="b" checked><span class="vx-dot"></span>Chosen</label>
+        <label class="vx-radio"><input type="radio" name="s-each" value="c" disabled><span class="vx-dot"></span>Off</label>
+        <label class="vx-radio"><input type="radio" name="s-each" value="d"><span class="vx-dot"></span>Not chosen</label>
+      </fieldset>
+      <fieldset class="vx-radios" role="radiogroup" id="s-none">
+        <legend>Nothing chosen yet</legend>
+        <label class="vx-radio"><input type="radio" name="s-none" value="a"><span class="vx-dot"></span>Small</label>
+        <label class="vx-radio"><input type="radio" name="s-none" value="b"><span class="vx-dot"></span>Medium</label>
+        <label class="vx-radio"><input type="radio" name="s-none" value="c"><span class="vx-dot"></span>Large</label>
+      </fieldset>
+      <fieldset class="vx-radios" role="radiogroup" id="s-off" disabled>
+        <legend>The whole group off</legend>
+        <label class="vx-radio"><input type="radio" name="s-off" value="a" checked><span class="vx-dot"></span>Off, chosen</label>
+        <label class="vx-radio"><input type="radio" name="s-off" value="b"><span class="vx-dot"></span>Off</label>
+      </fieldset>
+      <fieldset class="vx-radios" role="radiogroup" data-vx-way="across" id="s-row">
+        <legend>In a row</legend>
+        <label class="vx-radio"><input type="radio" name="s-row" value="a" checked><span class="vx-dot"></span>Day</label>
+        <label class="vx-radio"><input type="radio" name="s-row" value="b"><span class="vx-dot"></span>Night</label>
+        <label class="vx-radio"><input type="radio" name="s-row" value="c"><span class="vx-dot"></span>As the system</label>
+      </fieldset>
+      <fieldset class="vx-radios" role="radiogroup" id="s-long">
+        <legend>Коли розгортати на сервері</legend>
+        <label class="vx-radio"><input type="radio" name="s-long" value="a" checked><span class="vx-dot"></span>Розгорнути на сервері після кожної успішної перевірки</label>
+        <label class="vx-radio"><input type="radio" name="s-long" value="b"><span class="vx-dot"></span>Лише коли я попрошу</label>
+      </fieldset>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { radio } from '/packages/voxelmorphism/src/components/radio.js';
+  show(radio);
+</script>
+</body>
+</html>

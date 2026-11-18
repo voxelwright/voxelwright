@@ -1,0 +1,38 @@
+/* ---------- Number stepper ---------- */
+
+/* A well for the number, a key each side of it. The well and the keys are the kit's own
+   (.vx-well, .vx-button); this is how they sit together. */
+.vx-stepper {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3); /* room for a key's side and its light, clear of the well's rim */
+  max-inline-size: 100%;
+}
+.vx-stepper > .vx-well { flex: none; inline-size: calc(var(--vx) * 18); }
+.vx-stepper[data-vx-size="wide"] > .vx-well { inline-size: calc(var(--vx) * 28); }
+.vx-stepper input {
+  padding-inline: calc(var(--vx) * 2);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  /* the keys beside it are its spin buttons: the browser's own are put away */
+  appearance: textfield; -moz-appearance: textfield;
+}
+.vx-stepper input::-webkit-inner-spin-button, .vx-stepper input::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
+
+/* The keys are square, a whole target each, and carry one sign, cut a voxel to the cell. */
+.vx-stepper > .vx-button {
+  flex: none; inline-size: calc(var(--vx) * 11); padding: 0; font-size: calc(var(--vx) * 10);
+  /* The sign is three voxels in a face of eleven: four clear on every side, all on the grid. A
+     glyph of the key face carries the gap after it and sits high in its line; a voxel of indent
+     and a voxel of padding above move it half a voxel each way, to the middle. */
+  text-indent: var(--vx); padding-block-start: var(--vx);
+}
+
+/* With no script at all the keys could do nothing: they go, and the browser's spin buttons come back. */
+@media (scripting: none) {
+  .vx-stepper > .vx-button { display: none; }
+  .vx-stepper input { appearance: auto; -moz-appearance: auto; }
+  .vx-stepper input::-webkit-inner-spin-button, .vx-stepper input::-webkit-outer-spin-button { -webkit-appearance: auto; appearance: auto; }
+}

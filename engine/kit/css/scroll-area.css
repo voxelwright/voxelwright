@@ -1,0 +1,37 @@
+/* ---------- Scroll area ---------- */
+
+/* A recess that scrolls, and beside it a thin trench for the bar. --vx-scroll-h is its height in voxels.
+   The trench's column is always there, so nothing moves when the bar appears. */
+.vx-scroll {
+  display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--vx) * 4); column-gap: calc(var(--vx) * 2);
+  box-sizing: border-box; inline-size: 100%; block-size: calc(var(--vx) * var(--vx-scroll-h, 48)); min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-scroll-well { display: grid; grid-template-columns: minmax(0, 1fr); min-block-size: 0; min-inline-size: 0; }
+/* the real scrolling element: the wheel, a finger and the keys are the browser's own */
+.vx-scroll-view {
+  box-sizing: border-box; min-block-size: 0; overflow-y: auto; overflow-x: hidden;
+  padding: calc(var(--vx) * 3) calc(var(--vx) * 5); outline: 0; overflow-wrap: anywhere;
+}
+/* focus: the browser's ring, round the recess the view fills */
+.vx-scroll-well:has(> .vx-scroll-view:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+/* once the script has taken the bar over, the browser's own steps aside; with no script it stays */
+.vx-scroll[data-vx-on] .vx-scroll-view { scrollbar-width: none; }
+.vx-scroll[data-vx-on] .vx-scroll-view::-webkit-scrollbar { display: none; }
+
+/* the bar: shown only when the script runs and there is something to scroll */
+.vx-scroll-bar { position: relative; isolation: isolate; display: block; visibility: hidden; user-select: none; -webkit-user-select: none; touch-action: none; }
+.vx-scroll[data-vx-on] .vx-scroll-bar:not([data-vx-idle]) { visibility: visible; }
+/* easier to take hold of than it is wide: two voxels more on each side */
+.vx-scroll-bar::before { content: ""; position: absolute; inset-block: 0; inset-inline: calc(var(--vx) * -2); }
+/* a finger scrolls the view itself; the bar only shows where it is */
+@media (pointer: coarse) { .vx-scroll-bar { pointer-events: none; } }
+
+/* plain: a painted trench and a painted key, placed by the script (--_len, --_at) */
+.vx-scroll-bar:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-scroll-bar:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block-start: 0; inset-inline: var(--vx);
+  block-size: var(--_len, 0px); translate: 0 var(--_at, 0px);
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel));
+}

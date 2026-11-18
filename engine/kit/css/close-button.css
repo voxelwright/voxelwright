@@ -1,0 +1,29 @@
+/* ---------- Close button ---------- */
+
+/* A small ordinary key with a cross on it. The key is the kit's own (.vx-button); what is new
+   is its size, its sign, and a target larger than its cap.
+   Markup: <button class="vx-button vx-close" type="button" aria-label="Close">×</button>
+   The name is the aria-label ("Close", "Dismiss the notice", "Remove report.pdf"): say what it closes. */
+.vx-button.vx-close { /* two classes: the kit's rule for a key's legend is that strong */
+  /* the cap: seven voxels square */
+  inline-size: calc(var(--vx) * 7);
+  block-size: calc(var(--vx) * 7);
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0;
+  flex: none;
+  /* it keeps the room its target takes, so that two targets never lie on each other. Where it
+     must sit in a corner, take the margin off there: the target still reaches out. */
+  margin: calc(var(--vx) * 2);
+  /* The cross is cut a voxel to the cell: three voxels in a face of seven, two clear on every
+     side. A glyph of the key face carries the gap after it and sits high in its line; a voxel
+     of indent and a voxel of padding above move it half a voxel each way, to the middle. */
+  font-size: calc(var(--vx) * 10);
+  text-indent: var(--vx);
+  padding-block-start: var(--vx);
+}
+/* the target: two voxels more on every side, 44 px in all */
+.vx-button.vx-close::after { content: ""; position: absolute; inset: calc(var(--vx) * -2); }
+/* plain: a painted key moves a voxel up and left while it is held. Its target must not move
+   from under the pointer with it, or a press at its right or lower edge would come to nothing. */
+.vx-button.vx-close:not([data-vx-live]):active::after { right: calc(var(--vx) * -3); bottom: calc(var(--vx) * -3); }

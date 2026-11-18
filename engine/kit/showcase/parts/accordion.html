@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accordion</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/accordion.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Accordion</h1>
+    <p class="what">Rows of words with a chevron, parted by grooves. What opens is on the same surface. One at a time, or as many as you like.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: before you deploy harbor-api (one open at a time)</h2>
+    <div class="vx-accordion wide" id="faq">
+      <details name="faq" id="faq-1" open>
+        <summary>What does a deploy do?</summary>
+        <p>It builds the main branch, runs the tests, and swaps the new build in. The one before it is kept, so a rollback takes a few seconds.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details name="faq" id="faq-2">
+        <summary>How long is a build kept?</summary>
+        <p>The last three are kept. Older ones are removed the night after the fourth is made.</p>
+        <p>A build that is live is never removed, however old it is.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details name="faq" id="faq-3">
+        <summary>Who can roll back?</summary>
+        <p>Anyone on fogline who can deploy. Mina and Ada are told when it happens.</p>
+      </details>
+    </div>
+  </section>
+  <section>
+    <h2>Every state: closed, open, several open, a long label</h2>
+    <div class="vx-accordion wide" id="many">
+      <details id="many-1">
+        <summary>Closed</summary>
+        <p>Nothing is here until the row is opened.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details id="many-2" open>
+        <summary>Open</summary>
+        <p>The chevron has turned over. What opened is words on the same surface as the row.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details id="many-3" open>
+        <summary>Розгорнути на сервері: що відбувається під час розгортання harbor-api-production-eu-central-1</summary>
+        <p>Збирає гілку main, запускає тести і замінює поточну збірку новою.</p>
+      </details>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { accordion } from '/packages/voxelmorphism/src/components/accordion.js';
+  show(accordion);
+</script>
+</body>
+</html>

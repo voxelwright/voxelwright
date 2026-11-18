@@ -1,0 +1,127 @@
+/* The lit look for parts the kit already had: slider, list, menu, dialog, toast, lettering.
+   Their voxels are in src/looks/lit-existing.js. Link this after voxelmorphism.css. Every rule
+   holds only inside data-vx-look="lit". Sizes are in voxels. */
+
+/* ---------- lit: slider ---------- */
+
+/* The key is five voxels wide and stops a voxel short of each end of the trench. The browser's
+   own thumb is made seven wide (and stays unseen), so its middle is always the key's middle and
+   the key stays under the pointer. */
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 7); }
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 7); }
+[data-vx-look="lit"] .vx-slider input { accent-color: var(--lit-accent); }
+[data-vx-look="lit"] .vx-slider input:disabled { cursor: default; }
+
+/* ---------- lit: list ---------- */
+
+/* Rows of words on the surface. No tray, no tiles: a hairline between rows, and an accent groove
+   at the start of the current one. The hairline is a shadow, so a row is still a whole number of
+   voxels high. */
+[data-vx-look="lit"] .vx-list { padding: 0; gap: 0; }
+[data-vx-look="lit"] .vx-list > li { position: relative; }
+/* a line is six voxels, so a row that wraps is still a whole number of voxels high */
+[data-vx-look="lit"] .vx-list .vx-row, [data-vx-look="lit"] .vx-list > li:not(:has(> .vx-row)) { line-height: calc(var(--vx) * 6); }
+[data-vx-look="lit"] .vx-list > li + li { box-shadow: inset 0 1px 0 var(--vx-slate); }
+[data-vx-look="lit"] .vx-list > li:is([aria-current="true"], [aria-selected="true"]) { font-weight: 650; }
+/* a row that holds a link or a button answers the pointer: a tint that keeps clear of the mark */
+[data-vx-look="lit"] .vx-list > li:has(a, button) { background: linear-gradient(var(--_tint, transparent), var(--_tint, transparent)) no-repeat; background-size: calc(100% - var(--vx) * 3) 100%; background-position: calc(var(--vx) * 3) 0; }
+[data-vx-look="lit"] .vx-list > li:has(a, button):dir(rtl) { background-position: 0 0; }
+[data-vx-look="lit"] .vx-list > li:has(a, button):hover { --_tint: color-mix(in oklab, var(--vx-ink) 5%, transparent); }
+[data-vx-look="lit"] .vx-list > li:has(a, button):active { --_tint: color-mix(in oklab, var(--vx-ink) 10%, transparent); }
+/* A row written without a .vx-row (the part wraps it when it draws) holds its link or button
+   bare. It is the row's words, and the whole row is its target, as in a .vx-row. */
+[data-vx-look="lit"] .vx-list > li > :is(a, button) { color: inherit; font: inherit; text-decoration: none; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; }
+[data-vx-look="lit"] .vx-list > li > :is(a, button)::after { content: ""; position: absolute; inset: 0; }
+[data-vx-look="lit"] .vx-list > li > :is(a, button):focus-visible { outline: 0; }
+[data-vx-look="lit"] .vx-list > li:has(> :focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
+/* plain: the same rows; the mark is painted */
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) { background: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:not(:has(a, button)) { background: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li + li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset 0 1px 0 var(--vx-slate); }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
+  content: ""; position: absolute; inset-block: calc(var(--vx) * 2); inset-inline-start: var(--vx); inline-size: var(--vx);
+  background: var(--lit-accent);
+}
+
+/* ---------- lit: menu ---------- */
+
+/* A float of rows. The rows are words, so they are in the text face, not the key face; a row is
+   eleven voxels high, the size of anything pressed. The active row keeps its own colour: its mark
+   is the accent groove at its start (voxels), not a coloured tile. */
+[data-vx-look="lit"] .vx-menu [role^="menuitem"] {
+  min-block-size: calc(var(--vx) * 11); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 5);
+  font: 500 1rem/1.2 var(--vx-font); letter-spacing: normal; color: var(--vx-ink);
+  -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto;
+}
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-active] { color: var(--vx-ink); }
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-kind="danger"],
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-kind="danger"][data-vx-active] { color: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-menu [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) { color: var(--vx-ink-quiet); cursor: default; }
+/* plain: a painted float; the active row has the same mark, painted */
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) {
+  background: var(--vx-key);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]) {
+  color: var(--vx-ink);
+  background: linear-gradient(var(--lit-accent), var(--lit-accent)) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); }
+
+/* ---------- lit: dialog ---------- */
+
+/* A float at dialog height. The header is words, fourteen voxels high; its last row of voxels is
+   the groove that parts it from the body. */
+[data-vx-look="lit"] .vx-dialog::backdrop { background: rgb(8 9 15 / 0.5); }
+[data-vx-look="lit"] .vx-dialog > header {
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 6);
+  font: 700 1.125rem/calc(var(--vx) * 6) var(--vx-font); color: var(--vx-ink);
+}
+/* plain: a painted float, and a painted groove under the header */
+[data-vx-look="lit"] .vx-dialog:not([data-vx-live]) {
+  background: var(--vx-chalk);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-dialog:not([data-vx-live]) > header {
+  background: linear-gradient(color-mix(in oklab, var(--lit-warm) 55%, transparent), color-mix(in oklab, var(--lit-warm) 55%, transparent)) no-repeat;
+  background-size: calc(100% - var(--vx) * 8) var(--vx); background-position: 50% 100%;
+}
+
+/* ---------- lit: notice ---------- */
+
+/* A click dismisses a notice (it shatters under the click), so it says it can be pressed. */
+[data-vx-look="lit"] .vx-toast { cursor: pointer; }
+/* plain: the light it stands on is a line of its kind's colour round it */
+[data-vx-look="lit"] .vx-toast:not([data-vx-live]) {
+  background: var(--vx-key); border: 0; padding-inline-start: calc(var(--vx) * 8);
+  box-shadow: 0 0 0 1px var(--lit-accent), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="done"] { box-shadow: 0 0 0 1px var(--lit-go), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+[data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="failed"] { box-shadow: 0 0 0 1px var(--lit-stop), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+
+/* ---------- lit: lettering ---------- */
+
+/* The lit heading is asked for with data attributes on the element (see showcase/parts/lettering.html):
+   data-vx-material="key" data-vx-frame="light" data-vx-ink="ink": a board of the key's material,
+   a frame of the accent's light, letters of ink. Plain, a board in this look is painted the same,
+   whatever it asks for: the kit's own plain board is enamel with signal letters, which in this
+   look are one colour. */
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]):not([data-vx-live]) {
+  background: var(--vx-key); color: var(--vx-ink);
+  box-shadow: inset 0 0 0 var(--vx) var(--vx-key), inset 0 0 0 calc(var(--vx) * 2) var(--lit-accent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text::selection,
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text ::selection { background: color-mix(in oklab, var(--vx-link) 38%, transparent); }
+
+/* ---------- lit: block ---------- */
+
+/* plain: the look's own materials and lights, which the kit's plain block does not know */
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="key"] { background: var(--vx-key); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="floor"] { background: var(--vx-floor); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light"] { background: var(--lit-accent); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-warm"] { background: var(--lit-warm); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-go"] { background: var(--lit-go); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-stop"] { background: var(--lit-stop); }

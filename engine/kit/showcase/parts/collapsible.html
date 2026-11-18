@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collapsible</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/collapsible.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .deploys { list-style: none; padding: 0; display: grid; }
+  .deploys li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 9); padding-block: calc(var(--vx) * 1.5); line-height: calc(var(--vx) * 6); }
+  .deploys b { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .deploys span { color: var(--vx-ink-quiet); }
+  .states { display: grid; inline-size: 100%; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Collapsible</h1>
+    <p class="what">One row of words with a chevron. It shows and hides what is under it, on the same surface.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the deploys of harbor-api</h2>
+    <div class="wide">
+      <ul class="deploys">
+        <li><b>214</b>Mina Okafor <span>today, 10:52 · live</span></li>
+        <li><b>213</b>Ada Lindqvist <span>yesterday, 17:05</span></li>
+      </ul>
+      <div class="vx-groove"></div>
+      <details class="vx-collapsible" id="older">
+        <summary><span data-vx-when="closed">Show 3 older deploys</span><span data-vx-when="open">Hide older deploys</span></summary>
+        <ul class="deploys">
+          <li><b>212</b>Mina Okafor <span>Monday, 09:40</span></li>
+          <li><b>211</b>Ada Lindqvist <span>Friday, 16:12 · rolled back</span></li>
+          <li><b>210</b>Mina Okafor <span>Friday, 11:03</span></li>
+        </ul>
+      </details>
+      <p id="after">Builds older than these have been removed.</p>
+    </div>
+  </section>
+  <section>
+    <h2>Every state: closed, open, a long label</h2>
+    <div class="states">
+      <details class="vx-collapsible" id="s-closed">
+        <summary>Closed</summary>
+        <p>Nothing is here until the row is opened.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details class="vx-collapsible" id="s-open" open>
+        <summary>Open</summary>
+        <p>The chevron has turned over. What opened is words on the same surface as the row.</p>
+      </details>
+      <div class="vx-groove"></div>
+      <details class="vx-collapsible" id="s-long" open>
+        <summary>Розгорнути на сервері: що відбувається під час розгортання harbor-api-production-eu-central-1</summary>
+        <p>Збирає гілку main, запускає тести і замінює поточну збірку новою.</p>
+      </details>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { collapsible } from '/packages/voxelmorphism/src/components/collapsible.js';
+  show(collapsible);
+</script>
+</body>
+</html>

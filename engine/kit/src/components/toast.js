@@ -7,6 +7,22 @@ import { listeners } from './util.js';
 
 const STRIPE = { done: 'leaf', failed: 'brick', note: 'signal' };
 
+// A click dismisses a notice, and it shatters under the click: the break starts at the point
+// that was clicked. When nothing of it is left it says `vx-dismiss` (the event bubbles).
+// A notice made by toast() is then taken out of the page. One written in the page is the page's
+// own: it stays where it is, with nothing drawn and data-vx-leaving set, until the page shows it
+// again (take data-vx-leaving off and play 'assemble') or removes it.
+const owned = new WeakSet(); // notices made by toast(), which dismisses them itself
+
+async function shatter(el, live, e) {
+  el.setAttribute('data-vx-leaving', '');
+  if (!live) return;
+  const r = el.getBoundingClientRect();
+  const from = e && (e.clientX || e.clientY) ? [(e.clientX - r.left) / live.vx, (e.clientY - r.top) / live.vx] : undefined;
+  if (from) cue('break');
+  await live.play('crumble', null, { duration: 0.28, from });
+}
+
 export const toastDef = {
   name: 'toast',
   selector: '.vx-toast',
@@ -24,7 +40,13 @@ export const toastDef = {
 
   bind(live) {
     const on = listeners();
-    on.watch(live.el, { attributes: true, attributeFilter: ['data-vx-kind'] }, () => live.rebuild());
+    const el = live.el;
+    on.watch(el, { attributes: true, attributeFilter: ['data-vx-kind'] }, () => live.rebuild());
+    on(el, 'click', async (e) => {
+      if (owned.has(el) || el.hasAttribute('data-vx-leaving')) return;
+      await shatter(el, live, e);
+      el.dispatchEvent(new CustomEvent('vx-dismiss', { bubbles: true }));
+    });
     return on.done;
   },
 };
@@ -50,22 +72,25 @@ export function makeToast(adopt, liveOf) {
     text.textContent = message;
     el.append(text);
     region.append(el);
+    owned.add(el);
     adopt(el);
     const live = liveOf(el);
     live?.play('assemble', null, { from: [0, live.H / 2], duration: 0.3, each: 0.18 });
     cue(opts.kind === 'failed' ? 'failed' : opts.kind === 'done' ? 'done' : 'tick');
 
     let left = opts.duration ?? 4200, since = performance.now(), timer = 0, gone = false;
-    const dismiss = async () => {
+    // called with the click, it shatters from the point clicked; called with nothing, from its top
+    const dismiss = async (e) => {
       if (gone) return;
       gone = true;
       clearTimeout(timer);
-      el.setAttribute('data-vx-leaving', '');
-      if (live) await live.play('crumble', null, { duration: 0.28 });
+      await shatter(el, live, e);
+      el.dispatchEvent(new CustomEvent('vx-dismiss', { bubbles: true }));
       el.remove();
     };
+    el.addEventListener('click', dismiss);
     // the clock stops while the pointer is over it, while it has focus, and while the tab is hidden
-    const run = () => { since = performance.now(); timer = setTimeout(dismiss, left); };
+    const run = () => { since = performance.now(); timer = setTimeout(() => dismiss(), left); };
     const hold = () => { clearTimeout(timer); left -= performance.now() - since; };
     el.addEventListener('pointerenter', hold);
     el.addEventListener('pointerleave', run);

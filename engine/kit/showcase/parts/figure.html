@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Figure and image</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/aspect-ratio.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/figure.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own: a few words round the pictures, and the pictures themselves (drawn here) */
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  .sheet .words { max-inline-size: 34rem; font-size: 1.0625rem; line-height: calc(var(--vx) * 7); }
+  .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--vx) * 6); inline-size: 100%; align-items: start; }
+  .small { inline-size: calc(var(--vx) * 60); }
+  .mid { inline-size: 100%; max-inline-size: calc(var(--vx) * 100); }
+  .diagram { color: var(--vx-ink); font-family: var(--vx-font); }
+  svg.pixels { shape-rendering: crispEdges; }
+  @media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+<!-- the pictures, drawn once and used below: a harbour at first light, and its lighthouse -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <g id="harbour">
+      <rect width="80" height="6" fill="#27335f"/><rect y="6" width="80" height="6" fill="#4a4478"/><rect y="12" width="80" height="5" fill="#8a5a84"/><rect y="17" width="80" height="4" fill="#c76b6a"/><rect y="21" width="80" height="3" fill="#ec9a6a"/><rect y="24" width="80" height="2" fill="#f6c283"/>
+      <rect x="36" y="13" width="8" height="1" fill="#ffe2ae"/><rect x="34" y="14" width="12" height="2" fill="#ffe2ae"/><rect x="33" y="16" width="14" height="10" fill="#ffe2ae"/>
+      <rect y="20" width="10" height="6" fill="#3a3560"/><rect x="10" y="22" width="8" height="4" fill="#3a3560"/><rect x="18" y="24" width="6" height="2" fill="#3a3560"/><rect x="56" y="23" width="6" height="3" fill="#3a3560"/><rect x="62" y="21" width="18" height="5" fill="#3a3560"/>
+      <rect y="26" width="80" height="19" fill="#2c4468"/><rect y="26" width="80" height="1" fill="#f6c283" opacity=".55"/>
+      <rect x="35" y="27" width="10" height="1" fill="#ffe2ae" opacity=".85"/><rect x="37" y="29" width="6" height="1" fill="#ffe2ae" opacity=".8"/><rect x="34" y="31" width="12" height="1" fill="#ffe2ae" opacity=".7"/><rect x="38" y="33" width="4" height="1" fill="#ffe2ae" opacity=".6"/><rect x="36" y="35" width="8" height="1" fill="#ffe2ae" opacity=".5"/>
+      <rect y="24" width="30" height="1" fill="#fff" opacity=".35"/><rect x="48" y="25" width="32" height="1" fill="#fff" opacity=".3"/><rect x="8" y="29" width="18" height="1" fill="#fff" opacity=".14"/><rect x="50" y="32" width="22" height="1" fill="#fff" opacity=".12"/>
+      <rect x="44" y="9" width="21" height="2" fill="#ffe2ae" opacity=".28"/>
+      <rect x="62" y="28" width="12" height="2" fill="#1b2238"/><rect x="60" y="30" width="16" height="3" fill="#1b2238"/>
+      <rect x="66" y="12" width="5" height="16" fill="#f3efe4"/><rect x="66" y="16" width="5" height="2" fill="#c5402e"/><rect x="66" y="22" width="5" height="2" fill="#c5402e"/><rect x="65" y="9" width="7" height="3" fill="#1b2238"/><rect x="67" y="10" width="3" height="1" fill="#ffe2ae"/><rect x="66" y="8" width="5" height="1" fill="#c5402e"/><rect x="67" y="7" width="3" height="1" fill="#c5402e"/>
+      <rect y="37" width="24" height="8" fill="#1b2238"/><rect y="37" width="24" height="1" fill="#3b4668"/><rect x="5" y="35" width="2" height="2" fill="#1b2238"/><rect x="15" y="35" width="2" height="2" fill="#1b2238"/>
+      <rect x="40" y="33" width="1" height="5" fill="#1b2238"/><rect x="36" y="36" width="5" height="3" fill="#f3efe4"/><rect x="32" y="39" width="14" height="2" fill="#c5402e"/><rect x="34" y="41" width="10" height="1" fill="#1b2238"/>
+    </g>
+  </defs>
+</svg>
+
+<main class="vx-card sheet">
+  <header>
+    <h1>Figure and image</h1>
+    <p class="what">A picture set in a recess, a level below the surface, with its caption as words under it.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a post on the fogline blog</h2>
+    <p class="words">The office looks out over the harbour. Most mornings the fog lifts at about the time the first deploy goes out, which is how the company got its name.</p>
+    <figure class="vx-figure wide" id="use">
+      <div class="vx-recess"><svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="A harbour at first light: a low sun over the water, a lighthouse on a rock, a small boat by the quay."><use href="#harbour"/></svg></div>
+      <figcaption>The harbour at ten to six, from the meeting room. <small>Drawn by Ada</small></figcaption>
+    </figure>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>A diagram: lines and words, in the colour of the words round it</h3>
+    <figure class="vx-figure mid" id="diagram">
+      <div class="vx-recess"><svg class="diagram" viewBox="0 0 320 96" role="img" aria-label="What a deploy does, in order: build, 45 seconds; check, 2 seconds; live.">
+        <g fill="none" stroke="currentColor" stroke-width="2"><path d="M40 40H280"/><path d="M40 33v14M160 33v14M280 33v14"/></g>
+        <g fill="currentColor" font-size="13" font-weight="600" text-anchor="middle"><text x="40" y="24">Build</text><text x="160" y="24">Check</text><text x="280" y="24">Live</text></g>
+        <g fill="currentColor" font-size="12" text-anchor="middle" opacity=".72"><text x="100" y="62">45 s</text><text x="220" y="62">2 s</text></g>
+        <g fill="currentColor" font-size="11" text-anchor="middle" opacity=".72"><text x="160" y="84">asks /ready until it answers 200</text></g>
+      </svg></div>
+      <figcaption><strong>Figure 2.</strong> What a deploy of harbor-api does, and how long each step takes.</figcaption>
+    </figure>
+    <h3>An img, at the shape it was made; and one cropped to a shape (.vx-ratio inside the recess)</h3>
+    <div class="pair">
+      <figure class="vx-figure" id="img">
+        <div class="vx-recess"><img width="320" height="240" alt="The lighthouse on its rock, red bands on a white tower." src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 30' shape-rendering='crispEdges'%3E%3Crect width='40' height='8' fill='%2327335f'/%3E%3Crect y='8' width='40' height='6' fill='%234a4478'/%3E%3Crect y='14' width='40' height='5' fill='%238a5a84'/%3E%3Crect y='19' width='40' height='3' fill='%23c76b6a'/%3E%3Crect y='22' width='40' height='8' fill='%232c4468'/%3E%3Crect y='22' width='40' height='1' fill='%23f6c283' opacity='.5'/%3E%3Crect x='0' y='6' width='17' height='3' fill='%23ffe2ae' opacity='.25'/%3E%3Crect x='12' y='23' width='18' height='2' fill='%231b2238'/%3E%3Crect x='9' y='25' width='24' height='5' fill='%231b2238'/%3E%3Crect x='18' y='9' width='6' height='14' fill='%23f3efe4'/%3E%3Crect x='18' y='12' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='18' y='18' width='6' height='2' fill='%23c5402e'/%3E%3Crect x='17' y='5' width='8' height='4' fill='%231b2238'/%3E%3Crect x='19' y='6' width='4' height='2' fill='%23ffe2ae'/%3E%3Crect x='18' y='4' width='6' height='1' fill='%23c5402e'/%3E%3Crect x='19' y='3' width='4' height='1' fill='%23c5402e'/%3E%3C/svg%3E"></div>
+        <figcaption>The lighthouse, four by three as drawn.</figcaption>
+      </figure>
+      <figure class="vx-figure" id="cropped">
+        <div class="vx-recess"><div class="vx-ratio" data-vx-ratio="1:1"><svg class="pixels" viewBox="0 0 80 45" preserveAspectRatio="xMaxYMid slice" role="img" aria-label="The same harbour, cropped square round the lighthouse."><use href="#harbour"/></svg></div></div>
+        <figcaption>The harbour, cropped square.</figcaption>
+      </figure>
+    </div>
+    <h3>Small, with a long caption and a link in it</h3>
+    <figure class="vx-figure small" id="small">
+      <div class="vx-recess"><svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="The harbour at first light."><use href="#harbour"/></svg></div>
+      <figcaption>A caption wraps under its picture and is never wider than it, however much it has to say: <a href="#small">where the picture is from</a>, and a word with no gaps, Donaudampfschifffahrtsgesellschaft.</figcaption>
+    </figure>
+    <h3>No caption; a picture that did not come (its words stand in for it); Ukrainian</h3>
+    <div class="pair">
+      <figure class="vx-figure" id="bare">
+        <div class="vx-recess"><svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="The harbour at first light."><use href="#harbour"/></svg></div>
+      </figure>
+      <figure class="vx-figure" id="missing">
+        <div class="vx-recess"><div class="vx-ratio" data-vx-ratio="16:9"><img alt="A map of the runners in the eu region. The picture did not load." src="data:image/png;base64,AAAA"></div></div>
+        <figcaption lang="uk">Карта серверів, на які можна розгорнути.</figcaption>
+      </figure>
+    </div>
+    <h3>An image in a line of its own, with no figure round it</h3>
+    <span class="vx-figure small" id="alone"><span class="vx-recess"><svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="The harbour at first light."><use href="#harbour"/></svg></span></span>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

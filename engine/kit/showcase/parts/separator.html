@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Separator</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/separator.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own: a sign-in form, a line about a build, a row of keys, two columns of words */
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  .signin { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 84); }
+  .signin .vx-button { inline-size: 100%; }
+  .about { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 1) calc(var(--vx) * 2); font-size: 0.9375rem; color: var(--vx-ink-quiet); }
+  .about strong { color: var(--vx-ink); font-weight: 650; }
+  .keys { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); }
+  .sizes { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 3); }
+  .cols { display: flex; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+  .cols p { flex: 1 1 0; min-inline-size: 0; }
+  .stack { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Separator</h1>
+    <p class="what">The groove, parting what is on one surface: lying between blocks, standing in a row of things, or with a word in its middle.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: signing in to fogline</h2>
+    <form class="signin" onsubmit="return false">
+      <button class="vx-button" type="button">Continue with a passkey</button>
+      <div class="vx-separator"><span class="vx-groove" aria-hidden="true"></span><span>or</span><span class="vx-groove" aria-hidden="true"></span></div>
+      <label class="vx-field"><span class="vx-field-label">Email</span><span class="vx-well"><input type="email" placeholder="you@example.com" autocomplete="off"></span></label>
+      <button class="vx-button" data-vx-kind="main" type="submit">Send me a link</button>
+    </form>
+  </section>
+  <section>
+    <h2>In use: a line about a build, and a row of keys in two groups</h2>
+    <p class="about"><strong>harbor-api</strong><span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="small" role="separator" aria-orientation="vertical"></span>main<span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="small" role="separator" aria-orientation="vertical"></span>4f2c9a1<span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="small" role="separator" aria-orientation="vertical"></span>45 s</p>
+    <div class="keys" role="group" aria-label="Build">
+      <button class="vx-button">Logs</button>
+      <button class="vx-button">Files</button>
+      <span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="key" role="separator" aria-orientation="vertical"></span>
+      <button class="vx-button">Roll back</button>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>Lying: a div, and an hr</h3>
+    <div class="stack">
+      <div class="vx-groove" role="separator"></div>
+      <hr class="vx-groove">
+    </div>
+    <h3>Standing, three heights: between words, a line tall, between keys</h3>
+    <div class="sizes">
+      <span>Words</span>
+      <span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="small" role="separator" aria-orientation="vertical"></span>
+      <span>words</span>
+      <span class="vx-groove vx-separator" data-vx-way="down" role="separator" aria-orientation="vertical"></span>
+      <span>words</span>
+      <span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="key" role="separator" aria-orientation="vertical"></span>
+      <span>words</span>
+    </div>
+    <h3>Standing, as tall as the row (the kit's own groove, stretched by a row)</h3>
+    <div class="cols">
+      <p>What changed: the cache is keyed on the lockfile, and the health check asks whether the service can take traffic.</p>
+      <span class="vx-groove" data-vx-way="down" role="separator" aria-orientation="vertical"></span>
+      <p>What it cost: two afternoons.</p>
+    </div>
+    <h3>With a word: in the middle, near the start, a long one, Ukrainian</h3>
+    <div class="stack">
+      <div class="vx-separator"><span class="vx-groove" aria-hidden="true"></span><span>Today</span><span class="vx-groove" aria-hidden="true"></span></div>
+      <div class="vx-separator" data-vx-align="start"><span class="vx-groove" aria-hidden="true"></span><span>Earlier this week</span><span class="vx-groove" aria-hidden="true"></span></div>
+      <div class="vx-separator"><span class="vx-groove" aria-hidden="true"></span><span>Builds from before the runners were kept warm during working hours, which are not counted in the medians above</span><span class="vx-groove" aria-hidden="true"></span></div>
+      <div class="vx-separator" lang="uk"><span class="vx-groove" aria-hidden="true"></span><span>Розгорнути на сервері</span><span class="vx-groove" aria-hidden="true"></span></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

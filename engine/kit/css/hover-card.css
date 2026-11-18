@@ -1,0 +1,40 @@
+/* ---------- Hover card ---------- */
+
+/* A look ahead at what a link leads to. It is a popover (popover="manual"): the part opens it and
+   puts it by its link. Its width never depends on where it is. */
+.vx-hover-card {
+  box-sizing: border-box;
+  inline-size: min(calc(var(--vx) * 68), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 68), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 5);
+  border: 0;
+  overflow: visible;
+  isolation: isolate;
+  background: none;
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-size: 0.9375rem;
+  line-height: calc(var(--vx) * 6);
+  overflow-wrap: anywhere;
+}
+/* Open, what is in it is a column with a gap: a page's own margins for p and h3 do not reach in.
+   (Closed, it has no box at all, so `display` is named only for the open one.) */
+.vx-hover-card:is(:popover-open, [data-vx-measure]) { display: grid; gap: calc(var(--vx) * 2); align-content: start; }
+/* for the moment the part measures it, just before it opens */
+.vx-hover-card[data-vx-measure] { visibility: hidden; }
+.vx-hover-card:focus-visible { outline: none; }
+
+.vx-hover-card > :is(h2, h3, h4, p) { margin: 0; min-inline-size: 0; }
+.vx-hover-card > :where(h2, h3, h4) { font-size: 1rem; font-weight: 600; line-height: calc(var(--vx) * 6); }
+/* the quiet line that follows the heading sits close under it */
+.vx-hover-card > :is(h2, h3, h4) + .vx-hover-card-meta { margin-block-start: calc(var(--vx) * -2); }
+/* the quiet line: who or what it is, when, how many */
+.vx-hover-card-meta { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+.vx-hover-card a { color: var(--vx-link); text-underline-offset: 0.15em; }
+.vx-hover-card a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+
+/* plain: a painted slab; the accent's line is at its left and top, where the light shows */
+.vx-hover-card:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}

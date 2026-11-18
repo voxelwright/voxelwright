@@ -1,0 +1,21 @@
+/* ---------- Button group ---------- */
+
+/* Keys a voxel apart, read as one group. The keys are the kit's own (.vx-button); the group is
+   how they sit together, and its name. On a narrow page the row wraps; it is never cut.
+   Markup: <div class="vx-button-group" role="group" aria-label="History">
+             <button class="vx-button" type="button">Undo</button> ...
+           </div>
+   data-vx-way="down" stands the keys in a column, all as wide as the widest. */
+.vx-button-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: var(--vx);
+  max-inline-size: 100%;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0; /* it may be a fieldset */
+}
+.vx-button-group[data-vx-way="down"] { flex-direction: column; flex-wrap: nowrap; }

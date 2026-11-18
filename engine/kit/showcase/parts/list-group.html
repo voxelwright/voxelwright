@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>List group</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/list-group.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/item.css">
+<link rel="stylesheet" href="/packages/voxelmorphism/css/badge.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the page's own: a settings screen, its sections down the side */
+  .settings { display: grid; grid-template-columns: calc(var(--vx) * 50) minmax(0, 1fr); gap: calc(var(--vx) * 8); inline-size: 100%; }
+  .settings .pane { display: grid; gap: calc(var(--vx) * 2); align-content: start; padding-block-start: calc(var(--vx) * 2); min-inline-size: 0; }
+  .settings .pane .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+  .settings .pane p { color: var(--vx-ink-quiet); max-inline-size: 48ch; }
+  .lists { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 64)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 10); inline-size: 100%; align-items: start; }
+  .lists > div { display: grid; gap: calc(var(--vx) * 2); min-inline-size: 0; }
+  .lists h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); }
+  @media (max-width: 600px) { .settings { grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); } }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>List group</h1>
+    <p class="what">Rows of words parted by hairlines. The current row is marked by an accent groove at its start.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the sections of a project's settings</h2>
+    <div class="settings">
+      <nav aria-label="Settings">
+        <ul class="vx-list-group" id="sections">
+          <li><a href="#general">General</a></li>
+          <li><a href="#domains" aria-current="page">Domains</a></li>
+          <li><a href="#secrets">Secrets</a></li>
+          <li><a href="#people">People</a></li>
+          <li><a href="#billing">Billing</a></li>
+        </ul>
+      </nav>
+      <div class="pane" aria-live="polite">
+        <div class="name" id="pane-name">Domains</div>
+        <p id="pane-words">Addresses that answer for harbor-api.</p>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="lists">
+      <div>
+        <h3>Links, one current</h3>
+        <ul class="vx-list-group">
+          <li><a href="#a" aria-current="page">harbor-api</a></li>
+          <li><a href="#b">fog-site</a></li>
+          <li><a href="#c">tide-worker</a></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Words alone, none current</h3>
+        <ul class="vx-list-group" id="none">
+          <li>Cloned main at 4f2c9a1</li>
+          <li>Installed 212 packages</li>
+          <li>Built in 45 s</li>
+        </ul>
+      </div>
+      <div>
+        <h3>Buttons, one switched off</h3>
+        <ul class="vx-list-group" id="buttons">
+          <li><button type="button" aria-current="true">Production</button></li>
+          <li><button type="button">Preview</button></li>
+          <li><button type="button" disabled>Staging (not set up)</button></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Something trailing</h3>
+        <ul class="vx-list-group">
+          <li><a href="#inbox">Alerts</a><span class="vx-badge">3<span class="vx-badge-aloud"> open</span></span></li>
+          <li aria-current="true"><a href="#reviews">Reviews</a><span class="vx-badge">12<span class="vx-badge-aloud"> waiting</span></span></li>
+          <li><a href="#builds">Builds</a><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Rows that hold an item, and long words</h2>
+    <ul class="vx-list-group wide" id="items">
+      <li>
+        <a class="vx-item" href="#d418">
+          <span class="vx-item-text"><span class="vx-item-title">Deploy 418</span><span class="vx-item-line">Keep the last three builds, by Mina</span></span>
+          <span class="vx-item-trail">4 min ago</span>
+        </a>
+      </li>
+      <li>
+        <a class="vx-item" href="#d417" aria-current="true">
+          <span class="vx-item-text"><span class="vx-item-title">Deploy 417</span><span class="vx-item-line">Розгорнути на сервері у Франкфурті та повідомити команду в загальному каналі</span></span>
+          <span class="vx-item-trail">1 h ago</span>
+        </a>
+      </li>
+      <li>
+        <a class="vx-item" href="#d416">
+          <span class="vx-item-text"><span class="vx-item-title">harbor-api-production-eu-central-frankfurt-2-rollback-of-deploy-415</span><span class="vx-item-line">By Ada</span></span>
+          <span class="vx-item-trail">Yesterday</span>
+        </a>
+      </li>
+    </ul>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { listGroup } from '/packages/voxelmorphism/src/components/list-group.js';
+  show(listGroup);
+  // the page's own router: a press on a section makes it the current one
+  const WORDS = { general: 'The name, the branch that is built, and where it runs.', domains: 'Addresses that answer for harbor-api.', secrets: 'Values the build can read and nobody can see.', people: 'Who can deploy, and who can only look.', billing: 'This month so far, and the card on file.' };
+  const sections = document.getElementById('sections');
+  sections.addEventListener('click', (e) => {
+    const a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    for (const other of sections.querySelectorAll('a')) other.removeAttribute('aria-current');
+    a.setAttribute('aria-current', 'page');
+    document.getElementById('pane-name').textContent = a.textContent;
+    document.getElementById('pane-words').textContent = WORDS[a.hash.slice(1)];
+  });
+  const buttons = document.getElementById('buttons');
+  buttons.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    for (const other of buttons.querySelectorAll('button')) other.removeAttribute('aria-current');
+    b.setAttribute('aria-current', 'true');
+  });
+</script>
+</body>
+</html>
