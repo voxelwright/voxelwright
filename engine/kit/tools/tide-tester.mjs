@@ -86,7 +86,10 @@ try {
       assert.notEqual(poweredOpal, unlit[1]);
       const bank = page.locator('#lamp-bank');
       await bank.evaluate(el => el.dataset.caps = 'carbon');
-      assert.equal((await capPaint())[1], 'none', 'the inner carbon keybed must mask the outer opal finish');
+      const carbon = await key.screenshot();
+      const bare = await page.addStyleTag({ content: '#lamp-bank .vx-button[data-lamp]::before {background-image:none !important}' });
+      assert.deepEqual(await key.screenshot(), carbon, 'the opaque key must look exactly like bare resin');
+      await bare.evaluate(el => el.remove());
       await bank.evaluate(el => el.dataset.caps = 'field');
       assert((await capPaint())[1].includes('155%'), 'the nearest field finish supplies its own printed artwork');
       await bank.evaluate(el => delete el.dataset.caps);

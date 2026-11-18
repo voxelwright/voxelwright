@@ -2592,6 +2592,11 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 /* A nested instrument inherits the height of its nearest profile. */
 :where([data-profile]) { --vx-lamp-apron: 3; --vx-lamp-throw: 1; }
 :where([data-profile="low"]) { --vx-lamp-apron: 1.5; --vx-lamp-throw: .5; }
+/* Material settings inherit from the nearest cap set. Compute the powered
+   tint at the button, where the local lamp supply and color are available. */
+:where([data-caps]) { --vx-lamp-print: none; --vx-lamp-scatter: 0; }
+:where([data-caps="field"]) { --vx-lamp-print: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%); }
+:where([data-caps="opal"]) { --vx-lamp-scatter: 1; }
 /* A lamp key includes the floor and flange within the button's hit target. */
 .vx-button[data-lamp] {
   aspect-ratio: 1.18; height: auto; min-width: max(44px,calc(16 * var(--vx))); min-height: max(44px,calc(16 * var(--vx)));
@@ -2611,15 +2616,10 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 }
 .vx-button[data-lamp]:not([data-vx-live])::before {
   content: ""; position: absolute; inset: 7% 7% 8%; z-index: -1;
-  background: var(--_resin); border: 0;
+  background: var(--vx-lamp-print,none) var(--_resin); border: 0;
   border-inline: calc(var(--vx) * 1.5) solid var(--_apron);
   border-bottom: calc(var(--vx) * var(--vx-lamp-apron,3)) solid var(--_apron);
   box-shadow: inset 1px 1px 0 var(--_shoulder);
-}
-@scope ([data-caps="field"]) to ([data-caps]) {
-  .vx-button[data-lamp]:not([data-vx-live])::before {
-    background: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%),var(--_resin);
-  }
 }
 .vx-button[data-lamp]:not([data-vx-live])::after {
   content: ""; position: absolute; top: 31%; left: 29%; width: 12%; height: var(--vx);
@@ -2628,11 +2628,12 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 .vx-button[data-lamp][aria-pressed="true"]:not(:disabled,[aria-disabled="true"]) {
   --_strip: color-mix(in srgb,var(--case-lamp,#71e2cd) calc(100% * var(--lamp-level,1)),#414a42);
 }
-@scope ([data-caps="opal"]) to ([data-caps]) {
-  .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
-    background-image: radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp) calc(24% * var(--vx-pilot-level,var(--lamp-level,1))),transparent),transparent 52%),
-      radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp) calc(32% * var(--lamp-level,1)),transparent),transparent 44%);
-  }
+.vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
+  --_face-wash: calc(24% * var(--vx-lamp-scatter,0) * var(--vx-pilot-level,var(--lamp-level,1)));
+  --_side-wash: calc(32% * var(--vx-lamp-scatter,0) * var(--lamp-level,1));
+  background-image: var(--vx-lamp-print,none),
+    radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_face-wash),transparent),transparent 52%),
+    radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_side-wash),transparent),transparent 44%);
 }
 .vx-button[data-vx-pilot="status"] { --vx-pilot-level: 1; }
 .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::after {
