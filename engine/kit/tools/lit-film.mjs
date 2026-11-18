@@ -10,7 +10,7 @@ const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : args[i + 1]; };
 const which = args[0] || 'deploy', dark = args.includes('--dark');
 const port = process.env.PORT || 5989;
-const w = Number(flag('w', which === 'blog' ? 800 : 1040)), h = Number(flag('h', which === 'blog' ? 840 : 660));
+const w = Number(flag('w', which === 'blog' ? 800 : 1040)), h = Number(flag('h', which === 'blog' ? 900 : 660));
 const secs = Number(flag('secs', 13)), fps = Number(flag('fps', 30)), accent = flag('accent', '');
 const name = `${which}-${dark ? 'night' : 'day'}${accent ? '-' + accent : ''}`;
 const dir = `shots/lit/film/${name}`;

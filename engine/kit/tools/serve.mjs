@@ -19,7 +19,7 @@ const world = process.env.ENGINE_DIST ? resolve(process.env.ENGINE_DIST) : null;
 // It also tells this server what ended up drawing the page, so a phone's answer can be read here.
 const HAND = `<script type="module">import { use, ready } from '/packages/voxelmorphism/src/index.js'; import { renderer } from '/packages/voxelmorphism/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname), { method: 'POST' }).catch(() => {})));</script>\n`;
 const seen = join(root, 'milestones', 'seen.log');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4' };
 
 createServer(async (req, res) => {
   try {
@@ -54,8 +54,17 @@ createServer(async (req, res) => {
     if (!file.startsWith(base + '/') || /\/node_modules\//.test(file) || /\/\./.test(file.slice(base.length))) { res.writeHead(403).end('no'); return; }
     const s = await stat(file);
     if (!s.isFile()) throw new Error('not a file');
-    res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
     let body = await readFile(file);
+    // a clip is asked for a piece at a time (Safari plays nothing otherwise)
+    const piece = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+    if (piece && file.endsWith('.mp4') && (piece[1] || piece[2])) {
+      const from = piece[1] ? Number(piece[1]) : Math.max(0, body.length - Number(piece[2]));
+      const to = piece[1] && piece[2] ? Math.min(Number(piece[2]), body.length - 1) : body.length - 1;
+      if (from > to || from >= body.length) { res.writeHead(416, { 'content-range': `bytes */${body.length}` }).end(); return; }
+      res.writeHead(206, { 'content-type': 'video/mp4', 'content-range': `bytes ${from}-${to}/${body.length}`, 'accept-ranges': 'bytes', 'content-length': to - from + 1, 'cache-control': 'no-store' });
+      res.end(body.subarray(from, to + 1)); return;
+    }
+    res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store', ...(file.endsWith('.mp4') ? { 'accept-ranges': 'bytes' } : {}) });
     if (engine && !built && file.endsWith('.html') && !/[?&]gl\b/.test(req.url)) {
       const html = body.toString('utf8');
       const at = html.indexOf('<script type="module"');

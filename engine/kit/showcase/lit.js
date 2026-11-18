@@ -211,7 +211,7 @@ function blog() {
     h.show();
     for (;;) {
       await h.wait(1700);
-      await h.move(well, 0.28, 0.66);
+      await h.move(well, 0.62, 0.62); // clear of where the address will be typed
       h.dip(true); await h.wait(110); h.dip(false);
       // only take the keyboard when nobody else is using it
       if (document.hasFocus() && (document.activeElement === document.body || stage.contains(document.activeElement))) mail.focus({ preventScroll: true });
