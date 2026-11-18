@@ -53,8 +53,8 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   say(await focused() === 'site', 'a press on the words before the input puts focus in it');
   if (mode === 'live') {
     await p.waitForTimeout(250);
-    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('site').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS.light.id; });
-    say(lit, "the well's rim turns to the accent: the whole well has the focus, words and all");
+    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('site').closest('.vx-well')); return w.model.byName.frame.mats.includes(MATERIALS.light.id); });
+    say(lit, "the focus window lights when the add-on focuses its input");
   }
   await p.screenshot({ path: `shots/parts/input-group/hand-${mode}-${width}-focus.png` });
   await p.evaluate(() => document.activeElement.blur());

@@ -23,7 +23,7 @@ const key = {
 
   build(live, m) {
     const { el } = live;
-    const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
+    const off = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
     const kind = kindOf(el);
     const cap = seatedKey(live, m, off, kind === 'main' ? 'enamel' : 'key', lightName(el, kind === 'danger' ? 'light-stop' : 'light'));
     capIcon(live, cap, live.faceZ - 1, !off && kind === 'main' ? 'ivory' : 'ink');
@@ -75,19 +75,32 @@ const well = {
     const { W, H, el } = live, D = live.look.well;
     const input = el.querySelector('input, textarea');
     const bad = input?.getAttribute('aria-invalid') === 'true', focus = !!input?.matches(':focus');
-    // Invalid: no red rim. A red tube lies along the far, lower inside edge of the well, under the
-    // lip, so its light is contained by the hole and falls across the floor the way the room's
-    // light does. A focused invalid field keeps the tube and takes the accent's rim on its walls.
-    hole(live, m, { depth: D, wall: focus ? 'light' : bad ? 'gasket' : lightName(el, 'light-warm'), floor: input?.disabled ? 'slate' : 'floor' });
-    if (bad) {
+    const off = input?.matches(':disabled');
+    const lined = live.look.tooling;
+    const rtl = lined && getComputedStyle(el).direction === 'rtl';
+    const depth = lined ? Math.min(2, D) : D;
+    const wall = lined || bad && !focus ? 'gasket' : focus ? 'light' : lightName(el, 'light-warm');
+    hole(live, m, { depth, wall, floor: off ? 'slate' : 'floor' });
+    if (lined) {
+      const frame = m.part('frame');
+      ring(frame, -1, -1, 0, W + 2, H + 2, 'steel', 1);
+      // The frosted rail is always fitted. Focus lights a short segment at
+      // the entry end, keeping the text surface quiet during editing.
+      const n = Math.min(5, W - 2);
+      frame.box(rtl ? W - n - 1 : 1,
+        -1, 0, n, 1, 1, focus ? 'light' : 'lens');
+    }
+    // A field with a validation message keeps its lower window when clear.
+    if (bad || (lined && el.closest('.vx-field')?.querySelector('.vx-field-error'))) {
       const tell = m.part('tell');
       tell.sunk = true;
-      tell.box(0, live.H - 1, -D, live.W, 1, 1, 'light-stop');
-      // its light falls one row across the floor, and is gone by the next
-      m.part('floor').box(0, live.H - 2, -D - 1, live.W, 1, 1, 'stop-wash');
+      const w = lined ? Math.min(9, W - 2) : W;
+      const x = rtl ? W - w - 1 : lined ? 1 : 0;
+      tell.box(x, H - 1, -depth, w, 1, 1, bad && !off ? 'light-stop' : 'lens');
+      if (bad && !off) m.byName.floor.box(x, H - 2, -depth - 1, w, 1, 1, 'stop-wash');
     }
     live.state.bad = bad;
-    live.spring('lit', 0, CALM.k * 2, CALM.c * 1.4).to(focus ? 1 : 0);
+    live.spring('lit').snap(focus ? 1 : 0);
   },
 
   pose(live) {

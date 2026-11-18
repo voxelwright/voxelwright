@@ -37,7 +37,7 @@ const block = (p, group) => p.evaluate((g) => {
   const caps = l.state.caps, at = l.state.at;
   const under = caps.every((c, i) => { const [, , w, h] = at[i], s = seats[i]; return Math.abs((c.tx + (w - 2) / 2) * l.vx + (l.cssW - l.W * l.vx) / 2 - (s.offsetLeft + s.offsetWidth / 2)) <= 1 && Math.abs((c.ty + (h - 2) / 2) * l.vx + (l.cssH - l.H * l.vx) / 2 - (s.offsetTop + s.offsetHeight / 2)) <= 1; });
   const down = caps.map((c, i) => (c.tz <= -travel + 0.01 ? i : -1)).filter((i) => i >= 0);
-  const lit = caps.map((c, i) => (l.model.byName['lamp' + i].hidden ? -1 : i)).filter((i) => i >= 0);
+  const lit = caps.map((c, i) => (l.model.byName['lens' + i].col.some((component, n) => n % 4 === 3 && component > 0) ? i : -1)).filter((i) => i >= 0);
   const moving = caps.some((c, i) => l.spring('on' + i).moving || l.spring('hold' + i).moving);
   const tz = caps.map((c) => +c.tz.toFixed(2));
   return { index, down: down.join(), lit: lit.join(), under, tz: tz.join(' '), moving, on: under && !moving && down.join() === (index >= 0 ? String(index) : '') && tz.every((z, i) => (i === index ? z === -travel : z === 0)) };

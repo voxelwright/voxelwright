@@ -12,6 +12,8 @@
 // The keys are out of the tab order (tabindex="-1"): the arrow keys in the field do their work.
 
 
+import { watchFieldsets } from './util.js';
+
 const WAIT = 420, EVERY = 70; // ms: how long a key is held before it repeats, and how often then
 
 function wire(el, on) {
@@ -19,7 +21,7 @@ function wire(el, on) {
   const keys = [...el.querySelectorAll('[data-vx-step]')];
   if (!input) return;
   const num = (name) => { const v = input.getAttribute(name); return v === null || v === '' || isNaN(Number(v)) ? null : Number(v); };
-  const locked = () => input.disabled || input.readOnly;
+  const locked = () => input.matches(':disabled') || input.readOnly;
 
   // can it go that way from here? (an empty field can go either way)
   const can = (dir) => {
@@ -84,6 +86,9 @@ function wire(el, on) {
   on(input, 'change', sync);
   on.heed(input, 'value', sync); // set from code
   on.watch(input, { attributes: true, attributeFilter: ['min', 'max', 'step', 'disabled', 'readonly'] }, sync);
+  if (input.form) on(input.form, 'reset', () => setTimeout(sync));
+  watchFieldsets(input, on, sync);
+  on(window, 'blur', stop);
   sync();
 }
 

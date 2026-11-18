@@ -7,6 +7,10 @@ const controls = [
   { name: 'tabs', path: 'principles.html', selector: '.tabcard .vx-tabs', legend: '[aria-selected="true"] .vx-label' },
   { name: 'follow', path: 'parts/toggle-button.html', selector: '#s-off', legend: ':scope > .vx-label' },
   { name: 'bank', path: 'parts/toggle-group.html', selector: '#range', legend: 'label:has(input:checked) .vx-label' },
+  ...['high', 'low'].flatMap(profile => ['s', 'm', 'l', 'xl'].map(value => ({
+    name: 'bank', path: 'parts/toggle-group.html', selector: '.vx-toggle-group[data-vx-size="small"]',
+    legend: 'label:has(input:checked) .vx-label', value, profile,
+  }))),
   { name: 'pager', path: 'parts/pagination.html', selector: '#pager ol', legend: '[aria-current="page"] .vx-label' },
 ];
 
@@ -107,15 +111,18 @@ function report(ok, message) {
   if (!ok) failures++;
   console.log(`${ok ? 'ok' : 'FAIL'} ${message}`);
 }
-async function check(page, { name, path, selector, legend }, theme, width) {
+async function check(page, { name, path, selector, legend, value, profile = 'high' }, theme, width) {
+  await page.evaluate(build => sessionStorage.setItem('vx-instrument-build', JSON.stringify(build)),
+    { shell: theme === 'dark' ? 'smoke' : 'walnut', profile });
   await page.goto(base + path + (path ? '?theme=' + theme : ''));
   const control = page.locator(selector);
-  await control.scrollIntoViewIfNeeded();
+  await control.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  if (value) await control.locator('label').filter({ has: page.locator(`input[value="${value}"]`) }).click();
   await page.evaluate(() => document.fonts.ready);
   const settle = () => page.waitForFunction(() => document.documentElement.dataset.ready === '1' &&
     window.vx?.stage && !window.vx.stage.awake.size);
   const capture = async clip => (await page.screenshot({ clip })).toString('base64');
-  const prefix = `${width} ${theme} ${name}`;
+  const prefix = `${width} ${theme} ${name}${value ? " " + value + " " + profile : ""}`;
   if (name === 'follow') {
     await settle();
     const { centres, names, solidClear, inactiveLit } = await control.evaluate(geometry, name);
@@ -158,6 +165,7 @@ const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-un
 try {
   for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1, colorScheme: theme });
+    await page.goto(base + 'parts/');
     for (const control of controls) await check(page, control, theme, width);
     await page.close();
   }

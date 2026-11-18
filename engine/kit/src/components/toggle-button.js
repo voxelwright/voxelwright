@@ -7,9 +7,9 @@
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { hole, lightName, seatIndicator, seatedKey, keyLight } from '../core/light.js';
-import { listeners, wrapLabel } from './util.js';
+import { watchFieldsets, listeners, wrapLabel } from './util.js';
 
-const isOff = (el) => el.disabled || el.getAttribute('aria-disabled') === 'true';
+const isOff = (el) => el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
 const isOn = (el) => el.getAttribute('aria-pressed') === 'true';
 
 // What a toggle button does with or without voxels: a press flips it and tells the page.
@@ -106,19 +106,29 @@ export const toggleButton = {
     // it went on with no hand on it long enough to be seen (the Enter key, or code): the light
     // still says so, with the flare of a press
     const flash = () => { if (isOn(el) && !s.off && !reducedMotion()) s.flare = Math.max(s.flare ?? 0, 1); };
-    const down = () => { if (s.off) return; s.held = true; go(press, -live.model.keyTravel, PRESS.k, PRESS.c); cue('press'); };
+    const down = () => { if (s.off) return; s.held = true; go(press, -live.model.keyTravel - (isOn(el) ? live.look.step : 0), PRESS.k, PRESS.c); cue('press'); };
     const drop = () => { if (s.held) settle(); };
     on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
+    on(el, 'pointerup', drop);
     on(el, 'pointercancel', drop);
-    on(el, 'pointerenter', (e) => { if (e.pointerType === 'mouse' && !s.off) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
+    on(el, 'pointerenter', (e) => { if (e.pointerType === 'mouse' && !s.off && !reducedMotion()) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
     on(el, 'pointerleave', () => { go(hover, 0, CALM.k * 2, CALM.c * 1.4); drop(); });
     on(el, 'keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); });
     on(el, 'blur', drop);
     // the press that flips it is the click (wire, above, has already flipped it): the key then
     // goes where its new state rests
     on(el, 'click', () => { if (s.off) return; if (!isOn(el)) cue('release'); flash(); settle(); });
+    watchFieldsets(el, on, () => {
+      if (isOff(el)) { s.held = false; hover.snap(0); press.snap(0); }
+      live.rebuild();
+    });
     on.watch(el, { attributes: true, attributeFilter: ['aria-pressed', 'disabled', 'aria-disabled', 'data-vx-light'] }, (list) => {
       // set from code: it follows. Anything but aria-pressed, or a key that is off, is another shape.
+      if (isOff(el)) {
+        s.held = false;
+        press.snap(0);
+        hover.snap(0);
+      }
       if (s.off || isOff(el) || list.some((r) => r.attributeName !== 'aria-pressed')) return live.rebuild();
       if (!s.held) { flash(); settle(); }
     });

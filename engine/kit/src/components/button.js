@@ -5,7 +5,7 @@ import { inlineX, watchDirection } from '../plain.js';
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
-import { listeners, wrapLabel } from './util.js';
+import { watchFieldsets, listeners, wrapLabel } from './util.js';
 
 /** Draw a key's glyph in the space reserved by padding-inline-end. */
 export function capIcon(live, cap, z, mat) {
@@ -55,7 +55,7 @@ export const button = {
 
   build(live, m) {
     const { W, H, el } = live;
-    const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
+    const off = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
     const mat = off ? 'steel' : el.dataset.vxMaterial || 'enamel';
     const look = live.look, depth = off ? 1 : look.rise, step = Math.min(look.step, depth - 1);
     // A keycap: a body, and a top one voxel smaller all round. The step is what says "block".
@@ -95,6 +95,10 @@ export const button = {
       press.x = Math.min(press.x, stop * 0.36);
       move(stop, PRESS);
     }, () => move(0, RELEASE));
+    watchFieldsets(el, on, () => {
+      if (el.matches(':disabled')) { reset(); press.snap(0); hover.snap(0); }
+      live.rebuild();
+    });
     on(el, 'pointerenter', e => {
       if (e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
         hover.to(0.5, CALM.k * 2, CALM.c * 1.4);

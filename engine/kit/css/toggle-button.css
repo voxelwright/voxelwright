@@ -1,7 +1,6 @@
 /* ---------- Toggle button ---------- */
 
-/* The kit's key (.vx-button under the lit look), box for box: it must not be told from one at
-   rest. What is its own is at the end: on. */
+/* The latch uses the same cap profile and switch travel as a momentary key. */
 .vx-toggle-button {
   --_face: var(--vx-key, var(--vx-chalk));
   --_top: var(--vx-chalk-top);
@@ -57,6 +56,11 @@
   box-sizing: border-box;
   z-index: -1;
   pointer-events: none;
+}
+/* The shutter is a dark, unlit slit until the switch latches. */
+.vx-toggle-button:not([data-vx-live]):not(:disabled, [aria-disabled="true"])::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(#545951, #343a33) center calc(100% - var(--vx)) / calc(var(--vx) * 4) var(--vx) no-repeat;
 }
 /* plain, down: while it is held, and for as long as it is on */
 .vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"]) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }

@@ -127,12 +127,21 @@ export function seatedKey(live, m, disabled, material, lamp) {
     key.grounded = false;
     key.sunk = true;
     key.slab(0, inset, 0, W, height, 1, material, Math.min(W, height) > 2 ? 1 : 0);
+    if (look.tooling && live.el.hasAttribute('data-vx-step') && height >= 3) {
+      // A short-travel counter key. Its leading lip sits above the stamped
+      // carrier until the switch closes. The sign follows the raised face.
+      key.slab(0, inset, 1, W, height, 1, material, 1);
+      key.box(1, inset + 1, 2, W - 2, height - 2, 1, material);
+      live.state.top = live.faceZ = 3;
+      m.keyTravel = 2;
+      return key;
+    }
     m.keyTravel = 1;
   } else {
     ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
     ring(m.part('light'), 0, 0, 0, W, H, look.tooling && lamp === 'light' ? 'backlight' : lamp, 1);
     key.grounded = false;
-    if (look.tooling && material === 'key' && W >= 10 && H >= 10 && depth >= 3) {
+    if (look.tooling && W >= 10 && H >= 10 && depth >= 3) {
       // Stepped skirt, shoulders and a shallow cylindrical dish. The art is
       // sampled in the bank's coordinates so its horizon crosses the gaps.
       const sculpt = depth >= 5;
@@ -146,7 +155,7 @@ export function seatedKey(live, m, disabled, material, lamp) {
         const u = (origin + x) * live.vx;
         const horizon = H * (.74 + .072 * Math.sin(u * .025) + .038 * Math.sin(u * .066));
         for (let y = 2; y < H - 2; y++) {
-          const art = look.artwork && y >= horizon;
+          const art = material === 'key' && look.artwork && y >= horizon;
           key.plot(x, y, depth - 1, art ? (y > horizon + 2 ? 'cap-ridge' : 'cap-inlay') : material);
           if (rim) key.plot(x, y, depth, art ? 'cap-ridge' : material);
         }

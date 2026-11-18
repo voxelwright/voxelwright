@@ -9,6 +9,7 @@
 //
 // Their CSS under the look is css/existing.css.
 import { halo, byTheme, ring, hole, bezel, rowLens, lightName, UNDER, cap as capOf } from '../core/light.js';
+import { SHEAR } from '../core/stage.js';
 import { clamp, wrapLabel } from '../components/util.js';
 
 const rtl = (el) => getComputedStyle(el).direction === 'rtl';
@@ -22,6 +23,8 @@ const rtl = (el) => getComputedStyle(el).direction === 'rtl';
 // bind (components/slider.js) only says "draw again", so pose reads the input every time.
 const KEY = 7, TRENCH = 7; // the knob's width and the slot's height: sizes, not depths. Depths are the look's.
 
+const INDEX_HEIGHT = 4; // top face of the fader's ivory index stripe
+
 const slider = {
   pad: 7,
   glowRadius: 3,
@@ -30,34 +33,44 @@ const slider = {
   build(live, m) {
     const { W, H, el } = live, look = live.look, DEEP = look.well;
     const input = live.state.input = el.querySelector('input');
-    const off = !!input?.disabled;
+    const off = !!input?.matches(':disabled');
     const y = live.state.y = Math.floor((H - TRENCH) / 2);
     const instrument = Boolean(look.tooling);
-    bezel(m, 0, y, W, TRENCH);
-    if (look.tooling) {
-      const graduations = m.part('scale');
+    const channelY = instrument ? y + 2 : y;
+    const channelH = instrument ? 3 : TRENCH;
+    bezel(m, 0, channelY, W, channelH);
+    if (instrument) {
+      // The scale is stamped in a separate rule. Its end marks register
+      // with the centre of the carriage at each hard stop.
+      const rule = m.part('scale');
+      rule.tx = -SHEAR[0]; // the marks are one course above the slot
+      rule.box(0, y - 2, 0, W, 2, 1, 'steel');
       for (let i = 0; i <= 10; i++) {
-        const x = 1 + Math.round((W - 3) * i / 10);
-        graduations.plot(x, y - 2, 1, 'gasket');
+        const x = 1 + Math.floor(KEY / 2) + Math.round((W - KEY - 2) * i / 10);
+        const length = i % 5 === 0 ? 2 : 1;
+        rule.box(x, y - length, 0, 1, length, 1, 'gasket');
       }
     }
-    hole(live, m, { y, h: TRENCH, depth: DEEP, wall: 'slate', floor: 'slate' });
+    hole(live, m, { y: channelY, h: channelH, depth: DEEP, wall: 'gasket', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true;
-    lit.box(0, look.tooling ? y + 3 : y, -DEEP, W, look.tooling ? 1 : TRENCH, 1, off ? 'steel' : instrument ? 'backlight' : 'light');
+    lit.box(0, instrument ? y + 3 : y, instrument ? -1 : -DEEP, W, instrument ? 1 : TRENCH, 1, off ? 'steel' : instrument ? 'backlight' : 'light');
     // The knob stands on the floor of the slot, on its own light. Its shoulder is as far above the
     // surface as a key travels, so it clears the bezel, and its top is a keycap's: a step smaller.
     const thumb = m.part('thumb');
     thumb.grounded = false;
     const mat = off ? 'steel' : 'ivory', h = instrument ? TRENCH + 1 : TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
-    if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
-    capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0); // square-cornered: a fader's cap is a block
-    // The line: painted across the middle of its top, as deep as a groove, and not cut: a cut
-    // splits a top this small into two lumps. It is enamel, the kit's one paint, which shows on the
-    // ivory by day and at night alike (ink turns light at night and is lost on it; steel is lost by
-    // day). Switched off, the knob is steel and the line is slate.
-    const mid = (KEY - 1) / 2, g = look.groove;
-    thumb.box(mid, 1, top - g, 1, h - 2, g, off ? 'slate' : 'enamel');
+    if (instrument) {
+      // A metal stem rides in the slot; the rubber saddle spans the slot.
+      thumb.box(2, 2, -DEEP, KEY - 4, 3, DEEP + 2, 'steel');
+      thumb.slab(0, 0, 2, KEY, h, 2, off ? 'steel' : 'gasket', 1);
+      for (const x of [1, KEY - 2]) thumb.box(x, 1, 4, 1, h - 2, 1, off ? 'steel' : 'slate');
+      thumb.box(3, 0, INDEX_HEIGHT - 1, 1, h, 1, off ? 'slate' : 'ivory');
+    } else {
+      if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
+      capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0);
+      thumb.box(3, 1, top - look.groove, 1, h - 2, look.groove, off ? 'slate' : 'enamel');
+    }
     thumb.ty = instrument ? y - 1 : y + 1;
     live.state.travel = Math.max(0, W - 2 - KEY);
     live.state.flip = rtl(el);
@@ -70,8 +83,10 @@ const slider = {
     const t = max > min ? clamp((Number(input?.value) - min) / (max - min), 0, 1) : 0;
     const at = live.state.flip ? 1 - t : t;
     const x = 1 + at * live.state.travel;
-    thumb.tx = x;
     thumb.tz = live.spring('press').x;
+    // Register the stripe's visible face with the native thumb, including
+    // the parallax of a saddle held down in the channel.
+    thumb.tx = live.look.tooling ? x - SHEAR[0] * (INDEX_HEIGHT + thumb.tz) : x;
     // lit from the end the value starts at up to the middle of the knob
     const edge = x + KEY / 2;
     for (let i = 0; i < lit.count; i++) {

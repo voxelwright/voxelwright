@@ -22,7 +22,7 @@
 import { seatIndicator, ring, hole, bezel, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { listeners } from './util.js';
+import { watchFieldsets, listeners } from './util.js';
 import { keyTarget } from '../plain.js';
 
 const one = (el) => el.getAttribute('role') !== 'toolbar';
@@ -84,32 +84,29 @@ export const toggleGroup = {
       return [px((seat.offsetLeft + seat.offsetWidth / 2 - remX) / vx - w / 2), px((seat.offsetTop + seat.offsetHeight / 2 - remY) / vx - h / 2), w, h];
     });
     // A key in every seat, a voxel in from its edges, so two keys side by side have two voxels of
-    // slot between them. Each stands on the floor of the slot on a ring: steel, or the light for
-    // the one that is chosen. Up, its top stands the look's travel above the bezel; latched down,
+    // slot between them. Each stands on a steel seat above the floor of the slot. Up, its top stands the look's travel above the bezel; latched down,
     // it is level with it.
     const top = s.top = 1 + look.travel;
     const mat = lightName(el, 'light');
-    s.caps = []; s.lamps = []; s.studs = []; s.indicators = [];
+    s.caps = []; s.indicators = [];
     at.forEach(([x, y, w, h], i) => {
-      const off = !!inputs[i]?.disabled;
-      // The key stands on a steel ring. Chosen, the ring is light, and so is the floor of its seat
-      // round it: the voxel of slot about a latched key is full of its light, as the slot behind
-      // the switch's knob is.
-      const [stud, lamp] = ['ring', 'lamp'].map((name, j) => {
-        const p = m.part(name + i);
-        p.sunk = true; p.grounded = false;
-        if (j) p.box(-1, -1, -D, w, h - 3, 1, mat);
-        else ring(p, 0, 0, -D, w - 2, h - 2, 'steel');
-        p.tx = x + 1; p.ty = y + 1;
-        return p;
-      });
-      s.studs.push(stud);
+      const off = !!inputs[i]?.matches(':disabled');
+      // The pressed key exposes the shutter at the front. Its metal seat stays put.
+      const stud = m.part('ring' + i);
+      stud.sunk = true; stud.grounded = false;
+      ring(stud, 0, 0, -D, w - 2, h - 2, 'steel');
+      stud.tx = x + 1; stud.ty = y + 1;
       const cap = m.part('cap' + i);
       cap.grounded = false;
       capOf(cap, 0, 0, 1 - D, w - 2, h - 4, D + look.travel, off ? 'steel' : 'key');
+      // Rounded shoulders at the ends of a long bank key catch the key
+      // light. Keep the reading face broad on narrow single-letter keys.
+      if (!off && w >= 12 && h >= 10) {
+        for (const end of [1, w - 4]) cap.box(end, 2, top, 1, h - 8, 1, 'key');
+      }
       cap.tx = x + 1; cap.ty = y + 1;
       s.indicators.push(seatIndicator(live, i, x + 1, y + 1, w - 2, h - 2, mat));
-      s.caps.push(cap); s.lamps.push(lamp);
+      s.caps.push(cap);
       // the first drawing is as it is, with nothing moving
       const on = inputs[i]?.checked ? 1 : 0, spring = live.spring('on' + i, on);
       if (!s.built || reducedMotion()) spring.snap(on);
@@ -131,10 +128,8 @@ export const toggleGroup = {
       const on = live.spring('on' + i).x;
       cap.tz = -travel * on + live.spring('hold' + i).x;
       // its light comes on as it passes half way down, and only on one that can be changed
-      const shown = on > 0.5 && !s.inputs[i]?.disabled;
-      s.indicators[i](s.inputs[i]?.disabled ? 0 : on);
-      s.lamps[i].hidden = !shown;
-      s.studs[i].hidden = shown;
+      const shown = on > 0.5 && !s.inputs[i]?.matches(':disabled');
+      s.indicators[i](s.inputs[i]?.matches(':disabled') ? 0 : on);
       if (shown) lit = 1;
     });
     live.glowStrength = halo(0.07) * byTheme(live) * lit;
@@ -161,7 +156,7 @@ export const toggleGroup = {
     // it rests, so the first frame answers. What holds it is remembered, as the checkbox's latch does.
     let held = null;
     const hold = (i, by) => {
-      if (held || i < 0 || s.inputs[i]?.disabled) return;
+      if (held || i < 0 || s.inputs[i]?.matches(':disabled')) return;
       held = { i, by };
       go(live.spring('hold' + i), -live.look.step, PRESS);
       cue('press');
@@ -184,6 +179,7 @@ export const toggleGroup = {
     // a form put back to how it began: the inputs change after the event, so look a moment later
     const form = el.querySelector('input')?.form;
     if (form) on(form, 'reset', () => setTimeout(() => sync(true)));
+    watchFieldsets(el, on, () => live.rebuild());
     on.watch(el, { attributes: true, attributeFilter: ['disabled'], subtree: true }, () => live.rebuild());
     on.watch(el, { attributes: true, attributeFilter: ['data-vx-light', 'data-vx-way'] }, () => live.rebuild());
     // chosen between the drawing and now (by the page's own script): it is so already

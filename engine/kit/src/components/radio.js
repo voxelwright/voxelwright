@@ -14,7 +14,7 @@
 
 import { halo } from '../core/light.js';
 import { cue } from '../core/sound.js';
-import { listeners } from './util.js';
+import { watchFieldsets, listeners } from './util.js';
 import { latch, latchPose, latchTo, latchHold } from './checkbox.js';
 
 const GLOW = 0.06, REACH = 3; // the checkbox's own light
@@ -35,7 +35,7 @@ export const radio = {
 
   build(live, m) {
     const input = live.state.input = inputOf(live.el);
-    latch(live, m, { r: 1, off: !!input?.matches(':disabled') });
+    latch(live, m, { r: 2, off: !!input?.matches(':disabled') });
     // the first drawing is as it is, with nothing moving
     const s = live.spring('on', level(input));
     if (live.state.built === undefined) s.snap(level(input));
@@ -61,8 +61,7 @@ export const radio = {
     // a form put back to how it began: the inputs change after the event, so look a moment later
     if (input.form) on(input.form, 'reset', () => setTimeout(set));
     on.watch(input, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
-    const set_ = input.closest('fieldset');
-    if (set_) on.watch(set_, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
+    watchFieldsets(input, on, () => live.rebuild());
     return on.done;
   },
 };

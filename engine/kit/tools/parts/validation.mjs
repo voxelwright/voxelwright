@@ -66,8 +66,8 @@ for (const mode of ['live', 'plain']) {
   say(m.invalid === null && !m.tied && !m.shown && m.words === '', 'a whole address clears the mark, the message and the tie at once');
   if (mode === 'live') {
     await p.waitForTimeout(200);
-    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS.light.id; });
-    say(lit, 'and the rim is the accent again: it has focus');
+    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.frame.mats.includes(MATERIALS.light.id) && !w.model.byName.walls.mats.includes(MATERIALS.light.id); });
+    say(lit, 'the focus window stays lit after the fault clears');
   }
 
   // Tab to the next, type something wrong, Tab away: it is marked on leaving

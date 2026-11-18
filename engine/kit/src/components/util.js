@@ -19,6 +19,13 @@ export function listeners() {
   return on;
 }
 
+/** A control inherits disabled from each enclosing fieldset (except its first legend). */
+export function watchFieldsets(el, on, sync) {
+  for (let set = el.closest('fieldset'); set; set = set.parentElement?.closest('fieldset')) {
+    on.watch(set, { attributes: true, attributeFilter: ['disabled'] }, sync);
+  }
+}
+
 export const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 /**

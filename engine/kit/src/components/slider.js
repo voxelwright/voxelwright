@@ -2,9 +2,9 @@
 // Markup: <span class="vx-slider"><input type="range" min="0" max="100" value="40"></span>
 
 import { inlineX, watchDirection } from '../plain.js';
-import { PRESS, RELEASE } from '../core/motion.js';
+import { PRESS, RELEASE, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { listeners, clamp } from './util.js';
+import { watchFieldsets, listeners, clamp } from './util.js';
 
 const THUMB = 5;
 
@@ -25,7 +25,7 @@ export const slider = {
     lit.tz = 0.03;
     const thumb = m.part('thumb');
     thumb.grounded = false;
-    thumb.slab(0, 1, 1, THUMB, H - 2, 4, live.el.querySelector('input')?.disabled ? 'steel' : 'enamel', 1);
+    thumb.slab(0, 1, 1, THUMB, H - 2, 4, live.el.querySelector('input')?.matches(':disabled') ? 'steel' : 'enamel', 1);
     live.faceZ = 2;
     live.state.inlineX = inlineX(live);
     live.state.travel = W - THUMB;
@@ -52,14 +52,23 @@ export const slider = {
     on(input, 'input', () => { cue('tick'); live.invalidate(); });
     on(input, 'change', () => live.invalidate());
     on.heed(input, 'value', () => live.invalidate()); // set from code
-    on(input, 'pointerdown', () => { press.to(-1.5, PRESS.k, PRESS.c); live.invalidate(); });
-    const release = () => {
-      if (press.target === 0) return;
-      press.to(0, RELEASE.k, RELEASE.c);
+    const move = (to, spring) => {
+      if (reducedMotion()) press.snap(to); else press.to(to, spring.k, spring.c);
       live.invalidate();
     };
+    on(input, 'pointerdown', e => { if (e.button === 0 && !input.matches(':disabled')) move(-1.5, PRESS); });
+    const release = () => {
+      if (press.target === 0) return;
+      move(0, RELEASE);
+    };
     for (const type of ['pointerup', 'pointercancel', 'blur']) on(window, type, release);
-    on.watch(input, { attributes: true, attributeFilter: ['disabled', 'min', 'max', 'value'] }, () => live.rebuild());
+    if (input.form) on(input.form, 'reset', () => queueMicrotask(() => live.invalidate()));
+    const retool = () => {
+      if (input.matches(':disabled')) press.snap(0);
+      live.rebuild();
+    };
+    watchFieldsets(input, on, retool);
+    on.watch(input, { attributes: true, attributeFilter: ['disabled', 'min', 'max', 'value'] }, retool);
     return on.done;
   },
 };
