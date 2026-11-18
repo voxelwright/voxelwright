@@ -80,3 +80,7 @@ that live in this repo.
   there. Judge everything against the Ina Coolbrith view.
 - The owner is choosing among five candidate design systems in the kit thread: cube-grid buttons, cards and bars that
   depress or shatter, menus and cursors inside the engine in the world's own light, and parts that glow at night.
+- Nov 17: the kit moves into Village at `engine/kit` (Village #434, branch feature/434-kit, done by the kit thread
+  with its history). It follows #430 / PR 431, the page stage, which owns the kit's block pass and also takes the
+  shading changes (chamfer, light, gloss). PR 429's sync script and vendored copy are deleted when the kit lands.
+  plant-a-seed's garden then copies the kit from a tagged Village commit.
