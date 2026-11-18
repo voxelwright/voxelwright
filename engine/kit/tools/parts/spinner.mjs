@@ -65,6 +65,7 @@ await p.waitForTimeout(300);
 say(await p.evaluate(() => window.vx.stage.raf !== 0), 'shown again, it goes on');
 
 // the work ends: a real press on the key
+await p.locator('#flip').scrollIntoViewIfNeeded(); // a mouse cannot press what is out of the window
 const b = await p.locator('#flip').boundingBox();
 await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
 await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up();

@@ -6,6 +6,9 @@ import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM } from '../core/motion.js';
 import { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { inlineX } from '../plain.js';
+import { toggle, KNOB } from '../components/toggle.js';
+import { capIcon } from '../components/button.js';
 import { parts as existing } from './lit-existing.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -31,6 +34,7 @@ const key = {
       cap.grounded = false;
       capOf(cap, 0, 0, 1, W, H, depth - 1, kind === 'main' ? 'enamel' : 'key');
     }
+    capIcon(live, cap, depth - 1, !off && kind === 'main' ? 'ivory' : 'ink');
     live.state.off = off;
     live.state.top = depth;
     live.faceZ = depth;
@@ -131,14 +135,16 @@ const bar = {
     // A row of lamps in a slot: each is two voxels of light, a voxel apart. One that is not lit
     // is a dark stud, so the scale can be read with nothing on. A lit one reaches the level of the
     // surface, so its light lies on the surface.
+    const inlineStud = inlineX(live);
     const studs = m.part('studs');
     studs.sunk = true; studs.grounded = false;
     const fill = m.part('fill');
     fill.sunk = true; fill.grounded = false;
     const mat = lightName(el, 'light'), n = Math.max(1, Math.floor((W + 1) / 3));
     for (let i = 0; i < n; i++) {
-      studs.box(i * 3, y, -D, 2, T, 1, 'steel');
-      for (let a = 0; a < 2; a++) for (let j = 0; j < T; j++) for (let k = -D; k < 0; k++) fill.plot(i * 3 + a, y + j, k, mat, (i + 0.5) / n);
+      const x = inlineStud(i * 3, 2);
+      studs.box(x, y, -D, 2, T, 1, 'steel');
+      for (let a = 0; a < 2; a++) for (let j = 0; j < T; j++) for (let k = -D; k < 0; k++) fill.plot(x + a, y + j, k, mat, (i + 0.5) / n);
     }
   },
 
@@ -286,8 +292,6 @@ export const pointer = {
 // ---------------------------------------------------------------------------------------------
 // Switch. A trench with a key in it. On: the key is at the far end and the trench behind it is
 // full of light.
-const KNOB = 7;
-
 const switchPart = {
   pad: 7,
   glowRadius: 3,
@@ -310,19 +314,14 @@ const switchPart = {
     knob.slab(0, 0, 1 - D, KNOB, H - 2, D + 1, off ? 'steel' : 'ivory', 1);
     for (const x of [1, 3, 5]) knob.box(x, 1, 2, 1, H - 4, 1, off ? 'steel' : 'ivory'); // three ridges across its top
     knob.ty = 1;
+    live.state.inlineX = inlineX(live);
     live.state.travel = W - 2 - KNOB;
     const s = live.spring('at', input?.checked ? 1 : 0);
     if (!s.moving) s.snap(input?.checked ? 1 : 0);
   },
 
   pose(live) {
-    const { knob, lit } = live.model.byName;
-    const t = live.spring('at').x;
-    const x = 1 + t * live.state.travel;
-    knob.tx = x;
-    knob.tz = live.spring('press').x;
-    const edge = x + KNOB / 2;
-    for (let i = 0; i < lit.count; i++) lit.scales[i] = t <= 0.001 ? 0 : Math.max(0, Math.min(1, edge - lit.rest[i * 3] + 0.5));
+    toggle.pose(live);
     live.glowStrength = halo(0.05) * byTheme(live);
   },
 };

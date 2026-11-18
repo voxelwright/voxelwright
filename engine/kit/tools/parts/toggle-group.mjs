@@ -27,14 +27,20 @@ const press = async (p, sel) => { const [x, y] = await mid(p, sel); await p.mous
 const chosen = (p, group) => p.evaluate((g) => document.querySelector(`${g} input:checked`)?.value ?? null, group);
 const said = (p) => p.evaluate(() => document.getElementById('said').textContent);
 const focus = (p) => p.evaluate(() => { const a = document.activeElement; return a.value || a.dataset.value || a.textContent.trim(); });
-// where the middle of the key in the trench is, in px from the group's corner, beside the middle
-// of the chosen seat. `on` is true when they are within a pixel of each other.
+// The bank of keys: a key in every seat, its middle on the seat's middle. `on` is true when the
+// chosen seat's key is latched down (its face level with the bezel, on its light) and every other
+// key stands up; `down` is the seats whose keys are down, `under` whether every key is within a
+// pixel of its seat's middle; `moving` whether a key is still on its way.
 const block = (p, group) => p.evaluate((g) => {
-  const el = document.querySelector(g), l = window.vx.live(el), b = l.model.byName.block, seat = el.querySelector('label:has(input:checked)');
-  const [, , w, h] = l.state.at[l.state.index] ?? l.state.at[0];
-  const x = +((b.tx + w / 2) * l.vx + (l.cssW - l.W * l.vx) / 2).toFixed(1), y = +((b.ty + h / 2) * l.vx + (l.cssH - l.H * l.vx) / 2).toFixed(1);
-  const seatX = seat ? seat.offsetLeft + seat.offsetWidth / 2 : null, seatY = seat ? seat.offsetTop + seat.offsetHeight / 2 : null;
-  return { x, y, hidden: b.hidden, seatX, seatY, first: el.querySelector('label').offsetWidth / 2, on: seat !== null && Math.abs(x - seatX) <= 1 && Math.abs(y - seatY) <= 1, moving: l.spring('x').moving || l.spring('y').moving };
+  const el = document.querySelector(g), l = window.vx.live(el), seats = [...el.querySelectorAll(':scope > label')];
+  const index = seats.findIndex((s) => s.querySelector('input').checked), travel = l.look.travel;
+  const caps = l.state.caps, at = l.state.at;
+  const under = caps.every((c, i) => { const [, , w, h] = at[i], s = seats[i]; return Math.abs((c.tx + (w - 2) / 2) * l.vx + (l.cssW - l.W * l.vx) / 2 - (s.offsetLeft + s.offsetWidth / 2)) <= 1 && Math.abs((c.ty + (h - 2) / 2) * l.vx + (l.cssH - l.H * l.vx) / 2 - (s.offsetTop + s.offsetHeight / 2)) <= 1; });
+  const down = caps.map((c, i) => (c.tz <= -travel + 0.01 ? i : -1)).filter((i) => i >= 0);
+  const lit = caps.map((c, i) => (l.model.byName['lamp' + i].hidden ? -1 : i)).filter((i) => i >= 0);
+  const moving = caps.some((c, i) => l.spring('on' + i).moving || l.spring('hold' + i).moving);
+  const tz = caps.map((c) => +c.tz.toFixed(2));
+  return { index, down: down.join(), lit: lit.join(), under, tz: tz.join(' '), moving, on: under && !moving && down.join() === (index >= 0 ? String(index) : '') && tz.every((z, i) => (i === index ? z === -travel : z === 0)) };
 }, group);
 
 // at 390 px: is anything of the part outside the sheet's own column? (the page clips what overflows, so it would be cut, not scrolled)
@@ -49,14 +55,22 @@ const firstBoxes = await boxes(p);
 // ---- the seats lie on the voxel grid, and their words where a key's are
 const tall = await p.evaluate(() => [...document.querySelectorAll('.vx-toggle-group > label')].map((l) => l.offsetHeight));
 say(tall.every((h) => h === 44), `at this width every seat holds one line and is 11 voxels tall (${[...new Set(tall)].join(', ')} px)`);
-const words = await p.evaluate(() => { const top = (e) => { const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode()) && !n.textContent.trim()); const r = document.createRange(); r.selectNodeContents(n); return +(r.getBoundingClientRect().top - e.getBoundingClientRect().top).toFixed(2); }; return [top(document.querySelector('#two label')), top(document.querySelector('#style button[aria-pressed="false"]'))]; });
+// where the words lie in the layout (the stage's move of them onto their key's face taken off),
+// and how far that move takes them
+const words = await p.evaluate(() => {
+  const top = (e) => { const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode()) && !n.textContent.trim()); const r = document.createRange(); r.selectNodeContents(n); const t = new DOMMatrix(getComputedStyle(n.parentElement).transform); return +(r.getBoundingClientRect().top - t.f - e.getBoundingClientRect().top).toFixed(2); };
+  const moved = (e) => +new DOMMatrix(getComputedStyle(e.querySelector('.vx-label')).transform).f.toFixed(2);
+  const [chosen, up] = document.querySelectorAll('#two label'), l = window.vx.live(document.getElementById('two'));
+  return [top(chosen), top(up), top(document.querySelector('#style button[aria-pressed="false"]')), moved(up) - moved(chosen), l.look.travel * 0.5 * l.vx];
+});
 // (each is put on a whole pixel of the page by the stage, so they may differ by a part of one)
-say(Math.abs(words[0] - words[1]) < 1, `a seat's words stand at the same height as a key's (${words[0]} px down in the seat, ${words[1]} px down in the key)`);
+say(Math.abs(words[0] - words[2]) < 1 && Math.abs(words[1] - words[2]) < 1, `a seat's words stand where a key's do (${words[0]} and ${words[1]} px down in a seat, ${words[2]} px down in the key)`);
+say(Math.abs(words[3] - words[4]) < 1, `and lie on their own key's face: the words on a key that stands up are ${words[3]} px lower than on the latched one, as its face is (${words[4]})`);
 
 // ---- one of many: a radio group
 say(await p.locator('#range[role="radiogroup"] input[type="radio"]').count() === 3, 'one of many is a radio group of real radio buttons');
 let b = await block(p, '#range');
-say(!b.hidden && b.on, `the key is in the chosen seat (its middle at ${b.x}, ${b.y}; the seat's at ${b.seatX}, ${b.seatY})`);
+say(b.on && b.lit === String(b.index), `a key in every seat: the chosen one latched down on its light, the others standing up (${b.tz})`);
 say(await p.evaluate(() => window.vx.stage.awake.size) === 0, 'at rest nothing runs');
 
 // a real mouse
@@ -65,18 +79,18 @@ await p.mouse.move(mx, my, { steps: 6 });
 await p.mouse.down(); await p.mouse.up();
 await p.waitForTimeout(50);
 b = await block(p, '#range');
-say(await chosen(p, '#range') === 'month' && b.moving && b.x > b.first && b.x < b.seatX, `a press on Month chooses it, and the key is on its way there (at ${b.x} of ${b.seatX})`);
+say(await chosen(p, '#range') === 'month' && b.moving, `a press on Month chooses it: its key goes down and Day's comes up (on their way: ${b.tz})`);
 await p.waitForTimeout(700);
 b = await block(p, '#range');
-say(!b.moving && b.on, `and comes to rest in Month's seat (${b.x} for ${b.seatX})`);
+say(!b.moving && b.on, `and they come to rest: Month's latched, the others up (${b.tz})`);
 say((await said(p)).includes('month'), `the page heard change: "${await said(p)}"`);
 
 // the keyboard: one tab stop, arrow keys
 await p.focus('#range input:checked');
 await p.keyboard.press('ArrowLeft');
-await p.waitForTimeout(30);
+await p.waitForTimeout(500);
 b = await block(p, '#range');
-say(await chosen(p, '#range') === 'week' && !b.moving && b.on, `the left arrow chooses Week, and the key is there at once (${b.x} for ${b.seatX})`);
+say(await chosen(p, '#range') === 'week' && b.on, `the left arrow chooses Week, and its key latches down (${b.tz})`);
 await p.keyboard.press('ArrowRight');
 await p.keyboard.press('ArrowRight');
 say(await chosen(p, '#range') === 'day', 'the right arrow goes on, and round from the last seat to the first');
@@ -91,13 +105,29 @@ say(ring, 'focus from the keyboard shows a ring round the seat');
 await p.keyboard.press('Space');
 say(await chosen(p, '#range') === 'week', 'Space on the chosen seat leaves it chosen');
 
+// held: the first frame answers, before the choice is made
+{
+  const [hx, hy] = await mid(p, '#range label:nth-of-type(3)');
+  await p.mouse.move(hx, hy, { steps: 4 });
+  await p.mouse.down();
+  await p.waitForTimeout(250);
+  const h = await block(p, '#range');
+  const step = await p.evaluate(() => window.vx.live(document.getElementById('range')).look.step);
+  say(h.tz.split(' ')[2] === String(-step) && await chosen(p, '#range') === 'week', `held down, a key that stands up goes a step down before it is chosen (${h.tz})`);
+  await p.mouse.move(hx, hy - 80, { steps: 4 }); // dragged off before letting go
+  await p.mouse.up();
+  await p.waitForTimeout(500);
+  const a = await block(p, '#range');
+  say(a.on && await chosen(p, '#range') === 'week', `dragged off before letting go, nothing is chosen and the key comes back up (${a.tz})`);
+}
+
 // nothing chosen, then one
-b = await p.evaluate(() => window.vx.live(document.getElementById('none')).model.byName.block.hidden);
-say(b === true && await chosen(p, '#none') === null, 'nothing chosen: no key in the trench');
+b = await block(p, '#none');
+say(b.on && b.down === '' && b.lit === '' && await chosen(p, '#none') === null, `nothing chosen: every key stands up, and none has light (${b.tz})`);
 await press(p, '#none label:nth-of-type(2)');
 await p.waitForTimeout(400);
 b = await block(p, '#none');
-say(await chosen(p, '#none') === 'partly' && !b.hidden && b.on, `a press on Partly puts the key there (${b.x} for ${b.seatX})`);
+say(await chosen(p, '#none') === 'partly' && b.on && b.lit === '1', `a press on Partly latches its key down, on its light (${b.tz})`);
 
 // a seat that is off
 await press(p, 'input[name="plan"][value="fleet"]');
@@ -110,13 +140,13 @@ say(await chosen(p, '[aria-label="Plan"]') === 'free', 'and the arrow keys pass 
 await press(p, '#when label:nth-of-type(3)');
 await p.waitForTimeout(700);
 b = await block(p, '#when');
-say(await chosen(p, '#when') === 'monday' && b.on && b.y > 100, `standing: a press on the last seat sends the key down to it (${b.y} for ${b.seatY})`);
+say(await chosen(p, '#when') === 'monday' && b.on && b.index === 2, `standing: a press on the last seat latches its key (${b.tz})`);
 
 // from code
 await p.evaluate(() => { document.querySelector('#two input[value="board"]').checked = true; });
-await p.waitForTimeout(100);
+await p.waitForTimeout(500);
 b = await block(p, '#two');
-say(b.on && b.x > b.first, `chosen from code (input.checked = true): the key follows (${b.x} for ${b.seatX})`);
+say(b.on && b.index === 1, `chosen from code (input.checked = true): the keys follow (${b.tz})`);
 
 // ---- several of many: a toolbar of toggle buttons
 const tabs = () => p.evaluate(() => [...document.querySelectorAll('#kinds button')].map((k) => k.tabIndex).join());
@@ -178,7 +208,7 @@ await p.context().close();
   await q.mouse.down(); await q.mouse.up();
   await q.waitForTimeout(40);
   const k = await block(q, '#range');
-  say(!k.moving && k.on, `reduced motion: the key is in the new seat at once (${k.x} for ${k.seatX})`);
+  say(!k.moving && k.on && k.index === 2, `reduced motion: the keys are where they go at once, with no travelling (${k.tz})`);
   await q.context().close();
 }
 
@@ -211,10 +241,12 @@ for (const plain of [false, true]) {
   const wraps = await q.evaluate(() => document.querySelector('[lang="uk"] label').offsetHeight);
   say(out.length === 0 && wraps === 64 && h === '44, 64', `at 390 px${plain ? ', plain' : ''}: nothing is cut (${out.length} outside the column), the long names wrap to two lines, and seats are 11 or 16 voxels tall (${h} px)`);
   if (!plain) {
+    await q.locator('[lang="uk"]').scrollIntoViewIfNeeded();
+    await q.waitForTimeout(200);
     await press(q, '[lang="uk"] label:nth-of-type(2)');
     await q.waitForTimeout(700);
     const k = await block(q, '[lang="uk"]');
-    say(k.on, `at 390 px a press on a seat of two lines sends the key to it (${k.x} for ${k.seatX})`);
+    say(k.on && k.index === 1 && await chosen(q, '[lang="uk"]') === 'local', `at 390 px a press on a seat of two lines latches its key, and every key is under its seat (${k.tz})`);
   }
   await q.context().close();
 }

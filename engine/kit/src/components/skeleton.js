@@ -1,7 +1,8 @@
-// Skeleton. Shallow trenches the size of what is coming, with one soft light passing along them:
-// a band of light cubes that crosses the whole skeleton, so every trench is lit in its turn.
-// Tool: well (a trench a level shallower than a field), with the room's warm light in it. The
-// light is structure, not an action, so it is never the accent.
+// Skeleton. Shallow slots the size of what is coming, with one soft light passing along them:
+// a band of light cubes that crosses the whole skeleton, so every slot is lit in its turn.
+// Tool: a slot as shallow as a groove (nothing is put in it, so it is not as deep as a field),
+// with the room's warm light in it. The light is structure, not an action, so it is never the
+// accent. Nothing slides in it, so it has no bezel: its edge is the panel's own.
 // Markup: <p class="vx-skeleton-word" role="status">Loading the deploys</p>
 //         <div class="vx-skeleton" aria-busy="true">
 //           <span class="vx-bone" data-vx-bone="title" style="--vx-bone-w: 40"></span>
@@ -39,7 +40,7 @@ export const skeleton = {
 
   build(live, m) {
     const { W, H, el, vx } = live;
-    const D = Math.max(1, live.look.well - 1); // shallow: a level less than a field
+    const D = live.look.groove; // shallow: as deep as a groove, less than a field
     hole(live, m, { depth: D, wall: 'slate', floor: 'slate' });
     const light = m.part('light');
     light.sunk = true; light.grounded = false; light.masked = true;

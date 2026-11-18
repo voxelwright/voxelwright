@@ -41,6 +41,29 @@ import { toggleButton } from './components/toggle-button.js';
 import { toggleGroup } from './components/toggle-group.js';
 import { tooltip } from './components/tooltip.js';
 import { validation } from './components/validation.js';
+import { bubble } from './components/bubble.js';
+import { messageScroller } from './components/message-scroller.js';
+import { attachment } from './components/attachment.js';
+import { questionnaire } from './components/questionnaire.js';
+import { trace } from './components/trace.js';
+import { sheet } from './components/sheet.js';
+import { drawer } from './components/drawer.js';
+import { contextMenu } from './components/context-menu.js';
+import { dataTable } from './components/data-table.js';
+import { chart } from './components/chart.js';
+import { themePicker } from './components/theme-picker.js';
+import { navs } from './components/navs.js';
+import { navbar } from './components/navbar.js';
+import { sidebar } from './components/sidebar.js';
+import { navigationMenu, navigationMenuFloat } from './components/navigation-menu.js';
+import { menubar } from './components/menubar.js';
+import { commandPalette } from './components/command-palette.js';
+import { combobox } from './components/combobox.js';
+import { calendar } from './components/calendar.js';
+import { datePicker } from './components/date-picker.js';
+import { carousel } from './components/carousel.js';
+import { resizable } from './components/resizable.js';
+import { codeInput } from './components/code-input.js';
 import { behave, unbehave, plainPart } from './plain.js';
 
 export { Model, Part } from './core/model.js';
@@ -48,6 +71,7 @@ export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { LOOKS, defineLook } from './core/look.js';
 export { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole, cap, bezel } from './core/light.js';
 export { THEMES } from './looks/lit.js';
+export { pick, picked, restore, EARLY } from './components/theme-picker.js';
 export { listeners, clamp } from './components/util.js';
 export { wrapLabel } from './components/util.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
@@ -59,6 +83,9 @@ export { sound, cue } from './core/sound.js';
 export const components = [
   button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
   accordion, avatar, callout, checkbox, collapsible, hoverCard, kbd, listGroup, pagination, popover, prose, radio, scrollArea, scrollSpy, select, skeleton, spinner, stepper, table, toggleButton, toggleGroup, tooltip, validation,
+  bubble, messageScroller, attachment, questionnaire, trace, sheet, drawer, contextMenu, dataTable, chart, themePicker,
+  navs, navbar, sidebar, navigationMenu, navigationMenuFloat, menubar, commandPalette, combobox,
+  calendar, datePicker, carousel, resizable, codeInput,
 ];
 // what a part must do with no voxels at all
 for (const def of components) if (def.plain) plainPart(def.selector, def.plain);
@@ -149,7 +176,7 @@ export function getStage() {
 function fail() {
   const st = stage;
   if (!st) return;
-  for (const el of [...st.lives.keys()]) { st.remove(el); behave(el); }
+  release(document);
   stage = null;
   given = null;
   document.dispatchEvent(new CustomEvent('vx-plain'));
@@ -182,7 +209,9 @@ export function adopt(root = document) {
 export function release(root = document) {
   if (pending) { waiting.push([release, root]); return; }
   if (!stage) return;
-  for (const el of [...stage.lives.keys()]) if (root === document || root === el || root.contains(el)) { stage.remove(el); behave(el); }
+  const bound = stage.boundUnder(root);
+  for (const el of bound) stage.remove(el);
+  for (const el of bound) behave(el, false);
 }
 
 /**
@@ -192,9 +221,10 @@ export function release(root = document) {
  */
 export function refresh(el) {
   stage?.lives.get(el)?.rebuild();
+  for (const binding of stage?.bindings.get(el)?.values() ?? []) binding.def.refresh?.(binding);
 }
 
-/** The live model behind an element, for code that wants to play an effect on it. */
+/** The live model behind an element, or null when the element only has behavior. */
 export function live(el) {
   return stage?.lives.get(el) ?? null;
 }
@@ -209,7 +239,7 @@ export function theme(t) {
   return th;
 }
 
-/** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step?, plain? }. */
+/** Omit build for behavior only. A mixed definition can select its drawn variant with draws(el). */
 export function define(def) {
   if (components.includes(def)) return;
   components.push(def);

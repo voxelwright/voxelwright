@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Questionnaire</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* this page's own */
+  .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .said { color: var(--vx-ink-quiet); font-size: 0.875rem; min-block-size: 1.55em; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Questionnaire</h1>
+    <p class="what">A question inside a message, with a few answers to press: one, or several. Once answered it stays where it is, as the record.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the agent asks before it ships</h2>
+    <div class="talk" role="log" aria-label="Deploy agent" id="talk">
+      <article class="vx-message" aria-labelledby="a1-who a1-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><svg viewBox="0 0 8 8" shape-rendering="crispEdges"><rect width="8" height="8" fill="#22304f"/><rect x="1" y="2" width="1" height="1" fill="#e9edf7"/><rect x="2" y="3" width="1" height="1" fill="#e9edf7"/><rect x="1" y="4" width="1" height="1" fill="#e9edf7"/><rect x="4" y="5" width="3" height="1" fill="#9db8ff"/></svg></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Deploy agent</span><time class="vx-message-when" id="a1-when" datetime="2026-11-17T16:02">16:02</time></header>
+          <div class="vx-message-text"><p>Build 214 of harbor-api is green and ready. One thing is yours to decide.</p></div>
+          <fieldset class="vx-questionnaire" id="when">
+            <legend>When should it go out?</legend>
+            <div class="vx-toggle-group" data-vx-way="down">
+              <label><input type="radio" name="when" value="now">Now</label>
+              <label><input type="radio" name="when" value="tonight">Tonight, after the backup</label>
+              <label><input type="radio" name="when" value="monday">On Monday</label>
+            </div>
+            <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+            <p class="vx-questionnaire-note" role="status"></p>
+          </fieldset>
+        </div>
+      </article>
+    </div>
+    <p class="said" id="said" role="status"></p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state"><span>Several of many: checkboxes</span>
+        <fieldset class="vx-questionnaire" id="tell">
+          <legend>Who should hear about it?<span class="vx-questionnaire-hint">Choose any that apply.</span></legend>
+          <div class="vx-questionnaire-answers">
+            <label class="vx-check"><input type="checkbox" name="tell" value="team" checked><span class="vx-box"></span>The team channel</label>
+            <label class="vx-check"><input type="checkbox" name="tell" value="oncall"><span class="vx-box"></span>Whoever is on call</label>
+            <label class="vx-check"><input type="checkbox" name="tell" value="status"><span class="vx-box"></span>The status page</label>
+          </div>
+          <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+          <p class="vx-questionnaire-note" role="status"></p>
+        </fieldset>
+      </div>
+      <div class="state"><span>Answered, one of many: it cannot be changed, and says what was said</span>
+        <fieldset class="vx-questionnaire" id="done-one" disabled data-vx-answered>
+          <legend>Roll back if the health check fails?</legend>
+          <div class="vx-toggle-group" data-vx-way="down">
+            <label><input type="radio" name="back" value="yes" checked disabled>Yes, at once</label>
+            <label><input type="radio" name="back" value="ask" disabled>Ask me first</label>
+          </div>
+          <p class="vx-questionnaire-note">Answered: Yes, at once</p>
+        </fieldset>
+      </div>
+      <div class="state"><span>Answered, several of many</span>
+        <fieldset class="vx-questionnaire" id="done-some" disabled data-vx-answered>
+          <legend>Which checks must pass?</legend>
+          <div class="vx-questionnaire-answers">
+            <label class="vx-check"><input type="checkbox" name="checks" value="tests" checked disabled><span class="vx-box"></span>The tests</label>
+            <label class="vx-check"><input type="checkbox" name="checks" value="types" checked disabled><span class="vx-box"></span>The types</label>
+            <label class="vx-check"><input type="checkbox" name="checks" value="lint" disabled><span class="vx-box"></span>The lint</label>
+          </div>
+          <p class="vx-questionnaire-note">Answered: The tests, The types</p>
+        </fieldset>
+      </div>
+      <div class="state"><span>The key was pressed with nothing chosen: it says so, and waits</span>
+        <fieldset class="vx-questionnaire" id="asking" data-vx-asking>
+          <legend>Keep the old build for a week?</legend>
+          <div class="vx-toggle-group" data-vx-way="down">
+            <label><input type="radio" name="keep" value="yes">Keep it</label>
+            <label><input type="radio" name="keep" value="no">Remove it</label>
+          </div>
+          <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+          <p class="vx-questionnaire-note" role="status">Choose an answer first.</p>
+        </fieldset>
+      </div>
+      <div class="state"><span>None may be the answer (data-vx-optional)</span>
+        <fieldset class="vx-questionnaire" id="optional" data-vx-optional data-vx-none="nothing more">
+          <legend>Anything else to do after the deploy?</legend>
+          <div class="vx-questionnaire-answers">
+            <label class="vx-check"><input type="checkbox" name="after" value="cache"><span class="vx-box"></span>Empty the cache</label>
+            <label class="vx-check"><input type="checkbox" name="after" value="tag"><span class="vx-box"></span>Tag the release</label>
+          </div>
+          <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+          <p class="vx-questionnaire-note" role="status"></p>
+        </fieldset>
+      </div>
+      <div class="state"><span>Several of many, as toggle buttons</span>
+        <fieldset class="vx-questionnaire" id="days">
+          <legend>Which days may it deploy by itself?</legend>
+          <div class="vx-toggle-group" role="toolbar" aria-label="Days">
+            <button class="vx-toggle-button" type="button" aria-pressed="true">Weekdays</button>
+            <button class="vx-toggle-button" type="button" aria-pressed="false">Saturday</button>
+            <button class="vx-toggle-button" type="button" aria-pressed="false">Sunday</button>
+          </div>
+          <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+          <p class="vx-questionnaire-note" role="status"></p>
+        </fieldset>
+      </div>
+      <div class="state"><span>Ukrainian, with long answers</span>
+        <fieldset class="vx-questionnaire" id="uk" lang="uk" data-vx-said="Відповідь" data-vx-ask="Спершу оберіть відповідь.">
+          <legend>Куди розгорнути збірку 214?</legend>
+          <div class="vx-toggle-group" data-vx-way="down">
+            <label><input type="radio" name="where" value="server">Розгорнути на сервері після нічного резервного копіювання</label>
+            <label><input type="radio" name="where" value="local">Залишити локально</label>
+          </div>
+          <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Відповісти</button>
+          <p class="vx-questionnaire-note" role="status"></p>
+        </fieldset>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { questionnaire } from '/packages/voxelmorphism/src/components/questionnaire.js';
+  const said = document.getElementById('said');
+  window.answers = [];
+  document.addEventListener('vx-answer', (e) => {
+    window.answers.push({ id: e.target.id, ...e.detail });
+    if (e.target.id === 'when') said.textContent = `The page heard: ${e.detail.values.join(', ')}`;
+  });
+  show(questionnaire);
+</script>
+</body>
+</html>

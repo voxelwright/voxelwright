@@ -1,0 +1,58 @@
+/* ---------- Questionnaire ---------- */
+
+/* A question inside a message with a few answers to press, one or several. It is a fieldset
+   with a legend; the answers are the kit's own parts over real radio buttons or checkboxes;
+   once answered it stays, disabled, as the record.
+   Markup: <fieldset class="vx-questionnaire">
+             <legend>When should harbor-api go out?</legend>
+             <div class="vx-toggle-group" data-vx-way="down">                     one of many
+               <label><input type="radio" name="when" value="now">Now</label> …
+             </div>
+             <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+             <p class="vx-questionnaire-note" role="status"></p>
+           </fieldset>
+           <div class="vx-questionnaire-answers">                                 several of many
+             <label class="vx-check"><input type="checkbox" name="tell" value="team"><span class="vx-box"></span>The team channel</label> …
+           </div>
+   Answered: disabled on the fieldset and on each input, data-vx-answered on the fieldset, no
+   key, and the note says what was answered. The script does this when the key is pressed. */
+
+.vx-questionnaire {
+  position: relative;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--vx-font);
+  color: var(--vx-ink);
+}
+/* the question: words, a little heavier than the message round it */
+.vx-questionnaire > legend { position: relative; isolation: isolate; display: block; box-sizing: border-box; max-inline-size: 100%; margin: 0; padding: 0 0 calc(var(--vx) * 3); float: none; font-size: 1rem; font-weight: 600; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; }
+.vx-questionnaire-hint { display: block; font-size: 0.875rem; font-weight: 400; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); }
+
+/* one of many: the kit's toggle group, standing. Its seats start their words at the start. */
+/* The slot's bezel stands two voxels out from its box: the group is set in by that much, so the
+   bezel's edge lines up with the question's words. */
+.vx-questionnaire > .vx-toggle-group[role="radiogroup"], .vx-questionnaire > .vx-toggle-group:not([role]) { margin-inline-start: calc(var(--vx) * 2); }
+.vx-questionnaire > .vx-toggle-group > label { justify-items: start; text-align: start; }
+/* several of many: the kit's checkboxes one under another, or its toggle buttons side by side */
+.vx-questionnaire-answers { display: grid; justify-items: start; min-inline-size: 0; padding-inline-start: var(--vx); } /* a checkbox's collar stands a voxel out */
+.vx-questionnaire-answers > .vx-check { max-inline-size: 100%; overflow-wrap: anywhere; }
+
+/* the key that sends the answer, and under it the line that speaks: it keeps its line while
+   there is nothing to say, so nothing below moves when it does */
+/* (a fieldset lays its own things out in a line: the key is made a block, so it stands under the answers) */
+fieldset.vx-questionnaire > .vx-questionnaire-send { display: flex; inline-size: fit-content; margin-block-start: calc(var(--vx) * 4); }
+/* (written as a child of the fieldset: a card's own rule for paragraphs is stronger than a class) */
+.vx-questionnaire > .vx-questionnaire-note { margin: calc(var(--vx) * 2) 0 0; }
+/* straight under the answers, with no key between (answered): clear of the slot's bezel */
+.vx-questionnaire > :is(.vx-toggle-group, .vx-questionnaire-answers) + .vx-questionnaire-note { margin-block-start: calc(var(--vx) * 4); }
+.vx-questionnaire-note { min-block-size: calc(var(--vx) * 5); font-size: 0.875rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-questionnaire-note:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+/* asked to choose: the words are the page's own ink, so they are not missed */
+.vx-questionnaire[data-vx-asking] > .vx-questionnaire-note { color: var(--vx-ink); font-weight: 600; }
+/* answered: the record. The words of the answer that was given keep their ink. */
+.vx-questionnaire[data-vx-answered] > .vx-questionnaire-note { color: var(--vx-ink); }
+.vx-questionnaire[data-vx-answered] .vx-check:has(input:checked) { color: var(--vx-ink); }

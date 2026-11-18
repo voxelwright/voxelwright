@@ -108,13 +108,14 @@ const v = await p.locator('#notes .vx-scroll-view').boundingBox();
 await p.mouse.move(v.x + v.width / 2, v.y + v.height / 2);
 const pageWas = await p.evaluate(() => scrollY);
 const row = [];
-for (let i = 0; i < 8; i++) { await p.mouse.wheel(0, 60); await settle(p); s = await read(p, 'versions'); if (s.current.length !== 1 || !under(s)) { row.push('!'); break; } if (row.at(-1) !== s.current[0]) row.push(s.current[0]); }
+// wheel until the box has reached its end (how far that is depends on how tall its sections are)
+for (let i = 0, was = -1; i < 40; i++) { await p.mouse.wheel(0, 60); await settle(p); const at = await p.evaluate(() => document.querySelector('#notes .vx-scroll-view').scrollTop); if (at === was) break; was = at; s = await read(p, 'versions'); if (s.current.length !== 1 || !under(s)) { row.push('!'); break; } if (row.at(-1) !== s.current[0]) row.push(s.current[0]); }
 say(row.join(' ') === '#v24 #v23 #v22', `it watches the box its sections scroll in: wheeling the box marks ${row.join(' ')}`);
 s = await read(p);
 say(s.current.length === 1, `and the page's own spy still has one link marked (${s.current.join()})`);
 s = await read(p, 'rtl');
 say(s.current.length === 1 && s.shown && near(s.mark.right, s.nav.right) && s.mark.w === 4, 'right to left: the groove stands at the right, the start of the line');
-say(await p.evaluate(() => [...document.querySelectorAll('.vx-spy')].every((n) => { const l = window.vx.live(n); return l && !window.vx.stage.awake.has(l); }) && window.vx.stage.raf === 0), 'at rest nothing runs: no frame is asked for');
+say(await p.evaluate(() => [...document.querySelectorAll('.vx-spy')].every((n) => window.vx.live(n) === null) && window.vx.stage.awake.size === 0 && window.vx.stage.raf === 0), 'at rest nothing runs: no frame is asked for');
 await p.context().close();
 
 // ---- prefers-reduced-motion

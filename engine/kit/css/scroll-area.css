@@ -1,6 +1,6 @@
 /* ---------- Scroll area ---------- */
 
-/* A recess that scrolls, and beside it a thin trench for the bar. --vx-scroll-h is its height in voxels.
+/* A recess that scrolls, and beside it a thin slot in a steel bezel for the bar, with a small knob in it. --vx-scroll-h is its height in voxels.
    The trench's column is always there, so nothing moves when the bar appears. */
 .vx-scroll {
   display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--vx) * 4); column-gap: calc(var(--vx) * 2);

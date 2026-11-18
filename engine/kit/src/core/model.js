@@ -21,6 +21,28 @@ const FACES = [
 // Corner order per face: (-a,-b), (+a,-b), (+a,+b), (-a,+b). Matches gl.js.
 const CORNERS = [[-1, -1], [1, -1], [1, 1], [-1, 1]];
 
+function neighborhoodKey(cells, ground) {
+  if (cells.size < 1024) return null;
+  let xmin = Infinity, ymin = Infinity, zmin = Infinity, xmax = -Infinity, ymax = -Infinity, zmax = -Infinity;
+  for (const cell of cells.keys()) {
+    const x = cell >>> 21, y = cell >>> 8 & 8191, z = cell & 255;
+    xmin = Math.min(xmin, x); xmax = Math.max(xmax, x);
+    ymin = Math.min(ymin, y); ymax = Math.max(ymax, y);
+    zmin = Math.min(zmin, z); zmax = Math.max(zmax, z);
+  }
+  const width = xmax - xmin + 3, height = ymax - ymin + 3, depth = zmax - zmin + 3;
+  if (depth > 32 || width * height > cells.size * 2 || xmin === 0 || xmax === 2047 || ymin === 0 || ymax === 8191 || zmin === 0 || zmax === 255) return null;
+  const columns = new Uint32Array(width * height);
+  if (ground && zmin <= 128) columns.fill(2 ** Math.min(depth, 129 - zmin) - 1);
+  const index = (cell) => ((cell >>> 8 & 8191) - ymin + 1) * width + (cell >>> 21) - xmin + 1;
+  for (const cell of cells.keys()) columns[index(cell)] |= 1 << ((cell & 255) - zmin + 1);
+  const row = (at, shift) => (columns[at - 1] >>> shift & 7) | (columns[at] >>> shift & 7) << 3 | (columns[at + 1] >>> shift & 7) << 6;
+  return (cell) => {
+    const at = index(cell), shift = (cell & 255) - zmin;
+    return row(at - width, shift) | row(at, shift) << 9 | row(at + width, shift) << 18;
+  };
+}
+
 export class Part {
   constructor(name) {
     this.name = name;
@@ -118,11 +140,10 @@ export class Part {
     const cells = this.cells;
     const grounded = this.grounded;
     const occ = (x, y, z) => (grounded && z < 0 && !this.sunk) || cells.has(key(x, y, z));
-    const pos = [], col = [], ao = [], mats = [], births = [], flat = [];
-    for (const [k, id] of cells) {
-      const x = (k >>> 21) - 1024, y = ((k >>> 8) & 8191) - 4096, z = (k & 255) - 128;
+    const signature = neighborhoodKey(cells, grounded && !this.sunk), cache = new Map();
+    const surface = (x, y, z) => {
       // exposed at all?
-      if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) continue;
+      if (occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) && occ(x, y, z + 1) && occ(x, y, z - 1)) return null;
       let lo = 0, hi = 0;
       for (let f = 0; f < 6; f++) {
         const F = FACES[f];
@@ -137,12 +158,25 @@ export class Part {
         }
         if (f < 4) lo |= bits << (f * 8); else hi |= bits << ((f - 4) * 8);
       }
+      const frontOnly = !occ(x, y, z + 1) && occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z);
+      return [lo, hi, +frontOnly];
+    };
+    const pos = [], ao = [], mats = [], births = [], flat = [];
+    for (const [k, id] of cells) {
+      const x = (k >>> 21) - 1024, y = ((k >>> 8) & 8191) - 4096, z = (k & 255) - 128;
+      const hash = signature?.(k);
+      let face = signature ? cache.get(hash) : undefined;
+      if (face === undefined) {
+        face = surface(x, y, z);
+        if (signature && cache.size < 4096) cache.set(hash, face);
+      }
+      if (!face) continue;
       pos.push(x + 0.5, y + 0.5, z + 0.5); // a voxel at layer z spans z to z + 1
-      ao.push(lo >>> 0, hi >>> 0);
+      ao.push(face[0], face[1]);
       mats.push(id);
       births.push(this.births?.get(k) ?? 0);
       // shows its front face and nothing else: the middle of a face, where a look may keep the surface plain
-      flat.push(!occ(x, y, z + 1) && occ(x + 1, y, z) && occ(x - 1, y, z) && occ(x, y + 1, z) && occ(x, y - 1, z) ? 1 : 0);
+      flat.push(face[2]);
     }
     this.count = mats.length;
     this.rest = new Float32Array(pos);

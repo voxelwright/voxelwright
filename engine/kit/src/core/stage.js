@@ -4,6 +4,7 @@
 import { Model } from './model.js';
 import { lookOf, lightOf } from './look.js';
 import { Spring, assemble, crumble, settle, reducedMotion } from './motion.js';
+import { listeners } from '../components/util.js';
 
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
 
@@ -121,6 +122,7 @@ export class Live {
   }
 
   invalidate() {
+    if (this.destroyed) return;
     this.dirty = true;
     this.stage.wake(this);
   }
@@ -201,6 +203,7 @@ export class Live {
   }
 
   destroy() {
+    this.destroyed = true;
     this.unbind?.();
     this.canvas.remove();
     this.el.removeAttribute('data-vx-live');
@@ -222,16 +225,35 @@ export class Stage {
     // sets onfail and gives every part back to plain CSS, so nothing is left without a face.
     this.renderer.onfail = () => this.onfail?.();
     this.lives = new Map();
+    this.bindings = new WeakMap();
+    this.shadowRoots = new WeakMap();
+    const detached = new Set();
+    let pruning = 0;
+    this.removals = new MutationObserver((records) => {
+      for (const record of records) for (const node of record.removedNodes) {
+        if (node.nodeType !== 1 || (node.isConnected && node.ownerDocument === document)) continue;
+        for (const el of this.boundUnder(node)) detached.add(el);
+      }
+      if (detached.size && !pruning) pruning = setTimeout(() => {
+        pruning = 0;
+        for (const el of detached) if (!el.isConnected || el.ownerDocument !== document) this.remove(el);
+        detached.clear();
+      }, 0);
+    });
+    this.removals.observe(document, { childList: true, subtree: true });
     this.awake = new Set();
     this.raf = 0;
     this.last = 0;
     this.tick = this.tick.bind(this);
+    this.resizing = new Map();
     this.resize = new ResizeObserver((entries) => {
       for (const e of entries) {
         const live = this.lives.get(e.target);
         if (!live) continue;
-        if (e.target.offsetWidth !== live.cssW || e.target.offsetHeight !== live.cssH) live.rebuild();
+        if (e.target.offsetWidth !== live.cssW || e.target.offsetHeight !== live.cssH) this.resizing.set(live, false);
+        else this.resizing.delete(live);
       }
+      this.settleSizes();
     });
     this.seen = new IntersectionObserver((entries) => {
       for (const e of entries) {
@@ -302,22 +324,71 @@ export class Stage {
     this.snapping = requestAnimationFrame(() => this.resnap());
   }
 
+  settleSizes() {
+    if (this.resizeFrame || !this.resizing.size) return;
+    this.resizeFrame = requestAnimationFrame(() => {
+      this.resizeFrame = 0;
+      for (const [live, quiet] of this.resizing) {
+        if (!quiet) { this.resizing.set(live, true); continue; }
+        this.resizing.delete(live);
+        if (live.el.isConnected && (live.el.offsetWidth !== live.cssW || live.el.offsetHeight !== live.cssH)) live.rebuild();
+      }
+      this.settleSizes();
+    });
+  }
+
   add(el, def) {
+    for (let root = el.getRootNode(); root.nodeType === 11 && root.host && !this.shadowRoots.has(root.host); root = root.host.getRootNode()) {
+      this.shadowRoots.set(root.host, root);
+      this.removals.observe(root, { childList: true, subtree: true });
+    }
+    if (!def.build || (def.draws && !def.draws(el))) {
+      if (!def.bind && !def.plain) return null;
+      let bindings = this.bindings.get(el);
+      if (!bindings) this.bindings.set(el, bindings = new Map());
+      if (bindings.has(def)) return bindings.get(def);
+      const binding = { el, def, stage: this, state: {} };
+      bindings.set(def, binding);
+      if (def.bind) binding.unbind = def.bind(binding);
+      else {
+        const on = listeners();
+        const undo = def.plain(el, on);
+        binding.unbind = () => { if (typeof undo === 'function') undo(); on.done(); };
+      }
+      return binding;
+    }
     if (this.lives.has(el)) return this.lives.get(el);
     const live = new Live(el, def, this);
     this.lives.set(el, live);
-    this.resize.observe(el);
+    this.resize.observe(el, { box: 'border-box' });
     this.seen.observe(el);
     return live;
   }
 
   remove(el) {
+    const bindings = this.bindings.get(el);
+    this.bindings.delete(el);
+    if (bindings) for (const binding of bindings.values()) binding.unbind?.();
     const live = this.lives.get(el);
     if (!live) return;
     this.resize.unobserve(el); this.seen.unobserve(el);
     this.awake.delete(live);
+    this.resizing.delete(live);
     live.destroy();
     this.lives.delete(el);
+  }
+
+  boundUnder(root) {
+    const bound = new Set(root === document ? this.lives.keys() : []);
+    const visit = (tree) => {
+      for (const el of [tree, ...tree.querySelectorAll('*')]) {
+        if (this.lives.has(el) || this.bindings.has(el)) bound.add(el);
+        const shadow = this.shadowRoots.get(el);
+        if (shadow) visit(shadow);
+      }
+    };
+    visit(root);
+    return bound;
   }
 
   wake(live) {

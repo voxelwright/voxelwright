@@ -1,0 +1,78 @@
+/* ---------- Navigation menu ---------- */
+
+/* A site's top links; some open a float of more links under them, each with a line saying where
+   it leads. Words on the surface; what opens is a float. The current page has the accent groove
+   under its word on the bar, and at its start in the float.
+   Markup: <nav class="vx-navigation-menu" aria-label="fogline"><ul>
+             <li><button type="button" aria-expanded="false" popovertarget="nm-product">Product</button>
+               <div class="vx-navigation-menu-float" id="nm-product" popover><ul>
+                 <li><a href="/deploys"><span class="vx-nm-name">Deploys</span><span class="vx-nm-about">Ship a branch in one press.</span></a></li>
+               </ul></div></li>
+             <li><a href="/pricing">Pricing</a></li>
+           </ul></nav> */
+
+.vx-navigation-menu {
+  position: relative; isolation: isolate; box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink-quiet);
+}
+.vx-navigation-menu > ul { display: flex; flex-wrap: wrap; align-items: center; gap: 0 calc(var(--vx) * 1); margin: 0; padding: 0; list-style: none; }
+.vx-navigation-menu > ul > li { display: contents; }
+/* the words of the bar: its links and the buttons that open a float */
+.vx-navigation-menu > ul > li > :is(a, button) {
+  position: relative; display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 3);
+  margin: 0; border: 0; border-radius: 0; background: none; color: inherit; font: 500 1rem/calc(var(--vx) * 6) var(--vx-font);
+  text-decoration: none; cursor: pointer; overflow-wrap: anywhere; -webkit-tap-highlight-color: transparent;
+}
+.vx-navigation-menu > ul > li > :is(a, button):hover,
+.vx-navigation-menu > ul > li > button[aria-expanded="true"],
+.vx-navigation-menu > ul > li > a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+.vx-navigation-menu > ul > li > :is(a, button):focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* a chevron of cubes, turned over while its float is out */
+.vx-navigation-menu > ul > li > button::after {
+  content: ""; flex: none; inline-size: calc(var(--vx) * 2.5); block-size: calc(var(--vx) * 1.5); background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM4 0h1v1H4zM1 1h1v1H1zM3 1h1v1H3zM2 2h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM4 0h1v1H4zM1 1h1v1H1zM3 1h1v1H3zM2 2h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-navigation-menu > ul > li > button[aria-expanded="true"]::after { scale: 1 -1; }
+
+/* the float: the browser's own popover. With no script it opens in the middle of the window;
+   the part puts it under its word. Its width never depends on where it is. */
+.vx-navigation-menu-float {
+  box-sizing: border-box; margin: auto; border: 0; overflow: visible; isolation: isolate; background: none; color: var(--vx-ink);
+  inline-size: min(calc(var(--vx) * 132), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 132), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+  padding: calc(var(--vx) * 3);
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere;
+}
+.vx-navigation-menu-float:is(:popover-open, [data-vx-measure]) { display: block; }
+.vx-navigation-menu-float[data-vx-measure] { visibility: hidden; }
+.vx-navigation-menu-float:focus-visible { outline: none; }
+.vx-navigation-menu-float::backdrop { background: none; }
+.vx-navigation-menu-float[data-vx-narrow] { inline-size: min(calc(var(--vx) * 76), calc(100vw - var(--vx) * 6)); }
+.vx-navigation-menu-float ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: 0 calc(var(--vx) * 2); margin: 0; padding: 0; list-style: none; }
+.vx-navigation-menu-float a {
+  display: grid; gap: calc(var(--vx) * 0.5); box-sizing: border-box; min-block-size: calc(var(--vx) * 11);
+  padding: calc(var(--vx) * 3) calc(var(--vx) * 3) calc(var(--vx) * 3) calc(var(--vx) * 6);
+  color: var(--vx-ink); text-decoration: none; -webkit-tap-highlight-color: transparent;
+}
+.vx-navigation-menu-float a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+.vx-nm-name { font-weight: 600; }
+.vx-nm-about { color: var(--vx-ink-quiet); font-size: 0.9375rem; line-height: calc(var(--vx) * 5.5); }
+.vx-navigation-menu-float a:hover .vx-nm-name { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+/* plain: the groove is a painted line under the current word, and at the start of the current
+   link in a float; the float is a painted plate */
+.vx-navigation-menu:not([data-vx-live]) > ul > li > :is(a[aria-current]:not([aria-current="false"]), button[data-vx-current])::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 3); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-navigation-menu-float:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+.vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+.vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }

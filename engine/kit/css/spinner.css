@@ -1,6 +1,6 @@
 /* ---------- Spinner ---------- */
 
-/* A ring of light cubes, five voxels across (nine with data-vx-size="large"): an odd number, so a
+/* A ring of lamps (a stud with a cube of light on it), five voxels across (nine with data-vx-size="large"): an odd number, so a
    cube stands at every corner and at every second voxel between. */
 .vx-spinner { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 5); vertical-align: middle; }
 .vx-spinner[data-vx-size="large"] { inline-size: calc(var(--vx) * 9); block-size: calc(var(--vx) * 9); }

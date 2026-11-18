@@ -1,5 +1,6 @@
-// Avatar. A picture or initials set in a small well.
-// Tool: well (a hole), lit from its rim by the room's warm light like any well at rest. Nothing
+// Avatar. A picture or initials set in a small window cut into the surface.
+// Tool: a window (a hole), lit from its rim by the room's warm light like any well at rest. It has
+// no bezel: nothing moves in it, so its edge is the surface's own. Nothing
 // stands up: an avatar is looked at, not pressed.
 // Markup: <span class="vx-avatar"><img src="mina.jpg" alt="Mina Okafor"></span>
 //         <span class="vx-avatar" role="img" aria-label="Ada Lindqvist"><span class="vx-avatar-initials" aria-hidden="true">AL</span></span>

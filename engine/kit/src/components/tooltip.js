@@ -1,4 +1,5 @@
-// Tooltip. A few words about a control, on a small low slab with no light: it says something, it
+// Tooltip. A few words about a control, on a small low plate with no light (a plate: its top has
+// no step): it says something, it
 // does nothing. It comes when the pointer rests on its trigger or the keyboard's focus lands on
 // it, and goes when they leave, on Escape, and when the trigger is pressed. The first one waits a
 // moment; with one just shown, its neighbours come at once.

@@ -45,9 +45,12 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   const seen = await p.evaluate(() => window.seen), full = await tall('#many-1');
   const heights = [...new Set(seen.map((s) => Math.round(s[0])))], between = heights.filter((h) => h > closed + 1 && h < full - 1);
   let step = 0; for (let i = 1; i < seen.length; i++) step = Math.max(step, seen[i][0] - seen[i - 1][0]);
-  const slow = Math.max(...seen.slice(2).map((s) => s[1]));
+  const first = seen.findIndex(([height]) => height > closed), last = seen.findIndex(([height]) => height >= full - 0.01);
+  const opening = first >= 0 && last >= first ? seen.slice(first, last + 1) : [];
+  const slow = Math.max(0, ...opening.map((sample) => sample[1]));
   say(await isOpen('#many-1') && full > closed + 20, `a press on a row opens it (${closed} px to ${full} px)`);
   say(between.length >= 3 && step < (full - closed) * 0.6, `it opens over several frames, not in one jump (${between.length} heights on the way, the largest step ${step.toFixed(1)} of ${(full - closed).toFixed(1)} px; the slowest frame ${slow.toFixed(0)} ms)`);
+  say(opening.length > 0 && slow < 40, `the slowest frame while the row opens is ${slow.toFixed(1)} ms (budget: under 40 ms)`);
   say(await p.evaluate(() => window.made) === 1, `the surface it is on was made again once as it opened, not on every frame (${await p.evaluate(() => window.made)} times)`);
   say(await p.evaluate(() => scrollY) === y0 && Math.abs(await top('#many-1 > summary') - s0) < 0.5, 'the page has not scrolled and the row is where it was under the pointer');
   say(await isOpen('#many-2') && await isOpen('#many-3'), 'with no name on the rows, the others stay open (several at a time)');

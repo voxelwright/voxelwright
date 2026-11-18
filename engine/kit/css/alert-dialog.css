@@ -1,0 +1,22 @@
+/* ---------- Alert dialog ---------- */
+
+/* The kit's dialog (dialog.vx-dialog), asking before something is destroyed. It is drawn and
+   behaves as the dialog does: the kit's dialog part adopts it. What makes it an alert dialog is
+   in its markup:
+     <button class="vx-button" data-vx-kind="danger" id="open-delete">Delete project</button>
+     <dialog class="vx-dialog vx-alert-dialog" role="alertdialog" aria-labelledby="h" aria-describedby="p">
+       <header id="h">Delete harbor-api?</header>
+       <div class="vx-dialog-body"><p id="p">Its deploys go with it. This cannot be undone.</p></div>
+       <footer>
+         <button class="vx-button" data-vx-close="cancel" autofocus>Keep it</button>
+         <button class="vx-button" data-vx-kind="danger" data-vx-close="delete">Delete harbor-api</button>
+       </footer>
+     </dialog>
+   Opened with showModal(). role="alertdialog"; `autofocus` on the key that destroys nothing,
+   so the focus starts there (the browser's own, with or without script); the key that
+   destroys is data-vx-kind="danger", an ordinary cap on a red light, and stands last. No
+   data-vx-light-dismiss: a press outside does nothing, it must be answered. Escape is the
+   answer "cancel". Closing, it breaks, as every dialog of the kit does.
+   This file only makes it narrower than a dialog with a form in it: it holds a question. */
+
+dialog.vx-alert-dialog { inline-size: min(calc(var(--vx) * 100), calc(100vw - 32px)); }

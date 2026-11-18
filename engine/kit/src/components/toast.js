@@ -2,6 +2,7 @@
 // The stripe says what kind of news it is: leaf for done, brick for failed, signal for a notice.
 // Use toast('Watered.', { kind: 'done' }) from index.js, or mark up a .vx-toast yourself.
 
+import { inlineX, watchDirection } from '../plain.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
 
@@ -34,12 +35,14 @@ export const toastDef = {
     m.part('body').slab(0, 0, 0, W, H, d, 'chalk', r);
     const s = m.part('stripe');
     s.grounded = false;
-    s.box(0, r, d, r, H - r * 2, 1, STRIPE[el.dataset.vxKind] || 'signal');
+    const x = inlineX(live);
+    s.box(x(0, r), r, d, r, H - r * 2, 1, STRIPE[el.dataset.vxKind] || 'signal');
     live.faceZ = d;
   },
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const el = live.el;
     on.watch(el, { attributes: true, attributeFilter: ['data-vx-kind'] }, () => live.rebuild());
     on(el, 'click', async (e) => {

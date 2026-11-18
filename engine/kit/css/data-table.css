@@ -1,0 +1,75 @@
+/* ---------- Data table ----------
+   The kit's table (.vx-table: words, one groove under the head), with heads you can press to
+   sort, a checkbox a row and one for all of them, and the kit's pagination under it. Nothing of
+   its own is drawn: src/components/data-table.js is the behaviour that makes them one thing.
+     <div class="vx-data-table" id="deploys" data-vx-rows="5">
+       <div class="vx-table"><div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="cap"><table>
+         <caption id="cap">Deploys</caption>
+         <thead><tr>
+           <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every row on this page"><span class="vx-box"></span></label></th>
+           <th scope="col" aria-sort="ascending"><button type="button" class="vx-data-table-sort">Service</button></th>
+           <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">Builds</button></th>
+         </tr></thead>
+         <tbody><tr>
+           <td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose harbor-api"><span class="vx-box"></span></label></td>
+           <th scope="row">harbor-api</th><td class="vx-num">14</td>
+         </tr>…</tbody>
+       </table></div></div>
+       <div class="vx-data-table-foot">
+         <p class="vx-data-table-count" role="status"></p>
+         <nav class="vx-pagination" aria-label="Pages of deploys" hidden>…</nav>
+       </div>
+     </div>
+   Every rule here names .vx-data-table, so it holds over the table's, the checkbox's and the
+   pagination's own rules whichever file comes first in the kit's stylesheet.
+   Rows are whole voxels: the head is 11 voxels (a 44 px target), a body row 11 as well. */
+
+.vx-data-table { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; font-family: var(--vx-font); }
+
+/* the head: every head is 11 voxels tall, so the sort buttons are 44 px to hit and the groove
+   stays on the grid */
+.vx-data-table .vx-table thead th { padding-block: calc(var(--vx) * 3); vertical-align: middle; }
+.vx-data-table .vx-table thead th:has(> .vx-data-table-sort) { padding-block: 0; }
+
+/* a head you can press: its words, and a mark that says which way it is sorted */
+.vx-data-table .vx-data-table-sort {
+  display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5);
+  box-sizing: border-box; min-inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 11);
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: none;
+  font: inherit; line-height: inherit; color: inherit; text-align: inherit; letter-spacing: inherit;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-data-table .vx-num > .vx-data-table-sort { justify-content: flex-end; }
+.vx-data-table .vx-data-table-sort:hover, .vx-data-table [aria-sort] > .vx-data-table-sort { color: var(--vx-ink); }
+.vx-data-table .vx-data-table-sort:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
+/* the mark, cut from half-voxel cells like the kit's glyphs: two quiet points when the column is
+   not sorted by; one point, up for ascending and down for descending, when it is */
+.vx-data-table .vx-data-table-sort::after {
+  content: ""; flex: none;
+  inline-size: calc(var(--vx) * 2.5); block-size: calc(var(--vx) * 3.5);
+  background: currentColor; opacity: 0.5;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 0h1v1H2zM1 1h3v1H1zM0 2h5v1H0zM0 4h5v1H0zM1 5h3v1H1zM2 6h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 0h1v1H2zM1 1h3v1H1zM0 2h5v1H0zM0 4h5v1H0zM1 5h3v1H1zM2 6h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-data-table [aria-sort="ascending"] > .vx-data-table-sort::after, .vx-data-table [aria-sort="descending"] > .vx-data-table-sort::after {
+  opacity: 1;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 2h1v1H2zM1 3h3v1H1zM0 4h5v1H0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 2h1v1H2zM1 3h3v1H1zM0 4h5v1H0z'/%3E%3C/svg%3E");
+}
+.vx-data-table [aria-sort="descending"] > .vx-data-table-sort::after { transform: scaleY(-1); }
+/* with no script a head cannot sort: it is words, and offers nothing */
+.vx-data-table:not([data-vx-table]) .vx-data-table-sort { cursor: inherit; pointer-events: none; }
+.vx-data-table:not([data-vx-table]) .vx-data-table-sort::after { display: none; }
+
+/* the checkboxes: a column of their own, each 11 voxels square to hit, with no words */
+.vx-data-table .vx-table :is(th, td).vx-data-table-pick { inline-size: calc(var(--vx) * 11); padding-block: 0; padding-inline: 0 calc(var(--vx) * 1); vertical-align: middle; }
+.vx-data-table .vx-data-table-pick > .vx-check { display: flex; justify-content: center; gap: 0; inline-size: calc(var(--vx) * 11); min-block-size: calc(var(--vx) * 11); }
+/* a body row is 11 voxels: its words sit in the middle beside the checkbox */
+.vx-data-table .vx-table tbody :is(th, td) { vertical-align: middle; }
+.vx-data-table .vx-table tbody :is(th, td):not(.vx-data-table-pick) { padding-block: calc(var(--vx) * 3); }
+
+/* under the table: how many rows, and the pages */
+.vx-data-table-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 3) calc(var(--vx) * 6); min-inline-size: 0; }
+.vx-data-table-count { margin: 0; color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-variant-numeric: tabular-nums; }
+.vx-data-table-count:empty { display: none; }
+.vx-data-table .vx-pagination[hidden] { display: none; }

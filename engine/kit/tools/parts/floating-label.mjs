@@ -50,7 +50,7 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   say(await focused('mail'), 'a press on the resting label puts focus in its field');
   say(await where('mail') === 'above', 'and the label moves above the well');
   await p.screenshot({ path: `shots/parts/floating-label/hand-${mode}-${width}-focus.png` });
-  await p.keyboard.type('mina@harbor.dev', { delay: 15 });
+  await p.keyboard.type('mina@harbor.example', { delay: 15 });
   say(await where('mail') === 'above', 'it is above while something is typed');
   await p.keyboard.press('Tab');
   await settle();

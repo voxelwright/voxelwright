@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en-GB" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Date picker</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+  .form .vx-field { display: grid; gap: calc(var(--vx) * 2); }
+  .form .vx-field-label, .state > label, .state > p { font-size: 0.9375rem; }
+  .form .vx-field-label, .state > label { font-weight: 600; }
+  .form .note, .state > p { color: var(--vx-ink-quiet); }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; gap: calc(var(--vx) * 2); align-content: start; justify-items: start; min-inline-size: 0; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Date picker</h1>
+    <p class="what">A well with the real date input, and a small key beside it that opens the calendar in a float. Typing a date stays the browser's own.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: set when harbor-api goes out</h2>
+    <form class="form" onsubmit="return false">
+      <div class="vx-field">
+        <span class="vx-field-label" id="ship-label">Deploy on</span>
+        <div class="vx-date" id="ship-date">
+          <span class="vx-well"><input type="date" id="ship" name="ship" aria-labelledby="ship-label" value="2026-11-20" min="2026-11-17"></span>
+          <button class="vx-button" type="button" popovertarget="ship-pick" data-vx-say="Choose the deploy day"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+          <div class="vx-popover vx-date-float" id="ship-pick" popover role="dialog" aria-label="Deploy on">
+            <div class="vx-calendar" data-vx-for="ship" data-vx-today="2026-11-17"></div>
+          </div>
+        </div>
+      </div>
+      <p class="note">Mina approves it the day before. fogline sends the team a note when it is live.</p>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <label for="empty">Nothing set yet</label>
+        <div class="vx-date" id="empty-date">
+          <span class="vx-well"><input type="date" id="empty"></span>
+          <button class="vx-button" type="button" popovertarget="empty-pick" data-vx-say="Choose the review day"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+          <div class="vx-popover vx-date-float" id="empty-pick" popover role="dialog" aria-label="Review on">
+            <div class="vx-calendar" data-vx-for="empty" data-vx-today="2026-11-17"></div>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <p id="freeze-label">A range: the freeze over the holidays</p>
+        <div class="vx-date" id="freeze-date" role="group" aria-labelledby="freeze-label">
+          <span class="vx-well"><input type="date" id="freeze-from" aria-label="Freeze from" value="2026-12-18"></span>
+          <span class="vx-well"><input type="date" id="freeze-to" aria-label="Freeze until" value="2026-12-29"></span>
+          <button class="vx-button" type="button" popovertarget="freeze-pick" data-vx-say="Choose the freeze"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+          <div class="vx-popover vx-date-float" id="freeze-pick" popover role="dialog" aria-label="The freeze">
+            <div class="vx-calendar" data-vx-for="freeze-from freeze-to" data-vx-today="2026-11-17"></div>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <label for="locked">Fixed: the release day cannot be moved</label>
+        <div class="vx-date" id="locked-date">
+          <span class="vx-well"><input type="date" id="locked" value="2026-12-01" disabled></span>
+          <button class="vx-button" type="button" popovertarget="locked-pick" data-vx-say="Choose the release day"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+          <div class="vx-popover vx-date-float" id="locked-pick" popover role="dialog" aria-label="Release day">
+            <div class="vx-calendar" data-vx-for="locked" data-vx-today="2026-11-17"></div>
+          </div>
+        </div>
+      </div>
+      <div class="state" lang="uk">
+        <label for="uk">Розгорнути на сервері</label>
+        <div class="vx-date" id="uk-date">
+          <span class="vx-well"><input type="date" id="uk" value="2026-11-26"></span>
+          <button class="vx-button" type="button" popovertarget="uk-pick" data-vx-say="Вибрати день"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+          <div class="vx-popover vx-date-float" id="uk-pick" popover role="dialog" aria-label="Розгорнути на сервері">
+            <div class="vx-calendar" data-vx-for="uk" data-vx-today="2026-11-17" data-vx-prev="Попередній місяць" data-vx-next="Наступний місяць"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { calendar } from '/packages/voxelmorphism/src/components/calendar.js';
+  import { datePicker } from '/packages/voxelmorphism/src/components/date-picker.js';
+  show(calendar, datePicker);
+</script>
+</body>
+</html>

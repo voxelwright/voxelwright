@@ -1,0 +1,73 @@
+/* ---------- Navs ---------- */
+
+/* A row or a column of links to places. Words on the surface they are on: no box, nothing raised.
+   Markup: <nav class="vx-nav" data-vx-mark="groove" aria-label="harbor-api">
+             <a href="/overview">Overview</a>
+             <a href="/deploys" aria-current="page">Deploys</a>
+             <a role="link" aria-disabled="true">Billing</a>
+           </nav>
+   data-vx-mark: leave it out (the current link is heavier), "groove" (an accent groove under it,
+   or at its start in a column) or "seats" (a trench; the current link is the key in it).
+   data-vx-way="down" stacks the links. They may stand in a list, under titles (.vx-nav-title). */
+
+.vx-nav {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 2); box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%;
+  margin: 0; padding: 0;
+  font-family: var(--vx-font); font-size: 1rem; font-weight: 500; line-height: calc(var(--vx) * 6);
+  color: var(--vx-ink-quiet);
+}
+.vx-nav :is(ul, ol) { display: contents; margin: 0; padding: 0; list-style: none; }
+.vx-nav li { display: contents; }
+.vx-nav a {
+  position: relative; display: inline-flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-inline-size: 0; min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 2);
+  color: inherit; font: inherit; text-decoration: none; overflow-wrap: anywhere; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-nav a:hover, .vx-nav a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+/* no light in a word to brighten: the browser's ring, just inside the link */
+.vx-nav a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* one that leads nowhere yet */
+.vx-nav a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); cursor: default; }
+/* plain: nothing is drawn, so the current link says so with its weight */
+.vx-nav:not([data-vx-mark]) a[aria-current]:not([aria-current="false"]) { font-weight: 650; }
+
+/* a column */
+.vx-nav[data-vx-way="down"] { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.vx-nav[data-vx-way="down"][data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav[data-vx-way="down"] a[data-vx-level="2"] { padding-inline-start: calc(var(--vx) * 9); }
+.vx-nav-trail { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+/* a title over a group of links: words, smaller and quiet */
+.vx-nav-title {
+  box-sizing: border-box; margin: 0; padding: calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 1);
+  font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet);
+}
+.vx-nav[data-vx-mark="groove"] .vx-nav-title { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav-title:first-child, .vx-canvas + .vx-nav-title { padding-block-start: calc(var(--vx) * 1); }
+
+/* seats: a trench as wide as its links; the legends are in the key face, as on tabs */
+.vx-nav[data-vx-mark="seats"] { display: inline-flex; gap: 0; }
+.vx-nav[data-vx-mark="seats"] a {
+  justify-content: center; padding: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  font: 400 var(--vx-key-size)/calc(var(--vx) * 6) var(--vx-key-font); letter-spacing: 0; text-align: center;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-nav[data-vx-mark="seats"] a:hover, .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend, var(--vx-ink)); }
+.vx-nav[data-vx-mark="seats"] a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); }
+.vx-nav[data-vx-mark="seats"] a:focus-visible { outline-offset: calc(var(--vx) * -1); }
+
+/* plain: the groove is a painted line where it will be cut */
+.vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 2); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-nav[data-vx-mark="groove"][data-vx-way="down"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+}
+/* plain: a painted trench; the current seat is a painted key with the accent under it */
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate);
+}

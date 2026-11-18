@@ -1,0 +1,139 @@
+/* ---------- Sheet ---------- */
+
+/* A surface that comes in from an edge of the window, a level above the page, over a scrim. It
+   is the browser's own <dialog>, shown with showModal(): focus stays inside, Escape closes it,
+   focus goes back to what opened it. data-vx-side says which edge: "end" (the default), "start",
+   "top" or "bottom". It slides only where motion is allowed, and the slide is CSS, so it is the
+   same with no script.
+   Markup: see src/components/sheet.js.
+   The drawer (css/drawer.css) is the same thing and shares these rules: what is written here
+   for both is written with :where(), so that a rule of the drawer's own always wins. */
+
+dialog:where(.vx-sheet, .vx-drawer) {
+  --_side: end; /* the edge it is on: the part reads this */
+  --_dir: 1;
+  --_w: min(calc(var(--vx) * 96), calc(100vw - var(--vx) * 11));
+  --_w: min(calc(var(--vx) * 96), round(down, calc(100vw - var(--vx) * 11), var(--vx)));
+  /* where it waits, out of the window: its own size and the room its side and shadow take */
+  --_out: calc((100% + var(--vx) * 6) * var(--_dir)) 0;
+  position: fixed;
+  inset-block: 0;
+  inset-inline: auto 0;
+  box-sizing: border-box;
+  inline-size: var(--_w);
+  block-size: auto;
+  max-inline-size: none;
+  max-block-size: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  overflow: visible;
+  isolation: isolate;
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: calc(var(--vx) * 6);
+}
+dialog:where(.vx-sheet, .vx-drawer):dir(rtl) { --_dir: -1; }
+/* only while it is open: closed, a dialog has no box at all */
+dialog:where(.vx-sheet, .vx-drawer)[open] { display: flex; flex-direction: column; }
+dialog:where(.vx-sheet, .vx-drawer):focus-visible { outline: none; } /* what is in it shows the focus */
+
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="start"] {
+  --_side: start;
+  --_out: calc((-100% - var(--vx) * 6) * var(--_dir)) 0;
+  inset-inline: 0 auto;
+}
+/* from the top or the bottom it is as wide as the window and as high as what it holds; a strip
+   of the scrim, the height of a key, is always left to press */
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="top"] {
+  --_side: top;
+  --_out: 0 calc(-100% - var(--vx) * 6);
+  inset-block: 0 auto;
+  inset-inline: 0;
+  inline-size: auto;
+  max-block-size: calc(100% - var(--vx) * 11);
+}
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="bottom"] {
+  --_side: bottom;
+  --_out: 0 calc(100% + var(--vx) * 6);
+  inset-block: auto 0;
+  inset-inline: 0;
+  inline-size: auto;
+  max-block-size: calc(100% - var(--vx) * 11);
+}
+
+/* the scrim; a drawer that is being dragged shut lets the page show through as it goes */
+dialog:where(.vx-sheet, .vx-drawer)::backdrop { background: rgb(8 9 15 / 0.5); opacity: calc(1 - var(--_drag, 0) * 0.7); }
+
+/* the page behind does not scroll while one is open over it */
+:root:has(dialog:where(.vx-sheet, .vx-drawer):modal) { overflow: hidden; }
+
+/* It slides in and out, where motion is allowed. Closed, it waits outside the window; the
+   browser keeps it on top until it has got there. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog:where(.vx-sheet, .vx-drawer) {
+    translate: var(--_out);
+    transition: translate 200ms cubic-bezier(0.4, 0, 0.9, 0.6), overlay 200ms allow-discrete, display 200ms allow-discrete;
+  }
+  dialog:where(.vx-sheet, .vx-drawer)[open] {
+    translate: 0 0;
+    transition: translate 280ms cubic-bezier(0.2, 0.75, 0.2, 1), overlay 280ms allow-discrete, display 280ms allow-discrete;
+  }
+  @starting-style { dialog:where(.vx-sheet, .vx-drawer)[open] { translate: var(--_out); } }
+  dialog:where(.vx-sheet, .vx-drawer)::backdrop { opacity: 0; transition: opacity 200ms linear, overlay 200ms allow-discrete, display 200ms allow-discrete; }
+  dialog:where(.vx-sheet, .vx-drawer)[open]::backdrop { opacity: calc(1 - var(--_drag, 0) * 0.7); transition-duration: 280ms; }
+  @starting-style { dialog:where(.vx-sheet, .vx-drawer)[open]::backdrop { opacity: 0; } }
+}
+
+/* What is in it: a header of words (and a close key), what it holds, and its keys. A page's own
+   rules for header and footer must not reach in. */
+dialog:where(.vx-sheet, .vx-drawer) > :is(header, footer) { margin: 0; border: 0; background: none; flex: none; }
+dialog:where(.vx-sheet, .vx-drawer) > header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  /* fifteen voxels: a close key (eleven with its target) sits in it on whole voxels. Its last
+     row of voxels is the groove that parts it from what is below. */
+  min-block-size: calc(var(--vx) * 15);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 6);
+}
+dialog:where(.vx-sheet, .vx-drawer) > header:has(> .vx-close) { padding-inline-end: calc(var(--vx) * 4); }
+dialog:where(.vx-sheet, .vx-drawer) > header > :where(h2, h3) {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  margin: 0;
+  font: 700 1.125rem/calc(var(--vx) * 6) var(--vx-font);
+  color: var(--vx-ink);
+  overflow-wrap: anywhere;
+}
+/* what it holds scrolls by itself, and does not hand the scroll on to the page */
+:where(.vx-sheet-body, .vx-drawer-body) {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--vx) * 5) calc(var(--vx) * 6);
+}
+:where(.vx-sheet-body, .vx-drawer-body) > :first-child { margin-block-start: 0; }
+:where(.vx-sheet-body, .vx-drawer-body) > :last-child { margin-block-end: 0; }
+dialog:where(.vx-sheet, .vx-drawer) > footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--vx) * 4);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 6) calc(var(--vx) * 6);
+}
+
+/* plain: a painted panel, and a painted groove under the header */
+dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) {
+  background: var(--vx-chalk);
+  box-shadow: 0 0 0 1px var(--vx-chalk-side), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
+}
+dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {
+  background: linear-gradient(color-mix(in oklab, var(--lit-warm, var(--vx-slate)) 55%, transparent), color-mix(in oklab, var(--lit-warm, var(--vx-slate)) 55%, transparent)) no-repeat;
+  background-size: calc(100% - var(--vx) * 8) var(--vx);
+  background-position: 50% 100%;
+}

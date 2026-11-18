@@ -1,4 +1,4 @@
-/* Made by tools/css.mjs from css/_kit.css and the 37 files beside it. Do not edit: edit those, and run it again. */
+/* Made by tools/css.mjs from css/_kit.css and the 63 files beside it. Do not edit: edit those, and run it again. */
 
 /* Voxelmorphism. Everything here works with no script: it is the plain version.
    Where the script runs, each element gets data-vx-live and its painted faces step aside
@@ -231,6 +231,10 @@
   isolation: isolate;
 }
 
+/* Physical transforms and inset shadows follow the inline direction. */
+:where(.vx-switch, .vx-list > li) { --_inline-sign: 1; }
+:where(.vx-switch, .vx-list > li):dir(rtl) { --_inline-sign: -1; }
+
 /* ---------- Toggle ---------- */
 
 .vx-toggle {
@@ -259,7 +263,7 @@
   transition: transform 160ms var(--vx-ease-out);
 }
 .vx-toggle input:checked + .vx-switch:not([data-vx-live]) { background: var(--vx-signal); }
-.vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8)); }
+.vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8 * var(--_inline-sign))); }
 
 /* ---------- Slider ---------- */
 
@@ -298,7 +302,7 @@
 .vx-card > :first-child:not(canvas), .vx-card > .vx-canvas + * { margin-block-start: 0; }
 .vx-card > :last-child { margin-block-end: 0; }
 .vx-card > * + * { margin-block-start: 0.5em; }
-.vx-card :is(p, h3, h4) { margin-block: 0; }
+.vx-card > :is(p, h3, h4) { margin-block: 0; } /* the card's own words only: a part set on a card keeps its own spacing */
 .vx-card:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
 .vx-card:not([data-vx-live])[data-vx-edge] { border-inline-start: calc(var(--vx) * 2) solid var(--vx-steel); padding-inline-start: calc(var(--vx) * 6); }
 .vx-card:not([data-vx-live])[data-vx-edge="leaf"] { border-color: var(--vx-leaf); }
@@ -311,10 +315,10 @@
 
 .vx-list { list-style: none; margin: 0; padding: var(--vx); display: grid; gap: var(--vx); }
 .vx-list > li { display: flex; min-block-size: calc(var(--vx) * 11); }
-.vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
+.vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
 /* With voxels the part wraps each row's content in a .vx-row. A row written without one takes
    the same box, so a list is the same height plain and live. */
-.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
+.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
 /* Its link takes the row's line height too, as it does in a .vx-row. A page that sets a line
    height on every element would otherwise make a wrapped row taller plain than live. */
 .vx-list > li:not(:has(> .vx-row)) > :is(a, button) { font: inherit; }
@@ -326,7 +330,7 @@
 .vx-row-meta { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 .vx-list:not([data-vx-live]) { background: var(--vx-slate); }
 .vx-list:not([data-vx-live]) > li { background: var(--vx-chalk); }
-.vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset calc(var(--vx) * 2) 0 0 var(--vx-signal); }
+.vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset calc(var(--vx) * 2 * var(--_inline-sign)) 0 0 var(--vx-signal); }
 
 /* ---------- Tabs ---------- */
 
@@ -396,7 +400,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
 /* ---------- Toast ---------- */
 
 .vx-toasts { position: fixed; inset-inline: 0; inset-block-end: calc(var(--vx) * 8); z-index: 1000; display: grid; justify-items: center; gap: calc(var(--vx) * 4); pointer-events: none; }
-.vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding: calc(var(--vx) * 3.5) calc(var(--vx) * 6) calc(var(--vx) * 3.5) calc(var(--vx) * 8); font-weight: 600; line-height: 1.35; }
+.vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding-block: calc(var(--vx) * 3.5); padding-inline: calc(var(--vx) * 8) calc(var(--vx) * 6); font-weight: 600; line-height: 1.35; }
 .vx-toast-text { transition: opacity 120ms ease; }
 .vx-toast[data-vx-leaving] .vx-toast-text { opacity: 0; }
 .vx-toast:not([data-vx-live]) { background: var(--vx-chalk); border-inline-start: calc(var(--vx) * 2) solid var(--vx-signal); padding-inline-start: calc(var(--vx) * 6); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
@@ -688,6 +692,31 @@ dialog.vx-dialog:focus-visible { outline: none; }
   .vx-accordion > details::details-content, .vx-accordion > details > summary::after { transition: none; }
 }
 
+/* ==== css/alert-dialog.css ==== */
+
+/* ---------- Alert dialog ---------- */
+
+/* The kit's dialog (dialog.vx-dialog), asking before something is destroyed. It is drawn and
+   behaves as the dialog does: the kit's dialog part adopts it. What makes it an alert dialog is
+   in its markup:
+     <button class="vx-button" data-vx-kind="danger" id="open-delete">Delete project</button>
+     <dialog class="vx-dialog vx-alert-dialog" role="alertdialog" aria-labelledby="h" aria-describedby="p">
+       <header id="h">Delete harbor-api?</header>
+       <div class="vx-dialog-body"><p id="p">Its deploys go with it. This cannot be undone.</p></div>
+       <footer>
+         <button class="vx-button" data-vx-close="cancel" autofocus>Keep it</button>
+         <button class="vx-button" data-vx-kind="danger" data-vx-close="delete">Delete harbor-api</button>
+       </footer>
+     </dialog>
+   Opened with showModal(). role="alertdialog"; `autofocus` on the key that destroys nothing,
+   so the focus starts there (the browser's own, with or without script); the key that
+   destroys is data-vx-kind="danger", an ordinary cap on a red light, and stands last. No
+   data-vx-light-dismiss: a press outside does nothing, it must be answered. Escape is the
+   answer "cancel". Closing, it breaks, as every dialog of the kit does.
+   This file only makes it narrower than a dialog with a form in it: it holds a question. */
+
+dialog.vx-alert-dialog { inline-size: min(calc(var(--vx) * 100), calc(100vw - 32px)); }
+
 /* ==== css/aspect-ratio.css ==== */
 
 /* ---------- Aspect ratio ----------
@@ -728,11 +757,71 @@ dialog.vx-dialog:focus-visible { outline: none; }
 .vx-ratio > picture > img { display: block; inline-size: 100%; block-size: 100%; }
 .vx-ratio > iframe { border: 0; }
 
+/* ==== css/attachment.css ==== */
+
+/* ---------- Attachment ---------- */
+
+/* A file on a message, or waiting in the composer: a low tile with its name and its size on it,
+   and, where it can be taken away, the kit's close key beside it. Removed, it shatters.
+   Markup: <ul class="vx-attachments" aria-label="Attached files" data-vx-return="attach">
+             <li class="vx-attachment">
+               <span class="vx-attachment-tile">
+                 <span class="vx-attachment-name">build-214.log</span>
+                 <span class="vx-attachment-size">Log, 48 KB</span>
+               </span>
+               <button class="vx-button vx-close" type="button" aria-label="Remove build-214.log">×</button>
+             </li>
+           </ul>
+   The name and the size are words, and the key is named for what it removes. The second line
+   may say a state instead, in words, with a lamp before them:
+     <span class="vx-attachment-size"><span class="vx-lamp" data-vx-light="stop" aria-hidden="true"></span>Too large: 31 MB of 25</span>
+   A name too long for the tile is cut short with an ellipsis; give the whole of it in title.
+   data-vx-return on the list is the id of what takes focus when the last file is removed. */
+
+.vx-attachments { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 3); box-sizing: border-box; min-inline-size: 0; margin: 0; padding: 0; list-style: none; }
+.vx-attachments:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+.vx-attachment { display: inline-flex; align-items: center; min-inline-size: 0; max-inline-size: 100%; font-family: var(--vx-font); color: var(--vx-ink); }
+
+/* the tile: two lines (five voxels and four) and a voxel above and below: eleven voxels, as
+   tall as a key's target, so the key beside it stands level with it */
+.vx-attachment-tile {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: center;
+  box-sizing: border-box;
+  min-inline-size: calc(var(--vx) * 20);
+  max-inline-size: calc(var(--vx) * 64);
+  min-block-size: calc(var(--vx) * 11);
+  padding: calc(var(--vx) * 1) calc(var(--vx) * 4);
+}
+.vx-attachment-name { overflow: hidden; font-size: 0.9375rem; font-weight: 600; line-height: calc(var(--vx) * 5); white-space: nowrap; text-overflow: ellipsis; color: inherit; }
+a.vx-attachment-name { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+a.vx-attachment-name:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: -2px; }
+.vx-attachment-size { display: flex; align-items: center; gap: calc(var(--vx) * 2); overflow: hidden; font-size: 0.8125rem; line-height: calc(var(--vx) * 4); white-space: nowrap; text-overflow: ellipsis; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+/* the key stands a voxel from the tile: its own margin is two, and one is taken back */
+.vx-attachment > .vx-button.vx-close { margin-inline-start: calc(var(--vx) * 1); }
+
+/* going: its words go at once, and nothing in it answers a press while the bricks fall */
+.vx-attachment[data-vx-leaving] { pointer-events: none; }
+.vx-attachment[data-vx-leaving] :is(.vx-attachment-name, .vx-attachment-size, .vx-label) { opacity: 0; transition: opacity 100ms ease; }
+.vx-attachment[data-vx-leaving] .vx-button:not([data-vx-live]) { visibility: hidden; }
+
+/* plain: a painted plate with its shadow */
+.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
+.vx-attachment[data-vx-leaving] .vx-attachment-tile:not([data-vx-live]) { visibility: hidden; }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-attachment[data-vx-leaving] :is(.vx-attachment-name, .vx-attachment-size, .vx-label) { transition: none; }
+}
+
 /* ==== css/avatar.css ==== */
 
 /* ---------- Avatar ---------- */
 
-/* A picture or initials set in a small well.
+/* A picture or initials set in a small window, lit from its rim.
    Markup: <span class="vx-avatar"><img src="mina.jpg" alt="Mina Okafor"></span>
            <span class="vx-avatar" role="img" aria-label="Ada Lindqvist"><span class="vx-avatar-initials" aria-hidden="true">AL</span></span>
            <span class="vx-avatar"><img src="…" alt="Tomas Reyes"><span class="vx-avatar-initials" aria-hidden="true">TR</span></span>
@@ -871,12 +960,72 @@ dialog.vx-dialog:focus-visible { outline: none; }
 /* words for a screen reader only: what the "…" stands for */
 .vx-breadcrumb-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
+/* ==== css/bubble.css ==== */
+
+/* ---------- Bubble ---------- */
+
+/* A message set as a bubble. Theirs is set a level into the surface; yours stands a voxel above
+   it. No light on either: a bubble is read, not pressed.
+   Markup: <div class="vx-bubble"><p>The words.</p></div>                      theirs
+           <div class="vx-bubble" data-vx-from="me"><p>The words.</p></div>    yours
+   In a message (.vx-message) it stands where the message's text would, and takes its side from
+   the message; data-vx-from on the bubble itself wins. It is as wide as its words and no wider
+   than its column, so on a phone it takes most of the width. Several in one message stand a
+   voxel apart. */
+
+.vx-bubble {
+  /* how much of the opening the wall takes: half a voxel for each voxel the hole is deep. The
+     part sets --vx-bubble-deep from the look; a well is two deep without it. */
+  --_wall: calc(var(--vx) * var(--vx-bubble-deep, 2) / 2);
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  inline-size: fit-content;
+  min-inline-size: calc(var(--vx) * 11);
+  max-inline-size: min(100%, calc(var(--vx) * 132));
+  margin: 0;
+  /* Theirs: the floor is seen up and to the left of the opening, and the wall shows along the
+     right and the bottom (the way the kit is looked at, whichever way the page reads), so the
+     words keep that much further from those two edges. A line is six voxels: a bubble of one
+     line is eleven voxels tall, and every edge is on the grid. */
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4 + var(--_wall)) calc(var(--vx) * 2 + var(--_wall)) calc(var(--vx) * 4);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: calc(var(--vx) * 6);
+  color: var(--vx-ink);
+  text-align: start;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.vx-bubble > * { margin: 0; }
+/* (written this way, not "* + *": a card's own rule for paragraphs is stronger than that, and the
+   voxels' canvas is a child of the bubble too) */
+.vx-bubble > :not(.vx-canvas) ~ :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 2); }
+.vx-bubble a { color: var(--vx-link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+.vx-bubble a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.vx-bubble code { font: 400 0.875em/1 var(--vx-mono); }
+
+/* yours: a plate a voxel high. Its face is the element's own box, so the words sit in its middle. */
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])) { padding: calc(var(--vx) * 2.5) calc(var(--vx) * 4); }
+
+/* in a message: bubbles one under another, a voxel apart */
+.vx-bubble + .vx-bubble { margin-block-start: calc(var(--vx) * 1); }
+
+/* plain: theirs is a painted floor with the wall along the right and the bottom; yours a painted
+   plate with its shadow */
+.vx-bubble:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset calc(var(--_wall) * -1) calc(var(--_wall) * -1) 0 var(--vx-slate); }
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }
+
 /* ==== css/button-group.css ==== */
 
 /* ---------- Button group ---------- */
 
-/* Keys a voxel apart, read as one group. The keys are the kit's own (.vx-button); the group is
-   how they sit together, and its name. On a narrow page the row wraps; it is never cut.
+/* A bank of keys, read as one group. The keys are the kit's own (.vx-button); the group is how
+   they sit together, and its name. On a narrow page the row wraps; it is never cut.
+   They stand three voxels apart, the least that keeps them whole: a keycap is five voxels high,
+   and its side and the light at its foot are drawn two and a half voxels left of and above its
+   face. Nearer than that, each key would be drawn over the end of the one before it.
    Markup: <div class="vx-button-group" role="group" aria-label="History">
              <button class="vx-button" type="button">Undo</button> ...
            </div>
@@ -885,7 +1034,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
   display: inline-flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: var(--vx);
+  gap: calc(var(--vx) * 3);
   max-inline-size: 100%;
   box-sizing: border-box;
   margin: 0;
@@ -894,6 +1043,88 @@ dialog.vx-dialog:focus-visible { outline: none; }
   min-inline-size: 0; /* it may be a fieldset */
 }
 .vx-button-group[data-vx-way="down"] { flex-direction: column; flex-wrap: nowrap; }
+
+/* ==== css/calendar.css ==== */
+
+/* ---------- Calendar ---------- */
+
+/* A month on the surface. The days are words in a grid of eleven-voxel cells; the chosen day is a
+   key level with the surface, a range is a trench of light, today has a lamp under its number.
+   Markup: <div class="vx-calendar"><input type="date" aria-label="Deploy on" value="2026-11-20"></div>
+   The script makes the rest (a head with two keys and the month's name, and a grid of six weeks);
+   with no script the input is the browser's own. */
+.vx-calendar {
+  display: inline-grid;
+  grid-template-columns: calc(var(--vx) * 77);
+  gap: calc(var(--vx) * 3);
+  font-family: var(--vx-font);
+  color: var(--vx-ink);
+  vertical-align: top;
+}
+.vx-calendar > input[type="date"] { justify-self: start; }
+
+/* the head: previous, the month's name, next */
+.vx-calendar-head { display: flex; align-items: center; gap: calc(var(--vx) * 2); }
+.vx-calendar-head > .vx-button { flex: none; inline-size: calc(var(--vx) * 11); padding: 0; }
+.vx-calendar-month { flex: 1; min-inline-size: 0; text-align: center; font-weight: 600; font-size: 1rem; line-height: 1.3; overflow-wrap: anywhere; }
+.vx-calendar-chevron {
+  display: block;
+  inline-size: calc(var(--vx) * 2);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-calendar-head > [data-vx-step="prev"] .vx-calendar-chevron { transform: scaleX(-1); }
+.vx-calendar-head:dir(rtl) > [data-vx-step="prev"] .vx-calendar-chevron { transform: none; }
+.vx-calendar-head:dir(rtl) > [data-vx-step="next"] .vx-calendar-chevron { transform: scaleX(-1); }
+
+/* the grid: the names of the days, then six weeks of seven cells */
+.vx-calendar-grid { display: grid; }
+.vx-calendar-names, .vx-calendar-week { display: flex; }
+.vx-calendar-name {
+  flex: none; inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 7);
+  display: grid; place-items: center;
+  font-size: 0.8125rem; line-height: 1; color: var(--vx-ink-quiet);
+}
+.vx-calendar-week { position: relative; isolation: isolate; }
+.vx-calendar-cell { flex: none; display: grid; inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 11); position: relative; }
+.vx-calendar-day {
+  position: relative;
+  margin: 0; padding: 0; border: 0; border-radius: 0;
+  background: none;
+  color: inherit;
+  font: 500 0.9375rem/1 var(--vx-font);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-calendar-cell[data-vx-out] > .vx-calendar-day { color: var(--vx-ink-quiet); }
+.vx-calendar-day[aria-disabled="true"] { color: var(--vx-ink-quiet); text-decoration: line-through; text-decoration-thickness: 1px; cursor: default; }
+.vx-calendar-day:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); z-index: 1; }
+
+/* With no script there is no month to draw: the browser's own input stands alone. */
+@media (scripting: none) {
+  .vx-calendar { grid-template-columns: auto; }
+}
+
+/* plain: the chosen day is a painted key with a rim of the accent, a range is a band of the
+   accent's tint, today is a short warm bar under its number */
+.vx-calendar-week:not([data-vx-live]) > [data-vx-mark] { background: linear-gradient(color-mix(in oklab, var(--lit-accent, var(--vx-enamel)) 26%, transparent) 0 0) center / 100% calc(100% - var(--vx) * 2) no-repeat; }
+.vx-calendar-week:not([data-vx-live]) > [data-vx-mark="one"] { background: none; }
+.vx-calendar-week:not([data-vx-live]) > :is([data-vx-mark="one"], [data-vx-mark="start"], [data-vx-mark="end"]) > .vx-calendar-day {
+  background:
+    linear-gradient(var(--vx-key) 0 0) center / calc(100% - var(--vx) * 4) calc(100% - var(--vx) * 4) no-repeat,
+    linear-gradient(var(--lit-accent, var(--vx-enamel)) 0 0) center / calc(100% - var(--vx) * 2) calc(100% - var(--vx) * 2) no-repeat;
+}
+.vx-calendar-week:not([data-vx-live]) > [data-vx-mark="mid"] > .vx-calendar-day { background: linear-gradient(var(--vx-floor, var(--vx-chalk)) 0 0) center / calc(100% - var(--vx) * 4) calc(100% - var(--vx) * 4) no-repeat; }
+.vx-calendar-week:not([data-vx-live]) .vx-calendar-day[aria-current="date"]::after {
+  content: ""; position: absolute;
+  inset-block-start: calc(var(--vx) * 8); inset-inline-start: calc(var(--vx) * 4);
+  inline-size: calc(var(--vx) * 3); block-size: var(--vx);
+  background: var(--lit-warm, var(--vx-steel));
+}
 
 /* ==== css/callout.css ==== */
 
@@ -943,6 +1174,180 @@ dialog.vx-dialog:focus-visible { outline: none; }
 .vx-callout[data-vx-kind="done"]:not([data-vx-live])::before { background: var(--lit-go, var(--vx-leaf)); }
 .vx-callout[data-vx-kind="warning"]:not([data-vx-live])::before { background: var(--lit-warm, var(--vx-walnut)); }
 .vx-callout[data-vx-kind="failed"]:not([data-vx-live])::before { background: var(--lit-stop, var(--vx-brick)); }
+
+/* ==== css/carousel.css ==== */
+
+/* ---------- Carousel ---------- */
+
+/* Slides in a window: a recess (the kit's .vx-recess) that holds one slide at a time. Under it,
+   previous and next (the kit's keys) and between them a row of lamps in a slot: one a slide.
+   Markup: <section class="vx-carousel" aria-roledescription="carousel" aria-label="…">
+             <div class="vx-recess vx-carousel-window">
+               <div class="vx-carousel-track" tabindex="0">
+                 <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="1 of 3">…</div>
+               </div>
+             </div>
+             <div class="vx-carousel-bar">
+               <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+               <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+               <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+               <button class="vx-button" type="button" data-vx-play>Pause</button>   (only with data-vx-auto on the carousel)
+             </div>
+           </section>
+   --vx-carousel-n on the lamps is the number of slides: written in the page, the lamps take
+   their room before the script runs; the script keeps it true. */
+
+.vx-carousel {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 5);
+  box-sizing: border-box; inline-size: 100%; min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-carousel-window { display: grid; grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+/* The real scrolling element. It snaps a slide at a time, so a finger swipes it, and with no
+   script it is still a carousel. No smooth scrolling here: the part asks for it a move at a
+   time, and not at all where less motion is wanted. */
+.vx-carousel-track {
+  display: flex; min-inline-size: 0;
+  overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
+  outline: 0;
+}
+.vx-carousel-slide {
+  flex: none; box-sizing: border-box; inline-size: 100%; min-inline-size: 0;
+  scroll-snap-align: start; scroll-snap-stop: always;
+  padding: calc(var(--vx) * 5) calc(var(--vx) * 6);
+  line-height: calc(var(--vx) * 6);
+  overflow-wrap: anywhere;
+}
+.vx-carousel-slide > :is(h3, h4, p) { margin: 0; }
+.vx-carousel-slide > * + * { margin-block-start: calc(var(--vx) * 2); }
+/* focus: the browser's ring, round the recess the track fills */
+.vx-carousel-window:has(> .vx-carousel-track:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+/* once the script has taken over, the browser's own bar steps aside; with no script it stays */
+.vx-carousel[data-vx-on] .vx-carousel-track { scrollbar-width: none; }
+.vx-carousel[data-vx-on] .vx-carousel-track::-webkit-scrollbar { display: none; }
+
+/* the bar: previous, the lamps, next; then the pause key, if it has one */
+.vx-carousel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 4); min-inline-size: 0; }
+/* previous and next: the smallest key there is, 11 voxels square */
+.vx-carousel-bar > [data-vx-step] { flex: none; inline-size: calc(var(--vx) * 11); padding: 0; }
+/* the pause key keeps its width when its word changes, and stands a little apart */
+.vx-carousel-bar > [data-vx-play] { flex: none; min-inline-size: calc(var(--vx) * 24); margin-inline-start: calc(var(--vx) * 2); }
+/* The chevron is cut from half-voxel cells like the kit's glyphs, and is the legend's colour.
+   Next points the way the line runs; previous the other way. */
+.vx-carousel-chevron {
+  display: block;
+  inline-size: calc(var(--vx) * 2);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-carousel-bar > [data-vx-step="prev"] .vx-carousel-chevron { transform: scaleX(-1); }
+.vx-carousel-bar:dir(rtl) > [data-vx-step="next"] .vx-carousel-chevron { transform: scaleX(-1); }
+.vx-carousel-bar:dir(rtl) > [data-vx-step="prev"] .vx-carousel-chevron { transform: none; }
+
+/* The lamps: a slot four voxels high with a voxel of floor round the row; a lamp is two voxels
+   of light each way, the next one a voxel on. They show which slide it is on and are not
+   pressed: the keys and the track are. */
+.vx-carousel-lamps {
+  position: relative; isolation: isolate; display: block; flex: none; box-sizing: border-box;
+  inline-size: calc(var(--vx) * (var(--vx-carousel-n, 3) * 3 + 1));
+  block-size: calc(var(--vx) * 4);
+  padding: var(--vx);
+}
+/* plain: a painted slot of dark studs, and the accent's colour on the current one (--_at, set by the script) */
+.vx-carousel-lamps:not([data-vx-live]) {
+  background: repeating-linear-gradient(to right, var(--vx-steel) 0 calc(var(--vx) * 2), var(--vx-slate) 0 calc(var(--vx) * 3)) content-box, var(--vx-slate);
+}
+.vx-carousel-lamps:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block: var(--vx); inset-inline-start: calc(var(--vx) * (1 + 3 * var(--_at, 0)));
+  inline-size: calc(var(--vx) * 2);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+
+/* With no script at all the keys could do nothing and the lamps would say nothing: they go, and
+   the track scrolls under the browser's own bar. */
+@media (scripting: none) {
+  .vx-carousel-bar { display: none; }
+}
+
+/* ==== css/chart.css ==== */
+
+/* ---------- Chart ----------
+   A window cut into the panel with the numbers standing in it as light: columns of lamps (a bar
+   chart) or a line of lamps (a line chart). The table under it is the chart's numbers, and what
+   a screen reader reads; src/components/chart.js draws the window from it and writes the words
+   on its axes.
+     <figure class="vx-chart" data-vx-kind="bar">
+       <figcaption>Deploys a day <small>fogline, the week to 24 May</small></figcaption>
+       <div class="vx-chart-window"></div>
+       <table>
+         <thead><tr><th scope="col">Day</th><th scope="col" data-vx-light="go">Went out</th><th scope="col" data-vx-light="stop">Failed</th></tr></thead>
+         <tbody><tr><th scope="row">Mon</th><td>12</td><td>1</td></tr>…</tbody>
+       </table>
+     </figure>
+   The window is a whole number of voxels both ways, with room at its start for the scale's
+   numbers and under it for the places' names. --vx-chart-rows on the figure: how many voxels
+   tall it is (40; 32 on a phone). With no script there is no window: the table is the chart. */
+
+.vx-chart {
+  --_gutter: calc(var(--vx) * 11);
+  display: grid; gap: calc(var(--vx) * 3); justify-items: start;
+  inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; margin: 0;
+  container-type: inline-size;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-chart > figcaption { font-size: 1rem; line-height: calc(var(--vx) * 6); font-weight: 650; text-wrap: balance; }
+.vx-chart > figcaption small { display: block; font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-weight: 400; color: var(--vx-ink-quiet); text-wrap: pretty; }
+
+/* the window: a whole number of voxels, past the scale's numbers, a voxel clear of the edge for
+   its wall; the places' names stand under it */
+.vx-chart-window {
+  position: relative; isolation: isolate; display: block; box-sizing: border-box;
+  margin-inline-start: var(--_gutter);
+  margin-block: calc(var(--vx) * 1) calc(var(--vx) * 8);
+  inline-size: round(down, calc(100cqi - var(--_gutter) - var(--vx) * 2), var(--vx));
+  block-size: calc(var(--vx) * var(--vx-chart-rows, 40));
+}
+@media (max-width: 600px) { .vx-chart { --_gutter: calc(var(--vx) * 9); } .vx-chart-window { block-size: calc(var(--vx) * var(--vx-chart-rows, 32)); } }
+.vx-chart:not([data-vx-drawn]) > .vx-chart-window { display: none; }
+
+/* the scale's numbers, each on the level it marks; the places' names, each under its place */
+.vx-chart-y, .vx-chart-x { position: absolute; inset: 0; pointer-events: none; font-size: 0.75rem; line-height: calc(var(--vx) * 4); color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vx-chart-y > span { position: absolute; inset-inline-end: calc(100% + var(--vx) * 3); translate: 0 -50%; }
+.vx-chart-x > span { position: absolute; inset-block-start: calc(100% + var(--vx) * 2); translate: -50% 0; } /* set with left: the columns run left to right in any direction of writing */
+.vx-chart-x > span[hidden] { display: none; }
+
+/* the series' names, each beside a lamp of its light */
+.vx-chart-key { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); margin: 0; margin-inline-start: var(--_gutter); padding: 0; list-style: none; font-size: 0.875rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); }
+.vx-chart-key > li { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); }
+.vx-chart-key .vx-lamp { inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }
+
+/* the table: words for a screen reader once the window is drawn, unless it is asked to stay */
+.vx-chart[data-vx-drawn]:not([data-vx-table="shown"]) > table { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.vx-chart > table { border-collapse: collapse; font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-variant-numeric: tabular-nums; }
+.vx-chart > table caption { text-align: start; }
+.vx-chart > table :is(th, td) { padding: var(--vx) calc(var(--vx) * 3) var(--vx) 0; text-align: start; font-weight: 400; }
+.vx-chart > table thead th { color: var(--vx-ink-quiet); font-weight: 600; border-block-end: 1px solid var(--vx-slate); }
+.vx-chart > table tbody th { font-weight: 600; }
+.vx-chart > table td { text-align: end; }
+
+/* the marks for a page with no voxels: a painted window, painted columns and a line */
+.vx-chart-marks { position: absolute; inset: 0; pointer-events: none; }
+.vx-chart-window[data-vx-live] > .vx-chart-marks { display: none; }
+.vx-chart-window:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+.vx-chart-marks > span { position: absolute; background: var(--_light); }
+/* a column of lamps: two voxels of light, a voxel apart, from the bottom up */
+.vx-chart-marks > span { -webkit-mask: linear-gradient(to top, #000 0 calc(var(--vx) * 2), transparent 0) bottom / 100% calc(var(--vx) * 3) repeat-y; mask: linear-gradient(to top, #000 0 calc(var(--vx) * 2), transparent 0) bottom / 100% calc(var(--vx) * 3) repeat-y; }
+.vx-chart-marks > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.vx-chart-marks polyline { fill: none; stroke: var(--_light); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.vx-chart-marks rect { fill: var(--_light); }
+.vx-chart-marks [data-vx-light] { --_light: var(--lit-accent, var(--vx-enamel)); }
+.vx-chart-marks [data-vx-light="go"] { --_light: var(--lit-go, var(--vx-leaf)); }
+.vx-chart-marks [data-vx-light="stop"] { --_light: var(--lit-stop, var(--vx-brick)); }
+.vx-chart-marks [data-vx-light="warm"] { --_light: var(--lit-warm, var(--vx-steel)); }
+.vx-chart-marks [data-vx-light="stud"] { --_light: var(--vx-steel); } /* the studs are steel, as drawn */
 
 /* ==== css/checkbox.css ==== */
 
@@ -995,9 +1400,11 @@ dialog.vx-dialog:focus-visible { outline: none; }
   /* it keeps the room its target takes, so that two targets never lie on each other. Where it
      must sit in a corner, take the margin off there: the target still reaches out. */
   margin: calc(var(--vx) * 2);
-  /* The cross is cut a voxel to the cell: three voxels in a face of seven, two clear on every
-     side. A glyph of the key face carries the gap after it and sits high in its line; a voxel
-     of indent and a voxel of padding above move it half a voxel each way, to the middle. */
+  /* The cross is cut a voxel to the cell: three voxels in the middle of a cap of seven. A
+     keycap's top is a voxel smaller all round, so on the top, which is five across, one voxel is
+     clear on every side of it. A glyph of the key face carries the gap after it and sits high in
+     its line; a voxel of indent and a voxel of padding above move it half a voxel each way, to
+     the middle. */
   font-size: calc(var(--vx) * 10);
   text-indent: var(--vx);
   padding-block-start: var(--vx);
@@ -1075,6 +1482,63 @@ figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns:
   -webkit-user-select: none;
 }
 
+/* ==== css/code-input.css ==== */
+
+/* ---------- Code input ---------- */
+
+/* A row of small windows, one a character, with one real input lying over them. Its letter
+   spacing puts each character in its own window.
+   Markup: <span class="vx-otp" style="--vx-otp-n: 6">
+             <input autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" aria-label="Code from the email">
+           </span>
+   A window is nine voxels by thirteen, the next two voxels on. The row is half a window wider
+   than its windows: room for the caret after the last character, so the input never scrolls. */
+.vx-otp {
+  --_w: calc(var(--vx) * 9);
+  --_h: calc(var(--vx) * 13);
+  --_gap: calc(var(--vx) * 2);
+  --_pitch: calc(var(--_w) + var(--_gap));
+  position: relative;
+  display: inline-flex;
+  gap: var(--_gap);
+  box-sizing: border-box;
+  inline-size: calc(var(--vx-otp-n, 6) * var(--_pitch) + var(--_w) / 2);
+  block-size: var(--_h);
+  direction: ltr; /* a code reads left to right in every language */
+  vertical-align: top;
+  font: 500 1.5rem/1 var(--vx-mono);
+}
+.vx-otp > input {
+  position: absolute; inset: 0; z-index: 1;
+  box-sizing: border-box; inline-size: 100%; block-size: 100%;
+  margin: 0; border: 0; border-radius: 0; outline: 0; background: none;
+  padding: 0 0 0 calc((var(--_w) - 1ch) / 2);
+  font: inherit;
+  letter-spacing: calc(var(--_pitch) - 1ch);
+  color: var(--vx-ink);
+  caret-color: var(--lit-accent, var(--vx-enamel));
+  font-variant-numeric: tabular-nums;
+}
+.vx-otp > input::selection { background: color-mix(in oklab, var(--lit-accent, var(--vx-enamel)) 30%, transparent); }
+.vx-otp > input:disabled { color: var(--vx-ink-quiet); -webkit-text-fill-color: var(--vx-ink-quiet); opacity: 1; }
+.vx-otp-cell { position: relative; isolation: isolate; flex: none; inline-size: var(--_w); block-size: var(--_h); }
+
+/* With no script (and until it runs) the windows are painted on the row itself: a slate rim and
+   a pale floor, one a character. */
+.vx-otp:not([data-vx-on]) {
+  background:
+    repeating-linear-gradient(to right, var(--vx-floor, var(--vx-chalk)) 0 calc(var(--_w) - var(--vx) * 2), transparent 0 var(--_pitch)) var(--vx) var(--vx) / calc(var(--vx-otp-n, 6) * var(--_pitch) - var(--vx)) calc(var(--_h) - var(--vx) * 2) no-repeat,
+    repeating-linear-gradient(to right, var(--vx-slate) 0 var(--_w), transparent 0 var(--_pitch)) 0 0 / calc(var(--vx-otp-n, 6) * var(--_pitch)) var(--_h) no-repeat;
+}
+.vx-otp:not([data-vx-on]):has(> input:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: var(--vx); }
+
+/* plain, with the script: a window a cell; the one the next character goes into has the
+   accent's rim, and all of them a red one when the code is wrong */
+.vx-otp-cell:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+.vx-otp-cell[data-vx-active]:not([data-vx-live]) { box-shadow: inset 0 0 0 var(--vx) var(--lit-accent, var(--vx-enamel)); }
+.vx-otp:has(> input[aria-invalid="true"]) > .vx-otp-cell:not([data-vx-live]) { box-shadow: inset 0 0 0 var(--vx) var(--lit-stop, var(--vx-brick)); }
+.vx-otp:has(> input:disabled) > .vx-otp-cell:not([data-vx-live]) { background: var(--vx-slate); box-shadow: none; }
+
 /* ==== css/collapsible.css ==== */
 
 /* ---------- Collapsible ---------- */
@@ -1133,6 +1597,319 @@ figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns:
   .vx-collapsible::details-content, .vx-collapsible > summary::after { transition: none; }
 }
 
+/* ==== css/combobox.css ==== */
+
+/* ---------- Combobox ---------- */
+
+/* A field you type in (the kit's well), and under it a float of rows that match. The rows are
+   words, in the text face; the marked row has the accent groove at its start.
+   Markup: <div class="vx-combobox">
+             <label class="vx-field-label" for="p">Project</label>
+             <span class="vx-well"><input id="p" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="p-list" autocomplete="off"></span>
+             <div class="vx-combobox-float" popover="manual">
+               <div role="listbox" id="p-list" aria-labelledby="…"><div role="option">harbor-api</div> …</div>
+               <p class="vx-combobox-empty" hidden>No project is called “{q}”.</p>
+             </div>
+           </div> */
+
+.vx-combobox { display: grid; gap: calc(var(--vx) * 2); min-inline-size: 0; max-inline-size: 100%; inline-size: calc(var(--vx) * 80); }
+
+/* the float: the script makes it as wide as its field and puts it under it */
+.vx-combobox-float {
+  position: fixed; inset: auto; box-sizing: border-box; margin: 0; border: 0; overflow: visible; isolation: isolate;
+  inline-size: calc(var(--vx) * 80); max-inline-size: calc(100vw - var(--vx) * 6);
+  padding: calc(var(--vx) * 2) 0; background: none; color: var(--vx-ink);
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6);
+}
+.vx-combobox-float:is(:popover-open, [data-vx-measure]) { display: block; }
+.vx-combobox-float[data-vx-measure] { visibility: hidden; }
+.vx-combobox-float::backdrop { background: none; }
+/* a long list scrolls inside the float: six rows and a half show, so that it is plain there are more */
+.vx-combobox-float [role="listbox"] { max-block-size: calc(var(--vx) * 72); overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; }
+
+/* a row: words, eleven voxels high, the size of anything pressed */
+.vx-combobox-float [role="option"] {
+  display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 5) calc(var(--vx) * 2) calc(var(--vx) * 6);
+  overflow-wrap: anywhere; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-combobox-float [role="option"][hidden], .vx-combobox-float [role="group"][hidden] { display: none; }
+.vx-combobox-float [role="option"][aria-disabled="true"] { color: var(--vx-ink-quiet); cursor: default; }
+.vx-option-trail { margin-inline-start: auto; flex: none; color: var(--vx-ink-quiet); font-size: 0.875rem; }
+.vx-combobox-title { padding: calc(var(--vx) * 2) calc(var(--vx) * 5) calc(var(--vx) * 1) calc(var(--vx) * 6); font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet); }
+.vx-combobox-empty { margin: 0; padding: calc(var(--vx) * 2.5) calc(var(--vx) * 5) calc(var(--vx) * 2.5) calc(var(--vx) * 6); color: var(--vx-ink-quiet); }
+.vx-combobox-empty[hidden] { display: none; }
+
+/* plain: a painted plate with the accent's line where its light shows, and the mark painted */
+.vx-combobox-float:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+.vx-combobox-float:not([data-vx-live]) [role="option"][data-vx-active] {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+.vx-combobox-float:not([data-vx-live]) [role="option"][data-vx-active]:dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
+
+/* ==== css/command-palette.css ==== */
+
+/* ---------- Command palette ---------- */
+
+/* The kit's dialog, with a well at its top and rows of words under it. The well is in the
+   dialog's header, so the dialog's own groove parts it from the rows. The marked row has the
+   accent groove at its start.
+   Markup: <dialog class="vx-dialog vx-command-dialog" aria-label="Commands">
+             <header class="vx-command-head"><label class="vx-aloud" for="q">…</label><span class="vx-well"><input id="q" role="combobox" aria-controls="cmds" …></span></header>
+             <div class="vx-command-scroll"><div class="vx-command" id="cmds" role="listbox" aria-label="Commands" data-vx-chord="mod+k">…</div></div>
+             <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
+             <div class="vx-command-foot">…</div>
+           </dialog> */
+
+dialog.vx-command-dialog { inline-size: min(calc(var(--vx) * 140), calc(100vw - 32px)); margin-block-start: min(16vh, calc(var(--vx) * 30)); }
+.vx-command-dialog > header.vx-command-head { padding: calc(var(--vx) * 5) calc(var(--vx) * 4); font: inherit; }
+.vx-command-head .vx-well input { font-size: 1.0625rem; }
+
+/* the rows scroll by themselves. The list's own drawing reaches four voxels past its end; the
+   room at the scroller's end is that, so it adds nothing to what can be scrolled. */
+.vx-command-scroll {
+  max-block-size: min(calc(var(--vx) * 92), 52vh); overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 4);
+}
+.vx-command { position: relative; isolation: isolate; display: block; min-inline-size: 0; font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink); }
+.vx-command [role="option"] {
+  display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 2) calc(var(--vx) * 2) calc(var(--vx) * 5);
+  overflow-wrap: anywhere; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-command [role="option"][hidden], .vx-command [role="group"][hidden] { display: none; }
+.vx-command [role="option"][aria-disabled="true"] { color: var(--vx-ink-quiet); cursor: default; }
+.vx-command .vx-option-trail { margin-inline-start: auto; flex: none; color: var(--vx-ink-quiet); font-size: 0.875rem; }
+.vx-command-title { padding: calc(var(--vx) * 3) calc(var(--vx) * 2) calc(var(--vx) * 1) calc(var(--vx) * 5); font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet); }
+.vx-command [role="group"]:first-child > .vx-command-title, .vx-command > .vx-canvas + [role="group"] > .vx-command-title { padding-block-start: calc(var(--vx) * 1); }
+
+.vx-command-empty { margin: 0; padding: calc(var(--vx) * 2) calc(var(--vx) * 9) calc(var(--vx) * 6); color: var(--vx-ink-quiet); }
+.vx-command-empty[hidden] { display: none; }
+/* how it is used, in words with the names of keys */
+.vx-command-foot {
+  display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 5); color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 6);
+}
+.vx-command-foot > span { display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5); }
+/* a finger has no arrow keys to be told about */
+@media (hover: none) and (pointer: coarse) { .vx-command-foot { display: none; } }
+
+/* plain: the mark painted where its groove is cut */
+.vx-command:not([data-vx-live]) [role="option"][data-vx-active] {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: var(--vx) 50%;
+}
+.vx-command:not([data-vx-live]) [role="option"][data-vx-active]:dir(rtl) { background-position: calc(100% - var(--vx)) 50%; }
+
+/* ==== css/context-menu.css ==== */
+
+/* ---------- Context menu ---------- */
+
+/* The region a right press (or a long press, or the menu key) opens the kit's menu on, and the
+   menu while it is open at a point. The menu is the kit's own (.vx-menu); its look is the menu's.
+   Markup: see src/components/context-menu.js. */
+
+/* the region: a long press is the menu's, not the phone's own callout over a link or a picture */
+[data-vx-contextmenu] { position: relative; -webkit-touch-callout: none; }
+/* and on a touch screen not the start of a selection either; a text field in it keeps both */
+@media (pointer: coarse) {
+  [data-vx-contextmenu] { -webkit-user-select: none; user-select: none; }
+  [data-vx-contextmenu] :is(input, textarea, [contenteditable]:not([contenteditable="false"])) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+}
+
+/* Opened by a hand, the menu itself holds the focus until an arrow goes to a row: it shows no
+   ring for that, as a dialog does not; its rows show theirs. */
+.vx-menu[data-vx-at]:focus { outline: none; }
+
+/* ==== css/data-table.css ==== */
+
+/* ---------- Data table ----------
+   The kit's table (.vx-table: words, one groove under the head), with heads you can press to
+   sort, a checkbox a row and one for all of them, and the kit's pagination under it. Nothing of
+   its own is drawn: src/components/data-table.js is the behaviour that makes them one thing.
+     <div class="vx-data-table" id="deploys" data-vx-rows="5">
+       <div class="vx-table"><div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="cap"><table>
+         <caption id="cap">Deploys</caption>
+         <thead><tr>
+           <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every row on this page"><span class="vx-box"></span></label></th>
+           <th scope="col" aria-sort="ascending"><button type="button" class="vx-data-table-sort">Service</button></th>
+           <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">Builds</button></th>
+         </tr></thead>
+         <tbody><tr>
+           <td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose harbor-api"><span class="vx-box"></span></label></td>
+           <th scope="row">harbor-api</th><td class="vx-num">14</td>
+         </tr>…</tbody>
+       </table></div></div>
+       <div class="vx-data-table-foot">
+         <p class="vx-data-table-count" role="status"></p>
+         <nav class="vx-pagination" aria-label="Pages of deploys" hidden>…</nav>
+       </div>
+     </div>
+   Every rule here names .vx-data-table, so it holds over the table's, the checkbox's and the
+   pagination's own rules whichever file comes first in the kit's stylesheet.
+   Rows are whole voxels: the head is 11 voxels (a 44 px target), a body row 11 as well. */
+
+.vx-data-table { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; font-family: var(--vx-font); }
+
+/* the head: every head is 11 voxels tall, so the sort buttons are 44 px to hit and the groove
+   stays on the grid */
+.vx-data-table .vx-table thead th { padding-block: calc(var(--vx) * 3); vertical-align: middle; }
+.vx-data-table .vx-table thead th:has(> .vx-data-table-sort) { padding-block: 0; }
+
+/* a head you can press: its words, and a mark that says which way it is sorted */
+.vx-data-table .vx-data-table-sort {
+  display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5);
+  box-sizing: border-box; min-inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 11);
+  margin: 0; padding: 0; border: 0; border-radius: 0; background: none;
+  font: inherit; line-height: inherit; color: inherit; text-align: inherit; letter-spacing: inherit;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-data-table .vx-num > .vx-data-table-sort { justify-content: flex-end; }
+.vx-data-table .vx-data-table-sort:hover, .vx-data-table [aria-sort] > .vx-data-table-sort { color: var(--vx-ink); }
+.vx-data-table .vx-data-table-sort:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
+/* the mark, cut from half-voxel cells like the kit's glyphs: two quiet points when the column is
+   not sorted by; one point, up for ascending and down for descending, when it is */
+.vx-data-table .vx-data-table-sort::after {
+  content: ""; flex: none;
+  inline-size: calc(var(--vx) * 2.5); block-size: calc(var(--vx) * 3.5);
+  background: currentColor; opacity: 0.5;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 0h1v1H2zM1 1h3v1H1zM0 2h5v1H0zM0 4h5v1H0zM1 5h3v1H1zM2 6h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 0h1v1H2zM1 1h3v1H1zM0 2h5v1H0zM0 4h5v1H0zM1 5h3v1H1zM2 6h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-data-table [aria-sort="ascending"] > .vx-data-table-sort::after, .vx-data-table [aria-sort="descending"] > .vx-data-table-sort::after {
+  opacity: 1;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 2h1v1H2zM1 3h3v1H1zM0 4h5v1H0z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 7' shape-rendering='crispEdges'%3E%3Cpath d='M2 2h1v1H2zM1 3h3v1H1zM0 4h5v1H0z'/%3E%3C/svg%3E");
+}
+.vx-data-table [aria-sort="descending"] > .vx-data-table-sort::after { transform: scaleY(-1); }
+/* with no script a head cannot sort: it is words, and offers nothing */
+.vx-data-table:not([data-vx-table]) .vx-data-table-sort { cursor: inherit; pointer-events: none; }
+.vx-data-table:not([data-vx-table]) .vx-data-table-sort::after { display: none; }
+
+/* the checkboxes: a column of their own, each 11 voxels square to hit, with no words */
+.vx-data-table .vx-table :is(th, td).vx-data-table-pick { inline-size: calc(var(--vx) * 11); padding-block: 0; padding-inline: 0 calc(var(--vx) * 1); vertical-align: middle; }
+.vx-data-table .vx-data-table-pick > .vx-check { display: flex; justify-content: center; gap: 0; inline-size: calc(var(--vx) * 11); min-block-size: calc(var(--vx) * 11); }
+/* a body row is 11 voxels: its words sit in the middle beside the checkbox */
+.vx-data-table .vx-table tbody :is(th, td) { vertical-align: middle; }
+.vx-data-table .vx-table tbody :is(th, td):not(.vx-data-table-pick) { padding-block: calc(var(--vx) * 3); }
+
+/* under the table: how many rows, and the pages */
+.vx-data-table-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 3) calc(var(--vx) * 6); min-inline-size: 0; }
+.vx-data-table-count { margin: 0; color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-variant-numeric: tabular-nums; }
+.vx-data-table-count:empty { display: none; }
+.vx-data-table .vx-pagination[hidden] { display: none; }
+
+/* ==== css/date-picker.css ==== */
+
+/* ---------- Date picker ---------- */
+
+/* A well with the real date input, a small key beside it, and the calendar in a float.
+   Markup: <div class="vx-date">
+             <span class="vx-well"><input type="date" id="ship" aria-label="Ship on"></span>
+             <button class="vx-button" type="button" popovertarget="ship-pick" data-vx-say="Choose the day"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+             <div class="vx-popover vx-date-float" id="ship-pick" popover role="dialog" aria-label="Ship on">
+               <div class="vx-calendar" data-vx-for="ship"></div>
+             </div>
+           </div> */
+.vx-date { display: inline-flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); max-inline-size: 100%; vertical-align: top; }
+/* a width, not a basis: a basis does not count when the row works out how wide it wants to be,
+   and the key would go to a line of its own with room to spare */
+.vx-date > .vx-well { flex: 0 1 auto; inline-size: calc(var(--vx) * 44); min-inline-size: 0; }
+.vx-date > .vx-well + .vx-well { inline-size: calc(var(--vx) * 40); }
+.vx-date > [popovertarget] { flex: none; inline-size: calc(var(--vx) * 11); padding: 0; }
+/* once the key stands in for it, the browser's own picker steps aside (typing stays the browser's) */
+.vx-date[data-vx-on] input::-webkit-calendar-picker-indicator { display: none; }
+/* the float is as wide as the month in it */
+.vx-popover.vx-date-float {
+  inline-size: min(calc(var(--vx) * 87), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 87), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+}
+
+/* A small calendar drawn in half-voxel cells: two rings, a bar, and four days. */
+.vx-date-glyph {
+  display: block;
+  inline-size: calc(var(--vx) * 3.5);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM5 0h1v1H5zM0 1h7v2H0zM0 3h1v4H0zM6 3h1v4H6zM1 6h5v1H1zM2 4h1v1H2zM4 4h1v1H4z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM5 0h1v1H5zM0 1h7v2H0zM0 3h1v4H0zM6 3h1v4H6zM1 6h5v1H1zM2 4h1v1H2zM4 4h1v1H4z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+/* With no script the key could open only an empty float: it goes, and the input's own picker stays. */
+@media (scripting: none) {
+  .vx-date > [popovertarget] { display: none; }
+}
+
+/* ==== css/drawer.css ==== */
+
+/* ---------- Drawer ---------- */
+
+/* The sheet (css/sheet.css holds what the two share), made for where the window is: up from the
+   bottom on a phone, in from the end on a wide screen. data-vx-side fixes one edge. Its handle
+   shows where it comes from the bottom or the top; a hand drags it shut by that.
+   Markup: see src/components/drawer.js. */
+
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]) {
+    --_side: bottom;
+    --_out: 0 calc(100% + var(--vx) * 6);
+    inset-block: auto 0;
+    inset-inline: 0;
+    inline-size: auto;
+    max-block-size: calc(100% - var(--vx) * 11);
+  }
+}
+
+/* The handle: a real key at its inner edge, the width of a thumb. The pull drawn on it is voxels
+   (drawer.js); its target is eleven voxels high, more than it shows. */
+dialog.vx-drawer > .vx-drawer-handle {
+  display: none;
+  position: relative;
+  order: -1; /* it is last in the markup, so that the focus does not land on it first */
+  flex: none;
+  align-self: center;
+  inline-size: calc(var(--vx) * 24);
+  block-size: calc(var(--vx) * 6);
+  margin: calc(var(--vx) * 2) 0 calc(var(--vx) * -2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: grab;
+  touch-action: none; /* a finger on it drags the drawer; it does not scroll the page */
+  -webkit-tap-highlight-color: transparent;
+}
+dialog.vx-drawer > .vx-drawer-handle::after { content: ""; position: absolute; inset: calc(var(--vx) * -2.5) calc(var(--vx) * -4); }
+dialog.vx-drawer > .vx-drawer-handle:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+dialog.vx-drawer:is([data-vx-side="bottom"], [data-vx-side="top"]) > .vx-drawer-handle { display: block; }
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]) > .vx-drawer-handle { display: block; }
+}
+/* from the top, its inner edge is its lowest */
+dialog.vx-drawer[data-vx-side="top"] > .vx-drawer-handle { order: 1; margin: calc(var(--vx) * -2) 0 calc(var(--vx) * 3); }
+/* a header with a handle over it needs less room above its words */
+dialog.vx-drawer[data-vx-side="bottom"]:has(> .vx-drawer-handle) > header { padding-block-start: calc(var(--vx) * 1); }
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]):has(> .vx-drawer-handle) > header { padding-block-start: calc(var(--vx) * 1); }
+}
+
+/* while a hand holds it */
+dialog.vx-drawer[data-vx-dragging] { user-select: none; -webkit-user-select: none; }
+dialog.vx-drawer[data-vx-dragging] > .vx-drawer-handle { cursor: grabbing; }
+
+/* plain: the pull is painted, steel; held, the accent */
+dialog.vx-drawer:not([data-vx-live]) > .vx-drawer-handle::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--vx) * 2) calc(var(--vx) * 6);
+  background: var(--vx-steel);
+}
+dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::before { background: var(--lit-accent, var(--vx-enamel)); }
+
 /* ==== css/empty-state.css ==== */
 
 /* ---------- Empty state ---------- */
@@ -1165,11 +1942,11 @@ figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns:
 
 /* ---------- lit: slider ---------- */
 
-/* The key is five voxels wide and stops a voxel short of each end of the trench. The browser's
-   own thumb is made seven wide (and stays unseen), so its middle is always the key's middle and
-   the key stays under the pointer. */
-[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 7); }
-[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 7); }
+/* A fader. Its knob is seven voxels wide and stops a voxel short of each end of the slot. The
+   browser's own thumb is made nine wide (and stays unseen), so its middle is always the knob's
+   middle and the knob stays under the pointer. */
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 9); }
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 9); }
 [data-vx-look="lit"] .vx-slider input { accent-color: var(--lit-accent); }
 [data-vx-look="lit"] .vx-slider input:disabled { cursor: default; }
 
@@ -1440,7 +2217,9 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
    An add-on is a label of the same input: a press on it lands in the input, and it is read out as
    part of the input's name, in order ("Address https:// .fogline.app"). */
 
-.vx-input-group { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 4); min-inline-size: 0; }
+/* four voxels between the well and its key, beside it or under it: the key's side and the light
+   at its foot are drawn two and a half voxels left of and above its face, and stay clear of the rim */
+.vx-input-group { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 4); min-inline-size: 0; }
 /* The well asks for its words and 24 voxels to type in. Where the line cannot give that and the
    key too, the key goes to the next line and the well takes the whole of this one; the well
    itself gives way before the page scrolls sideways. */
@@ -1660,12 +2439,414 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
   background: var(--lit-accent, var(--vx-enamel));
 }
 
+/* ==== css/marker.css ==== */
+
+/* ---------- Marker ---------- */
+
+/* A line across a thread with a word in it: a date, "New". Tool: groove (the kit's .vx-groove),
+   one either side of the word. No script.
+   Markup: <div class="vx-marker">
+             <span class="vx-groove" aria-hidden="true"></span>
+             <span class="vx-marker-word"><time datetime="2026-11-17">Today</time></span>
+             <span class="vx-groove" aria-hidden="true"></span>
+           </div>
+   The word is read in its place in the thread; the grooves are only seen.
+   data-vx-kind="new"   where what has not been read begins. Its grooves carry the accent's light
+                        (a light means something: this marks a state), so write
+                        data-vx-light="accent" on both, and say what is new in words:
+                        <span class="vx-marker-word">New<span class="vx-aloud"> messages</span></span>
+   data-vx-align="start"  the word near the start, a short groove before it
+   A date keeps to the room's own warm light: it parts the thread and says nothing more. */
+
+.vx-marker {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  margin: 0;
+  /* five voxels a line and a voxel above and below: seven voxels, a groove through the middle */
+  padding-block: calc(var(--vx) * 1);
+  font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font);
+  color: var(--vx-ink-quiet);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.vx-marker > .vx-groove { flex: 1 1 0; min-inline-size: calc(var(--vx) * 4); }
+.vx-marker > :not(.vx-groove) { flex: 0 1 auto; min-inline-size: 0; }
+.vx-marker[data-vx-align="start"] { text-align: start; }
+.vx-marker[data-vx-align="start"] > .vx-groove:first-child { flex: 0 0 calc(var(--vx) * 6); }
+
+/* new: the word is the accent's own colour for words */
+.vx-marker[data-vx-kind="new"] { color: var(--vx-link); }
+/* plain: its grooves are painted in the accent, whether or not the light was asked for */
+.vx-marker[data-vx-kind="new"] > .vx-groove:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* in a thread: room above and below, the same as between two people */
+:is(.vx-message, .vx-marker) + .vx-marker, .vx-marker + .vx-message { margin-block-start: calc(var(--vx) * 4); }
+
+/* ==== css/menubar.css ==== */
+
+/* ---------- Menubar ---------- */
+
+/* The row of words across the top of an app; each opens the kit's menu. The word whose menu is
+   out has the accent groove under it.
+   Markup: <ul class="vx-menubar" role="menubar" aria-label="harbor-api">
+             <li role="none">
+               <button type="button" role="menuitem" id="m-file-k" aria-haspopup="menu" aria-expanded="false" popovertarget="m-file">File</button>
+               <div class="vx-menu" id="m-file" popover role="menu" aria-labelledby="m-file-k">…</div>
+             </li> …
+           </ul> */
+
+.vx-menubar {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center; gap: 0 calc(var(--vx) * 1);
+  box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; list-style: none;
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink-quiet);
+}
+.vx-menubar > li { display: contents; }
+.vx-menubar > li > [role="menuitem"], .vx-menubar > [role="menuitem"] {
+  position: relative; display: inline-flex; align-items: center; box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); min-inline-size: calc(var(--vx) * 11); justify-content: center; padding: calc(var(--vx) * 2) calc(var(--vx) * 3);
+  margin: 0; border: 0; border-radius: 0; background: none; color: inherit; font: 500 1rem/calc(var(--vx) * 6) var(--vx-font);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-menubar > li > [role="menuitem"]:hover, .vx-menubar [role="menuitem"][aria-expanded="true"] { color: var(--vx-ink); }
+.vx-menubar > li > [role="menuitem"]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+
+/* plain: the groove is a painted line under the word whose menu is out */
+.vx-menubar:not([data-vx-live]) > li > [role="menuitem"][aria-expanded="true"]::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 3); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+
+/* ==== css/message-scroller.css ==== */
+
+/* ---------- Message scroller ---------- */
+
+/* The thread: the kit's scroll area holding messages. It keeps to the newest message while you
+   are at its foot, leaves you alone while you read back, and shows a key when something new
+   has come below.
+   Markup: <div class="vx-scroll vx-thread" style="--vx-scroll-h: 96">
+             <div class="vx-recess vx-scroll-well">
+               <div class="vx-scroll-view" role="log" aria-label="Deploys, harbor-api" tabindex="0">
+                 <article class="vx-message">…</article> …
+               </div>
+               <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+             </div>
+             <span class="vx-scroll-bar" aria-hidden="true"></span>
+           </div>
+   Leave .vx-recess off the well and the thread lies on the surface itself (a thread of bubbles
+   wants that: theirs are cut into the panel, yours stand on it). The key's slot is hidden
+   until the script shows it; with no script it never is, and the log scrolls as any does. */
+
+.vx-thread > .vx-scroll-well { position: relative; }
+/* messages one under another; room at the head and the foot for what stands in the thread */
+.vx-thread .vx-scroll-view { padding-block: calc(var(--vx) * 5); }
+/* a thread on the surface has no wall to keep clear of */
+.vx-thread > .vx-scroll-well:not(.vx-recess) > .vx-scroll-view { padding-inline: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+
+/* the key that says something new is below: it stands at the foot of the thread, in the middle,
+   over the words. Its slot is as small as the key, so the thread under it can still be pressed. */
+.vx-thread-new { position: absolute; z-index: 2; inset-block-end: calc(var(--vx) * 4); inset-inline: calc(var(--vx) * 4); isolation: isolate; display: block; inline-size: fit-content; max-inline-size: calc(100% - var(--vx) * 8); margin-inline: auto; translate: none; }
+
+/* ==== css/message.css ==== */
+
+/* ---------- Message ---------- */
+
+/* One message: who, when, the words. Tool: none. It is words on the surface beside an avatar
+   (the kit's .vx-avatar); nothing is boxed and nothing stands up. No script.
+   Markup: <article class="vx-message" aria-labelledby="m1-who m1-when">
+             <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
+             <div class="vx-message-body">
+               <header class="vx-message-head">
+                 <span class="vx-message-who" id="m1-who">Mina Okafor</span>
+                 <time class="vx-message-when" id="m1-when" datetime="2026-11-17T10:42">10:42</time>
+               </header>
+               <div class="vx-message-text"><p>The words.</p></div>
+               <p class="vx-message-foot">Edited</p>                                  (optional: a line about the message)
+             </div>
+           </article>
+   The article is named by who and when (aria-labelledby), so a screen reader that moves from
+   message to message hears both; the avatar is then only a picture and is hidden from it.
+   data-vx-from="me"   yours: no avatar, set at the far side
+   data-vx-run         it follows one from the same person: the avatar and the head are not shown
+                       (the head is still written, and still read out)
+   What a message holds besides words goes in the body, under the text: a bubble (.vx-bubble, in
+   place of the text), attachments, a questionnaire, a trace. A thread of messages is a
+   role="log" (see message-scroller). */
+
+.vx-message {
+  display: grid;
+  grid-template-columns: calc(var(--vx) * 8) minmax(0, 1fr);
+  column-gap: calc(var(--vx) * 3);
+  align-items: start;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  margin: 0;
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  color: var(--vx-ink);
+}
+.vx-message > .vx-avatar { grid-column: 1; }
+.vx-message-body { grid-column: 2; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: calc(var(--vx) * 1); justify-items: start; min-inline-size: 0; }
+.vx-message-body > * { max-inline-size: 100%; }
+
+/* who and when: one line of five voxels, the name first */
+.vx-message-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: calc(var(--vx) * 2); margin: 0; line-height: calc(var(--vx) * 5); overflow-wrap: anywhere; }
+.vx-message-who { font-size: 0.9375rem; font-weight: 650; }
+.vx-message-when { font-size: 0.8125rem; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+/* the words: the text face, six voxels a line. They select and copy as any words do. */
+.vx-message-text { font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; text-wrap: pretty; }
+.vx-message-text > * { margin: 0; }
+.vx-message-text > :not(:first-child) { margin-block-start: calc(var(--vx) * 2); } /* stronger than a card's rule for paragraphs */
+.vx-message-text a { color: var(--vx-link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+.vx-message-text a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.vx-message-text code { font: 400 0.875em/1 var(--vx-mono); }
+
+/* a line about the message: edited, sending, not sent. A lamp (.vx-lamp) may lead it; the words
+   say the state, the lamp only repeats it. */
+.vx-message-foot { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 2); margin: 0; min-block-size: calc(var(--vx) * 5); font-size: 0.8125rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+/* a key in it (send again) stands clear of the words, so its light does not lie on them */
+.vx-message-foot > .vx-button { margin-inline-start: calc(var(--vx) * 2); }
+
+/* yours: no avatar, and what it holds is set at the far side. The words still start where
+   words start. */
+.vx-message[data-vx-from="me"] { grid-template-columns: minmax(0, 1fr); }
+.vx-message[data-vx-from="me"] > .vx-avatar { display: none; }
+.vx-message[data-vx-from="me"] > .vx-message-body { grid-column: 1; justify-items: end; }
+.vx-message[data-vx-from="me"] :is(.vx-message-head, .vx-message-foot) { justify-content: flex-end; }
+
+/* it follows one from the same person: only the words are shown. The head keeps its place in
+   the markup and is read out; it takes no room. */
+.vx-message[data-vx-run] > .vx-avatar { visibility: hidden; block-size: 0; }
+.vx-message[data-vx-run] .vx-message-head { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* messages one under another */
+.vx-message + .vx-message { margin-block-start: calc(var(--vx) * 5); }
+.vx-message + .vx-message[data-vx-run] { margin-block-start: calc(var(--vx) * 2); }
+
+/* ==== css/navbar.css ==== */
+
+/* ---------- Navbar ---------- */
+
+/* The bar across the top of a site or an app. It lies on a surface; its links are navs with the
+   accent groove; it has one key at the end at most, and one more that folds the links away
+   where the bar is narrow.
+   Markup: <header class="vx-card vx-navbar-surface" data-vx-bolts="none">
+             <div class="vx-navbar">
+               <a class="vx-navbar-brand" href="/">fogline</a>
+               <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="top">Menu</button>
+               <div class="vx-navbar-fold" id="top">
+                 <nav class="vx-nav" data-vx-mark="groove" aria-label="Main">…</nav>
+                 <a class="vx-button" data-vx-kind="main" href="/new">New project</a>
+               </div>
+             </div>
+           </header>
+   The bar folds by its own width (160 voxels), so one in a narrow column folds on a wide screen
+   too. Folding needs the script: without it (no data-vx-on) the links wrap and are never hidden. */
+
+/* a surface that is only a bar: three voxels above and below what is on it, room for a key's sides */
+.vx-card.vx-navbar-surface { padding: calc(var(--vx) * 3) calc(var(--vx) * 6); }
+
+.vx-navbar {
+  container: vx-navbar / inline-size;
+  position: relative; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 6); box-sizing: border-box; min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-card > .vx-navbar { margin-block-start: 0; }
+.vx-navbar-brand {
+  display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); margin: 0;
+  font: 700 1.0625rem/calc(var(--vx) * 6) var(--vx-font); letter-spacing: -0.005em; color: var(--vx-ink); text-decoration: none; overflow-wrap: anywhere;
+}
+a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
+.vx-navbar-fold { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 6); min-inline-size: 0; }
+.vx-navbar-fold > .vx-nav { flex: 0 1 auto; }
+/* the one key at the end */
+.vx-navbar-fold > .vx-button { margin-inline-start: auto; }
+/* the key that folds the links away: only where the bar is narrow, and only with the script */
+.vx-navbar-key { display: none; margin-inline-start: auto; }
+
+@container vx-navbar (max-width: 639.98px) {
+  .vx-navbar[data-vx-on] > .vx-navbar-key { display: inline-flex; }
+  .vx-navbar[data-vx-on] > .vx-navbar-key[aria-expanded="false"] ~ .vx-navbar-fold { display: none; }
+  /* out: a column under the bar, on the same surface */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold { flex: 1 0 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; row-gap: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-button { margin-inline-start: 0; align-self: start; }
+  /* plain: the groove stands at the start of the current link, as in any column */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+    inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+  }
+}
+
+/* ==== css/navigation-menu.css ==== */
+
+/* ---------- Navigation menu ---------- */
+
+/* A site's top links; some open a float of more links under them, each with a line saying where
+   it leads. Words on the surface; what opens is a float. The current page has the accent groove
+   under its word on the bar, and at its start in the float.
+   Markup: <nav class="vx-navigation-menu" aria-label="fogline"><ul>
+             <li><button type="button" aria-expanded="false" popovertarget="nm-product">Product</button>
+               <div class="vx-navigation-menu-float" id="nm-product" popover><ul>
+                 <li><a href="/deploys"><span class="vx-nm-name">Deploys</span><span class="vx-nm-about">Ship a branch in one press.</span></a></li>
+               </ul></div></li>
+             <li><a href="/pricing">Pricing</a></li>
+           </ul></nav> */
+
+.vx-navigation-menu {
+  position: relative; isolation: isolate; box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink-quiet);
+}
+.vx-navigation-menu > ul { display: flex; flex-wrap: wrap; align-items: center; gap: 0 calc(var(--vx) * 1); margin: 0; padding: 0; list-style: none; }
+.vx-navigation-menu > ul > li { display: contents; }
+/* the words of the bar: its links and the buttons that open a float */
+.vx-navigation-menu > ul > li > :is(a, button) {
+  position: relative; display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 3);
+  margin: 0; border: 0; border-radius: 0; background: none; color: inherit; font: 500 1rem/calc(var(--vx) * 6) var(--vx-font);
+  text-decoration: none; cursor: pointer; overflow-wrap: anywhere; -webkit-tap-highlight-color: transparent;
+}
+.vx-navigation-menu > ul > li > :is(a, button):hover,
+.vx-navigation-menu > ul > li > button[aria-expanded="true"],
+.vx-navigation-menu > ul > li > a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+.vx-navigation-menu > ul > li > :is(a, button):focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* a chevron of cubes, turned over while its float is out */
+.vx-navigation-menu > ul > li > button::after {
+  content: ""; flex: none; inline-size: calc(var(--vx) * 2.5); block-size: calc(var(--vx) * 1.5); background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM4 0h1v1H4zM1 1h1v1H1zM3 1h1v1H3zM2 2h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 5 3' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM4 0h1v1H4zM1 1h1v1H1zM3 1h1v1H3zM2 2h1v1H2z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-navigation-menu > ul > li > button[aria-expanded="true"]::after { scale: 1 -1; }
+
+/* the float: the browser's own popover. With no script it opens in the middle of the window;
+   the part puts it under its word. Its width never depends on where it is. */
+.vx-navigation-menu-float {
+  box-sizing: border-box; margin: auto; border: 0; overflow: visible; isolation: isolate; background: none; color: var(--vx-ink);
+  inline-size: min(calc(var(--vx) * 132), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 132), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+  padding: calc(var(--vx) * 3);
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere;
+}
+.vx-navigation-menu-float:is(:popover-open, [data-vx-measure]) { display: block; }
+.vx-navigation-menu-float[data-vx-measure] { visibility: hidden; }
+.vx-navigation-menu-float:focus-visible { outline: none; }
+.vx-navigation-menu-float::backdrop { background: none; }
+.vx-navigation-menu-float[data-vx-narrow] { inline-size: min(calc(var(--vx) * 76), calc(100vw - var(--vx) * 6)); }
+.vx-navigation-menu-float ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: 0 calc(var(--vx) * 2); margin: 0; padding: 0; list-style: none; }
+.vx-navigation-menu-float a {
+  display: grid; gap: calc(var(--vx) * 0.5); box-sizing: border-box; min-block-size: calc(var(--vx) * 11);
+  padding: calc(var(--vx) * 3) calc(var(--vx) * 3) calc(var(--vx) * 3) calc(var(--vx) * 6);
+  color: var(--vx-ink); text-decoration: none; -webkit-tap-highlight-color: transparent;
+}
+.vx-navigation-menu-float a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+.vx-nm-name { font-weight: 600; }
+.vx-nm-about { color: var(--vx-ink-quiet); font-size: 0.9375rem; line-height: calc(var(--vx) * 5.5); }
+.vx-navigation-menu-float a:hover .vx-nm-name { text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+
+/* plain: the groove is a painted line under the current word, and at the start of the current
+   link in a float; the float is a painted plate */
+.vx-navigation-menu:not([data-vx-live]) > ul > li > :is(a[aria-current]:not([aria-current="false"]), button[data-vx-current])::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 3); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-navigation-menu-float:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+.vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+.vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
+
+/* ==== css/navs.css ==== */
+
+/* ---------- Navs ---------- */
+
+/* A row or a column of links to places. Words on the surface they are on: no box, nothing raised.
+   Markup: <nav class="vx-nav" data-vx-mark="groove" aria-label="harbor-api">
+             <a href="/overview">Overview</a>
+             <a href="/deploys" aria-current="page">Deploys</a>
+             <a role="link" aria-disabled="true">Billing</a>
+           </nav>
+   data-vx-mark: leave it out (the current link is heavier), "groove" (an accent groove under it,
+   or at its start in a column) or "seats" (a trench; the current link is the key in it).
+   data-vx-way="down" stacks the links. They may stand in a list, under titles (.vx-nav-title). */
+
+.vx-nav {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 2); box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%;
+  margin: 0; padding: 0;
+  font-family: var(--vx-font); font-size: 1rem; font-weight: 500; line-height: calc(var(--vx) * 6);
+  color: var(--vx-ink-quiet);
+}
+.vx-nav :is(ul, ol) { display: contents; margin: 0; padding: 0; list-style: none; }
+.vx-nav li { display: contents; }
+.vx-nav a {
+  position: relative; display: inline-flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-inline-size: 0; min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 2);
+  color: inherit; font: inherit; text-decoration: none; overflow-wrap: anywhere; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-nav a:hover, .vx-nav a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+/* no light in a word to brighten: the browser's ring, just inside the link */
+.vx-nav a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* one that leads nowhere yet */
+.vx-nav a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); cursor: default; }
+/* plain: nothing is drawn, so the current link says so with its weight */
+.vx-nav:not([data-vx-mark]) a[aria-current]:not([aria-current="false"]) { font-weight: 650; }
+
+/* a column */
+.vx-nav[data-vx-way="down"] { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.vx-nav[data-vx-way="down"][data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav[data-vx-way="down"] a[data-vx-level="2"] { padding-inline-start: calc(var(--vx) * 9); }
+.vx-nav-trail { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+/* a title over a group of links: words, smaller and quiet */
+.vx-nav-title {
+  box-sizing: border-box; margin: 0; padding: calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 1);
+  font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet);
+}
+.vx-nav[data-vx-mark="groove"] .vx-nav-title { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav-title:first-child, .vx-canvas + .vx-nav-title { padding-block-start: calc(var(--vx) * 1); }
+
+/* seats: a trench as wide as its links; the legends are in the key face, as on tabs */
+.vx-nav[data-vx-mark="seats"] { display: inline-flex; gap: 0; }
+.vx-nav[data-vx-mark="seats"] a {
+  justify-content: center; padding: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  font: 400 var(--vx-key-size)/calc(var(--vx) * 6) var(--vx-key-font); letter-spacing: 0; text-align: center;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-nav[data-vx-mark="seats"] a:hover, .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend, var(--vx-ink)); }
+.vx-nav[data-vx-mark="seats"] a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); }
+.vx-nav[data-vx-mark="seats"] a:focus-visible { outline-offset: calc(var(--vx) * -1); }
+
+/* plain: the groove is a painted line where it will be cut */
+.vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 2); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-nav[data-vx-mark="groove"][data-vx-way="down"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+}
+/* plain: a painted trench; the current seat is a painted key with the accent under it */
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate);
+}
+
 /* ==== css/pagination.css ==== */
 
 /* ---------- Pagination ---------- */
 
-/* A trench of seats: the current page is the key in it, level with the surface on its light.
-   Previous and next are small keys beside the trench.
+/* A bank of latching buttons in a slot: every page is a keycap, and the current page is the one
+   that is down, level with the surface, on its light. Previous and next are small keys beside
+   the slot.
    Markup: <nav class="vx-pagination" aria-label="Pages of deploys">
              <a class="vx-button" rel="prev" href="?page=4" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
              <ol class="vx-pagination-pages">
@@ -1700,7 +2881,7 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 .vx-pagination:dir(rtl) > [rel~="next"] .vx-pagination-chevron { transform: scaleX(-1); }
 .vx-pagination:dir(rtl) > [rel~="prev"] .vx-pagination-chevron { transform: none; }
 
-/* the trench */
+/* the slot, and the buttons in it */
 .vx-pagination-pages { position: relative; isolation: isolate; display: flex; box-sizing: border-box; block-size: calc(var(--vx) * 11); margin: 0; padding: 0; list-style: none; }
 .vx-pagination-pages > li { display: flex; }
 .vx-pagination-pages > li > a, .vx-pagination-gap {
@@ -1713,7 +2894,7 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 .vx-pagination-pages > li > a { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .vx-pagination-pages > li > a:hover { color: var(--lit-legend, var(--vx-ink)); }
 .vx-pagination-pages > li > a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend, var(--vx-ink)); cursor: default; }
-/* no light of its own to brighten on a seat down in the trench: the browser's ring, inside it */
+/* a button in the bank has no light of its own to brighten: the browser's ring, inside its seat */
 .vx-pagination-pages > li > a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
 /* the gap is not pressed, so it need not be as wide as a seat */
 .vx-pagination-gap { min-inline-size: calc(var(--vx) * 6); padding-inline: calc(var(--vx) * 1); }
@@ -1723,7 +2904,7 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
   .vx-pagination-pages > li[data-vx-when="wide"] { display: none; }
 }
 
-/* plain: a painted trench; the current seat is a painted key with the accent under it */
+/* plain: a painted slot; the current seat is a painted key with the accent under it */
 .vx-pagination-pages:not([data-vx-live]) { background: var(--vx-slate); }
 .vx-pagination-pages:not([data-vx-live]) > li > a[aria-current]:not([aria-current="false"]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate); }
 
@@ -1880,6 +3061,67 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 /* a bare <pre> (no code block round it) still keeps to the page: it scrolls inside itself */
 .vx-prose > pre { overflow-x: auto; font: 400 0.875rem/1.45 var(--vx-mono); }
 
+/* ==== css/questionnaire.css ==== */
+
+/* ---------- Questionnaire ---------- */
+
+/* A question inside a message with a few answers to press, one or several. It is a fieldset
+   with a legend; the answers are the kit's own parts over real radio buttons or checkboxes;
+   once answered it stays, disabled, as the record.
+   Markup: <fieldset class="vx-questionnaire">
+             <legend>When should harbor-api go out?</legend>
+             <div class="vx-toggle-group" data-vx-way="down">                     one of many
+               <label><input type="radio" name="when" value="now">Now</label> …
+             </div>
+             <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+             <p class="vx-questionnaire-note" role="status"></p>
+           </fieldset>
+           <div class="vx-questionnaire-answers">                                 several of many
+             <label class="vx-check"><input type="checkbox" name="tell" value="team"><span class="vx-box"></span>The team channel</label> …
+           </div>
+   Answered: disabled on the fieldset and on each input, data-vx-answered on the fieldset, no
+   key, and the note says what was answered. The script does this when the key is pressed. */
+
+.vx-questionnaire {
+  position: relative;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  max-inline-size: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-family: var(--vx-font);
+  color: var(--vx-ink);
+}
+/* the question: words, a little heavier than the message round it */
+.vx-questionnaire > legend { position: relative; isolation: isolate; display: block; box-sizing: border-box; max-inline-size: 100%; margin: 0; padding: 0 0 calc(var(--vx) * 3); float: none; font-size: 1rem; font-weight: 600; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; }
+.vx-questionnaire-hint { display: block; font-size: 0.875rem; font-weight: 400; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); }
+
+/* one of many: the kit's toggle group, standing. Its seats start their words at the start. */
+/* The slot's bezel stands two voxels out from its box: the group is set in by that much, so the
+   bezel's edge lines up with the question's words. */
+.vx-questionnaire > .vx-toggle-group[role="radiogroup"], .vx-questionnaire > .vx-toggle-group:not([role]) { margin-inline-start: calc(var(--vx) * 2); }
+.vx-questionnaire > .vx-toggle-group > label { justify-items: start; text-align: start; }
+/* several of many: the kit's checkboxes one under another, or its toggle buttons side by side */
+.vx-questionnaire-answers { display: grid; justify-items: start; min-inline-size: 0; padding-inline-start: var(--vx); } /* a checkbox's collar stands a voxel out */
+.vx-questionnaire-answers > .vx-check { max-inline-size: 100%; overflow-wrap: anywhere; }
+
+/* the key that sends the answer, and under it the line that speaks: it keeps its line while
+   there is nothing to say, so nothing below moves when it does */
+/* (a fieldset lays its own things out in a line: the key is made a block, so it stands under the answers) */
+fieldset.vx-questionnaire > .vx-questionnaire-send { display: flex; inline-size: fit-content; margin-block-start: calc(var(--vx) * 4); }
+/* (written as a child of the fieldset: a card's own rule for paragraphs is stronger than a class) */
+.vx-questionnaire > .vx-questionnaire-note { margin: calc(var(--vx) * 2) 0 0; }
+/* straight under the answers, with no key between (answered): clear of the slot's bezel */
+.vx-questionnaire > :is(.vx-toggle-group, .vx-questionnaire-answers) + .vx-questionnaire-note { margin-block-start: calc(var(--vx) * 4); }
+.vx-questionnaire-note { min-block-size: calc(var(--vx) * 5); font-size: 0.875rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-questionnaire-note:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+/* asked to choose: the words are the page's own ink, so they are not missed */
+.vx-questionnaire[data-vx-asking] > .vx-questionnaire-note { color: var(--vx-ink); font-weight: 600; }
+/* answered: the record. The words of the answer that was given keep their ink. */
+.vx-questionnaire[data-vx-answered] > .vx-questionnaire-note { color: var(--vx-ink); }
+.vx-questionnaire[data-vx-answered] .vx-check:has(input:checked) { color: var(--vx-ink); }
+
 /* ==== css/radio.css ==== */
 
 /* ---------- Radio group ---------- */
@@ -1945,11 +3187,79 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 .vx-radio input:disabled + .vx-dot:not([data-vx-live])::before { background: var(--vx-slate); }
 .vx-radio input:disabled:checked + .vx-dot:not([data-vx-live])::before { content: none; }
 
+/* ==== css/resizable.css ==== */
+
+/* ---------- Resizable panels ---------- */
+
+/* Regions of one surface parted by a groove that can be dragged. No box round a region: a pane
+   is words on the surface. --vx-split is the size of a pane that has a groove after it (halves
+   without it); the last pane takes the rest. With no script the groove is a still divider there.
+   Markup: <div class="vx-resizable" style="--vx-split: 32%">
+             <div class="vx-resizable-pane" id="files" data-vx-min="20">…</div>
+             <div class="vx-resizable-groove" role="separator" aria-controls="files" aria-label="Width of the file list" aria-valuenow="32"></div>
+             <div class="vx-resizable-pane" data-vx-min="24">…</div>
+           </div>
+   data-vx-way="down" stacks the panes; the container then has a height (15rem unless it is given one). */
+.vx-resizable {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  box-sizing: border-box;
+  inline-size: 100%;
+  min-inline-size: 0;
+  font-family: var(--vx-font);
+  color: var(--vx-ink);
+}
+.vx-resizable[data-vx-way="down"] { flex-direction: column; block-size: calc(var(--vx) * 60); }
+
+/* A pane keeps clear of the groove beside it: three voxels, which is how far the groove's
+   target reaches over it. A long word wraps, so a narrow pane grows down, never sideways. */
+.vx-resizable-pane { box-sizing: border-box; flex: 0 0 var(--vx-split, 50%); min-inline-size: 0; min-block-size: 0; overflow-wrap: anywhere; }
+.vx-resizable > .vx-resizable-pane:last-child { flex: 1 1 0; }
+.vx-resizable:not([data-vx-way="down"]) > .vx-resizable-pane:has(+ .vx-resizable-groove) { padding-inline-end: calc(var(--vx) * 3); }
+.vx-resizable:not([data-vx-way="down"]) > .vx-resizable-groove + .vx-resizable-pane { padding-inline-start: calc(var(--vx) * 3); }
+/* stacked, a pane has only the height it is given: what does not fit scrolls */
+.vx-resizable[data-vx-way="down"] > .vx-resizable-pane { overflow: auto; }
+.vx-resizable[data-vx-way="down"] > .vx-resizable-pane:has(+ .vx-resizable-groove) { padding-block-end: calc(var(--vx) * 3); }
+.vx-resizable[data-vx-way="down"] > .vx-resizable-groove + .vx-resizable-pane { padding-block-start: calc(var(--vx) * 3); }
+
+/* The groove: five voxels of the surface, the channel its middle one. */
+.vx-resizable-groove {
+  position: relative;
+  isolation: isolate;
+  flex: none;
+  box-sizing: border-box;
+  inline-size: calc(var(--vx) * 5);
+  user-select: none; -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-resizable[data-vx-way="down"] > .vx-resizable-groove { inline-size: auto; block-size: calc(var(--vx) * 5); }
+/* its target is a whole one, eleven voxels: three more on each side */
+.vx-resizable-groove::after { content: ""; position: absolute; inset-block: 0; inset-inline: calc(var(--vx) * -3); }
+.vx-resizable[data-vx-way="down"] > .vx-resizable-groove::after { inset-inline: 0; inset-block: calc(var(--vx) * -3); }
+/* once the script runs it can be taken hold of: a finger on it drags it, and does not scroll the page */
+.vx-resizable[data-vx-on] > .vx-resizable-groove:not([aria-disabled="true"]) { cursor: col-resize; touch-action: none; }
+.vx-resizable[data-vx-on][data-vx-way="down"] > .vx-resizable-groove:not([aria-disabled="true"]) { cursor: row-resize; }
+/* while it is dragged nothing in the panes is selected */
+.vx-resizable:has(> .vx-resizable-groove[data-vx-held]) { user-select: none; -webkit-user-select: none; }
+/* focus: the browser's ring round the groove's own box. Its light is brighter too, but by day a
+   brighter warm line is too little to find. */
+.vx-resizable-groove:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 0; }
+
+/* plain: a painted line, a voxel wide; the accent's while it is held */
+.vx-resizable-groove:not([data-vx-live]) {
+  --_line: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent);
+  background: linear-gradient(var(--_line), var(--_line)) center / var(--vx) 100% no-repeat;
+}
+.vx-resizable[data-vx-way="down"] > .vx-resizable-groove:not([data-vx-live]) { background-size: 100% var(--vx); }
+.vx-resizable[data-vx-on] > .vx-resizable-groove:not([data-vx-live]):not([aria-disabled="true"]):not([data-vx-held]):is(:hover, :focus-visible) { --_line: var(--lit-warm, var(--vx-steel)); }
+.vx-resizable-groove[data-vx-held]:not([data-vx-live]) { --_line: var(--lit-accent, var(--vx-enamel)); }
+
 /* ==== css/scroll-area.css ==== */
 
 /* ---------- Scroll area ---------- */
 
-/* A recess that scrolls, and beside it a thin trench for the bar. --vx-scroll-h is its height in voxels.
+/* A recess that scrolls, and beside it a thin slot in a steel bezel for the bar, with a small knob in it. --vx-scroll-h is its height in voxels.
    The trench's column is always there, so nothing moves when the bar appears. */
 .vx-scroll {
   display: grid; grid-template-columns: minmax(0, 1fr) calc(var(--vx) * 4); column-gap: calc(var(--vx) * 2);
@@ -2057,8 +3367,10 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
   appearance: none; -webkit-appearance: none;
   box-sizing: border-box; flex: 1 1 auto; inline-size: 100%; min-inline-size: 0;
   min-block-size: calc(var(--vx) * 11);
-  /* the far end keeps room for the chevron: 4 voxels, its 7, and 3 before it */
-  padding: 0; padding-inline: calc(var(--vx) * 5) calc(var(--vx) * 14);
+  /* The words start five voxels in: four from the edge of the cap's top, which is a voxel
+     smaller all round. The far end keeps room for the chevron: five voxels (four on the top),
+     its 7, and 3 before it. */
+  padding: 0; padding-inline: calc(var(--vx) * 5) calc(var(--vx) * 15);
   margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
   color: inherit;
   /* a legend on a key: the key face */
@@ -2071,6 +3383,10 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
    (where the browser draws the picker itself; a system picker keeps its own look) */
 .vx-select option, .vx-select optgroup { font: 500 1rem var(--vx-font); color: var(--vx-ink); background: var(--vx-chalk); }
 .vx-select select:disabled { cursor: default; color: var(--vx-ink-quiet); opacity: 1; }
+/* under its label in a field it stands two voxels further down than a well would: a keycap's
+   side and the light at its foot are drawn two and a half voxels above its face, and must not
+   lie on the label's words */
+.vx-field > .vx-select { margin-block-start: calc(var(--vx) * 2); }
 .vx-select:has(select:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
 
 /* at night the legend shines through, and flares with the light as the key goes down (--lit is
@@ -2084,7 +3400,7 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 .vx-select:not([data-vx-live]):has(select:disabled) { background: var(--vx-steel); box-shadow: none; }
 .vx-select:not([data-vx-live])::after {
   content: ""; position: absolute; pointer-events: none;
-  inset-inline-end: calc(var(--vx) * 4); inset-block-start: calc(50% - var(--vx) * 2);
+  inset-inline-end: calc(var(--vx) * 5); inset-block-start: calc(50% - var(--vx) * 2);
   inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 4);
   background: currentColor;
   --_u: var(--vx);
@@ -2148,11 +3464,222 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 .vx-separator[data-vx-align="start"] > .vx-groove:first-child { flex: 0 0 calc(var(--vx) * 6); }
 .vx-separator[data-vx-align="start"] { text-align: start; }
 
+/* ==== css/sheet.css ==== */
+
+/* ---------- Sheet ---------- */
+
+/* A surface that comes in from an edge of the window, a level above the page, over a scrim. It
+   is the browser's own <dialog>, shown with showModal(): focus stays inside, Escape closes it,
+   focus goes back to what opened it. data-vx-side says which edge: "end" (the default), "start",
+   "top" or "bottom". It slides only where motion is allowed, and the slide is CSS, so it is the
+   same with no script.
+   Markup: see src/components/sheet.js.
+   The drawer (css/drawer.css) is the same thing and shares these rules: what is written here
+   for both is written with :where(), so that a rule of the drawer's own always wins. */
+
+dialog:where(.vx-sheet, .vx-drawer) {
+  --_side: end; /* the edge it is on: the part reads this */
+  --_dir: 1;
+  --_w: min(calc(var(--vx) * 96), calc(100vw - var(--vx) * 11));
+  --_w: min(calc(var(--vx) * 96), round(down, calc(100vw - var(--vx) * 11), var(--vx)));
+  /* where it waits, out of the window: its own size and the room its side and shadow take */
+  --_out: calc((100% + var(--vx) * 6) * var(--_dir)) 0;
+  position: fixed;
+  inset-block: 0;
+  inset-inline: auto 0;
+  box-sizing: border-box;
+  inline-size: var(--_w);
+  block-size: auto;
+  max-inline-size: none;
+  max-block-size: none;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: none;
+  overflow: visible;
+  isolation: isolate;
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: calc(var(--vx) * 6);
+}
+dialog:where(.vx-sheet, .vx-drawer):dir(rtl) { --_dir: -1; }
+/* only while it is open: closed, a dialog has no box at all */
+dialog:where(.vx-sheet, .vx-drawer)[open] { display: flex; flex-direction: column; }
+dialog:where(.vx-sheet, .vx-drawer):focus-visible { outline: none; } /* what is in it shows the focus */
+
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="start"] {
+  --_side: start;
+  --_out: calc((-100% - var(--vx) * 6) * var(--_dir)) 0;
+  inset-inline: 0 auto;
+}
+/* from the top or the bottom it is as wide as the window and as high as what it holds; a strip
+   of the scrim, the height of a key, is always left to press */
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="top"] {
+  --_side: top;
+  --_out: 0 calc(-100% - var(--vx) * 6);
+  inset-block: 0 auto;
+  inset-inline: 0;
+  inline-size: auto;
+  max-block-size: calc(100% - var(--vx) * 11);
+}
+dialog:where(.vx-sheet, .vx-drawer)[data-vx-side="bottom"] {
+  --_side: bottom;
+  --_out: 0 calc(100% + var(--vx) * 6);
+  inset-block: auto 0;
+  inset-inline: 0;
+  inline-size: auto;
+  max-block-size: calc(100% - var(--vx) * 11);
+}
+
+/* the scrim; a drawer that is being dragged shut lets the page show through as it goes */
+dialog:where(.vx-sheet, .vx-drawer)::backdrop { background: rgb(8 9 15 / 0.5); opacity: calc(1 - var(--_drag, 0) * 0.7); }
+
+/* the page behind does not scroll while one is open over it */
+:root:has(dialog:where(.vx-sheet, .vx-drawer):modal) { overflow: hidden; }
+
+/* It slides in and out, where motion is allowed. Closed, it waits outside the window; the
+   browser keeps it on top until it has got there. */
+@media (prefers-reduced-motion: no-preference) {
+  dialog:where(.vx-sheet, .vx-drawer) {
+    translate: var(--_out);
+    transition: translate 200ms cubic-bezier(0.4, 0, 0.9, 0.6), overlay 200ms allow-discrete, display 200ms allow-discrete;
+  }
+  dialog:where(.vx-sheet, .vx-drawer)[open] {
+    translate: 0 0;
+    transition: translate 280ms cubic-bezier(0.2, 0.75, 0.2, 1), overlay 280ms allow-discrete, display 280ms allow-discrete;
+  }
+  @starting-style { dialog:where(.vx-sheet, .vx-drawer)[open] { translate: var(--_out); } }
+  dialog:where(.vx-sheet, .vx-drawer)::backdrop { opacity: 0; transition: opacity 200ms linear, overlay 200ms allow-discrete, display 200ms allow-discrete; }
+  dialog:where(.vx-sheet, .vx-drawer)[open]::backdrop { opacity: calc(1 - var(--_drag, 0) * 0.7); transition-duration: 280ms; }
+  @starting-style { dialog:where(.vx-sheet, .vx-drawer)[open]::backdrop { opacity: 0; } }
+}
+
+/* What is in it: a header of words (and a close key), what it holds, and its keys. A page's own
+   rules for header and footer must not reach in. */
+dialog:where(.vx-sheet, .vx-drawer) > :is(header, footer) { margin: 0; border: 0; background: none; flex: none; }
+dialog:where(.vx-sheet, .vx-drawer) > header {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  /* fifteen voxels: a close key (eleven with its target) sits in it on whole voxels. Its last
+     row of voxels is the groove that parts it from what is below. */
+  min-block-size: calc(var(--vx) * 15);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 6);
+}
+dialog:where(.vx-sheet, .vx-drawer) > header:has(> .vx-close) { padding-inline-end: calc(var(--vx) * 4); }
+dialog:where(.vx-sheet, .vx-drawer) > header > :where(h2, h3) {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  margin: 0;
+  font: 700 1.125rem/calc(var(--vx) * 6) var(--vx-font);
+  color: var(--vx-ink);
+  overflow-wrap: anywhere;
+}
+/* what it holds scrolls by itself, and does not hand the scroll on to the page */
+:where(.vx-sheet-body, .vx-drawer-body) {
+  flex: 1 1 auto;
+  min-block-size: 0;
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--vx) * 5) calc(var(--vx) * 6);
+}
+:where(.vx-sheet-body, .vx-drawer-body) > :first-child { margin-block-start: 0; }
+:where(.vx-sheet-body, .vx-drawer-body) > :last-child { margin-block-end: 0; }
+dialog:where(.vx-sheet, .vx-drawer) > footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: calc(var(--vx) * 4);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 6) calc(var(--vx) * 6);
+}
+
+/* plain: a painted panel, and a painted groove under the header */
+dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) {
+  background: var(--vx-chalk);
+  box-shadow: 0 0 0 1px var(--vx-chalk-side), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
+}
+dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {
+  background: linear-gradient(color-mix(in oklab, var(--lit-warm, var(--vx-slate)) 55%, transparent), color-mix(in oklab, var(--lit-warm, var(--vx-slate)) 55%, transparent)) no-repeat;
+  background-size: calc(100% - var(--vx) * 8) var(--vx);
+  background-position: 50% 100%;
+}
+
+/* ==== css/sidebar.css ==== */
+
+/* ---------- Sidebar ---------- */
+
+/* A column of links and groups beside the content: part of the window's surface, parted from the
+   rest by a standing groove. Its rows are navs (.vx-nav, a column with the accent groove).
+   Markup: <button class="vx-button" type="button" aria-controls="side" aria-expanded="true">Projects</button>
+           <div class="vx-sidebar" id="side">
+             <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="Workspace">
+               <p class="vx-nav-title">Projects</p>
+               <ul><li><a href="/harbor-api" aria-current="page">harbor-api</a></li> …</ul>
+             </nav>
+             <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+           </div>
+   Put it first in a row with the content (a flex or a grid row): it is 52 voxels wide
+   (--vx-sidebar-w) and as tall as the row. Folded away it has the hidden attribute. Under 768 px
+   it is not beside the content: its key brings it in over the page. A page that wants another
+   width for that sets --vx-sidebar-over to 1 or 0 on it by its own rule. */
+
+.vx-sidebar {
+  position: relative; isolation: isolate; display: flex; align-items: stretch; flex: none; box-sizing: border-box;
+  inline-size: calc(var(--vx) * var(--vx-sidebar-w, 52)); min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-sidebar > .vx-nav, .vx-sidebar-scroll { flex: 1 1 auto; min-inline-size: 0; }
+.vx-sidebar > .vx-nav, .vx-sidebar-scroll > .vx-nav { align-content: start; justify-content: flex-start; padding-inline-end: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 4); }
+/* a long one scrolls by itself. The room at its end is what the nav's own drawing reaches into,
+   so that it adds nothing to what can be scrolled. */
+.vx-sidebar-scroll { overflow: hidden auto; overscroll-behavior: contain; padding-block-end: calc(var(--vx) * 7); }
+.vx-sidebar-scroll > .vx-nav { padding-block-end: 0; }
+.vx-sidebar > .vx-groove { flex: none; }
+
+/* where it comes in over the page */
+@media (max-width: 767.98px) {
+  .vx-sidebar[data-vx-on] { --vx-sidebar-over: 1; }
+}
+
+/* over the page: the browser's own popover, at the edge the page starts from, as tall as the window */
+.vx-sidebar[popover] {
+  position: fixed; inset: 0 auto 0 0; margin: 0; border: 0; overflow: visible; background: none; color: var(--vx-ink);
+  block-size: 100dvh; max-block-size: none;
+  inline-size: min(calc(var(--vx) * 72), calc(100vw - var(--vx) * 14));
+  inline-size: min(calc(var(--vx) * 72), round(down, calc(100vw - var(--vx) * 14), var(--vx)));
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 3) calc(var(--vx) * 4) calc(var(--vx) * 4);
+}
+.vx-sidebar[popover]:dir(rtl) { inset: 0 0 0 auto; }
+.vx-sidebar[popover]:not(:popover-open, [data-vx-measure]) { display: none; }
+.vx-sidebar[popover][data-vx-measure] { visibility: hidden; }
+.vx-sidebar[popover]:focus-visible { outline: none; }
+.vx-sidebar[popover] > .vx-groove { display: none; } /* it is a surface of its own there: no edge to part */
+.vx-sidebar[popover]::backdrop { background: rgb(8 9 15 / 0.5); }
+/* it comes in from the edge, and goes the same way */
+.vx-sidebar[popover] { translate: -100% 0; transition: translate 200ms var(--vx-ease-out), overlay 200ms allow-discrete, display 200ms allow-discrete; }
+.vx-sidebar[popover]:dir(rtl) { translate: 100% 0; }
+.vx-sidebar[popover]:popover-open { translate: 0 0; }
+@starting-style {
+  .vx-sidebar[popover]:popover-open { translate: -100% 0; }
+  .vx-sidebar[popover]:popover-open:dir(rtl) { translate: 100% 0; }
+}
+.vx-sidebar[popover]::backdrop { opacity: 0; transition: opacity 200ms var(--vx-ease-out), overlay 200ms allow-discrete, display 200ms allow-discrete; }
+.vx-sidebar[popover]:popover-open::backdrop { opacity: 1; }
+@starting-style { .vx-sidebar[popover]:popover-open::backdrop { opacity: 0; } }
+/* plain: a painted surface */
+.vx-sidebar[popover]:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1.5) 0 0 var(--vx-shadow); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-sidebar[popover], .vx-sidebar[popover]::backdrop { transition: none; }
+}
+
 /* ==== css/skeleton.css ==== */
 
 /* ---------- Skeleton ---------- */
 
-/* The region that is loading. Its trenches (.vx-bone) take the size of what is coming:
+/* The region that is loading. Its shallow slots (.vx-bone) take the size of what is coming:
    --vx-bone-w and --vx-bone-h are in voxels, so every edge lands on the grid. */
 .vx-skeleton { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; min-inline-size: 0; }
 .vx-bone {
@@ -2193,7 +3720,7 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 
 /* ---------- Spinner ---------- */
 
-/* A ring of light cubes, five voxels across (nine with data-vx-size="large"): an odd number, so a
+/* A ring of lamps (a stud with a cube of light on it), five voxels across (nine with data-vx-size="large"): an odd number, so a
    cube stands at every corner and at every second voxel between. */
 .vx-spinner { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 5); vertical-align: middle; }
 .vx-spinner[data-vx-size="large"] { inline-size: calc(var(--vx) * 9); block-size: calc(var(--vx) * 9); }
@@ -2233,14 +3760,16 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 
 /* ---------- Number stepper ---------- */
 
-/* A well for the number, a key each side of it. The well and the keys are the kit's own
-   (.vx-well, .vx-button); this is how they sit together. */
+/* A window for the number, a small keycap each side of it. The window and the keys are the
+   kit's own (.vx-well, .vx-button); this is how they sit together. */
 .vx-stepper {
   position: relative;
   isolation: isolate;
   display: inline-flex;
   align-items: center;
-  gap: calc(var(--vx) * 3); /* room for a key's side and its light, clear of the well's rim */
+  /* with the room each key keeps round its cap, a cap is four voxels from the window: clear of
+     its rim by more than a voxel, with the cap's side and its light between */
+  gap: calc(var(--vx) * 2);
   max-inline-size: 100%;
 }
 .vx-stepper > .vx-well { flex: none; inline-size: calc(var(--vx) * 18); }
@@ -2254,14 +3783,26 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 }
 .vx-stepper input::-webkit-inner-spin-button, .vx-stepper input::-webkit-outer-spin-button { -webkit-appearance: none; appearance: none; margin: 0; }
 
-/* The keys are square, a whole target each, and carry one sign, cut a voxel to the cell. */
+/* The keys are the kit's small key, as the close button is: a cap seven voxels square, in a
+   target of eleven. A cap that small beside a window eleven tall reads as the window's own. */
 .vx-stepper > .vx-button {
-  flex: none; inline-size: calc(var(--vx) * 11); padding: 0; font-size: calc(var(--vx) * 10);
-  /* The sign is three voxels in a face of eleven: four clear on every side, all on the grid. A
-     glyph of the key face carries the gap after it and sits high in its line; a voxel of indent
-     and a voxel of padding above move it half a voxel each way, to the middle. */
+  flex: none;
+  inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 7);
+  min-inline-size: 0; min-block-size: 0;
+  padding: 0;
+  /* it keeps the room its target takes */
+  margin: calc(var(--vx) * 2);
+  /* The sign is cut a voxel to the cell: three voxels on the cap's top, which is five across
+     (a keycap's top is a voxel smaller all round): one clear on every side. A glyph of the key
+     face carries the gap after it and sits high in its line; a voxel of indent and a voxel of
+     padding above move it half a voxel each way, to the middle. */
+  font-size: calc(var(--vx) * 10);
   text-indent: var(--vx); padding-block-start: var(--vx);
 }
+/* the target: two voxels more on every side, 44 px in all */
+.vx-stepper > .vx-button::after { content: ""; position: absolute; inset: calc(var(--vx) * -2); }
+/* plain: a painted key moves a voxel up and left while it is held; its target stays under the pointer */
+.vx-stepper > .vx-button:not([data-vx-live]):active::after { right: calc(var(--vx) * -3); bottom: calc(var(--vx) * -3); }
 
 /* With no script at all the keys could do nothing: they go, and the browser's spin buttons come back. */
 @media (scripting: none) {
@@ -2363,6 +3904,67 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 /* the foot: what the rows come to, under a hairline of its own */
 .vx-table tfoot :is(th, td) { border-block-start: 1px solid var(--vx-steel); font-weight: 600; }
 
+/* ==== css/theme-picker.css ==== */
+
+/* ---------- Theme picker ----------
+   The one place a site's theme is set from: a bank of seats for the theme, each with a lamp of
+   that theme's own accent, and a bank for the time of day. The banks are the kit's trench of
+   seats (.vx-toggle-group, one of many); this file lays the two side by side and sets the lamp
+   in its seat. src/components/theme-picker.js fills the theme bank from THEMES and does the
+   choosing.
+     <div class="vx-theme-picker">
+       <div class="vx-toggle-group" role="radiogroup" aria-label="Theme" data-vx-pick="theme" data-vx-size="small"></div>
+       <div class="vx-toggle-group" role="radiogroup" aria-label="Time of day" data-vx-pick="time" data-vx-size="small">
+         <label><input type="radio" name="time" value="light">Day</label>
+         <label><input type="radio" name="time" value="dark">Night</label>
+         <label><input type="radio" name="time" value="system" checked>System</label>
+       </div>
+     </div>
+   A seat written out by the site (its own words, and no change of width when the script arrives):
+     <label><input type="radio" value="rose"><span class="vx-theme-lamp"></span><span class="vx-label">Rose</span></label>
+   In a settings page each bank may have its name before it, as words:
+     <div class="vx-theme-picker" data-vx-way="down">
+       <span class="vx-theme-picker-name" id="t">Theme</span><div class="vx-toggle-group" role="radiogroup" aria-labelledby="t" data-vx-pick="theme"></div> …
+   Without the script it can do nothing, so it is not shown; the page then follows the system. */
+
+.vx-theme-picker {
+  position: relative; isolation: isolate;
+  display: inline-flex; flex-wrap: wrap; align-items: center;
+  gap: calc(var(--vx) * 3) calc(var(--vx) * 4);
+  min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+/* it keeps its place while the script is on its way, and for good if there is none */
+.vx-theme-picker:not([data-vx-picker]) { visibility: hidden; }
+
+/* in a settings page: a name, then its bank, one under the other */
+.vx-theme-picker[data-vx-way="down"] { display: grid; grid-template-columns: auto minmax(0, 1fr); justify-items: start; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 5); }
+.vx-theme-picker-name { font-weight: 600; font-size: 0.9375rem; line-height: 1.3; }
+@media (max-width: 600px) {
+  .vx-theme-picker[data-vx-way="down"] { grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); }
+  .vx-theme-picker[data-vx-way="down"] > .vx-toggle-group { margin-block-end: calc(var(--vx) * 2); }
+}
+
+/* The theme bank: equal seats, each as wide as the widest, as many to a row as fit, so a
+   theme's name is never broken up (the part measures them and writes the columns on the bank).
+   These rules name the trench's own class as well, so that they hold whichever file comes
+   first in the stylesheet. */
+/* a seat of it: the lamp, then the words, side by side */
+.vx-theme-picker .vx-toggle-group[data-vx-pick="theme"] > label { grid-auto-flow: column; column-gap: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 3); }
+.vx-theme-picker .vx-toggle-group[data-vx-pick="theme"] > label > .vx-label { white-space: nowrap; }
+/* the words stand over the lamp's light, never under it */
+.vx-theme-picker .vx-toggle-group[data-vx-pick] > label > .vx-label { position: relative; }
+
+/* the lamp: two voxels square, in a collar a voxel wide that reaches past its box */
+.vx-theme-lamp { position: relative; isolation: isolate; display: block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); pointer-events: none; }
+
+/* plain: a painted lamp of the theme's accent (the part writes --_day and --_night on it) in a painted collar */
+.vx-theme-lamp:not([data-vx-live]) { background: var(--_day, var(--vx-steel)); box-shadow: 0 0 0 var(--vx) var(--vx-steel); }
+:root[data-theme="dark"] .vx-theme-lamp:not([data-vx-live]) { background: var(--_night, var(--vx-steel)); }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .vx-theme-lamp:not([data-vx-live]) { background: var(--_night, var(--vx-steel)); }
+}
+
 /* ==== css/toggle-button.css ==== */
 
 /* ---------- Toggle button ---------- */
@@ -2440,11 +4042,14 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 
 .vx-toggle-group { position: relative; isolation: isolate; max-inline-size: 100%; box-sizing: border-box; }
 
-/* Several of many: toggle buttons side by side, a voxel apart. On a narrow page they wrap. */
-.vx-toggle-group[role="toolbar"] { display: inline-flex; flex-wrap: wrap; gap: var(--vx); }
+/* Several of many: a bank of toggle buttons, three voxels apart as the keys of a button group
+   are (nearer, each cap's side would be drawn over the one before it). On a narrow page they wrap. */
+.vx-toggle-group[role="toolbar"] { display: inline-flex; flex-wrap: wrap; gap: calc(var(--vx) * 3); }
 .vx-toggle-group[role="toolbar"][data-vx-way="down"] { flex-direction: column; align-items: stretch; }
 
-/* One of many: a trench of equal seats over real radio buttons. */
+/* One of many: a slot of equal seats over real radio buttons, a latching keycap in each; the
+   chosen one is latched down. In voxels the slot has a bezel, which reaches two voxels past this
+   box on every side. */
 .vx-toggle-group:not([role="toolbar"]) { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
 .vx-toggle-group:not([role="toolbar"])[data-vx-way="down"] { grid-auto-flow: row; grid-auto-columns: auto; }
 .vx-toggle-group > label {
@@ -2476,7 +4081,7 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
 .vx-toggle-group > label:has(input:disabled) { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); }
 .vx-toggle-group > label:has(input:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
 
-/* plain: a painted trench; the chosen seat is a key in it with the accent under it */
+/* plain: a painted slot; the chosen seat is a key in it with the accent under it */
 .vx-toggle-group:not([role="toolbar"]):not([data-vx-live]) { background: var(--vx-slate); }
 .vx-toggle-group:not([data-vx-live]) > label:has(input:checked) { background: var(--vx-key, var(--vx-chalk)); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)); }
 .vx-toggle-group:not([data-vx-live]) > label:has(input:checked:disabled) { background: var(--vx-steel); box-shadow: none; }
@@ -2512,6 +4117,57 @@ hr.vx-groove { overflow: visible; block-size: var(--vx); }
   background: var(--vx-key, var(--vx-chalk));
   box-shadow: inset 0 0 0 1px var(--vx-slate), calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow);
 }
+
+/* ==== css/trace.css ==== */
+
+/* ---------- Trace ---------- */
+
+/* What an agent did, step by step: a standing groove with a lamp at each step (green done, the
+   accent in progress, red failed, dark not begun). Each step is a line of words; one with more
+   to show opens, and is the kit's collapsible.
+   Markup: <ol class="vx-trace" aria-label="What the agent did" aria-live="off">
+             <li data-vx-state="done">
+               <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+               <details class="vx-collapsible">
+                 <summary><span class="vx-trace-what">Read build-214.log</span><span class="vx-trace-state">Done, 2 s</span></summary>
+                 <p>What it found.</p>            or <pre class="vx-trace-out">what it printed</pre>
+               </details>
+             </li>
+             <li data-vx-state="running">
+               <span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span>
+               <p class="vx-trace-line"><span class="vx-trace-what">Building the image</span><span class="vx-trace-state">In progress</span></p>
+             </li>
+           </ol>
+   data-vx-state: done, running, failed, waiting. The state is always said in words
+   (.vx-trace-state); the lamp repeats it. */
+
+.vx-trace { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; list-style: none; font-family: var(--vx-font); font-size: 1rem; color: var(--vx-ink); }
+/* a step: the lamp's column (a lamp is two voxels, its collar four), then the words */
+.vx-trace > li { position: relative; display: grid; grid-template-columns: calc(var(--vx) * 4) minmax(0, 1fr); column-gap: calc(var(--vx) * 3); align-items: start; min-inline-size: 0; }
+/* the lamp stands level with the middle of the step's first line (a row is eleven voxels) */
+.vx-trace > li > .vx-lamp { grid-column: 1; margin-block-start: calc(var(--vx) * 4.5); margin-inline-start: calc(var(--vx) * 1); }
+.vx-trace > li > :not(.vx-lamp) { grid-column: 2; min-inline-size: 0; }
+
+/* a step that does not open: one row of words, as tall as one that does */
+.vx-trace-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 3); box-sizing: border-box; min-block-size: calc(var(--vx) * 11); margin: 0; padding-block: calc(var(--vx) * 2.5); line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; }
+/* one that opens is the kit's collapsible; a step's words are lighter than a heading's */
+.vx-trace .vx-collapsible > summary { flex-wrap: wrap; row-gap: 0; font-weight: 400; }
+.vx-trace-what { min-inline-size: 0; font-weight: 500; }
+.vx-trace-state { font-size: 0.875rem; font-weight: 400; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+/* failed: said in words, and the words are in the colour for what went wrong */
+.vx-trace > li[data-vx-state="failed"] .vx-trace-state { color: var(--vx-danger-text); font-weight: 600; }
+/* not begun: quieter words, and a dark lamp (the part draws it; the kit's lamp has no dark) */
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) .vx-trace-what { color: var(--vx-ink-quiet); }
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) > .vx-lamp > .vx-canvas { visibility: hidden; }
+
+/* what a step shows when it is open: words, or what was printed */
+.vx-trace .vx-collapsible > :not(summary) { font-size: 0.9375rem; color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-trace .vx-trace-out { margin: 0; font: 400 0.8125rem/calc(var(--vx) * 5) var(--vx-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.vx-trace-status { margin: 0; }
+
+/* plain: the rail is painted from each lamp to the next, and a dark lamp is painted steel */
+.vx-trace:not([data-vx-live]) > li:not(:last-child)::before { content: ""; position: absolute; inset-block: calc(var(--vx) * 6.5) calc(var(--vx) * -4.5); inset-inline-start: calc(var(--vx) * 1); inline-size: calc(var(--vx) * 2); background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) > .vx-lamp:not([data-vx-live]) { background: var(--vx-steel); }
 
 /* ==== css/validation.css ==== */
 

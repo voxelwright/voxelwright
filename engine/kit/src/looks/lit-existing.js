@@ -8,20 +8,19 @@
 //   Object.assign(LOOKS.lit.parts, parts);
 //
 // Their CSS under the look is css/existing.css.
-import { halo, byTheme, ring, hole, lightName, UNDER, cap as capOf } from '../core/light.js';
+import { halo, byTheme, ring, hole, bezel, lightName, UNDER, cap as capOf } from '../core/light.js';
 import { clamp, wrapLabel } from '../components/util.js';
 
 const rtl = (el) => getComputedStyle(el).direction === 'rtl';
-// A groove is one voxel deep. The look has no number for it (lit.js's own groove writes 1 too);
-// it is named here once, so that it is one line to change when the look gets one.
-const GROOVE = 1;
 
 // ---------------------------------------------------------------------------------------------
-// Slider. A trench with a key in it; the trench behind the key is full of the accent's light.
-// Tool: well (a trench) and key. The same family as the switch: the light is on the floor of the
-// trench, so the trench stays a trench.
+// Slider. A fader: a slot in a steel bezel, a knob standing in the slot with a line across its
+// top to read its place by, and the slot behind the knob full of the accent's light. The same
+// device as the switch (lit.js), made to stop anywhere.
+// Tool: what slides (bezel, slot, knob). The light is on the floor of the slot, so the slot stays
+// a slot.
 // bind (components/slider.js) only says "draw again", so pose reads the input every time.
-const KEY = 5, TRENCH = 7; // the key's width and the trench's height: sizes, not depths. Depths are the look's.
+const KEY = 7, TRENCH = 7; // the knob's width and the slot's height: sizes, not depths. Depths are the look's.
 
 const slider = {
   pad: 7,
@@ -29,19 +28,28 @@ const slider = {
   glowStrength: halo(0.05),
 
   build(live, m) {
-    const { W, H, el } = live, DEEP = live.look.well;
+    const { W, H, el } = live, look = live.look, DEEP = look.well;
     const input = live.state.input = el.querySelector('input');
     const off = !!input?.disabled;
     const y = live.state.y = Math.floor((H - TRENCH) / 2);
+    bezel(m, 0, y, W, TRENCH);
     hole(live, m, { y, h: TRENCH, depth: DEEP, wall: 'slate', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true;
     lit.box(0, y, -DEEP, W, TRENCH, 1, off ? 'steel' : 'light');
-    // the key stands on the floor of the trench, on its own light, a voxel proud of the surface
+    // The knob stands on the floor of the slot, on its own light. Its shoulder is as far above the
+    // surface as a key travels, so it clears the bezel, and its top is a keycap's: a step smaller.
     const thumb = m.part('thumb');
     thumb.grounded = false;
-    if (!off) ring(thumb, 0, 0, -DEEP, KEY, TRENCH - 2, 'light');
-    capOf(thumb, 0, 0, 1 - DEEP, KEY, TRENCH - 2, DEEP, off ? 'steel' : 'ivory');
+    const mat = off ? 'steel' : 'ivory', h = TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
+    if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
+    capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0); // square-cornered: a fader's cap is a block
+    // The line: painted across the middle of its top, as deep as a groove, and not cut: a cut
+    // splits a top this small into two lumps. It is enamel, the kit's one paint, which shows on the
+    // ivory by day and at night alike (ink turns light at night and is lost on it; steel is lost by
+    // day). Switched off, the knob is steel and the line is slate.
+    const mid = (KEY - 1) / 2, g = look.groove;
+    thumb.box(mid, 1, top - g, 1, h - 2, g, off ? 'slate' : 'enamel');
     thumb.ty = y + 1;
     live.state.travel = Math.max(0, W - 2 - KEY);
     live.state.flip = rtl(el);
@@ -56,7 +64,7 @@ const slider = {
     const x = 1 + at * live.state.travel;
     thumb.tx = x;
     thumb.tz = live.spring('press').x;
-    // lit from the end the value starts at up to the middle of the key
+    // lit from the end the value starts at up to the middle of the knob
     const edge = x + KEY / 2;
     for (let i = 0; i < lit.count; i++) {
       const d = live.state.flip ? lit.rest[i * 3] - edge : edge - lit.rest[i * 3];
@@ -77,7 +85,7 @@ const list = {
   glowStrength: halo(0.06),
 
   build(live, m) {
-    const { W, el, vx } = live;
+    const { W, el, vx } = live, GROOVE = live.look.groove;
     const rows = live.state.rows = [];
     const marks = [];
     const x = rtl(el) ? W - 2 : 1;
@@ -114,7 +122,10 @@ const list = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Menu. A float on the accent's light, built out of its trigger's corner. The active row is
+// Menu. A plate above everything on the accent's light, as thick as the look's float, built out
+// of its trigger's corner. Its top is flat: a plate, not a keycap. It is not bolted: bolts hold a
+// panel down where it stays, and a plate comes and goes (and it is built and taken away as one
+// part, `panel`, so bolts of their own would hang in the air while it builds). The active row is
 // marked as the look marks "current": an accent groove at its start, full of light to the level
 // of the face. Tool: float, and a groove.
 // bind (components/menu.js) hides the part named `pick` and assembles the part named `panel` when
@@ -127,7 +138,7 @@ const menu = {
   glowStrength: halo(MENU_GLOW),
 
   build(live, m) {
-    const { W, H, el, vx } = live, d = live.look.float;
+    const { W, H, el, vx } = live, d = live.look.float, GROOVE = live.look.groove;
     // the light and the slab are one part, so both are built out of the corner together
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, 'light', 1);
@@ -161,8 +172,10 @@ const menu = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// Dialog. A float at dialog height on the accent's light. Its header is words; a groove of the
-// room's own light parts them from the body. Its keys are keys. Tool: float, and a groove.
+// Dialog. A plate above everything on the accent's light, as thick as the look's dialog (the
+// thickest thing in the kit), with a flat top. Not bolted, for the menu's reason: it is dismissed,
+// and what is bolted down stays. Its header is words; a groove of the room's own light parts them
+// from the body. Its keys are keys. Tool: float, and a groove.
 // bind (components/dialog.js) assembles and crumbles every part, so no name matters here.
 const DIALOG_GLOW = 0.1, INSET = 4;
 
@@ -172,7 +185,7 @@ const dialog = {
   glowStrength: halo(DIALOG_GLOW),
 
   build(live, m) {
-    const { W, H, el, vx } = live, d = live.look.dialog, r = live.look.round;
+    const { W, H, el, vx } = live, d = live.look.dialog, r = live.look.round, GROOVE = live.look.groove;
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, lightName(el, 'light'), r);
     panel.slab(0, 0, 1, W, H, d - 1, 'chalk', r);

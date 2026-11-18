@@ -23,9 +23,7 @@ export const callout = {
     const mat = live.state.mat = LIGHT[el.dataset.vxKind] ?? LIGHT.note;
     // at the start of the line: the left, or the right where the page reads right to left
     const x = getComputedStyle(el).direction === 'rtl' ? W - 1 : 0;
-    // the look has no number for a groove's depth yet (the kit's own groove is one voxel down);
-    // if it gets one, this follows it
-    hole(live, m, { x, w: 1, depth: live.look.groove ?? 1, wall: mat, floor: mat });
+    hole(live, m, { x, w: 1, depth: live.look.groove, wall: mat, floor: mat });
   },
 
   // the warm light is the room's own and stays as quiet as any groove; the others say something

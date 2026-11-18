@@ -38,7 +38,10 @@ const boxes = (q) => q.evaluate(() => [...document.querySelectorAll('.vx-stepper
 const p = await open();
 const firstBoxes = await boxes(p);
 const sizes = await p.evaluate(() => { const s = document.querySelector('#replicas'); return [...s.children].filter((c) => !c.matches('.vx-canvas')).map((c) => c.offsetWidth + 'x' + c.offsetHeight).join(' '); });
-say(sizes === '44x44 72x44 44x44', `each key is a whole target, 11 voxels square, and the well is as tall (${sizes})`);
+say(sizes === '28x28 72x44 28x28', `each key's cap is seven voxels square, a small key beside a window eleven tall (${sizes})`);
+// the room each key keeps (its margin) and its target (::after) are 44 px, as the close button's are
+const room = await p.evaluate(() => [...document.querySelectorAll('#replicas > .vx-button')].map((k) => { const c = getComputedStyle(k), a = getComputedStyle(k, '::after'); return [parseFloat(c.marginLeft) + parseFloat(c.marginRight) + k.offsetWidth, parseFloat(c.marginTop) + parseFloat(c.marginBottom) + k.offsetHeight, k.offsetWidth - parseFloat(a.left) - parseFloat(a.right), k.offsetHeight - parseFloat(a.top) - parseFloat(a.bottom)].join('x'); }).join(' '));
+say(room === '44x44x44x44 44x44x44x44', `each key keeps 44 px of room and its target is 44 by 44 px (${room})`);
 say(await p.evaluate(() => { const i = document.querySelector('#replicas input'); return i.type === 'number' && i.matches('.vx-well > input') && document.querySelectorAll('#replicas > .vx-button[aria-label]').length === 2; }), 'it is a real number field in the kit\'s well, with two of the kit\'s keys, each with a name');
 say(await p.evaluate(() => !!window.vx.live(document.querySelector('#replicas .vx-well')) && !!window.vx.live(document.querySelector('#replicas .vx-button'))), 'the well and the keys are drawn in voxels by the kit\'s own parts');
 
@@ -55,6 +58,17 @@ const low = await p.evaluate(() => { const l = window.vx.live(document.querySele
 say(low, 'and is drawn off: low, with no light');
 await press(p, down('#replicas'));
 say(await val(p, '#replicas') === '1', 'a press on it then does nothing (still 1)');
+
+// the target, not the cap: a press 20 px right of the plus key's middle (off its cap) steps; 26 px does not
+{
+  const at = async (dx, dy) => { const [mx, my] = await mid(p, up('#replicas')); await p.mouse.move(mx + dx, my + dy, { steps: 4 }); await p.mouse.down(); await p.waitForTimeout(90); await p.mouse.up(); await p.mouse.move(4, 4); };
+  await at(20, 20);
+  const one = await val(p, '#replicas');
+  await at(26, 0);
+  const two = await val(p, '#replicas');
+  say(one === '2' && two === '2', `a press at the corner of the plus key's target, 20 px right and down of its middle, steps (1 to ${one}); one 26 px off does nothing (${two})`);
+  await press(p, down('#replicas'));
+}
 
 // holding a key repeats, and stops at the limit
 let [x, y] = await mid(p, up('#replicas'));

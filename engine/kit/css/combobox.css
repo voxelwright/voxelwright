@@ -1,0 +1,51 @@
+/* ---------- Combobox ---------- */
+
+/* A field you type in (the kit's well), and under it a float of rows that match. The rows are
+   words, in the text face; the marked row has the accent groove at its start.
+   Markup: <div class="vx-combobox">
+             <label class="vx-field-label" for="p">Project</label>
+             <span class="vx-well"><input id="p" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="p-list" autocomplete="off"></span>
+             <div class="vx-combobox-float" popover="manual">
+               <div role="listbox" id="p-list" aria-labelledby="…"><div role="option">harbor-api</div> …</div>
+               <p class="vx-combobox-empty" hidden>No project is called “{q}”.</p>
+             </div>
+           </div> */
+
+.vx-combobox { display: grid; gap: calc(var(--vx) * 2); min-inline-size: 0; max-inline-size: 100%; inline-size: calc(var(--vx) * 80); }
+
+/* the float: the script makes it as wide as its field and puts it under it */
+.vx-combobox-float {
+  position: fixed; inset: auto; box-sizing: border-box; margin: 0; border: 0; overflow: visible; isolation: isolate;
+  inline-size: calc(var(--vx) * 80); max-inline-size: calc(100vw - var(--vx) * 6);
+  padding: calc(var(--vx) * 2) 0; background: none; color: var(--vx-ink);
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6);
+}
+.vx-combobox-float:is(:popover-open, [data-vx-measure]) { display: block; }
+.vx-combobox-float[data-vx-measure] { visibility: hidden; }
+.vx-combobox-float::backdrop { background: none; }
+/* a long list scrolls inside the float: six rows and a half show, so that it is plain there are more */
+.vx-combobox-float [role="listbox"] { max-block-size: calc(var(--vx) * 72); overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin; }
+
+/* a row: words, eleven voxels high, the size of anything pressed */
+.vx-combobox-float [role="option"] {
+  display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 5) calc(var(--vx) * 2) calc(var(--vx) * 6);
+  overflow-wrap: anywhere; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-combobox-float [role="option"][hidden], .vx-combobox-float [role="group"][hidden] { display: none; }
+.vx-combobox-float [role="option"][aria-disabled="true"] { color: var(--vx-ink-quiet); cursor: default; }
+.vx-option-trail { margin-inline-start: auto; flex: none; color: var(--vx-ink-quiet); font-size: 0.875rem; }
+.vx-combobox-title { padding: calc(var(--vx) * 2) calc(var(--vx) * 5) calc(var(--vx) * 1) calc(var(--vx) * 6); font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet); }
+.vx-combobox-empty { margin: 0; padding: calc(var(--vx) * 2.5) calc(var(--vx) * 5) calc(var(--vx) * 2.5) calc(var(--vx) * 6); color: var(--vx-ink-quiet); }
+.vx-combobox-empty[hidden] { display: none; }
+
+/* plain: a painted plate with the accent's line where its light shows, and the mark painted */
+.vx-combobox-float:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+.vx-combobox-float:not([data-vx-live]) [role="option"][data-vx-active] {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+.vx-combobox-float:not([data-vx-live]) [role="option"][data-vx-active]:dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }

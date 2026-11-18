@@ -1,0 +1,94 @@
+/* ---------- Carousel ---------- */
+
+/* Slides in a window: a recess (the kit's .vx-recess) that holds one slide at a time. Under it,
+   previous and next (the kit's keys) and between them a row of lamps in a slot: one a slide.
+   Markup: <section class="vx-carousel" aria-roledescription="carousel" aria-label="…">
+             <div class="vx-recess vx-carousel-window">
+               <div class="vx-carousel-track" tabindex="0">
+                 <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="1 of 3">…</div>
+               </div>
+             </div>
+             <div class="vx-carousel-bar">
+               <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+               <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+               <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+               <button class="vx-button" type="button" data-vx-play>Pause</button>   (only with data-vx-auto on the carousel)
+             </div>
+           </section>
+   --vx-carousel-n on the lamps is the number of slides: written in the page, the lamps take
+   their room before the script runs; the script keeps it true. */
+
+.vx-carousel {
+  display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 5);
+  box-sizing: border-box; inline-size: 100%; min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-carousel-window { display: grid; grid-template-columns: minmax(0, 1fr); min-inline-size: 0; }
+/* The real scrolling element. It snaps a slide at a time, so a finger swipes it, and with no
+   script it is still a carousel. No smooth scrolling here: the part asks for it a move at a
+   time, and not at all where less motion is wanted. */
+.vx-carousel-track {
+  display: flex; min-inline-size: 0;
+  overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; overscroll-behavior-x: contain;
+  outline: 0;
+}
+.vx-carousel-slide {
+  flex: none; box-sizing: border-box; inline-size: 100%; min-inline-size: 0;
+  scroll-snap-align: start; scroll-snap-stop: always;
+  padding: calc(var(--vx) * 5) calc(var(--vx) * 6);
+  line-height: calc(var(--vx) * 6);
+  overflow-wrap: anywhere;
+}
+.vx-carousel-slide > :is(h3, h4, p) { margin: 0; }
+.vx-carousel-slide > * + * { margin-block-start: calc(var(--vx) * 2); }
+/* focus: the browser's ring, round the recess the track fills */
+.vx-carousel-window:has(> .vx-carousel-track:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+/* once the script has taken over, the browser's own bar steps aside; with no script it stays */
+.vx-carousel[data-vx-on] .vx-carousel-track { scrollbar-width: none; }
+.vx-carousel[data-vx-on] .vx-carousel-track::-webkit-scrollbar { display: none; }
+
+/* the bar: previous, the lamps, next; then the pause key, if it has one */
+.vx-carousel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 4); min-inline-size: 0; }
+/* previous and next: the smallest key there is, 11 voxels square */
+.vx-carousel-bar > [data-vx-step] { flex: none; inline-size: calc(var(--vx) * 11); padding: 0; }
+/* the pause key keeps its width when its word changes, and stands a little apart */
+.vx-carousel-bar > [data-vx-play] { flex: none; min-inline-size: calc(var(--vx) * 24); margin-inline-start: calc(var(--vx) * 2); }
+/* The chevron is cut from half-voxel cells like the kit's glyphs, and is the legend's colour.
+   Next points the way the line runs; previous the other way. */
+.vx-carousel-chevron {
+  display: block;
+  inline-size: calc(var(--vx) * 2);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-carousel-bar > [data-vx-step="prev"] .vx-carousel-chevron { transform: scaleX(-1); }
+.vx-carousel-bar:dir(rtl) > [data-vx-step="next"] .vx-carousel-chevron { transform: scaleX(-1); }
+.vx-carousel-bar:dir(rtl) > [data-vx-step="prev"] .vx-carousel-chevron { transform: none; }
+
+/* The lamps: a slot four voxels high with a voxel of floor round the row; a lamp is two voxels
+   of light each way, the next one a voxel on. They show which slide it is on and are not
+   pressed: the keys and the track are. */
+.vx-carousel-lamps {
+  position: relative; isolation: isolate; display: block; flex: none; box-sizing: border-box;
+  inline-size: calc(var(--vx) * (var(--vx-carousel-n, 3) * 3 + 1));
+  block-size: calc(var(--vx) * 4);
+  padding: var(--vx);
+}
+/* plain: a painted slot of dark studs, and the accent's colour on the current one (--_at, set by the script) */
+.vx-carousel-lamps:not([data-vx-live]) {
+  background: repeating-linear-gradient(to right, var(--vx-steel) 0 calc(var(--vx) * 2), var(--vx-slate) 0 calc(var(--vx) * 3)) content-box, var(--vx-slate);
+}
+.vx-carousel-lamps:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block: var(--vx); inset-inline-start: calc(var(--vx) * (1 + 3 * var(--_at, 0)));
+  inline-size: calc(var(--vx) * 2);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+
+/* With no script at all the keys could do nothing and the lamps would say nothing: they go, and
+   the track scrolls under the browser's own bar. */
+@media (scripting: none) {
+  .vx-carousel-bar { display: none; }
+}

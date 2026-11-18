@@ -1,7 +1,10 @@
 /* ---------- Button group ---------- */
 
-/* Keys a voxel apart, read as one group. The keys are the kit's own (.vx-button); the group is
-   how they sit together, and its name. On a narrow page the row wraps; it is never cut.
+/* A bank of keys, read as one group. The keys are the kit's own (.vx-button); the group is how
+   they sit together, and its name. On a narrow page the row wraps; it is never cut.
+   They stand three voxels apart, the least that keeps them whole: a keycap is five voxels high,
+   and its side and the light at its foot are drawn two and a half voxels left of and above its
+   face. Nearer than that, each key would be drawn over the end of the one before it.
    Markup: <div class="vx-button-group" role="group" aria-label="History">
              <button class="vx-button" type="button">Undo</button> ...
            </div>
@@ -10,7 +13,7 @@
   display: inline-flex;
   flex-wrap: wrap;
   align-items: stretch;
-  gap: var(--vx);
+  gap: calc(var(--vx) * 3);
   max-inline-size: 100%;
   box-sizing: border-box;
   margin: 0;

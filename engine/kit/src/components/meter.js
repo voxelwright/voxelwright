@@ -4,6 +4,7 @@
 // Markup: <span class="vx-meter"><progress value="3" max="5">3 of 5</progress></span>
 //         <span class="vx-meter" data-vx-kind="growth" data-vx-seed="4"><progress value="0.6"></progress></span>
 
+import { inlineX, watchDirection } from '../plain.js';
 import { plant, pot } from '../core/plant.js';
 import { CALM } from '../core/motion.js';
 import { listeners, clamp } from './util.js';
@@ -41,8 +42,8 @@ export const meter = {
       m.part('floor').box(1, y + 1, 0, W - 2, 3, 1, 'slate');
       const fill = m.part('fill');
       fill.grounded = false;
-      const n = W - 2;
-      for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) for (let k = 1; k <= 2; k++) fill.plot(1 + i, y + 1 + j, k, el.dataset.vxMaterial || 'leaf', (i + 0.5) / n);
+      const x = inlineX(live), n = W - 2;
+      for (let i = 0; i < n; i++) for (let j = 0; j < 3; j++) for (let k = 1; k <= 2; k++) fill.plot(x(1 + i), y + 1 + j, k, el.dataset.vxMaterial || 'leaf', (i + 0.5) / n);
       live.faceZ = 2;
     }
   },
@@ -60,6 +61,7 @@ export const meter = {
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const set = () => { live.spring('v').to(read(live.el)); live.invalidate(); };
     on.watch(live.el, { attributes: true, subtree: true, attributeFilter: ['value', 'max', 'data-vx-value'] }, set);
     on.watch(live.el, { attributes: true, attributeFilter: ['data-vx-kind', 'data-vx-seed', 'data-vx-petal', 'data-vx-pot'] }, () => live.rebuild());

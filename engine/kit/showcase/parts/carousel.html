@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Carousel</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .week { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; max-inline-size: calc(var(--vx) * 130); }
+  .week-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: calc(var(--vx) * 1) calc(var(--vx) * 5); }
+  .week-head h3 { font-size: 1.125rem; line-height: 1.3; }
+  .week-head span { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .vx-carousel-slide .kind { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .vx-carousel-slide h4 { font-size: 1.0625rem; font-weight: 600; }
+  .vx-carousel-slide p { text-wrap: pretty; }
+  .vx-carousel-slide a { color: var(--vx-link); }
+  .vx-carousel-slide a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Carousel</h1>
+    <p class="what">Slides in a window, one at a time. Previous and next are keys; a row of lamps says which slide it is on. A finger swipes it. It never moves by itself unless it is asked to.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: what changed this week</h2>
+    <div class="week">
+      <div class="week-head"><h3>This week in fogline</h3><span>Four notes, 17 November</span></div>
+      <section class="vx-carousel" id="week" aria-roledescription="carousel" aria-label="This week in fogline">
+        <div class="vx-recess vx-carousel-window">
+          <div class="vx-carousel-track" tabindex="0">
+            <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="1 of 4">
+              <p class="kind">Deploys</p>
+              <h4>Roll back from the deploy list</h4>
+              <p>Every deploy of harbor-api now has a Roll back key beside it. The build it goes back to is kept warm for a day, so going back takes seconds.</p>
+            </div>
+            <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="2 of 4">
+              <p class="kind">Logs</p>
+              <h4>Logs keep their place</h4>
+              <p>Leave a build log and come back: it is where you left it, with the new lines under a mark. <a href="#week">Read how it works</a></p>
+            </div>
+            <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="3 of 4">
+              <p class="kind">Teams</p>
+              <h4>Mina and Ada can approve</h4>
+              <p>A deploy to production can ask for a second pair of eyes. Name who may approve it in the project's settings.</p>
+            </div>
+            <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="4 of 4">
+              <p class="kind">Regions</p>
+              <h4>Frankfurt is open</h4>
+              <p>fogline can run in Frankfurt from today. Moving a service there takes one deploy and no change to its address.</p>
+            </div>
+          </div>
+        </div>
+        <div class="vx-carousel-bar">
+          <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 4"></span>
+          <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+        </div>
+      </section>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <p>On the first slide: there is no previous</p>
+        <section class="vx-carousel" id="first" aria-roledescription="carousel" aria-label="Builds, first">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>Build 212</h4><p>harbor-api, 45 s. Live since 10:43.</p></div>
+              <div class="vx-carousel-slide"><h4>Build 211</h4><p>harbor-api, 51 s. Rolled back at 09:20.</p></div>
+              <div class="vx-carousel-slide"><h4>Build 210</h4><p>harbor-api, 48 s. Replaced by 211.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide" aria-disabled="true"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          </div>
+        </section>
+      </div>
+      <div class="state">
+        <p>On the last slide: there is no next</p>
+        <section class="vx-carousel" id="last" aria-roledescription="carousel" aria-label="Builds, last">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>Build 212</h4><p>harbor-api, 45 s. Live since 10:43.</p></div>
+              <div class="vx-carousel-slide"><h4>Build 211</h4><p>harbor-api, 51 s. Rolled back at 09:20.</p></div>
+              <div class="vx-carousel-slide"><h4>Build 210</h4><p>harbor-api, 48 s. Replaced by 211.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          </div>
+        </section>
+      </div>
+      <div class="state">
+        <p>One slide only: both keys are off</p>
+        <section class="vx-carousel" id="one" aria-roledescription="carousel" aria-label="Notes, one">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>Nothing else is new</h4><p>fogline had one note this week. The rest is in the changelog.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide" aria-disabled="true"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 1"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide" aria-disabled="true"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          </div>
+        </section>
+      </div>
+      <div class="state">
+        <p>Asked to go on by itself: it has a pause key, and goes round</p>
+        <section class="vx-carousel" id="rotating" data-vx-auto="5000" aria-roledescription="carousel" aria-label="Tips">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>Deploy on push</h4><p>Turn it on and every push to main is built and goes live.</p></div>
+              <div class="vx-carousel-slide"><h4>Keep three builds</h4><p>The last three stay warm, so a roll back is quick.</p></div>
+              <div class="vx-carousel-slide"><h4>Name your regions</h4><p>A service can run in two at once. Ada's runs in three.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="Previous slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="Next slide"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <button class="vx-button" type="button" data-vx-play>Pause</button>
+          </div>
+        </section>
+      </div>
+      <div class="state">
+        <p>Right to left: the slides, the keys and the lamps run the other way</p>
+        <section class="vx-carousel" id="rtl" dir="rtl" lang="ar" data-vx-of="من" aria-roledescription="carousel" aria-label="البناءات">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>البناء 212</h4><p>اكتمل البناء في 45 ثانية. يعمل منذ 10:43.</p></div>
+              <div class="vx-carousel-slide"><h4>البناء 211</h4><p>اكتمل البناء في 51 ثانية.</p></div>
+              <div class="vx-carousel-slide"><h4>البناء 210</h4><p>اكتمل البناء في 48 ثانية.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="الشريحة السابقة"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 3"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="الشريحة التالية"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          </div>
+        </section>
+      </div>
+      <div class="state">
+        <p>Ukrainian, and a long word: it wraps inside its slide</p>
+        <section class="vx-carousel" id="uk" lang="uk" data-vx-of="з" aria-roledescription="carousel" aria-label="Розгортання">
+          <div class="vx-recess vx-carousel-window">
+            <div class="vx-carousel-track" tabindex="0">
+              <div class="vx-carousel-slide"><h4>Розгорнути на сервері</h4><p>Збірка триває близько хвилини. Адреса сервісу: harbor-api-production-eu-central-1.fogline.example</p></div>
+              <div class="vx-carousel-slide"><h4>Повернути попередню збірку</h4><p>Останні три збірки зберігаються, тож повернення займає секунди.</p></div>
+            </div>
+          </div>
+          <div class="vx-carousel-bar">
+            <button class="vx-button" type="button" data-vx-step="prev" aria-label="Попередній слайд"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+            <span class="vx-carousel-lamps" aria-hidden="true" style="--vx-carousel-n: 2"></span>
+            <button class="vx-button" type="button" data-vx-step="next" aria-label="Наступний слайд"><span class="vx-carousel-chevron" aria-hidden="true"></span></button>
+          </div>
+        </section>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { carousel } from '/packages/voxelmorphism/src/components/carousel.js';
+  const q = new URLSearchParams(location.search), tips = document.getElementById('rotating');
+  // for a check with a real hand: ?auto=1200 makes the one that goes by itself quicker, ?still takes that away
+  if (q.has('auto')) tips.dataset.vxAuto = q.get('auto');
+  if (q.has('still')) { tips.removeAttribute('data-vx-auto'); tips.querySelector('[data-vx-play]').remove(); }
+  // the one shown on its last slide is put there before the part reads where it is
+  const last = document.querySelector('#last .vx-carousel-track');
+  last.scrollTo({ left: last.scrollWidth, behavior: 'instant' });
+  show(carousel);
+</script>
+</body>
+</html>

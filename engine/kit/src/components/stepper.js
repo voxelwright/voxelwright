@@ -11,7 +11,6 @@
 // is switched off (aria-disabled). `input` and `change` come from the field, as if typed.
 // The keys are out of the tab order (tabindex="-1"): the arrow keys in the field do their work.
 
-import { listeners } from './util.js';
 
 const WAIT = 420, EVERY = 70; // ms: how long a key is held before it repeats, and how often then
 
@@ -91,8 +90,5 @@ function wire(el, on) {
 export const stepper = {
   name: 'stepper',
   selector: '.vx-stepper',
-  pad: 0,
-  build() {}, // its well and its keys are the kit's own parts
-  bind(live) { const on = listeners(); wire(live.el, on); return () => { on.done(); }; },
   plain: wire,
 };

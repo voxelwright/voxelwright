@@ -229,6 +229,10 @@
   isolation: isolate;
 }
 
+/* Physical transforms and inset shadows follow the inline direction. */
+:where(.vx-switch, .vx-list > li) { --_inline-sign: 1; }
+:where(.vx-switch, .vx-list > li):dir(rtl) { --_inline-sign: -1; }
+
 /* ---------- Toggle ---------- */
 
 .vx-toggle {
@@ -257,7 +261,7 @@
   transition: transform 160ms var(--vx-ease-out);
 }
 .vx-toggle input:checked + .vx-switch:not([data-vx-live]) { background: var(--vx-signal); }
-.vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8)); }
+.vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8 * var(--_inline-sign))); }
 
 /* ---------- Slider ---------- */
 
@@ -296,7 +300,7 @@
 .vx-card > :first-child:not(canvas), .vx-card > .vx-canvas + * { margin-block-start: 0; }
 .vx-card > :last-child { margin-block-end: 0; }
 .vx-card > * + * { margin-block-start: 0.5em; }
-.vx-card :is(p, h3, h4) { margin-block: 0; }
+.vx-card > :is(p, h3, h4) { margin-block: 0; } /* the card's own words only: a part set on a card keeps its own spacing */
 .vx-card:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
 .vx-card:not([data-vx-live])[data-vx-edge] { border-inline-start: calc(var(--vx) * 2) solid var(--vx-steel); padding-inline-start: calc(var(--vx) * 6); }
 .vx-card:not([data-vx-live])[data-vx-edge="leaf"] { border-color: var(--vx-leaf); }
@@ -309,10 +313,10 @@
 
 .vx-list { list-style: none; margin: 0; padding: var(--vx); display: grid; gap: var(--vx); }
 .vx-list > li { display: flex; min-block-size: calc(var(--vx) * 11); }
-.vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
+.vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
 /* With voxels the part wraps each row's content in a .vx-row. A row written without one takes
    the same box, so a list is the same height plain and live. */
-.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 6); line-height: 1.35; }
+.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
 /* Its link takes the row's line height too, as it does in a .vx-row. A page that sets a line
    height on every element would otherwise make a wrapped row taller plain than live. */
 .vx-list > li:not(:has(> .vx-row)) > :is(a, button) { font: inherit; }
@@ -324,7 +328,7 @@
 .vx-row-meta { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
 .vx-list:not([data-vx-live]) { background: var(--vx-slate); }
 .vx-list:not([data-vx-live]) > li { background: var(--vx-chalk); }
-.vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset calc(var(--vx) * 2) 0 0 var(--vx-signal); }
+.vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset calc(var(--vx) * 2 * var(--_inline-sign)) 0 0 var(--vx-signal); }
 
 /* ---------- Tabs ---------- */
 
@@ -394,7 +398,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
 /* ---------- Toast ---------- */
 
 .vx-toasts { position: fixed; inset-inline: 0; inset-block-end: calc(var(--vx) * 8); z-index: 1000; display: grid; justify-items: center; gap: calc(var(--vx) * 4); pointer-events: none; }
-.vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding: calc(var(--vx) * 3.5) calc(var(--vx) * 6) calc(var(--vx) * 3.5) calc(var(--vx) * 8); font-weight: 600; line-height: 1.35; }
+.vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding-block: calc(var(--vx) * 3.5); padding-inline: calc(var(--vx) * 8) calc(var(--vx) * 6); font-weight: 600; line-height: 1.35; }
 .vx-toast-text { transition: opacity 120ms ease; }
 .vx-toast[data-vx-leaving] .vx-toast-text { opacity: 0; }
 .vx-toast:not([data-vx-live]) { background: var(--vx-chalk); border-inline-start: calc(var(--vx) * 2) solid var(--vx-signal); padding-inline-start: calc(var(--vx) * 6); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }

@@ -94,14 +94,13 @@ say so in your report.
 **Exists:** button (key), switch (trench with a key), slider, text field (well), card (surface),
 list, dropdown menu (float), dialog (float), tabs (trench of seats, the chosen one a key level
 with the surface), meter (trench that fills with light), toast (float), block, lettering (voxel
-headings that break under the pointer), groove, recess, lamp, pointer, checkbox (small well full
-of light).
+headings that break under the pointer), groove, recess, lamp, pointer, checkbox (a latching push-button in a steel collar, its lamp lit when ticked).
 
 **Forms**
 
 | Part | Tool |
 |---|---|
-| radio group | Small wells with a one-voxel corner step; the chosen one full of light. Arrow keys move the choice. |
+| radio group | Latching push-buttons in steel collars, their corners stepped (the checkbox's latch); the chosen one latched down with its lamp lit. Arrow keys move the choice. |
 | select (native) | A key with a chevron: it opens the browser's own picker. |
 | label | None: words. |
 | field with error and validation | The well. Invalid: the rim is red, and the message below is words beside a red lamp. Valid needs nothing. |
@@ -109,8 +108,8 @@ of light).
 | input group | One well holding the input and its add-on words. A key that belongs to it stands beside the well, not in it. |
 | number stepper | A well for the number, two small keys (minus, plus) beside it. |
 | toggle button | A key that stays down while on, with its light held bright. |
-| toggle group | One of many: a trench of seats like tabs. Several of many: toggle buttons side by side. |
-| button group | Keys a voxel apart, read as one group. |
+| toggle group | One of many: a bank of latching keys in a slot with a bezel; the chosen one latched down on its light. Several of many: toggle buttons side by side. |
+| button group | Keys three voxels apart, read as one group (nearer, a cap's side is drawn over the key before it). |
 | close button | A small ordinary key with the cross icon. Its target is still 44 px. |
 
 **Reading**
@@ -200,9 +199,10 @@ Copy the checkbox: `src/components/checkbox.js`, `css/checkbox.css`, `showcase/p
 It is the example to hold yours beside. Read `src/looks/lit.js` for a key, a well, a trench that
 fills, a switch, a float, and `src/core/light.js` for the helpers.
 
-A part with "none" as its tool has no `.js` file unless it needs behaviour. If it needs behaviour
-and no voxels, write the `.js` with an empty `build() {}`, the behaviour in `plain(el, on)`, and
-call the same from `bind`.
+A part with "none" as its tool has no `.js` file unless it needs behaviour. For behaviour without
+voxels, omit `build`: such a part gets no canvas and no model, and it may sit on the same element
+as a part that draws (a context menu on a recess). Put its wiring in `plain(el, on)`, and supply
+`bind(live)` too when it needs the stage.
 
 The kit's one stylesheet, `voxelmorphism.css`, is made from the files in `css/` by
 `node tools/css.mjs`. Never edit it by hand. Run the tool after you change a file in `css/`; a
@@ -212,7 +212,7 @@ nothing.
 
 Things that exist and should be used, not written again: `.vx-aloud` (words for a screen reader
 only); `place`, `anchored` and `slabOnLight` in `src/components/popover.js` (anything that floats
-by a trigger); `steady` in `src/components/accordion.js` (a row that opens on a large panel);
+by a trigger);
 the kit's own parts (`.vx-button`, `.vx-well`, `.vx-groove`, `.vx-lamp`, `.vx-recess`,
 `.vx-tabs`, `.vx-check`, the menu, the dialog, the popover). Read `showcase/parts/index.html`
 for the whole list; each part's file begins with its markup.
@@ -307,7 +307,8 @@ no WebGPU, or a page with `data-vx-plain`, shows. It does not have to be pretty 
   shared file needs a change, write the exact change in your report; the coordinator makes it.
 - **No git.** Do not commit, stash, switch branch or push. The coordinator commits.
 - **One server: port 5989,** already running and serving this folder. Start no server, open no
-  other port, stop no process.
+  other port. Stop no process but one you started yourself, and that only by its PID: never
+  `pkill` or `killall`, which can stop other people's servers.
 - **Nothing leaves the machine:** no package installs, no uploads, no outside services. Reading
   public documentation is fine.
 - No new dependencies. No licence file. No skill folders in the repository.

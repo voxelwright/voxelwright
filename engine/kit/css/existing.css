@@ -4,11 +4,11 @@
 
 /* ---------- lit: slider ---------- */
 
-/* The key is five voxels wide and stops a voxel short of each end of the trench. The browser's
-   own thumb is made seven wide (and stays unseen), so its middle is always the key's middle and
-   the key stays under the pointer. */
-[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 7); }
-[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 7); }
+/* A fader. Its knob is seven voxels wide and stops a voxel short of each end of the slot. The
+   browser's own thumb is made nine wide (and stays unseen), so its middle is always the knob's
+   middle and the knob stays under the pointer. */
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 9); }
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 9); }
 [data-vx-look="lit"] .vx-slider input { accent-color: var(--lit-accent); }
 [data-vx-look="lit"] .vx-slider input:disabled { cursor: default; }
 

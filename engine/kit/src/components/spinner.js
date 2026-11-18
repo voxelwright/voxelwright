@@ -1,7 +1,7 @@
-// Spinner. A small ring of light cubes that take turns: one is full, the ones behind it are
-// going out, the rest wait small.
-// Tool: light (the accent: something is in progress), as cubes standing on the surface like a
-// lamp. Not a key: nothing in it can be pressed.
+// Spinner. A ring of lamps that take turns: one is lit, the ones behind it are going out, and the
+// rest are dark studs, as a lamp that is off is in the meter.
+// Tool: what shows a state (lamps: the accent, something is in progress). Each lamp is a steel
+// stud a voxel high with a voxel of light on it. Not a key: nothing in it can be pressed.
 // Markup, alone:        <span class="vx-spinner" role="status"><span class="vx-spinner-word">Loading the deploys</span></span>
 //         beside words: <p role="status"><span class="vx-spinner" aria-hidden="true"></span> Building harbor-api</p>
 //         data-vx-size="large" is a ring of sixteen. The region being waited for takes
@@ -16,8 +16,8 @@ import { reducedMotion } from '../core/motion.js';
 import { listeners } from './util.js';
 
 const TURN = 0.8;   // seconds for the light to go once round
-const WAIT = 0.45;  // the size of a cube that is waiting
-const STILL = 0.75; // the size of every cube when nothing may move
+const WAIT = 0;     // the size of a lamp's light while it waits: none, so its stud shows dark
+const STILL = 0.75; // the size of every lamp's light when nothing may move
 const TAIL = 0.6;   // how much of the ring is still going out behind the full cube
 
 const running = (live) => live.el.isConnected && !reducedMotion();
@@ -37,13 +37,17 @@ export const spinner = {
     for (let j = 0; j < H - 1; j += 2) seats.push([W - 1, j]);
     for (let i = W - 1; i > 0; i -= 2) seats.push([i, H - 1]);
     for (let j = H - 1; j > 0; j -= 2) seats.push([0, j]);
+    // the studs: what a lamp is when it is not lit
+    const studs = m.part('studs');
+    for (const [x, y] of seats) studs.box(x, y, 0, 1, 1, 1, 'steel');
+    // the light of each lamp: one voxel, standing on its stud
     const cubes = m.part('cubes');
     cubes.grounded = false; cubes.masked = true;
     const mat = lightName(el, 'light');
-    for (const [x, y] of seats) cubes.plot(x, y, 0, mat); // a cube: one voxel each way
+    for (const [x, y] of seats) cubes.plot(x, y, 1, mat);
     live.state.seats = seats;
     live.state.turn = null; // which seat each drawn cube is: found once the model is baked
-    live.faceZ = 1; // the cubes' tops lie on the element's box, as a lamp's does
+    live.faceZ = 1; // the studs' tops lie on the element's box, as a lamp's collar does
   },
 
   pose(live) {

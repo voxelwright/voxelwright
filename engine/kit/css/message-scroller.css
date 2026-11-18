@@ -1,0 +1,27 @@
+/* ---------- Message scroller ---------- */
+
+/* The thread: the kit's scroll area holding messages. It keeps to the newest message while you
+   are at its foot, leaves you alone while you read back, and shows a key when something new
+   has come below.
+   Markup: <div class="vx-scroll vx-thread" style="--vx-scroll-h: 96">
+             <div class="vx-recess vx-scroll-well">
+               <div class="vx-scroll-view" role="log" aria-label="Deploys, harbor-api" tabindex="0">
+                 <article class="vx-message">…</article> …
+               </div>
+               <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+             </div>
+             <span class="vx-scroll-bar" aria-hidden="true"></span>
+           </div>
+   Leave .vx-recess off the well and the thread lies on the surface itself (a thread of bubbles
+   wants that: theirs are cut into the panel, yours stand on it). The key's slot is hidden
+   until the script shows it; with no script it never is, and the log scrolls as any does. */
+
+.vx-thread > .vx-scroll-well { position: relative; }
+/* messages one under another; room at the head and the foot for what stands in the thread */
+.vx-thread .vx-scroll-view { padding-block: calc(var(--vx) * 5); }
+/* a thread on the surface has no wall to keep clear of */
+.vx-thread > .vx-scroll-well:not(.vx-recess) > .vx-scroll-view { padding-inline: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+
+/* the key that says something new is below: it stands at the foot of the thread, in the middle,
+   over the words. Its slot is as small as the key, so the thread under it can still be pressed. */
+.vx-thread-new { position: absolute; z-index: 2; inset-block-end: calc(var(--vx) * 4); inset-inline: calc(var(--vx) * 4); isolation: isolate; display: block; inline-size: fit-content; max-inline-size: calc(100% - var(--vx) * 8); margin-inline: auto; translate: none; }
