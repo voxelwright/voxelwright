@@ -293,7 +293,8 @@
 .vx-well ::placeholder { color: var(--vx-ink-quiet); opacity: 1; }
 .vx-well:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
 .vx-well:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
-.vx-well:not([data-vx-live]):has([aria-invalid="true"]) { box-shadow: inset 0 0 0 var(--vx) var(--vx-brick); }
+/* invalid: a red line inside the far lower edge, not a ring */
+.vx-well:not([data-vx-live]):has([aria-invalid="true"]) { box-shadow: inset 0 calc(var(--vx) * -1) 0 var(--lit-stop, var(--vx-brick)); }
 
 /* ---------- Note card ---------- */
 
@@ -4204,7 +4205,8 @@ dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {
 
 /* ---------- Field with error and validation ---------- */
 
-/* Tool: the well. Invalid (aria-invalid="true" on the control): the well's rim is red, and the
+/* Tool: the well. Invalid (aria-invalid="true" on the control): a red tube lies along the far lower
+   inside edge of the well, its light kept in the hole, and the
    message below it is words beside a red lamp. Valid needs nothing.
    Markup: <div class="vx-field">
              <label class="vx-field-label" for="mail">Email</label>

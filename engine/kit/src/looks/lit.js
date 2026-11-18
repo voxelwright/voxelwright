@@ -71,13 +71,25 @@ const well = {
     const { W, H, el } = live, D = live.look.well;
     const input = el.querySelector('input, textarea');
     const bad = input?.getAttribute('aria-invalid') === 'true', focus = !!input?.matches(':focus');
-    hole(live, m, { depth: D, wall: bad ? 'light-stop' : focus ? 'light' : lightName(el, 'light-warm'), floor: input?.disabled ? 'slate' : 'floor' });
-    live.spring('lit', 0, CALM.k * 2, CALM.c * 1.4).to(focus || bad ? 1 : 0);
+    // Invalid: no red rim. A red tube lies along the far, lower inside edge of the well, under the
+    // lip, so its light is contained by the hole and falls across the floor the way the room's
+    // light does. A focused invalid field keeps the tube and takes the accent's rim on its walls.
+    hole(live, m, { depth: D, wall: focus ? 'light' : bad ? 'gasket' : lightName(el, 'light-warm'), floor: input?.disabled ? 'slate' : 'floor' });
+    if (bad) {
+      const tell = m.part('tell');
+      tell.sunk = true;
+      tell.box(0, live.H - 1, -D, live.W, 1, 1, 'light-stop');
+      // its light falls one row across the floor, and is gone by the next
+      m.part('floor').box(0, live.H - 2, -D - 1, live.W, 1, 1, 'stop-wash');
+    }
+    live.state.bad = bad;
+    live.spring('lit', 0, CALM.k * 2, CALM.c * 1.4).to(focus ? 1 : 0);
   },
 
   pose(live) {
     const lit = live.spring('lit').x;
-    live.glowStrength = halo(WELL_GLOW) * (0.2 + lit * (live.theme === 'day' ? 2.2 : 1.6));
+    // the tube's light stays in the well: only a breath of it reaches the surface
+    live.glowStrength = halo(WELL_GLOW) * (0.2 + lit * (live.theme === 'day' ? 2.2 : 1.6)) + (live.state.bad ? halo(0.006) : 0);
     live.glowRadius = 3.2 + lit * 1.2;
   },
 };

@@ -1,6 +1,7 @@
 /* ---------- Field with error and validation ---------- */
 
-/* Tool: the well. Invalid (aria-invalid="true" on the control): the well's rim is red, and the
+/* Tool: the well. Invalid (aria-invalid="true" on the control): a red tube lies along the far lower
+   inside edge of the well, its light kept in the hole, and the
    message below it is words beside a red lamp. Valid needs nothing.
    Markup: <div class="vx-field">
              <label class="vx-field-label" for="mail">Email</label>

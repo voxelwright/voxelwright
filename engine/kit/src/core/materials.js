@@ -51,6 +51,8 @@ const defs = {
   'light-stop': { day: '#f0442e', night: '#ff5a44', jitter: 0, glow: 1 },
   // Lens: an unlit lamp window, smoked glass. It is there before it lights, and stays when it goes out.
   lens: { day: '#7a766c', night: '#14171b', jitter: 0.004 },
+  // Stop wash: the floor of a well where the red tube's light falls on it. Lit, not glowing.
+  'stop-wash': { day: '#d39c86', night: '#3a1d1c', jitter: 0.004 },
   // Key: the cap of an ordinary key.
   key: { day: '#fffefa', night: '#2b3046', jitter: 0.004 },
   // Pointer-edge: the outline of the voxel pointer.
