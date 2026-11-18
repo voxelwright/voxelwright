@@ -95,6 +95,18 @@ async function checkReopened(page) {
     return el.returnValue;
   });
   say(explicit === 'reserved', 'a page can veto cancellation and requestClose keeps an explicit result');
+  const handled = await dialog.evaluate(async el => {
+    el.showModal();
+    el.returnValue = 'handled';
+    el.addEventListener('cancel', e => {
+      el.close();
+      e.preventDefault();
+    }, { once: true });
+    el.requestClose('unused');
+    await new Promise(requestAnimationFrame);
+    return !el.open && el.returnValue === 'handled';
+  });
+  say(handled, 'a cancel listener can close with its own result and veto the native default');
   for (const prevent of [true, false]) {
     await dialog.evaluate((el, prevent) => {
       el.showModal();
