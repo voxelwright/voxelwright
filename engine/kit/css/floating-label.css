@@ -1,0 +1,48 @@
+/* ---------- Floating label ---------- */
+
+/* Tool: the well. The label is words: they rest inside the well while it is empty, and move above
+   it when it has focus or holds something.
+   Markup: <div class="vx-field vx-floating">
+             <label class="vx-field-label" for="mail">Email</label>
+             <span class="vx-well"><input id="mail" placeholder=" "></span>
+           </div>
+   The placeholder (a space will do) is how CSS knows the field is empty; no script is needed.
+   The label's place is above the well, and that is where it is unless the field is known to be
+   empty and at rest: a field with no placeholder, one of a kind that shows none, or one the
+   browser filled in by itself keeps its label above, so the label never lies on what was typed.
+   Its row above the well is kept in both states: nothing else moves when the label does. */
+
+.vx-floating { position: relative; }
+.vx-floating > .vx-field-label {
+  position: relative; z-index: 1; /* over the well, which is where it rests */
+  justify-self: start;
+  /* never wider than the room inside the well, in either state, so its lines break the same way */
+  max-inline-size: calc(100% - var(--vx) * 8);
+  min-block-size: calc(var(--vx) * 5); line-height: calc(var(--vx) * 5);
+  transition: translate 180ms var(--vx-ease-out), color 180ms var(--vx-ease-out);
+}
+
+/* At rest and empty: down into the well, to where the first words will be typed. It goes down
+   its own row and the gap, and is centred on the well (11 voxels) whatever its own height.
+   "Empty" leaves out a field the browser filled in by itself: until the page is touched the
+   browser may show what it put there and still count the field as empty. That is asked inside
+   :is(), which lets a browser that does not know one of the two names keep the rule. */
+.vx-floating:has(:is(input, textarea):placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > .vx-field-label {
+  translate: calc(var(--vx) * 4) calc(var(--vx) * 7.5 + 50%);
+  color: var(--vx-ink-quiet);
+}
+.vx-floating:has(:is(input, textarea):placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > .vx-field-label:dir(rtl) { translate: calc(var(--vx) * -4) calc(var(--vx) * 7.5 + 50%); }
+/* in a taller well it rests on the first line */
+.vx-floating:has(textarea:placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > .vx-field-label { translate: calc(var(--vx) * 4) calc(var(--vx) * 5 + 100%); }
+.vx-floating:has(textarea:placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > .vx-field-label:dir(rtl) { translate: calc(var(--vx) * -4) calc(var(--vx) * 5 + 100%); }
+/* resting in a field that can be typed in, it shows where a press will land */
+.vx-floating:has(:is(input, textarea):enabled:placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > .vx-field-label { cursor: text; }
+
+/* a placeholder of real words would lie under the resting label: it shows once the label has moved */
+.vx-floating :is(input, textarea):not(:focus)::placeholder { color: transparent; }
+
+.vx-floating:has(:is(input, textarea):disabled) > .vx-field-label { color: var(--vx-ink-quiet); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-floating > .vx-field-label { transition: none; }
+}

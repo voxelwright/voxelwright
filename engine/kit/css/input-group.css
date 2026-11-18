@@ -1,0 +1,38 @@
+/* ---------- Input group ---------- */
+
+/* Tool: one well, holding the input and its add-on words. A key that belongs to it stands beside
+   the well, not in it: what is pressed stands up, what is typed into is cut in.
+   Markup: <div class="vx-field">
+             <label class="vx-field-label" for="site">Address</label>
+             <div class="vx-input-group">
+               <span class="vx-well">
+                 <label class="vx-addon" for="site">https://</label>
+                 <input id="site">
+                 <label class="vx-addon" for="site">.fogline.app</label>
+               </span>
+               <button class="vx-button">Copy</button>
+             </div>
+           </div>
+   An add-on is a label of the same input: a press on it lands in the input, and it is read out as
+   part of the input's name, in order ("Address https:// .fogline.app"). */
+
+.vx-input-group { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 4); min-inline-size: 0; }
+/* The well asks for its words and 24 voxels to type in. Where the line cannot give that and the
+   key too, the key goes to the next line and the well takes the whole of this one; the well
+   itself gives way before the page scrolls sideways. */
+.vx-input-group > .vx-well { display: flex; align-items: center; flex: 1 1 auto; min-inline-size: 0; max-inline-size: 100%; }
+.vx-input-group > .vx-well > input { flex: 1 1 calc(var(--vx) * 24); inline-size: auto; min-inline-size: calc(var(--vx) * 8); }
+.vx-input-group > .vx-button { flex: none; }
+
+.vx-addon {
+  /* in a line too short for everything the words give way first, and say so with an ellipsis */
+  flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  padding-inline: calc(var(--vx) * 4) 0;
+  color: var(--vx-ink-quiet); font: 500 1rem/1.5 var(--vx-font);
+  cursor: text; user-select: none; -webkit-user-select: none;
+}
+.vx-input-group input + .vx-addon { padding-inline: 0 calc(var(--vx) * 4); }
+/* the words and what is typed read as one line: a voxel between them, not the well's whole margin */
+.vx-input-group .vx-addon + input { padding-inline-start: calc(var(--vx) * 1); }
+.vx-input-group input:has(+ .vx-addon) { padding-inline-end: calc(var(--vx) * 1); }
+.vx-input-group input:disabled ~ .vx-addon, .vx-input-group .vx-addon:has(~ input:disabled) { cursor: default; }

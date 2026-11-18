@@ -1,0 +1,37 @@
+/* ---------- Kbd ----------
+   The name of a key. A small low cap with no light: it names a key, it is not one.
+     <kbd class="vx-kbd">K</kbd>
+     <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd>   held together
+   Its legend is in the key face, as on a key, at the key face's one size. It is seven voxels
+   tall and takes no more room in a line of words than the line has. */
+
+.vx-kbd {
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  block-size: calc(var(--vx) * 7);
+  min-inline-size: calc(var(--vx) * 7);
+  padding: 0 calc(var(--vx) * 2);
+  /* a line of words is seven voxels tall or less: the cap must not push its line apart */
+  margin-block: calc(var(--vx) * -1);
+  margin-inline: calc(var(--vx) * 0.5); /* its low side and its shadow keep clear of the next word */
+  vertical-align: middle;
+  color: var(--lit-legend, var(--vx-ink));
+  font: 400 var(--vx-key-size)/1 var(--vx-key-font);
+  font-synthesis: none;
+  letter-spacing: 0;
+  white-space: nowrap;
+  cursor: default;
+}
+.vx-kbd abbr { text-decoration: none; cursor: inherit; }
+.vx-kbd > .vx-label { display: inline-block; } /* the script wraps the legend, to keep it on whole pixels */
+
+/* plain: a painted cap with its low side */
+.vx-kbd:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-slate-side), inset 0 0 0 1px var(--vx-slate-side); }
+
+/* keys held together, or pressed one after another: caps a voxel apart, with the word between */
+.vx-keys { display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5); margin-block: calc(var(--vx) * -1); vertical-align: middle; font: 500 0.875em/1 var(--vx-font); color: var(--vx-ink-quiet); white-space: nowrap; }
+.vx-keys > .vx-kbd { margin: 0; }

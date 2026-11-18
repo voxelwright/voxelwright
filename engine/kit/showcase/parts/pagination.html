@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pagination</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the page's own: a list of deploys with its pages under it */
+  .deploys { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .deploys .top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: calc(var(--vx) * 1) calc(var(--vx) * 4); }
+  .deploys .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+  .deploys .count { color: var(--vx-ink-quiet); font-size: 0.9375rem; font-variant-numeric: tabular-nums; }
+  .deploys ul { display: grid; padding: 0; list-style: none; }
+  .deploys ul li { display: flex; justify-content: space-between; gap: calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 9); align-items: center; font-weight: 500; }
+  .deploys ul li span { color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; font-weight: 400; }
+  .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; }
+  .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 3); }
+  .each h3:first-child { margin-block-start: 0; }
+  .each > * { max-inline-size: 100%; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Pagination</h1>
+    <p class="what">A trench of seats. The current page is the key in it; previous and next are small keys beside it.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the deploys of a project, twenty pages of them</h2>
+    <div class="deploys">
+      <div class="top"><div class="name">Deploys</div><div class="count" id="count" aria-live="polite">Page 5 of 20</div></div>
+      <ul id="rows">
+        <li>Deploy 378 <span>May 20, 10:42</span></li>
+        <li>Deploy 377 <span>May 20, 09:15</span></li>
+        <li>Deploy 376 <span>May 19, 17:03</span></li>
+      </ul>
+      <!-- written out for page 5, so it is whole with no script; the page's script is the router -->
+      <nav class="vx-pagination" aria-label="Pages of deploys" id="pager">
+        <a class="vx-button" rel="prev" href="#page-4" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+        <ol class="vx-pagination-pages">
+          <li><a href="#page-1" aria-label="Page 1">1</a></li>
+          <li class="vx-pagination-gap"><span aria-hidden="true">…</span><span class="vx-pagination-aloud">More pages</span></li>
+          <li data-vx-when="wide"><a href="#page-4" aria-label="Page 4">4</a></li>
+          <li><a href="#page-5" aria-label="Page 5" aria-current="page">5</a></li>
+          <li data-vx-when="wide"><a href="#page-6" aria-label="Page 6">6</a></li>
+          <li class="vx-pagination-gap"><span aria-hidden="true">…</span><span class="vx-pagination-aloud">More pages</span></li>
+          <li><a href="#page-20" aria-label="Page 20">20</a></li>
+        </ol>
+        <a class="vx-button" rel="next" href="#page-6" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+      </nav>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="each">
+      <h3>A few pages, the first current: there is no previous</h3>
+      <nav class="vx-pagination" aria-label="A few pages" id="few">
+        <a class="vx-button" rel="prev" role="link" aria-disabled="true" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+        <ol class="vx-pagination-pages">
+          <li><a href="#few-1" aria-label="Page 1" aria-current="page">1</a></li>
+          <li><a href="#few-2" aria-label="Page 2">2</a></li>
+          <li><a href="#few-3" aria-label="Page 3">3</a></li>
+        </ol>
+        <a class="vx-button" rel="next" href="#few-2" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+      </nav>
+      <h3>The last current: there is no next</h3>
+      <nav class="vx-pagination" aria-label="At the end">
+        <a class="vx-button" rel="prev" href="#end-2" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+        <ol class="vx-pagination-pages">
+          <li><a href="#end-1" aria-label="Page 1">1</a></li>
+          <li><a href="#end-2" aria-label="Page 2">2</a></li>
+          <li><a href="#end-3" aria-label="Page 3" aria-current="page">3</a></li>
+        </ol>
+        <a class="vx-button" rel="next" role="link" aria-disabled="true" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+      </nav>
+      <h3>Many more, with long numbers; on a narrow screen the near ones are left out</h3>
+      <nav class="vx-pagination" aria-label="Many pages" id="many">
+        <a class="vx-button" rel="prev" href="#m-1279" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+        <ol class="vx-pagination-pages">
+          <li><a href="#m-1" aria-label="Page 1">1</a></li>
+          <li class="vx-pagination-gap"><span aria-hidden="true">…</span><span class="vx-pagination-aloud">More pages</span></li>
+          <li data-vx-when="wide"><a href="#m-1279" aria-label="Page 1279">1279</a></li>
+          <li><a href="#m-1280" aria-label="Page 1280" aria-current="page">1280</a></li>
+          <li data-vx-when="wide"><a href="#m-1281" aria-label="Page 1281">1281</a></li>
+          <li class="vx-pagination-gap"><span aria-hidden="true">…</span><span class="vx-pagination-aloud">More pages</span></li>
+          <li><a href="#m-4096" aria-label="Page 4096">4096</a></li>
+        </ol>
+        <a class="vx-button" rel="next" href="#m-1281" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+      </nav>
+      <h3>The trench alone, and one with no current page</h3>
+      <nav class="vx-pagination" aria-label="Without keys">
+        <ol class="vx-pagination-pages">
+          <li><a href="#t-1" aria-label="Page 1">1</a></li>
+          <li><a href="#t-2" aria-label="Page 2" aria-current="page">2</a></li>
+          <li><a href="#t-3" aria-label="Page 3">3</a></li>
+          <li><a href="#t-4" aria-label="Page 4">4</a></li>
+        </ol>
+      </nav>
+      <nav class="vx-pagination" aria-label="None current" id="nocurrent">
+        <ol class="vx-pagination-pages">
+          <li><a href="#n-1" aria-label="Page 1">1</a></li>
+          <li><a href="#n-2" aria-label="Page 2">2</a></li>
+          <li><a href="#n-3" aria-label="Page 3">3</a></li>
+        </ol>
+      </nav>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { pagination } from '/packages/voxelmorphism/src/components/pagination.js';
+  show(pagination);
+
+  // The page's own router, standing in for an app's: a press on a seat or a key goes to that
+  // page. It writes the seats for the page it is on (fewer on a narrow screen) into the rows
+  // that are there, and says which is current; the part only reads that.
+  const TOTAL = 20, pager = document.getElementById('pager'), list = pager.querySelector('ol');
+  const narrow = matchMedia('(max-width: 600px)');
+  // five seats on a narrow screen, seven otherwise; 0 is a gap
+  const seats = (p) => {
+    const n = narrow.matches ? 5 : 7, side = (n - 5) / 2;
+    if (p <= n - 3) return [...Array(n - 2).keys()].map((i) => i + 1).concat(0, TOTAL);
+    if (p > TOTAL - (n - 3)) return [1, 0].concat([...Array(n - 2).keys()].map((i) => TOTAL - (n - 3) + i));
+    const mid = []; for (let q = p - side; q <= p + side; q++) mid.push(q);
+    return [1, 0, ...mid, 0, TOTAL];
+  };
+  const step = (a, to) => {
+    if (to) { a.setAttribute('href', '#page-' + to); a.removeAttribute('aria-disabled'); a.removeAttribute('role'); }
+    else { a.removeAttribute('href'); a.setAttribute('aria-disabled', 'true'); a.setAttribute('role', 'link'); }
+  };
+  let page = 5;
+  function go(p, moveFocus) {
+    page = Math.max(1, Math.min(TOTAL, p));
+    const want = seats(page), have = [...list.querySelectorAll(':scope > li')];
+    const same = have.length === want.length && want.every((q, i) => (q === 0) === have[i].classList.contains('vx-pagination-gap'));
+    if (same) {
+      // the same seats: only their numbers and which is current change, so the key can slide
+      want.forEach((q, i) => {
+        if (!q) return;
+        const a = have[i].firstElementChild;
+        if (a.textContent !== String(q)) { a.textContent = q; a.setAttribute('href', '#page-' + q); a.setAttribute('aria-label', 'Page ' + q); }
+        if (q === page) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+      });
+    } else {
+      // other seats: the whole list is written again, as an app's renderer would
+      list.replaceChildren(...want.map((q) => {
+        const li = document.createElement('li');
+        if (!q) { li.className = 'vx-pagination-gap'; li.innerHTML = '<span aria-hidden="true">…</span><span class="vx-pagination-aloud">More pages</span>'; return li; }
+        const a = document.createElement('a');
+        a.href = '#page-' + q; a.textContent = q; a.setAttribute('aria-label', 'Page ' + q);
+        if (q === page) a.setAttribute('aria-current', 'page');
+        li.append(a);
+        return li;
+      }));
+    }
+    step(pager.querySelector('[rel="prev"]'), page > 1 ? page - 1 : 0);
+    step(pager.querySelector('[rel="next"]'), page < TOTAL ? page + 1 : 0);
+    document.getElementById('count').textContent = `Page ${page} of ${TOTAL}`;
+    const first = 418 - (page - 1) * 10;
+    [...document.getElementById('rows').children].forEach((li, i) => { li.firstChild.textContent = `Deploy ${first - i} `; });
+    // a seat that was pressed may now hold another number: focus goes with the current page
+    if (moveFocus) list.querySelector('[aria-current]')?.focus({ preventScroll: true });
+  }
+  pager.addEventListener('click', (e) => {
+    const a = e.target.closest('a');
+    if (!a) return;
+    e.preventDefault();
+    const to = /#page-(\d+)$/.exec(a.getAttribute('href') || '');
+    if (to) go(Number(to[1]), list.contains(a));
+  });
+  narrow.addEventListener('change', () => go(page, false));
+  go(page, false);
+</script>
+</body>
+</html>

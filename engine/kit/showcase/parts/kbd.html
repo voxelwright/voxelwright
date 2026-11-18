@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kbd</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own: a list of shortcuts, and a line of words */
+  .shortcuts { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 96); padding: 0; list-style: none; }
+  .shortcuts li { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 11); }
+  .shortcuts li + li { border-block-start: 1px solid var(--vx-slate); }
+  .sheet .words { max-inline-size: 34rem; font-size: 1.0625rem; line-height: calc(var(--vx) * 7); }
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Kbd</h1>
+    <p class="what">The name of a key. A small low cap with no light: it names a key, it is not one, and nothing in it answers a press.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: shortcuts in the deploys panel</h2>
+    <ul class="shortcuts">
+      <li>Find a project <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd></li>
+      <li>Deploy the open project <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">Enter</kbd></kbd></li>
+      <li>Roll back <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">Shift</kbd>+<kbd class="vx-kbd">Z</kbd></kbd></li>
+      <li>Show the build log <kbd class="vx-kbd">L</kbd></li>
+      <li>Next project, previous project <kbd class="vx-keys"><kbd class="vx-kbd">J</kbd><kbd class="vx-kbd">K</kbd></kbd></li>
+    </ul>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>In a line of words: the lines keep their distance</h3>
+    <p class="words">Press <kbd class="vx-kbd">?</kbd> anywhere to see every shortcut. To find a project, hold <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd> and start typing its name; <kbd class="vx-kbd">Esc</kbd> closes the list again, and <kbd class="vx-kbd">Tab</kbd> moves between its rows as it does everywhere else on the page.</p>
+    <h3>One letter, a word, a long word</h3>
+    <div class="row">
+      <kbd class="vx-kbd">K</kbd>
+      <kbd class="vx-kbd">1</kbd>
+      <kbd class="vx-kbd">Esc</kbd>
+      <kbd class="vx-kbd">Shift</kbd>
+      <kbd class="vx-kbd">Space</kbd>
+      <kbd class="vx-kbd">Backspace</kbd>
+      <kbd class="vx-kbd">Page Down</kbd>
+    </div>
+    <h3>Signs, each with its name for a screen reader</h3>
+    <div class="row">
+      <kbd class="vx-kbd"><abbr title="Command">⌘</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Shift">⇧</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Option">⌥</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Enter">↵</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Up">↑</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Down">↓</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Left">←</abbr></kbd>
+      <kbd class="vx-kbd"><abbr title="Right">→</abbr></kbd>
+    </div>
+    <h3>Held together, and one after another</h3>
+    <div class="row">
+      <kbd class="vx-keys"><kbd class="vx-kbd"><abbr title="Command">⌘</abbr></kbd><kbd class="vx-kbd">K</kbd></kbd>
+      <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">Shift</kbd>+<kbd class="vx-kbd">P</kbd></kbd>
+      <kbd class="vx-keys"><kbd class="vx-kbd">G</kbd>then<kbd class="vx-kbd">D</kbd></kbd>
+    </div>
+    <h3>Ukrainian</h3>
+    <p class="words" lang="uk">Натисніть <kbd class="vx-kbd">Пробіл</kbd>, щоб розгорнути на сервері, або <kbd class="vx-kbd">Esc</kbd>, щоб скасувати.</p>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { kbd } from '/packages/voxelmorphism/src/components/kbd.js';
+  show(kbd);
+</script>
+</body>
+</html>

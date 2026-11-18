@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dialog</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  /* the dialog that is shown open stands in the page's own flow, so the page has room for it */
+  .stand { grid-template-columns: minmax(0, 1fr); }
+  .stand dialog[open] { position: relative; margin: calc(var(--vx) * 4) 0 calc(var(--vx) * 6); inline-size: min(calc(var(--vx) * 112), 100%); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Dialog</h1>
+    <p class="what">A float at dialog height on the accent's light. Its header is words, parted from the body by a groove. Its keys are keys, one of them main.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: renaming a project</h2>
+    <div class="row">
+      <button class="vx-button" id="open-rename">Rename</button>
+      <button class="vx-button" data-vx-kind="danger" id="open-delete">Delete project</button>
+      <span class="chosen" id="result" role="status"></span>
+    </div>
+  </section>
+  <section class="stand">
+    <h2>Every state</h2>
+    <p class="what">One that is not modal, open on the page: the page behind it still works.</p>
+    <dialog class="vx-dialog" id="still" open aria-labelledby="still-h">
+      <header id="still-h" lang="uk">Розгорнути на сервері?</header>
+      <div class="vx-dialog-body"><p>The build of harbor-api at 4f2c9a1 passed its tests 3 minutes ago. Deploying replaces what is live.</p></div>
+      <footer>
+        <button class="vx-button" data-vx-close="later">Not now</button>
+        <button class="vx-button" data-vx-kind="main" data-vx-close="deploy">Deploy</button>
+      </footer>
+    </dialog>
+    <button class="vx-button" id="open-still">Show it again</button>
+  </section>
+</main>
+<dialog class="vx-dialog" id="rename" aria-labelledby="rename-h">
+  <header id="rename-h">Rename harbor-api</header>
+  <div class="vx-dialog-body">
+    <!-- the form is in the body; the key that sends it is in the footer and names it -->
+    <form method="dialog" id="rename-form">
+      <label class="vx-field"><span class="vx-field-label">New name</span><span class="vx-well"><input type="text" id="new-name" name="name" value="harbor-api" autocomplete="off"></span><span class="vx-field-hint">Its address changes with it. The old one keeps working for 30 days.</span></label>
+    </form>
+  </div>
+  <footer>
+    <button class="vx-button" type="button" data-vx-close="cancel">Cancel</button>
+    <button class="vx-button" data-vx-kind="main" form="rename-form" value="save">Save</button>
+  </footer>
+</dialog>
+<dialog class="vx-dialog" id="delete" role="alertdialog" aria-labelledby="delete-h" aria-describedby="delete-p">
+  <header id="delete-h">Delete harbor-api?</header>
+  <div class="vx-dialog-body"><p id="delete-p">Its 212 deploys, its logs and its address go with it. This cannot be undone.</p></div>
+  <footer>
+    <button class="vx-button" data-vx-close="cancel" autofocus>Keep it</button>
+    <button class="vx-button" data-vx-kind="danger" data-vx-close="delete">Delete</button>
+  </footer>
+</dialog>
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
+  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  const $ = (id) => document.getElementById(id);
+  $('open-rename').addEventListener('click', () => $('rename').showModal());
+  $('open-delete').addEventListener('click', () => $('delete').showModal());
+  $('open-still').addEventListener('click', () => $('still').show());
+  for (const id of ['rename', 'delete', 'still']) $(id).addEventListener('close', () => { $('result').textContent = id + ': ' + ($(id).returnValue || 'closed'); });
+  show();
+</script>
+</body>
+</html>

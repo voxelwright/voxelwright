@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Field with error and validation</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 100); justify-items: stretch; }
+  .form .send { margin-block-start: calc(var(--vx) * 2); display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 5); }
+  .form .said { color: var(--vx-ink-quiet); font-size: 0.9375rem; min-inline-size: 0; overflow-wrap: anywhere; }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 5) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Field with error and validation</h1>
+    <p class="what">The well. Wrong, its rim is red and the message below is words beside a red lamp. Right needs nothing.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: invite someone to harbor-api</h2>
+    <form class="form" id="invite">
+      <div class="vx-field">
+        <label class="vx-field-label" for="mail">Their email</label>
+        <span class="vx-well"><input id="mail" name="mail" type="email" required autocomplete="off"></span>
+        <p class="vx-field-error" id="mail-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text"></span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="handle">A handle for them</label>
+        <span class="vx-well"><input id="handle" name="handle" required pattern="[a-z0-9\-]{2,20}" autocomplete="off" aria-describedby="handle-hint"></span>
+        <p class="vx-field-hint" id="handle-hint">Lower case, digits and dashes. Two to twenty.</p>
+        <p class="vx-field-error" id="handle-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">Use lower case, digits and dashes: two to twenty of them.</span></p>
+      </div>
+      <div class="send">
+        <button class="vx-button" data-vx-kind="main" type="submit" id="send">Send invite</button>
+        <span class="said" id="said" role="status"></span>
+      </div>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-rest">Right, or not yet looked at</label>
+        <span class="vx-well"><input id="s-rest" value="mina@harbor.dev" autocomplete="off"></span>
+        <p class="vx-field-error" id="s-rest-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text"></span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-own">Asked by the browser's own rules</label>
+        <span class="vx-well"><input id="s-own" type="email" placeholder="type half an address, then leave" autocomplete="off"></span>
+        <p class="vx-field-error" id="s-own-error"><span class="vx-lamp" data-vx-light="stop"></span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-bad">Wrong</label>
+        <span class="vx-well"><input id="s-bad" value="mina@" autocomplete="off" aria-invalid="true" aria-describedby="s-bad-error"></span>
+        <p class="vx-field-error" id="s-bad-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">Finish the address: mina@harbor.dev</span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-hint">With a hint, right</label>
+        <span class="vx-well"><input id="s-hint" value="fogline" autocomplete="off" aria-describedby="s-hint-hint"></span>
+        <p class="vx-field-hint" id="s-hint-hint">The name of the team.</p>
+        <p class="vx-field-error" id="s-hint-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">That team is not yours to invite to.</span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-hint-bad">With a hint, wrong</label>
+        <span class="vx-well"><input id="s-hint-bad" value="saltmarsh" autocomplete="off" aria-invalid="true" aria-describedby="s-hint-bad-hint s-hint-bad-error"></span>
+        <p class="vx-field-hint" id="s-hint-bad-hint">The name of the team.</p>
+        <p class="vx-field-error" id="s-hint-bad-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">That team is not yours to invite to.</span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-long">Адреса сервера</label>
+        <span class="vx-well"><input id="s-long" value="harbor" autocomplete="off" aria-invalid="true" aria-describedby="s-long-error"></span>
+        <p class="vx-field-error" id="s-long-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">Не вдалося розгорнути на сервері: перевірте адресу і спробуйте ще раз.</span></p>
+      </div>
+      <div class="vx-field">
+        <label class="vx-field-label" for="s-area">A longer answer, wrong</label>
+        <span class="vx-well"><textarea id="s-area" aria-invalid="true" aria-describedby="s-area-error">ok</textarea></span>
+        <p class="vx-field-error" id="s-area-error"><span class="vx-lamp" data-vx-light="stop"></span><span class="vx-field-error-text">Say a little more: Ada reads these.</span></p>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { validation } from '/packages/voxelmorphism/src/components/validation.js';
+  show(validation);
+  const form = document.getElementById('invite'), said = document.getElementById('said');
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    said.textContent = `Invite sent to ${form.elements.mail.value}.`;
+    form.reset();
+  });
+  form.addEventListener('input', () => { said.textContent = ''; });
+</script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+/* ---------- Skeleton ---------- */
+
+/* The region that is loading. Its trenches (.vx-bone) take the size of what is coming:
+   --vx-bone-w and --vx-bone-h are in voxels, so every edge lands on the grid. */
+.vx-skeleton { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; min-inline-size: 0; }
+.vx-bone {
+  position: relative; isolation: isolate; display: block; flex: none;
+  /* a line of words: a trench two voxels high in a line six voxels high */
+  inline-size: calc(var(--vx) * var(--vx-bone-w, 60)); max-inline-size: 100%;
+  block-size: calc(var(--vx) * var(--vx-bone-h, 2));
+  margin-block: calc(var(--vx) * 2);
+}
+/* a heading */
+.vx-bone[data-vx-bone="title"] { block-size: calc(var(--vx) * var(--vx-bone-h, 4)); margin-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+/* a picture, an avatar, a key: its own size, no line round it */
+.vx-bone[data-vx-bone="box"] { inline-size: calc(var(--vx) * var(--vx-bone-w, 10)); block-size: calc(var(--vx) * var(--vx-bone-h, 10)); margin-block: 0; }
+
+:is(.vx-skeleton, .vx-bone)[hidden] { display: none; } /* the class would otherwise undo the attribute */
+
+/* the words that say it is loading: read out, not shown */
+.vx-skeleton-word { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* plain: a painted trench, and a painted light that crosses it */
+.vx-bone:not([data-vx-live]) {
+  background-color: var(--vx-slate);
+  background-image: linear-gradient(90deg, transparent, color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 60%, transparent), transparent);
+  background-repeat: no-repeat; background-size: calc(var(--vx) * 14) 100%; background-position: calc(var(--vx) * -14) 0;
+  animation: vx-bone 2.1s linear infinite;
+}
+.vx-bone:not([data-vx-live]):dir(rtl) { animation-direction: reverse; }
+[aria-busy="false"] .vx-bone:not([data-vx-live]) { animation: none; }
+@keyframes vx-bone {
+  0% { background-position: calc(var(--vx) * -14) 0; }
+  72%, 100% { background-position: calc(100% + var(--vx) * 14) 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vx-bone:not([data-vx-live]) { animation: none; }
+}

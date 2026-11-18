@@ -1,48 +1,7 @@
-/* The lit look on a page: one system of depth and light, shown as two screens. An experiment
-   page: what the look needs in CSS lives here until it is settled, and only then moves into the kit. */
+/* Depth and light, shown as two screens. The look itself is the kit's (data-vx-look="lit" on
+   <html>); this file is only the page: its layout and the two faux products. */
 
 *, *::before, *::after { box-sizing: border-box; }
-
-:root {
-  --vx-look: lit;
-  --vx-ground: #e9e7e0;
-  --vx-ink: #1b1d2a;
-  --vx-ink-quiet: #5a5d6e;
-  --vx-enamel: #2f5bff;
-  --vx-on-enamel: #ffffff;
-  --vx-chalk: #f5f2e9;
-  --vx-slate: #dcd8cb;
-  --vx-steel: #cfcbbd;
-  --vx-signal: #2f5bff;
-  --vx-on-signal: #ffffff;
-  --vx-focus: #2f5bff;
-  --vx-link: #2449d8;
-  --lit-accent: #2f5bff;       /* the colour of the light under a key */
-  --lit-legend: var(--vx-ink); /* what is written on an ordinary key */
-  --lit-warm: #b97a00;
-  --lit-go: #0d7a3a;
-}
-:root[data-theme="dark"] {
-  --vx-ground: #08090f;
-  --vx-ink: #e8eaf4;
-  --vx-ink-quiet: #a3a8be;
-  --vx-enamel: #3560f2;
-  --vx-chalk: #1b1e2d;
-  --vx-slate: #11131f;
-  --vx-steel: #262938;
-  --vx-signal: #4d7dff;
-  --vx-focus: #8fb0ff;
-  --vx-link: #9db8ff;
-  --lit-accent: #4d7dff;
-  --lit-legend: #dfe8ff;
-  --lit-warm: #ffd68a;
-  --lit-go: #5fe894;
-}
-/* themes: another accent, the same system */
-:root[data-accent="rose"] { --vx-enamel: #c2186f; --vx-signal: #c2186f; --vx-focus: #c2186f; --vx-link: #a8125e; --lit-accent: #ff3d9a; }
-:root[data-accent="rose"][data-theme="dark"] { --vx-enamel: #c9237a; --vx-signal: #ff6fb4; --vx-focus: #ffa3cf; --vx-link: #ffa3cf; --lit-accent: #ff6fb4; --lit-legend: #ffe3f1; }
-:root[data-accent="dusk"] { --vx-enamel: #5b3df0; --vx-signal: #5b3df0; --vx-focus: #5b3df0; --vx-link: #4a2fd0; --lit-accent: #6a4dff; }
-:root[data-accent="dusk"][data-theme="dark"] { --vx-enamel: #6548f2; --vx-signal: #9278ff; --vx-focus: #b9a8ff; --vx-link: #b9a8ff; --lit-accent: #9278ff; --lit-legend: #e9e3ff; }
 
 html {
   background: var(--vx-ground);
@@ -68,42 +27,6 @@ html[data-only] body { padding-block-start: calc(var(--vx) * 10); }
 html[data-only="deploy"] #blog, html[data-only="blog"] #deploy { display: none; }
 
 main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
-
-/* ---------- key ---------- */
-
-.vx-button { --_on: var(--lit-legend); font: 400 var(--vx-key-size)/1 var(--vx-key-font); letter-spacing: 0; }
-.vx-button:is([data-vx-material="brick"], [data-vx-material="leaf"], [data-vx-material="chalk"]) { --_on: var(--lit-legend); }
-.vx-button[data-vx-material="enamel"] { --_on: #fff; }
-.vx-button:disabled { --_on: var(--vx-ink-quiet); }
-.vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
-/* the legend shines through at night, and flares with the light as the key goes down */
-:root[data-theme="dark"] .vx-button:not(:disabled) .vx-label {
-  text-shadow: 0 0 calc(6px + var(--lit, 0) * 10px) color-mix(in oklab, var(--lit-accent), transparent calc(45% - var(--lit, 0) * 40%));
-}
-:root[data-theme="dark"] .vx-button[data-vx-material="enamel"] .vx-label { text-shadow: 0 0 calc(4px + var(--lit, 0) * 10px) rgb(255 255 255 / calc(0.35 + var(--lit, 0) * 0.5)); }
-
-/* tabs carry the same legend */
-.vx-tabs > [role="tab"] { font: 400 var(--vx-key-size)/1 var(--vx-key-font); color: var(--vx-ink-quiet); }
-.vx-tabs > [role="tab"][aria-selected="true"] { color: var(--lit-legend); }
-
-/* ---------- groove, lamp, recess, pointer ---------- */
-
-.vx-groove { position: relative; isolation: isolate; display: block; block-size: var(--vx); border: 0; margin: 0; flex: none; }
-.vx-groove[data-vx-way="down"] { block-size: auto; inline-size: var(--vx); align-self: stretch; }
-.vx-groove:not([data-vx-live]) { background: var(--lit-warm); opacity: 0.6; }
-
-.vx-lamp { position: relative; isolation: isolate; display: inline-block; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); flex: none; }
-.vx-lamp:not([data-vx-live]) { background: var(--lit-go); }
-
-.vx-recess { position: relative; isolation: isolate; display: block; }
-.vx-recess:not([data-vx-live]) { background: var(--vx-slate); }
-
-.vx-cursor { position: absolute; z-index: 40; inset-block-start: 0; inset-inline-start: 0; inline-size: calc(var(--vx) * 8); block-size: calc(var(--vx) * 13); pointer-events: none; isolation: isolate; opacity: 0; transition: opacity 240ms var(--vx-ease-out); }
-.vx-cursor[data-on] { opacity: 1; }
-.vx-cursor:not([data-vx-live]) { display: none; }
-
-.vx-well:has(:focus-visible) { outline: 0; } /* the rim's own light is the focus */
-.vx-well :is(input, textarea) { caret-color: var(--lit-accent); }
 
 /* ---------- a screen ---------- */
 

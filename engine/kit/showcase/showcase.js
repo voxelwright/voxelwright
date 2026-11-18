@@ -97,5 +97,7 @@ $('#grow').addEventListener('input', (e) => grow(e.target.value / 100));
 grow(0.55);
 
 if (!root.hasAttribute('data-vx-plain')) adoptAll();
+// a notice written in the page breaks under a click like any other; this page puts its samples back
+document.addEventListener('vx-dismiss', (e) => { const el = e.target; if (el.closest('.vx-toasts')) return; setTimeout(() => { el.removeAttribute('data-vx-leaving'); const l = live(el); l?.play('assemble', null, { from: [0, l.H / 2] }); }, 900); });
 window.vx = { live, toast, get stage() { return getStage(); } };
 ready().then(() => { root.dataset.ready = '1'; });

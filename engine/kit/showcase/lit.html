@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-vx-look="lit">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -12,8 +12,7 @@
     var q = new URLSearchParams(location.search), r = document.documentElement;
     r.dataset.theme = q.get('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     if (q.get('only')) r.dataset.only = q.get('only');
-    if (q.get('accent')) r.dataset.accent = q.get('accent');
-    setTimeout(function () { r.dataset.ready = '1'; }, 5000);
+        setTimeout(function () { r.dataset.ready = '1'; }, 5000);
   })();
 </script>
 </head>
@@ -27,7 +26,7 @@
       <button role="tab" aria-selected="false" data-value="dark">Night</button>
     </div>
     <div class="vx-tabs" role="tablist" aria-label="Theme" id="accent">
-      <button role="tab" aria-selected="true" data-value="">Bay</button>
+      <button role="tab" aria-selected="true" data-value="bay">Bay</button>
       <button role="tab" aria-selected="false" data-value="rose">Rose</button>
       <button role="tab" aria-selected="false" data-value="dusk">Dusk</button>
     </div>
@@ -59,7 +58,7 @@
           <div class="state"><span class="vx-lamp" data-vx-light="go"></span><span class="state-word">Live</span></div>
         </div>
         <div class="actions">
-          <button class="vx-button" data-vx-material="enamel" id="go">Deploy</button>
+          <button class="vx-button" data-vx-kind="main" id="go">Deploy</button>
           <button class="vx-button">Roll back</button>
           <label class="vx-toggle auto"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Deploy on push</label>
         </div>
@@ -101,7 +100,7 @@ ship(pack)</code></pre></div>
     <div class="vx-groove" role="separator"></div>
     <form class="subscribe" onsubmit="return false">
       <label class="vx-field"><span class="vx-field-label">New notes by email</span><span class="vx-well"><input type="email" id="mail" placeholder="you@example.com" autocomplete="off"></span></label>
-      <button class="vx-button" data-vx-material="enamel" id="sub"><span class="sub-word">Subscribe</span></button>
+      <button class="vx-button" data-vx-kind="main" id="sub"><span class="sub-word">Subscribe</span></button>
     </form>
   </div>
   <span class="vx-cursor" aria-hidden="true"></span>

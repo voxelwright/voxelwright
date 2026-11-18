@@ -18,6 +18,7 @@ export const BASE = {
   float: 4,      // things that float for a moment: a menu, a toast
   dialog: 6,
   well: 2,       // how deep a field is cut
+  groove: 1,     // how deep a groove is cut
   round: 2,      // the corner step of a slab that holds content (controls step by one)
   icons: null,   // name -> rows: icons drawn for this look's voxel, where the kit's are too large
   inlay: false,  // true: an icon is set into the face, not stood on it (a relief one voxel high is too much at 8 px)

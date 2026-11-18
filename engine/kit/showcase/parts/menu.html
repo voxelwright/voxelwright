@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dropdown menu</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  /* room under each key for its menu, so that the two menus on this page never lie over each other */
+  .room { align-items: start; min-block-size: calc(var(--vx) * 66); }
+  .room .chosen { align-self: start; padding-block-start: calc(var(--vx) * 2.5); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Dropdown menu</h1>
+    <p class="what">A float on the accent's light, built out of its trigger's corner. The active row has an accent groove at its start: it follows the pointer and the arrow keys.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: what can be done with a project</h2>
+    <div class="row room">
+      <button class="vx-button" id="trigger" popovertarget="project-menu" aria-haspopup="menu" aria-expanded="false">harbor-api</button>
+      <div class="vx-menu" id="project-menu" popover role="menu">
+        <button role="menuitem">Redeploy</button>
+        <button role="menuitem">Roll back to 4f2c9a1</button>
+        <button role="menuitem" lang="uk">Розгорнути на сервері</button>
+        <button role="menuitem" data-vx-kind="danger">Delete project</button>
+      </div>
+      <span class="chosen" id="chosen" role="status"></span>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <p class="what">Open, with the second row active. Press a row, or Escape, to close it; its key opens it again.</p>
+    <div class="row room">
+      <button class="vx-button" id="still-trigger" popovertarget="still-menu" aria-haspopup="menu" aria-expanded="false">Open</button>
+      <div class="vx-menu" id="still-menu" popover="manual" role="menu">
+        <button role="menuitem">Redeploy</button>
+        <button role="menuitem">Roll back to 4f2c9a1</button>
+        <button role="menuitem" lang="uk">Розгорнути на сервері</button>
+        <button role="menuitem" data-vx-kind="danger">Delete project</button>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
+  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  document.getElementById('project-menu').addEventListener('click', (e) => { const it = e.target.closest('[role="menuitem"]'); if (it) document.getElementById('chosen').textContent = 'Chosen: ' + it.textContent.trim(); });
+  await show();
+  // the second menu is shown open, so that it can be looked at: its second row is made active
+  const still = document.getElementById('still-menu'), second = still.querySelectorAll('[role="menuitem"]')[1];
+  still.addEventListener('keydown', (e) => { if (e.key === 'Escape') { still.hidePopover(); document.getElementById('still-trigger').focus(); } });
+  const showStill = () => {
+    still.showPopover();
+    second.setAttribute('data-vx-active', '');
+    second.dispatchEvent(new PointerEvent('pointermove', { bubbles: true }));
+  };
+  if (!new URLSearchParams(location.search).has('closed')) {
+    showStill();
+    // a menu is placed once, when it opens. This one is open while the window may still change
+    // size, so it is opened again then, to stay under its key.
+    addEventListener('resize', () => { if (still.matches(':popover-open')) { still.hidePopover(); showStill(); } });
+  }
+</script>
+</body>
+</html>

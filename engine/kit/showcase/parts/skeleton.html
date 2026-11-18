@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skeleton</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .deploys { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+  .deploys-head { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 5); flex-wrap: wrap; }
+  .deploys-head h3 { font-size: 1.125rem; line-height: 1.3; }
+  .rows { display: grid; gap: calc(var(--vx) * 3); inline-size: 100%; }
+  .rows .one { display: flex; align-items: center; gap: calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 12); min-inline-size: 0; }
+  .rows .text { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-inline-size: 0; }
+  .rows .mark { flex: none; display: grid; place-items: center; inline-size: calc(var(--vx) * 10); block-size: calc(var(--vx) * 10); color: var(--vx-ink-quiet); font: 600 0.8125rem/1 var(--vx-mono); }
+  .rows .name { font-weight: 600; line-height: calc(var(--vx) * 6); }
+  .rows .when { color: var(--vx-ink-quiet); line-height: calc(var(--vx) * 6); }
+  .states { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 6); inline-size: 100%; }
+  .states .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); }
+  .states .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .pair { display: flex; align-items: center; gap: calc(var(--vx) * 4); }
+  .pair .text { display: grid; grid-template-columns: minmax(0, 1fr); flex: 1 1 auto; min-inline-size: 0; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Skeleton</h1>
+    <p class="what">Shallow trenches the size of what is coming, with one soft light passing along them. It stops when it is out of sight, and stands still for anyone who asks for less motion.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the deploys of harbor-api, on their way</h2>
+    <div class="deploys">
+      <div class="deploys-head">
+        <h3 id="deploys-title">Deploys</h3>
+        <button class="vx-button" id="flip">Finish loading</button>
+      </div>
+      <!-- the words stand outside the busy region; they are changed when the loading ends -->
+      <p class="vx-skeleton-word" role="status" id="word">Loading the deploys</p>
+      <div class="vx-skeleton rows" id="list" aria-busy="true" aria-labelledby="deploys-title">
+        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 44"></span><span class="vx-bone" style="--vx-bone-w: 68"></span></div></div>
+        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 60"></span></div></div>
+        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 52"></span><span class="vx-bone" style="--vx-bone-w: 56"></span></div></div>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <p>A line of words</p>
+        <div class="vx-skeleton" aria-busy="true"><span class="vx-bone"></span></div>
+      </div>
+      <div class="state">
+        <p>A heading and a paragraph</p>
+        <div class="vx-skeleton" aria-busy="true">
+          <span class="vx-bone" data-vx-bone="title" style="--vx-bone-w: 48"></span>
+          <span class="vx-bone" style="--vx-bone-w: 120"></span>
+          <span class="vx-bone" style="--vx-bone-w: 112"></span>
+          <span class="vx-bone" style="--vx-bone-w: 76"></span>
+        </div>
+      </div>
+      <div class="state">
+        <p>A picture beside two lines, and a key</p>
+        <div class="vx-skeleton" aria-busy="true">
+          <div class="pair"><span class="vx-bone" data-vx-bone="box" style="--vx-bone-w: 14; --vx-bone-h: 14"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 40"></span><span class="vx-bone" style="--vx-bone-w: 64"></span></div><span class="vx-bone" data-vx-bone="box" style="--vx-bone-w: 24; --vx-bone-h: 11"></span></div>
+        </div>
+      </div>
+      <div class="state">
+        <p>Loading has ended (aria-busy="false"): no light</p>
+        <div class="vx-skeleton" aria-busy="false" id="still">
+          <span class="vx-bone" style="--vx-bone-w: 84"></span>
+          <span class="vx-bone" style="--vx-bone-w: 52"></span>
+        </div>
+      </div>
+      <div class="state" dir="rtl" lang="ar">
+        <p>من اليمين إلى اليسار</p>
+        <div class="vx-skeleton" aria-busy="true">
+          <span class="vx-bone" style="--vx-bone-w: 84"></span>
+          <span class="vx-bone" style="--vx-bone-w: 52"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { skeleton } from '/packages/voxelmorphism/src/components/skeleton.js';
+  import { adopt, release } from '/packages/voxelmorphism/src/index.js';
+
+  // What a product does when what was coming is here: the bones go, the region is no longer
+  // busy, and the words a screen reader hears change.
+  const list = document.getElementById('list'), word = document.getElementById('word'), flip = document.getElementById('flip');
+  const bones = list.innerHTML;
+  const rows = [['4f2c9a1', 'Cloned main at 4f2c9a1', 'Mina, 10:43'], ['9be07d2', 'Rolled back to 9be07d2', 'Ada, yesterday'], ['c41e6f0', 'Built in 45 s', 'Mina, Monday']];
+  const label = (text) => { (flip.querySelector('.vx-label') ?? flip).textContent = text; };
+  flip.addEventListener('click', () => {
+    const busy = list.getAttribute('aria-busy') === 'true';
+    release(list);
+    if (busy) {
+      list.innerHTML = rows.map(([id, what, who]) => `<div class="one"><span class="mark">${id.slice(0, 2)}</span><div class="text"><span class="name">${what}</span><span class="when">${who}</span></div></div>`).join('');
+      list.setAttribute('aria-busy', 'false');
+      word.textContent = 'Deploys loaded';
+      label('Load again');
+    } else {
+      list.innerHTML = bones;
+      list.setAttribute('aria-busy', 'true');
+      word.textContent = 'Loading the deploys';
+      label('Finish loading');
+      adopt(list);
+    }
+  });
+  show(skeleton);
+</script>
+</body>
+</html>

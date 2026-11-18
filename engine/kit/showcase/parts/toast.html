@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Notice</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .notes { gap: calc(var(--vx) * 5); padding-block: calc(var(--vx) * 2); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Notice</h1>
+    <p class="what">A small float on a light that says what kind of news it is. It goes by itself; a click dismisses it sooner, and it shatters under the click.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a deploy says how it went</h2>
+    <div class="row">
+      <button class="vx-button" data-vx-kind="main" id="deploy">Deploy</button>
+      <button class="vx-button" id="fail">Deploy a broken build</button>
+      <button class="vx-button" id="stay">One that stays</button>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <p class="what">These three are written in the page. Press one: it shatters where it was pressed, and the page puts it back.</p>
+    <div class="col notes" id="notes">
+      <div class="vx-toast" data-vx-kind="done" role="status"><span class="vx-toast-text">Deployed harbor-api</span></div>
+      <div class="vx-toast" data-vx-kind="failed" role="status"><span class="vx-toast-text">The build of fog-site failed: 2 tests did not pass.</span></div>
+      <div class="vx-toast" data-vx-kind="note" role="status"><span class="vx-toast-text" lang="uk">Розгорнути на сервері можна після перевірки.</span></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS, toast, live } from '/packages/voxelmorphism/src/index.js';
+  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  const $ = (id) => document.getElementById(id);
+  $('deploy').addEventListener('click', () => toast('Deployed harbor-api', { kind: 'done' }));
+  $('fail').addEventListener('click', () => toast('The build of fog-site failed: 2 tests did not pass.', { kind: 'failed' }));
+  $('stay').addEventListener('click', () => toast('Press this notice to dismiss it.', { kind: 'note', duration: 600000 }));
+  // a notice the page wrote is the page's to put back: the kit says vx-dismiss when it has shattered
+  window.dismissed = [];
+  $('notes').addEventListener('vx-dismiss', (e) => {
+    const el = e.target;
+    window.dismissed.push(el.dataset.vxKind);
+    setTimeout(() => { el.removeAttribute('data-vx-leaving'); live(el)?.play('assemble', null, { from: [0, live(el).H / 2], duration: 0.3, each: 0.18 }); }, 900);
+  });
+  window.toast = toast;
+  show();
+</script>
+</body>
+</html>

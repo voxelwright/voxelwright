@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hover card</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .sheet a { color: var(--vx-link); text-underline-offset: 0.15em; }
+  .sheet a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+  .log { display: grid; gap: calc(var(--vx) * 2); list-style: none; padding: 0; }
+  .log time { color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; margin-inline-end: calc(var(--vx) * 3); }
+  /* room under and over a link for its card, so the page's picture shows both */
+  .room { min-block-size: calc(var(--vx) * 70); align-content: start; }
+  .sheet .up { margin-block-start: calc(var(--vx) * 34); }
+  .people { display: grid; gap: calc(var(--vx) * 3); }
+  .people dt { font-weight: 600; }
+  .people dd { margin: 0; color: var(--vx-ink-quiet); }
+  .online { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Hover card</h1>
+    <p class="what">A look ahead at what a link leads to, on the accent's light. It opens when the pointer rests on the link or the focus lands on it, and stays while the pointer travels into it. The link itself leads to everything it shows.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section class="room">
+    <h2>In use: who deployed</h2>
+    <ul class="log">
+      <li><time>10:52</time>Deployed by <a href="#mina" id="l-mina" data-vx-card="c-mina">Mina Okafor</a>
+        <div class="vx-hover-card" id="c-mina" popover="manual">
+          <h3>Mina Okafor</h3>
+          <p class="vx-hover-card-meta">Platform, fogline</p>
+          <p>Looks after harbor-api and the build cache.</p>
+          <p class="vx-hover-card-meta"><span class="online"><span class="vx-lamp"></span>On call this week</span> · <a href="#mina" id="c-mina-link">214 deploys</a></p>
+        </div>
+      </li>
+      <li><time>09:17</time>Rolled back by <a href="#ada" id="l-ada" data-vx-card="c-ada">Ada Lindqvist</a>
+        <div class="vx-hover-card" id="c-ada" popover="manual">
+          <h3>Ada Lindqvist</h3>
+          <p class="vx-hover-card-meta">Payments, fogline</p>
+          <p>Owns tide-worker and ferry-cron.</p>
+          <p class="vx-hover-card-meta"><a href="#ada">88 deploys</a></p>
+        </div>
+      </li>
+    </ul>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <p class="up">Over its link where it is asked to be: <a href="#mina" id="l-up" data-vx-card="c-up">harbor-api</a>
+      <span class="vx-hover-card" id="c-up" popover="manual" data-vx-side="top">
+        <strong>harbor-api</strong>
+        <span class="vx-hover-card-meta">Розгорнуто на сервері о 10:52. A long word wraps: harbor-api-production-eu-central-1.</span>
+      </span>
+    </p>
+  </section>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>Where the links lead: people</h2>
+    <dl class="people">
+      <div id="mina"><dt>Mina Okafor</dt><dd>Platform, fogline. Looks after harbor-api and the build cache. On call this week. 214 deploys.</dd></div>
+      <div id="ada"><dt>Ada Lindqvist</dt><dd>Payments, fogline. Owns tide-worker and ferry-cron. 88 deploys.</dd></div>
+    </dl>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { hoverCard } from '/packages/voxelmorphism/src/components/hover-card.js';
+  await show(hoverCard);
+  // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
+  if (!new URLSearchParams(location.search).has('hand')) for (const id of ['c-mina', 'c-up']) document.getElementById(id).showPopover();
+</script>
+</body>
+</html>

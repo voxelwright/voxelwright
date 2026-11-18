@@ -76,6 +76,16 @@ const parts = [
   }],
 ];
 
+/**
+ * A part of your own that needs behaviour without voxels: wire(el, on) is called for each element
+ * that matches when the page is plain; `on` collects listeners (on(target, type, fn),
+ * on.watch(...)), which are dropped if the element later gets voxels. index.js define() calls
+ * this for a part that has a `plain` function.
+ */
+export function plainPart(selector, wire) {
+  parts.push([selector, wire]);
+}
+
 /** Give the plain parts under root their behaviour. Safe to call again. */
 export function behave(root = document) {
   for (const [selector, wire] of parts) {

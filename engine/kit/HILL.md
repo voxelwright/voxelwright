@@ -37,7 +37,7 @@ Where a number exists it is read before anyone gives an opinion.
 |---|---|---|
 | Gates passing | section 1 | all |
 | Motion: time to settle against the spec's range; `no response`, `pop`, `snap`, `empty frame` | `film.mjs` | passes |
-| Parts built, of the full set (shadcn's and Bootstrap's lists) | the inventory, section 5 | 13 of 76 |
+| Parts built, of the full set (shadcn's and Bootstrap's lists) | the inventory, section 5; `tools/parts.mjs` | 50 of 76 |
 | Plain against voxels, per part and state (an image difference) | to be built with the web version | not measured |
 
 ## 3. Look and feel

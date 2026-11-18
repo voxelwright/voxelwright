@@ -38,6 +38,18 @@ const defs = {
   lamp: { day: '#fff3c4', night: '#ffe9a0', jitter: 0.01, glow: 1 },
   // Ink: lettering set into a surface.
   ink: { day: '#0a0f3d', night: '#eceefb', jitter: 0.0, seamless: true },
+  // Lights (the lit look). They glow by day too where a look's light says so.
+  // light: the accent, under what acts. A theme changes it.
+  light: { day: '#2f5bff', night: '#4d7dff', jitter: 0, glow: 1 },
+  // light-warm: the room's own light, half as strong: grooves, wells at rest.
+  'light-warm': { day: '#f1d9a8', night: '#c9a264', jitter: 0, glow: 0.5 },
+  // light-go: done, live. light-stop: failed, destructive. The same in every theme.
+  'light-go': { day: '#12b556', night: '#35e07a', jitter: 0, glow: 1 },
+  'light-stop': { day: '#f0442e', night: '#ff5a44', jitter: 0, glow: 1 },
+  // Key: the cap of an ordinary key.
+  key: { day: '#fffefa', night: '#2b3046', jitter: 0.004 },
+  // Pointer-edge: the outline of the voxel pointer.
+  'pointer-edge': { day: '#191b27', night: '#04050a', jitter: 0 },
 };
 
 export const MATERIALS = {};

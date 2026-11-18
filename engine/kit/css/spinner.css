@@ -1,0 +1,37 @@
+/* ---------- Spinner ---------- */
+
+/* A ring of light cubes, five voxels across (nine with data-vx-size="large"): an odd number, so a
+   cube stands at every corner and at every second voxel between. */
+.vx-spinner { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 5); vertical-align: middle; }
+.vx-spinner[data-vx-size="large"] { inline-size: calc(var(--vx) * 9); block-size: calc(var(--vx) * 9); }
+.vx-spinner[hidden] { display: none; } /* the class would otherwise undo the attribute */
+
+/* the words that say what is being waited for: read out, not shown */
+.vx-spinner-word { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* plain: the same ring painted, one corner cube and one side cube repeated; the turn is a step
+   round the ring, a cube at a time */
+.vx-spinner:not([data-vx-live]) { --_c: var(--lit-accent, var(--vx-enamel)); --_n: 8; }
+.vx-spinner:not([data-vx-live])[data-vx-size="large"] { --_n: 16; }
+.vx-spinner:not([data-vx-live])[data-vx-light="go"] { --_c: var(--lit-go, var(--vx-leaf)); }
+.vx-spinner:not([data-vx-live])[data-vx-light="stop"] { --_c: var(--lit-stop, var(--vx-brick)); }
+.vx-spinner:not([data-vx-live])[data-vx-light="warm"] { --_c: var(--lit-warm, var(--vx-steel)); }
+.vx-spinner:not([data-vx-live])::before {
+  content: ""; position: absolute; inset: 0; opacity: 0.45;
+  background:
+    repeating-linear-gradient(90deg, var(--_c) 0 var(--vx), transparent 0 calc(var(--vx) * 2)) 0 0 / 100% var(--vx) no-repeat,
+    repeating-linear-gradient(90deg, var(--_c) 0 var(--vx), transparent 0 calc(var(--vx) * 2)) 0 100% / 100% var(--vx) no-repeat,
+    repeating-linear-gradient(180deg, var(--_c) 0 var(--vx), transparent 0 calc(var(--vx) * 2)) 0 0 / var(--vx) 100% no-repeat,
+    repeating-linear-gradient(180deg, var(--_c) 0 var(--vx), transparent 0 calc(var(--vx) * 2)) 100% 0 / var(--vx) 100% no-repeat;
+}
+/* the cube whose turn it is: one full cube that steps from seat to seat round the edge */
+.vx-spinner:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block-start: 0; inset-inline-start: 0; inline-size: var(--vx); block-size: var(--vx); background: var(--_c);
+  offset-path: inset(calc(var(--vx) * 0.5)); offset-rotate: 0deg; offset-anchor: center;
+  animation: vx-spinner 0.8s steps(var(--_n)) infinite;
+}
+@keyframes vx-spinner { from { offset-distance: 0%; } to { offset-distance: 100%; } }
+@media (prefers-reduced-motion: reduce) {
+  .vx-spinner:not([data-vx-live])::before { opacity: 0.75; }
+  .vx-spinner:not([data-vx-live])::after { animation: none; display: none; }
+}

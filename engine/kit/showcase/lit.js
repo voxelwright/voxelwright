@@ -1,9 +1,8 @@
 // Depth and light: one system on the real parts, shown as two screens with a pointer of the same
-// voxels doing one thing in each. The look is in lit-look.js; this file is the page: the time of
+// voxels doing one thing in each. The look is the kit's (src/looks/lit.js); this file is the page: the time of
 // day, the theme, and the two short stories (written the way Benji Taylor's Stageshow skill
 // teaches: a finished screen, one gesture, a result that stays, a reset with a cause).
-import { adopt, ready, live, refresh, getStage, defineMaterial, LOOKS, PRESS, RELEASE } from '/packages/voxelmorphism/src/index.js';
-import './lit-look.js';
+import { adopt, ready, live, refresh, getStage, theme, THEMES, PRESS, RELEASE } from '/packages/voxelmorphism/src/index.js';
 
 const root = document.documentElement;
 const q = new URLSearchParams(location.search);
@@ -12,25 +11,7 @@ const $$ = (s, el = document) => [...el.querySelectorAll(s)];
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------------------------------------
-// Themes. A theme is the accent: the light under what acts, and the cap of the one main key.
-// The system does not change with it. An accent keeps clear of green and red, which mean done
-// and failed whatever the theme.
-const ACCENTS = {
-  '': { light: { day: '#2f5bff', night: '#4d7dff' }, cap: { day: '#2f5bff', night: '#3560f2' } },
-  rose: { light: { day: '#ff3d9a', night: '#ff6fb4' }, cap: { day: '#c2186f', night: '#c9237a' } },
-  dusk: { light: { day: '#6a4dff', night: '#9278ff' }, cap: { day: '#5b3df0', night: '#6548f2' } },
-};
-function setAccent(name) {
-  const a = ACCENTS[name] ?? ACCENTS[''];
-  if (name) root.dataset.accent = name; else delete root.dataset.accent;
-  const look = LOOKS.lit;
-  look.materials.enamel = a.cap;
-  look.materials.signal = { ...a.light, glow: 1 };
-  defineMaterial('light', { ...a.light, glow: 1, jitter: 0 }); // and every look's table is made again
-  const stage = getStage();
-  if (stage) for (const l of stage.lives.values()) { l.model.tint(l.theme, l.look); l.invalidate(); }
-}
-
+// The time of day and the theme, by the page's own switches. A theme is the kit's: theme(name).
 function tabs(el, value, set) {
   const all = $$('[role="tab"]', el);
   for (const t of all) t.setAttribute('aria-selected', String(t.dataset.value === value));
@@ -38,8 +19,9 @@ function tabs(el, value, set) {
   el.addEventListener('click', (e) => { if (live(el)) return; const t = e.target.closest('[role="tab"]'); if (t) set(t.dataset.value); });
 }
 tabs($('#time'), root.dataset.theme, (v) => { root.dataset.theme = v; });
-tabs($('#accent'), root.dataset.accent || '', setAccent);
-if (root.dataset.accent) setAccent(root.dataset.accent);
+const first = THEMES[q.get('accent')] ? q.get('accent') : 'bay';
+tabs($('#accent'), first, theme);
+if (first !== 'bay') theme(first);
 
 // ---------------------------------------------------------------------------------------------
 // The pointer, and a hand to move it.
@@ -140,8 +122,9 @@ function deploy() {
       note.setAttribute('data-shown', '');
       l?.play('assemble', null, { from: [0, l.H / 2], duration: 0.34, each: 0.2 });
     } else if (note.hasAttribute('data-shown')) {
+      const gone = note.hasAttribute('data-vx-leaving'); // a person's click has already broken it
       note.setAttribute('data-vx-leaving', '');
-      if (l && !reduced) await l.play('crumble', null, { duration: 0.3 });
+      if (l && !reduced && !gone) await l.play('crumble', null, { duration: 0.3 });
       note.removeAttribute('data-shown');
     }
   };

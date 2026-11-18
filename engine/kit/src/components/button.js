@@ -47,7 +47,8 @@ export const button = {
     const press = live.spring('press'), hover = live.spring('hover');
     let held = false;
     const down = () => { if (live.state.off) return; held = true; press.to(-live.look.travel, PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
-    const up = () => { if (!held) return; held = false; if (el.getAttribute('aria-expanded') === 'true') return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
+    const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
+    const up = () => { if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
     const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
     const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
     const leave = () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(); live.invalidate(); };
@@ -60,14 +61,14 @@ export const button = {
     el.addEventListener('keyup', up);
     el.addEventListener('blur', up);
     const watch = new MutationObserver((list) => {
-      if (list.some((r) => r.attributeName !== 'aria-expanded')) return live.rebuild();
+      if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) return live.rebuild();
       // a trigger stays down while what it opened is open
-      const open = el.getAttribute('aria-expanded') === 'true';
+      const open = holds();
       held = false;
       press.to(open ? -live.look.travel : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
       live.invalidate();
     });
-    watch.observe(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-icon', 'aria-expanded'] });
+    watch.observe(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] });
     return () => {
       watch.disconnect();
       for (const [t, f] of [['pointerdown', down], ['pointerup', up], ['pointercancel', up], ['pointerenter', enter], ['pointerleave', leave], ['keydown', key], ['keyup', up], ['blur', up]]) el.removeEventListener(t, f);

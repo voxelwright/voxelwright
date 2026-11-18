@@ -1,0 +1,36 @@
+/* ---------- Figure and image ----------
+   A picture set in a recess (the kit's .vx-recess), with its caption as words under it.
+   Tool: well for the picture; none for the caption. No script.
+     <figure class="vx-figure">
+       <div class="vx-recess"><img src="…" alt="What the picture shows" width="640" height="360"></div>
+       <figcaption>What it is. <small>Who made it</small></figcaption>
+     </figure>
+   The picture may be an <img>, a <picture>, an inline <svg> or a <video>. It is as wide as the
+   figure and keeps its own shape; for a shape of your choosing put a .vx-ratio between the
+   recess and the picture (css/aspect-ratio.css). An image with no figure round it:
+     <span class="vx-figure"><span class="vx-recess"><img …></span></span>
+   The figure is as wide as its place; give it an inline-size to make it smaller. */
+
+.vx-figure { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); margin: 0; min-inline-size: 0; max-inline-size: 100%; }
+span.vx-figure { display: inline-grid; vertical-align: top; }
+
+/* the recess: its rim is one voxel all round, and the picture lies on its floor inside the rim */
+.vx-figure > .vx-recess { display: block; box-sizing: border-box; min-inline-size: 0; padding: var(--vx); line-height: 0; }
+.vx-figure > .vx-recess > :is(img, svg, video), .vx-figure > .vx-recess > picture > img { display: block; inline-size: 100%; block-size: auto; max-inline-size: 100%; }
+.vx-figure > .vx-recess > picture { display: block; }
+/* a picture that has not come (or never will) shows its words on the floor, not a broken box */
+.vx-figure img { color: var(--vx-ink-quiet); font: 400 0.875rem/1.4 var(--vx-font); }
+
+.vx-figure figcaption {
+  max-inline-size: 34rem;
+  color: var(--vx-ink-quiet);
+  font: 400 0.875rem/1.45 var(--vx-font);
+  line-height: round(up, 1.4em, var(--vx)); /* 20 px: five voxels a line */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.vx-figure figcaption :is(strong, b) { color: var(--vx-ink); font-weight: 600; }
+/* who made it, after what it is */
+.vx-figure figcaption small { display: block; font-size: 0.8125rem; }
+.vx-figure figcaption a { color: var(--vx-link); text-underline-offset: 0.2em; }
+.vx-figure figcaption a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }

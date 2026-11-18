@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lettering and block</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* Plain, a board cannot ask the script which scale fits its column, so the page says it: two
+     voxels to the cell where the column has room for this word (352 px), one where it has not.
+     The same sizes the voxels take, so nothing moves when they arrive. */
+  .signs { container-type: inline-size; }
+  #lit-sign:not([data-vx-live]) { --_s: 1; }
+  @container (min-width: 352px) { #lit-sign:not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 7); padding-inline-end: calc(var(--vx) * 5); } }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Lettering and block</h1>
+    <p class="what">Voxel headings that break under the pointer and mend themselves, and the plain solid. In this look a board is of the key's material, its frame is the accent's light, and its letters are ink.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section class="signs">
+    <h2>In use: the name over a page</h2>
+    <h3 class="vx-sign" id="lit-sign" data-vx-font="sign" data-vx-scale="2" data-vx-material="key" data-vx-frame="light" data-vx-ink="ink">Fogline</h3>
+    <p class="what">Press it, or hold and brush across it.</p>
+  </section>
+  <section class="signs">
+    <h2>Every state</h2>
+    <p class="what">A heading with no board: letters of ink standing on the surface. A click breaks it; a drag selects its words.</p>
+    <h3 class="vx-sign" id="bare" data-vx-board="none">Deploys this week</h3>
+    <p class="what">A board, one voxel to the cell, in Ukrainian.</p>
+    <h3 class="vx-sign" id="lit-uk" data-vx-font="sign" data-vx-scale="1" data-vx-material="key" data-vx-frame="light" data-vx-ink="ink" lang="uk">Розгорнути</h3>
+    <p class="what">As the kit draws a board that asks for nothing: enamel, with a frame and letters of signal. In this look both are the accent, so by day the word cannot be read. A board needs the three attributes above.</p>
+    <h3 class="vx-sign" id="old-sign" data-vx-font="sign" data-vx-scale="1">Fogline</h3>
+    <p class="what">Blocks, in the look's materials and lights: chalk, key, slate, steel, enamel; the accent, go, stop.</p>
+    <div class="row">
+      <span class="vx-block" data-vx-material="chalk"></span>
+      <span class="vx-block" data-vx-material="key" data-vx-depth="3"></span>
+      <span class="vx-block" data-vx-material="slate" data-vx-depth="1"></span>
+      <span class="vx-block" data-vx-material="steel" data-vx-depth="1"></span>
+      <span class="vx-block" data-vx-material="enamel" data-vx-depth="3"></span>
+      <span class="vx-block" data-vx-material="light" data-vx-depth="1"></span>
+      <span class="vx-block" data-vx-material="light-go" data-vx-depth="1"></span>
+      <span class="vx-block" data-vx-material="light-stop" data-vx-depth="1"></span>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
+  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  window.pokes = 0;
+  document.addEventListener('vx-poke', () => { window.pokes++; });
+  show();
+</script>
+</body>
+</html>

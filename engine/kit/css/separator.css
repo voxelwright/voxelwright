@@ -1,0 +1,48 @@
+/* ---------- Separator ----------
+   The groove (the kit's .vx-groove), used to part things. Tool: groove. No script.
+   Lying, between blocks (this exists already):
+     <div class="vx-groove" role="separator"></div>          or <hr class="vx-groove">
+   Standing, in a row of things. .vx-separator on a standing groove gives it a height of its
+   own, so it does not depend on the row stretching it, and room on either side:
+     <span class="vx-groove vx-separator" data-vx-way="down" role="separator" aria-orientation="vertical"></span>
+     data-vx-size="small"  between words (5 voxels)
+     (none)                between things a line tall, and beside low things (7 voxels)
+     data-vx-size="key"    between keys (11 voxels, as tall as a key)
+   With a word in its middle. The word is read; the grooves either side are only seen:
+     <div class="vx-separator"><span class="vx-groove" aria-hidden="true"></span><span>or</span><span class="vx-groove" aria-hidden="true"></span></div>
+     data-vx-align="start"  the word near the start, a short groove before it
+   data-vx-light on a groove (accent, go, stop) is the kit's: a light means something, so a
+   separator keeps to the room's own warm light unless it marks a state. */
+
+/* an <hr> is clipped by the browser; a groove's light must not be */
+hr.vx-groove { overflow: visible; block-size: var(--vx); }
+
+/* ---- standing, in a row ---- */
+.vx-groove.vx-separator[data-vx-way="down"] {
+  display: inline-block;
+  flex: none;
+  align-self: center;
+  vertical-align: middle;
+  inline-size: var(--vx);
+  block-size: calc(var(--vx) * 7);
+  margin-inline: calc(var(--vx) * 1);
+}
+.vx-groove.vx-separator[data-vx-way="down"][data-vx-size="small"] { block-size: calc(var(--vx) * 5); }
+.vx-groove.vx-separator[data-vx-way="down"][data-vx-size="key"] { block-size: calc(var(--vx) * 11); }
+
+/* ---- with a word in its middle ---- */
+.vx-separator:not(.vx-groove) {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  min-inline-size: 0;
+  color: var(--vx-ink-quiet);
+  font: 500 0.875rem/1.45 var(--vx-font);
+  line-height: round(up, 1.4em, var(--vx)); /* 20 px: five voxels a line */
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.vx-separator:not(.vx-groove) > .vx-groove { flex: 1 1 0; min-inline-size: calc(var(--vx) * 4); }
+.vx-separator:not(.vx-groove) > :not(.vx-groove) { flex: 0 1 auto; min-inline-size: 0; }
+.vx-separator[data-vx-align="start"] > .vx-groove:first-child { flex: 0 0 calc(var(--vx) * 6); }
+.vx-separator[data-vx-align="start"] { text-align: start; }

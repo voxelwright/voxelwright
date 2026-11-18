@@ -1,0 +1,50 @@
+/* ---------- Breadcrumb ---------- */
+
+/* Words parted by chevrons. None of the tools: no box, nothing raised.
+   Markup: <nav class="vx-breadcrumb" aria-label="Breadcrumb">
+             <ol>
+               <li><a href="/">fogline</a></li>
+               <li><a href="/projects">Projects</a></li>
+               <li><a href="/projects/harbor-api" aria-current="page">harbor-api</a></li>
+             </ol>
+           </nav>
+   The last one is where you are: aria-current="page", on a link or on a plain span.
+   A long trail wraps onto more lines; a long name breaks inside itself. To shorten a trail, leave
+   the middle out and say so: <li><span class="vx-breadcrumb-more">…</span></li>. */
+
+.vx-breadcrumb {
+  display: block;
+  min-inline-size: 0;
+  font-family: var(--vx-font);
+  font-size: 0.9375rem;
+  line-height: 1.35;
+  color: var(--vx-ink-quiet);
+}
+.vx-breadcrumb > ol { display: flex; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 2); margin: 0; padding: 0; list-style: none; }
+.vx-breadcrumb li { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); min-inline-size: 0; }
+.vx-breadcrumb li { min-block-size: calc(var(--vx) * 11); }
+.vx-breadcrumb :is(a, [aria-current], .vx-breadcrumb-more) { display: inline-flex; align-items: center; min-inline-size: 0; overflow-wrap: anywhere; }
+.vx-breadcrumb a { position: relative; color: inherit; font-weight: 500; text-decoration: none; -webkit-tap-highlight-color: transparent; }
+/* a link's target is 11 voxels high, whatever the size of its words: it reaches above and below
+   them, so the focus ring can keep to the words */
+.vx-breadcrumb a::after { content: ""; position: absolute; inset-inline: 0; inset-block: min(0px, calc(50% - var(--vx) * 5.5)); }
+.vx-breadcrumb a[href]:hover { color: var(--vx-ink); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
+.vx-breadcrumb a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.vx-breadcrumb [aria-current]:not([aria-current="false"]) { color: var(--vx-ink); font-weight: 650; }
+.vx-breadcrumb [aria-current]:not([aria-current="false"]):hover { text-decoration: none; }
+
+/* the chevron: seven half-voxel cells high, cut like the kit's glyphs. It is drawn, not written,
+   so nobody hears it read. It points the way the line runs. */
+.vx-breadcrumb li + li::before {
+  content: "";
+  flex: none;
+  inline-size: calc(var(--vx) * 2);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 4 7' shape-rendering='crispEdges'%3E%3Cpath d='M0 0h1v1H0zM1 1h1v1H1zM2 2h1v1H2zM3 3h1v1H3zM2 4h1v1H2zM1 5h1v1H1zM0 6h1v1H0z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.vx-breadcrumb:dir(rtl) li + li::before { transform: scaleX(-1); }
+
+/* words for a screen reader only: what the "…" stands for */
+.vx-breadcrumb-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

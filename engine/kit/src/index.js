@@ -17,11 +17,38 @@ import { dialog } from './components/dialog.js';
 import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
-import { behave, unbehave } from './plain.js';
+import { groove, recess, lamp, pointer, applyTheme } from './looks/lit.js';
+import { accordion } from './components/accordion.js';
+import { avatar } from './components/avatar.js';
+import { callout } from './components/callout.js';
+import { checkbox } from './components/checkbox.js';
+import { collapsible } from './components/collapsible.js';
+import { hoverCard } from './components/hover-card.js';
+import { kbd } from './components/kbd.js';
+import { listGroup } from './components/list-group.js';
+import { pagination } from './components/pagination.js';
+import { popover } from './components/popover.js';
+import { prose } from './components/prose.js';
+import { radio } from './components/radio.js';
+import { scrollArea } from './components/scroll-area.js';
+import { scrollSpy } from './components/scroll-spy.js';
+import { select } from './components/select.js';
+import { skeleton } from './components/skeleton.js';
+import { spinner } from './components/spinner.js';
+import { stepper } from './components/stepper.js';
+import { table } from './components/table.js';
+import { toggleButton } from './components/toggle-button.js';
+import { toggleGroup } from './components/toggle-group.js';
+import { tooltip } from './components/tooltip.js';
+import { validation } from './components/validation.js';
+import { behave, unbehave, plainPart } from './plain.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { LOOKS, defineLook } from './core/look.js';
+export { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole } from './core/light.js';
+export { THEMES } from './looks/lit.js';
+export { listeners, clamp } from './components/util.js';
 export { wrapLabel } from './components/util.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
 export { FONTS, registerFont, makeFont, layout as layoutText, measure as measureText } from './core/fonts/index.js';
@@ -29,7 +56,12 @@ export { FONTS, registerFont, makeFont, layout as layoutText, measure as measure
 export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
-export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block];
+export const components = [
+  button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
+  accordion, avatar, callout, checkbox, collapsible, hoverCard, kbd, listGroup, pagination, popover, prose, radio, scrollArea, scrollSpy, select, skeleton, spinner, stepper, table, toggleButton, toggleGroup, tooltip, validation,
+];
+// what a part must do with no voxels at all
+for (const def of components) if (def.plain) plainPart(def.selector, def.plain);
 let stage = null;
 
 // The renderer. By default it is the Village engine's (WebGPU, src/engine.js). use() hands the
@@ -167,9 +199,22 @@ export function live(el) {
   return stage?.lives.get(el) ?? null;
 }
 
-/** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step? }. */
+/**
+ * Set the lit look's theme: 'bay', 'rose', 'dusk', or an object shaped like one of THEMES. Every
+ * part that is drawn is recoloured, and the stylesheet's tokens follow.
+ */
+export function theme(t) {
+  const th = applyTheme(t);
+  if (stage) for (const l of stage.lives.values()) { l.model.tint(l.theme, l.look); l.invalidate(); }
+  return th;
+}
+
+/** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step?, plain? }. */
 export function define(def) {
+  if (components.includes(def)) return;
   components.push(def);
+  // what it must do with no voxels at all (keys, opening, closing): def.plain(el, on)
+  if (def.plain) plainPart(def.selector, def.plain);
 }
 
 /** Show a toast: toast('Watered.', { kind: 'done' | 'failed' | 'note', duration }). Works plain too. */
