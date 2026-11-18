@@ -18,6 +18,9 @@
 .tester-controls .choice { margin: 0; }
 .tester-controls fieldset { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
 .tester-controls legend { padding: 0; margin-bottom: .45rem; font-size: .86rem; font-weight: 580; }
+.lamp-level { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: .25rem; font-size: .86rem; }
+.lamp-level output { font-variant-numeric: tabular-nums; }
+.lamp-level .vx-slider { grid-column: 1/-1; width: calc(100% - 1.5rem); min-width: 0; justify-self: center; --vx: 2px; }
 .tester-controls .sound { display: flex; align-items: center; flex-wrap: wrap; gap: .45rem; margin: 0; border-top: 1px solid #c7c9bf; padding-top: .9rem; cursor: pointer; }
 .tester-controls .sound input { width: 1rem; height: 1rem; margin: 0; accent-color: #374537; }
 .tester-controls .sound small { font-weight: 400; }
@@ -25,5 +28,5 @@
   .key-tester { grid-template-columns: 1fr; gap: 1.5rem; }
   .key-stage { min-block-size: 16rem; }
   .tester-controls { grid-template-columns: 1fr 1fr; gap: 1rem; }
-  .tester-controls p, .tester-controls .sound { grid-column: 1/-1; }
+  .tester-controls p, .tester-controls .sound, .lamp-level { grid-column: 1/-1; }
 }

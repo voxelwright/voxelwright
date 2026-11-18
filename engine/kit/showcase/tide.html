@@ -26,13 +26,17 @@
         </div>
       </div>
       <div class="tester-controls">
-        <p id="key-help">Press and hold Tide to feel the travel. Release to switch its lamp.</p>
+        <p id="key-help">Press Tide to switch its lamp. Hold the key down to inspect its travel.</p>
         <label class="choice" for="caps">Keycap<select id="caps"></select></label>
         <label class="choice" for="shell">Enclosure<select id="shell"></select></label>
         <fieldset class="profile"><legend>Key profile</legend><div>
           <label><input type="radio" name="profile" value="low">Low</label>
           <label><input type="radio" name="profile" value="high" checked>Sculpted</label>
         </div></fieldset>
+        <div class="lamp-level">
+          <label for="dimmer">Lamp brightness</label><output id="level-out" for="dimmer"></output>
+          <span class="vx-slider"><input id="dimmer" type="range" min="0" max="10" value="7"></span>
+        </div>
         <label class="sound" for="sound"><input id="sound" type="checkbox">Switch sound <small>Cherry MX Brown</small></label>
       </div>
     </section>
