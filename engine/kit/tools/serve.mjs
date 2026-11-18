@@ -60,7 +60,7 @@ createServer(async (req, res) => {
     const s = await stat(file);
     if (!s.isFile()) throw new Error('not a file');
     let body = await readFile(file);
-    if (file.endsWith('.ts')) body = stripTypeScriptTypes(body.toString('utf8'));
+    if (file.endsWith('.ts')) { try { body = stripTypeScriptTypes(body.toString('utf8')); } catch (e) { res.writeHead(500, { 'content-type': 'text/plain' }).end(`${path}: ${e.message}`); return; } }
     // a clip is asked for a piece at a time (Safari plays nothing otherwise)
     const piece = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
     if (piece && file.endsWith('.mp4') && (piece[1] || piece[2])) {

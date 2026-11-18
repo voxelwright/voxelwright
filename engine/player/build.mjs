@@ -38,8 +38,16 @@ for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
   const text = readFileSync(join(root, file), 'utf8')
   if (file.endsWith('.js')) { reach(file, text); put(file, js(text)) } else put(file, text)
 }
-put('kit/voxelmorphism.css', readFileSync(join(root, 'kit/voxelmorphism.css')))
-cpSync(join(root, 'kit/fonts'), join(out, 'kit/fonts'), { recursive: true })
+// Of the fonts only the files the stylesheet names, with each family's licence where it has one. The kit's own faces
+// (Vox Text, and Vox Block and Vox Sign inside the stylesheet) have no licence yet: this folder is for looking at on
+// this machine, and goes to no host until the owner says so.
+const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
+put('kit/voxelmorphism.css', sheet)
+for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {
+  cpSync(join(root, 'kit', font), join(out, 'kit', font))
+  const licence = join('kit', dirname(font), 'OFL.txt')
+  if (existsSync(join(root, licence))) cpSync(join(root, licence), join(out, licence))
+}
 while (todo.length) {
   const path = todo.pop(), text = stripTypeScriptTypes(readFileSync(join(root, path), 'utf8'))
   reach(path, text)
