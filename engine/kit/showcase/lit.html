@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxelmorphism: depth and light</title>
+<meta name="description" content="One design system on the Voxelmorphism kit: keys that stand on their own light, one surface a region, lit grooves, and wells a level below. Shown as a deploy panel and a personal blog.">
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="lit.css">
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search), r = document.documentElement;
+    r.dataset.theme = q.get('theme') || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+    if (q.get('only')) r.dataset.only = q.get('only');
+    if (q.get('accent')) r.dataset.accent = q.get('accent');
+    setTimeout(function () { r.dataset.ready = '1'; }, 5000);
+  })();
+</script>
+</head>
+<body>
+<header class="top">
+  <h1>Depth and light</h1>
+  <p class="lede">One system. What you press stands on its own light. A region is one surface, parted by lit grooves. What you put something into is a level below. Press things yourself, or watch.</p>
+  <div class="switches">
+    <div class="vx-tabs" role="tablist" aria-label="Time of day" id="time">
+      <button role="tab" aria-selected="false" data-value="light">Day</button>
+      <button role="tab" aria-selected="false" data-value="dark">Night</button>
+    </div>
+    <div class="vx-tabs" role="tablist" aria-label="Theme" id="accent">
+      <button role="tab" aria-selected="true" data-value="">Bay</button>
+      <button role="tab" aria-selected="false" data-value="rose">Rose</button>
+      <button role="tab" aria-selected="false" data-value="dusk">Dusk</button>
+    </div>
+  </div>
+</header>
+
+<main>
+<!-- ============================ a deploy panel ============================ -->
+<section class="stage" id="deploy" aria-label="A deploy panel">
+  <div class="vx-card window" data-vx-light="accent">
+    <div class="bar">
+      <div class="app">Deploys</div>
+      <div class="team">fogline</div>
+    </div>
+    <div class="vx-groove" role="separator"></div>
+    <div class="cols">
+      <nav class="side" aria-label="Projects">
+        <ul class="projects">
+          <li aria-current="true"><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent"></span>harbor-api</li>
+          <li>fog-site</li>
+          <li>tide-worker</li>
+          <li>ferry-cron</li>
+        </ul>
+      </nav>
+      <div class="vx-groove" data-vx-way="down" role="separator"></div>
+      <div class="main">
+        <div class="head">
+          <div class="name">harbor-api</div>
+          <div class="state"><span class="vx-lamp" data-vx-light="go"></span><span class="state-word">Live</span></div>
+        </div>
+        <div class="actions">
+          <button class="vx-button" data-vx-material="enamel" id="go">Deploy</button>
+          <button class="vx-button">Roll back</button>
+          <label class="vx-toggle auto"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Deploy on push</label>
+        </div>
+        <div class="build">
+          <div class="build-top"><span class="build-word">Build</span><span class="build-num">100%</span></div>
+          <span class="vx-meter"><progress value="1" max="1">100%</progress></span>
+        </div>
+        <div class="vx-recess log" aria-label="Build log">
+          <div class="line"><span class="at">10:42:17</span>Cloned main at 4f2c9a1</div>
+          <div class="line"><span class="at">10:42:31</span>Installed 212 packages</div>
+          <div class="line"><span class="at">10:43:02</span>Built in 45 s</div>
+        </div>
+      </div>
+    </div>
+    <div class="vx-toast" data-vx-kind="done" role="status"><span class="vx-toast-text">Deployed harbor-api</span></div>
+  </div>
+  <span class="vx-cursor" aria-hidden="true"></span>
+</section>
+
+<!-- ============================ a personal blog ============================ -->
+<section class="stage" id="blog" aria-label="A personal blog">
+  <div class="vx-card window" data-vx-light="accent">
+    <div class="bar">
+      <div class="app">field notes</div>
+      <nav class="links" aria-label="Sections"><a href="#blog" aria-current="page">Blog</a><a href="#blog">Tags</a><a href="#blog">About</a></nav>
+    </div>
+    <div class="vx-groove" role="separator"></div>
+    <article class="post">
+      <div class="post-title">Shipping small things</div>
+      <div class="post-date">May 24, 2026</div>
+      <p>Small work is easy to underestimate. A tiny package still needs care, a clear label, and a page that says what it is for.</p>
+      <p>The goal is not to move fast. It is to hand over something whole, that the next person can build on without asking you.</p>
+      <div class="vx-recess code"><pre><code>pack = Box()
+pack.add(item)
+pack.label(to)
+ship(pack)</code></pre></div>
+      <div class="quote"><span class="vx-groove" data-vx-way="down"></span><p>Finish the small thing. Then send it.</p></div>
+    </article>
+    <div class="vx-groove" role="separator"></div>
+    <form class="subscribe" onsubmit="return false">
+      <label class="vx-field"><span class="vx-field-label">New notes by email</span><span class="vx-well"><input type="email" id="mail" placeholder="you@example.com" autocomplete="off"></span></label>
+      <button class="vx-button" data-vx-material="enamel" id="sub"><span class="sub-word">Subscribe</span></button>
+    </form>
+  </div>
+  <span class="vx-cursor" aria-hidden="true"></span>
+</section>
+</main>
+
+<script type="module" src="lit.js"></script>
+</body>
+</html>

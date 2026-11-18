@@ -10,11 +10,16 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const port = Number(process.env.PORT || 5985);
 const engine = process.argv.includes('--engine');
+// The Village engine's built folder (its engine/dist, after `npm run player`), sent under /engine/ and never
+// written: with it a kit panel can stand in the engine's world, on this one port, as
+//   /engine/landing/index.html?kit=/packages/voxelmorphism/&hour=17.8&scale=1
+//   ENGINE_DIST=<Village>/engine/dist PORT=5989 node tools/serve.mjs
+const world = process.env.ENGINE_DIST ? resolve(process.env.ENGINE_DIST) : null;
 // module scripts run in document order, so this one runs before the page's own.
 // It also tells this server what ended up drawing the page, so a phone's answer can be read here.
 const HAND = `<script type="module">import { use, ready } from '/packages/voxelmorphism/src/index.js'; import { renderer } from '/packages/voxelmorphism/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname), { method: 'POST' }).catch(() => {})));</script>\n`;
 const seen = join(root, 'milestones', 'seen.log');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4' };
 
 createServer(async (req, res) => {
   try {
@@ -42,14 +47,25 @@ createServer(async (req, res) => {
       res.writeHead(own ? 204 : 403).end(); return;
     }
     if (path.endsWith('/')) path += 'index.html';
-    const file = normalize(join(root, path));
+    const built = world && path.startsWith('/engine/');
+    const base = built ? world : root;
+    const file = normalize(join(base, built ? path.slice(7) : path));
     // nothing whose name starts with a dot is served: .git, .claude, an env file
-    if (!file.startsWith(root + '/') || /\/node_modules\//.test(file) || /\/\./.test(file.slice(root.length))) { res.writeHead(403).end('no'); return; }
+    if (!file.startsWith(base + '/') || /\/node_modules\//.test(file) || /\/\./.test(file.slice(base.length))) { res.writeHead(403).end('no'); return; }
     const s = await stat(file);
     if (!s.isFile()) throw new Error('not a file');
-    res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store' });
     let body = await readFile(file);
-    if (engine && file.endsWith('.html') && !/[?&]gl\b/.test(req.url)) {
+    // a clip is asked for a piece at a time (Safari plays nothing otherwise)
+    const piece = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
+    if (piece && file.endsWith('.mp4') && (piece[1] || piece[2])) {
+      const from = piece[1] ? Number(piece[1]) : Math.max(0, body.length - Number(piece[2]));
+      const to = piece[1] && piece[2] ? Math.min(Number(piece[2]), body.length - 1) : body.length - 1;
+      if (from > to || from >= body.length) { res.writeHead(416, { 'content-range': `bytes */${body.length}` }).end(); return; }
+      res.writeHead(206, { 'content-type': 'video/mp4', 'content-range': `bytes ${from}-${to}/${body.length}`, 'accept-ranges': 'bytes', 'content-length': to - from + 1, 'cache-control': 'no-store' });
+      res.end(body.subarray(from, to + 1)); return;
+    }
+    res.writeHead(200, { 'content-type': types[extname(file)] || 'application/octet-stream', 'cache-control': 'no-store', ...(file.endsWith('.mp4') ? { 'accept-ranges': 'bytes' } : {}) });
+    if (engine && !built && file.endsWith('.html') && !/[?&]gl\b/.test(req.url)) {
       const html = body.toString('utf8');
       const at = html.indexOf('<script type="module"');
       if (at >= 0 && !html.includes('seam')) body = html.slice(0, at) + HAND + html.slice(at);

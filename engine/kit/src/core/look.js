@@ -26,6 +26,8 @@ export const BASE = {
   quiet: false,  // true: a voxel that shows only its front face has no seam and no grain,
                  // so a face you read from is plain and the grid is left to edges and sides
   materials: {}, // name -> { day, night, jitter, glow }: colours this look changes
+  light: null,   // { day: {...}, night: {...} }: what this look changes in each theme's light (materials.js LIGHTS);
+                 // glow above 0 by day lets its lit parts shine in daylight too
   parts: {},     // part name -> { build, pose, pad }: another model for that part
 };
 
@@ -60,6 +62,7 @@ export function tableOf(look) {
 
 /** The light for a theme as this look wants it. */
 export function lightOf(look, theme) {
-  if (look.seam === 1) return LIGHTS[theme];
-  return ((look._lights ??= {})[theme] ??= { ...LIGHTS[theme], seam: LIGHTS[theme].seam * look.seam });
+  const own = look.light?.[theme];
+  if (look.seam === 1 && !own) return LIGHTS[theme];
+  return ((look._lights ??= {})[theme] ??= { ...LIGHTS[theme], ...own, seam: (own?.seam ?? LIGHTS[theme].seam) * look.seam });
 }
