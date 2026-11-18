@@ -94,7 +94,11 @@ void main() {
   // Voxels that glow keep their colour whatever the light does.
   float g = max(vColor.a, 0.0) * uGlow;
   c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * uSeam * 0.5), g * 0.36);
-  o = vec4(c, 1.0);
+  float through = clamp(-1.0 - vColor.a, 0.0, 1.0);
+  float facing = abs(dot(n, normalize(vec3(-uWellShear, 1.0))));
+  float grazing = pow(1.0 - min(facing, 1.0), 3.0) * through;
+  float opacity = 1.0 - through + grazing * .65;
+  o = vec4(mix(c, uHighlight, grazing * .45) * opacity, opacity);
 }`;
 
 const SHADOW_VS = `#version 300 es

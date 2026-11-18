@@ -6,6 +6,9 @@ import { Renderer } from './core/gl.js';
 import { renderer as engine } from './engine.js';
 import { button } from './components/button.js';
 import { toggle } from './components/toggle.js';
+import { instrument, settings } from './looks/instrument.js';
+import { backplane } from './components/backplane.js';
+import { rotary } from './components/rotary.js';
 import { slider } from './components/slider.js';
 import { field } from './components/field.js';
 import { card } from './components/card.js';
@@ -81,7 +84,7 @@ export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
 export const components = [
-  button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
+  button, toggle, slider, rotary, backplane, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
   accordion, avatar, callout, checkbox, collapsible, hoverCard, kbd, listGroup, pagination, popover, prose, radio, scrollArea, scrollSpy, select, skeleton, spinner, stepper, table, toggleButton, toggleGroup, tooltip, validation,
   bubble, messageScroller, attachment, questionnaire, trace, sheet, drawer, contextMenu, dataTable, chart, themePicker,
   navs, navbar, sidebar, navigationMenu, navigationMenuFloat, menubar, commandPalette, combobox,
@@ -235,8 +238,15 @@ export function live(el) {
  */
 export function theme(t) {
   const th = applyTheme(t);
-  if (stage) for (const l of stage.lives.values()) { l.model.tint(l.theme, l.look); l.invalidate(); }
+  if (stage) for (const l of stage.lives.values()) l.recolor();
   return th;
+}
+
+/** Fit an enclosure, cap set, profile and backlight to the lit kit. May be called before adopt(). */
+export function fitInstrument(choice) {
+  const fitted = settings(choice);
+  instrument(fitted, document.documentElement, stage);
+  return fitted;
 }
 
 /** Omit build for behavior only. A mixed definition can select its drawn variant with draws(el). */

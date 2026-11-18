@@ -53,7 +53,12 @@ export const slider = {
     on(input, 'change', () => live.invalidate());
     on.heed(input, 'value', () => live.invalidate()); // set from code
     on(input, 'pointerdown', () => { press.to(-1.5, PRESS.k, PRESS.c); live.invalidate(); });
-    on(window, 'pointerup', () => { if (press.target !== 0) { press.to(0, RELEASE.k, RELEASE.c); live.invalidate(); } });
+    const release = () => {
+      if (press.target === 0) return;
+      press.to(0, RELEASE.k, RELEASE.c);
+      live.invalidate();
+    };
+    for (const type of ['pointerup', 'pointercancel', 'blur']) on(window, type, release);
     on.watch(input, { attributes: true, attributeFilter: ['disabled', 'min', 'max', 'value'] }, () => live.rebuild());
     return on.done;
   },

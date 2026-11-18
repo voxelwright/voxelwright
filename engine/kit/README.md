@@ -12,7 +12,7 @@ cd engine/kit
 PORT=5989 node tools/serve.mjs
 ```
 
-Open [the showcase](http://127.0.0.1:5989/kit/showcase/). The bare server address redirects there.
+Open [the showcase](http://127.0.0.1:5989/kit/showcase/). Signal Desk opens at the bare server address. Turn its dial, press a lamp key or change the enclosure. The build follows you through the parts catalog in the same tab. The original interactive rules are under Design notes.
 Run `PORT=5989 node tools/links.mjs` from the same directory to check all the pages.
 
 ## Use
@@ -49,6 +49,7 @@ backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`
 
 | Name | What it does |
 |---|---|
+| `fitInstrument({ shell, caps, profile, lamp, level })` | Fit the shared enclosure, cap geometry and backlight to a page using the lit look. Signal Desk demonstrates the choices. |
 | `adopt(root?)` | Turn every part under `root` into voxels |
 | `release(root?)` | Give them back to plain CSS |
 | `live(el)` | The live model behind an element: `play('assemble' \| 'crumble')`, `spring()`, `rebuild()` |

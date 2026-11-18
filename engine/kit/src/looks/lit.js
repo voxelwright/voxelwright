@@ -30,7 +30,11 @@ const key = {
     live.state.off = off;
     live.label(el.querySelector(':scope > .vx-label'), () => live.state.top + cap.tz);
     // a key that is already held down as the page arrives (open, or pressed) is drawn down
-    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-m.keyTravel); }
+    if (live.state.first === undefined || live.state.pressTravel !== m.keyTravel) {
+      live.state.first = false;
+      live.state.pressTravel = m.keyTravel;
+      if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-m.keyTravel);
+    }
   },
 
   pose(live) {
@@ -273,6 +277,13 @@ const surface = {
     body.slab(0, 0, 2, W, H, top - 4, 'chalk', r);
     ring(body, 0, 0, top - 3, W, H, 'gasket', r);
     body.slab(1, 1, top - 2, W - 2, H - 2, 2, 'chalk', r);
+    if (live.look.tooling && large) {
+      // Removable reading plate inside the case. The light pipe is let into the
+      // case edge, outside the plate, leaving a clear view of its four walls.
+      body.slab(4, 4, top - 1, W - 8, H - 8, 1, 'panel', 1);
+      const rail = m.part('pipe');
+      rail.box(8, H - 1, top - 3, W - 16, 1, 1, 'backlight');
+    }
     if (el.dataset.vxLight) ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el), r);
     if (wide && el.dataset.vxBolts !== 'none') {
       for (const x of [4, W - 5]) for (const y of [4, H - 5]) {
@@ -479,6 +490,9 @@ export function applyTheme(t = 'bay') {
   look.materials.enamel = th.cap;
   look.materials.light = { ...th.light, glow: 0.68 };
   look.materials.signal = { ...th.light, glow: 1 };
+  if (LOOKS.instrument) {
+    for (const name of ['enamel', 'light', 'signal']) LOOKS.instrument.materials[name] = look.materials[name];
+  }
   defineMaterial('light', { ...th.light, glow: 1, jitter: 0 }); // and every look's colours are read again
   const root = globalThis.document?.documentElement;
   if (root) {

@@ -47,8 +47,13 @@ for (const mode of ['live', 'plain']) {
   say(m.tall === tall, `nothing below moved (the page is ${m.tall} px tall, was ${tall})`);
   say(await p.evaluate(() => document.getElementById('said').textContent) === '', 'and nothing was sent');
   if (mode === 'live') {
-    const red = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS['light-stop'].id; });
-    say(red, "the well's rim is the red light");
+    const red = await p.evaluate(async () => {
+      const { MATERIALS } = await import('/kit/src/index.js');
+      const { walls, tell } = window.vx.live(document.getElementById('mail').closest('.vx-well')).model.byName;
+      const stop = MATERIALS['light-stop'].id;
+      return !walls.mats.includes(stop) && tell?.mats.includes(stop) && tell.rest[2] < 0;
+    });
+    say(red, 'the red tube sits inside the well below its rim');
   }
   await p.screenshot({ path: `shots/parts/validation/hand-${mode}-wrong.png` });
 

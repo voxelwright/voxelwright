@@ -32,16 +32,24 @@ const slider = {
     const input = live.state.input = el.querySelector('input');
     const off = !!input?.disabled;
     const y = live.state.y = Math.floor((H - TRENCH) / 2);
+    const instrument = Boolean(look.tooling);
     bezel(m, 0, y, W, TRENCH);
+    if (look.tooling) {
+      const graduations = m.part('scale');
+      for (let i = 0; i <= 10; i++) {
+        const x = 1 + Math.round((W - 3) * i / 10);
+        graduations.plot(x, y - 2, 1, 'gasket');
+      }
+    }
     hole(live, m, { y, h: TRENCH, depth: DEEP, wall: 'slate', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true;
-    lit.box(0, y, -DEEP, W, TRENCH, 1, off ? 'steel' : 'light');
+    lit.box(0, look.tooling ? y + 3 : y, -DEEP, W, look.tooling ? 1 : TRENCH, 1, off ? 'steel' : instrument ? 'backlight' : 'light');
     // The knob stands on the floor of the slot, on its own light. Its shoulder is as far above the
     // surface as a key travels, so it clears the bezel, and its top is a keycap's: a step smaller.
     const thumb = m.part('thumb');
     thumb.grounded = false;
-    const mat = off ? 'steel' : 'ivory', h = TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
+    const mat = off ? 'steel' : 'ivory', h = instrument ? TRENCH + 1 : TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
     if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
     capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0); // square-cornered: a fader's cap is a block
     // The line: painted across the middle of its top, as deep as a groove, and not cut: a cut
@@ -50,7 +58,7 @@ const slider = {
     // day). Switched off, the knob is steel and the line is slate.
     const mid = (KEY - 1) / 2, g = look.groove;
     thumb.box(mid, 1, top - g, 1, h - 2, g, off ? 'slate' : 'enamel');
-    thumb.ty = y + 1;
+    thumb.ty = instrument ? y - 1 : y + 1;
     live.state.travel = Math.max(0, W - 2 - KEY);
     live.state.flip = rtl(el);
   },

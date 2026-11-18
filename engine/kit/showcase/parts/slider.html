@@ -11,6 +11,12 @@
   .knob { display: grid; gap: calc(var(--vx) * 1); font-weight: 500; }
   .knob > span:first-child { display: flex; justify-content: space-between; gap: calc(var(--vx) * 4); }
   .knob output { color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+  @media (min-width: 640px) {
+    .sheet .control-strip { grid-template-columns: minmax(0, 1fr) 7rem; align-items: center; }
+    .control-strip h2 { grid-column: 1/-1; }
+  }
+  .rotary-level { justify-items: center; }
+  .rotary-level > span:first-child { gap: .65em; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -24,7 +30,7 @@
     <p class="what">A fader: a knob in a slot, the slot in a steel bezel. A line across the knob's top reads its place; behind the knob the slot is full of the accent's light.</p>
   </header>
   <div class="vx-groove" role="separator"></div>
-  <section>
+  <section class="control-strip">
     <h2>In use: how a deploy scales</h2>
     <div class="knobs">
       <label class="knob"><span>Instances <output id="inst-out">4</output></span>
@@ -34,6 +40,8 @@
       <label class="knob"><span><span lang="uk">Одночасних збірок</span> <output id="par-out">2</output></span>
         <span class="vx-slider"><input type="range" min="1" max="6" value="2" id="par"></span></label>
     </div>
+    <label class="knob rotary-level"><span>Gain <output id="gain-out">6</output></span>
+      <span class="vx-rotary"><input type="range" min="0" max="10" value="6" id="gain"></span></label>
   </section>
   <section>
     <h2>Every state</h2>
@@ -52,6 +60,7 @@
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const say = (id, fn) => { const i = document.getElementById(id), o = document.getElementById(id + '-out'); i.addEventListener('input', () => { o.textContent = fn(i.value); }); };
+  say('gain', v => v);
   say('inst', (v) => v);
   say('mem', (v) => (v >= 1024 ? v / 1024 + ' GB' : v + ' MB'));
   say('par', (v) => v);

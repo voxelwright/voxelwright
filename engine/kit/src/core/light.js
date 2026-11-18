@@ -130,9 +130,28 @@ export function seatedKey(live, m, disabled, material, lamp) {
     m.keyTravel = 1;
   } else {
     ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
-    ring(m.part('light'), 0, 0, 0, W, H, lamp, 1);
+    ring(m.part('light'), 0, 0, 0, W, H, look.tooling && lamp === 'light' ? 'backlight' : lamp, 1);
     key.grounded = false;
-    cap(key, 0, 0, 1, W, H, depth - 1, material);
+    if (look.tooling && material === 'key' && W >= 10 && H >= 10 && depth >= 3) {
+      // Stepped skirt, shoulders and a shallow cylindrical dish. The art is
+      // sampled in the bank's coordinates so its horizon crosses the gaps.
+      const sculpt = depth >= 5;
+      const lip = sculpt ? 2 : 1;
+      const shoulder = depth - 2;
+      key.slab(0, 0, 1, W, H, Math.max(1, shoulder - 1), material, 2);
+      key.slab(1, 1, shoulder, W - 2, H - 2, 1, material, 2);
+      const origin = live.el.offsetLeft / live.vx;
+      for (let x = lip; x < W - lip; x++) {
+        const rim = sculpt && (x < lip + 2 || x >= W - lip - 2);
+        const u = (origin + x) * live.vx;
+        const horizon = H * (.74 + .072 * Math.sin(u * .025) + .038 * Math.sin(u * .066));
+        for (let y = 2; y < H - 2; y++) {
+          const art = look.artwork && y >= horizon;
+          key.plot(x, y, depth - 1, art ? (y > horizon + 2 ? 'cap-ridge' : 'cap-inlay') : material);
+          if (rim) key.plot(x, y, depth, art ? 'cap-ridge' : material);
+        }
+      }
+    } else cap(key, 0, 0, 1, W, H, depth - 1, material);
   }
   live.state.top = live.faceZ = depth;
   return key;

@@ -212,7 +212,8 @@ export class Part {
       col[i * 4] = clamp01(base[0] + j);
       col[i * 4 + 1] = clamp01(base[1] + j);
       col[i * 4 + 2] = clamp01(base[2] + j);
-      col[i * 4 + 3] = m.seamless || still ? -1 : m.glow; // the fourth value is glow; -1 means no seams
+      // Values below -1 carry thin-sheet transmission through both block passes.
+      col[i * 4 + 3] = m.transmission ? -1 - m.transmission : m.seamless || still ? -1 : m.glow; // the fourth value is glow; -1 means no seams
     }
   }
 }

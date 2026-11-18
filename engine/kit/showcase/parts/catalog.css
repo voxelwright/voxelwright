@@ -40,3 +40,9 @@ h1 { margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .
   #count { margin-inline-start: auto; }
 }
 .sheet-note { font-size: .875rem; color: var(--vx-ink-quiet); }
+[data-shell] body { color: #263028; }
+[data-shell] .specimens { color: var(--vx-ink); }
+[data-shell] .search input { color: #263028; }
+[data-shell] :is(.toolbar, #count) { color: #454e46; }
+[data-shell] .group { border-color: #b9c3b7; }
+[data-shell] .group h2 { letter-spacing: -.03em; }

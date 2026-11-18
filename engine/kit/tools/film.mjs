@@ -71,7 +71,7 @@ for (const name of names) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  const path = sc.path ? `showcase/parts/${sc.path}.html?theme=${has('dark') ? 'dark' : 'light'}` : flag('page', 'showcase/');
+  const path = sc.path ? `showcase/parts/${sc.path}.html?theme=${has('dark') ? 'dark' : 'light'}` : flag('page', 'showcase/principles.html');
   await page.goto(`http://127.0.0.1:${port}/kit/${path}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await page.evaluate(() => document.fonts.ready);

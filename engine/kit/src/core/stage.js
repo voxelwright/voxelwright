@@ -73,7 +73,12 @@ export class Live {
     if (lookOf(cs) !== this.look) return this.rebuild(); // another look is another shape
     if (theme === this.theme) return;
     this.theme = theme;
-    this.model.tint(theme, this.look);
+    this.recolor();
+  }
+
+  recolor() {
+    this.model.tint(this.theme, this.look);
+    this.glows = this.model.parts.some(p => p.col.some((channel, i) => i % 4 === 3 && channel > 0));
     this.invalidate();
   }
 
@@ -238,6 +243,22 @@ export class Live {
 
   writeRest(p, o) {
     const pos = this.pos, rest = p.rest, sc = p.scales;
+    // The encoder turns as one solid. Rotate cube centres and their normals about the same axle.
+    if (p.axle) {
+      const { x, y, angle } = p.axle;
+      const c = Math.cos(angle), s = Math.sin(angle);
+      const qz = Math.sin(angle / 2), qw = Math.cos(angle / 2);
+      for (let i = 0; i < p.count; i++, o += 8) {
+        const dx = rest[i * 3] - x, dy = rest[i * 3 + 1] - y;
+        pos[o] = x + c * dx - s * dy + p.tx;
+        pos[o + 1] = y + s * dx + c * dy + p.ty;
+        pos[o + 2] = rest[i * 3 + 2] + p.tz;
+        pos[o + 3] = 1;
+        pos[o + 4] = pos[o + 5] = 0;
+        pos[o + 6] = qz; pos[o + 7] = qw;
+      }
+      return;
+    }
     for (let i = 0; i < p.count; i++, o += 8) {
       pos[o] = rest[i * 3] + p.tx; pos[o + 1] = rest[i * 3 + 1] + p.ty; pos[o + 2] = rest[i * 3 + 2] + p.tz;
       pos[o + 3] = sc ? sc[i] : 1; pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;

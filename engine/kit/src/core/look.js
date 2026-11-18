@@ -55,7 +55,7 @@ export function tableOf(look) {
   const table = [];
   for (const name of names) {
     const m = MATERIALS[name], o = look.materials[name];
-    table[m.id] = o ? { ...m, day: o.day ? hex(o.day) : m.day, night: o.night ? hex(o.night) : m.night, jitter: o.jitter ?? m.jitter, glow: o.glow ?? m.glow } : m;
+    table[m.id] = o ? { ...m, day: o.day ? hex(o.day) : m.day, night: o.night ? hex(o.night) : m.night, jitter: o.jitter ?? m.jitter, glow: o.glow ?? m.glow, grain: o.grain ?? m.grain, transmission: o.transmission ?? 0 } : m;
   }
   look._table = table; look._rev = revision.n;
   return table;

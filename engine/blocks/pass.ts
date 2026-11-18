@@ -221,7 +221,11 @@ ${world ? `    // The world's picture has one sample a pixel and cubes of any si
   let g = max(i.color.a, 0.0) * part.gleam.a;
   c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * seamLight, g * 0.36);
   ${world ? `// The world's last pass makes whatever is over ${GLOWS_OVER} of full glow (glow.ts): the kit's white is kept under it.
-  return vec4f(c * ${GLOWS_OVER}, 1.0);` : 'return vec4f(c, 1.0);'}
+  return vec4f(c * ${GLOWS_OVER}, 1.0);` : `let through = clamp(-1.0 - i.color.a, 0.0, 1.0);
+  let facing = abs(dot(n, normalize(part.eye.xyz)));
+  let grazing = pow(1.0 - min(facing, 1.0), 3.0) * through;
+  let opacity = 1.0 - through + grazing * 0.65;
+  return vec4f(mix(c, part.gleam.rgb, grazing * 0.45) * opacity, opacity);`}
 }
 
 // Depth as the light sees it.
