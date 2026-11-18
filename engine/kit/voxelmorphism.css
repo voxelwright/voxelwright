@@ -470,3 +470,154 @@ dialog.vx-dialog:focus-visible { outline: none; }
 @media (prefers-reduced-motion: reduce) {
   .vx-switch:not([data-vx-live])::after { transition: none; }
 }
+
+/* ============================================================================================
+   The lit look: one system of depth and light. Put data-vx-look="lit" on <html> (or on any
+   element, for what is inside it). Its parts are drawn in src/looks/lit.js with the tools in
+   src/core/light.js. A theme (theme('rose') from the script) sets the --lit-*-day and
+   --lit-*-night tokens read here; without one the theme is Bay.
+   ============================================================================================ */
+
+[data-vx-look="lit"] {
+  --vx-look: lit;
+  --vx-ground: #e9e7e0;
+  --vx-ink: #1b1d2a;
+  --vx-ink-quiet: #5a5d6e;
+  --vx-enamel: var(--lit-cap-day, #2f5bff);
+  --vx-enamel-top: color-mix(in oklab, var(--vx-enamel), #fff 22%);
+  --vx-enamel-side: color-mix(in oklab, var(--vx-enamel), #000 20%);
+  --vx-on-enamel: #ffffff;
+  --vx-signal: var(--lit-accent-day, #2f5bff);
+  --vx-signal-top: color-mix(in oklab, var(--vx-signal), #fff 22%);
+  --vx-signal-side: color-mix(in oklab, var(--vx-signal), #000 20%);
+  --vx-on-signal: #ffffff;
+  --vx-chalk: #f5f2e9;
+  --vx-chalk-top: #fffdf6;
+  --vx-chalk-side: #d5d1c2;
+  --vx-slate: #dcd8cb;
+  --vx-slate-side: #bdb9ab;
+  --vx-steel: #cfcbbd;
+  --vx-key: #fffefa;
+  --vx-floor: #fbf9f2;
+  --vx-knob: #fffefa;
+  --vx-shadow: rgb(41 33 26 / 0.24);
+  --vx-focus: var(--lit-cap-day, #2f5bff);
+  --vx-link: var(--lit-link-day, #2449d8);
+  --vx-danger-text: #b3261a;
+  --lit-accent: var(--lit-accent-day, #2f5bff);
+  --lit-legend: var(--vx-ink);
+  --lit-warm: #b97a00;
+  --lit-go: #0d7a3a;
+  --lit-stop: #c5301c;
+  --lit-night: 0; /* 1 at night: what shines only then is multiplied by it */
+}
+:root[data-theme="dark"][data-vx-look="lit"], :root[data-theme="dark"] [data-vx-look="lit"] {
+  --vx-ground: #08090f;
+  --vx-ink: #e8eaf4;
+  --vx-ink-quiet: #a3a8be;
+  --vx-enamel: var(--lit-cap-night, #3560f2);
+  --vx-signal: var(--lit-accent-night, #4d7dff);
+  --vx-chalk: #1b1e2d;
+  --vx-chalk-top: #252938;
+  --vx-chalk-side: #10121c;
+  --vx-slate: #11131f;
+  --vx-slate-side: #090a12;
+  --vx-steel: #262938;
+  --vx-key: #2b3046;
+  --vx-floor: #0c0e18;
+  --vx-knob: #d7dbf0;
+  --vx-shadow: rgb(0 0 5 / 0.6);
+  --vx-focus: var(--lit-link-night, #9db8ff);
+  --vx-link: var(--lit-link-night, #9db8ff);
+  --vx-danger-text: #ffb3a8;
+  --lit-accent: var(--lit-accent-night, #4d7dff);
+  --lit-legend: var(--lit-legend-night, #dfe8ff);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-vx-look="lit"], :root:not([data-theme="light"]) [data-vx-look="lit"] {
+    --vx-ground: #08090f;
+    --vx-ink: #e8eaf4;
+    --vx-ink-quiet: #a3a8be;
+    --vx-enamel: var(--lit-cap-night, #3560f2);
+    --vx-signal: var(--lit-accent-night, #4d7dff);
+    --vx-chalk: #1b1e2d;
+    --vx-chalk-top: #252938;
+    --vx-chalk-side: #10121c;
+    --vx-slate: #11131f;
+    --vx-slate-side: #090a12;
+    --vx-steel: #262938;
+    --vx-key: #2b3046;
+    --vx-floor: #0c0e18;
+    --vx-knob: #d7dbf0;
+    --vx-shadow: rgb(0 0 5 / 0.6);
+    --vx-focus: var(--lit-link-night, #9db8ff);
+    --vx-link: var(--lit-link-night, #9db8ff);
+    --vx-danger-text: #ffb3a8;
+    --lit-accent: var(--lit-accent-night, #4d7dff);
+    --lit-legend: var(--lit-legend-night, #dfe8ff);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+/* ---------- lit: keys ---------- */
+
+/* An ordinary key is the colour of the surface's own material; data-vx-kind="main" is the one
+   main action of a group (the accent cap); data-vx-kind="danger" destroys something (a red light). */
+[data-vx-look="lit"] .vx-button { --_face: var(--vx-key); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--lit-legend); font-weight: 400; }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="main"], [data-vx-material="enamel"]) { --_face: var(--vx-enamel); --_top: var(--vx-enamel-top); --_side: var(--vx-enamel-side); --_on: var(--vx-on-enamel); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--lit-legend); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); }
+[data-vx-look="lit"] .vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
+/* at night the legend shines through, and flares with the light as the key goes down (--lit is
+   set by the part, 0 to 1) */
+[data-vx-look="lit"] .vx-button[data-vx-live]:not(:disabled) .vx-label {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+[data-vx-look="lit"] .vx-button[data-vx-live]:is([data-vx-kind="main"], [data-vx-material="enamel"]):not(:disabled) .vx-label {
+  text-shadow: 0 0 calc((4px + var(--lit, 0) * 10px) * var(--lit-night)) rgb(255 255 255 / calc(var(--lit-night) * (0.35 + var(--lit, 0) * 0.5)));
+}
+[data-vx-look="lit"] .vx-tabs > [role="tab"] { color: var(--vx-ink-quiet); font-weight: 400; }
+[data-vx-look="lit"] .vx-tabs > [role="tab"][aria-selected="true"] { color: var(--lit-legend); }
+[data-vx-look="lit"] .vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-key); color: var(--vx-ink); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent); }
+
+/* ---------- lit: groove, lamp, recess, pointer ---------- */
+
+/* Groove: a thin lit channel that parts what is on one surface. data-vx-way="down" stands it up. */
+.vx-groove { position: relative; isolation: isolate; display: block; flex: none; block-size: var(--vx); border: 0; margin: 0; }
+.vx-groove[data-vx-way="down"] { block-size: auto; inline-size: var(--vx); align-self: stretch; }
+.vx-groove:not([data-vx-live]) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-groove[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* Lamp: a small light that says a state. data-vx-light: go (the default), stop, warm, accent. */
+.vx-lamp { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }
+.vx-lamp:not([data-vx-live]) { background: var(--lit-go, var(--vx-leaf)); }
+.vx-lamp[data-vx-light="stop"]:not([data-vx-live]) { background: var(--lit-stop, var(--vx-brick)); }
+.vx-lamp[data-vx-light="warm"]:not([data-vx-live]) { background: var(--lit-warm, var(--vx-steel)); }
+.vx-lamp[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* Recess: a level below the surface for what is read as set apart (a log, code). */
+.vx-recess { position: relative; isolation: isolate; display: block; }
+.vx-recess:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+
+/* Pointer: an arrow of the same voxels. Move it with CSS translate; data-on shows it. */
+.vx-cursor { position: absolute; z-index: 40; inset-block-start: 0; inset-inline-start: 0; inline-size: calc(var(--vx) * 8); block-size: calc(var(--vx) * 13); pointer-events: none; isolation: isolate; opacity: 0; transition: opacity 240ms var(--vx-ease-out); }
+.vx-cursor[data-on] { opacity: 1; }
+.vx-cursor:not([data-vx-live]) { display: none; }
+
+/* ---------- lit: wells ---------- */
+
+[data-vx-look="lit"] .vx-well[data-vx-live]:has(:focus-visible) { outline: 0; } /* the rim's own light is the focus */
+[data-vx-look="lit"] .vx-well :is(input, textarea) { caret-color: var(--lit-accent); }
+[data-vx-look="lit"] .vx-well:not([data-vx-live]) { background: var(--vx-floor); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-cursor { transition: none; }
+}

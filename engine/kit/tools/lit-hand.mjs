@@ -30,7 +30,7 @@ await p.screenshot({ path: 'shots/lit/hand-night-bay.png' });
 for (const name of ['rose', 'dusk']) {
   await press(`#accent [data-value="${name}"]`);
   await p.waitForTimeout(700);
-  say(await p.evaluate(() => document.documentElement.dataset.accent) === name, `pressing ${name} sets the theme`);
+  say(await p.evaluate(() => document.documentElement.dataset.vxTheme) === name, `pressing ${name} sets the theme`);
   await p.screenshot({ path: `shots/lit/hand-night-${name}.png` });
 }
 await press('#time [data-value="light"]');
@@ -39,9 +39,9 @@ await p.screenshot({ path: 'shots/lit/hand-day-dusk.png' });
 await press('#accent [data-value="rose"]');
 await p.waitForTimeout(600);
 await p.screenshot({ path: 'shots/lit/hand-day-rose.png' });
-await press('#accent [data-value=""]');
+await press('#accent [data-value="bay"]');
 await p.waitForTimeout(600);
-say(!(await p.evaluate(() => document.documentElement.dataset.accent)), 'pressing Bay goes back');
+say(await p.evaluate(() => document.documentElement.dataset.vxTheme) === 'bay', 'pressing Bay goes back');
 
 // a real pointer comes into the deploy panel
 const [ax, ay] = await mid('#deploy .actions', 0.5, 0.5);

@@ -17,11 +17,15 @@ import { dialog } from './components/dialog.js';
 import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
+import { groove, recess, lamp, pointer, applyTheme } from './looks/lit.js';
 import { behave, unbehave } from './plain.js';
 
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { LOOKS, defineLook } from './core/look.js';
+export { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole } from './core/light.js';
+export { THEMES } from './looks/lit.js';
+export { listeners, clamp } from './components/util.js';
 export { wrapLabel } from './components/util.js';
 export { Spring, assemble, crumble, PRESS, RELEASE, SLIDE, CALM } from './core/motion.js';
 export { FONTS, registerFont, makeFont, layout as layoutText, measure as measureText } from './core/fonts/index.js';
@@ -29,7 +33,7 @@ export { FONTS, registerFont, makeFont, layout as layoutText, measure as measure
 export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
-export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block];
+export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer];
 let stage = null;
 
 // The renderer. By default it is the Village engine's (WebGPU, src/engine.js). use() hands the
@@ -165,6 +169,16 @@ export function refresh(el) {
 /** The live model behind an element, for code that wants to play an effect on it. */
 export function live(el) {
   return stage?.lives.get(el) ?? null;
+}
+
+/**
+ * Set the lit look's theme: 'bay', 'rose', 'dusk', or an object shaped like one of THEMES. Every
+ * part that is drawn is recoloured, and the stylesheet's tokens follow.
+ */
+export function theme(t) {
+  const th = applyTheme(t);
+  if (stage) for (const l of stage.lives.values()) { l.model.tint(l.theme, l.look); l.invalidate(); }
+  return th;
 }
 
 /** Register a component of your own: { name, selector, build(live, model), pose?, bind?, step? }. */
