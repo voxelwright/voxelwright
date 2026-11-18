@@ -2,7 +2,8 @@
 // day and at night, on a laptop and on a phone. Shoots each, lays them on one sheet, and says
 // what can be measured.
 //   PORT=5989 node tools/part.mjs <name>        the page is showcase/parts/<name>.html
-// Writes shots/parts/<name>/{live,plain}-{day,night}-{1280,390}.png and sheet.png. Exit 1 if
+// Writes shots/parts/<name>/{live,plain}-{day,night}-{1280,390}.png, sheet.png, and thumb.jpg (the
+// laptop's voxels by day and at night, small, for showcase/parts/index.html). Exit 1 if
 // anything fails:
 //   error      a script error, or a file that did not load
 //   not ready  the page never set data-ready="1" on <html>
@@ -68,6 +69,11 @@ a, b = row(1280, 0.5), row(390, 0.5)
 s = Image.new("RGB", (max(a.width, b.width), a.height + b.height + 12), "#777")
 s.paste(a, (0, 0)); s.paste(b, (0, a.height + 12))
 s.save(f"{d}/sheet.png")
+# a small preview for the page of every part: the laptop's voxels by day and at night, side by side
+day, night = (Image.open(f"{d}/live-{t}-1280.png").convert("RGB") for t in ("day", "night"))
+h = min(day.height, night.height, 1100)
+t = Image.new("RGB", (2560, h)); t.paste(day.crop((0, 0, 1280, h)), (0, 0)); t.paste(night.crop((0, 0, 1280, h)), (1280, 0))
+t.resize((960, h * 960 // 2560), Image.LANCZOS).save(f"{d}/thumb.jpg", quality=82)
 `, dir]);
 console.log(bad ? `${bad} to fix. Pictures in ${dir}/` : `ok: ${dir}/sheet.png (voxels day, voxels night, plain day, plain night; laptop above, phone below)`);
 process.exit(bad ? 1 : 0);
