@@ -87,7 +87,8 @@ export async function stand(on: Stage, kit: string, where: Standing): Promise<HT
       const { ox, oy, s } = frame, area = [-ox / s, -oy / s, (frame.wpx - ox) / s, (frame.hpx - oy) / s] as const
       // All of a panel is drawn in one lot: what is laid is written to the device at once, and the world's commands
       // are sent once a frame.
-      if (!pass.lay({ ...frame, light }, { clip, area })) { if (!warned) console.warn('blocks: the panel is more than one lot holds (64 parts, one map of depths); the rest of it is not drawn'); warned = true; break }
+      const eye: V3 = [-dot(o, where.right) / where.cube, -dot(o, where.down) / where.cube, -dot(o, where.out) / where.cube]
+      if (!pass.lay({ ...frame, light }, { clip, area, eye })) { if (!warned) console.warn('blocks: the panel is more than one lot holds (64 parts, one map of depths); the rest of it is not drawn'); warned = true; break }
     }
     pass.draw(encoder, to.color, to.size, { depth: to.depth })
   })

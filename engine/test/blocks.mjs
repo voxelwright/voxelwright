@@ -32,6 +32,12 @@ try {
     check(said.flatFace.every(delta => delta <= 1), `a no-seam cube or a zero-seam light leaves the whole face flat (differences ${said.flatFace})`)
     const [left, middle, right] = said.worldEdges
     check(said.worldSmall === 0 && Math.abs(said.worldMiddle - 160) <= 2 && left > middle + 5 && right < middle - 5, `world edges disappear at 3 px (middle ${said.worldMiddle}, difference ${said.worldSmall}) and face the light at 8 px (${said.worldEdges})`)
+    const [legacy, matte, muted, shiny] = said.finishes, spread = values => Math.max(...values) - Math.min(...values)
+    check(said.spareIgnored === 0 && said.occludedApart[0] > 5 && said.occludedApart[1] === 0 && legacy.every((value, index) => value === said.oldEdge[index]), 'old frames ignore the finish bytes; 255/0 retains the old edge and corner occlusion')
+    check(spread(matte) <= 1 && spread(muted) > spread(matte) && spread(muted) < spread(legacy), `at 4 px the green-channel range responds to the chamfer byte: ${[matte, muted, legacy].map(spread)}`)
+    check(Math.min(...shiny) > Math.max(...matte) + 5 && said.unlitApart === 0 && said.worldSpec[0] > said.worldSpec[1] + 12, `specular needs direct light and follows the world camera: page matte/gloss ${matte[1]}/${shiny[1]}, world ${said.worldSpec}`)
+    const [hard, soft] = said.shadows
+    check(soft.fringe > hard.fringe && soft.core > 0 && hard.faceDiff === 0 && soft.faceDiff === 0 && said.shadowOmitted === 0 && said.shadowOff === 0, `ground softness widens the fringe, keeps a contact shadow and leaves faces, legacy radius and shadow-off intact: ${JSON.stringify(said.shadows)}`)
     check(said.filled && said.aloneApart <= 2, `40 parts drawn in one turn, on ${said.sheets} sheet${said.sheets === 1 ? '' : 's'}, are the same drawn each alone (apart by ${said.aloneApart} of 255 at most)`)
     check(said.underPage === 0 && said.throughWell === 255, `a slab under the page is not seen (${said.underPage}), and is seen through a well (${said.throughWell})`)
     check(said.drawnAtRest.every((n) => n === 0) && said.heldAtRest < said.heldDrawing / 4, `at rest nothing is drawn (${said.drawnAtRest}), and ${(said.heldDrawing / 2 ** 20).toFixed(1)} MB held while drawing is ${(said.heldAtRest / 2 ** 20).toFixed(1)} MB`)

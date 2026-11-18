@@ -16,7 +16,7 @@ import { DEPTH, GLOWS_OVER, shader } from '../probe/gpu.ts'
 
 /** How far towards and away from the viewer a cube may be, in cubes. */
 const Z_RANGE = 512
-/** How far apart two parts' values are kept, bytes. A dynamic offset into a uniform buffer must be a multiple of the device's `minUniformBufferOffsetAlignment`, which is 256 unless a smaller one is asked for. The shader reads the first 240 (`VALUES`). */
+/** Size of a part's uniform block and its aligned dynamic offset, in bytes. */
 const SLOT = 256
 
 export interface Light {
@@ -42,6 +42,8 @@ export interface Frame {
   col: Float32Array<ArrayBuffer>
   /** Two a cube: how shut in each corner of each face is, two bits a corner. */
   ao: Uint32Array<ArrayBuffer>
+  /** Opt into two unsigned strengths in the second AO word per cube: bits 16–23 chamfer and seam, 24–31 specular. */
+  surfaceBytes?: boolean
   count: number
   /** The part's picture, device pixels. */
   wpx: number
@@ -59,12 +61,14 @@ export interface Frame {
   well?: readonly number[] | null
   groundShadow?: number
   soft?: number
+  /** Filter radius on the ground only, in voxels (0–2). Omitted: 1.25 times the face shadow radius. */
+  groundSoft?: number
   glowRadius?: number
   glowStrength?: number
 }
 
 /** Where a part goes: its picture's corner on what is drawn into (px), or how its cubes come to be seen in the world. */
-export type Place = { x: number; y: number } | { clip: Float32Array; area: readonly [number, number, number, number] }
+export type Place = { x: number; y: number } | { clip: Float32Array; area: readonly [number, number, number, number]; eye?: readonly [number, number, number] }
 
 export interface Blocks {
   /**
@@ -100,7 +104,7 @@ const FACES = [
 const wgsl = (world: boolean) => /* wgsl */ `
 struct Part {
   clip: mat4x4f,    // from a place among the part's cubes to where it is seen
-  view: vec4f,      // px a cube (z), how strong a glow's halo is (w)
+  view: vec4f,      // ground filter radius (-1: inherited), surface bytes enabled, px a cube, halo strength
   area: vec4f,      // the part of the page that is this part's picture, in cubes: x0, y0, x1, y1
   sun: vec4f,       // towards the light, its strength
   ambient: vec4f,   // top, front, side, under
@@ -111,6 +115,7 @@ struct Part {
   fall: vec4f,      // how far a shadow travels a cube of height (x, y), the penumbra, a halo's reach
   lrect: vec4f,     // the light's view of this part: corner, 1 / size, in cubes
   region: vec4f,    // where that view is kept in the map of depths: corner and size, 0 to 1
+  eye: vec4f,       // towards the viewer (w = 0) or position of the viewer in the part's coordinates (w = 1)
 }
 @group(0) @binding(0) var<uniform> part: Part;
 @group(0) @binding(1) var depths: texture_depth_2d;
@@ -143,6 +148,7 @@ struct Face {
   @location(0) n: vec3f, @location(1) p: vec3f, @location(2) uv: vec2f, @location(3) ao: f32, @location(4) color: vec4f,
   // How far the face's two axes lean to the light: the one \`uv.x\` runs along, and the one \`uv.y\` does.
   @location(5) lean: vec2f,
+  @location(6) @interpolate(flat) finish: vec2f,
 }
 @vertex fn cube(i: Cube) -> Face {
   const ALONG = array(${FACES.map(face => `vec3f(${face.a})`).join(', ')});
@@ -158,6 +164,7 @@ struct Face {
   o.uv = i.uv;
   o.ao = f32(bits & 3u);
   o.color = i.color;
+  o.finish = select(vec2f(1.0, 0.0), vec2f(vec2u(i.ao.y >> 16u, i.ao.y >> 24u) & vec2u(255u)) / 255.0, part.view.y != 0.0);
   o.lean = vec2f(dot(turned(ALONG[f], i.quat), part.sun.xyz), dot(turned(ACROSS[f], i.quat), part.sun.xyz));
   o.at = part.clip * vec4f(p, 1.0);
   return o;
@@ -200,11 +207,19 @@ ${world ? `    // The world's picture has one sample a pixel and cubes of any si
     relief *= visibility;
     seam *= visibility;
 ` : ''}  }
-  c *= 1.0 + relief * part.tint.a * 5.0;
-  c *= 1.0 - seam * part.tint.a * 0.5;
+  let edge = part.tint.a * i.finish.x;
+  let seamLight = 1.0 - seam * edge * 0.5;
+  c *= 1.0 + relief * edge * 5.0;
+  c *= seamLight;
+  if (i.finish.y > 0.0 && direct > 0.0) {
+    let towardEye = part.eye.xyz - i.p * part.eye.w;
+    let halfway = part.sun.xyz + towardEye / max(length(towardEye), 0.0001);
+    let cosine = max(dot(n, halfway) / max(length(halfway), 0.0001), 0.0);
+    c += part.gleam.rgb * (i.finish.y * direct * pow(cosine, 6.0));
+  }
   // Cubes that glow keep their colour whatever the light does.
   let g = max(i.color.a, 0.0) * part.gleam.a;
-  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * part.tint.a * 0.5), g * 0.36);
+  c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * seamLight, g * 0.36);
   ${world ? `// The world's last pass makes whatever is over ${GLOWS_OVER} of full glow (glow.ts): the kit's white is kept under it.
   return vec4f(c * ${GLOWS_OVER}, 1.0);` : 'return vec4f(c, 1.0);'}
 }
@@ -242,7 +257,8 @@ struct Ground { @builtin(position) at: vec4f, @location(0) p: vec3f }
   return o;
 }
 @fragment fn shaded(i: Ground) -> @location(0) vec4f {
-  let a = (1.0 - lit(i.p, vec3f(0.0, 0.0, 1.0), part.fall.z * 1.25)) * part.shade.a;
+  let radius = select(part.view.x, part.fall.z * 1.25, part.view.x < 0.0);
+  let a = (1.0 - lit(i.p, vec3f(0.0, 0.0, 1.0), radius)) * part.shade.a;
   return vec4f(part.shade.rgb * a, a);
 }
 
@@ -289,11 +305,11 @@ export interface Options {
 }
 
 export async function blocks(device: GPUDevice, format: GPUTextureFormat, options: Options = {}): Promise<Blocks> {
-  const world = options.world ?? false, samples = world ? 1 : 4, MAP = 2048, SLOTS = 64, VALUES = 240
+  const world = options.world ?? false, samples = world ? 1 : 4, MAP = 2048, SLOTS = 64
   // At most this many texels a cube in the map of depths: 12 in a page, where a cube is 8 or 12 pixels; 6 in the world, where a whole panel is drawn in one lot and seen from further off.
   const DENSE = world ? 6 : 12
   const module = await shader(device, 'blocks', wgsl(world))
-  const values: GPUBindGroupLayoutEntry = { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: VALUES } }
+  const values: GPUBindGroupLayoutEntry = { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: SLOT } }
   const bare = device.createBindGroupLayout({ entries: [values] })
   const lit = device.createBindGroupLayout({ entries: [values, { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth' } }, { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'comparison' } }] })
   const layoutOf = (l: GPUBindGroupLayout) => device.createPipelineLayout({ bindGroupLayouts: [l] })
@@ -347,14 +363,14 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
   device.queue.writeBuffer(cubeBuffer, 0, cubeCorners())
   const slots = device.createBuffer({ size: SLOT * SLOTS, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const slotValues = new Float32Array(new ArrayBuffer(SLOT * SLOTS))
-  const bareGroup = device.createBindGroup({ layout: bare, entries: [{ binding: 0, resource: { buffer: slots, size: VALUES } }] })
+  const bareGroup = device.createBindGroup({ layout: bare, entries: [{ binding: 0, resource: { buffer: slots, size: SLOT } }] })
   const sampler = device.createSampler({ compare: 'less-equal', magFilter: 'linear', minFilter: 'linear' })
   // The map of depths, and what reads it: made when first needed, and again after a rest.
   let map: { texture: GPUTexture; view: GPUTextureView; group: GPUBindGroup } | null = null
   const mapOf = () => {
     if (map) return map
     const texture = device.createTexture({ size: [MAP, MAP], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING }), view = texture.createView()
-    return (map = { texture, view, group: device.createBindGroup({ layout: lit, entries: [{ binding: 0, resource: { buffer: slots, size: VALUES } }, { binding: 1, resource: view }, { binding: 2, resource: sampler }] }) })
+    return (map = { texture, view, group: device.createBindGroup({ layout: lit, entries: [{ binding: 0, resource: { buffer: slots, size: SLOT } }, { binding: 1, resource: view }, { binding: 2, resource: sampler }] }) })
   }
 
   // Every laid part's cubes, one after another, in three buffers as the kit keeps them.
@@ -424,8 +440,10 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
       // Everything but the matrix, which waits to be told how large what is drawn into is.
       const well = frame.well ?? [0, 0, -1, -1], a = light.ambient, { ox, oy, s } = frame
       const area = 'clip' in at ? at.area : [-ox / s, -oy / s, (frame.wpx - ox) / s, (frame.hpx - oy) / s]
+      const eye = 'clip' in at ? at.eye : undefined, { groundSoft } = frame
       slotValues.set([
-        0, 0, s, light.glow * (frame.glowStrength ?? 0.11),
+        groundSoft !== undefined && Number.isFinite(groundSoft) ? Math.min(2, Math.max(0, groundSoft)) : -1,
+        frame.surfaceBytes === true ? 1 : 0, s, light.glow * (frame.glowStrength ?? 0.11),
         area[0], area[1], area[2], area[3],
         L[0], L[1], L[2], light.sun,
         a.top, a.front, a.side, a.under,
@@ -436,6 +454,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
         lsx, lsy, frame.soft ?? 0.22, frame.glowRadius ?? 2.4,
         u0, v0, 1 / uw, 1 / vh,
         region[0] / MAP, region[1] / MAP, region[2] / MAP, region[3] / MAP,
+        eye?.[0] ?? (world ? 0 : -frame.shear[0]), eye?.[1] ?? (world ? 0 : -frame.shear[1]), eye?.[2] ?? 1, eye ? 1 : 0,
       ], laid.length * PER + 16)
       laid.push({ first: used, count, at, ox, oy, s, shear: frame.shear, w: frame.wpx, h: frame.hpx, region, glows: light.glow > 0 && !!frame.glows })
       used += count

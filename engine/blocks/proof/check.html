@@ -24,7 +24,7 @@ const read = (c) => { const t = Object.assign(document.createElement('canvas'), 
 const apart = (a, b) => { let worst = 0; for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i])); return worst }
 const frame = () => new Promise((r) => requestAnimationFrame(r))
 
-function drawInWorld(pass, device, format, part, scale) {
+function drawInWorld(pass, device, format, part, scale, eye) {
   const size = [10 * scale, 8 * scale], [width, height] = size
   const canvas = Object.assign(document.createElement('canvas'), { width, height }), context = canvas.getContext('webgpu')
   context.configure({ device, format })
@@ -33,7 +33,7 @@ function drawInWorld(pass, device, format, part, scale) {
   encoder.beginRenderPass({ colorAttachments: [{ view: color, loadOp: 'clear', storeOp: 'store' }], depthStencilAttachment: { view, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' } }).end()
   const area = [-2, -2, 8, 6], dx = 2 * scale / width, dy = -2 * scale / height
   const clip = new Float32Array([dx, 0, 0, 0, 0, dy, 0, 0, 0, 0, -0.01, 0, -1 - area[0] * dx, 1 - area[1] * dy, 0.5, 1])
-  pass.lay(part, { clip, area })
+  pass.lay(part, { clip, area, eye })
   pass.draw(encoder, color, size, { depth: view })
   device.queue.submit([encoder.finish()])
   const pixels = read(canvas)
@@ -75,13 +75,53 @@ globalThis.check = async () => {
     return difference
   })
   const format = navigator.gpu.getPreferredCanvasFormat(), world = await blocks(stage.device, format, { world: true })
-  const inWorld = (part, scale) => drawInWorld(world, stage.device, format, part, scale)
+  const inWorld = (part, scale, eye) => drawInWorld(world, stage.device, format, part, scale, eye)
   const small = inWorld(slate, 3), large = inWorld(slate, 8)
   out.worldSmall = apart(small, inWorld(unseamed, 3))
   const acrossCube = (pixels, scale, offset) => green(pixels, 5 * scale + offset, 4 * scale + Math.floor(scale / 2), 10 * scale)
   out.worldMiddle = acrossCube(small, 3, 1)
   out.worldEdges = [0, 4, 7].map(offset => acrossCube(large, 8, offset))
+  const marked = { ...slate, ao: slate.ao.map((bits, index) => index % 2 ? bits | 0xff000000 : bits), surfaceBytes: true }
+  out.worldSpec = [[50, 70, 60], [-50, -70, 60]].map(eye => acrossCube(inWorld(marked, 8, eye), 8, 4))
   world.destroy()
+
+  const swatch = slab(20, 6, 4, [124, 124, 124], 0, { s: 4, ox: 24, oy: 24, wpx: 128, hpx: 72 })
+  const swatchCanvas = canvasFor(swatch), render = part => drawn([[part, swatchCanvas]])[0]
+  const bare = render(swatch), finishes = [[255, 0], [0, 0], [64, 0], [0, 255]]
+  const packed = swatch.ao.map((bits, index) => {
+    if (index % 2 === 0) return bits
+    const [edge, specular] = finishes[Math.floor(swatch.pos[(index >> 1) * 8] / 5)]
+    return bits | (edge << 16) | (specular << 24)
+  })
+  out.spareIgnored = apart(bare, render({ ...swatch, ao: packed }))
+  const occluded = { ...swatch, ao: swatch.ao.map((_, index) => index % 2 ? 0xffff : 0xffffffff) }
+  const occludedPixels = render(occluded)
+  const withFinish = occluded.ao.map((bits, index) => index % 2 ? bits | 0xff0000 : bits)
+  out.occludedApart = [apart(bare, occludedPixels), apart(occludedPixels, render({ ...occluded, surfaceBytes: true, ao: withFinish }))]
+  const sample = { ...swatch, surfaceBytes: true, ao: packed }, finished = render(sample)
+  const faceRow = (pixels, column) => Array.from({ length: 4 }, (_, offset) => green(pixels, swatch.ox + (column + 2) * 4 + offset, swatch.oy + 18, swatch.wpx))
+  out.finishes = [2, 7, 12, 17].map(column => faceRow(finished, column))
+  out.oldEdge = faceRow(bare, 2)
+  const unlit = render({ ...sample, light: { ...light, sun: 0 } })
+  out.unlitApart = apart(faceRow(unlit, 7), faceRow(unlit, 17))
+  const noShadow = render({ ...swatch, groundShadow: 0 })
+  const shadowStats = radius => {
+    const pixels = render({ ...swatch, groundSoft: radius })
+    let fringe = 0, core = 0, faceDiff = 0
+    for (let at = 3; at < pixels.length; at += 4) {
+      if (noShadow[at] === 0) {
+        if (pixels[at] > 3 && pixels[at] < 73) fringe++
+        if (pixels[at] >= 73) core++
+      } else if (noShadow[at] === 255) {
+        faceDiff = Math.max(faceDiff, Math.abs(pixels[at - 2] - bare[at - 2]))
+      }
+    }
+    return { fringe, core, faceDiff }
+  }
+  out.shadows = [0, 1].map(shadowStats)
+  const customSoft = { ...swatch, soft: 0.6 }
+  out.shadowOmitted = apart(render(customSoft), render({ ...customSoft, groundSoft: customSoft.soft * 1.25 }))
+  out.shadowOff = apart(noShadow, render({ ...swatch, groundShadow: 0, groundSoft: 2 }))
 
   // Parts drawn together in one turn are the parts drawn each alone.
   const colours = [[14, 34, 255], [255, 246, 0], [251, 252, 255], [195, 201, 222], [224, 51, 31], [35, 168, 75]]

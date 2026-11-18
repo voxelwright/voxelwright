@@ -1726,6 +1726,31 @@ quarter turn leaves those edges lit from the same direction.
   out as a cube comes down from eight pixels to three. Under a high sun a standing panel's cubes are lit on top
   and shaded below and little at the sides: it reads as courses of tiles.
 
+### Optional finishes and softer ground shadows
+
+The WebGPU renderer accepts two independent options on the frame passed to `draw`. Neither changes the frame's
+array lengths. Omit both for the previous rendering, even if unused bits in the AO array are nonzero.
+
+- `groundSoft`: ground-shadow filter radius, in voxels, clamped to 0–2. Try 1 at four pixels per cube.
+  Omitted or non-finite uses the old radius, `1.25 * (soft ?? 0.22)`. This only widens the shadow's edge:
+  `groundShadow` still controls opacity (0 is off), `soft` still controls self-shadowing, and neither the
+  sun's direction nor the canvas bounds change. Allow enough bleed in the canvas for the wider fringe.
+- `surfaceBytes: true`: opt **the whole frame** into per-cube finishes. In the second AO word of each cube,
+  bits 0–15 keep their occlusion data, bits 16–23 scale both chamfer and seam, and bits 24–31 scale specular
+  strength. Both strengths are unsigned bytes. Set **255 / 0** on every cube that should keep its old finish;
+  **0 / 0** is matte and seamless. A negative glow channel still suppresses edges. Specular is independent of
+  the seam and glow: it reflects direct light in the highlight colour, follows the viewer in the world, and
+  adds nothing in shadow. It is a stylised highlight, not a metalness or roughness model.
+
+For example, with integer `chamfer` and `specular` in 0–255:
+
+```js
+const word = 2 * cubeIndex + 1;
+ao[word] = (ao[word] & 0xffff) | (chamfer << 16) | (specular << 24);
+```
+
+Older renderers, including the WebGL2 fallback, ignore these options and still draw the original colours and AO.
+
 ### In the world
 
 `blocks/world.ts` stands a panel of the kit's parts in a stage's world: `stand(on, kit, where)`. The panel is real
