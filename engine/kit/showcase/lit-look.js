@@ -14,7 +14,7 @@ import { defineLook, defineMaterial, define, CALM } from '/packages/voxelmorphis
 // ---------------------------------------------------------------------------------------------
 // Materials. The lights glow by day too (see `light` in the look).
 defineMaterial('light', { day: '#2f5bff', night: '#4d7dff', glow: 1, jitter: 0 });       // the accent: what acts
-defineMaterial('light-warm', { day: '#f1d9a8', night: '#e0b470', glow: 0.5, jitter: 0 }); // the room's own light, half as strong: grooves, wells
+defineMaterial('light-warm', { day: '#f1d9a8', night: '#c9a264', glow: 0.5, jitter: 0 }); // the room's own light, half as strong: grooves, wells
 defineMaterial('light-go', { day: '#12b556', night: '#35e07a', glow: 1, jitter: 0 });    // done, live
 defineMaterial('light-stop', { day: '#f0442e', night: '#ff5a44', glow: 1, jitter: 0 });  // failed, destructive
 defineMaterial('key', { day: '#fffefa', night: '#2b3046', jitter: 0.004 });              // the cap of an ordinary key
@@ -31,7 +31,7 @@ const UNDER = -0.02;
 // By day a halo has a bright surface to show on, and needs more to be seen at all.
 const byTheme = (live) => (live.theme === 'day' ? 2.6 : 1);
 // The room's own warm light is quieter by day and carries further at night.
-const warmth = (live) => (live.theme === 'day' ? 1.5 : 3.2);
+const warmth = (live) => (live.theme === 'day' ? 1.5 : 2.1);
 
 const lightOf = (el, fallback) => {
   const k = el.dataset.vxLight;
@@ -276,8 +276,8 @@ const NEWS = { done: 'light-go', failed: 'light-stop', note: 'light' };
 
 const notice = {
   pad: 11,
-  glowRadius: 5,
-  glowStrength: halo(0.07),
+  glowRadius: 6,
+  glowStrength: halo(0.15),
 
   build(live, m) {
     const { W, H, el } = live, d = live.look.float;
@@ -288,7 +288,7 @@ const notice = {
     live.faceZ = d;
   },
 
-  pose(live) { live.glowStrength = halo(0.07) * byTheme(live); },
+  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.18 : 0.15); },
 };
 
 // ---------------------------------------------------------------------------------------------

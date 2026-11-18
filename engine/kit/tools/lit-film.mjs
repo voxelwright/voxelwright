@@ -1,6 +1,6 @@
 // Film a story on the lit page, frame by frame, with the page's clock stepped by hand, so the film
 // is the same on any machine and no frame is dropped.
-//   PORT=5989 node tools/lit-film.mjs <deploy|blog> [--dark] [--w 1040] [--h 680] [--secs 13] [--fps 30] [--accent ember]
+//   PORT=5989 node tools/lit-film.mjs <deploy|blog> [--dark] [--w 1040] [--h 680] [--secs 13] [--fps 30] [--accent rose]
 // Writes shots/lit/film/<name>.mp4, <name>-sheet.png (a contact sheet) and a few named stills.
 import { chromium } from 'playwright';
 import { mkdir, rm } from 'node:fs/promises';

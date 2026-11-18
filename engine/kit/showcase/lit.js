@@ -13,11 +13,12 @@ const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 // ---------------------------------------------------------------------------------------------
 // Themes. A theme is the accent: the light under what acts, and the cap of the one main key.
-// The system does not change with it.
+// The system does not change with it. An accent keeps clear of green and red, which mean done
+// and failed whatever the theme.
 const ACCENTS = {
   '': { light: { day: '#2f5bff', night: '#4d7dff' }, cap: { day: '#2f5bff', night: '#3560f2' } },
-  ember: { light: { day: '#ff5a1f', night: '#ff7a3d' }, cap: { day: '#c7400e', night: '#cc4410' } },
-  moss: { light: { day: '#17a35a', night: '#45d184' }, cap: { day: '#1f7a4a', night: '#23874f' } },
+  rose: { light: { day: '#ff3d9a', night: '#ff6fb4' }, cap: { day: '#c2186f', night: '#c9237a' } },
+  dusk: { light: { day: '#6a4dff', night: '#9278ff' }, cap: { day: '#5b3df0', night: '#6548f2' } },
 };
 function setAccent(name) {
   const a = ACCENTS[name] ?? ACCENTS[''];
@@ -114,11 +115,14 @@ function deploy() {
   let n = 0;
   const lines = () => $$('.line', log);
   const write = (b) => lines().forEach((l, i) => { l.innerHTML = `<span class="at">${b[i * 2]}</span>${b[i * 2 + 1]}`; });
-  const state = (text, light) => {
+  let swap = 0;
+  const state = (text, light, now = false) => {
     if (lamp.dataset.vxLight !== light) lamp.dataset.vxLight = light;
+    clearTimeout(swap);
+    if (now) { word.textContent = text; word.style.opacity = ''; return; }
     if (word.textContent === text) return;
     word.style.opacity = 0;
-    setTimeout(() => { word.textContent = text; word.style.opacity = ''; }, 150);
+    swap = setTimeout(() => { word.textContent = text; word.style.opacity = ''; }, 150);
   };
   const bar = (v) => { prog.setAttribute('value', String(v)); prog.textContent = Math.round(v * 100) + '%'; };
   // the number follows the light in the trench, not the other way round
@@ -146,7 +150,7 @@ function deploy() {
     bar(1); num.textContent = '100%';
     write(BUILDS[n % 2]);
     for (const l of lines()) l.removeAttribute('data-out');
-    state('Live', 'go');
+    state('Live', 'go', true);
     note.removeAttribute('data-shown'); note.removeAttribute('data-vx-leaving');
     for (const p of live(note)?.model.parts ?? []) { p.fx = null; p.hidden = false; }
   };
@@ -157,30 +161,38 @@ function deploy() {
       await h.wait(1500);
       await h.move(go);
       await h.press(go);
-      // the press is the cause: the last build's light drains and its log leaves, last line first
-      follow();
-      state('Building', 'accent');
-      bar(0);
-      for (const l of lines().reverse()) { l.setAttribute('data-out', ''); await h.wait(70); }
-      await h.wait(260);
-      h.move($('.actions', stage), 0.5, 0.66, 1.25).catch(() => {}); // it rests on empty surface, near its next move
-      n++;
-      write(BUILDS[n % 2]);
-      const ls = lines();
-      for (const [i, v] of [0.34, 0.71, 1].entries()) {
-        bar(v);
-        await h.wait(520);
-        ls[i].removeAttribute('data-out');
-        await h.wait(i === 2 ? 620 : 430);
-      }
-      state('Live', 'go');
-      await h.wait(180);
-      notice(true);
-      await h.wait(2700);
-      cancelAnimationFrame(following);
-      await notice(false);
+      await build(true);
     }
   }
+  // The press is the cause: the last build's light drains and its log leaves, last line first;
+  // then the new one fills, its lines arrive, and a notice says it is done.
+  async function build(shown) {
+    cancelAnimationFrame(following);
+    follow();
+    notice(false);
+    state('Building', 'accent');
+    bar(0);
+    for (const l of lines().reverse()) { l.setAttribute('data-out', ''); await h.wait(70); }
+    await h.wait(260);
+    if (shown) h.move($('.actions', stage), 0.5, 0.66, 1.25).catch(() => {}); // it rests on empty surface, near its next move
+    n++;
+    write(BUILDS[n % 2]);
+    const ls = lines();
+    for (const [i, v] of [0.34, 0.71, 1].entries()) {
+      bar(v);
+      await h.wait(520);
+      ls[i].removeAttribute('data-out');
+      await h.wait(i === 2 ? 620 : 430);
+    }
+    state('Live', 'go');
+    await h.wait(180);
+    notice(true);
+    await h.wait(2700);
+    cancelAnimationFrame(following);
+    await notice(false);
+  }
+  // a person's own press does the same
+  go.addEventListener('click', (e) => { if (!e.isTrusted) return; h.stop(); build(false).catch((err) => { if (!(err instanceof Stop)) throw err; }); });
   return { stage, h, play, rest };
 }
 
@@ -190,18 +202,34 @@ function deploy() {
 function blog() {
   const stage = $('#blog'), h = hand(stage);
   const well = $('.vx-well', stage), mail = $('#mail'), sub = $('#sub'), word = $('.sub-word', stage);
-  const say = (text, light) => {
+  let swap = 0;
+  const say = (text, light, now = false) => {
     if (light) sub.dataset.vxLight = light; else delete sub.dataset.vxLight;
     refresh(sub);
+    clearTimeout(swap);
+    if (now) { word.textContent = text; word.style.opacity = ''; return; }
     if (word.textContent === text) return;
     word.style.opacity = 0;
-    setTimeout(() => { word.textContent = text; word.style.opacity = ''; }, 130);
+    swap = setTimeout(() => { word.textContent = text; word.style.opacity = ''; }, 130);
   };
   const rest = () => {
     mail.value = '';
+    mail.removeAttribute('aria-invalid');
     if (document.activeElement === mail) mail.blur();
-    say('Subscribe', '');
+    say('Subscribe', '', true);
   };
+  // a person's own press: an address that will not do lights the well red until it is mended;
+  // one that will, and the key confirms on itself
+  sub.addEventListener('click', async (e) => {
+    if (!e.isTrusted) return;
+    h.stop();
+    if (!/^\S+@\S+\.\S+$/.test(mail.value.trim())) { mail.setAttribute('aria-invalid', 'true'); mail.focus(); return; }
+    say('Subscribed', 'go');
+    try { await h.wait(2600); } catch (err) { if (err instanceof Stop) return; throw err; }
+    say('Subscribe', '');
+    mail.value = '';
+  });
+  mail.addEventListener('input', () => mail.removeAttribute('aria-invalid'));
   // the key is as wide as its longer word from the start, so it never changes size under the pointer
   word.textContent = 'Subscribed';
   sub.style.minInlineSize = Math.ceil(sub.getBoundingClientRect().width / 4) * 4 + 'px';
@@ -259,7 +287,10 @@ function direct(story) {
   stage.addEventListener('pointerleave', (e) => {
     if (!e.isTrusted || !own) return;
     h.show(false);
-    back = setTimeout(() => { if (stage.contains(document.activeElement)) return; own = false; stage.removeAttribute('data-own'); start(); }, 2600);
+    back = setTimeout(() => {
+      if (stage.contains(document.activeElement) && document.activeElement.matches('input')) return; // someone is typing
+      own = false; stage.removeAttribute('data-own'); start();
+    }, 2600);
   });
   return { start, halt };
 }
