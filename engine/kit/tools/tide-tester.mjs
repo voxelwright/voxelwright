@@ -35,11 +35,24 @@ try {
         el.querySelector('canvas') === instance.canvas;
     });
     assert.equal(usesVoxels, !plain, 'the enhanced key must be drawn by the shared voxel stage');
+    const depths = () => key.evaluate(async el => {
+      const { live } = await import('../src/index.js');
+      await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+      return Object.fromEntries(live(el).model.parts.map(part => [part.name, part.tz]));
+    });
     await key.focus();
+    const rest = plain ? null : await depths();
     await page.keyboard.down('Space');
     assert.equal(await key.getAttribute('aria-pressed'), 'false');
+    const pressed = plain ? null : await depths();
     await page.keyboard.up('Space');
     assert.equal(await key.getAttribute('aria-pressed'), 'true');
+    if (rest) {
+      const moving = Object.keys(rest).filter(name => pressed[name] < rest[name] - .5);
+      assert(moving.length > 0, 'holding the switch must lower actual model parts');
+      const released = await depths();
+      for (const name of moving) assert(Math.abs(released[name] - rest[name]) < .1, name + ' must return with the lamp still lit');
+    }
     await key.evaluate(el => el.setAttribute('aria-disabled', 'true'));
     await page.keyboard.press('Enter');
     assert.equal(await key.getAttribute('aria-pressed'), 'true');

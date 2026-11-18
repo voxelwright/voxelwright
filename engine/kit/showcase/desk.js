@@ -83,7 +83,9 @@ for (const input of document.querySelectorAll('[name="shell"],[name="profile"],[
   input.addEventListener('change', () => apply({ [input.name]: input.value }));
 }
 $('#caps').addEventListener('change', e => apply({ caps: e.target.value }));
-for (const key of keys) key.addEventListener('click', () => apply({ lamp: key.dataset.lamp }));
+for (const key of keys) key.addEventListener('click', () => {
+  if (!key.matches(':disabled, [aria-disabled="true"]')) apply({ lamp: key.dataset.lamp });
+});
 gain.addEventListener('input', () => apply({ level: gain.valueAsNumber }));
 contour.addEventListener('input', () => drawScope());
 reduceMotion.addEventListener('change', () => drawScope());
