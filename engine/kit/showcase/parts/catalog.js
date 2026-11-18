@@ -1,5 +1,8 @@
+import { connectSound } from '../switch-sound.js';
 import { restore } from '../../src/index.js';
 import { show } from './parts.js';
+
+connectSound(document.querySelector('#catalog-sound'));
 
 const groups = [...document.querySelectorAll('.group')];
 const search = document.querySelector('#query');

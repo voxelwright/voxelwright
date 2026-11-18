@@ -197,8 +197,8 @@ Decide by how often it happens (from the site-craft rules):
 
 - Off by default. Nothing sounds, and no audio context exists, until the page calls `sound(true)`
   from a click or a key press.
-- Every sound is synthesised: wooden tocks, because voxels are blocks. Each has a small random
-  pitch (plus or minus 6%), is shorter than 250 ms, and is quieter than speech.
+- A key plays two short local recordings of a Cherry MX Brown switch under a PBT cap. The downstroke
+  lands on press and the lighter return lands on release. Other cues use Web Audio synthesis.
 - Cues: `press`, `release`, `slide`, `tick` (a slider step), `build`, `break`, `poke`, `done`,
   `failed`. The picture changes first; the sound follows in the same frame.
 - A hidden tab is silent.

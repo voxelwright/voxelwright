@@ -21,3 +21,5 @@ p { text-wrap: pretty; }
   body { padding-inline: calc(var(--vx) * 3); }
   .sheet { padding: calc(var(--vx) * 6) calc(var(--vx) * 5) calc(var(--vx) * 8); }
 }
+.part-footer { display: flex; flex-wrap: wrap; gap: 1.5rem; align-items: center; max-inline-size: calc(var(--vx) * 190); margin: 1.5rem auto 0; font-size: .875rem; color: var(--vx-ink-quiet); }
+.part-footer a { color: inherit; text-underline-offset: .2em; }

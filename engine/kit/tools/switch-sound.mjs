@@ -1,0 +1,52 @@
+// Drive a real key and observe when decoded samples enter the browser's audio graph.
+import assert from 'node:assert/strict';
+import { chromium } from 'playwright';
+
+const port = process.env.PORT || 5989;
+const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+try {
+  const page = await browser.newPage();
+  const requests = [];
+  page.on('request', request => {
+    if (request.url().endsWith('.wav')) requests.push(request.url());
+  });
+  await page.addInitScript(() => {
+    window.strokes = [];
+    window.decoded = 0;
+    const decode = BaseAudioContext.prototype.decodeAudioData;
+    BaseAudioContext.prototype.decodeAudioData = async function (...args) {
+      const buffer = await decode.apply(this, args);
+      window.decoded++;
+      return buffer;
+    };
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function (...args) {
+      window.strokes.push(this.buffer.duration);
+      return start.apply(this, args);
+    };
+  });
+  await page.goto('http://127.0.0.1:' + port + '/kit/showcase/parts/button-group.html');
+  const key = page.locator('#draft[data-vx-live]');
+  await key.click();
+  assert.equal(requests.length, 0);
+  const sound = page.getByRole('checkbox', {name: 'Switch sound'});
+  await sound.check();
+  await page.waitForFunction(() => window.decoded === 2);
+  await key.focus();
+  await page.keyboard.down('Space');
+  await page.keyboard.down('Space');
+  await page.keyboard.up('Space');
+  const strokes = await page.evaluate(() => window.strokes);
+  assert.equal(strokes.length, 2);
+  assert.notEqual(strokes[0], strokes[1]);
+  await sound.uncheck();
+  await key.click();
+  assert.equal(await page.evaluate(() => window.strokes.length), 2);
+  await sound.check();
+  await page.getByRole('link', {name: 'Parts catalog', exact: true}).click();
+  assert.equal(await page.getByRole('checkbox', {name: 'Switch sound'}).isChecked(), true);
+  assert.equal(await page.evaluate(() => window.decoded), 0);
+  console.log('Recorded down/up, repeat suppression, opt-in, mute, and catalog navigation passed.');
+} finally {
+  await browser.close();
+}
