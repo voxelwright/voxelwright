@@ -77,7 +77,7 @@ const well = {
 
   pose(live) {
     const lit = live.spring('lit').x;
-    live.glowStrength = halo(WELL_GLOW) * (warmth(live) + lit * (live.theme === 'day' ? 2.2 : 1.6));
+    live.glowStrength = halo(WELL_GLOW) * (0.2 + lit * (live.theme === 'day' ? 2.2 : 1.6));
     live.glowRadius = 3.2 + lit * 1.2;
   },
 };
@@ -95,7 +95,14 @@ export const groove = {
   build(live, m) {
     const { W, H, el } = live;
     const mat = lightName(el, 'light-warm');
-    hole(live, m, { depth: live.look.groove, wall: mat, floor: mat });
+    const header = !el.dataset.vxLight && W > H && el.parentElement?.matches('.vx-card')
+      && el.parentElement.querySelector(':scope > .vx-groove') === el;
+    const { floor } = hole(live, m, { depth: live.look.groove, wall: mat, floor: mat });
+    if (header) {
+      // A short opal tube is recessed below the header; the remaining channel reflects it.
+      const length = Math.min(W - 2, Math.max(6, Math.round(W / 4)));
+      if (length > 0) floor.box(1, 0, -live.look.groove - 1, length, H, 1, 'lamp');
+    }
   },
 
   pose(live) { live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live)); },
@@ -161,10 +168,13 @@ export const recess = {
 
   build(live, m) {
     const { W, H, el } = live, D = live.look.well;
-    hole(live, m, { depth: D, wall: lightName(el, 'light-warm'), floor: 'floor' });
+    const { walls } = hole(live, m, { depth: D, wall: lightName(el, 'light-warm'), floor: 'floor' });
+    if (el.dataset.vxReflection === 'warm' && W > 4) {
+      walls.box(2, H, -D, W - 4, 1, Math.min(D, 2), 'warm-metal');
+    }
   },
 
-  pose(live) { live.glowStrength = halo(WELL_GLOW) * warmth(live); },
+  pose(live) { live.glowStrength = halo(WELL_GLOW) * 0.2; },
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -183,7 +193,7 @@ export const lamp = {
     live.faceZ = 2;
   },
 
-  pose(live) { live.glowStrength = halo(0.16) * byTheme(live) * (1 + live.spring('pulse').x); },
+  pose(live) { live.glowStrength = halo(0.032) * byTheme(live) * (1 + 2 * live.spring('pulse').x); },
 
   bind(live) {
     const watch = new MutationObserver(() => { live.rebuild(); const p = live.spring('pulse', 0, CALM.k, CALM.c * 0.8); p.snap(1.4); p.to(0); live.invalidate(); });
@@ -218,9 +228,9 @@ const surface = {
     if (el.dataset.vxLight) ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el), r);
     if (wide && el.dataset.vxBolts !== 'none') {
       for (const x of [4, W - 5]) for (const y of [4, H - 5]) {
-        body.slab(x - 2, y - 2, top - 1, 5, 5, 1, 'steel', 1);
+        body.slab(x - 1, y - 1, top - 1, 3, 3, 1, 'steel', 1);
         body.slab(x - 1, y - 1, top, 3, 3, 1, 'steel', 1);
-        body.box(x, y, top, 2, 1, 1, 'gasket');
+        body.box(x, y, top, 1, 1, 1, 'slate');
       }
     }
     cardSpine(live, m, top, H);
@@ -236,8 +246,8 @@ const NEWS = { done: 'light-go', failed: 'light-stop', note: 'light' };
 
 const notice = {
   pad: 11,
-  glowRadius: 6,
-  glowStrength: halo(0.15),
+  glowRadius: 2.2,
+  glowStrength: halo(0.035),
 
   build(live, m) {
     const { W, H, el } = live, d = live.look.float;
@@ -248,7 +258,7 @@ const notice = {
     live.faceZ = d;
   },
 
-  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.18 : 0.15); },
+  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025); },
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -307,16 +317,16 @@ const switchPart = {
     hole(live, m, { depth: D, wall: 'slate', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true; lit.covered = true;
-    lit.box(0, 0, -D, W, H, 1, 'light'); // light on the floor of the trench: the trench stays a trench
+    lit.box(1, Math.floor((H - 2) / 2), -D, W - 2, 2, 1, 'light-go'); // light on the floor of the trench: the trench stays a trench
     // the key stands on the floor of the trench, on its own light, a voxel proud of the surface
     const knob = m.part('knob');
     knob.grounded = false;
     if (!off) ring(knob, 0, 0, -D, KNOB, H - 2, 'light');
     knob.slab(0, 0, 1 - D, KNOB, H - 2, D + 1, off ? 'steel' : 'ivory', 1);
-    const paddle = off ? 'steel' : 'key';
+    const paddle = off ? 'steel' : 'ivory';
     knob.slab(0, 0, 2, KNOB, H - 2, 1, paddle, 1);
     knob.box(1, 1, 3, KNOB - 2, 2, 1, paddle);
-    knob.box(2, 1, 3, KNOB - 4, 1, 1, 'steel');
+    knob.box(2, 1, 3, KNOB - 4, 1, 1, off ? 'slate' : 'key');
     knob.ty = 1;
     live.state.inlineX = inlineX(live);
     live.state.travel = W - 2 - KNOB;
@@ -374,14 +384,15 @@ defineLook('lit', {
   rise: 6, travel: 4, step: 1,
   slab: 5, round: 2, float: 6, dialog: 7, well: 4,
   light: {
-    day: { glow: FULL, seam: 0.016, shadow: [0.13, 0.10, 0.07, 0.34] },
-    night: { glow: FULL, seam: 0.034, sun: 0.63, shadow: [0, 0, 0.02, 0.6] },
+    day: { glow: FULL, seam: 0.008, shadow: [0.13, 0.10, 0.07, 0.34] },
+    night: { glow: FULL, seam: 0.016, sun: 0.63, shadow: [0, 0, 0.02, 0.6] },
   },
   materials: {
     chalk: { day: '#e9dcc5', night: '#23313b', jitter: 0.006 },   // the surface
     floor: { day: '#c8bda7', night: '#141a1f', jitter: 0.004 },   // the bottom of a well
-    slate: { day: '#9f998a', night: '#141b21', jitter: 0.008 },   // trays, trenches
-    steel: { day: '#918a77', night: '#626766', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
+    slate: { day: '#9f998a', night: '#283038', jitter: 0.008 },   // trays, trenches
+    'light-warm': { day: '#c1ac83', night: '#87704e', glow: 0.2 },
+    steel: { day: '#aba58f', night: '#535b5b', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
     enamel: { day: '#174ec6', night: '#315aca', jitter: 0.012 },  // the cap of the one main key
     key: { day: '#f2ebda', night: '#434745', jitter: 0.006 },     // an ordinary cap
     ivory: { day: '#fffefa', night: '#d7dbf0', jitter: 0.006 },

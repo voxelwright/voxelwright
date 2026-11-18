@@ -28,10 +28,11 @@ the construction rules in the numbered sections.
 - The kit supplies an optional finish per material to renderers that support it. Ordinary
   cubes use full chamfer and zero gloss. Steel and enamel catch direct light. The well
   floor is matte. The ground filter spans one voxel at the default four-pixel scale.
+- One warm tube lights the header groove. The idle well walls emit no light. The deploy log has a passive warm reflection on its lower inside edge. Set `?log=quiet` on the demo for the unlined well. A pale slide paddle reveals a green slit. Pilot lamps light their socket locally.
 - Two dark cells separate each pair of meter lamps. A warning uses amber in the daytime.
   A destructive menu row carries a red tracking light when selected.
 - The chart opens at the reading in its table and animates a subsequent change. A menu, toast or dialog rises on an intact
-  plate. Its lettering follows the same projection from the first frame. Closing a dialog
+  plate. Its lettering stays opaque on the moving plate and follows its projection from the first drawn frame. The plate overshoots its seat by about one course and catches at level. With reduced motion it stays in place and fades. Closing a dialog
   reverses from the current height and fades its scrim. Dismissing a toast still breaks it.
 
 ## 1. Principles

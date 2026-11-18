@@ -278,6 +278,7 @@ function direct(story) {
   return { start, halt };
 }
 
+if (q.get('log') !== 'quiet') $('#deploy .log').dataset.vxReflection = 'warm';
 adopt();
 window.vx = { live, get stage() { return getStage(); } };
 ready().then(() => {

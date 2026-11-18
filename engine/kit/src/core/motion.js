@@ -185,7 +185,11 @@ export function plateMotion(part, { duration = 0.4, top, out, still, start = out
     kind: out ? 'lower' : 'assemble', t: 0, end,
     get progress() {
       const t = clamp01(this.t / end);
-      return out ? start * (1 - t * t) : 1 - (1 - start) * (1 - t) ** 2;
+      if (out) return start * (1 - t) ** 2;
+      if (still) return start + (1 - start) * t;
+      // A spring-loaded stop lets the plate pass its seat by about one course, then catch.
+      const left = 1 - t;
+      return 1 + (1 - start) * left * left * (2.15 - 3.15 * left);
     },
     get dz() { return still ? 0 : (this.progress - 1) * (top - 0.5); },
     write(pos, o) {

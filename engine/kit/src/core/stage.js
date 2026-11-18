@@ -140,7 +140,8 @@ export class Live {
     const { dz, progress } = this.carried;
     this.el.style.setProperty('--vx-plate-x', dz * SHEAR[0] * this.vx + 'px');
     this.el.style.setProperty('--vx-plate-y', dz * SHEAR[1] * this.vx + 'px');
-    this.el.style.setProperty('--vx-plate-ink', Math.min(1, progress * 2));
+    const ink = this.el.dataset.vxCarried === 'still' ? progress : Number(progress > 0);
+    this.el.style.setProperty('--vx-plate-ink', Math.max(0, Math.min(1, ink)));
   }
 
   stopMotion() {
@@ -174,7 +175,13 @@ export class Live {
     for (const p of this.model.parts) {
       if (!p.fx) continue;
       p.fx.t += dt;
-      moving = true;
+      if (p.fx.t >= p.fx.end && (!this.visible || p.hidden || !p.count)) {
+        // draw() skips hidden geometry, including a menu's inactive selection mark.
+        if (p.fx.kind === 'lower' || p.fx.kind === 'crumble') p.hidden = true;
+        p.fx = null;
+        this.dirty = true;
+        this.settled(p);
+      } else moving = true;
     }
     if (this.form.step && this.form.step(this, dt)) moving = true;
     if (moving) this.dirty = true;
@@ -204,10 +211,6 @@ export class Live {
       ao.set(p.ao, n * 2);
       o += cnt * 8; n += cnt;
     }
-    if (this.carried) {
-      this.carryWords();
-      if (this.carried.t >= this.carried.end && this.carried.kind !== 'lower') this.clearPlate();
-    }
     const ok = this.stage.renderer.draw({
       pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
@@ -216,6 +219,10 @@ export class Live {
       glowRadius: this.glowRadius ?? this.form.glowRadius, glowStrength: this.glowStrength ?? this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx ?? this.canvas);
+    if (ok && this.carried) {
+      this.carryWords();
+      if (this.carried.t >= this.carried.end && this.carried.kind !== 'lower') this.clearPlate();
+    }
     // labels follow their faces
     const k = this.vx;
     for (const l of this.labels) {

@@ -18,6 +18,7 @@ const defs = {
   floor: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
   slate: { day: '#c3c9de', night: '#222963', jitter: 0.012 },
+  'warm-metal': { day: '#d4b383', night: '#ac895b', jitter: 0.003 },
   gasket: { day: '#565447', night: '#151c21', jitter: 0.008 },
   // Steel: neutral parts and anything switched off.
   steel: { day: '#aab1c9', night: '#33375a', jitter: 0.018 },

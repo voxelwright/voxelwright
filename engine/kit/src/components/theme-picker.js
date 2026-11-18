@@ -264,7 +264,7 @@ export const themePicker = {
   pose(live) {
     if (!isLamp(live.el)) return;
     // the chosen theme's lamp is the bright one; the others are lit, so their colours can be told
-    live.glowStrength = halo(inputOf(live.el)?.checked ? 0.16 : 0.05) * byTheme(live);
+    live.glowStrength = halo(inputOf(live.el)?.checked ? 0.07 : 0.012) * byTheme(live);
   },
 
   bind(live) {

@@ -123,7 +123,10 @@ export function bezel(m, x, y, w, h, { by = h <= 8 || w <= 8 ? 1 : 2, mat = 'ste
 export function hole(live, m, { x = 0, y = 0, w = live.W, h = live.H, depth = live.look.well, wall = 'slate', floor = 'floor' } = {}) {
   const walls = m.part('walls');
   walls.sunk = true;
-  walls.box(x - 1, y - 1, -depth, w + 2, h + 2, depth, wall).carve(x, y, -depth, w, h, depth);
+  // An idle well reflects the room along a cast wall. Thin lit grooves and active rims
+  // keep their own light source.
+  const lining = wall === 'light-warm' && floor === 'floor' && w > 2 && h > 2 ? 'slate' : wall;
+  walls.box(x - 1, y - 1, -depth, w + 2, h + 2, depth, lining).carve(x, y, -depth, w, h, depth);
   walls.tz = UNDER;
   const bed = m.part('floor');
   bed.sunk = true;

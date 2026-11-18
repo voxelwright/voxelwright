@@ -144,12 +144,12 @@ export const popover = {
   name: 'popover',
   selector: '.vx-popover',
   pad: 11,
-  glowRadius: 6,
+  glowRadius: 2.2,
   glowStrength: halo(0.15),
 
   build(live, m) { slabOnLight(live, m); },
 
-  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.18 : 0.15); },
+  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025); },
 
   bind(live) {
     const on = listeners();

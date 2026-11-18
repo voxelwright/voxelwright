@@ -1,7 +1,7 @@
 // Every part, every check: the harness on each page under showcase/parts, then each part's own
 // check under tools/parts. Prints one line a run and the failing lines under it.
 //   PORT=5989 node tools/parts.mjs [name ...]      exit 1 if anything fails
-// The right-to-left page's check lists faults in the kit on purpose; it is reported, not counted.
+// The direction check exits 2 when its only finding is the known Arabic and Hebrew font gap.
 import { readdir } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
@@ -23,11 +23,12 @@ await Promise.all(Array.from({ length: 3 }, async () => {
   while (queue.length) {
     const [kind, name, args] = queue.shift();
     const { code, out } = await run(args);
-    const known = kind === 'check' && name === 'direction';
+    const failed = code !== 0;
+    const known = kind === 'check' && name === 'direction' && code === 2;
     if (name === 'message-scroller' && kind === 'check') console.log(out.split('\n').find((line) => line.includes('wheel after settling:')) ?? 'wheel measurement missing');
-    if (code && !known) bad++;
+    if (failed && !known) bad++;
     const fails = out.split('\n').filter((l) => /^FAIL|Error|error:/.test(l.trim())).slice(0, 8);
-    console.log(`${code ? (known ? 'known' : 'FAIL ') : 'ok   '} ${kind} ${name}${code ? '\n      ' + (fails.join('\n      ') || out.trim().split('\n').slice(-3).join('\n      ')) : ''}`);
+    console.log(`${failed ? (known ? 'known' : 'FAIL ') : 'ok   '} ${kind} ${name}${failed ? '\n      ' + (fails.join('\n      ') || out.trim().split('\n').slice(-3).join('\n      ')) : ''}`);
   }
 }));
 console.log(bad ? `${bad} of ${jobs.length} failed` : `all ${jobs.length} pass (${pages.length} pages, ${checks.length} checks)`);

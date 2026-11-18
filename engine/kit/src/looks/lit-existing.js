@@ -130,11 +130,11 @@ const list = {
 // of the face. Tool: float, and a groove.
 // bind (components/menu.js) hides the part named `pick` and assembles the part named `panel` when
 // the menu opens, and reads state.items and state.active; it sets state.active itself.
-const MENU_GLOW = 0.15, MARK_X = 2;
+const MENU_GLOW = 0.027, MARK_X = 2;
 
 const menu = {
   pad: 11,
-  glowRadius: 5.5,
+  glowRadius: 2.2,
   glowStrength: halo(MENU_GLOW),
 
   build(live, m) {
@@ -184,11 +184,11 @@ const menu = {
 // and what is bolted down stays. Its header is words; a groove of the room's own light parts them
 // from the body. Its keys are keys. Tool: float, and a groove.
 // bind (components/dialog.js) assembles and crumbles every part, so no name matters here.
-const DIALOG_GLOW = 0.1, INSET = 4;
+const DIALOG_GLOW = 0.025, INSET = 4;
 
 const dialog = {
   pad: 16,
-  glowRadius: 5,
+  glowRadius: 2.2,
   glowStrength: halo(DIALOG_GLOW),
 
   build(live, m) {
