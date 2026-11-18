@@ -56,10 +56,10 @@ export const button = {
     const press = live.spring('press'), hover = live.spring('hover');
     let held = false;
     const travel = () => live.model.keyTravel ?? Math.min(live.look.travel, Math.max(0, (live.state.top ?? live.look.rise) - 1));
-    const down = () => { if (live.state.off) return; held = true; press.to(-travel(), PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
+    const down = (e) => { if (held || el.disabled || el.getAttribute('aria-disabled') === 'true' || (e?.type === 'pointerdown' && e.button !== 0)) return; held = true; press.to(-travel(), PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
     const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
-    const up = () => { if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
-    const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
+    const up = (e) => { if (e?.type === 'keyup' && e.key !== ' ' && e.key !== 'Enter') return; if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); if (!['blur', 'pointerleave', 'pointercancel'].includes(e?.type)) cue('release'); live.invalidate(); };
+    const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(e); };
     const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
     const leave = () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(); live.invalidate(); };
     el.addEventListener('pointerdown', down);
