@@ -67,8 +67,8 @@ export const menu = {
       const origin = el.dataset.vxFrom && !invoker() ? el.dataset.vxFrom.trim().split(/\s+/).map(Number) : anchor.map(px => px / live.vx);
       live.visible = true;
       live.state.scrollY = (el.querySelector(':scope > .vx-menu-rows')?.scrollTop ?? 0) / live.vx;
-      live.rebuild();
-      live.play('assemble', ['panel'], { duration: 0.17, surface: 'rim', from: origin });
+      const resume = live.rebuild();
+      live.play('assemble', ['panel'], { resume, duration: 0.17, surface: 'rim', from: origin });
       if (invoker()?.matches(':focus-visible')) live.state.items.find(menuEnabled)?.focus();
       live.draw();
       el.removeAttribute('data-vx-cover-legends');

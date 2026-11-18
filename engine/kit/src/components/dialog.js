@@ -6,6 +6,36 @@ import { cue } from '../core/sound.js';
 import { nativeRelease } from './popover.js';
 import { listeners } from './util.js';
 
+// Let the browser decide whether cancel succeeds. beforetoggle runs only when
+// closing proceeds, before requestClose(value) writes an explicit value.
+export function wireDialog(el, on) {
+  let cancel, escape, normalizeEscape = false;
+  on(el, 'keydown', e => { escape = e.key === 'Escape' ? e : null; });
+  on(el, 'keyup', () => { escape = null; });
+  on(el, 'cancel', e => {
+    cancel = e;
+    setTimeout(() => { if (cancel === e) { cancel = null; escape = null; } }, 0);
+  });
+  on(el, 'beforetoggle', e => {
+    const accepted = e.newState === 'closed' && cancel && !cancel.defaultPrevented;
+    normalizeEscape = accepted && escape && !escape.defaultPrevented;
+    // Some browsers keep the previous result if no new value is supplied.
+    if (accepted) el.returnValue = 'cancel';
+    cancel = escape = null;
+  });
+  on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
+    // Other browsers explicitly write an empty result for the Escape key.
+    if (!el.open && normalizeEscape && !el.returnValue) el.returnValue = 'cancel';
+    normalizeEscape = false;
+  });
+  on(el, 'click', e => {
+    if (e.defaultPrevented) return;
+    const b = e.target.closest('[data-vx-close]');
+    if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
+    else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
+  });
+}
+
 export const dialog = {
   name: 'dialog',
   selector: 'dialog.vx-dialog',
@@ -31,38 +61,14 @@ export const dialog = {
     nativeRelease(live, on, null, palette ? 0.1 : 0.23, surface);
     const opened = () => {
       live.visible = true;
-      live.rebuild();
+      const resume = live.rebuild();
       cue('build');
-      live.play('assemble', null, { duration: palette ? 0.16 : 0.32, surface });
+      live.play('assemble', null, { duration: palette ? 0.16 : 0.32, surface, resume });
     };
     live.state.leave = value => el.close(value);
-    // Keep the native cancel and submit defaults. A page can veto either, even
-    // from a listener registered after adoption. Only an accepted close plays.
-    let cancel, acceptedCancel = false;
-    on(el, 'cancel', e => {
-      cancel = e;
-      setTimeout(() => { if (cancel === e) cancel = null; }, 0);
-    });
-    on(el, 'beforetoggle', e => {
-      if (e.newState === 'closed') {
-        acceptedCancel = !!cancel && !cancel.defaultPrevented;
-        cue('release');
-      }
-      cancel = null;
-    });
-    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
-      if (el.open) opened();
-      // The UA writes requestClose(value) after beforetoggle. Keep its explicit
-      // value, and give Escape its established result before close is delivered.
-      else if (acceptedCancel && !el.returnValue) el.returnValue = 'cancel';
-      acceptedCancel = false;
-    });
-    on(el, 'click', e => {
-      if (e.defaultPrevented) return;
-      const b = e.target.closest('[data-vx-close]');
-      if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
-      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
-    });
+    wireDialog(el, on);
+    on(el, 'beforetoggle', e => { if (e.newState === 'closed') cue('release'); });
+    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => { if (el.open) opened(); });
     if (el.open) queueMicrotask(opened);
     return on.done;
   },

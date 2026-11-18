@@ -33,7 +33,7 @@
     <h2>In use: a project's week</h2>
     <div class="top">
       <div class="name">harbor-api</div>
-      <button class="vx-button" type="button" id="week">The week before</button>
+      <button class="vx-button" type="button" id="week"><span class="vx-label">The week before</span></button>
     </div>
     <div class="two">
       <figure class="vx-chart" data-vx-kind="bar" id="deploys">
@@ -153,7 +153,7 @@
       cell.textContent = seconds < 60 ? seconds + ' s' : Math.floor(seconds / 60) + ' min ' + seconds % 60 + ' s';
     });
     document.getElementById('deploys-when').textContent = weeks[w].when;
-    key.textContent = w ? 'The week after' : 'The week before';
+    key.querySelector('.vx-label').textContent = w ? 'The week after' : 'The week before';
   });
   show(chart);
 </script>

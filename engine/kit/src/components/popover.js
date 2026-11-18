@@ -53,12 +53,13 @@ export function place(el, trigger, { side = 'bottom', align = 'start', gap = 8, 
  */
 export function rouse(live) {
   live.visible = true;
-  live.rebuild();
+  const resume = live.rebuild();
   for (const [node, l] of live.stage.lives) {
     if (node === live.el || !live.el.contains(node)) continue;
     l.visible = true;
     if (node.offsetWidth !== l.cssW || node.offsetHeight !== l.cssH) l.rebuild(); else l.invalidate();
   }
+  return resume;
 }
 
 /** The float's model: a ring of light on the surface and a slab standing on it. */
@@ -134,8 +135,8 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     el.setAttribute('data-vx-measure', '');
     const from = put();
     if (live) {
-      rouse(live);
-      if (from && !still?.()) live.play('assemble', parts, { surface: 'rim', from: [from[0] / live.vx, from[1] / live.vx], duration });
+      const resume = rouse(live);
+      if (from && !still?.()) live.play('assemble', parts, { surface: 'rim', resume, from: [from[0] / live.vx, from[1] / live.vx], duration });
     }
     el.removeAttribute('data-vx-measure');
   });

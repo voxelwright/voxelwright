@@ -50,6 +50,7 @@ export class Live {
     this.pad = this.form.pad ?? 6;
     this.faceZ = 0;
     this.well = null;
+    const previousSurface = this.surface;
     this.stopMotion();
     this.model = new Model();
     for (const l of this.labels) { l.node.style.transform = ''; l.last = undefined; } // a label's nudge belongs to the model it was on
@@ -66,6 +67,7 @@ export class Live {
     this.layout();
     this.form.pose?.(this);
     this.invalidate();
+    return previousSurface;
   }
 
   retint() {
@@ -124,7 +126,7 @@ export class Live {
     const shared = { W: this.W, H: this.H, top, ...opts };
     const out = effect === 'crumble' || effect === 'lower', still = reducedMotion();
     const surface = opts.surface ?? this.form.surface;
-    const prior = this.surface;
+    const prior = this.surface ?? opts.resume;
     this.clearSurface();
     // Resolve superseded runs now. Their callers can distinguish cancellation from landing.
     this.waiters = (this.waiters ?? []).filter(waiter => {
@@ -134,7 +136,7 @@ export class Live {
     });
     for (const p of list) {
       if (surface) p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still,
-        rim: surface === 'rim', start: prior?.progress ?? (out ? 1 : 0),
+        rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
         from: prior?.from ?? opts.from ?? [0, this.H] });
       else if (still) p.fx = settle(p, { out });
       else p.fx = (out ? crumble : assemble)(p, shared);

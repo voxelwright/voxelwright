@@ -66,6 +66,10 @@ const slider = {
       thumb.slab(0, 0, 2, KEY, h, 2, off ? 'steel' : 'gasket', 1);
       for (const x of [1, KEY - 2]) thumb.box(x, 1, 4, 1, h - 2, 1, off ? 'steel' : 'slate');
       thumb.box(3, 0, INDEX_HEIGHT - 1, 1, h, 1, off ? 'slate' : 'ivory');
+      if (!off) {
+        // Enamel tips take the theme color; the ivory centre reads in low light.
+        for (const end of [0, h - 1]) thumb.plot(3, end, INDEX_HEIGHT - 1, 'enamel');
+      }
     } else {
       if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
       capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0);

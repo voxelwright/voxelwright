@@ -2446,7 +2446,9 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 /* The rubber saddle and its index stripe sit on the native range thumb. */
 [data-shell] .vx-slider:not([data-vx-live]) input {
   appearance: none;
-  --saddle: linear-gradient(90deg,#424641,#222926 15%,#626661 25%,#323732 37% 44%,#e8dfc7 44% 56%,#303531 56% 68%,#60655e 76%,#292e2a 87%,#404440);
+  --saddle: linear-gradient(var(--vx-enamel),var(--vx-enamel)) center top / 12% var(--vx) no-repeat,
+    linear-gradient(var(--vx-enamel),var(--vx-enamel)) center bottom / 12% var(--vx) no-repeat,
+    linear-gradient(90deg,#424641,#222926 15%,#626661 25%,#323732 37% 44%,#e8dfc7 44% 56%,#303531 56% 68%,#60655e 76%,#292e2a 87%,#404440);
   background: transparent;
 }
 [data-shell] .vx-slider:not([data-vx-live]) input:disabled {
@@ -2536,6 +2538,10 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 }
 [data-shell] :is(.vx-check,.vx-radio) input:disabled:checked + :is(.vx-box,.vx-dot):not([data-vx-live]) { --glass: #414741; }
 
+/* Centre the legend on the usable key face above its lower lamp. */
+[data-shell] .vx-toggle-group:not([role="toolbar"], [data-vx-size="small"]) > label {
+  padding-block: calc(var(--vx) * 1.5) calc(var(--vx) * 2.5);
+}
 [data-shell] .vx-toggle-group:not([data-vx-live]) > label {
   border: 0; background: var(--vx-key); color: var(--lit-legend);
   box-shadow: inset 0 0 0 2px #62655b, inset 3px 4px #ffffff65, inset -3px -6px #302d2545;

@@ -3,6 +3,7 @@
 // menu (arrow keys, closing on a choice, telling its trigger it is open). With voxels each part
 // does this itself; without them adopt() wires the same behaviour here, and draws nothing.
 
+import { wireDialog } from './components/dialog.js';
 import { place } from './components/popover.js';
 import { listeners } from './components/util.js';
 
@@ -108,15 +109,7 @@ const parts = [
       all()[to].focus();
     });
   }],
-  ['dialog.vx-dialog', (el, on) => {
-    on(el, 'click', (e) => {
-      const b = e.target.closest('[data-vx-close]');
-      if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
-      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
-    });
-    // Escape gives "cancel", as it does with voxels
-    on(el, 'cancel', (e) => { if (e.cancelable) { e.preventDefault(); el.close('cancel'); } });
-  }],
+  ['dialog.vx-dialog', wireDialog],
   ['.vx-menu', (el, on) => {
     const items = () => [...el.querySelectorAll('[role^="menuitem"]')];
     const { invoker, put } = menuAnchor(el, on, () => 12);

@@ -181,8 +181,9 @@ export function crumble(part, opts = {}) {
 
 // A transient is assembled on one grid shared by its body, light and inlays. Run the
 // same course backwards on dismissal so an interrupted build releases exactly where it is.
-export function surfaceCourses(part, { W, H, top, duration, from, rim, still, out, start }) {
-  const release = out && start === 1;
+export function surfaceCourses(part, { W, H, top, duration, from, rim, still, out, start, previousRelease }) {
+  // A reversal retraces the same trajectory, including each block's tilt.
+  const release = start > 0 && start < 1 ? previousRelease ?? false : out && start === 1;
   const end = Math.max(0.001, (still ? 0.12 : duration) * Math.abs((out ? 0 : 1) - start));
   const size = rim ? 3 : brickSize(W, H);
   const grid = still ? null : bricks(part, size);

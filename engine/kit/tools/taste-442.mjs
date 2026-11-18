@@ -344,6 +344,20 @@ async function rapidDismiss(page, spec) {
   await openOverlay(page, spec);
   await finishMotion(page);
   assert.ok(await page.locator(spec.host).isVisible(), 'overlay opens again cleanly');
+  if (spec.name === 'dialog') {
+    const continuous = await page.locator(spec.host).evaluate(async el => {
+      const { stage, live: find } = window.vx, live = find(el);
+      el.close();
+      stage.advance(0.07);
+      const progress = live.surface.progress, pose = live.pos.slice();
+      el.showModal();
+      await Promise.resolve();
+      live.draw();
+      return progress > 0 && progress < 1 && live.surface.progress === progress &&
+        pose.length === live.pos.length && pose.every((value, i) => Math.abs(value - live.pos[i]) < 0.001);
+    });
+    assert.ok(continuous, 'the first reopened frame preserves the closing position and rotation of every block');
+  }
 }
 
 try {

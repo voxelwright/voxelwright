@@ -143,6 +143,9 @@ for (const plain of [false, true]) {
   await p.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2, { steps: 5 });
   await p.mouse.down(); await p.waitForTimeout(70); await p.mouse.up();
   await p.waitForTimeout(60);
+  const key = p.locator('#week');
+  say(await key.locator('.vx-label').textContent() === 'The week after' && (plain || await key.locator('canvas').count() === 1),
+    `${tag}: changing the week keeps the physical key and updates its legend`);
   const mid = await read(p, 'deploys');
   if (!plain) say(mid.scales[0] === 0 && mid.g < 1, `${tag}: the numbers change: the light grows again from the bottom (g ${mid.g.toFixed(2)})`);
   await p.waitForTimeout(1100);

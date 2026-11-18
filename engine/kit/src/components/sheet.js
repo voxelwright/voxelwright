@@ -86,10 +86,10 @@ export function wire(el, on, live) {
   const opened = () => {
     // closed, it had no box: it and what is in it are measured and drawn now, on the first frame
     if (live) {
-      rouse(live);
+      const resume = rouse(live);
       const edge = live.state.edge;
       const from = [edge === 'right' ? live.W : 0, edge === 'bottom' ? live.H : 0];
-      live.play('assemble', ['panel', 'groove'], { duration: 0.24, surface: 'rim', from });
+      live.play('assemble', ['panel', 'groove'], { duration: 0.24, surface: 'rim', from, resume });
     }
     // the page behind does not scroll (CSS), and does not shift for want of its scrollbar
     if (el.matches(':modal') && bar > 0) root.style.scrollbarGutter = 'stable';

@@ -80,6 +80,22 @@ say(d.open && d.focus === 'Keep it', 'Enter on Delete project opens it again, on
 await p.keyboard.press('Enter'); await gone(p);
 d = await read(p, 'delete');
 say(!d.open && d.value === 'cancel' && await result(p) === 'Nothing deleted', 'Enter straight away keeps it: the hasty answer destroys nothing');
+async function checkReopened(page) {
+  const dialog = page.locator('#delete');
+  await dialog.evaluate(el => el.showModal());
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => !document.querySelector('#delete').open);
+  say(await dialog.evaluate(el => el.returnValue) === 'cancel', 'Escape after a previous confirmation returns cancel');
+  const explicit = await dialog.evaluate(async el => {
+    el.showModal();
+    el.addEventListener('cancel', e => e.preventDefault(), {once: true});
+    el.requestClose('reserved');
+    if (!el.open) return null;
+    el.requestClose('reserved');
+    return el.returnValue;
+  });
+  say(explicit === 'reserved', 'a page can veto cancellation and requestClose keeps an explicit result');
+}
 // the danger key
 await press(p, '#open-delete'); await p.waitForTimeout(600);
 await press(p, '#delete [data-vx-kind="danger"]'); await p.waitForTimeout(60);
@@ -88,6 +104,7 @@ say(d.made.fx === 'crumble', 'a press on Delete harbor-api: the face breaks up')
 await gone(p);
 d = await read(p, 'delete');
 say(!d.open && d.value === 'delete' && await result(p) === 'harbor-api deleted' && d.focus === 'open-delete', 'and closes with "delete"; the page heard it');
+await checkReopened(p);
 // another, from a key in a row
 await press(p, '#open-revoke'); await p.waitForTimeout(600);
 d = await read(p, 'revoke');
@@ -123,12 +140,12 @@ await p.mouse.click(40, 40); await p.waitForTimeout(200);
 say((await read(p, 'delete')).open, 'plain: a press outside does nothing');
 await p.keyboard.press('Escape'); await p.waitForTimeout(200);
 d = await read(p, 'delete');
-// (the kit's plain dialog lets the browser close it on Escape, which leaves returnValue as it was: "")
-say(!d.open && (d.value === 'cancel' || d.value === '') && d.focus === 'open-delete' && await result(p) === 'Nothing deleted', `plain: Escape closes it, nothing is deleted, the focus is back (returnValue "${d.value}")`);
+say(!d.open && d.value === 'cancel' && d.focus === 'open-delete' && await result(p) === 'Nothing deleted', `plain: Escape closes it, nothing is deleted, the focus is back (returnValue "${d.value}")`);
 await press(p, '#open-delete'); await p.waitForTimeout(100);
 await press(p, '#delete [data-vx-kind="danger"]'); await p.waitForTimeout(200);
 d = await read(p, 'delete');
 say(!d.open && d.value === 'delete', 'plain: its danger key closes it with "delete"');
+await checkReopened(p);
 await p.close();
 
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
