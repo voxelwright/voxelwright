@@ -33,10 +33,9 @@ This keeps the reference useful across the kit while leaving room for a better m
 2. Capture a baseline first and keep it. Always show before and after side by
    side (11:42-12:02: the agent made annotated before/after images with arrows
    because the owner could not see the subtle changes).
-3. Get a council of reviewers. One strong model from each provider, read only,
-   each given the screenshots plus the request, each returning a score out of 10
-   per category (6:54-8:08). For Village use Claude Opus and GPT-6.1 Sol at
-   minimum. A new review after fixes is a new round; log scores per round (12:37).
+3. Get independent visual scores from different models. Choose reviewers using the current
+   routing in `AGENTS.md`. Each gets the screenshots and request, works read-only, and returns
+   a score out of 10 per category (6:54-8:08). Log a fresh round after fixes (12:37).
 4. Fix what the reviewers found, then re-review with fresh context.
 5. Stop only when every reviewer clears the bar in every category, or say plainly
    that you stopped on cost or time. Early rounds typically jump (6 to 8 to 9 in
