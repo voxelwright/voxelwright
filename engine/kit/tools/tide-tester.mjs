@@ -40,6 +40,10 @@ try {
     assert.equal(await key.getAttribute('aria-pressed'), 'false');
     await page.keyboard.up('Space');
     assert.equal(await key.getAttribute('aria-pressed'), 'true');
+    await key.evaluate(el => el.setAttribute('aria-disabled', 'true'));
+    await page.keyboard.press('Enter');
+    assert.equal(await key.getAttribute('aria-pressed'), 'true');
+    await key.evaluate(el => el.removeAttribute('aria-disabled'));
     const dimmer = page.getByRole('slider', { name: 'Lamp brightness' });
     await dimmer.press('End');
     assert.equal(await page.locator('#level-out').textContent(), '100%');

@@ -31,6 +31,7 @@ capPicker.addEventListener('change', () => fit({ caps: capPicker.value }));
 casePicker.addEventListener('change', () => fit({ shell: casePicker.value }));
 for (const radio of profiles) radio.addEventListener('change', () => fit({ profile: radio.value }));
 key.addEventListener('click', () => {
+  if (key.matches(':disabled, [aria-disabled="true"]')) return;
   key.setAttribute('aria-pressed', String(key.getAttribute('aria-pressed') !== 'true'));
   fit();
 });
