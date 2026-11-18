@@ -12,20 +12,41 @@ async function visit(path = '') {
   await page.goto(new URL(path, desk).href);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
 }
+// Sample the actual painted surface, including GPU-drawn material behind DOM text.
+async function contrastAtText(locator) {
+  await locator.scrollIntoViewIfNeeded();
+  const { x, y, ink } = await locator.evaluate(el => {
+    const range = document.createRange();
+    range.selectNodeContents(el.firstChild);
+    const box = range.getClientRects()[0];
+    const ink = getComputedStyle(el).color.match(/[\d.]+/g).slice(0, 3).map(Number);
+    el.style.webkitTextFillColor = 'transparent';
+    return { x: Math.floor(box.left + box.width / 2), y: Math.floor(box.top + box.height / 2), ink };
+  });
+  let patch;
+  try { patch = await page.screenshot({ clip: { x, y, width: 1, height: 1 } }); }
+  finally { await locator.evaluate(el => el.style.removeProperty('-webkit-text-fill-color')); }
+  return page.evaluate(async ({ ink, image }) => {
+    const bitmap = new Image();
+    bitmap.src = 'data:image/png;base64,' + image;
+    await bitmap.decode();
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.drawImage(bitmap, 0, 0);
+    function luminance(rgb) {
+      const [r, g, b] = Array.from(rgb).slice(0, 3).map(n => n / 255)
+        .map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4);
+      return r * .2126 + g * .7152 + b * .0722;
+    }
+    const paper = luminance(ctx.getImageData(0, 0, 1, 1).data);
+    const text = luminance(ink);
+    return (Math.max(text, paper) + .05) / (Math.min(text, paper) + .05);
+  }, { ink, image: patch.toString('base64') });
+}
 try {
   await visit();
   for (const shell of ['alloy', 'smoke']) {
     await page.locator('[name=shell][value=' + shell + ']').check();
-    const ratio = await page.locator('.sound').evaluate(el => {
-      function luminance(rgb) {
-        const channels = rgb.match(/[\d.]+/g).slice(0, 3).map(n => Number(n) / 255)
-          .map(n => n <= .04045 ? n / 12.92 : ((n + .055) / 1.055) ** 2.4);
-        return channels[0] * .2126 + channels[1] * .7152 + channels[2] * .0722;
-      }
-      const ink = luminance(getComputedStyle(el).color);
-      const paper = luminance(getComputedStyle(document.documentElement).backgroundColor);
-      return (Math.max(ink, paper) + .05) / (Math.min(ink, paper) + .05);
-    });
+    const ratio = await contrastAtText(page.locator('.sound > span:last-child'));
     assert(ratio >= 4.5, shell + ' switch sound contrast ' + ratio);
   }
   assert(await page.getByRole('link', { name: 'Design notes' }).isVisible());
@@ -64,6 +85,9 @@ try {
   assert.equal(result.before, 0);
   assert.equal(result.after, 0);
   assert.deepEqual(result.enamel, result.cap);
+  await visit('parts/bubble.html');
+  const replyContrast = await contrastAtText(page.locator('#reply p'));
+  assert(replyContrast >= 4.5, 'reading ink on the dark enclosure measured ' + replyContrast);
   await visit('principles.html');
   await page.getByRole('switch', { name: 'Voxels' }).press('Space');
   for (const path of ['', 'parts/', 'parts/slider.html']) {

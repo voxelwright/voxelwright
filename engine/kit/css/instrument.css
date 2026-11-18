@@ -28,3 +28,7 @@
 }
 [data-shell] .vx-toggle-group[data-vx-live] > label:not(:has(:disabled)),
 [data-shell] .vx-tabs[data-vx-live] > [aria-selected="true"] { color: var(--lit-legend); }
+
+[data-shell] { --vx-reading-plate: var(--panel); }
+[data-shell] .vx-pagination-pages > li > a { color: var(--lit-legend); }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) > li > a { background-color: var(--vx-key); }

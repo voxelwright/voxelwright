@@ -25,7 +25,7 @@ export const bubble = {
     if (mine(el)) {
       // one voxel: the look's own step, the one depth it has for "a voxel"
       const up = look.step;
-      m.part('plate').slab(0, 0, 0, W, H, up, 'key', 1);
+      m.part('plate').slab(0, 0, 0, W, H, up, live.look.readingPlate, 1);
       live.faceZ = up;
     } else {
       const D = look.well;

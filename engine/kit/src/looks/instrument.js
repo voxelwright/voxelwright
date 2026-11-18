@@ -60,7 +60,7 @@ export function instrument(s, root, stage) {
   const retool = LOOKS.instrument?.tooling !== shape;
   let look = LOOKS.instrument;
   if (retool) {
-    look = defineLook('instrument', { from: 'lit', tooling: shape, artwork: s.caps === 'field', rise: s.profile === 'high' ? 7 : 3,
+    look = defineLook('instrument', { from: 'lit', tooling: shape, readingPlate: 'panel', artwork: s.caps === 'field', rise: s.profile === 'high' ? 7 : 3,
       travel: s.profile === 'high' ? 4 : 2, grain: 1, seam: .45,
       finishes: { ...LOOKS.lit.finishes, chalk: shell.face, key: cap.face, 'warm-metal': finish(65, 105), 'spun-brass': finish(10, 85) },
       materials: { panel: paint(panel), chalk: paint(shell.plate, { grain: shell.grain, transmission: shell.transmission, jitter: .004 }),

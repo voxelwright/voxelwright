@@ -150,7 +150,7 @@ const menu = {
     // the light and the slab are one part, so both are built out of the corner together
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, 'light', 1);
-    panel.slab(0, 0, 1, W, H, d - 1, 'key', 1); // a float is a plate, not a keycap
+    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate, 1); // a float is a plate, not a keycap
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const h = items[0] ? Math.max(2, Math.round(items[0].offsetHeight / vx)) : 2;
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));

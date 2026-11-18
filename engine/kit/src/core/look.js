@@ -17,6 +17,7 @@ export const BASE = {
   slab: 2,       // things that hold content: a card, a list tile
   float: 4,      // things that float for a moment: a menu, a toast
   dialog: 6,
+  readingPlate: 'key', // stock used for passive plates that carry text
   well: 2,       // how deep a field is cut
   groove: 1,     // how deep a groove is cut
   round: 2,      // the corner step of a slab that holds content (controls step by one)

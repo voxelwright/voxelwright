@@ -92,7 +92,7 @@ export const tooltip = {
 
   build(live, m) {
     const { W, H } = live, d = live.look.slab;
-    m.part('body').slab(0, 0, 0, W, H, d, 'key', 1);
+    m.part('body').slab(0, 0, 0, W, H, d, live.look.readingPlate, 1);
     live.faceZ = d;
   },
 

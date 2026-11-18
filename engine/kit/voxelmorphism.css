@@ -858,7 +858,7 @@ a.vx-attachment-name:focus-visible { outline: 2px solid var(--vx-focus); outline
 .vx-attachment[data-vx-leaving] .vx-button:not([data-vx-live]) { visibility: hidden; }
 
 /* plain: a painted plate with its shadow */
-.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
+.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk-top))); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
 .vx-attachment[data-vx-leaving] .vx-attachment-tile:not([data-vx-live]) { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1063,7 +1063,7 @@ a.vx-attachment-name:focus-visible { outline: 2px solid var(--vx-focus); outline
 /* plain: theirs is a painted floor with the wall along the right and the bottom; yours a painted
    plate with its shadow */
 .vx-bubble:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset calc(var(--_wall) * -1) calc(var(--_wall) * -1) 0 var(--vx-slate); }
-.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk-top))); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }
 
 /* ==== css/button-group.css ==== */
 
@@ -1690,7 +1690,7 @@ figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns:
 
 /* plain: a painted plate with the accent's line where its light shows, and the mark painted */
 .vx-combobox-float:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 .vx-combobox-float:not([data-vx-live]) [role="option"][data-vx-active] {
@@ -2046,7 +2046,7 @@ dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::befo
 [data-vx-look="lit"] .vx-menu [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) { color: var(--vx-ink-quiet); cursor: default; }
 /* plain: a painted float; the active row has the same mark, painted */
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) {
-  background: var(--vx-key);
+  background: var(--vx-reading-plate, var(--vx-key));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]) {
@@ -2082,7 +2082,7 @@ dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::befo
 [data-vx-look="lit"] .vx-toast { cursor: pointer; }
 /* plain: the light it stands on is a line of its kind's colour round it */
 [data-vx-look="lit"] .vx-toast:not([data-vx-live]) {
-  background: var(--vx-key); border: 0; padding-inline-start: calc(var(--vx) * 8);
+  background: var(--vx-reading-plate, var(--vx-key)); border: 0; padding-inline-start: calc(var(--vx) * 8);
   box-shadow: 0 0 0 1px var(--lit-accent), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="done"] { box-shadow: 0 0 0 1px var(--lit-go), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
@@ -2241,7 +2241,7 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 
 /* plain: a painted slab; the accent's line is at its left and top, where the light shows */
 .vx-hover-card:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 
@@ -2320,6 +2320,10 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 }
 [data-shell] .vx-toggle-group[data-vx-live] > label:not(:has(:disabled)),
 [data-shell] .vx-tabs[data-vx-live] > [aria-selected="true"] { color: var(--lit-legend); }
+
+[data-shell] { --vx-reading-plate: var(--panel); }
+[data-shell] .vx-pagination-pages > li > a { color: var(--lit-legend); }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) > li > a { background-color: var(--vx-key); }
 
 /* ==== css/item.css ==== */
 
@@ -2842,7 +2846,7 @@ a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-of
   background: var(--lit-accent, var(--vx-enamel));
 }
 .vx-navigation-menu-float:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 .vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
@@ -3035,7 +3039,7 @@ a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-of
 
 /* plain: a painted slab; the accent's line is at its left and top, where the light shows */
 .vx-popover:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 
@@ -4213,7 +4217,7 @@ dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {
 
 /* plain: a painted slab */
 .vx-tooltip:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: inset 0 0 0 1px var(--vx-slate), calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow);
 }
 

@@ -60,7 +60,7 @@
 [data-vx-look="lit"] .vx-menu [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) { color: var(--vx-ink-quiet); cursor: default; }
 /* plain: a painted float; the active row has the same mark, painted */
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) {
-  background: var(--vx-key);
+  background: var(--vx-reading-plate, var(--vx-key));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]) {
@@ -96,7 +96,7 @@
 [data-vx-look="lit"] .vx-toast { cursor: pointer; }
 /* plain: the light it stands on is a line of its kind's colour round it */
 [data-vx-look="lit"] .vx-toast:not([data-vx-live]) {
-  background: var(--vx-key); border: 0; padding-inline-start: calc(var(--vx) * 8);
+  background: var(--vx-reading-plate, var(--vx-key)); border: 0; padding-inline-start: calc(var(--vx) * 8);
   box-shadow: 0 0 0 1px var(--lit-accent), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="done"] { box-shadow: 0 0 0 1px var(--lit-go), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
