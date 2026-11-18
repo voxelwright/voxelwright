@@ -2052,8 +2052,11 @@ dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::befo
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:not(:has(a, button)) { background: none; }
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: none; }
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li + li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset 0 1px 0 var(--vx-slate); }
-[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li::before {
   content: ""; position: absolute; inset-block: calc(var(--vx) * 2); inset-inline-start: var(--vx); inline-size: var(--vx);
+  background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate));
+}
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
   background: var(--lit-accent);
 }
 

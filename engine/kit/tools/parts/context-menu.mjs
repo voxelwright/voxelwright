@@ -184,7 +184,9 @@ m = await read(p, 'log-menu');
 say(m.open && m.hash === '', 'let go, the menu stays, and the link under the finger is not followed');
 say(m.left >= 12 && m.right + m.made.lift <= 390 - 12 + 0.5 && m.label === 'deploy-213.log', `at 390 px it is inside the window (${Math.round(m.left)} to ${Math.round(m.right)})`);
 await p.screenshot({ path: 'shots/parts/context-menu/hand-long-390.png' });
-await touch('touchStart', 20, 20); await touch('touchEnd'); await p.waitForTimeout(200);
+const heading = await box(p, 'h1');
+await touch('touchStart', heading.x + heading.width / 2, heading.y + heading.height / 2);
+await touch('touchEnd'); await p.waitForTimeout(200);
 say(!(await read(p, 'log-menu')).open, 'a tap outside it closes it');
 // a finger that moves is scrolling, not asking for the menu
 await touch('touchStart', x, y);

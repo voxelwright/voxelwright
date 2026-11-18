@@ -8,7 +8,7 @@
 //   Object.assign(LOOKS.lit.parts, parts);
 //
 // Their CSS under the look is css/existing.css.
-import { halo, byTheme, ring, hole, bezel, lightName, UNDER, cap as capOf } from '../core/light.js';
+import { halo, byTheme, ring, hole, bezel, rowLens, lightName, UNDER, cap as capOf } from '../core/light.js';
 import { clamp, wrapLabel } from '../components/util.js';
 
 const rtl = (el) => getComputedStyle(el).direction === 'rtl';
@@ -83,42 +83,30 @@ const slider = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// List. Rows of words on the surface, parted by hairlines (CSS). The only voxels are the mark of
-// the current row: an accent groove at its start. Tool: none, and a groove.
-// bind (components/list.js) reads state.rows[i].li and .press, and rebuilds on any change under
-// the list, so build must not touch the DOM once the rows are wrapped.
+// List. Each row has a smoked lens at its leading edge. Selected lenses emit
+// light. The legend can depress without moving the socket.
 const list = {
   pad: 6,
   glowRadius: 2.8,
   glowStrength: halo(0.06),
 
   build(live, m) {
-    const { W, el, vx } = live, GROOVE = live.look.groove;
+    const { W, el, vx } = live;
     const rows = live.state.rows = [];
-    const marks = [];
+    const lens = m.part('lens');
     const x = rtl(el) ? W - 2 : 1;
     [...el.children].filter((n) => n.tagName === 'LI').forEach((li, i) => {
       const top = Math.round(li.offsetTop / vx), h = Math.max(2, Math.round(li.offsetHeight / vx));
       const current = li.getAttribute('aria-current') === 'true' || li.getAttribute('aria-selected') === 'true';
       const row = { li, part: null, current, press: live.spring('row' + i) };
       rows.push(row);
-      if (current && h > 4) marks.push([top + 2, h - 4]);
+      const inset = h > 4 ? 2 : 0;
+      rowLens(lens, x, top + inset, 1, h - inset * 2, current);
       // the words answer a press: they go a little way into the surface with it
       live.label(wrapLabel(li, 'vx-row'), () => row.press.x);
     });
     live.faceZ = 0;
-    if (!marks.length) return;
-    // One groove a current row, all in one column. The stage knows one hole a part, so the hole
-    // is the column from the first mark to the last, and each mark has its own walls and floor.
-    const walls = m.part('walls'), bed = m.part('floor');
-    walls.sunk = true; walls.tz = UNDER; bed.sunk = true;
-    for (const [y, h] of marks) {
-      walls.box(x - 1, y, -GROOVE, 1, h, GROOVE, 'light').box(x + 1, y, -GROOVE, 1, h, GROOVE, 'light');
-      bed.box(x - 1, y, -GROOVE - 1, 3, h, 1, 'light');
-    }
-    const first = marks[0], last = marks[marks.length - 1];
-    walls.box(x - 1, first[0] - 1, -GROOVE, 3, 1, GROOVE, 'light').box(x - 1, last[0] + last[1], -GROOVE, 3, 1, GROOVE, 'light');
-    live.well = [x, first[0], x + 1, last[0] + last[1]];
+
   },
 
   pose(live) {
