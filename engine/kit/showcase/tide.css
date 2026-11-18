@@ -9,8 +9,8 @@
 }
 .key-study .hardware { width: min(100%,20rem); padding: clamp(15px,2vw,26px); border-radius: 14px; }
 .key-study .faceplate { padding: clamp(16px,2.4vw,30px); border-radius: 7px; }
-.key-study .keybed { grid-template-columns: minmax(0,1fr); }
-.key-study .keybed .vx-button { --vx: 4px; height: 100px; font-size: 22px; }
+.key-study .keybed { grid-template-columns: minmax(0,1fr); width: min(100%,12rem); margin-inline: auto; }
+.key-study .keybed .vx-button[data-lamp] { --vx: 4px; width: 100%; height: auto; aspect-ratio: 1.18; font-size: 22px; }
 .key-study .keybed .vx-label { gap: 8px; }
 .key-study .keybed i { width: 22px; height: 4px; }
 .tester-controls { display: grid; gap: 1.2rem; }
