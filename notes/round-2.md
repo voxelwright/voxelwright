@@ -84,3 +84,10 @@ that live in this repo.
   with its history). It follows #430 / PR 431, the page stage, which owns the kit's block pass and also takes the
   shading changes (chamfer, light, gloss). PR 429's sync script and vendored copy are deleted when the kit lands.
   plant-a-seed's garden then copies the kit from a tagged Village commit.
+- The lead's conditions for the kit move are on #434:
+  - import from plant-a-seed main (5bf93a7 or later), never from the `font` branch; Vox Zakon stays in plant-a-seed
+    until its licence is settled;
+  - the glyph sets and type tools move with the kit;
+  - `engine/kit` ignores milestones/, shots/ and the skills folders before the first push;
+  - the garden's copy includes `showcase/showcase.css`.
+  The font thread has been told.
