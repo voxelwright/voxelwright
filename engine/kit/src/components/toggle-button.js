@@ -7,7 +7,7 @@
 
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { ring, hole, halo, byTheme, lightName } from '../core/light.js';
+import { ring, hole, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { listeners, wrapLabel } from './util.js';
 
 // the key's own numbers (looks/lit.js), so the two cannot be told apart at rest
@@ -61,7 +61,7 @@ export const toggleButton = {
       else {
         ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
         cap.grounded = false;
-        cap.slab(0, 0, LOW, W, H, depth - LOW, 'key', 1); // the cap stands on the ring, which ring() makes one voxel high
+        capOf(cap, 0, 0, LOW, W, H, depth - LOW, 'key'); // the cap stands on the ring, which ring() makes one voxel high
       }
       s.top = depth;
       live.faceZ = depth;

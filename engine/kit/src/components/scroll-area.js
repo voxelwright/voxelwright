@@ -1,7 +1,8 @@
-// Scroll area. A recess that scrolls; beside it, a thin trench with a small key in it that shows
-// where you are and can be dragged.
-// Tool: well. The recess is the kit's own (.vx-recess); this part is the bar: a trench cut in the
-// surface at the recess's far edge, and a key standing in it on the accent's light.
+// Scroll area. A recess that scrolls; beside it, a thin slot with a small knob in it that shows
+// where you are and can be dragged: a fader stood on end.
+// Tool: what slides. The recess is the kit's own (.vx-recess); this part is the bar: a slot cut in
+// the surface at the recess's far edge, in a steel bezel a voxel wide, and a knob standing in it
+// on the accent's light, ridged across to grip. The same device as the switch and the slider.
 // Markup: <div class="vx-scroll" style="--vx-scroll-h: 48">
 //           <div class="vx-recess vx-scroll-well">
 //             <div class="vx-scroll-view" tabindex="0" role="region" aria-label="Build log">…</div>
@@ -14,7 +15,7 @@
 // to go a page that way. It is hidden from a screen reader and takes no focus, and it goes when
 // there is nothing to scroll.
 
-import { hole, ring, halo, byTheme } from '../core/light.js';
+import { hole, ring, bezel, halo, byTheme, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE } from '../core/motion.js';
 import { listeners } from './util.js';
 
@@ -83,18 +84,26 @@ export const scrollArea = {
   glowStrength: halo(0.05),
 
   build(live, m) {
-    const { W, H, vx } = live, D = live.look.well, st = live.state.bar;
+    const { W, H, vx } = live, look = live.look, D = look.well, st = live.state.bar;
+    // The bezel is a voxel wide, not two: the bar is thin, and it stands two voxels from the recess.
+    bezel(m, 0, 0, W, H, { by: 1 });
     hole(live, m, { depth: D, wall: 'slate', floor: 'slate' });
     const L = st && !st.idle ? Math.round(st.len / vx) : 0;
+    // the knob stands on the floor of the slot, on its own light, a voxel clear of the walls; its
+    // top is as far above the surface as a key travels, as the slider's shoulder is, so it stands
+    // proud of the bezel
+    const top = look.travel;
     if (L && W > 2) {
-      // the key stands on the floor of the trench, on its own light, a voxel clear of the walls
       const key = m.part('key');
       key.grounded = false;
       ring(key, 1, 0, -D, W - 2, L, 'light');
-      key.box(1, 0, 1 - D, W - 2, L, live.look.rise - 1, 'key');
+      capOf(key, 1, 0, 1 - D, W - 2, L, D - 1 + top, 'ivory');
+      // ridges across its middle to grip: three, or one on a knob too short for three
+      const mid = Math.floor(L / 2);
+      for (const y of L >= 9 ? [mid - 2, mid, mid + 2] : [mid]) key.box(1, y, top, W - 2, 1, 1, 'ivory');
     }
-    // held, it goes down as far as a key does, and no further than level with the surface
-    live.state.down = Math.max(0, Math.min(live.look.travel, live.look.rise - D));
+    // held, it goes down as far as a key does, and no further than level with the bezel
+    live.state.down = Math.max(0, Math.min(look.travel, top - 1));
   },
 
   pose(live) {

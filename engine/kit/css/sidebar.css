@@ -1,0 +1,66 @@
+/* ---------- Sidebar ---------- */
+
+/* A column of links and groups beside the content: part of the window's surface, parted from the
+   rest by a standing groove. Its rows are navs (.vx-nav, a column with the accent groove).
+   Markup: <button class="vx-button" type="button" aria-controls="side" aria-expanded="true">Projects</button>
+           <div class="vx-sidebar" id="side">
+             <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="Workspace">
+               <p class="vx-nav-title">Projects</p>
+               <ul><li><a href="/harbor-api" aria-current="page">harbor-api</a></li> …</ul>
+             </nav>
+             <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+           </div>
+   Put it first in a row with the content (a flex or a grid row): it is 52 voxels wide
+   (--vx-sidebar-w) and as tall as the row. Folded away it has the hidden attribute. Under 768 px
+   it is not beside the content: its key brings it in over the page. A page that wants another
+   width for that sets --vx-sidebar-over to 1 or 0 on it by its own rule. */
+
+.vx-sidebar {
+  position: relative; isolation: isolate; display: flex; align-items: stretch; flex: none; box-sizing: border-box;
+  inline-size: calc(var(--vx) * var(--vx-sidebar-w, 52)); min-inline-size: 0; max-inline-size: 100%;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-sidebar > .vx-nav, .vx-sidebar-scroll { flex: 1 1 auto; min-inline-size: 0; }
+.vx-sidebar > .vx-nav, .vx-sidebar-scroll > .vx-nav { align-content: start; justify-content: flex-start; padding-inline-end: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 4); }
+/* a long one scrolls by itself. The room at its end is what the nav's own drawing reaches into,
+   so that it adds nothing to what can be scrolled. */
+.vx-sidebar-scroll { overflow: hidden auto; overscroll-behavior: contain; padding-block-end: calc(var(--vx) * 7); }
+.vx-sidebar-scroll > .vx-nav { padding-block-end: 0; }
+.vx-sidebar > .vx-groove { flex: none; }
+
+/* where it comes in over the page */
+@media (max-width: 767.98px) {
+  .vx-sidebar[data-vx-on] { --vx-sidebar-over: 1; }
+}
+
+/* over the page: the browser's own popover, at the edge the page starts from, as tall as the window */
+.vx-sidebar[popover] {
+  position: fixed; inset: 0 auto 0 0; margin: 0; border: 0; overflow: visible; background: none; color: var(--vx-ink);
+  block-size: 100dvh; max-block-size: none;
+  inline-size: min(calc(var(--vx) * 72), calc(100vw - var(--vx) * 14));
+  inline-size: min(calc(var(--vx) * 72), round(down, calc(100vw - var(--vx) * 14), var(--vx)));
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 3) calc(var(--vx) * 4) calc(var(--vx) * 4);
+}
+.vx-sidebar[popover]:dir(rtl) { inset: 0 0 0 auto; }
+.vx-sidebar[popover]:not(:popover-open, [data-vx-measure]) { display: none; }
+.vx-sidebar[popover][data-vx-measure] { visibility: hidden; }
+.vx-sidebar[popover]:focus-visible { outline: none; }
+.vx-sidebar[popover] > .vx-groove { display: none; } /* it is a surface of its own there: no edge to part */
+.vx-sidebar[popover]::backdrop { background: rgb(8 9 15 / 0.5); }
+/* it comes in from the edge, and goes the same way */
+.vx-sidebar[popover] { translate: -100% 0; transition: translate 200ms var(--vx-ease-out), overlay 200ms allow-discrete, display 200ms allow-discrete; }
+.vx-sidebar[popover]:dir(rtl) { translate: 100% 0; }
+.vx-sidebar[popover]:popover-open { translate: 0 0; }
+@starting-style {
+  .vx-sidebar[popover]:popover-open { translate: -100% 0; }
+  .vx-sidebar[popover]:popover-open:dir(rtl) { translate: 100% 0; }
+}
+.vx-sidebar[popover]::backdrop { opacity: 0; transition: opacity 200ms var(--vx-ease-out), overlay 200ms allow-discrete, display 200ms allow-discrete; }
+.vx-sidebar[popover]:popover-open::backdrop { opacity: 1; }
+@starting-style { .vx-sidebar[popover]:popover-open::backdrop { opacity: 0; } }
+/* plain: a painted surface */
+.vx-sidebar[popover]:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1.5) 0 0 var(--vx-shadow); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-sidebar[popover], .vx-sidebar[popover]::backdrop { transition: none; }
+}

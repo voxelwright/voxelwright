@@ -56,7 +56,7 @@ for (const mode of ['live', 'plain']) {
   await p.keyboard.type('mina', { delay: 20 });
   m = await state('mail');
   say(m.invalid === 'true' && m.shown, 'half an address is still wrong');
-  await p.keyboard.type('@harbor.dev', { delay: 20 });
+  await p.keyboard.type('@harbor.example', { delay: 20 });
   m = await state('mail');
   say(m.invalid === null && !m.tied && !m.shown && m.words === '', 'a whole address clears the mark, the message and the tie at once');
   if (mode === 'live') {
@@ -91,7 +91,7 @@ for (const mode of ['live', 'plain']) {
   // Enter sends
   await p.keyboard.press('Enter');
   await p.waitForTimeout(300);
-  say(await p.evaluate(() => document.getElementById('said').textContent) === 'Invite sent to mina@harbor.dev.', 'Enter sends a right form');
+  say(await p.evaluate(() => document.getElementById('said').textContent) === 'Invite sent to mina@harbor.example.', 'Enter sends a right form');
   m = await state('mail');
   say(m.invalid === null && !m.shown, 'and the form is at rest again');
 
@@ -111,7 +111,7 @@ for (const mode of ['live', 'plain']) {
   await p.keyboard.press('Tab');
   await p.waitForTimeout(250);
   s = await state('s-own');
-  const kept = await p.evaluate((live) => { const n = document.getElementById('s-own-error'); return !!n.querySelector(':scope > .vx-lamp') && (!live || !!n.querySelector(':scope > .vx-canvas')) && n.querySelector(':scope > .vx-field-error-text')?.textContent.length > 0; }, mode === 'live');
+  const kept = await p.evaluate((live) => { const n = document.getElementById('s-own-error'); return !!n.querySelector(':scope > .vx-lamp') && !n.querySelector(':scope > .vx-canvas') && (!!n.querySelector(':scope > .vx-lamp > .vx-canvas') === live) && n.querySelector(':scope > .vx-field-error-text')?.textContent.length > 0; }, mode === 'live');
   say(s.invalid === 'true' && s.tied && s.shown && s.words.length > 0 && kept, `a message with only a lamp in it is given the browser's words, beside the lamp ("${s.words}")`);
 
   if (mode === 'live') {

@@ -1,0 +1,54 @@
+/* ---------- Navbar ---------- */
+
+/* The bar across the top of a site or an app. It lies on a surface; its links are navs with the
+   accent groove; it has one key at the end at most, and one more that folds the links away
+   where the bar is narrow.
+   Markup: <header class="vx-card vx-navbar-surface" data-vx-bolts="none">
+             <div class="vx-navbar">
+               <a class="vx-navbar-brand" href="/">fogline</a>
+               <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="top">Menu</button>
+               <div class="vx-navbar-fold" id="top">
+                 <nav class="vx-nav" data-vx-mark="groove" aria-label="Main">…</nav>
+                 <a class="vx-button" data-vx-kind="main" href="/new">New project</a>
+               </div>
+             </div>
+           </header>
+   The bar folds by its own width (160 voxels), so one in a narrow column folds on a wide screen
+   too. Folding needs the script: without it (no data-vx-on) the links wrap and are never hidden. */
+
+/* a surface that is only a bar: three voxels above and below what is on it, room for a key's sides */
+.vx-card.vx-navbar-surface { padding: calc(var(--vx) * 3) calc(var(--vx) * 6); }
+
+.vx-navbar {
+  container: vx-navbar / inline-size;
+  position: relative; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 6); box-sizing: border-box; min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-card > .vx-navbar { margin-block-start: 0; }
+.vx-navbar-brand {
+  display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); margin: 0;
+  font: 700 1.0625rem/calc(var(--vx) * 6) var(--vx-font); letter-spacing: -0.005em; color: var(--vx-ink); text-decoration: none; overflow-wrap: anywhere;
+}
+a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
+.vx-navbar-fold { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 6); min-inline-size: 0; }
+.vx-navbar-fold > .vx-nav { flex: 0 1 auto; }
+/* the one key at the end */
+.vx-navbar-fold > .vx-button { margin-inline-start: auto; }
+/* the key that folds the links away: only where the bar is narrow, and only with the script */
+.vx-navbar-key { display: none; margin-inline-start: auto; }
+
+@container vx-navbar (max-width: 639.98px) {
+  .vx-navbar[data-vx-on] > .vx-navbar-key { display: inline-flex; }
+  .vx-navbar[data-vx-on] > .vx-navbar-key[aria-expanded="false"] ~ .vx-navbar-fold { display: none; }
+  /* out: a column under the bar, on the same surface */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold { flex: 1 0 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; row-gap: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-button { margin-inline-start: 0; align-self: start; }
+  /* plain: the groove stands at the start of the current link, as in any column */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+    inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+  }
+}

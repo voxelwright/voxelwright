@@ -111,9 +111,11 @@ ship(pack)</code></pre></div>
 <script type="module">
   // ?engine=spike draws with a throwaway copy of the engine's renderer kept in shots/engine-spike/
   // (not in the repository), where shading is being tried before it goes to the engine at its source
-  if (new URLSearchParams(location.search).get('engine') === 'spike') {
+  // ?engine=dist draws with the engine's own build, served under /engine/ (ENGINE_DIST), not the kit's copy
+  const which = new URLSearchParams(location.search).get('engine');
+  if (which === 'spike' || which === 'dist') {
     const { use } = await import('/packages/voxelmorphism/src/index.js');
-    const { renderer } = await import('/shots/engine-spike/blocks/renderer.js');
+    const { renderer } = await import(which === 'dist' ? '/engine/blocks/renderer.js' : '/shots/engine-spike/blocks/renderer.js');
     use(renderer());
   }
   await import('./skeuo-look.js');

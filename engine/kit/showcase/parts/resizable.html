@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resizable panels</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* what is in a pane is the page's own: words, in rows a whole number of voxels high */
+  .vx-resizable-pane { display: grid; align-content: start; gap: calc(var(--vx) * 2); line-height: calc(var(--vx) * 6); }
+  .vx-resizable-pane h3 { font-size: 1rem; line-height: calc(var(--vx) * 6); }
+  .vx-resizable-pane p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .names { list-style: none; margin: 0; padding: 0; display: grid; }
+  .names li { min-block-size: calc(var(--vx) * 8); display: flex; align-items: center; gap: calc(var(--vx) * 2); }
+  .names li[aria-current] { font-weight: 650; }
+  .state { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+  .state .vx-lamp { margin-inline-start: calc(var(--vx) * 1); }
+  .facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 0 calc(var(--vx) * 4); font-size: 0.9375rem; }
+  .facts dt { color: var(--vx-ink-quiet); }
+  .facts dd { margin: 0; }
+  .said { color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; min-block-size: calc(var(--vx) * 6); }
+  .cases { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; }
+  .case { display: grid; gap: calc(var(--vx) * 2); min-inline-size: 0; }
+  .case > h3 { font-size: 0.875rem; line-height: 1.3; font-weight: 600; color: var(--vx-ink-quiet); }
+  .short { block-size: calc(var(--vx) * 36); }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Resizable panels</h1>
+    <p class="what">Regions of one surface, parted by a groove you can drag. It turns to the accent while it is held, and keeps both regions above a least size.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the services of a project, and the one that is open</h2>
+    <div class="vx-resizable" id="use" style="--vx-split: 32%">
+      <div class="vx-resizable-pane" id="services" data-vx-min="24">
+        <h3>Services</h3>
+        <ul class="names">
+          <li aria-current="true">harbor-api</li>
+          <li>fogline</li>
+          <li>tide-worker</li>
+          <li>ferry-cron</li>
+        </ul>
+      </div>
+      <div class="vx-resizable-groove" id="use-groove" role="separator" aria-controls="services" aria-label="Width of the list of services" aria-valuenow="32"></div>
+      <div class="vx-resizable-pane" id="detail" data-vx-min="40">
+        <div class="state"><h3>harbor-api</h3><span class="vx-lamp"></span><span>Live</span></div>
+        <p>Mina deployed it from main four minutes ago. Ada asked for a review of the next build.</p>
+        <dl class="facts">
+          <dt>Region</dt><dd>Frankfurt</dd>
+          <dt>Replicas</dt><dd>3</dd>
+          <dt>Branch</dt><dd>main</dd>
+        </dl>
+      </div>
+    </div>
+    <p class="said" id="said" role="status">The list has 32% of the room.</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="cases">
+      <div class="case">
+        <h3>At rest, in halves</h3>
+        <div class="vx-resizable" id="rest">
+          <div class="vx-resizable-pane" id="rest-a"><h3>Build</h3><p>Runs the tests, then packs the image.</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="rest-a" aria-label="Width of the build notes" aria-valuenow="50"></div>
+          <div class="vx-resizable-pane"><h3>Deploy</h3><p>Rolls out one replica at a time.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>Held: the groove is the accent's</h3>
+        <div class="vx-resizable" id="held" style="--vx-split: 40%">
+          <div class="vx-resizable-pane" id="held-a"><h3>Staging</h3><p>fogline, built from the branch tide.</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="held-a" aria-label="Width of the staging notes" aria-valuenow="40" data-vx-held></div>
+          <div class="vx-resizable-pane"><h3>Production</h3><p>fogline, built from main.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>At its least: the first pane goes no narrower than 20 voxels</h3>
+        <div class="vx-resizable" id="least" style="--vx-split: calc(var(--vx) * 20)">
+          <div class="vx-resizable-pane" id="least-a" data-vx-min="20"><h3>Files</h3><p>12 changed</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="least-a" aria-label="Width of the file list" aria-valuenow="12"></div>
+          <div class="vx-resizable-pane" data-vx-min="24"><h3>server/routes.js</h3><p>The handler for a deploy hook, and the check of its signature.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>At its most: the second pane keeps its 24 voxels</h3>
+        <div class="vx-resizable" id="most" style="--vx-split: 86%">
+          <div class="vx-resizable-pane" id="most-a" data-vx-min="20"><h3>server/routes.js</h3><p>The handler for a deploy hook, and the check of its signature.</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="most-a" aria-label="Width of the open file" aria-valuenow="86"></div>
+          <div class="vx-resizable-pane" data-vx-min="24"><h3>Notes</h3><p>Ada: ship it.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>Stacked: a lying groove, moved with the up and down arrows</h3>
+        <div class="vx-resizable short" id="stack" data-vx-way="down" style="--vx-split: 45%">
+          <div class="vx-resizable-pane" id="stack-a" data-vx-min="10"><h3>Request</h3><p>POST /hooks/deploy, from the forge, signed.</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="stack-a" aria-label="Height of the request" aria-valuenow="45"></div>
+          <div class="vx-resizable-pane" data-vx-min="10"><h3>Response</h3><p>202 Accepted. The build is queued behind one other.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>Three panes: each groove moves the pane before it against the pane after it</h3>
+        <div class="vx-resizable" id="three" style="--vx-split: 28%">
+          <div class="vx-resizable-pane" id="three-a"><h3>Queue</h3><p>2 builds</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="three-a" aria-label="Width of the queue" aria-valuenow="28"></div>
+          <div class="vx-resizable-pane" id="three-b"><h3>Running</h3><p>harbor-api</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="three-b" aria-label="Width of what is running" aria-valuenow="28"></div>
+          <div class="vx-resizable-pane"><h3>Done</h3><p>fogline, tide-worker</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>Right to left: the first pane is on the right, and the arrows keep their own sides</h3>
+        <div class="vx-resizable" id="rtl" dir="rtl" lang="ar" style="--vx-split: 35%">
+          <div class="vx-resizable-pane" id="rtl-a"><h3>الخدمات</h3><p>واجهة الميناء</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="rtl-a" aria-label="عرض قائمة الخدمات" aria-valuenow="35"></div>
+          <div class="vx-resizable-pane"><h3>السجلات</h3><p>اكتمل البناء في 45 ثانية.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>A Ukrainian label, and a long word that must wrap</h3>
+        <div class="vx-resizable" id="long" lang="uk" style="--vx-split: 38%">
+          <div class="vx-resizable-pane" id="long-a" data-vx-min="20"><h3>Розгорнути на сервері</h3><p>harbor-api-production-eu-central-1</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="long-a" aria-label="Ширина списку" aria-valuenow="38"></div>
+          <div class="vx-resizable-pane" data-vx-min="20"><h3>Збірка триває близько хвилини</h3><p>Після неї сервіс перезапускається сам.</p></div>
+        </div>
+      </div>
+      <div class="case">
+        <h3>Fixed: a groove that cannot be moved takes no focus</h3>
+        <div class="vx-resizable" id="fixed" style="--vx-split: 30%">
+          <div class="vx-resizable-pane" id="fixed-a"><h3>Plan</h3><p>Team</p></div>
+          <div class="vx-resizable-groove" role="separator" aria-controls="fixed-a" aria-label="Width of the plan" aria-valuenow="30" aria-disabled="true"></div>
+          <div class="vx-resizable-pane"><h3>Seats</h3><p>8 of 10 taken.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { resizable } from '/packages/voxelmorphism/src/components/resizable.js';
+  // the page hears each change, as an app would to remember the split
+  const said = document.getElementById('said');
+  document.getElementById('use').addEventListener('vx-resize', (e) => { said.textContent = `The list has ${e.detail.value}% of the room.`; });
+  window.resized = [];
+  document.addEventListener('vx-resize', (e) => window.resized.push([e.target.closest('.vx-resizable').id, e.detail.value, e.detail.size]));
+  show(resizable);
+</script>
+</body>
+</html>

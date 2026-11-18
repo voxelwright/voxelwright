@@ -1,4 +1,4 @@
-// A person on the pagination page: a real mouse presses seats and keys, real keys walk the links,
+// A person on the pagination page: a real mouse presses the bank's buttons and the keys, real keys walk the links,
 // and the page's router says which page is current. Run in voxels and plain, then on a phone,
 // then with reduced motion. Says ok or FAIL for each thing that must hold.
 //   PORT=5989 node tools/parts/pagination.mjs
@@ -27,12 +27,18 @@ async function open({ width = 1180, plain = false, reduced = false } = {}) {
 const press = async (p, sel) => { await p.locator(sel).first().scrollIntoViewIfNeeded(); const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
 const current = (p, nav = '#pager') => p.evaluate((nav) => [...document.querySelectorAll(`${nav} [aria-current="page"]`)].map((a) => a.textContent).join(','), nav);
 const seats = (p, nav = '#pager') => p.evaluate((nav) => [...document.querySelectorAll(`${nav} ol > li`)].filter((li) => li.offsetParent).map((li) => (li.classList.contains('vx-pagination-gap') ? '…' : li.textContent.trim())).join(' '), nav);
-// where the key is drawn, and where the current seat is, in voxels from the trench's edge
+// which button of the bank is down (at), which is on its way down (target), and where the
+// current seat is, each as voxels from the slot's edge; whether the light is round that seat
 const key = (p, nav = '#pager') => p.evaluate((nav) => {
   const ol = document.querySelector(`${nav} ol`), l = window.vx.live(ol), cur = ol.querySelector('[aria-current="page"]');
   const seat = cur ? Math.round((cur.getBoundingClientRect().left - ol.getBoundingClientRect().left) / l.vx) : null;
-  const near = (v) => (Math.abs(v - Math.round(v)) < 0.01 ? Math.round(v) : v);
-  return { at: l.state.has ? near(l.model.byName.block.tx) : null, target: l.state.has ? l.spring('x').target : null, seat, well: l.well };
+  const seats = l.state.seats ?? [], up = l.state.up;
+  const down = seats.filter((q) => Math.abs(q.part.tz + up) < 0.01), going = seats.filter((q) => q.spring.target === -up);
+  const stand = seats.filter((q) => Math.abs(q.part.tz) < 0.01).length;
+  const light = l.model.byName.light;
+  let lit = null;
+  if (light?.count) { lit = Infinity; for (let i = 0; i < light.count; i++) lit = Math.min(lit, light.rest[i * 3] - 0.5); }
+  return { at: down.length === 1 ? down[0].x : null, target: going.length === 1 ? going[0].x : null, seat, lit, stand, caps: seats.length, up, well: l.well };
 }, nav);
 // everything of the part that reaches past the sheet's inner edge
 const outside = (p, sel) => p.evaluate((sel) => {
@@ -50,7 +56,7 @@ const outside = (p, sel) => p.evaluate((sel) => {
 for (const plain of [false, true]) {
   const tag = plain ? 'plain' : 'voxels';
   const p = await open({ plain });
-  say(await p.locator('.vx-pagination-pages[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no trench is drawn in voxels' : 'every trench is drawn in voxels'}`);
+  say(await p.locator('.vx-pagination-pages[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no bank is drawn in voxels' : 'every bank is drawn in voxels'}`);
   say(await current(p) === '5' && await seats(p) === '1 … 4 5 6 … 20', `${tag}: it starts on page 5 of 20: ${await seats(p)}`);
 
   // a real press on a seat
@@ -58,7 +64,7 @@ for (const plain of [false, true]) {
   await p.waitForTimeout(700);
   say(await current(p) === '6' && await p.textContent('#count') === 'Page 6 of 20', `${tag}: a press on seat 6 makes page 6 current (${await p.textContent('#count')})`);
   say(await seats(p) === '1 … 5 6 7 … 20', `${tag}: and the seats are written round it: ${await seats(p)}`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat && k.at !== null, `${tag}: the key is drawn in the current seat (key at ${k.at}, seat at ${k.seat})`); }
+  if (!plain) { const k = await key(p); say(k.at === k.seat && k.at !== null && k.lit === k.seat, `${tag}: the button that is down, on the light, is the current one (down at ${k.at}, light at ${k.lit}, seat at ${k.seat})`); say(k.stand === k.caps - 1 && k.up > 0, `${tag}: and every other page is a cap standing ${k.up} voxels above the surface (${k.stand} of ${k.caps})`); }
 
   if (!plain) {
     const off = await p.evaluate(() => {
@@ -100,8 +106,22 @@ for (const plain of [false, true]) {
   await press(p, '#pager [rel="next"]');
   await p.waitForTimeout(300);
   say(await current(p) === '20', `${tag}: pressing it does nothing`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the key is in the last seat (key at ${k.at}, seat at ${k.seat})`); }
-  if (!plain) say(await p.evaluate(() => { const ol = document.querySelector('#pager ol'); return ol.firstElementChild === window.vx.live(ol).canvas; }), `${tag}: the app wrote the list again, and the trench still has its canvas`);
+  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the last button is the one that is down (down at ${k.at}, seat at ${k.seat})`); }
+  if (!plain) say(await p.evaluate(() => { const ol = document.querySelector('#pager ol'); return ol.firstElementChild === window.vx.live(ol).canvas; }), `${tag}: the app wrote the list again, and the slot still has its canvas`);
+
+  // a button answers the hand before the link is followed, and comes back if the press is taken away
+  if (!plain) {
+    const a = p.locator('#few ol a').nth(1);
+    await a.scrollIntoViewIfNeeded();
+    const b = await a.boundingBox(), cx = b.x + b.width / 2, cy = b.y + b.height / 2;
+    const cap = () => p.evaluate(() => { const l = window.vx.live(document.querySelector('#few ol')); return { tz: l.state.seats[1].part.tz, up: l.state.up }; });
+    await p.mouse.move(cx, cy, { steps: 4 }); await p.mouse.down(); await p.waitForTimeout(180);
+    const held = await cap();
+    say(held.tz < -held.up * 0.8, `${tag}: held, a button goes down (${held.tz.toFixed(2)} of ${held.up} voxels)`);
+    await p.mouse.move(cx, cy + 90, { steps: 5 }); await p.mouse.up(); await p.waitForTimeout(450);
+    const freed = await cap();
+    say(Math.abs(freed.tz) < 0.05 && await current(p, '#few') === '1', `${tag}: the press taken away, it comes back up and the page is as it was (${freed.tz.toFixed(2)}, page ${await current(p, '#few')})`);
+  }
 
   // set from code: the mark follows the markup
   await p.evaluate(() => { const all = document.querySelectorAll('#few ol a'); all[0].removeAttribute('aria-current'); all[2].setAttribute('aria-current', 'page'); });
@@ -109,10 +129,10 @@ for (const plain of [false, true]) {
     const moving = await key(p, '#few');
     await p.waitForTimeout(700);
     const k = await key(p, '#few');
-    say(moving.target === k.seat && moving.at !== moving.target, `${tag}: aria-current set from code: the key sets off for the new seat (at ${moving.at?.toFixed(2)}, going to ${moving.target})`);
-    say(k.at === k.seat, `${tag}: and arrives (key at ${k.at}, seat at ${k.seat})`);
+    say(moving.target === k.seat && moving.at !== moving.target, `${tag}: aria-current set from code: the new button sets off down, and is not there yet (down at ${moving.at}, going down at ${moving.target})`);
+    say(k.at === k.seat && k.lit === k.seat && k.stand === k.caps - 1, `${tag}: and arrives, and the old one is up again (down at ${k.at}, seat at ${k.seat}, ${k.stand} of ${k.caps} standing)`);
     const none = await key(p, '#nocurrent');
-    say(none.at === null && none.well !== null, `${tag}: a trench with no current page has no key in it`);
+    say(none.at === null && none.lit === null && none.stand === none.caps && none.well !== null, `${tag}: a bank with no current page has no button down and no light`);
   } else {
     const painted = await p.evaluate(() => [...document.querySelectorAll('#few ol a')].map((a) => getComputedStyle(a).boxShadow !== 'none'));
     say(painted.join() === 'false,false,true', `${tag}: aria-current set from code: the painted key is on the new seat`);
@@ -141,7 +161,7 @@ for (const plain of [false, true]) {
   await press(p, '#pager ol a[href="#page-20"]');
   await p.waitForTimeout(600);
   say(await current(p) === '20' && await seats(p) === '1 … 18 19 20', `${tag}: a press on 20: ${await seats(p)}`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the key is in its seat (key at ${k.at}, seat at ${k.seat})`); }
+  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the button that is down is the current one (down at ${k.at}, seat at ${k.seat})`); }
   say(p.errors.length === 0, `${tag}: no errors` + (p.errors.length ? ': ' + [...new Set(p.errors)].join(' | ') : ''));
   await p.context().close();
 }
@@ -152,7 +172,7 @@ for (const plain of [false, true]) {
   await p.evaluate(() => { const all = document.querySelectorAll('#few ol a'); all[0].removeAttribute('aria-current'); all[2].setAttribute('aria-current', 'page'); });
   await p.waitForTimeout(60);
   const k = await key(p, '#few');
-  say(k.at === k.seat, `reduced motion: the key is in the new seat at once (key at ${k.at}, seat at ${k.seat})`);
+  say(k.at === k.seat && k.stand === k.caps - 1, `reduced motion: the new button is down at once, and the old one up (down at ${k.at}, seat at ${k.seat})`);
   await p.context().close();
 }
 

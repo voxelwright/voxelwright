@@ -1,6 +1,7 @@
 // Slider. A thumb riding a channel; the channel is lit behind it.
 // Markup: <span class="vx-slider"><input type="range" min="0" max="100" value="40"></span>
 
+import { inlineX, watchDirection } from '../plain.js';
 import { cue } from '../core/sound.js';
 import { listeners, clamp } from './util.js';
 
@@ -25,6 +26,7 @@ export const slider = {
     thumb.grounded = false;
     thumb.slab(0, 1, 1, THUMB, H - 2, 4, live.el.querySelector('input')?.disabled ? 'steel' : 'enamel', 1);
     live.faceZ = 2;
+    live.state.inlineX = inlineX(live);
     live.state.travel = W - THUMB;
   },
 
@@ -34,14 +36,15 @@ export const slider = {
     const min = Number(input.min || 0), max = Number(input.max || 100);
     const t = max > min ? clamp((Number(input.value) - min) / (max - min), 0, 1) : 0;
     const x = t * live.state.travel;
-    thumb.tx = x;
+    thumb.tx = live.state.inlineX(x, THUMB);
     thumb.tz = live.spring('press').x;
     const edge = x + THUMB / 2;
-    for (let i = 0; i < lit.count; i++) lit.scales[i] = Math.max(0, Math.min(1, edge - lit.rest[i * 3] + 0.5));
+    for (let i = 0; i < lit.count; i++) lit.scales[i] = Math.max(0, Math.min(1, edge - live.state.inlineX(lit.rest[i * 3], 0) + 0.5));
   },
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const input = live.el.querySelector('input');
     const press = live.spring('press');
     // while the pointer is down the thumb follows the value exactly: no easing

@@ -1,11 +1,12 @@
 // Toggle. A knob in a channel. Behind the knob the channel floor lights up: signal means on.
 // Markup: <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Label</label>
 
+import { inlineX, watchDirection } from '../plain.js';
 import { SLIDE } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
 
-const KNOB = 7;
+export const KNOB = 7;
 
 export const toggle = {
   name: 'toggle',
@@ -26,6 +27,7 @@ export const toggle = {
     knob.slab(0, 0, 1, KNOB, H - 2, 3, off ? 'steel' : 'ivory', 1);
     knob.ty = 1;
     live.faceZ = 1;
+    live.state.inlineX = inlineX(live);
     live.state.travel = W - 2 - KNOB;
     const s = live.spring('at', input?.checked ? 1 : 0, SLIDE.k, SLIDE.c);
     if (!s.moving) s.snap(input?.checked ? 1 : 0);
@@ -35,18 +37,19 @@ export const toggle = {
     const { knob, lit } = live.model.byName;
     const t = live.spring('at').x;
     const x = 1 + t * live.state.travel;
-    knob.tx = x;
+    knob.tx = live.state.inlineX(x, KNOB);
     knob.tz = live.spring('press').x;
-    // the floor is lit from the left wall up to the middle of the knob
+    // the floor is lit from the inline-start wall up to the middle of the knob
     const edge = x + KNOB / 2;
     for (let i = 0; i < lit.count; i++) {
-      const cx = lit.rest[i * 3];
+      const cx = live.state.inlineX(lit.rest[i * 3], 0);
       lit.scales[i] = t <= 0.001 ? 0 : Math.max(0, Math.min(1, edge - cx + 0.5));
     }
   },
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const input = live.el.parentElement.querySelector('input');
     const at = live.spring('at', input.checked ? 1 : 0, SLIDE.k, SLIDE.c);
     const press = live.spring('press');

@@ -23,7 +23,7 @@ const read = (id) => p.evaluate((id) => {
   const { thumb, lit, walls } = l.model.byName, r = el.getBoundingClientRect();
   let on = 0;
   for (let i = 0; i < lit.count; i++) if (lit.scales[i] > 0.5) on++;
-  return { value: Number(input.value), key: r.left + (thumb.tx + 2.5) * l.vx, down: thumb.tz, press: l.spring('press').target, lit: on / (lit.count || 1), trench: !!walls && !!l.well, left: r.left, right: r.right, y: r.top + r.height / 2, W: l.W, vx: l.vx };
+  return { value: Number(input.value), key: r.left + (thumb.tx + 3.5) * l.vx, down: thumb.tz, press: l.spring('press').target, lit: on / (lit.count || 1), trench: !!walls && !!l.well, left: r.left, right: r.right, y: r.top + r.height / 2, W: l.W, vx: l.vx };
 }, id);
 
 let s = await read('fine');
@@ -64,10 +64,10 @@ say(dragged.value > 250 && dragged.value < 350, `and the value is where it was l
 // the ends: the key stops inside the trench, and at the least nothing is lit
 await p.mouse.click(s.left + 1, s.y); await p.waitForTimeout(250);
 let end = await read('fine');
-say(end.value === 0 && end.lit === 0 && end.key - 2.5 * end.vx >= end.left + end.vx - 0.5, `at the least: value 0, nothing lit, the key a voxel inside the trench`);
+say(end.value === 0 && end.lit === 0 && end.key - 3.5 * end.vx >= end.left + end.vx - 0.5, `at the least: value 0, nothing lit, the key a voxel inside the trench`);
 await p.mouse.click(s.right - 1, s.y); await p.waitForTimeout(250);
 end = await read('fine');
-say(end.value === 1000 && end.lit > 0.9 && end.key + 2.5 * end.vx <= end.right - end.vx + 0.5, `at the most: value 1000, the trench lit, the key a voxel inside`);
+say(end.value === 1000 && end.lit > 0.9 && end.key + 3.5 * end.vx <= end.right - end.vx + 0.5, `at the most: value 1000, the trench lit, the key a voxel inside`);
 
 // keys
 await p.focus('#inst'); await p.keyboard.press('Shift+Tab'); await p.keyboard.press('Tab');

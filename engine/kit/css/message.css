@@ -1,0 +1,74 @@
+/* ---------- Message ---------- */
+
+/* One message: who, when, the words. Tool: none. It is words on the surface beside an avatar
+   (the kit's .vx-avatar); nothing is boxed and nothing stands up. No script.
+   Markup: <article class="vx-message" aria-labelledby="m1-who m1-when">
+             <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
+             <div class="vx-message-body">
+               <header class="vx-message-head">
+                 <span class="vx-message-who" id="m1-who">Mina Okafor</span>
+                 <time class="vx-message-when" id="m1-when" datetime="2026-11-17T10:42">10:42</time>
+               </header>
+               <div class="vx-message-text"><p>The words.</p></div>
+               <p class="vx-message-foot">Edited</p>                                  (optional: a line about the message)
+             </div>
+           </article>
+   The article is named by who and when (aria-labelledby), so a screen reader that moves from
+   message to message hears both; the avatar is then only a picture and is hidden from it.
+   data-vx-from="me"   yours: no avatar, set at the far side
+   data-vx-run         it follows one from the same person: the avatar and the head are not shown
+                       (the head is still written, and still read out)
+   What a message holds besides words goes in the body, under the text: a bubble (.vx-bubble, in
+   place of the text), attachments, a questionnaire, a trace. A thread of messages is a
+   role="log" (see message-scroller). */
+
+.vx-message {
+  display: grid;
+  grid-template-columns: calc(var(--vx) * 8) minmax(0, 1fr);
+  column-gap: calc(var(--vx) * 3);
+  align-items: start;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  margin: 0;
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  color: var(--vx-ink);
+}
+.vx-message > .vx-avatar { grid-column: 1; }
+.vx-message-body { grid-column: 2; display: grid; grid-template-columns: minmax(0, 1fr); row-gap: calc(var(--vx) * 1); justify-items: start; min-inline-size: 0; }
+.vx-message-body > * { max-inline-size: 100%; }
+
+/* who and when: one line of five voxels, the name first */
+.vx-message-head { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: calc(var(--vx) * 2); margin: 0; line-height: calc(var(--vx) * 5); overflow-wrap: anywhere; }
+.vx-message-who { font-size: 0.9375rem; font-weight: 650; }
+.vx-message-when { font-size: 0.8125rem; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+/* the words: the text face, six voxels a line. They select and copy as any words do. */
+.vx-message-text { font-size: 1rem; line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; text-wrap: pretty; }
+.vx-message-text > * { margin: 0; }
+.vx-message-text > :not(:first-child) { margin-block-start: calc(var(--vx) * 2); } /* stronger than a card's rule for paragraphs */
+.vx-message-text a { color: var(--vx-link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+.vx-message-text a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.vx-message-text code { font: 400 0.875em/1 var(--vx-mono); }
+
+/* a line about the message: edited, sending, not sent. A lamp (.vx-lamp) may lead it; the words
+   say the state, the lamp only repeats it. */
+.vx-message-foot { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 2); margin: 0; min-block-size: calc(var(--vx) * 5); font-size: 0.8125rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+/* a key in it (send again) stands clear of the words, so its light does not lie on them */
+.vx-message-foot > .vx-button { margin-inline-start: calc(var(--vx) * 2); }
+
+/* yours: no avatar, and what it holds is set at the far side. The words still start where
+   words start. */
+.vx-message[data-vx-from="me"] { grid-template-columns: minmax(0, 1fr); }
+.vx-message[data-vx-from="me"] > .vx-avatar { display: none; }
+.vx-message[data-vx-from="me"] > .vx-message-body { grid-column: 1; justify-items: end; }
+.vx-message[data-vx-from="me"] :is(.vx-message-head, .vx-message-foot) { justify-content: flex-end; }
+
+/* it follows one from the same person: only the words are shown. The head keeps its place in
+   the markup and is read out; it takes no room. */
+.vx-message[data-vx-run] > .vx-avatar { visibility: hidden; block-size: 0; }
+.vx-message[data-vx-run] .vx-message-head { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* messages one under another */
+.vx-message + .vx-message { margin-block-start: calc(var(--vx) * 5); }
+.vx-message + .vx-message[data-vx-run] { margin-block-start: calc(var(--vx) * 2); }

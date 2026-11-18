@@ -1,0 +1,31 @@
+/* ---------- Menubar ---------- */
+
+/* The row of words across the top of an app; each opens the kit's menu. The word whose menu is
+   out has the accent groove under it.
+   Markup: <ul class="vx-menubar" role="menubar" aria-label="harbor-api">
+             <li role="none">
+               <button type="button" role="menuitem" id="m-file-k" aria-haspopup="menu" aria-expanded="false" popovertarget="m-file">File</button>
+               <div class="vx-menu" id="m-file" popover role="menu" aria-labelledby="m-file-k">…</div>
+             </li> …
+           </ul> */
+
+.vx-menubar {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center; gap: 0 calc(var(--vx) * 1);
+  box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; list-style: none;
+  font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink-quiet);
+}
+.vx-menubar > li { display: contents; }
+.vx-menubar > li > [role="menuitem"], .vx-menubar > [role="menuitem"] {
+  position: relative; display: inline-flex; align-items: center; box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); min-inline-size: calc(var(--vx) * 11); justify-content: center; padding: calc(var(--vx) * 2) calc(var(--vx) * 3);
+  margin: 0; border: 0; border-radius: 0; background: none; color: inherit; font: 500 1rem/calc(var(--vx) * 6) var(--vx-font);
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-menubar > li > [role="menuitem"]:hover, .vx-menubar [role="menuitem"][aria-expanded="true"] { color: var(--vx-ink); }
+.vx-menubar > li > [role="menuitem"]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+
+/* plain: the groove is a painted line under the word whose menu is out */
+.vx-menubar:not([data-vx-live]) > li > [role="menuitem"][aria-expanded="true"]::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 3); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}

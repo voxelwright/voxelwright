@@ -4,7 +4,7 @@
 //         <div class="vx-menu" id="m" popover role="menu"><button role="menuitem">…</button>…</div>
 
 import { listeners, wrapLabel } from './util.js';
-import { keyTarget } from '../plain.js';
+import { menuAnchor, menuEnabled, menuTarget, watchDirection } from '../plain.js';
 
 export const menu = {
   name: 'menu',
@@ -35,6 +35,7 @@ export const menu = {
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const el = live.el;
     live.state.active = -1;
     const setActive = (i) => {
@@ -43,43 +44,32 @@ export const menu = {
       live.state.items?.forEach((it, j) => it.toggleAttribute('data-vx-active', j === i));
       live.invalidate();
     };
-    const invoker = () => document.querySelector(`[popovertarget="${el.id}"]`);
-    const place = () => {
-      const t = invoker();
-      if (!t) return [0, 0];
-      const r = t.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight, gap = live.vx * 3;
-      let left = r.left, top = r.bottom + gap, fromX = 0, fromY = 0;
-      if (left + w > innerWidth - 12) { left = Math.max(12, r.right - w); fromX = w; }
-      if (top + h > innerHeight - 12 && r.top - gap - h > 12) { top = r.top - gap - h; fromY = h; }
-      el.style.left = Math.round(left) + 'px';
-      el.style.top = Math.round(top) + 'px';
-      return [fromX / live.vx, fromY / live.vx];
-    };
+    const { invoker, put } = menuAnchor(el, on, () => live.vx * 3);
     on(el, 'toggle', (e) => {
       invoker()?.setAttribute('aria-expanded', String(e.newState === 'open'));
       if (e.newState !== 'open') { setActive(-1); return; }
-      const from = place();
+      // opened at a point (a context menu sets data-vx-from, in voxels), or by its trigger
+      const [x, y] = el.dataset.vxFrom && !invoker() ? el.dataset.vxFrom.split(' ').map((n) => Number(n) * live.vx) : put();
       live.rebuild();
       live.model.byName.pick.hidden = true;
-      live.play('assemble', ['panel'], { from, duration: 0.2, each: 0.14 });
+      live.play('assemble', ['panel'], { from: [x / live.vx, y / live.vx], duration: 0.2, each: 0.14 });
       const viaKey = invoker()?.matches(':focus-visible');
-      if (viaKey) { live.state.items[0]?.focus(); setActive(0); }
+      if (viaKey) live.state.items.find(menuEnabled)?.focus();
     });
-    on(el, 'pointermove', (e) => { const it = e.target.closest('[role^="menuitem"]'); setActive(it ? live.state.items.indexOf(it) : -1); });
+    on(el, 'pointermove', (e) => { const it = e.target.closest('[role^="menuitem"]'); setActive(menuEnabled(it) ? live.state.items.indexOf(it) : -1); });
     on(el, 'pointerleave', () => setActive(-1));
     on(el, 'focusin', (e) => { const i = live.state.items.indexOf(e.target); if (i >= 0) setActive(i); });
     on(el, 'keydown', (e) => {
-      const items = live.state.items, n = items.length;
-      if (!n) return;
+      const items = live.state.items;
       // from the item that has focus; the pointer may be resting somewhere else
-      const focused = items.indexOf(document.activeElement);
-      const to = keyTarget(e.key, focused >= 0 ? focused : live.state.active, n, ['ArrowDown', 'ArrowUp']);
-      if (to < 0) return;
+      const from = items.includes(document.activeElement) ? document.activeElement : items[live.state.active];
+      const to = menuTarget(e.key, items, from);
+      if (!to) return;
       e.preventDefault();
-      items[to].focus();
+      to.focus();
     });
     on(el, 'click', (e) => {
-      if (!e.target.closest('[role^="menuitem"]')) return;
+      if (!menuEnabled(e.target.closest('[role^="menuitem"]'))) return;
       const t = invoker();
       el.hidePopover();
       t?.focus();

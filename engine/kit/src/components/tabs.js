@@ -5,7 +5,7 @@
 import { SLIDE } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners, wrapLabel } from './util.js';
-import { chooseTab, keyTarget } from '../plain.js';
+import { chooseTab, keyTarget, tabKeys, watchDirection } from '../plain.js';
 
 export const tabs = {
   name: 'tabs',
@@ -41,6 +41,7 @@ export const tabs = {
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const el = live.el;
     // tell: false when nobody chose anything (the first pose, or the same tab again)
     const select = (i, glide, tell = true) => {
@@ -59,7 +60,7 @@ export const tabs = {
       if (t) select(live.state.tabs.indexOf(t), true);
     });
     on(el, 'keydown', (e) => {
-      const to = keyTarget(e.key, live.state.index, live.state.tabs.length, ['ArrowRight', 'ArrowLeft']);
+      const to = keyTarget(e.key, live.state.index, live.state.tabs.length, tabKeys(el));
       if (to < 0) return;
       e.preventDefault();
       select(to, false);

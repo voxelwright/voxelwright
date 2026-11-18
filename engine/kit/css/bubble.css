@@ -1,0 +1,54 @@
+/* ---------- Bubble ---------- */
+
+/* A message set as a bubble. Theirs is set a level into the surface; yours stands a voxel above
+   it. No light on either: a bubble is read, not pressed.
+   Markup: <div class="vx-bubble"><p>The words.</p></div>                      theirs
+           <div class="vx-bubble" data-vx-from="me"><p>The words.</p></div>    yours
+   In a message (.vx-message) it stands where the message's text would, and takes its side from
+   the message; data-vx-from on the bubble itself wins. It is as wide as its words and no wider
+   than its column, so on a phone it takes most of the width. Several in one message stand a
+   voxel apart. */
+
+.vx-bubble {
+  /* how much of the opening the wall takes: half a voxel for each voxel the hole is deep. The
+     part sets --vx-bubble-deep from the look; a well is two deep without it. */
+  --_wall: calc(var(--vx) * var(--vx-bubble-deep, 2) / 2);
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  inline-size: fit-content;
+  min-inline-size: calc(var(--vx) * 11);
+  max-inline-size: min(100%, calc(var(--vx) * 132));
+  margin: 0;
+  /* Theirs: the floor is seen up and to the left of the opening, and the wall shows along the
+     right and the bottom (the way the kit is looked at, whichever way the page reads), so the
+     words keep that much further from those two edges. A line is six voxels: a bubble of one
+     line is eleven voxels tall, and every edge is on the grid. */
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4 + var(--_wall)) calc(var(--vx) * 2 + var(--_wall)) calc(var(--vx) * 4);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: calc(var(--vx) * 6);
+  color: var(--vx-ink);
+  text-align: start;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.vx-bubble > * { margin: 0; }
+/* (written this way, not "* + *": a card's own rule for paragraphs is stronger than that, and the
+   voxels' canvas is a child of the bubble too) */
+.vx-bubble > :not(.vx-canvas) ~ :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 2); }
+.vx-bubble a { color: var(--vx-link); text-decoration-thickness: 1px; text-underline-offset: 0.18em; }
+.vx-bubble a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.vx-bubble code { font: 400 0.875em/1 var(--vx-mono); }
+
+/* yours: a plate a voxel high. Its face is the element's own box, so the words sit in its middle. */
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])) { padding: calc(var(--vx) * 2.5) calc(var(--vx) * 4); }
+
+/* in a message: bubbles one under another, a voxel apart */
+.vx-bubble + .vx-bubble { margin-block-start: calc(var(--vx) * 1); }
+
+/* plain: theirs is a painted floor with the wall along the right and the bottom; yours a painted
+   plate with its shadow */
+.vx-bubble:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset calc(var(--_wall) * -1) calc(var(--_wall) * -1) 0 var(--vx-slate); }
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }

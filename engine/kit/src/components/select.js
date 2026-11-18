@@ -6,14 +6,14 @@
 // The <select> is the control and stays one: it lies over the whole key, so every press, key and
 // touch goes to the browser, and the picker that opens is the browser's, on a phone as on a desk.
 
-import { ring, halo, byTheme, lightName } from '../core/light.js';
+import { ring, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
 import { listeners, wrapLabel } from './util.js';
 
 const GLOW = 0.075, REACH = 4.2; // a key's light, as the look's other keys have it
-const EDGE = 4;                  // voxels from the chevron to the end of the cap
+const EDGE = 5;                  // voxels from the chevron to the end of the cap: four on its top, which is a voxel smaller all round, as the words have before them
 const OPENS = [' ', 'Enter', 'ArrowDown', 'ArrowUp']; // the keys that open a picker, on one system or another
 const SHOWN = 0.14;              // seconds a press is shown for, however soon it is let go
 /** Is the select's picker open? null where the browser has no way to say (no select:open). */
@@ -40,9 +40,9 @@ export const select = {
       // key, and its halo on the surface round it
       ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
       cap.grounded = false;
-      cap.slab(0, 0, 1, W, H, depth - 1, 'key', 1);
+      capOf(cap, 0, 0, 1, W, H, depth - 1, 'key');
     }
-    // the chevron is set into the face at its far end, level with it: the face stays plain
+    // the chevron is set into the cap's top at its far end, level with it: the face stays plain
     const g = ICONS.chevron, rtl = getComputedStyle(el).direction === 'rtl';
     const gx = rtl ? EDGE : W - g[0].length - EDGE, gy = Math.round((H - g.length) / 2);
     if (W >= g[0].length + EDGE * 2) for (let j = 0; j < g.length; j++) for (let i = 0; i < g[j].length; i++) if (g[j][i] === '#') cap.plot(gx + i, gy + j, depth - 1, off ? 'slate' : 'ink');

@@ -1,6 +1,6 @@
 /* ---------- Skeleton ---------- */
 
-/* The region that is loading. Its trenches (.vx-bone) take the size of what is coming:
+/* The region that is loading. Its shallow slots (.vx-bone) take the size of what is coming:
    --vx-bone-w and --vx-bone-h are in voxels, so every edge lands on the grid. */
 .vx-skeleton { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: start; min-inline-size: 0; }
 .vx-bone {

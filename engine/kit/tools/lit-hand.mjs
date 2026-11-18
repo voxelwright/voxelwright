@@ -69,7 +69,7 @@ await press('#sub');
 await p.waitForTimeout(500);
 say(await p.evaluate(() => document.querySelector('#mail').getAttribute('aria-invalid')) === 'true', 'Subscribe with no address marks the field');
 await p.screenshot({ path: 'shots/lit/hand-invalid.png' });
-await p.keyboard.type('mina@saltmarsh.dev', { delay: 20 });
+await p.keyboard.type('mina@saltmarsh.example', { delay: 20 });
 say(await p.evaluate(() => document.querySelector('#mail').getAttribute('aria-invalid')) === null, 'typing clears the mark');
 await press('#sub');
 await p.waitForTimeout(500);

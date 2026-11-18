@@ -38,10 +38,10 @@ const p = await open();
 const groups = await p.evaluate(() => [...document.querySelectorAll('.vx-button-group')].map((g) => [g.getAttribute('role'), g.getAttribute('aria-label')]));
 say(groups.every(([r, n]) => r === 'group' && n), `every group is a group with a name (${groups.map((g) => g[1]).join(', ')})`);
 let g = await gaps(p, '[aria-label="Review"]');
-say(g.across.join() === '4,4' && g.rows === 1, `its keys are one voxel apart (${g.across.join(', ')} px)`);
+say(g.across.join() === '12,12' && g.rows === 1, `its keys are three voxels apart, the least that keeps each cap's side clear of the key before it (${g.across.join(', ')} px)`);
 g = await gaps(p, '[aria-label="Move"]');
 const widths = await p.evaluate(() => [...document.querySelector('[aria-label="Move"]').children].map((k) => k.offsetWidth));
-say(g.down.join() === '4,4' && new Set(widths).size === 1, `standing, they are one voxel apart and all as wide as the widest (${g.down.join(', ')} px; ${widths.join(', ')} px wide)`);
+say(g.down.join() === '12,12' && new Set(widths).size === 1, `standing, they are three voxels apart and all as wide as the widest (${g.down.join(', ')} px; ${widths.join(', ')} px wide)`);
 say(await p.evaluate(() => [...document.querySelectorAll('.vx-button-group .vx-button')].every((k) => window.vx.live(k)?.def.name === 'button')), 'each key is the kit\'s own, drawn by the kit\'s button');
 
 // each is still a key of its own: a real mouse, real keys
@@ -70,7 +70,7 @@ for (const plain of [false, true]) {
   const q = await open({ width: 390, plain });
   const w = await gaps(q, '[lang="uk"]');
   const side = await q.evaluate(() => { scrollTo(200, 0); const m = scrollX; scrollTo(0, 0); return m; });
-  say(w.rows > 1 && !w.cut && w.down.every((d) => d === 4) && side === 0, `at 390 px${plain ? ', plain' : ''}: the long row wraps to ${w.rows} rows a voxel apart, no key is cut, and the page does not move sideways`);
+  say(w.rows > 1 && !w.cut && w.down.every((d) => d === 12) && side === 0, `at 390 px${plain ? ', plain' : ''}: the long row wraps to ${w.rows} rows three voxels apart, no key is cut, and the page does not move sideways`);
   await q.context().close();
 }
 // ---- plain
@@ -78,7 +78,7 @@ for (const plain of [false, true]) {
   const q = await open({ plain: true });
   const k = await gaps(q, '[aria-label="Review"]');
   await press(q, '#undo');
-  say(k.across.join() === '4,4' && await said(q) === '2 changes since the last draft', 'plain: the same gaps, and the keys still press');
+  say(k.across.join() === '12,12' && await said(q) === '2 changes since the last draft', 'plain: the same gaps, and the keys still press');
   await q.context().close();
 }
 

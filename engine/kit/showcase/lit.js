@@ -227,7 +227,7 @@ function blog() {
       // only take the keyboard when nobody else is using it
       if (document.hasFocus() && (document.activeElement === document.body || stage.contains(document.activeElement))) mail.focus({ preventScroll: true });
       await h.wait(420);
-      for (const c of 'ada@fogline.dev') { mail.value += c; await h.wait(c === '@' || c === '.' ? 150 : 62 + (c.charCodeAt(0) % 5) * 9); }
+      for (const c of 'ada@fogline.example') { mail.value += c; await h.wait(c === '@' || c === '.' ? 150 : 62 + (c.charCodeAt(0) % 5) * 9); }
       await h.wait(380);
       await h.move(sub);
       await h.press(sub);

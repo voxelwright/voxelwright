@@ -1,0 +1,63 @@
+/* ---------- Drawer ---------- */
+
+/* The sheet (css/sheet.css holds what the two share), made for where the window is: up from the
+   bottom on a phone, in from the end on a wide screen. data-vx-side fixes one edge. Its handle
+   shows where it comes from the bottom or the top; a hand drags it shut by that.
+   Markup: see src/components/drawer.js. */
+
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]) {
+    --_side: bottom;
+    --_out: 0 calc(100% + var(--vx) * 6);
+    inset-block: auto 0;
+    inset-inline: 0;
+    inline-size: auto;
+    max-block-size: calc(100% - var(--vx) * 11);
+  }
+}
+
+/* The handle: a real key at its inner edge, the width of a thumb. The pull drawn on it is voxels
+   (drawer.js); its target is eleven voxels high, more than it shows. */
+dialog.vx-drawer > .vx-drawer-handle {
+  display: none;
+  position: relative;
+  order: -1; /* it is last in the markup, so that the focus does not land on it first */
+  flex: none;
+  align-self: center;
+  inline-size: calc(var(--vx) * 24);
+  block-size: calc(var(--vx) * 6);
+  margin: calc(var(--vx) * 2) 0 calc(var(--vx) * -2);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: grab;
+  touch-action: none; /* a finger on it drags the drawer; it does not scroll the page */
+  -webkit-tap-highlight-color: transparent;
+}
+dialog.vx-drawer > .vx-drawer-handle::after { content: ""; position: absolute; inset: calc(var(--vx) * -2.5) calc(var(--vx) * -4); }
+dialog.vx-drawer > .vx-drawer-handle:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+dialog.vx-drawer:is([data-vx-side="bottom"], [data-vx-side="top"]) > .vx-drawer-handle { display: block; }
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]) > .vx-drawer-handle { display: block; }
+}
+/* from the top, its inner edge is its lowest */
+dialog.vx-drawer[data-vx-side="top"] > .vx-drawer-handle { order: 1; margin: calc(var(--vx) * -2) 0 calc(var(--vx) * 3); }
+/* a header with a handle over it needs less room above its words */
+dialog.vx-drawer[data-vx-side="bottom"]:has(> .vx-drawer-handle) > header { padding-block-start: calc(var(--vx) * 1); }
+@media (max-width: 639.98px) {
+  dialog.vx-drawer:not([data-vx-side]):has(> .vx-drawer-handle) > header { padding-block-start: calc(var(--vx) * 1); }
+}
+
+/* while a hand holds it */
+dialog.vx-drawer[data-vx-dragging] { user-select: none; -webkit-user-select: none; }
+dialog.vx-drawer[data-vx-dragging] > .vx-drawer-handle { cursor: grabbing; }
+
+/* plain: the pull is painted, steel; held, the accent */
+dialog.vx-drawer:not([data-vx-live]) > .vx-drawer-handle::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--vx) * 2) calc(var(--vx) * 6);
+  background: var(--vx-steel);
+}
+dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::before { background: var(--lit-accent, var(--vx-enamel)); }

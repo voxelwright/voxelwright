@@ -1,0 +1,43 @@
+/* ---------- Marker ---------- */
+
+/* A line across a thread with a word in it: a date, "New". Tool: groove (the kit's .vx-groove),
+   one either side of the word. No script.
+   Markup: <div class="vx-marker">
+             <span class="vx-groove" aria-hidden="true"></span>
+             <span class="vx-marker-word"><time datetime="2026-11-17">Today</time></span>
+             <span class="vx-groove" aria-hidden="true"></span>
+           </div>
+   The word is read in its place in the thread; the grooves are only seen.
+   data-vx-kind="new"   where what has not been read begins. Its grooves carry the accent's light
+                        (a light means something: this marks a state), so write
+                        data-vx-light="accent" on both, and say what is new in words:
+                        <span class="vx-marker-word">New<span class="vx-aloud"> messages</span></span>
+   data-vx-align="start"  the word near the start, a short groove before it
+   A date keeps to the room's own warm light: it parts the thread and says nothing more. */
+
+.vx-marker {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  margin: 0;
+  /* five voxels a line and a voxel above and below: seven voxels, a groove through the middle */
+  padding-block: calc(var(--vx) * 1);
+  font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font);
+  color: var(--vx-ink-quiet);
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.vx-marker > .vx-groove { flex: 1 1 0; min-inline-size: calc(var(--vx) * 4); }
+.vx-marker > :not(.vx-groove) { flex: 0 1 auto; min-inline-size: 0; }
+.vx-marker[data-vx-align="start"] { text-align: start; }
+.vx-marker[data-vx-align="start"] > .vx-groove:first-child { flex: 0 0 calc(var(--vx) * 6); }
+
+/* new: the word is the accent's own colour for words */
+.vx-marker[data-vx-kind="new"] { color: var(--vx-link); }
+/* plain: its grooves are painted in the accent, whether or not the light was asked for */
+.vx-marker[data-vx-kind="new"] > .vx-groove:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* in a thread: room above and below, the same as between two people */
+:is(.vx-message, .vx-marker) + .vx-marker, .vx-marker + .vx-message { margin-block-start: calc(var(--vx) * 4); }

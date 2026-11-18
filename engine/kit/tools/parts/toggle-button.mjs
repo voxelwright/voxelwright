@@ -42,7 +42,10 @@ const differ = (p, a, b) => p.evaluate(async ([a, b]) => {
   const data = async (s) => { const i = new Image(); i.src = 'data:image/png;base64,' + s; await i.decode(); const c = document.createElement('canvas'); c.width = i.width; c.height = i.height; const g = c.getContext('2d'); g.drawImage(i, 0, 0); return [g.getImageData(0, 0, c.width, c.height).data, c.width, c.height]; };
   const [x, w, h] = await data(a), [y, w2, h2] = await data(b);
   if (w !== w2 || h !== h2) return -1;
-  let n = 0; for (let i = 0; i < x.length; i += 4) if (x[i] !== y[i] || x[i + 1] !== y[i + 1] || x[i + 2] !== y[i + 2]) n++;
+  // the panel behind the two keys is made of cubes, each a hair lighter or darker than the next, so the ground
+  // under one key is not the ground under the other: a pixel differs when it is more than that grain apart
+  const far = (i) => Math.abs(x[i] - y[i]) > 8;
+  let n = 0; for (let i = 0; i < x.length; i += 4) if (far(i) || far(i + 1) || far(i + 2)) n++;
   return n;
 }, [a, b]);
 const where = (p, sel) => p.evaluate((s) => { const e = document.querySelector(s); const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode()) && !n.textContent.trim()); const r = document.createRange(); r.selectNodeContents(n); const q = r.getBoundingClientRect(), k = e.getBoundingClientRect(); return [+(q.left - k.left).toFixed(2), +(q.top - k.top).toFixed(2), k.width, k.height]; }, sel);

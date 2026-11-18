@@ -19,7 +19,8 @@
   .log[data-wrap] .line { white-space: normal; overflow-wrap: anywhere; }
   .log .at { color: var(--vx-ink-quiet); margin-inline-end: 1.5ch; }
   .log:not([data-times]) .at { display: none; }
-  .state { display: grid; gap: calc(var(--vx) * 2); justify-items: start; }
+  /* a caption stands four voxels above what it names: a keycap's side and the light at its foot are drawn two and a half voxels above its face, and a bezel reaches two past its slot */
+  .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
   .row { align-items: start; }
 </style>

@@ -29,7 +29,7 @@
 <main class="vx-card sheet">
   <header>
     <h1>Pagination</h1>
-    <p class="what">A trench of seats. The current page is the key in it; previous and next are small keys beside it.</p>
+    <p class="what">A bank of latching buttons in a slot. The current page is the one that is down, on its light; previous and next are small keys beside it.</p>
   </header>
   <div class="vx-groove" role="separator"></div>
   <section>
@@ -94,7 +94,7 @@
         </ol>
         <a class="vx-button" rel="next" href="#m-1281" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
       </nav>
-      <h3>The trench alone, and one with no current page</h3>
+      <h3>The bank alone, and one with no current page</h3>
       <nav class="vx-pagination" aria-label="Without keys">
         <ol class="vx-pagination-pages">
           <li><a href="#t-1" aria-label="Page 1">1</a></li>
@@ -141,7 +141,7 @@
     const want = seats(page), have = [...list.querySelectorAll(':scope > li')];
     const same = have.length === want.length && want.every((q, i) => (q === 0) === have[i].classList.contains('vx-pagination-gap'));
     if (same) {
-      // the same seats: only their numbers and which is current change, so the key can slide
+      // the same seats: only their numbers and which is current change, so one button can come up and another go down
       want.forEach((q, i) => {
         if (!q) return;
         const a = have[i].firstElementChild;

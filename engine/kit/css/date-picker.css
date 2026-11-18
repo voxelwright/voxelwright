@@ -1,0 +1,38 @@
+/* ---------- Date picker ---------- */
+
+/* A well with the real date input, a small key beside it, and the calendar in a float.
+   Markup: <div class="vx-date">
+             <span class="vx-well"><input type="date" id="ship" aria-label="Ship on"></span>
+             <button class="vx-button" type="button" popovertarget="ship-pick" data-vx-say="Choose the day"><span class="vx-date-glyph" aria-hidden="true"></span></button>
+             <div class="vx-popover vx-date-float" id="ship-pick" popover role="dialog" aria-label="Ship on">
+               <div class="vx-calendar" data-vx-for="ship"></div>
+             </div>
+           </div> */
+.vx-date { display: inline-flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); max-inline-size: 100%; vertical-align: top; }
+/* a width, not a basis: a basis does not count when the row works out how wide it wants to be,
+   and the key would go to a line of its own with room to spare */
+.vx-date > .vx-well { flex: 0 1 auto; inline-size: calc(var(--vx) * 44); min-inline-size: 0; }
+.vx-date > .vx-well + .vx-well { inline-size: calc(var(--vx) * 40); }
+.vx-date > [popovertarget] { flex: none; inline-size: calc(var(--vx) * 11); padding: 0; }
+/* once the key stands in for it, the browser's own picker steps aside (typing stays the browser's) */
+.vx-date[data-vx-on] input::-webkit-calendar-picker-indicator { display: none; }
+/* the float is as wide as the month in it */
+.vx-popover.vx-date-float {
+  inline-size: min(calc(var(--vx) * 87), calc(100vw - var(--vx) * 6));
+  inline-size: min(calc(var(--vx) * 87), round(down, calc(100vw - var(--vx) * 6), var(--vx)));
+}
+
+/* A small calendar drawn in half-voxel cells: two rings, a bar, and four days. */
+.vx-date-glyph {
+  display: block;
+  inline-size: calc(var(--vx) * 3.5);
+  block-size: calc(var(--vx) * 3.5);
+  background: currentColor;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM5 0h1v1H5zM0 1h7v2H0zM0 3h1v4H0zM6 3h1v4H6zM1 6h5v1H1zM2 4h1v1H2zM4 4h1v1H4z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 7' shape-rendering='crispEdges'%3E%3Cpath d='M1 0h1v1H1zM5 0h1v1H5zM0 1h7v2H0zM0 3h1v4H0zM6 3h1v4H6zM1 6h5v1H1zM2 4h1v1H2zM4 4h1v1H4z'/%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+
+/* With no script the key could open only an empty float: it goes, and the input's own picker stays. */
+@media (scripting: none) {
+  .vx-date > [popovertarget] { display: none; }
+}

@@ -30,9 +30,7 @@ export const listGroup = {
     // two voxels short of the row at each end, one voxel in from the start of the line
     const inset = h > 4 ? 2 : 0;
     const x = getComputedStyle(el).direction === 'rtl' ? W - 2 : 1;
-    // the look has no number for a groove's depth yet (the kit's own groove is one voxel down);
-    // if it gets one, this follows it
-    hole(live, m, { x, y: top + inset, w: 1, h: h - inset * 2, depth: live.look.groove ?? 1, wall: 'light', floor: 'light' });
+    hole(live, m, { x, y: top + inset, w: 1, h: h - inset * 2, depth: live.look.groove, wall: 'light', floor: 'light' });
   },
 
   pose(live) { live.glowStrength = halo(0.05) * byTheme(live); },

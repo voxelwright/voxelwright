@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sidebar</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* a window: the sidebar and what it is beside, in one row on the sheet's own surface */
+  .window { display: flex; align-items: stretch; inline-size: 100%; min-inline-size: 0; }
+  .content { flex: 1 1 0; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; padding-block: calc(var(--vx) * 2) calc(var(--vx) * 4); }
+  .vx-sidebar:not([hidden], [popover]) + .content { padding-inline-start: calc(var(--vx) * 6); }
+  .content .top { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 5); }
+  .content h3 { font-size: 1.25rem; line-height: 1.25; }
+  .content p { color: var(--vx-ink-quiet); max-inline-size: 56ch; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); align-content: start; }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .short { block-size: calc(var(--vx) * 62); }
+  .state .vx-sidebar { --vx-sidebar-w: 44; }
+  /* the two small windows in "every state" stay beside their content on a phone too, so that
+     both can be looked at there; the one in use comes in over the page */
+  .state .vx-sidebar[data-vx-on] { --vx-sidebar-over: 0; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Sidebar</h1>
+    <p class="what">A column of links and groups beside the content: part of the window's surface, parted from the rest by a standing groove. A key folds it away. On a phone the same key brings it in over the page.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a workspace and its projects</h2>
+    <div class="window">
+      <div class="vx-sidebar" id="side">
+        <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="fogline">
+          <p class="vx-nav-title" id="side-projects">Projects</p>
+          <ul aria-labelledby="side-projects">
+            <li><a href="#harbor-api" aria-current="page">harbor-api</a></li>
+            <li><a href="#fog-site">fog-site</a></li>
+            <li><a href="#tide-worker">tide-worker</a></li>
+            <li><a href="#ferry-cron">ferry-cron</a></li>
+          </ul>
+          <p class="vx-nav-title" id="side-workspace">Workspace</p>
+          <ul aria-labelledby="side-workspace">
+            <li><a href="#team">Team <span class="vx-nav-trail">6</span></a></li>
+            <li><a href="#usage">Usage</a></li>
+            <li><a href="#uk" lang="uk">Розгорнути на сервері</a></li>
+          </ul>
+        </nav>
+        <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+      </div>
+      <div class="content">
+        <div class="top">
+          <button class="vx-button" id="side-key" type="button" aria-controls="side" aria-expanded="true">Sidebar</button>
+          <h3 id="name">harbor-api</h3>
+        </div>
+        <p id="about" role="status">Live. Build 4f2c9a1 went out four minutes ago and has answered every health check since.</p>
+        <p>The key folds the sidebar away and brings it back. On a narrow window it is not beside this at all: the key brings it in over the page.</p>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <p>Folded away as the page arrives: its key says so</p>
+        <div class="window">
+          <div class="vx-sidebar" id="away">
+            <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="Guide">
+              <a href="#install" aria-current="page">Install</a>
+              <a href="#configure">Configure</a>
+              <a href="#deploy">Deploy</a>
+            </nav>
+            <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+          </div>
+          <div class="content">
+            <div class="top"><button class="vx-button" id="away-key" type="button" aria-controls="away" aria-expanded="false">Guide</button></div>
+            <p>Install harbor-api with one line, then open harbor.toml.</p>
+          </div>
+        </div>
+      </div>
+      <div class="state">
+        <p>A long one in a short window scrolls by itself; a deeper link is set in</p>
+        <div class="window short">
+          <div class="vx-sidebar" id="long">
+            <div class="vx-sidebar-scroll" tabindex="0" role="region" aria-label="Settings, scrolls">
+              <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="Settings">
+                <a href="#general">General</a>
+                <a href="#domains">Domains</a>
+                <a href="#domains-dns" data-vx-level="2" aria-current="page">DNS records</a>
+                <a href="#domains-tls" data-vx-level="2">Certificates</a>
+                <a href="#secrets">Secrets <span class="vx-nav-trail">14</span></a>
+                <a href="#hooks">Hooks</a>
+                <a href="#members">Members</a>
+                <a href="#billing">Billing</a>
+              </nav>
+            </div>
+            <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+          </div>
+          <div class="content"><p>api.fogline.example points at harbor-api.</p></div>
+        </div>
+      </div>
+      <div class="state" dir="rtl" lang="ar">
+        <p>من اليمين إلى اليسار</p>
+        <div class="window">
+          <div class="vx-sidebar" id="rtl">
+            <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="المشاريع">
+              <a href="#ar-1" aria-current="page">واجهة الميناء</a>
+              <a href="#ar-2">موقع الضباب</a>
+              <a href="#ar-3">عامل المد</a>
+            </nav>
+            <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
+          </div>
+          <div class="content"><p>آخر نشر كان قبل أربع دقائق.</p></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { navs } from '/packages/voxelmorphism/src/components/navs.js';
+  import { sidebar } from '/packages/voxelmorphism/src/components/sidebar.js';
+  // The page stands in for a router: a link that is followed becomes the current one.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('.vx-nav a[href]');
+    if (!a) return;
+    for (const other of a.closest('.vx-nav').querySelectorAll('a')) if (other === a) other.setAttribute('aria-current', 'page'); else other.removeAttribute('aria-current');
+    if (a.closest('#side')) document.getElementById('name').textContent = a.firstChild.textContent.trim();
+  });
+  await show(navs, sidebar);
+  // ?over opens the one in use as the page arrives, for a picture of it over the page on a phone
+  if (new URLSearchParams(location.search).has('over')) document.getElementById('side-key').setAttribute('aria-expanded', 'true');
+</script>
+</body>
+</html>

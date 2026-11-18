@@ -1,7 +1,8 @@
 // Note card. A chalk slab two voxels proud of the page. data-vx-edge names a material for a spine
-// down its left side, which says what kind of note it is.
+// along its inline-start edge, which says what kind of note it is.
 // Markup: <article class="vx-card" data-vx-edge="leaf">...</article>
 
+import { inlineX, watchDirection } from '../plain.js';
 import { listeners } from './util.js';
 
 export const card = {
@@ -19,13 +20,15 @@ export const card = {
       const spine = m.part('spine');
       spine.grounded = false;
       const sw = live.look.round, sy = live.look.round; // the spine is as wide as the corner step, and starts below it
-      spine.box(0, sy, d, sw, H - sy * 2, 1, edge);
+      const x = inlineX(live);
+      spine.box(x(0, sw), sy, d, sw, H - sy * 2, 1, edge);
     }
     live.faceZ = d;
   },
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     on.watch(live.el, { attributes: true, attributeFilter: ['data-vx-edge'] }, () => live.rebuild());
     return on.done;
   },

@@ -16,7 +16,9 @@
    An add-on is a label of the same input: a press on it lands in the input, and it is read out as
    part of the input's name, in order ("Address https:// .fogline.app"). */
 
-.vx-input-group { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 4); min-inline-size: 0; }
+/* four voxels between the well and its key, beside it or under it: the key's side and the light
+   at its foot are drawn two and a half voxels left of and above its face, and stay clear of the rim */
+.vx-input-group { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 4); min-inline-size: 0; }
 /* The well asks for its words and 24 voxels to type in. Where the line cannot give that and the
    key too, the key goes to the next line and the well takes the whole of this one; the well
    itself gives way before the page scrolls sideways. */

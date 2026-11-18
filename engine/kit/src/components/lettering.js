@@ -23,6 +23,7 @@
 // data-vx-press="text"; a heading is "text". With less motion asked for, nothing breaks and
 // lettering is plain text to every gesture. vx-poke fires once for each press that breaks.
 
+import { inlineX, watchDirection } from '../plain.js';
 import { FONTS, measure, layout, voxels } from '../core/fonts/index.js';
 import '../core/fonts/sign.js';
 import '../core/fonts/sentence.js';
@@ -209,9 +210,11 @@ export const lettering = {
     const refine = el.dataset.vxRefine !== 'off';
     const mat = el.dataset.vxInk || (bare ? 'ink' : 'signal');
     const b = box(f);
+    const x = inlineX(live);
     let y = Math.round((H - b.h) / 2) + (bare ? 0 : f.margin * scale + 1) + f.over * scale;
     f.laid.forEach((line, i) => {
-      const x0 = bare ? 0 : Math.round((W - line.width * scale) / 2);
+      const width = line.width * scale;
+      const x0 = bare ? x(0, width) : Math.round((W - width) / 2);
       for (const { g, x } of line.glyphs) for (const [vx, vy] of voxels(g, scale, refine)) letters.box(x0 + x * scale + vx, y + vy, z, 1, 1, depth, mat);
       y += (font.cap + (f.gaps[i] ?? font.lineGap)) * scale;
     });
@@ -229,6 +232,7 @@ export const lettering = {
 
   bind(live) {
     const on = listeners();
+    watchDirection(live, on);
     const el = live.el;
     const size = () => {
       const vx = parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4;

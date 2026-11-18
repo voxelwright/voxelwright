@@ -15,7 +15,6 @@
 // is cleared as soon as what is typed is right. Words left empty are the browser's own, in the
 // reader's language. aria-invalid set from code is heard, and the message is tied or untied.
 
-import { listeners } from './util.js';
 
 const CONTROL = 'input, textarea, select';
 
@@ -76,12 +75,5 @@ function wire(note, on) {
 export const validation = {
   name: 'validation',
   selector: '.vx-field-error',
-  pad: 0,
-  build() {}, // nothing of its own to draw: the well and the lamp are parts already
-  bind(live) {
-    const on = listeners();
-    wire(live.el, on);
-    return on.done;
-  },
   plain: wire,
 };

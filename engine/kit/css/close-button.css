@@ -15,9 +15,11 @@
   /* it keeps the room its target takes, so that two targets never lie on each other. Where it
      must sit in a corner, take the margin off there: the target still reaches out. */
   margin: calc(var(--vx) * 2);
-  /* The cross is cut a voxel to the cell: three voxels in a face of seven, two clear on every
-     side. A glyph of the key face carries the gap after it and sits high in its line; a voxel
-     of indent and a voxel of padding above move it half a voxel each way, to the middle. */
+  /* The cross is cut a voxel to the cell: three voxels in the middle of a cap of seven. A
+     keycap's top is a voxel smaller all round, so on the top, which is five across, one voxel is
+     clear on every side of it. A glyph of the key face carries the gap after it and sits high in
+     its line; a voxel of indent and a voxel of padding above move it half a voxel each way, to
+     the middle. */
   font-size: calc(var(--vx) * 10);
   text-indent: var(--vx);
   padding-block-start: var(--vx);

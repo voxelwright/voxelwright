@@ -5,7 +5,10 @@
 import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM } from '../core/motion.js';
-import { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole } from '../core/light.js';
+import { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { inlineX } from '../plain.js';
+import { toggle, KNOB } from '../components/toggle.js';
+import { capIcon } from '../components/button.js';
 import { parts as existing } from './lit-existing.js';
 
 // ---------------------------------------------------------------------------------------------
@@ -29,8 +32,9 @@ const key = {
       // foot of the key, and its halo is the light on the surface round it
       ring(m.part('light'), 0, 0, 0, W, H, lightName(el, kind === 'danger' ? 'light-stop' : 'light'), 1);
       cap.grounded = false;
-      cap.slab(0, 0, 1, W, H, depth - 1, kind === 'main' ? 'enamel' : 'key', 1);
+      capOf(cap, 0, 0, 1, W, H, depth - 1, kind === 'main' ? 'enamel' : 'key');
     }
+    capIcon(live, cap, depth - 1, !off && kind === 'main' ? 'ivory' : 'ink');
     live.state.off = off;
     live.state.top = depth;
     live.faceZ = depth;
@@ -126,13 +130,22 @@ const bar = {
     live.state.built = true;
     live.state.posed = false;
     live.state.growth = false;
-    const T = 3, y = Math.floor((H - T) / 2), D = 2;
-    hole(live, m, { y, h: T, depth: D, wall: 'slate', floor: 'floor' });
-    // the light fills the trench to the level of the surface, so its halo lies on the surface
+    const T = 3, y = Math.floor((H - T) / 2), D = live.look.well;
+    hole(live, m, { y, h: T, depth: D, wall: 'slate', floor: 'slate' });
+    // A row of lamps in a slot: each is two voxels of light, a voxel apart. One that is not lit
+    // is a dark stud, so the scale can be read with nothing on. A lit one reaches the level of the
+    // surface, so its light lies on the surface.
+    const inlineStud = inlineX(live);
+    const studs = m.part('studs');
+    studs.sunk = true; studs.grounded = false;
     const fill = m.part('fill');
     fill.sunk = true; fill.grounded = false;
-    const mat = lightName(el, 'light');
-    for (let i = 0; i < W; i++) for (let j = 0; j < T; j++) for (let k = -D; k < 0; k++) fill.plot(i, y + j, k, mat, (i + 0.5) / W);
+    const mat = lightName(el, 'light'), n = Math.max(1, Math.floor((W + 1) / 3));
+    for (let i = 0; i < n; i++) {
+      const x = inlineStud(i * 3, 2);
+      studs.box(x, y, -D, 2, T, 1, 'steel');
+      for (let a = 0; a < 2; a++) for (let j = 0; j < T; j++) for (let k = -D; k < 0; k++) fill.plot(x + a, y + j, k, mat, (i + 0.5) / n);
+    }
   },
 
   pose(live) {
@@ -171,7 +184,9 @@ export const lamp = {
 
   build(live, m) {
     const { W, H, el } = live;
-    m.part('lamp').box(0, 0, 0, W, H, 1, lightName(el, 'light-go'));
+    // a lamp in its collar: the collar is a voxel wide and reaches past the element's box
+    m.part('collar').slab(-1, -1, 0, W + 2, H + 2, 1, 'steel', 1).carve(0, 0, 0, W, H, 1);
+    m.part('lamp').box(0, 0, 0, W, H, 2, lightName(el, 'light-go'));
     live.faceZ = 1;
   },
 
@@ -202,6 +217,12 @@ const surface = {
       body.grounded = false;
       body.slab(0, 0, 1, W, H, d, 'chalk', r);
     } else body.slab(0, 0, 0, W, H, d, 'chalk', r);
+    // a panel is bolted down: a stud near each corner of one large enough to be a panel
+    if (W >= 60 && H >= 40 && el.dataset.vxBolts !== 'none') {
+      const top = lit ? d + 1 : d, at = 4, bolts = m.part('bolts');
+      bolts.grounded = false;
+      for (const [x, y] of [[at, at], [W - at - 2, at], [at, H - at - 2], [W - at - 2, H - at - 2]]) bolts.box(x, y, top, 2, 2, 1, 'steel');
+    }
     live.faceZ = lit ? d + 1 : d;
   },
 
@@ -271,17 +292,17 @@ export const pointer = {
 // ---------------------------------------------------------------------------------------------
 // Switch. A trench with a key in it. On: the key is at the far end and the trench behind it is
 // full of light.
-const KNOB = 7;
-
 const switchPart = {
   pad: 7,
   glowRadius: 3,
   glowStrength: halo(0.05),
 
   build(live, m) {
-    const { W, H } = live, D = 2;
+    const { W, H } = live, D = live.look.well;
     const input = live.state.input = live.el.parentElement.querySelector('input');
     const off = input?.disabled;
+    // a slide switch: a bezel round a slot, a knob with ridges to grip, light in the slot behind it
+    bezel(m, 0, 0, W, H);
     hole(live, m, { depth: D, wall: 'slate', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true; lit.covered = true;
@@ -290,21 +311,17 @@ const switchPart = {
     const knob = m.part('knob');
     knob.grounded = false;
     if (!off) ring(knob, 0, 0, -D, KNOB, H - 2, 'light');
-    knob.slab(0, 0, 1 - D, KNOB, H - 2, D, off ? 'steel' : 'ivory', 1);
+    knob.slab(0, 0, 1 - D, KNOB, H - 2, D + 1, off ? 'steel' : 'ivory', 1);
+    for (const x of [1, 3, 5]) knob.box(x, 1, 2, 1, H - 4, 1, off ? 'steel' : 'ivory'); // three ridges across its top
     knob.ty = 1;
+    live.state.inlineX = inlineX(live);
     live.state.travel = W - 2 - KNOB;
     const s = live.spring('at', input?.checked ? 1 : 0);
     if (!s.moving) s.snap(input?.checked ? 1 : 0);
   },
 
   pose(live) {
-    const { knob, lit } = live.model.byName;
-    const t = live.spring('at').x;
-    const x = 1 + t * live.state.travel;
-    knob.tx = x;
-    knob.tz = live.spring('press').x;
-    const edge = x + KNOB / 2;
-    for (let i = 0; i < lit.count; i++) lit.scales[i] = t <= 0.001 ? 0 : Math.max(0, Math.min(1, edge - lit.rest[i * 3] + 0.5));
+    toggle.pose(live);
     live.glowStrength = halo(0.05) * byTheme(live);
   },
 };
@@ -318,14 +335,14 @@ const choice = {
   glowStrength: halo(0.07),
 
   build(live, m) {
-    const { W, H, el, vx } = live, D = 2;
+    const { W, H, el, vx } = live, D = live.look.well;
     const tabsEl = live.state.tabs = [...el.querySelectorAll(':scope > [role="tab"]')];
     hole(live, m, { depth: D, wall: 'slate', floor: 'slate' });
     const seat = live.state.seat = tabsEl.length ? Math.round(tabsEl[0].offsetWidth / vx) : W;
     const block = m.part('block');
     block.grounded = false;
     ring(block, 1, 1, -D, seat - 2, H - 2, 'light');
-    block.slab(1, 1, 1 - D, seat - 2, H - 2, D - 1, 'key', 1);
+    capOf(block, 1, 1, 1 - D, seat - 2, H - 2, D - 1, 'key');
     const index = Math.max(0, tabsEl.findIndex((t) => t.getAttribute('aria-selected') === 'true'));
     live.state.index = index;
     const xs = live.state.xs = tabsEl.map((t) => Math.round(t.offsetLeft / vx) + 1);
@@ -341,20 +358,23 @@ const choice = {
 
 // ---------------------------------------------------------------------------------------------
 defineLook('lit', {
-  quiet: true,
-  rise: 3, travel: 2, step: 0,
-  slab: 2, round: 2, float: 5, dialog: 6, well: 2,
+  // Objects, not flat faces: the cubes show on every face, slabs and caps are thick, a key is a
+  // keycap, what slides has a bezel, a panel is bolted down.
+  quiet: false,
+  rise: 5, travel: 2, step: 1,
+  slab: 4, round: 2, float: 6, dialog: 7, well: 2,
   light: {
-    day: { glow: FULL, seam: 0.04, shadow: [0.16, 0.13, 0.1, 0.24] },
-    night: { glow: FULL, seam: 0.06, sun: 0.5, shadow: [0, 0, 0.02, 0.6] },
+    day: { glow: FULL, seam: 0.05, shadow: [0.16, 0.13, 0.1, 0.24] },
+    night: { glow: FULL, seam: 0.085, sun: 0.5, shadow: [0, 0, 0.02, 0.6] },
   },
   materials: {
-    chalk: { day: '#f5f2e9', night: '#1b1e2d' },   // the surface
-    floor: { day: '#fbf9f2', night: '#0c0e18' },   // the bottom of a well
-    slate: { day: '#dcd8cb', night: '#11131f' },   // trays, trenches
-    steel: { day: '#cfcbbd', night: '#262938' },   // switched off
-    enamel: { day: '#2f5bff', night: '#3560f2' },  // the cap of the one main key
-    ivory: { day: '#fffefa', night: '#d7dbf0' },
+    chalk: { day: '#f5f2e9', night: '#1b1e2d', jitter: 0.006 },   // the surface
+    floor: { day: '#fbf9f2', night: '#0c0e18', jitter: 0.004 },   // the bottom of a well
+    slate: { day: '#dcd8cb', night: '#11131f', jitter: 0.008 },   // trays, trenches
+    steel: { day: '#c2beb0', night: '#30344a', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
+    enamel: { day: '#2f5bff', night: '#3560f2', jitter: 0.012 },  // the cap of the one main key
+    key: { day: '#fffefa', night: '#2b3046', jitter: 0.006 },     // an ordinary cap
+    ivory: { day: '#fffefa', night: '#d7dbf0', jitter: 0.006 },
     signal: { day: '#2f5bff', night: '#4d7dff', glow: 1 }, // what is on: the accent's light
   },
   parts: { button: key, field: well, meter: bar, card: surface, toast: notice, toggle: switchPart, tabs: choice, ...existing },

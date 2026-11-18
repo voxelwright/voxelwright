@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code input</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .sign { display: grid; gap: calc(var(--vx) * 4); justify-items: start; max-inline-size: calc(var(--vx) * 100); }
+  .sign h3 { font-size: 1.125rem; line-height: 1.3; }
+  .sign p, .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .sign label, .state > label { font-weight: 600; font-size: 0.9375rem; }
+  .field { display: grid; gap: calc(var(--vx) * 2); justify-items: start; }
+  .bad { display: flex; align-items: center; gap: calc(var(--vx) * 2); font-size: 0.9375rem; }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; gap: calc(var(--vx) * 2); align-content: start; justify-items: start; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Code input</h1>
+    <p class="what">A row of small windows, one a digit. The window the next digit goes into has the accent's light in its rim. It is one real input, so paste and a phone's offer of the code are the browser's own.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: signing in to fogline</h2>
+    <form class="sign" id="sign" onsubmit="return false">
+      <h3>Check your email</h3>
+      <p>We sent a code to mina@fogline.example. It works for ten minutes.</p>
+      <div class="field">
+        <label for="code">Code from the email</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required></span>
+      </div>
+      <button class="vx-button" type="submit" data-vx-kind="main">Sign in</button>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <label for="half">Half way</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="half" autocomplete="one-time-code" inputmode="numeric" maxlength="6" value="482"></span>
+      </div>
+      <div class="state">
+        <label for="full">Every window full</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="full" autocomplete="one-time-code" inputmode="numeric" maxlength="6" value="482915"></span>
+      </div>
+      <div class="state">
+        <label for="wrong">Wrong</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="wrong" autocomplete="one-time-code" inputmode="numeric" maxlength="6" value="482916" aria-invalid="true" aria-describedby="wrong-why"></span>
+        <p class="bad" id="wrong-why"><span class="vx-lamp" data-vx-light="stop"></span>That code is not the one we sent.</p>
+      </div>
+      <div class="state">
+        <label for="off">Used: it cannot be changed</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="off" autocomplete="one-time-code" inputmode="numeric" maxlength="6" value="301772" disabled></span>
+      </div>
+      <div class="state">
+        <label for="pair">Four letters and digits, from Ada's screen</label>
+        <span class="vx-otp" style="--vx-otp-n: 4"><input id="pair" autocomplete="off" inputmode="text" maxlength="4" autocapitalize="characters" spellcheck="false" value="K7Q"></span>
+      </div>
+      <div class="state" lang="uk">
+        <label for="uk">Код із листа, щоб розгорнути на сервері</label>
+        <span class="vx-otp" style="--vx-otp-n: 6"><input id="uk" autocomplete="one-time-code" inputmode="numeric" maxlength="6"></span>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { codeInput } from '/packages/voxelmorphism/src/components/code-input.js';
+  show(codeInput);
+</script>
+</body>
+</html>

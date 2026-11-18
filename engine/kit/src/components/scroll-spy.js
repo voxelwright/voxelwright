@@ -12,7 +12,6 @@
 // It only watches: it marks the current link with aria-current and never scrolls anything. A
 // link pressed is the browser's own jump. With no script the link marked in the markup shows.
 
-import { listeners } from './util.js';
 
 /** What scrolls a section: the nearest ancestor that scrolls up and down, or null for the page. */
 function scrollerOf(node) {
@@ -115,17 +114,5 @@ function wire(el, on) {
 export const scrollSpy = {
   name: 'scroll-spy',
   selector: '.vx-spy',
-  pad: 0,
-
-  // no voxels of its own: the words are words, and the mark is a groove, which is a part already
-  build() {},
-
-  bind(live) {
-    live.canvas.hidden = true; // nothing is drawn on it
-    const on = listeners();
-    wire(live.el, on);
-    return on.done;
-  },
-
-  plain(el, on) { wire(el, on); },
+  plain: wire,
 };

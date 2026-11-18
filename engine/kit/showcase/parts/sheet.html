@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sheet</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .deploys { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
+  .stack { display: grid; gap: calc(var(--vx) * 3); justify-items: start; }
+  .links { display: grid; gap: calc(var(--vx) * 1); list-style: none; padding: 0; margin: 0; }
+  .links a { display: flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: var(--vx-ink); font-weight: 500; text-decoration: none; }
+  .links a:hover { text-decoration: underline; text-underline-offset: 0.2em; }
+  .links a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+  .log { margin: 0; font: 400 0.875rem/calc(var(--vx) * 6) var(--vx-mono); color: var(--vx-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Every state: a sheet at each edge of a small window, standing open so that it can be looked
+     at. These are not modal, do not slide, and are as wide as the small window allows. */
+  .frames { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--vx) * 5) calc(var(--vx) * 6); inline-size: 100%; }
+  .frames h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-end: calc(var(--vx) * 2); }
+  .frame { position: relative; isolation: isolate; overflow: clip; block-size: calc(var(--vx) * 60); background: var(--vx-ground); color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .frame > p { padding: calc(var(--vx) * 4) calc(var(--vx) * 5) 0; }
+  .frame::after { content: ""; position: absolute; inset: 0; background: rgb(8 9 15 / 0.5); }
+  .frame dialog[open] { position: absolute; z-index: 1; --_w: calc(var(--vx) * 44); transition: none; }
+  @media (max-width: 600px) { .frames { grid-template-columns: minmax(0, 1fr); } }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Sheet</h1>
+    <p class="what">A panel that comes in from an edge of the window and lies a level above the page, over a scrim. Escape, its keys and a press on the scrim send it back.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the deploys of harbor-api</h2>
+    <div class="row">
+      <button class="vx-button" id="open-filters" commandfor="filters" command="show-modal">Filters</button>
+      <span class="chosen" id="result" role="status">Showing every deploy</span>
+    </div>
+    <div class="deploys">
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 213</span><span class="vx-item-line">main at 4f2c9a1, by Mina, four minutes ago</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></span></div>
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 212</span><span class="vx-item-line">fogline-cache at 9be01d7, by Ada, yesterday</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></span></div>
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 211</span><span class="vx-item-line">main at 77c2e40, by Mina, two days ago</span></span><span class="vx-item-trail">Replaced</span></div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <p class="what">One from each edge. The start and the end follow the direction of the writing.</p>
+    <div class="row">
+      <button class="vx-button" id="open-top" commandfor="s-top" command="show-modal">From the top</button>
+      <button class="vx-button" id="open-end" commandfor="filters" command="show-modal">From the end</button>
+      <button class="vx-button" id="open-bottom" commandfor="s-bottom" command="show-modal">From the bottom</button>
+      <button class="vx-button" id="open-start" commandfor="s-start" command="show-modal">From the start</button>
+    </div>
+    <div class="frames">
+      <div>
+        <h3>At the end</h3>
+        <div class="frame">
+          <p>harbor-api: 213 deploys, the last one four minutes ago.</p>
+          <dialog class="vx-sheet" open aria-labelledby="f-end-h">
+            <header><h2 id="f-end-h">Filters</h2></header>
+            <div class="vx-sheet-body"><p>Only what failed, on main.</p></div>
+            <footer><button class="vx-button" data-vx-kind="main" type="button">Apply</button></footer>
+          </dialog>
+        </div>
+      </div>
+      <div>
+        <h3>At the start</h3>
+        <div class="frame">
+          <p style="text-align: end">harbor-api: 213 deploys, the last one four minutes ago.</p>
+          <dialog class="vx-sheet" open data-vx-side="start" aria-labelledby="f-start-h">
+            <header><h2 id="f-start-h" lang="uk">Розгорнути на сервері</h2></header>
+            <div class="vx-sheet-body"><p>Deploys, logs, settings, team.</p></div>
+          </dialog>
+        </div>
+      </div>
+      <div>
+        <h3>At the top</h3>
+        <div class="frame">
+          <dialog class="vx-sheet" open data-vx-side="top" aria-labelledby="f-top-h">
+            <header><h2 id="f-top-h">Maintenance on Saturday</h2></header>
+            <div class="vx-sheet-body"><p>Deploys wait from 02:00 to 03:00.</p></div>
+          </dialog>
+        </div>
+      </div>
+      <div>
+        <h3>At the bottom</h3>
+        <div class="frame">
+          <p>harbor-api: 213 deploys, the last one four minutes ago.</p>
+          <dialog class="vx-sheet" open data-vx-side="bottom" aria-labelledby="f-bottom-h">
+            <header><h2 id="f-bottom-h">Build 213</h2></header>
+            <div class="vx-sheet-body"><p>Passed its tests in 48 seconds.</p></div>
+          </dialog>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog class="vx-sheet" id="filters" aria-labelledby="filters-h">
+  <header><h2 id="filters-h">Filters</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close filters">×</button></header>
+  <div class="vx-sheet-body">
+    <form method="dialog" id="filters-form" class="stack">
+      <label class="vx-check"><input type="checkbox" name="failed"><span class="vx-box"></span>Only what failed</label>
+      <label class="vx-check"><input type="checkbox" name="mine"><span class="vx-box"></span>Only mine</label>
+      <label class="vx-check"><input type="checkbox" name="live" checked><span class="vx-box"></span>Keep the live one in sight</label>
+      <label class="vx-field"><span class="vx-field-label">Branch</span><span class="vx-well"><input type="text" name="branch" id="branch" value="main" autocomplete="off"></span></label>
+    </form>
+  </div>
+  <footer>
+    <button class="vx-button" type="button" data-vx-close="reset">Reset</button>
+    <button class="vx-button" data-vx-kind="main" form="filters-form" value="apply">Apply</button>
+  </footer>
+</dialog>
+
+<dialog class="vx-sheet" id="s-top" data-vx-side="top" aria-labelledby="s-top-h">
+  <header><h2 id="s-top-h">Maintenance on Saturday</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close the notice">×</button></header>
+  <div class="vx-sheet-body"><p>Deploys wait from 02:00 to 03:00 while fogline moves to its new region. What is live stays live.</p></div>
+  <footer><button class="vx-button" type="button" data-vx-close="read">Got it</button></footer>
+</dialog>
+
+<dialog class="vx-sheet" id="s-bottom" data-vx-side="bottom" aria-labelledby="s-bottom-h">
+  <header><h2 id="s-bottom-h">Build 213</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close the log">×</button></header>
+  <div class="vx-sheet-body"><pre class="log">10:24:31  Cloning harbor-api at 4f2c9a1
+10:24:42  Installing 212 packages
+10:25:17  48 tests passed
+10:25:20  Deployed to harbor-api.fogline.example</pre></div>
+  <footer><button class="vx-button" type="button" data-vx-close="done">Done</button></footer>
+</dialog>
+
+<dialog class="vx-sheet" id="s-start" data-vx-side="start" aria-labelledby="s-start-h">
+  <header><h2 id="s-start-h">harbor-api</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close the menu">×</button></header>
+  <div class="vx-sheet-body">
+    <ul class="links">
+      <li><a href="#deploys">Deploys</a></li>
+      <li><a href="#logs">Logs</a></li>
+      <li><a href="#settings">Settings</a></li>
+      <li><a href="#team">Team</a></li>
+    </ul>
+  </div>
+</dialog>
+
+<script type="module">
+  import { show } from './parts.js';
+  import { sheet } from '/packages/voxelmorphism/src/components/sheet.js';
+  const $ = (id) => document.getElementById(id);
+  const said = { apply: 'Filters applied', reset: 'Showing every deploy', cancel: 'Filters left as they were' };
+  $('filters').addEventListener('close', () => { $('result').textContent = said[$('filters').returnValue] ?? 'Filters left as they were'; });
+  show(sheet);
+</script>
+</body>
+</html>

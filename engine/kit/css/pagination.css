@@ -1,7 +1,8 @@
 /* ---------- Pagination ---------- */
 
-/* A trench of seats: the current page is the key in it, level with the surface on its light.
-   Previous and next are small keys beside the trench.
+/* A bank of latching buttons in a slot: every page is a keycap, and the current page is the one
+   that is down, level with the surface, on its light. Previous and next are small keys beside
+   the slot.
    Markup: <nav class="vx-pagination" aria-label="Pages of deploys">
              <a class="vx-button" rel="prev" href="?page=4" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
              <ol class="vx-pagination-pages">
@@ -36,7 +37,7 @@
 .vx-pagination:dir(rtl) > [rel~="next"] .vx-pagination-chevron { transform: scaleX(-1); }
 .vx-pagination:dir(rtl) > [rel~="prev"] .vx-pagination-chevron { transform: none; }
 
-/* the trench */
+/* the slot, and the buttons in it */
 .vx-pagination-pages { position: relative; isolation: isolate; display: flex; box-sizing: border-box; block-size: calc(var(--vx) * 11); margin: 0; padding: 0; list-style: none; }
 .vx-pagination-pages > li { display: flex; }
 .vx-pagination-pages > li > a, .vx-pagination-gap {
@@ -49,7 +50,7 @@
 .vx-pagination-pages > li > a { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .vx-pagination-pages > li > a:hover { color: var(--lit-legend, var(--vx-ink)); }
 .vx-pagination-pages > li > a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend, var(--vx-ink)); cursor: default; }
-/* no light of its own to brighten on a seat down in the trench: the browser's ring, inside it */
+/* a button in the bank has no light of its own to brighten: the browser's ring, inside its seat */
 .vx-pagination-pages > li > a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
 /* the gap is not pressed, so it need not be as wide as a seat */
 .vx-pagination-gap { min-inline-size: calc(var(--vx) * 6); padding-inline: calc(var(--vx) * 1); }
@@ -59,6 +60,6 @@
   .vx-pagination-pages > li[data-vx-when="wide"] { display: none; }
 }
 
-/* plain: a painted trench; the current seat is a painted key with the accent under it */
+/* plain: a painted slot; the current seat is a painted key with the accent under it */
 .vx-pagination-pages:not([data-vx-live]) { background: var(--vx-slate); }
 .vx-pagination-pages:not([data-vx-live]) > li > a[aria-current]:not([aria-current="false"]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate); }

@@ -53,10 +53,14 @@ say(b.to > b.W - 1 && near(b.from / b.W, 0.7, 0.03), `meter, right to left, 30%:
 // ---- slider: a real press at 80% of its width
 const slide = async (sel) => {
   await show(p, sel);
+  // start in the middle, so the press lands on the track and not on the thumb; the lit fader's
+  // knob is 7 voxels wide, the base thumb 5, and its middle is measured as such
+  await p.evaluate((sel) => { const i = document.querySelector(sel + ' input'); i.value = 50; i.dispatchEvent(new Event('input', { bubbles: true })); }, sel);
+  await p.waitForTimeout(150);
   const r = await p.locator(sel).boundingBox(), x = r.x + r.width * 0.8, y = r.y + r.height / 2;
   await p.mouse.click(x, y);
   await p.waitForTimeout(350);
-  const s = await p.evaluate((sel) => { const el = document.querySelector(sel), l = window.vx.live(el), t = l.model.byName.thumb; return { value: Number(el.querySelector('input').value), thumb: el.getBoundingClientRect().left + (t.tx + 2.5) * l.vx }; }, sel);
+  const s = await p.evaluate((sel) => { const el = document.querySelector(sel), l = window.vx.live(el), t = l.model.byName.thumb; return { value: Number(el.querySelector('input').value), thumb: el.getBoundingClientRect().left + (t.tx + (l.well ? 3.5 : 2.5)) * l.vx }; }, sel);
   await p.evaluate((sel) => { document.querySelector(sel + ' input').value = 20; }, sel);
   return { ...s, x };
 };
@@ -95,7 +99,9 @@ const icon = (sel, look) => p.evaluate(([sel, look]) => {
   if (look) el.style.setProperty('--vx-look', look); else el.style.removeProperty('--vx-look');
   const l = window.vx.live(el); l.rebuild();
   const cap = l.model.byName.cap, xs = [];
-  for (let i = 0; i < cap.count; i++) if (cap.rest[i * 3 + 2] > l.state.top) xs.push(cap.rest[i * 3]);
+  // a relief stands above the cap (the base look); an inlay is set flush into its top layer, in ink (the lit look)
+  const ink = window.vx.MATERIALS?.ink?.id;
+  for (let i = 0; i < cap.count; i++) if (cap.rest[i * 3 + 2] > l.state.top || (ink !== undefined && cap.mats[i] === ink && cap.rest[i * 3 + 2] === l.state.top - 0.5)) xs.push(cap.rest[i * 3]);
   const r = el.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(el.querySelector('.vx-label')); const w = range.getBoundingClientRect();
   const cs = getComputedStyle(el);
   return { glyph: xs.length ? [r.left + Math.min(...xs) * l.vx, r.left + (Math.max(...xs) + 0.5) * l.vx] : null, words: [w.left, w.right], box: [r.left, r.right], pad: [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)] };
@@ -111,10 +117,13 @@ await icon(ltr('p-button', '[data-vx-icon]'), ''); await icon(rtl('p-button', '[
 // ---- the kit's list: its mark and its padding
 const tray = (sel) => p.evaluate((sel) => {
   const el = document.querySelector(sel), l = window.vx.live(el), row = l.model.byName.row0;
+  const cs = getComputedStyle(el.querySelector('.vx-row'));
+  const pad = [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)];
+  // the lit look draws the mark as a groove (a hole) at the row's start
+  if (!row && l.well) return { W: l.W, mark: [l.well[0], l.well[2] - 1], pad };
   let top = -Infinity; for (let i = 0; i < row.count; i++) top = Math.max(top, row.rest[i * 3 + 2]);
   const xs = []; for (let i = 0; i < row.count; i++) if (row.rest[i * 3 + 2] === top) xs.push(row.rest[i * 3]);
-  const cs = getComputedStyle(el.querySelector('.vx-row'));
-  return { W: l.W, mark: [Math.min(...xs), Math.max(...xs)], pad: [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)] };
+  return { W: l.W, mark: [Math.min(...xs), Math.max(...xs)], pad };
 }, sel);
 a = await tray(ltr('p-list', '.vx-list')); b = await tray(rtl('p-list', '.vx-list'));
 say(a.mark[1] < 4 && a.pad[0] > a.pad[1], `list, left to right: the mark of the current row is at the left, where the row begins, and the row keeps ${a.pad[0]} px for it there`);
@@ -198,9 +207,13 @@ a = await keysPlain(ltr('p-tabs', '.vx-tabs')); b = await keysPlain(rtl('p-tabs'
 say(a[1] === 1, `tabs, plain, left to right: ${a[0]} goes to the tab on the right`);
 say(b[1] === 1, `tabs, plain, right to left: ${b[0]} belongs to the tab on its left (the second); it chose tab ${b[1] + 1} of 3. Mend: src/plain.js:37`);
 // the list: a painted mark
-const mark = (sel) => q.evaluate((sel) => { const li = document.querySelector(sel + ' li[aria-current]'), cs = getComputedStyle(li); return { shadow: cs.boxShadow, pad: [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)] }; }, sel);
+const mark = (sel) => q.evaluate((sel) => {
+  const li = document.querySelector(sel + ' li[aria-current]'), cs = getComputedStyle(li), be = getComputedStyle(li, '::before'), r = li.getBoundingClientRect();
+  return { shadow: cs.boxShadow, pad: [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)], before: be.content !== 'none' && be.content !== 'normal' ? { right: parseFloat(be.right), left: parseFloat(be.left), w: parseFloat(be.width) } : null, rw: r.width };
+}, sel);
 b = await mark(rtl('p-list', '.vx-list'));
-const dx = Number((b.shadow.match(/\)\s*(-?[\d.]+)px/) || [])[1]);
+// a ::before at the right edge (the lit look), or an inset shadow of a negative x (the base look)
+const dx = b.before ? (b.before.right < b.before.left || Number.isNaN(b.before.left) ? -1 : 1) : Number((b.shadow.match(/\)\s*(-?[\d.]+)px/) || [])[1]);
 say(dx < 0, `list, plain, right to left: the painted mark belongs at the right edge of the row; it is an inset shadow of ${dx} px, which paints the left edge. Mend: voxelmorphism.css:322`);
 say(b.pad[1] > b.pad[0], `list, plain, right to left: the room for the mark belongs at the right; the row has ${b.pad[0]} px at the left and ${b.pad[1]} px at the right. Mend: voxelmorphism.css:310`);
 // this batch, plain

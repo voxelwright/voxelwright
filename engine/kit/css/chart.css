@@ -1,0 +1,74 @@
+/* ---------- Chart ----------
+   A window cut into the panel with the numbers standing in it as light: columns of lamps (a bar
+   chart) or a line of lamps (a line chart). The table under it is the chart's numbers, and what
+   a screen reader reads; src/components/chart.js draws the window from it and writes the words
+   on its axes.
+     <figure class="vx-chart" data-vx-kind="bar">
+       <figcaption>Deploys a day <small>fogline, the week to 24 May</small></figcaption>
+       <div class="vx-chart-window"></div>
+       <table>
+         <thead><tr><th scope="col">Day</th><th scope="col" data-vx-light="go">Went out</th><th scope="col" data-vx-light="stop">Failed</th></tr></thead>
+         <tbody><tr><th scope="row">Mon</th><td>12</td><td>1</td></tr>…</tbody>
+       </table>
+     </figure>
+   The window is a whole number of voxels both ways, with room at its start for the scale's
+   numbers and under it for the places' names. --vx-chart-rows on the figure: how many voxels
+   tall it is (40; 32 on a phone). With no script there is no window: the table is the chart. */
+
+.vx-chart {
+  --_gutter: calc(var(--vx) * 11);
+  display: grid; gap: calc(var(--vx) * 3); justify-items: start;
+  inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; margin: 0;
+  container-type: inline-size;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-chart > figcaption { font-size: 1rem; line-height: calc(var(--vx) * 6); font-weight: 650; text-wrap: balance; }
+.vx-chart > figcaption small { display: block; font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-weight: 400; color: var(--vx-ink-quiet); text-wrap: pretty; }
+
+/* the window: a whole number of voxels, past the scale's numbers, a voxel clear of the edge for
+   its wall; the places' names stand under it */
+.vx-chart-window {
+  position: relative; isolation: isolate; display: block; box-sizing: border-box;
+  margin-inline-start: var(--_gutter);
+  margin-block: calc(var(--vx) * 1) calc(var(--vx) * 8);
+  inline-size: round(down, calc(100cqi - var(--_gutter) - var(--vx) * 2), var(--vx));
+  block-size: calc(var(--vx) * var(--vx-chart-rows, 40));
+}
+@media (max-width: 600px) { .vx-chart { --_gutter: calc(var(--vx) * 9); } .vx-chart-window { block-size: calc(var(--vx) * var(--vx-chart-rows, 32)); } }
+.vx-chart:not([data-vx-drawn]) > .vx-chart-window { display: none; }
+
+/* the scale's numbers, each on the level it marks; the places' names, each under its place */
+.vx-chart-y, .vx-chart-x { position: absolute; inset: 0; pointer-events: none; font-size: 0.75rem; line-height: calc(var(--vx) * 4); color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.vx-chart-y > span { position: absolute; inset-inline-end: calc(100% + var(--vx) * 3); translate: 0 -50%; }
+.vx-chart-x > span { position: absolute; inset-block-start: calc(100% + var(--vx) * 2); translate: -50% 0; } /* set with left: the columns run left to right in any direction of writing */
+.vx-chart-x > span[hidden] { display: none; }
+
+/* the series' names, each beside a lamp of its light */
+.vx-chart-key { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); margin: 0; margin-inline-start: var(--_gutter); padding: 0; list-style: none; font-size: 0.875rem; line-height: calc(var(--vx) * 5); color: var(--vx-ink-quiet); }
+.vx-chart-key > li { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); }
+.vx-chart-key .vx-lamp { inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }
+
+/* the table: words for a screen reader once the window is drawn, unless it is asked to stay */
+.vx-chart[data-vx-drawn]:not([data-vx-table="shown"]) > table { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.vx-chart > table { border-collapse: collapse; font-size: 0.875rem; line-height: calc(var(--vx) * 5); font-variant-numeric: tabular-nums; }
+.vx-chart > table caption { text-align: start; }
+.vx-chart > table :is(th, td) { padding: var(--vx) calc(var(--vx) * 3) var(--vx) 0; text-align: start; font-weight: 400; }
+.vx-chart > table thead th { color: var(--vx-ink-quiet); font-weight: 600; border-block-end: 1px solid var(--vx-slate); }
+.vx-chart > table tbody th { font-weight: 600; }
+.vx-chart > table td { text-align: end; }
+
+/* the marks for a page with no voxels: a painted window, painted columns and a line */
+.vx-chart-marks { position: absolute; inset: 0; pointer-events: none; }
+.vx-chart-window[data-vx-live] > .vx-chart-marks { display: none; }
+.vx-chart-window:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+.vx-chart-marks > span { position: absolute; background: var(--_light); }
+/* a column of lamps: two voxels of light, a voxel apart, from the bottom up */
+.vx-chart-marks > span { -webkit-mask: linear-gradient(to top, #000 0 calc(var(--vx) * 2), transparent 0) bottom / 100% calc(var(--vx) * 3) repeat-y; mask: linear-gradient(to top, #000 0 calc(var(--vx) * 2), transparent 0) bottom / 100% calc(var(--vx) * 3) repeat-y; }
+.vx-chart-marks > svg { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; overflow: visible; }
+.vx-chart-marks polyline { fill: none; stroke: var(--_light); stroke-width: 2px; vector-effect: non-scaling-stroke; }
+.vx-chart-marks rect { fill: var(--_light); }
+.vx-chart-marks [data-vx-light] { --_light: var(--lit-accent, var(--vx-enamel)); }
+.vx-chart-marks [data-vx-light="go"] { --_light: var(--lit-go, var(--vx-leaf)); }
+.vx-chart-marks [data-vx-light="stop"] { --_light: var(--lit-stop, var(--vx-brick)); }
+.vx-chart-marks [data-vx-light="warm"] { --_light: var(--lit-warm, var(--vx-steel)); }
+.vx-chart-marks [data-vx-light="stud"] { --_light: var(--vx-steel); } /* the studs are steel, as drawn */
