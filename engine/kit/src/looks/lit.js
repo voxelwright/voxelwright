@@ -6,6 +6,7 @@ import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM } from '../core/motion.js';
 import { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole } from '../core/light.js';
+import { parts as existing } from './lit-existing.js';
 
 // ---------------------------------------------------------------------------------------------
 // Key. A cap standing on a ring of light.
@@ -34,6 +35,8 @@ const key = {
     live.state.top = depth;
     live.faceZ = depth;
     live.label(el.querySelector(':scope > .vx-label'), () => live.state.top + cap.tz);
+    // a key that is already held down as the page arrives (open, or pressed) is drawn down
+    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-look.travel); }
   },
 
   pose(live) {
@@ -95,7 +98,7 @@ export const groove = {
   build(live, m) {
     const { W, H, el } = live;
     const mat = lightName(el, 'light-warm');
-    hole(live, m, { depth: 1, wall: mat, floor: mat });
+    hole(live, m, { depth: live.look.groove, wall: mat, floor: mat });
   },
 
   pose(live) { live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live)); },
@@ -354,7 +357,7 @@ defineLook('lit', {
     ivory: { day: '#fffefa', night: '#d7dbf0' },
     signal: { day: '#2f5bff', night: '#4d7dff', glow: 1 }, // what is on: the accent's light
   },
-  parts: { button: key, field: well, meter: bar, card: surface, toast: notice, toggle: switchPart, tabs: choice },
+  parts: { button: key, field: well, meter: bar, card: surface, toast: notice, toggle: switchPart, tabs: choice, ...existing },
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -363,8 +366,8 @@ defineLook('lit', {
 // red, which mean done and failed whatever the theme. One object holds all of a theme: the
 // materials and the stylesheet's tokens are both set from it.
 export const THEMES = {
-  bay: { light: { day: '#2f5bff', night: '#4d7dff' }, cap: { day: '#2f5bff', night: '#3560f2' }, link: { day: '#2449d8', night: '#9db8ff' }, legend: '#dfe8ff' },
-  rose: { light: { day: '#ff3d9a', night: '#ff6fb4' }, cap: { day: '#c2186f', night: '#c9237a' }, link: { day: '#a8125e', night: '#ffa3cf' }, legend: '#ffe3f1' },
+  bay: { light: { day: '#2f5bff', night: '#4d7dff' }, cap: { day: '#2f5bff', night: '#3560f2' }, link: { day: '#1f40c4', night: '#9db8ff' }, legend: '#dfe8ff' },
+  rose: { light: { day: '#ff3d9a', night: '#ff6fb4' }, cap: { day: '#c2186f', night: '#c9237a' }, link: { day: '#9a1056', night: '#ffa3cf' }, legend: '#ffe3f1' },
   dusk: { light: { day: '#6a4dff', night: '#9278ff' }, cap: { day: '#5b3df0', night: '#6548f2' }, link: { day: '#4a2fd0', night: '#b9a8ff' }, legend: '#e9e3ff' },
 };
 

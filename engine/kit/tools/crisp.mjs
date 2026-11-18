@@ -14,7 +14,7 @@ for (const w of [390, 768, 1280]) for (const mode of ['plain', 'live']) {
   await page.waitForTimeout(500);
   const off = await page.evaluate((live) => {
     const out = [];
-    for (const el of document.querySelectorAll('.vx-button, .vx-tabs > [role="tab"]')) {
+    for (const el of document.querySelectorAll('.vx-button, .vx-tabs > [role="tab"], .vx-toggle-button, .vx-toggle-group > label')) {
       if (!el.offsetParent) continue;
       if (live && !el.closest('[data-vx-live]')) continue; // a part the page keeps plain on purpose
       const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
@@ -26,7 +26,7 @@ for (const w of [390, 768, 1280]) for (const mode of ['plain', 'live']) {
       if (fx > 0.02 || fy > 0.02) out.push(`${node.textContent.trim().slice(0, 16)} x ${r.left.toFixed(2)} y ${(r.top + scrollY).toFixed(2)}`);
     }
     const canvases = [...document.querySelectorAll('.vx-canvas')].filter((c) => c.offsetParent).map((c) => c.getBoundingClientRect()).filter((r) => Math.abs(r.left - Math.round(r.left)) > 0.02 || Math.abs(r.top - Math.round(r.top)) > 0.02).length;
-    return { off: out, all: document.querySelectorAll('.vx-button, .vx-tabs > [role="tab"]').length, canvases, parts: document.querySelectorAll('.vx-canvas').length };
+    return { off: out, all: document.querySelectorAll('.vx-button, .vx-tabs > [role="tab"], .vx-toggle-button, .vx-toggle-group > label').length, canvases, parts: document.querySelectorAll('.vx-canvas').length };
   }, mode === 'live');
   // Live is the gate. Plain is told, not failed: there the page's own spacing decides.
   if (mode === 'live') bad += off.off.length + off.canvases;

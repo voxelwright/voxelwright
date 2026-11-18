@@ -18,6 +18,29 @@ import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
 import { groove, recess, lamp, pointer, applyTheme } from './looks/lit.js';
+import { accordion } from './components/accordion.js';
+import { avatar } from './components/avatar.js';
+import { callout } from './components/callout.js';
+import { checkbox } from './components/checkbox.js';
+import { collapsible } from './components/collapsible.js';
+import { hoverCard } from './components/hover-card.js';
+import { kbd } from './components/kbd.js';
+import { listGroup } from './components/list-group.js';
+import { pagination } from './components/pagination.js';
+import { popover } from './components/popover.js';
+import { prose } from './components/prose.js';
+import { radio } from './components/radio.js';
+import { scrollArea } from './components/scroll-area.js';
+import { scrollSpy } from './components/scroll-spy.js';
+import { select } from './components/select.js';
+import { skeleton } from './components/skeleton.js';
+import { spinner } from './components/spinner.js';
+import { stepper } from './components/stepper.js';
+import { table } from './components/table.js';
+import { toggleButton } from './components/toggle-button.js';
+import { toggleGroup } from './components/toggle-group.js';
+import { tooltip } from './components/tooltip.js';
+import { validation } from './components/validation.js';
 import { behave, unbehave, plainPart } from './plain.js';
 
 export { Model, Part } from './core/model.js';
@@ -33,7 +56,12 @@ export { FONTS, registerFont, makeFont, layout as layoutText, measure as measure
 export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
-export const components = [button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer];
+export const components = [
+  button, toggle, slider, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
+  accordion, avatar, callout, checkbox, collapsible, hoverCard, kbd, listGroup, pagination, popover, prose, radio, scrollArea, scrollSpy, select, skeleton, spinner, stepper, table, toggleButton, toggleGroup, tooltip, validation,
+];
+// what a part must do with no voxels at all
+for (const def of components) if (def.plain) plainPart(def.selector, def.plain);
 let stage = null;
 
 // The renderer. By default it is the Village engine's (WebGPU, src/engine.js). use() hands the

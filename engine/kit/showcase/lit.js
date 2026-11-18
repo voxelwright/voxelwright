@@ -122,8 +122,9 @@ function deploy() {
       note.setAttribute('data-shown', '');
       l?.play('assemble', null, { from: [0, l.H / 2], duration: 0.34, each: 0.2 });
     } else if (note.hasAttribute('data-shown')) {
+      const gone = note.hasAttribute('data-vx-leaving'); // a person's click has already broken it
       note.setAttribute('data-vx-leaving', '');
-      if (l && !reduced) await l.play('crumble', null, { duration: 0.3 });
+      if (l && !reduced && !gone) await l.play('crumble', null, { duration: 0.3 });
       note.removeAttribute('data-shown');
     }
   };

@@ -88,7 +88,7 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   const probe = await p.evaluate(() => {
     let named = 0;
     for (const s of document.styleSheets) {
-      if (!s.href?.endsWith('floating-label.css')) continue;
+      if (!/(floating-label|voxelmorphism)\.css(\?|$)/.test(s.href || '')) continue; // its own file, or the kit's one stylesheet that carries it
       for (const r of s.cssRules) if (r.selectorText?.includes('autofill')) { named++; r.selectorText = r.selectorText.replace(/:is\([^()]*autofill[^()]*\)/g, '[data-vx-probe]').replace(/:(-webkit-)?autofill/g, '[data-vx-probe]'); }
     }
     document.getElementById('pass').setAttribute('data-vx-probe', '');

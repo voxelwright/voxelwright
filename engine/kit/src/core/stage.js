@@ -49,6 +49,7 @@ export class Live {
     this.faceZ = 0;
     this.well = null;
     this.model = new Model();
+    for (const l of this.labels) { l.node.style.transform = ''; l.last = undefined; } // a label's nudge belongs to the model it was on
     this.labels.length = 0;
     this.form.build(this, this.model);
     this.model.bake(this.theme, this.look);

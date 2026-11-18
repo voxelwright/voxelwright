@@ -90,7 +90,7 @@ export function makeToast(adopt, liveOf) {
     };
     el.addEventListener('click', dismiss);
     // the clock stops while the pointer is over it, while it has focus, and while the tab is hidden
-    const run = () => { since = performance.now(); timer = setTimeout(() => dismiss(), left); };
+    const run = () => { since = performance.now(); if (left !== Infinity) timer = setTimeout(() => dismiss(), left); };
     const hold = () => { clearTimeout(timer); left -= performance.now() - since; };
     el.addEventListener('pointerenter', hold);
     el.addEventListener('pointerleave', run);
