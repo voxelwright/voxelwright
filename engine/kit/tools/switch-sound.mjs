@@ -67,7 +67,8 @@ try {
   await key.click();
   assert.equal(await page.evaluate(() => window.strokes.length), 3);
   await sound.check();
-  await page.getByRole('link', {name: 'Parts catalog', exact: true}).click();
+  await page.getByRole('navigation', {name: 'Instrument library'})
+    .getByRole('link', {name: 'Parts catalog', exact: true}).click();
   assert.equal(await page.getByRole('checkbox', {name: 'Switch sound'}).isChecked(), true);
   assert.equal(await page.evaluate(() => window.decoded), 0);
   await page.addInitScript(() => {
