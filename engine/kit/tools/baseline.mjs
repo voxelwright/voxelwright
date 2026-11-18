@@ -14,8 +14,13 @@ const flag = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : ar
 
 if (args[0] === '--compare') {
   const [, a, b] = args;
-  const files = (await readdir(`shots/${b}`)).filter((f) => f.endsWith('.png')).sort();
-  const rows = files.map((f) => `<figure><figcaption>${f.replace('.png', '')}</figcaption><div><img src="../${a}/${f}" loading="lazy" alt="${a}"><img src="${f}" loading="lazy" alt="${b}"></div></figure>`).join('\n');
+  const [before, after] = await Promise.all([a, b].map(async name =>
+    new Set((await readdir(`shots/${name}`)).filter(f => f.endsWith('.png')))));
+  const files = [...new Set([...before, ...after])].sort();
+  const shot = (set, path, name, file) => set.has(file)
+    ? `<img src="${path}${file}" loading="lazy" alt="${name}">`
+    : `<span>No capture in ${name}</span>`;
+  const rows = files.map(f => `<figure><figcaption>${f.replace('.png', '')}</figcaption><div>${shot(before, '../' + a + '/', a, f)}${shot(after, '', b, f)}</div></figure>`).join('\n');
   await writeFile(`shots/${b}/compare.html`, page(`${a} against ${b}`, `<p>Left: ${a}. Right: ${b}.</p>${rows}`, 'figure div { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }'));
   console.log(`shots/${b}/compare.html`);
   process.exit(0);

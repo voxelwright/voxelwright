@@ -76,13 +76,13 @@ for (const mode of ['live', 'plain']) {
   // keys
   await p.evaluate(() => document.getElementById('tests').focus());
   await p.keyboard.press('Space');
-  await p.waitForTimeout(500);
+  if (mode === 'live') await p.waitForFunction(() => window.vx.stage.awake.size === 0);
   s = await read('tests');
   say(s.level === 0 && agrees(s), 'Space unticks the one in focus');
   await p.keyboard.press('Tab');
   say(await p.evaluate(() => document.activeElement.id) === 'post', 'Tab goes to the next: each is a tab stop of its own');
   await p.keyboard.press('Space');
-  await p.waitForTimeout(500);
+  if (mode === 'live') await p.waitForFunction(() => window.vx.stage.awake.size === 0);
   t = await read('post');
   say(t.level === 1 && agrees(t), 'and Space ticks it');
   const ring = await p.evaluate(() => { const c = getComputedStyle(document.activeElement.parentElement.querySelector('.vx-box')); return document.activeElement.matches(':focus-visible') && c.outlineStyle === 'solid' && parseFloat(c.outlineWidth) >= 2; });

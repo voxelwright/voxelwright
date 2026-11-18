@@ -26,7 +26,7 @@ const read = (id) => p.evaluate(async (id) => {
   const items = l.state.items;
   return {
     open: el.matches(':popover-open'), parts: l.model.parts.map((q) => q.name).join(','), panel: made(panel), panelCubes: panel.count, pick: made(pick), pickCubes: pick.count,
-    active: l.state.active, shown: !pick.hidden, markY: pick.ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
+    danger: !l.model.byName.danger.hidden, active: l.state.active, shown: !pick.hidden || !l.model.byName.danger.hidden, markY: pick.ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
     building: panel.fx?.kind ?? null, top: l.faceZ, float: l.look.float, focus: items.indexOf(document.activeElement),
     expanded: document.querySelector(`[popovertarget="${id}"]`).getAttribute('aria-expanded'), rect: (({ left, top, width, height }) => ({ left, top, width, height }))(el.getBoundingClientRect()),
   };
@@ -65,7 +65,7 @@ say(m.active === 1 && m.shown && m.markY === m.rowY[1], 'the mark follows the po
 await p.screenshot({ path: 'shots/parts/menu/hand-pointer.png' });
 await over('project-menu', 3);
 const colours = await p.evaluate(() => [...document.querySelectorAll('#project-menu [role="menuitem"]')].map((it) => getComputedStyle(it).color));
-say(colours[3] !== colours[0] && colours[3] !== 'rgb(255, 255, 255)', `the destructive row keeps its red while it is active (${colours[3]})`);
+say((await read('project-menu')).danger && colours[3] !== colours[0] && colours[3] !== 'rgb(255, 255, 255)', `the destructive row keeps its red while it is active (${colours[3]})`);
 const b1 = await item('project-menu', 1);
 await p.mouse.click(b1.x + 30, b1.y + b1.height / 2); await p.waitForTimeout(400);
 m = await read('project-menu');

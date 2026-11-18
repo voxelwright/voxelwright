@@ -250,7 +250,7 @@ export function define(def) {
 /** Show a toast: toast('Watered.', { kind: 'done' | 'failed' | 'note', duration }). Works plain too. */
 export const toast = makeToast((el) => adopt(el), (el) => live(el));
 
-/** Close a dialog the way its own buttons do: it crumbles, then closes. */
+/** Close a dialog the way its own buttons do: it lowers, then closes. */
 export function closeDialog(el, value) {
   const l = live(el);
   if (l?.state.leave) return l.state.leave(value);

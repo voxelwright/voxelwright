@@ -18,6 +18,7 @@ const defs = {
   floor: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
   slate: { day: '#c3c9de', night: '#222963', jitter: 0.012 },
+  gasket: { day: '#565447', night: '#151c21', jitter: 0.008 },
   // Steel: neutral parts and anything switched off.
   steel: { day: '#aab1c9', night: '#33375a', jitter: 0.018 },
   // Ivory: the knob of a switch. It stays light at night so the knob can always be found.
@@ -40,11 +41,12 @@ const defs = {
   ink: { day: '#0a0f3d', night: '#eceefb', jitter: 0.0, seamless: true },
   // Lights (the lit look). They glow by day too where a look's light says so.
   // light: the accent, under what acts. A theme changes it.
-  light: { day: '#2f5bff', night: '#4d7dff', jitter: 0, glow: 1 },
+  light: { day: '#388de6', night: '#458fe3', jitter: 0, glow: 1 },
   // light-warm: the room's own light, half as strong: grooves, wells at rest.
   'light-warm': { day: '#f1d9a8', night: '#c9a264', jitter: 0, glow: 0.5 },
   // light-go: done, live. light-stop: failed, destructive. The same in every theme.
   'light-go': { day: '#12b556', night: '#35e07a', jitter: 0, glow: 1 },
+  caution: { day: '#ac6615', night: '#efb664', jitter: 0, glow: 0.55 },
   'light-stop': { day: '#f0442e', night: '#ff5a44', jitter: 0, glow: 1 },
   // Key: the cap of an ordinary key.
   key: { day: '#fffefa', night: '#2b3046', jitter: 0.004 },

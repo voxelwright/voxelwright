@@ -1,4 +1,4 @@
-// Menu. A slab that is built out of its trigger's corner. The item under the pointer or the
+// Menu. An engraved plate rises beside its trigger. The item under the pointer or the
 // focus gets an enamel tile; the tile moves at once, because moving through a menu is frequent.
 // Markup: <button class="vx-button" popovertarget="m">More</button>
 //         <div class="vx-menu" id="m" popover role="menu"><button role="menuitem">…</button>…</div>
@@ -10,6 +10,7 @@ export const menu = {
   name: 'menu',
   selector: '.vx-menu',
   pad: 9,
+  carryPlate: true,
 
   build(live, m) {
     const { W, H, el, vx } = live;
@@ -45,14 +46,15 @@ export const menu = {
       live.invalidate();
     };
     const { invoker, put } = menuAnchor(el, on, () => live.vx * 3);
+    on(el, 'beforetoggle', (e) => el.toggleAttribute('data-vx-cover-legends', e.newState === 'open'));
     on(el, 'toggle', (e) => {
       invoker()?.setAttribute('aria-expanded', String(e.newState === 'open'));
-      if (e.newState !== 'open') { setActive(-1); return; }
-      // opened at a point (a context menu sets data-vx-from, in voxels), or by its trigger
-      const [x, y] = el.dataset.vxFrom && !invoker() ? el.dataset.vxFrom.split(' ').map((n) => Number(n) * live.vx) : put();
+      if (e.newState !== 'open') { live.stopMotion(); setActive(-1); return; }
+      // A context menu without an invoker has already been placed at the pointer.
+      if (!el.dataset.vxFrom || invoker()) put();
       live.rebuild();
       live.model.byName.pick.hidden = true;
-      live.play('assemble', ['panel'], { from: [x / live.vx, y / live.vx], duration: 0.2, each: 0.14 });
+      live.play('assemble', ['panel'], { duration: 0.2 });
       const viaKey = invoker()?.matches(':focus-visible');
       if (viaKey) live.state.items.find(menuEnabled)?.focus();
     });

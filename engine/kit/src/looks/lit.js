@@ -4,43 +4,33 @@
 // data-vx-look="lit") holds for everything inside it.
 import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
-import { CALM } from '../core/motion.js';
-import { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { CALM, SLIDE } from '../core/motion.js';
+import { pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel } from '../core/light.js';
 import { inlineX } from '../plain.js';
 import { toggle, KNOB } from '../components/toggle.js';
+import { meter } from '../components/meter.js';
+import { wrapLabel } from '../components/util.js';
+import { cardSpine } from '../components/card.js';
 import { capIcon } from '../components/button.js';
 import { parts as existing } from './lit-existing.js';
 
 // ---------------------------------------------------------------------------------------------
 // Key. A cap standing on a ring of light.
-const KEY_GLOW = 0.075, KEY_REACH = 4.2;
 
 const key = {
   pad: 9,
-  glowRadius: KEY_REACH,
-  glowStrength: halo(KEY_GLOW),
+  soft: 0.65,
 
   build(live, m) {
-    const { W, H, el } = live, look = live.look;
+    const { el } = live;
     const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
     const kind = kindOf(el);
-    const cap = m.part('cap');
-    const depth = off ? 1 : look.rise;
-    if (off) cap.slab(0, 0, 0, W, H, 1, 'steel', 1);
-    else {
-      // the light is a ring one voxel high under the cap's edge: it shows as a lit line at the
-      // foot of the key, and its halo is the light on the surface round it
-      ring(m.part('light'), 0, 0, 0, W, H, lightName(el, kind === 'danger' ? 'light-stop' : 'light'), 1);
-      cap.grounded = false;
-      capOf(cap, 0, 0, 1, W, H, depth - 1, kind === 'main' ? 'enamel' : 'key');
-    }
-    capIcon(live, cap, depth - 1, !off && kind === 'main' ? 'ivory' : 'ink');
+    const cap = seatedKey(live, m, off, kind === 'main' ? 'enamel' : 'key', lightName(el, kind === 'danger' ? 'light-stop' : 'light'));
+    capIcon(live, cap, live.faceZ - 1, !off && kind === 'main' ? 'ivory' : 'ink');
     live.state.off = off;
-    live.state.top = depth;
-    live.faceZ = depth;
     live.label(el.querySelector(':scope > .vx-label'), () => live.state.top + cap.tz);
     // a key that is already held down as the page arrives (open, or pressed) is drawn down
-    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-look.travel); }
+    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-live.state.keyTravel); }
   },
 
   pose(live) {
@@ -49,8 +39,11 @@ const key = {
     cap.tz = live.state.off ? 0 : press + hover;
     // the light answers: brighter while aimed at, a flare as the key goes down, a slow fall after
     const f = live.state.flare ?? 0;
-    live.glowStrength = halo(KEY_GLOW) * byTheme(live) * (1 + hover * 1.2 + f * 2.6);
-    live.glowRadius = KEY_REACH + f * 2.2;
+    keyLight(live, hover, f);
+    if (kindOf(live.el) === 'main' && !live.state.off) {
+      live.glowStrength *= 2.6;
+      live.glowRadius += 1;
+    }
     live.el.style.setProperty('--lit', f.toFixed(3));
   },
 
@@ -124,6 +117,7 @@ const bar = {
 
   build(live, m) {
     const { W, H, el } = live;
+    if (el.dataset.vxKind === 'growth') return meter.build(live, m);
     const v = read(el);
     const s = live.spring('v', v, CALM.k, CALM.c);
     if (live.state.built === undefined) s.snap(v);
@@ -132,7 +126,7 @@ const bar = {
     live.state.growth = false;
     const T = 3, y = Math.floor((H - T) / 2), D = live.look.well;
     hole(live, m, { y, h: T, depth: D, wall: 'slate', floor: 'slate' });
-    // A row of lamps in a slot: each is two voxels of light, a voxel apart. One that is not lit
+    // A row of lamps in a slot: each is two voxels of light, two apart. One that is not lit
     // is a dark stud, so the scale can be read with nothing on. A lit one reaches the level of the
     // surface, so its light lies on the surface.
     const inlineStud = inlineX(live);
@@ -140,15 +134,16 @@ const bar = {
     studs.sunk = true; studs.grounded = false;
     const fill = m.part('fill');
     fill.sunk = true; fill.grounded = false;
-    const mat = lightName(el, 'light'), n = Math.max(1, Math.floor((W + 1) / 3));
+    const mat = lightName(el, 'light'), n = Math.max(1, Math.floor((W + 2) / 4));
     for (let i = 0; i < n; i++) {
-      const x = inlineStud(i * 3, 2);
+      const x = inlineStud(i * 4, 2);
       studs.box(x, y, -D, 2, T, 1, 'steel');
       for (let a = 0; a < 2; a++) for (let j = 0; j < T; j++) for (let k = -D; k < 0; k++) fill.plot(x + a, y + j, k, mat, (i + 0.5) / n);
     }
   },
 
   pose(live) {
+    if (live.state.growth) return meter.pose(live);
     live.glowStrength = halo(0.04) * byTheme(live);
     if (!live.state.posed) { live.state.posed = true; live.model.byName.fill.grow(live.spring('v').x + 0.0001, 0); }
   },
@@ -184,10 +179,8 @@ export const lamp = {
 
   build(live, m) {
     const { W, H, el } = live;
-    // a lamp in its collar: the collar is a voxel wide and reaches past the element's box
-    m.part('collar').slab(-1, -1, 0, W + 2, H + 2, 1, 'steel', 1).carve(0, 0, 0, W, H, 1);
-    m.part('lamp').box(0, 0, 0, W, H, 2, lightName(el, 'light-go'));
-    live.faceZ = 1;
+    pilot(m, W, H, lightName(el, 'light-go'));
+    live.faceZ = 2;
   },
 
   pose(live) { live.glowStrength = halo(0.16) * byTheme(live) * (1 + live.spring('pulse').x); },
@@ -204,29 +197,37 @@ export const lamp = {
 // the ground round it: a window that lights the page it is on.
 const surface = {
   pad: 14,
-  glowRadius: 10,
+  soft: 1,
+  glowRadius: 3,
   glowStrength: halo(0.02),
 
   build(live, m) {
-    const { W, H, el } = live, d = live.look.slab, r = live.look.round;
-    const lit = el.dataset.vxLight;
+    const { W, el } = live;
+    const inset = el.clientTop / live.vx;
+    const H = Math.max(1, live.H - Math.round(inset));
+    const large = W >= 48 && H >= 22;
+    const wide = W > 100 && H >= 46;
+    const depth = wide ? 14 : large ? 8 : live.look.slab;
+    const top = inset ? Math.min(depth, 2 * inset) : depth;
+    const r = large ? 3 : live.look.round;
     const body = m.part('body');
-    if (lit) {
-      // the light sits a voxel in from the edge, under the slab: no lit line, only its light on the ground
-      ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el, 'light'), 3);
-      body.grounded = false;
-      body.slab(0, 0, 1, W, H, d, 'chalk', r);
-    } else body.slab(0, 0, 0, W, H, d, 'chalk', r);
-    // a panel is bolted down: a stud near each corner of one large enough to be a panel
-    if (W >= 60 && H >= 40 && el.dataset.vxBolts !== 'none') {
-      const top = lit ? d + 1 : d, at = 4, bolts = m.part('bolts');
-      bolts.grounded = false;
-      for (const [x, y] of [[at, at], [W - at - 2, at], [at, H - at - 2], [W - at - 2, H - at - 2]]) bolts.box(x, y, top, 2, 2, 1, 'steel');
+    body.slab(2, 2, 0, W - 4, H - 4, 2, 'gasket', r);
+    body.slab(0, 0, 2, W, H, top - 4, 'chalk', r);
+    ring(body, 0, 0, top - 3, W, H, 'gasket', r);
+    body.slab(1, 1, top - 2, W - 2, H - 2, 2, 'chalk', r);
+    if (el.dataset.vxLight) ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el), r);
+    if (wide && el.dataset.vxBolts !== 'none') {
+      for (const x of [4, W - 5]) for (const y of [4, H - 5]) {
+        body.slab(x - 2, y - 2, top - 1, 5, 5, 1, 'steel', 1);
+        body.slab(x - 1, y - 1, top, 3, 3, 1, 'steel', 1);
+        body.box(x, y, top, 2, 1, 1, 'gasket');
+      }
     }
-    live.faceZ = lit ? d + 1 : d;
+    cardSpine(live, m, top, H);
+    live.faceZ = top;
   },
 
-  pose(live) { live.glowStrength = halo(0.02) * (live.theme === 'day' ? 0.9 : 1); },
+  pose(live) { live.glowStrength = halo(0.012) * byTheme(live); },
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -312,7 +313,10 @@ const switchPart = {
     knob.grounded = false;
     if (!off) ring(knob, 0, 0, -D, KNOB, H - 2, 'light');
     knob.slab(0, 0, 1 - D, KNOB, H - 2, D + 1, off ? 'steel' : 'ivory', 1);
-    for (const x of [1, 3, 5]) knob.box(x, 1, 2, 1, H - 4, 1, off ? 'steel' : 'ivory'); // three ridges across its top
+    const paddle = off ? 'steel' : 'key';
+    knob.slab(0, 0, 2, KNOB, H - 2, 1, paddle, 1);
+    knob.box(1, 1, 3, KNOB - 2, 2, 1, paddle);
+    knob.box(2, 1, 3, KNOB - 4, 1, 1, 'steel');
     knob.ty = 1;
     live.state.inlineX = inlineX(live);
     live.state.travel = W - 2 - KNOB;
@@ -346,8 +350,8 @@ const choice = {
     const index = Math.max(0, tabsEl.findIndex((t) => t.getAttribute('aria-selected') === 'true'));
     live.state.index = index;
     const xs = live.state.xs = tabsEl.map((t) => Math.round(t.offsetLeft / vx) + 1);
-    live.spring('x', xs[index] ?? 1, 260, 30).snap(xs[index] ?? 1);
-    tabsEl.forEach((t) => live.label(t.querySelector(':scope > .vx-label') ?? t, () => live.faceZ));
+    live.spring('x', xs[index] ?? 1, SLIDE.k * 1.25, SLIDE.c * 1.12).snap(xs[index] ?? 1);
+    tabsEl.forEach((t) => live.label(wrapLabel(t), () => live.faceZ));
   },
 
   pose(live) {
@@ -361,21 +365,28 @@ defineLook('lit', {
   // Objects, not flat faces: the cubes show on every face, slabs and caps are thick, a key is a
   // keycap, what slides has a bezel, a panel is bolted down.
   quiet: false,
-  rise: 5, travel: 2, step: 1,
-  slab: 4, round: 2, float: 6, dialog: 7, well: 2,
+  groundSoft: 1,
+  finishes: {
+    chalk: { chamfer: 75 }, floor: { chamfer: 0 }, slate: { chamfer: 80 },
+    steel: { chamfer: 195, specular: 165 }, enamel: { chamfer: 175, specular: 105 },
+    key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 },
+  },
+  rise: 6, travel: 4, step: 1,
+  slab: 5, round: 2, float: 6, dialog: 7, well: 4,
   light: {
-    day: { glow: FULL, seam: 0.05, shadow: [0.16, 0.13, 0.1, 0.24] },
-    night: { glow: FULL, seam: 0.085, sun: 0.5, shadow: [0, 0, 0.02, 0.6] },
+    day: { glow: FULL, seam: 0.016, shadow: [0.13, 0.10, 0.07, 0.34] },
+    night: { glow: FULL, seam: 0.034, sun: 0.63, shadow: [0, 0, 0.02, 0.6] },
   },
   materials: {
-    chalk: { day: '#f5f2e9', night: '#1b1e2d', jitter: 0.006 },   // the surface
-    floor: { day: '#fbf9f2', night: '#0c0e18', jitter: 0.004 },   // the bottom of a well
-    slate: { day: '#dcd8cb', night: '#11131f', jitter: 0.008 },   // trays, trenches
-    steel: { day: '#c2beb0', night: '#30344a', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
-    enamel: { day: '#2f5bff', night: '#3560f2', jitter: 0.012 },  // the cap of the one main key
-    key: { day: '#fffefa', night: '#2b3046', jitter: 0.006 },     // an ordinary cap
+    chalk: { day: '#e9dcc5', night: '#23313b', jitter: 0.006 },   // the surface
+    floor: { day: '#c8bda7', night: '#141a1f', jitter: 0.004 },   // the bottom of a well
+    slate: { day: '#9f998a', night: '#141b21', jitter: 0.008 },   // trays, trenches
+    steel: { day: '#918a77', night: '#626766', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
+    enamel: { day: '#174ec6', night: '#315aca', jitter: 0.012 },  // the cap of the one main key
+    key: { day: '#f2ebda', night: '#434745', jitter: 0.006 },     // an ordinary cap
     ivory: { day: '#fffefa', night: '#d7dbf0', jitter: 0.006 },
-    signal: { day: '#2f5bff', night: '#4d7dff', glow: 1 }, // what is on: the accent's light
+    light: { day: '#388de6', night: '#458fe3', glow: 0.68 },
+    signal: { day: '#388de6', night: '#458fe3', glow: 1 }, // what is on: the accent's light
   },
   parts: { button: key, field: well, meter: bar, card: surface, toast: notice, toggle: switchPart, tabs: choice, ...existing },
 });
@@ -386,7 +397,7 @@ defineLook('lit', {
 // red, which mean done and failed whatever the theme. One object holds all of a theme: the
 // materials and the stylesheet's tokens are both set from it.
 export const THEMES = {
-  bay: { light: { day: '#2f5bff', night: '#4d7dff' }, cap: { day: '#2f5bff', night: '#3560f2' }, link: { day: '#1f40c4', night: '#9db8ff' }, legend: '#dfe8ff' },
+  bay: { light: { day: '#388de6', night: '#458fe3' }, cap: { day: '#174ec6', night: '#315aca' }, link: { day: '#1f40c4', night: '#9db8ff' }, legend: '#dfe8ff' },
   rose: { light: { day: '#ff3d9a', night: '#ff6fb4' }, cap: { day: '#c2186f', night: '#c9237a' }, link: { day: '#9a1056', night: '#ffa3cf' }, legend: '#ffe3f1' },
   dusk: { light: { day: '#6a4dff', night: '#9278ff' }, cap: { day: '#5b3df0', night: '#6548f2' }, link: { day: '#4a2fd0', night: '#b9a8ff' }, legend: '#e9e3ff' },
 };
@@ -400,6 +411,7 @@ export function applyTheme(t = 'bay') {
   const th = typeof t === 'string' ? THEMES[t] ?? THEMES.bay : t;
   const look = LOOKS.lit;
   look.materials.enamel = th.cap;
+  look.materials.light = { ...th.light, glow: 0.68 };
   look.materials.signal = { ...th.light, glow: 1 };
   defineMaterial('light', { ...th.light, glow: 1, jitter: 0 }); // and every look's colours are read again
   const root = globalThis.document?.documentElement;

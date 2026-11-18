@@ -55,7 +55,8 @@ export const button = {
     wrapLabel(el);
     const press = live.spring('press'), hover = live.spring('hover');
     let held = false;
-    const down = () => { if (live.state.off) return; held = true; press.to(-live.look.travel, PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
+    const travel = () => Math.min(live.look.travel, Math.max(0, (live.state.top ?? live.look.rise) - 1));
+    const down = () => { if (live.state.off) return; held = true; press.to(-travel(), PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
     const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
     const up = () => { if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
     const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
@@ -74,7 +75,7 @@ export const button = {
       // a trigger stays down while what it opened is open
       const open = holds();
       held = false;
-      press.to(open ? -live.look.travel : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
+      press.to(open ? -travel() : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
       live.invalidate();
     });
     return () => {

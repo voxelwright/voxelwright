@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-vx-look="lit">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -26,6 +26,7 @@
     <label class="vx-toggle"><input type="checkbox" role="switch" id="voxels" checked><span class="vx-switch"></span>Voxels</label>
     <label class="vx-toggle"><input type="checkbox" role="switch" id="sound"><span class="vx-switch"></span>Sound</label>
   </div>
+  <nav aria-label="Kit examples"><a href="lit.html?still">Hardware panel</a> · <a href="parts/">All parts</a></nav>
 </header>
 
 <main>
@@ -40,7 +41,7 @@
     </div>
     <div class="show" id="scale-demo">
       <div class="bench" id="scale-bench">
-        <button class="vx-button">Plant a seed</button>
+        <button class="vx-button" data-vx-kind="main">Plant a seed</button>
         <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
       </div>
       <label class="knob"><span>Voxel size <output id="scale-out">4 px</output></span>
@@ -107,7 +108,7 @@
         <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="12"></span>12</li>
         <li><span class="vx-block" data-vx-material="signal" data-vx-depth="6"></span>Signal, 6</li>
       </ul>
-      <div class="bench"><button class="vx-button">Hold me down and watch the shadow</button></div>
+      <div class="bench"><button class="vx-button">Hold for shadow</button></div>
     </div>
   </article>
 
@@ -135,7 +136,7 @@
 
   <div class="kit">
     <figure><div class="bench wrap">
-      <button class="vx-button" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-kind="main" data-vx-icon="plus">Plant a seed</button>
       <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
       <button class="vx-button" data-vx-material="brick" data-vx-icon="cross">Pull it up</button>
       <button class="vx-button" disabled>Asleep</button>
@@ -194,12 +195,12 @@
     </div><figcaption>Toast</figcaption></figure>
 
     <figure><div class="bench stack">
-      <div class="vx-tabs" role="tablist" aria-label="Garden">
+      <div class="vx-card tabcard">
+        <div class="vx-tabs" role="tablist" aria-label="Garden">
         <button role="tab" aria-selected="true" aria-controls="tp1">Growing</button>
         <button role="tab" aria-selected="false" aria-controls="tp2">Bloomed</button>
         <button role="tab" aria-selected="false" aria-controls="tp3">Wilted</button>
       </div>
-      <div class="vx-card tabcard">
         <p id="tp1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
         <p id="tp2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
         <p id="tp3" role="tabpanel" hidden>Nothing has wilted.</p>
@@ -238,7 +239,7 @@
     </div>
     <div class="show">
       <div class="bench wrap" data-plain>
-        <button class="vx-button">Plant a seed</button>
+        <button class="vx-button" data-vx-kind="main">Plant a seed</button>
         <button class="vx-button" data-vx-material="chalk">Not yet</button>
         <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
         <label class="vx-field grow"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="Plain HTML"></span></label>

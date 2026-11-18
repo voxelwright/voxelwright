@@ -80,7 +80,7 @@ await p.mouse.down(); await p.mouse.up();
 await p.waitForTimeout(50);
 b = await block(p, '#range');
 say(await chosen(p, '#range') === 'month' && b.moving, `a press on Month chooses it: its key goes down and Day's comes up (on their way: ${b.tz})`);
-await p.waitForTimeout(700);
+await p.waitForFunction(() => window.vx.stage.awake.size === 0);
 b = await block(p, '#range');
 say(!b.moving && b.on, `and they come to rest: Month's latched, the others up (${b.tz})`);
 say((await said(p)).includes('month'), `the page heard change: "${await said(p)}"`);
@@ -88,7 +88,7 @@ say((await said(p)).includes('month'), `the page heard change: "${await said(p)}
 // the keyboard: one tab stop, arrow keys
 await p.focus('#range input:checked');
 await p.keyboard.press('ArrowLeft');
-await p.waitForTimeout(500);
+await p.waitForFunction(() => window.vx.stage.awake.size === 0);
 b = await block(p, '#range');
 say(await chosen(p, '#range') === 'week' && b.on, `the left arrow chooses Week, and its key latches down (${b.tz})`);
 await p.keyboard.press('ArrowRight');
@@ -116,7 +116,7 @@ say(await chosen(p, '#range') === 'week', 'Space on the chosen seat leaves it ch
   say(h.tz.split(' ')[2] === String(-step) && await chosen(p, '#range') === 'week', `held down, a key that stands up goes a step down before it is chosen (${h.tz})`);
   await p.mouse.move(hx, hy - 80, { steps: 4 }); // dragged off before letting go
   await p.mouse.up();
-  await p.waitForTimeout(500);
+  await p.waitForFunction(() => window.vx.stage.awake.size === 0);
   const a = await block(p, '#range');
   say(a.on && await chosen(p, '#range') === 'week', `dragged off before letting go, nothing is chosen and the key comes back up (${a.tz})`);
 }
@@ -125,7 +125,7 @@ say(await chosen(p, '#range') === 'week', 'Space on the chosen seat leaves it ch
 b = await block(p, '#none');
 say(b.on && b.down === '' && b.lit === '' && await chosen(p, '#none') === null, `nothing chosen: every key stands up, and none has light (${b.tz})`);
 await press(p, '#none label:nth-of-type(2)');
-await p.waitForTimeout(400);
+await p.waitForFunction(() => window.vx.stage.awake.size === 0);
 b = await block(p, '#none');
 say(await chosen(p, '#none') === 'partly' && b.on && b.lit === '1', `a press on Partly latches its key down, on its light (${b.tz})`);
 
@@ -138,13 +138,13 @@ say(await chosen(p, '[aria-label="Plan"]') === 'free', 'and the arrow keys pass 
 
 // standing
 await press(p, '#when label:nth-of-type(3)');
-await p.waitForTimeout(700);
+await p.waitForFunction(() => window.vx.stage.awake.size === 0);
 b = await block(p, '#when');
 say(await chosen(p, '#when') === 'monday' && b.on && b.index === 2, `standing: a press on the last seat latches its key (${b.tz})`);
 
 // from code
 await p.evaluate(() => { document.querySelector('#two input[value="board"]').checked = true; });
-await p.waitForTimeout(500);
+await p.waitForFunction(() => window.vx.live(document.querySelector('#two')).state.index === 1 && window.vx.stage.awake.size === 0);
 b = await block(p, '#two');
 say(b.on && b.index === 1, `chosen from code (input.checked = true): the keys follow (${b.tz})`);
 

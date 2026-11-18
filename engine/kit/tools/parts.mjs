@@ -24,6 +24,7 @@ await Promise.all(Array.from({ length: 3 }, async () => {
     const [kind, name, args] = queue.shift();
     const { code, out } = await run(args);
     const known = kind === 'check' && name === 'direction';
+    if (name === 'message-scroller' && kind === 'check') console.log(out.split('\n').find((line) => line.includes('wheel after settling:')) ?? 'wheel measurement missing');
     if (code && !known) bad++;
     const fails = out.split('\n').filter((l) => /^FAIL|Error|error:/.test(l.trim())).slice(0, 8);
     console.log(`${code ? (known ? 'known' : 'FAIL ') : 'ok   '} ${kind} ${name}${code ? '\n      ' + (fails.join('\n      ') || out.trim().split('\n').slice(-3).join('\n      ')) : ''}`);

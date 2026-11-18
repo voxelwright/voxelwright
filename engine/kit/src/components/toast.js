@@ -28,6 +28,7 @@ export const toastDef = {
   name: 'toast',
   selector: '.vx-toast',
   pad: 9,
+  carryPlate: true,
 
   build(live, m) {
     const { W, H, el } = live;
@@ -78,7 +79,7 @@ export function makeToast(adopt, liveOf) {
     owned.add(el);
     adopt(el);
     const live = liveOf(el);
-    live?.play('assemble', null, { from: [0, live.H / 2], duration: 0.3, each: 0.18 });
+    live?.play('assemble', null, { duration: 0.3 });
     cue(opts.kind === 'failed' ? 'failed' : opts.kind === 'done' ? 'done' : 'tick');
 
     let left = opts.duration ?? 4200, since = performance.now(), timer = 0, gone = false;

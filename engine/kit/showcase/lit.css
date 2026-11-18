@@ -40,7 +40,7 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .window > .vx-groove { margin-inline: calc(var(--vx) * 6); }
 
 .bar { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 6); min-block-size: calc(var(--vx) * 15); padding: 0 calc(var(--vx) * 9); }
-.app { font: 400 var(--vx-key-size)/1 var(--vx-key-font); }
+.app { font: 650 1.35rem/1 var(--vx-font); }
 .team { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
 .links { display: flex; gap: calc(var(--vx) * 7); }
 .links a { color: var(--vx-ink-quiet); text-decoration: none; font-weight: 500; padding-block: calc(var(--vx) * 2); }
@@ -62,7 +62,7 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .state { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2.5); color: var(--vx-ink-quiet); font-weight: 600; font-size: 0.9375rem; }
 .state-word { transition: opacity 160ms var(--vx-ease-out); }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: calc(var(--vx) * 5); }
-.actions .auto { margin-inline-start: auto; font-size: 0.9375rem; }
+.actions .auto { margin-inline-start: calc(var(--vx) * 3); font-size: 0.9375rem; }
 .build { display: grid; gap: calc(var(--vx) * 2); }
 .build-top { display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9375rem; }
 .build-num { font-variant-numeric: tabular-nums; color: var(--vx-ink-quiet); }

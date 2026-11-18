@@ -70,14 +70,47 @@ export function cap(part, x, y, z, w, h, d, mat, r = 1) {
   return part;
 }
 
+/** The same moulded cap, socket and travel for momentary and latching keys. */
+export function seatedKey(live, m, disabled, material, lamp) {
+  const { W, H, look } = live;
+  const small = Math.min(W, H) < 9;
+  const depth = disabled ? 1 : small ? Math.min(3, look.rise) : look.rise + (material === 'enamel' ? 2 : 0);
+  live.state.keyTravel = Math.min(look.travel, Math.max(0, depth - 1));
+  const key = m.part('cap');
+  if (disabled) key.slab(0, 0, 0, W, H, 1, 'steel', 1);
+  else {
+    if (!small) ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
+    ring(m.part('light'), 0, 0, 0, W, H, lamp, 1);
+    key.grounded = false;
+    cap(key, 0, 0, 1, W, H, depth - 1, material);
+  }
+  live.state.top = live.faceZ = depth;
+  return key;
+}
+
+/** Light stays close to the socket. A latched key keeps its lens lit after release. */
+export function keyLight(live, hover, flare, held = 0) {
+  live.glowStrength = halo(0.026) * byTheme(live) * (1 + hover * 1.2 + flare * 2.6 + held * 1.3);
+  live.glowRadius = 2.3 + flare * 0.8;
+}
+
+/** A pilot lamp has a steel socket, a raised lens and one pale facet facing the light. */
+export function pilot(m, w, h, material) {
+  m.part('collar').slab(-1, -1, 0, w + 2, h + 2, 2, 'steel', 1).carve(0, 0, 0, w, h, 2);
+  const lens = m.part('lamp');
+  lens.box(0, 0, 0, w, h, 3, material);
+  lens.plot(0, 0, 2, 'ivory');
+}
+
 /**
  * A bezel: a frame one voxel high standing on the surface round a slot (x, y, w, h), `by` voxels
  * wide. For what slides in a slot: a switch, a fader. It reaches `by` voxels past the element's
  * box, into the part's pad.
  */
-export function bezel(m, x, y, w, h, { by = 2, mat = 'steel', name = 'bezel' } = {}) {
+export function bezel(m, x, y, w, h, { by = h <= 8 || w <= 8 ? 1 : 2, mat = 'steel', name = 'bezel' } = {}) {
   const b = m.part(name);
-  b.slab(x - by, y - by, 0, w + by * 2, h + by * 2, 1, mat, 1).carve(x, y, 0, w, h, 1);
+  b.slab(x - by, y - by, 0, w + by * 2, h + by * 2, 2, mat, 1).carve(x, y, 0, w, h, 2);
+  ring(b, x - 1, y - 1, 1, w + 2, h + 2, 'slate');
   return b;
 }
 

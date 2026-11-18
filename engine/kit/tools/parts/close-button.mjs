@@ -65,7 +65,7 @@ let [x, y] = await mid(p, '#close');
 await p.mouse.move(x - 19, y + 19, { steps: 6 });
 await p.mouse.down();
 await p.waitForTimeout(160);
-const tz = await p.evaluate(() => { const l = window.vx.live(document.getElementById('close')); return [+l.model.byName.cap.tz.toFixed(2), l.look.travel]; });
+const tz = await p.evaluate(() => { const l = window.vx.live(document.getElementById('close')); return [+l.model.byName.cap.tz.toFixed(2), Math.min(l.look.travel, l.faceZ - 1)]; });
 say(Math.abs(tz[0] - (0.5 - tz[1])) < 0.15, `held at the edge of its target, the cap still goes down (${tz[0]})`);
 await p.mouse.move(x - 19, y + 150, { steps: 6 });
 await p.mouse.up();

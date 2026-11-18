@@ -26,7 +26,7 @@ const mid = async (p, sel) => { const b = await p.locator(sel).first().boundingB
 const press = async (p, sel) => { const [x, y] = await mid(p, sel); await p.mouse.move(x, y, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(140); await p.mouse.up(); };
 const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s).getAttribute('aria-pressed'), sel);
 // the voxels behind an element: how far its cap is down, and its light
-const voxels = (p, sel) => p.evaluate((s) => { const l = window.vx.live(document.querySelector(s)); const cap = l.model.byName.cap; return { tz: cap ? +cap.tz.toFixed(2) : null, light: !!l.model.byName.light, travel: l.look.travel, glow: l.glowStrength, reach: l.glowRadius, parts: l.model.parts.map((q) => q.name).join() }; }, sel);
+const voxels = (p, sel) => p.evaluate((s) => { const l = window.vx.live(document.querySelector(s)); const cap = l.model.byName.cap; return { tz: cap ? +cap.tz.toFixed(2) : null, light: !!l.model.byName.light, travel: l.look.travel, glow: l.glowStrength, reach: l.glowRadius, lensVisible: !!l.model.byName.lens && !l.model.byName.lens.hidden, parts: l.model.parts.map((q) => q.name).join() }; }, sel);
 // the picture of one key with everything else on the page put out of sight
 async function alone(p, sel, pad = 30) { // 30 px round it: its side, its shadow and its halo, and still clear of the sheet's edge
   await p.evaluate((s) => { for (const st of document.querySelectorAll('.state')) { st.style.visibility = st.contains(document.querySelector(s)) ? '' : 'hidden'; st.querySelector('span').style.visibility = 'hidden'; } }, sel);
@@ -78,6 +78,7 @@ for (const theme of ['light', 'dark']) {
 // ---- a real mouse and real keys
 const p = await open();
 let on = await voxels(p, '#s-on'), off = await voxels(p, '#s-off');
+say(on.lensVisible && !off.lensVisible, "only the latched key has a lit front window");
 say(on.tz === -on.travel, `on, the cap is down by the key's travel (${on.tz})`);
 say(on.glow > off.glow * 1.5 && on.reach === off.reach, `on, its light is held brighter than a key's at rest, and reaches no further (${(on.glow / off.glow).toFixed(2)} times; reach ${on.reach})`);
 say(await p.evaluate(() => window.vx.stage.awake.size) === 0, 'at rest nothing runs');

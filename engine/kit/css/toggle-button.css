@@ -64,5 +64,8 @@
 .vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"])::after { content: ""; position: absolute; inset: 0 calc(var(--vx) * -1) calc(var(--vx) * -1) 0; }
 /* plain, on: the accent's light all round its foot */
 .vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]) { --_top: var(--lit-accent, var(--vx-enamel)); --_side: var(--lit-accent, var(--vx-enamel)); box-shadow: 0 0 0 calc(var(--vx) * 0.5) var(--lit-accent, var(--vx-enamel)); }
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"])::after {
+  background: linear-gradient(var(--lit-accent), var(--lit-accent)) center calc(100% - var(--vx) * 2) / calc(var(--vx) * 4) var(--vx) no-repeat;
+}
 /* plain, off while on: a dent, no light */
 .vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:is(:disabled, [aria-disabled="true"]) { box-shadow: inset 0 0 0 calc(var(--vx) * 0.5) var(--vx-slate); }

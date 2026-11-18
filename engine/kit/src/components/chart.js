@@ -30,7 +30,7 @@
 //   A chart reads from left to right in either direction of writing: its places, its columns
 //   and their names are laid out left to right on a right-to-left page as well.
 //   Under prefers-reduced-motion the light is there at once; otherwise the columns grow (the line
-//   draws itself from the left) when the chart is first drawn and when its numbers change.
+//   draws itself from the left) only when its numbers change. The first reading is complete.
 
 import { hole, halo, byTheme, lightName, warmth } from '../core/light.js';
 import { reducedMotion } from '../core/motion.js';
@@ -287,9 +287,9 @@ export const chart = {
       if (y < 0 || y >= H) continue;
       for (let x = 2; x < W - 1; x += 4) if (!used.has(x + ',' + y)) marks.box(x, y, -D, 1, 1, 1, 'slate');
     }
-    // the light grows when the chart is first drawn and when its numbers change, never when it
-    // is only laid out again
-    if (live.state.g === undefined || live.state.news) { live.state.g = reducedMotion() ? 1 : 0; live.state.news = false; }
+    if (live.state.g === undefined) live.state.g = 1;
+    else if (live.state.news) live.state.g = reducedMotion() ? 1 : 0;
+    live.state.news = false;
     live.state.grown = false;
   },
 

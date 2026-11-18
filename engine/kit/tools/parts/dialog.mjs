@@ -45,11 +45,11 @@ say(d.groove === 'light-warm' && Math.abs(d.grooveY - (d.headEnd - 4)) < 0.5, `a
 say(d.headInk && d.headBand === 'rgba(0, 0, 0, 0)' && d.headH % 4 === 0, `its header is words in ink with no band behind them, ${d.headH / 4} voxels high`);
 say(d.keys.length === 2 && d.keys.filter((k) => k.kind === 'main').length === 1 && d.keys.every((k) => k.lit), `its keys stand on light, and one is main (${d.keys.map((k) => k.kind + ':' + k.cap).join(', ')})`);
 
-// its key closes it with the key's value: it breaks, then it is gone
+// its key closes it with the key's value: the plate lowers, then it is gone
 await press('#still [data-vx-close="later"]');
 await p.waitForTimeout(60);
 d = await read('still');
-say(d.open && d.leaving && d.fx === 'crumble', 'a press on Not now: it breaks first');
+say(d.open && d.leaving && d.fx === 'lower', 'a press on Not now: the plate lowers first');
 await p.waitForTimeout(700);
 d = await read('still');
 say(!d.open && d.value === 'later' && await result() === 'still: later', 'then it is closed, with that key\'s value');
@@ -73,7 +73,7 @@ say(!stops.some((s) => s.startsWith('OUT')) && stops.includes('Cancel') && stops
 await p.locator('#new-name').fill('harbor-core');
 await p.locator('#new-name').press('Enter'); await p.waitForTimeout(60);
 d = await read('rename');
-say(d.leaving && d.fx === 'crumble', 'Enter in the field sends the form: the dialog breaks');
+say(d.leaving && d.fx === 'lower', 'Enter in the field sends the form: the dialog lowers');
 await p.waitForTimeout(700);
 d = await read('rename');
 say(!d.open && d.value === 'save' && await result() === 'rename: save', 'and closes with the main key\'s value');
@@ -83,7 +83,7 @@ await p.keyboard.press('Enter'); await p.waitForTimeout(700);
 say((await read('rename')).open, 'Enter on that key opens it again');
 await p.keyboard.press('Escape'); await p.waitForTimeout(60);
 d = await read('rename');
-say(d.open && d.fx === 'crumble', 'Escape breaks it');
+say(d.open && d.fx === 'lower', 'Escape lowers it');
 await p.waitForTimeout(700);
 d = await read('rename');
 say(!d.open && d.value === 'cancel' && await p.evaluate(() => document.activeElement.id) === 'open-rename', 'and closes it with "cancel"; focus is back');
@@ -105,6 +105,41 @@ await p.keyboard.press('Tab'); await p.keyboard.press('Space'); await p.waitForT
 d = await read('delete');
 say(!d.open && d.value === 'delete' && await result() === 'delete: delete', 'Tab to Delete and Space: it closes with "delete"');
 say(await p.evaluate(() => document.activeElement.id) === 'open-delete', 'focus is back on the key that opened it');
+
+// Interrupt an opening using the same close key a hand can press. Reopening a dialog from
+// application code before the close effect finishes must keep the new dialog open.
+for (const reduced of [false, true]) {
+  await p.emulateMedia({ reducedMotion: reduced ? 'reduce' : 'no-preference' });
+  await p.evaluate(() => { window.vx.stage.manual = true; });
+  await p.locator('#open-rename').click();
+  await p.waitForFunction(() => window.vx.live(document.querySelector('#rename')).carried && window.vx.live(document.querySelector('#rename')).visible);
+  const travel = await p.evaluate(() => {
+    const stage = window.vx.stage, dialog = document.getElementById('rename'), live = window.vx.live(dialog);
+    stage.advance(1 / 60);
+    const z = live.carried.dz, at = live.carried.progress;
+    dialog.querySelector('[data-vx-close="cancel"]').click();
+    const continuous = live.carried.progress === at && live.carried.dz === z;
+    stage.advance(1 / 60);
+    const reversing = live.carried.progress < at;
+    const stationary = live.carried.dz === 0;
+    dialog.close();
+    dialog.showModal();
+    return { continuous, reversing, stationary };
+  });
+  await p.waitForFunction(() => window.vx.live(document.getElementById('rename')).carried?.kind === 'assemble');
+  const open = await p.evaluate(async () => {
+    const stage = window.vx.stage, dialog = document.getElementById('rename');
+    for (let i = 0; i < 36; i++) stage.advance(1 / 60);
+    await Promise.resolve();
+    const shown = dialog.open && !dialog.hasAttribute('data-vx-carried') && !dialog.hasAttribute('data-vx-leaving');
+    dialog.close();
+    stage.manual = false;
+    stage.schedule();
+    return shown;
+  });
+  say(travel.continuous && travel.reversing && travel.stationary === reduced && open,
+    `${reduced ? 'less motion' : 'motion'}: the close key reverses the plate in place and an immediate reopen completes on the new dialog`);
+}
 
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
 await browser.close();

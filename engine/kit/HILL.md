@@ -108,6 +108,19 @@ That is 63 to build and 76 in all.
 | Round | Date | What | Result |
 |---|---|---|---|
 | 0 | 2026-11-17 | Baseline of the kit as merged at `bf55acd`, shot on the engine renderer (`shots/baseline/`) | GPT 6.2 Sol: 6.22. Opus 5.5: 6.33. See below. |
+| 1 | 2026-11-18 | Hardware baseline at `dc46636f`, 100 showcase images, nine part pages, the deploy panel at 390 and 1280, and the two hardware references. | Sol 7.11 (6/8/6/7/7/7/8/7/8). Opus 5.78 (5/6/5/6/6/6/7/5/6). |
+| 2 | 2026-11-18 | Cast housing, quieter daylight finish, latched window, engraved shortcuts, seated lamps. The same nine pages and deploy views, compared against round 1 and both references. | Sol 7.78 (8/7/7/8/8/7/8/8/9). Opus 5.94 (6/5.5/6/6/6/5/6.5/5.5/7). |
+| 3 | 2026-11-18 | Cast case (A), exposed rack (B) and round 2 (C) on the main renderer. Both ranked A > B > C. Same phone and desktop panel, both references, latch states and press frames. | Cast case: Sol 8.33 (9/8/8/8/9/8/8/8/9). Opus 7.33 (8/7/7/7/8/8/6/8/7). |
+| 4 | 2026-11-18 | Adopted cast case on the whole showcase. 104 baseline shots, fit at 390 and 1280, all 69 part pages and four motion films. Sol reviewed the full gallery. Opus viewed the full showcase and five of nine component sheets. | Sol 8.22 (9/8/8/8.5/8.5/8/7/8/9). Opus 6.89 (7.5/7/7/7/7/6/6/7/7.5). |
+| 5 | 2026-11-18 | Both reviewers opened the same nine sheets, covering all 69 component pages, the whole showcase at 390 and 1280 by day and night, both hardware references, round 1 and the round 3 winner. Both ranked the seated lift above the drawer, and the drawer above round 4. | Lift: Sol 7.56 (8/7/7/7/8/7/8/7/9). Opus 6.33 (7/6/6/6/6/5/6/7/8). Opus marked type provisional at contact-sheet scale. |
+
+Round 5 is the first fair whole-kit baseline. Scores fell from 8.22/6.89 to 7.56/6.33. Earlier rounds used smaller panels or gave the two reviewers different coverage. Compare subsequent rounds with 7.56/6.33 and keep this panel in the comparison.
+
+**First regroup.** Both councils still read the housing as thin and the latch as too similar to a resting key. A thicker flat slab and a brighter rim gained little on their own. The cast shell won on the section of its cover and on the height and light of its latch. Both reviewers found the phone header too close to the screw heads.
+
+**Second regroup.** Both reviewers could read the casting. Both saw chalk keys competing at the same weight, tab legends behind a case lip, and an empty menu before the text appeared. Deepening the case further would consume more clearance. Compare two ways of bringing in a whole engraved plate and docking controls on it.
+
+The old lip covered 864 of 948 painted tab-letter pixels at 1280 (91%) and 10 of 948 at 390. The lift preserved all 948 pixels in both themes and kept the three legends 35 px clear at both widths. The night heading had 29 px of visible air above the casting at 390 and 41 px at 1280. Deploy stood eight courses to Roll back’s six, with 2.6 times its local light. Under full-parts load the input-through-rest films found zero unsupported text samples for either mechanism (lift 0/1,404, drawer 0/1,330). The extra sample at input caught a flash before the first tick in the trial. Both reviewers saw the final lift lose weight as its words faded. Both found small hardware and lit wells competing for attention at rest.
 
 ### Round 0, by criterion
 

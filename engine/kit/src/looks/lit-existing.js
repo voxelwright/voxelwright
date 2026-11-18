@@ -152,6 +152,10 @@ const menu = {
     pick.grounded = false;
     pick.box(rtl(el) ? W - 1 - MARK_X : MARK_X, Math.min(2, h - 1), d - GROOVE, 1, Math.max(1, h - 4), GROOVE, 'light');
     pick.tz = 0.03;
+    const danger = m.part('danger');
+    danger.grounded = false;
+    danger.box(rtl(el) ? W - 1 - MARK_X : MARK_X, Math.min(2, h - 1), d - GROOVE, 1, Math.max(1, h - 4), GROOVE, 'light-stop');
+    danger.tz = pick.tz;
     live.faceZ = d;
   },
 
@@ -159,7 +163,10 @@ const menu = {
     const { pick, panel } = live.model.byName, a = live.state.active;
     // not while the slab is still being built: the mark would hang in the air
     pick.hidden = !(a >= 0) || !!panel.fx;
-    if (a >= 0) pick.ty = live.state.ys[a] ?? 0;
+    const danger = live.model.byName.danger;
+    danger.hidden = pick.hidden || live.state.items[a]?.dataset.vxKind !== 'danger';
+    if (!danger.hidden) pick.hidden = true;
+    if (a >= 0) danger.ty = pick.ty = live.state.ys[a] ?? 0;
     live.glowStrength = halo(MENU_GLOW) * (live.theme === 'day' ? 1.2 : 1);
   },
 

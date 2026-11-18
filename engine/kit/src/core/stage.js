@@ -3,7 +3,7 @@
 
 import { Model } from './model.js';
 import { lookOf, lightOf } from './look.js';
-import { Spring, assemble, crumble, settle, reducedMotion } from './motion.js';
+import { Spring, assemble, crumble, plateMotion, settle, reducedMotion } from './motion.js';
 import { listeners } from '../components/util.js';
 
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
@@ -49,6 +49,7 @@ export class Live {
     this.pad = this.form.pad ?? 6;
     this.faceZ = 0;
     this.well = null;
+    this.stopMotion();
     this.model = new Model();
     for (const l of this.labels) { l.node.style.transform = ''; l.last = undefined; } // a label's nudge belongs to the model it was on
     this.labels.length = 0;
@@ -114,11 +115,46 @@ export class Live {
     let top = 1;
     for (const p of this.model.parts) for (let i = 0; i < p.count; i++) top = Math.max(top, p.rest[i * 3 + 2] + 0.5);
     const shared = { W: this.W, H: this.H, top, ...opts };
-    const make = reducedMotion() ? (p) => settle(p, { out: effect === 'crumble' }) : effect === 'crumble' ? (p) => crumble(p, shared) : (p) => assemble(p, shared);
-    let longest = 0;
-    for (const p of list) { p.fx = make(p); p.hidden = false; longest = Math.max(longest, p.fx.end); }
+    const exiting = effect === 'crumble' || effect === 'lower';
+    const carried = this.form.carryPlate && effect !== 'crumble';
+    const still = reducedMotion(), start = this.carried?.progress;
+    this.clearPlate();
+    for (const p of list) {
+      if (carried || effect === 'lower') p.fx = plateMotion(p, { ...shared, out: exiting, still, start });
+      else if (still) p.fx = settle(p, { out: exiting });
+      else p.fx = (effect === 'crumble' ? crumble : assemble)(p, shared);
+      p.hidden = false;
+    }
+    if (carried && list.length) {
+      this.carried = list[0].fx;
+      this.el.dataset.vxCarried = still ? 'still' : 'moving';
+      this.el.removeAttribute('data-vx-cover-legends');
+      this.carryWords();
+    }
     this.invalidate();
+    if (!list.length) return Promise.resolve();
     return new Promise((resolve) => { (this.waiters ??= []).push({ list, resolve }); });
+  }
+
+  carryWords() {
+    const { dz, progress } = this.carried;
+    this.el.style.setProperty('--vx-plate-x', dz * SHEAR[0] * this.vx + 'px');
+    this.el.style.setProperty('--vx-plate-y', dz * SHEAR[1] * this.vx + 'px');
+    this.el.style.setProperty('--vx-plate-ink', Math.min(1, progress * 2));
+  }
+
+  stopMotion() {
+    this.clearPlate();
+    for (const part of this.model?.parts ?? []) part.fx = null;
+    for (const waiter of this.waiters ?? []) waiter.resolve();
+    this.waiters = [];
+  }
+
+  clearPlate() {
+    if (!this.carried) return;
+    this.carried = null;
+    this.el.removeAttribute('data-vx-carried');
+    for (const name of ['--vx-plate-x', '--vx-plate-y', '--vx-plate-ink']) this.el.style.removeProperty(name);
   }
 
   invalidate() {
@@ -130,7 +166,11 @@ export class Live {
   /** One step of time. Returns true if this needs another frame. */
   step(dt) {
     let moving = false;
-    for (const k in this.springs) if (this.springs[k].step(dt)) moving = true;
+    for (const spring of Object.values(this.springs)) {
+      if (!spring.moving) continue;
+      this.dirty = true; // draw the exact resting pose on the step which snaps to target
+      if (spring.step(dt)) moving = true;
+    }
     for (const p of this.model.parts) {
       if (!p.fx) continue;
       p.fx.t += dt;
@@ -154,9 +194,9 @@ export class Live {
         if (done) {
           const kind = p.fx.kind;
           p.fx = null;
-          if (kind === 'crumble') p.hidden = true;
+          if (kind === 'crumble' || kind === 'lower') p.hidden = true;
           this.settled(p);
-          if (kind === 'crumble') continue; // nothing left to draw
+          if (p.hidden) continue; // nothing left to draw
           this.writeRest(p, o);
         }
       } else this.writeRest(p, o);
@@ -164,10 +204,14 @@ export class Live {
       ao.set(p.ao, n * 2);
       o += cnt * 8; n += cnt;
     }
+    if (this.carried) {
+      this.carryWords();
+      if (this.carried.t >= this.carried.end && this.carried.kind !== 'lower') this.clearPlate();
+    }
     const ok = this.stage.renderer.draw({
       pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
-      soft: this.form.soft,
+      soft: this.form.soft, groundSoft: this.look.groundSoft, surfaceBytes: !!this.look.finishes,
       // a part may turn its own light up and down as it is used (live.glowStrength, live.glowRadius)
       glowRadius: this.glowRadius ?? this.form.glowRadius, glowStrength: this.glowStrength ?? this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
@@ -204,9 +248,11 @@ export class Live {
 
   destroy() {
     this.destroyed = true;
+    this.stopMotion();
     this.unbind?.();
     this.canvas.remove();
     this.el.removeAttribute('data-vx-live');
+    this.el.removeAttribute('data-vx-cover-legends');
     for (const l of this.labels) l.node.style.transform = '';
   }
 }

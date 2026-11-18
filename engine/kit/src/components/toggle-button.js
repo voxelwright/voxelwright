@@ -7,15 +7,8 @@
 
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { ring, hole, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
+import { hole, lightName, seatedKey, keyLight } from '../core/light.js';
 import { listeners, wrapLabel } from './util.js';
-
-// the key's own numbers (looks/lit.js), so the two cannot be told apart at rest
-const KEY_GLOW = 0.075, KEY_REACH = 4.2;
-// while the key is on its light is held this much brighter than a key's at rest. It does not
-// reach further than at rest (a flare does, for a moment): a light that stays on must not lie
-// on the words beside the key.
-const HELD = 1.3;
 
 const isOff = (el) => el.disabled || el.getAttribute('aria-disabled') === 'true';
 const isOn = (el) => el.getAttribute('aria-pressed') === 'true';
@@ -35,8 +28,7 @@ export const toggleButton = {
   name: 'toggle-button',
   selector: '.vx-toggle-button',
   pad: 9,
-  glowRadius: KEY_REACH,
-  glowStrength: halo(KEY_GLOW),
+  soft: 0.65,
 
   build(live, m) {
     const { W, H, el } = live, look = live.look;
@@ -55,20 +47,18 @@ export const toggleButton = {
       s.top = -dent;
       live.label(label, () => -dent);
     } else {
-      const cap = m.part('cap');
-      const depth = off ? LOW : look.rise;
-      if (off) cap.slab(0, 0, 0, W, H, LOW, 'steel', 1);
-      else {
-        ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
-        cap.grounded = false;
-        capOf(cap, 0, 0, LOW, W, H, depth - LOW, 'key'); // the cap stands on the ring, which ring() makes one voxel high
+      const cap = seatedKey(live, m, off, 'key', lightName(el));
+      const depth = s.top;
+      if (!off) {
+        // A window in the lower lip of the cap lights only when the latch is closed.
+        const lens = m.part('lens');
+        lens.grounded = false;
+        lens.box(2, H - 2, depth, Math.max(1, W - 4), 1, 1, lightName(el));
       }
-      s.top = depth;
-      live.faceZ = depth;
       live.label(label, () => s.top + cap.tz);
     }
     // where it rests: down while on. The first drawing is as it is, with nothing moving.
-    const rest = on && !off ? -look.travel : 0, press = live.spring('press');
+    const rest = on && !off ? -s.keyTravel : 0, press = live.spring('press');
     if (!s.built || reducedMotion()) { press.snap(rest); s.flare = 0; s.lit = rest ? 1 : 0; }
     else if (!s.held) press.to(rest, rest ? PRESS.k : RELEASE.k, rest ? PRESS.c : RELEASE.c);
     s.built = true;
@@ -83,11 +73,13 @@ export const toggleButton = {
     }
     const press = live.spring('press').x, hover = live.spring('hover').x;
     cap.tz = press + hover;
+    const lens = live.model.byName.lens;
+    lens.hidden = !isOn(live.el);
+    lens.tz = cap.tz;
     // the light answers as the key's does: brighter while aimed at, a flare as it goes down and
     // a slow fall after. On, it does not fall back to where it was: it is held bright.
     const f = live.state.flare ?? 0, lit = live.state.lit ?? 0;
-    live.glowStrength = halo(KEY_GLOW) * byTheme(live) * (1 + hover * 1.2 + f * 2.6 + lit * HELD);
-    live.glowRadius = KEY_REACH + f * 2.2;
+    keyLight(live, hover, f, lit);
     live.el.style.setProperty('--lit', Math.max(f, lit * 0.5).toFixed(3));
   },
 
@@ -112,13 +104,13 @@ export const toggleButton = {
     wire(el, on);
     const press = live.spring('press'), hover = live.spring('hover');
     const go = (spring, x, k, c) => { if (reducedMotion()) spring.snap(x); else spring.to(x, k, c); live.invalidate(); };
-    const rest = () => (isOn(el) && !s.off ? -live.look.travel : 0);
+    const rest = () => (isOn(el) && !s.off ? -s.keyTravel : 0);
     // back to where it rests: up if it is off, down if it is on
     const settle = () => { s.held = false; const r = rest(); go(press, r, r ? PRESS.k : RELEASE.k, r ? PRESS.c : RELEASE.c); };
     // it went on with no hand on it long enough to be seen (the Enter key, or code): the light
     // still says so, with the flare of a press
     const flash = () => { if (isOn(el) && !s.off && !reducedMotion()) s.flare = Math.max(s.flare ?? 0, 1); };
-    const down = () => { if (s.off) return; s.held = true; go(press, -live.look.travel, PRESS.k, PRESS.c); cue('press'); };
+    const down = () => { if (s.off) return; s.held = true; go(press, -s.keyTravel, PRESS.k, PRESS.c); cue('press'); };
     const drop = () => { if (s.held) settle(); };
     on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
     on(el, 'pointercancel', drop);

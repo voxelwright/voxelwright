@@ -119,7 +119,7 @@ headings that break under the pointer), groove, recess, lamp, pointer, checkbox 
 |---|---|
 | prose (headings, links, quote, lists) | None, but a quote's rule is a vertical groove. |
 | code block | A recess. |
-| kbd | A small low cap with no light: it names a key, it is not one. |
+| kbd | An engraved legend set one voxel into the surface. |
 | table | None. One groove between head and body; rows are parted by space or a hairline in `--vx-slate`. |
 | figure and image | The picture is set in a recess; the caption is words. |
 | aspect ratio | None (layout only). |
@@ -254,7 +254,7 @@ a ring of light 1 and a cap 4, its top a voxel smaller all round) going 2 down w
 (`travel`), a float 6 (`float`), a dialog 7 (`dialog`).
 
 Materials: `chalk` (the surface), `key` (an ordinary cap), `enamel` (the main cap), `floor` (the
-bottom of a well), `slate` (trays, trenches), `steel` (switched off), `ivory` (a knob), `ink`,
+bottom of a well), `slate` (trays, trenches), `gasket` (cover joints and key sockets), `steel` (hardware and switched-off controls), `ivory` (a knob), `ink`,
 `light`, `light-warm`, `light-go`, `light-stop`. No new materials and no colours of your own:
 a theme recolours these, and yours would be left behind.
 

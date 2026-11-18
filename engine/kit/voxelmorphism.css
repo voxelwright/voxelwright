@@ -386,14 +386,20 @@ dialog.vx-dialog {
    takes focus when it opens with nothing to focus; it shows no ring, its controls show theirs. */
 .vx-dialog > :is(header, footer) { margin: 0; border: 0; background: none; }
 dialog.vx-dialog:focus-visible { outline: none; }
-.vx-dialog::backdrop { background: rgb(10 15 61 / 0.5); }
+.vx-dialog::backdrop { background: rgb(10 15 61 / 0.5); transition: opacity 200ms ease-out; }
+.vx-dialog[data-vx-leaving]::backdrop { opacity: 0; }
 .vx-dialog > header { padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 3.5); font-weight: 700; font-size: 1.125rem; line-height: 1.25; color: var(--vx-on-enamel); }
 .vx-dialog-body { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); line-height: 1.55; overflow: auto; }
 .vx-dialog-body > :first-child { margin-block-start: 0; }
 .vx-dialog-body > :last-child { margin-block-end: 0; }
 .vx-dialog > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--vx) * 4); padding: calc(var(--vx) * 1) calc(var(--vx) * 6) calc(var(--vx) * 6); }
-.vx-dialog > :not(canvas) { transition: opacity 160ms ease; }
-.vx-dialog:is([data-vx-building], [data-vx-leaving]) > :not(canvas) { opacity: 0; transition-duration: 80ms; }
+[data-vx-carried] > :not(.vx-canvas) {
+  translate: var(--vx-plate-x, 0) var(--vx-plate-y, 0);
+  opacity: var(--vx-plate-ink, 0);
+  transition: none;
+}
+[data-vx-carried="still"] > .vx-canvas { opacity: var(--vx-plate-ink, 0); }
+.vx-toast[data-vx-carried] .vx-toast-text { display: inline-block; transition: none; }
 .vx-dialog:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow); }
 .vx-dialog:not([data-vx-live]) > header { background: var(--vx-enamel); }
 
@@ -401,6 +407,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
 
 .vx-toasts { position: fixed; inset-inline: 0; inset-block-end: calc(var(--vx) * 8); z-index: 1000; display: grid; justify-items: center; gap: calc(var(--vx) * 4); pointer-events: none; }
 .vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding-block: calc(var(--vx) * 3.5); padding-inline: calc(var(--vx) * 8) calc(var(--vx) * 6); font-weight: 600; line-height: 1.35; }
+.vx-menu[data-vx-cover-legends] [role^="menuitem"] { opacity: 0; }
 .vx-toast-text { transition: opacity 120ms ease; }
 .vx-toast[data-vx-leaving] .vx-toast-text { opacity: 0; }
 .vx-toast:not([data-vx-live]) { background: var(--vx-chalk); border-inline-start: calc(var(--vx) * 2) solid var(--vx-signal); padding-inline-start: calc(var(--vx) * 6); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
@@ -491,31 +498,32 @@ dialog.vx-dialog:focus-visible { outline: none; }
 
 [data-vx-look="lit"] {
   --vx-look: lit;
+  --vx-bubble-deep: 4;
   --vx-ground: #e9e7e0;
   --vx-ink: #1b1d2a;
   --vx-ink-quiet: #5a5d6e;
-  --vx-enamel: var(--lit-cap-day, #2f5bff);
+  --vx-enamel: var(--lit-cap-day, #174ec6);
   --vx-enamel-top: color-mix(in oklab, var(--vx-enamel), #fff 22%);
   --vx-enamel-side: color-mix(in oklab, var(--vx-enamel), #000 20%);
   --vx-on-enamel: #ffffff;
-  --vx-signal: var(--lit-accent-day, #2f5bff);
+  --vx-signal: var(--lit-accent-day, #388de6);
   --vx-signal-top: color-mix(in oklab, var(--vx-signal), #fff 22%);
   --vx-signal-side: color-mix(in oklab, var(--vx-signal), #000 20%);
-  --vx-on-signal: #ffffff;
-  --vx-chalk: #f5f2e9;
+  --vx-on-signal: #101421;
+  --vx-chalk: #e9dcc5;
   --vx-chalk-top: #fffdf6;
   --vx-chalk-side: #d5d1c2;
-  --vx-slate: #dcd8cb;
+  --vx-slate: #9f998a;
   --vx-slate-side: #bdb9ab;
   --vx-steel: #cfcbbd;
-  --vx-key: #fffefa;
-  --vx-floor: #fbf9f2;
+  --vx-key: #f2ebda;
+  --vx-floor: #c8bda7;
   --vx-knob: #fffefa;
   --vx-shadow: rgb(41 33 26 / 0.24);
-  --vx-focus: var(--lit-cap-day, #2f5bff);
+  --vx-focus: var(--lit-cap-day, #174ec6);
   --vx-link: var(--lit-link-day, #1f40c4);
   --vx-danger-text: #9c1f14;
-  --lit-accent: var(--lit-accent-day, #2f5bff);
+  --lit-accent: var(--lit-accent-day, #388de6);
   --lit-legend: var(--vx-ink);
   --lit-warm: #b97a00;
   --lit-go: #0d7a3a;
@@ -526,22 +534,22 @@ dialog.vx-dialog:focus-visible { outline: none; }
   --vx-ground: #08090f;
   --vx-ink: #e8eaf4;
   --vx-ink-quiet: #a3a8be;
-  --vx-enamel: var(--lit-cap-night, #3560f2);
-  --vx-signal: var(--lit-accent-night, #4d7dff);
-  --vx-chalk: #1b1e2d;
+  --vx-enamel: var(--lit-cap-night, #315aca);
+  --vx-signal: var(--lit-accent-night, #458fe3);
+  --vx-chalk: #23313b;
   --vx-chalk-top: #252938;
   --vx-chalk-side: #10121c;
-  --vx-slate: #11131f;
+  --vx-slate: #141b21;
   --vx-slate-side: #090a12;
   --vx-steel: #262938;
-  --vx-key: #2b3046;
-  --vx-floor: #0c0e18;
+  --vx-key: #434745;
+  --vx-floor: #141a1f;
   --vx-knob: #d7dbf0;
   --vx-shadow: rgb(0 0 5 / 0.6);
   --vx-focus: var(--lit-link-night, #9db8ff);
   --vx-link: var(--lit-link-night, #9db8ff);
   --vx-danger-text: #ffb3a8;
-  --lit-accent: var(--lit-accent-night, #4d7dff);
+  --lit-accent: var(--lit-accent-night, #458fe3);
   --lit-legend: var(--lit-legend-night, #dfe8ff);
   --lit-warm: #c9a264;
   --lit-go: #5fe894;
@@ -553,22 +561,22 @@ dialog.vx-dialog:focus-visible { outline: none; }
     --vx-ground: #08090f;
     --vx-ink: #e8eaf4;
     --vx-ink-quiet: #a3a8be;
-    --vx-enamel: var(--lit-cap-night, #3560f2);
-    --vx-signal: var(--lit-accent-night, #4d7dff);
-    --vx-chalk: #1b1e2d;
+    --vx-enamel: var(--lit-cap-night, #315aca);
+    --vx-signal: var(--lit-accent-night, #458fe3);
+    --vx-chalk: #23313b;
     --vx-chalk-top: #252938;
     --vx-chalk-side: #10121c;
-    --vx-slate: #11131f;
+    --vx-slate: #141b21;
     --vx-slate-side: #090a12;
     --vx-steel: #262938;
-    --vx-key: #2b3046;
-    --vx-floor: #0c0e18;
+    --vx-key: #434745;
+    --vx-floor: #141a1f;
     --vx-knob: #d7dbf0;
     --vx-shadow: rgb(0 0 5 / 0.6);
     --vx-focus: var(--lit-link-night, #9db8ff);
     --vx-link: var(--lit-link-night, #9db8ff);
     --vx-danger-text: #ffb3a8;
-    --lit-accent: var(--lit-accent-night, #4d7dff);
+    --lit-accent: var(--lit-accent-night, #458fe3);
     --lit-legend: var(--lit-legend-night, #dfe8ff);
     --lit-warm: #c9a264;
     --lit-go: #5fe894;
@@ -577,13 +585,20 @@ dialog.vx-dialog:focus-visible { outline: none; }
   }
 }
 
+/* The case shoulder occupies its own box above the cover in both rendering modes.
+   The canvas is positioned from the inside edge of this border. */
+[data-vx-look="lit"] .vx-card { border-top: calc(var(--vx) * 7) solid transparent; }
+@media (max-width: 600px) {
+  [data-vx-look="lit"] .vx-card { border-top-width: calc(var(--vx) * 4); }
+}
+
 /* ---------- lit: keys ---------- */
 
 /* An ordinary key is the colour of the surface's own material; data-vx-kind="main" is the one
    main action of a group (the accent cap); data-vx-kind="danger" destroys something (a red light). */
 [data-vx-look="lit"] .vx-button { --_face: var(--vx-key); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--lit-legend); font-weight: 400; }
 [data-vx-look="lit"] .vx-button:is([data-vx-kind="main"], [data-vx-material="enamel"]) { --_face: var(--vx-enamel); --_top: var(--vx-enamel-top); --_side: var(--vx-enamel-side); --_on: var(--vx-on-enamel); }
-[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--lit-legend); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-text); }
 [data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-text); }
 [data-vx-look="lit"] .vx-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); }
 [data-vx-look="lit"] .vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
@@ -595,7 +610,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
 [data-vx-look="lit"] .vx-button[data-vx-live]:is([data-vx-kind="main"], [data-vx-material="enamel"]):not(:disabled) .vx-label {
   text-shadow: 0 0 calc((4px + var(--lit, 0) * 10px) * var(--lit-night)) rgb(255 255 255 / calc(var(--lit-night) * (0.35 + var(--lit, 0) * 0.5)));
 }
-[data-vx-look="lit"] .vx-tabs > [role="tab"] { color: var(--vx-ink-quiet); font-weight: 400; }
+[data-vx-look="lit"] .vx-tabs > [role="tab"] { color: var(--vx-ink); font-weight: 400; }
 [data-vx-look="lit"] .vx-tabs > [role="tab"][aria-selected="true"] { color: var(--lit-legend); }
 [data-vx-look="lit"] .vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-key); color: var(--vx-ink); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent); }
 
@@ -2007,7 +2022,7 @@ dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::befo
   background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
 }
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
-[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); background-image: linear-gradient(var(--lit-stop), var(--lit-stop)); }
 
 /* ---------- lit: dialog ---------- */
 
@@ -2293,7 +2308,7 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 /* ==== css/kbd.css ==== */
 
 /* ---------- Kbd ----------
-   The name of a key. A small low cap with no light: it names a key, it is not one.
+   The name of a key. An inscription set into the surface.
      <kbd class="vx-kbd">K</kbd>
      <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd>   held together
    Its legend is in the key face, as on a key, at the key face's one size. It is seven voxels
@@ -2323,8 +2338,8 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 .vx-kbd abbr { text-decoration: none; cursor: inherit; }
 .vx-kbd > .vx-label { display: inline-block; } /* the script wraps the legend, to keep it on whole pixels */
 
-/* plain: a painted cap with its low side */
-.vx-kbd:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-slate-side), inset 0 0 0 1px var(--vx-slate-side); }
+/* Plain inset for the engraved legend. */
+.vx-kbd:not([data-vx-live]) { background: var(--vx-slate); box-shadow: inset 1px 1px 0 var(--vx-slate-side); }
 
 /* keys held together, or pressed one after another: caps a voxel apart, with the word between */
 .vx-keys { display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5); margin-block: calc(var(--vx) * -1); vertical-align: middle; font: 500 0.875em/1 var(--vx-font); color: var(--vx-ink-quiet); white-space: nowrap; }
@@ -4033,6 +4048,9 @@ dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {
 .vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"])::after { content: ""; position: absolute; inset: 0 calc(var(--vx) * -1) calc(var(--vx) * -1) 0; }
 /* plain, on: the accent's light all round its foot */
 .vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]) { --_top: var(--lit-accent, var(--vx-enamel)); --_side: var(--lit-accent, var(--vx-enamel)); box-shadow: 0 0 0 calc(var(--vx) * 0.5) var(--lit-accent, var(--vx-enamel)); }
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"])::after {
+  background: linear-gradient(var(--lit-accent), var(--lit-accent)) center calc(100% - var(--vx) * 2) / calc(var(--vx) * 4) var(--vx) no-repeat;
+}
 /* plain, off while on: a dent, no light */
 .vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:is(:disabled, [aria-disabled="true"]) { box-shadow: inset 0 0 0 calc(var(--vx) * 0.5) var(--vx-slate); }
 

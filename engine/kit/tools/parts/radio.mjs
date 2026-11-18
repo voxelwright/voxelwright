@@ -86,7 +86,7 @@ for (const mode of ['live', 'plain']) {
   s = await read('where');
   say(s.chosen === 'sin', 'a second press does not let it up');
   if (mode === 'live') {
-    await p.waitForTimeout(500);
+    await p.waitForFunction(() => window.vx.stage.awake.size === 0);
     const d = await drawn('where'), travel = await p.evaluate(() => window.vx.live(document.querySelector('.vx-dot')).look.travel);
     say(d === `fra cap 0 dark; iad cap 0 dark; sin lit ${-travel} light`, `at rest again, the one chosen now is down with its lamp on and the one before it has come up (${d})`);
     const b = await p.locator('#where .vx-dot').nth(0).boundingBox();

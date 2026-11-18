@@ -8,6 +8,32 @@ a whole interface.
 This file is the rule book. Its paths and commands start in `engine/kit`.
 `voxelmorphism.css` and `src/` implement it. Open the examples at `http://127.0.0.1:5989/kit/showcase/`.
 
+## Hardware look
+
+Set `data-vx-look="lit"` on a region to use the hardware shown in
+[the deploy panel](showcase/lit.html?still) and [the parts](showcase/parts/).
+The following dimensions apply to this look. The original showcase illustrates
+the construction rules in the numbered sections.
+
+- A full enclosure has fourteen courses, from its inset foot through the casting and gasket
+  to the removable cover. A cover wider than 100 voxels and at least 46 voxels tall
+  carries four slotted steel screws. The top lip occupies a shared inset in the case.
+  Tabs can sit on the cover with the words clear of its lip.
+  Narrow enclosures have eight courses and a clear cover. Small plates use five.
+  A steel bezel captures the slide paddle, and a steel socket seats each pilot lamp.
+- Keys stand on light. A seven-voxel-wide key rises three courses. Its hit target stays
+  eleven voxels wide. An ordinary full key rises six courses from its socket. The
+  group’s main key rises eight and uses blue enamel and 2.6 times the local light. A latched key holds
+  four courses down and lights a window across its lower lip. Shortcut legends sit one course below the surface.
+- The kit supplies an optional finish per material to renderers that support it. Ordinary
+  cubes use full chamfer and zero gloss. Steel and enamel catch direct light. The well
+  floor is matte. The ground filter spans one voxel at the default four-pixel scale.
+- Two dark cells separate each pair of meter lamps. A warning uses amber in the daytime.
+  A destructive menu row carries a red tracking light when selected.
+- The chart opens at the reading in its table and animates a subsequent change. A menu, toast or dialog rises on an intact
+  plate. Its lettering follows the same projection from the first frame. Closing a dialog
+  reverses from the current height and fades its scrim. Dismissing a toast still breaks it.
+
 ## 1. Principles
 
 1. **The voxel is the unit.** Every size is a whole number of voxels. Nothing is a fraction of a block.
@@ -132,15 +158,12 @@ Decide by how often it happens (from the site-craft rules):
 | Occasionally | Opening a menu or a dialog, a toast | Built: 200 to 460 ms |
 | Rarely | The sign, a bloom | Delight lives here |
 
-- **Assembly** marks the moment a thing is made: a dialog opens, a toast arrives, a note is added.
-  The thing rises out of the page in **bricks**: voxels are grouped into bricks of 2 to 7 voxels,
-  laid in a running bond, and each brick moves as one piece. A brick grows up through the page's
-  surface, overshoots by about 8% and settles; the page hides whatever is still below it, so
-  nothing is ever suddenly there and no frame is noise. One brick takes 170 ms; the whole build
-  takes 200 ms (menu), 300 ms (toast), 460 ms (dialog). The first brick moves on the frame of the
-  input. Words appear once there is a slab to carry them (340 ms into a dialog).
-- **Order.** By default courses are laid from the bottom-left corner upward. A menu is built out
-  of the corner nearest its trigger, a dialog from its centre, a toast from its stripe.
+- **Assembly** marks making a new object. A note can rise out of the page in bricks of two
+  to seven voxels laid in a running bond. Each brick rises through the surface, overshoots
+  by about 8% and settles. The page hides the courses still below it.
+- **Overlay plates** carry their engraving and controls together. A menu rises in 200 ms,
+  a toast in 300 ms and a dialog in 460 ms. A dialog lowers intact in 270 ms. Text and
+  plate positions come from the same frame. With reduced motion the whole plate fades in place.
 - **Crumble** marks removal: the thing breaks into the same bricks, which fall down the page
   turning as they go and shrink away at the end. 270 to 340 ms, always shorter than the build.
   Content fades out in 80 ms first, so text is never seen breaking.
@@ -205,7 +228,7 @@ Decide by how often it happens (from the site-craft rules):
     outside it. `data-vx-press="text"` on a board, or `"play"` on a heading, swaps this.
   - `PORT=5989 node tools/select.mjs` checks all of it with real pointer input, in two browsers.
 - A dialog may be modal (`showModal()`) or not (`show()`, when the page behind must stay usable
-  while a setting changes). Both build and crumble the same way; only a modal one has a backdrop.
+  while a setting changes). Both assemble and lower the same way; only a modal one has a backdrop.
 - A value set from code (`input.value = 3`, `input.checked = true`) is drawn at once, with no
   sound and no slide: the hand did not move it. `vx-change` fires only when a person chooses.
 - Toasts are `role="status"`, or `role="alert"` for a failure. Their clock stops on hover and

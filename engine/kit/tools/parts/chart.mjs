@@ -158,6 +158,13 @@ for (const plain of [false, true]) {
   await p.ctx.close();
 }
 
+{
+  const p = await open({ wait: 0 });
+  const initial = await read(p, 'deploys');
+  say(initial.g === 1 && initial.scales[0] === 1, 'the initial reading is full on arrival');
+  await p.ctx.close();
+}
+
 // reduced motion: the light is there on the first frame, and stays put when the numbers change
 {
   const p = await open({ reduced: true, wait: 0 });

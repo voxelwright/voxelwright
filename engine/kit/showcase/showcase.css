@@ -107,8 +107,12 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
 .kit figcaption { order: -1; font-weight: 700; font-size: 1.3rem; line-height: 1.2; letter-spacing: -0.01em; }
 .kit .bench { min-block-size: 0; }
 .kit .vx-tabs { justify-self: start; }
-.kit .bench.stack:has(.tabcard) { gap: 0; }
-.tabcard { min-block-size: calc(var(--vx) * 22); }
+.kit .bench.wrap:has([data-vx-icon="plus"]) {
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  justify-content: start;
+}
+.tabcard { display: grid; gap: calc(var(--vx) * 4); align-content: start; min-block-size: calc(var(--vx) * 22); }
 
 /* ---------- growth ---------- */
 
@@ -132,7 +136,7 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
 }
 @media (max-width: 34rem) {
   .code { white-space: pre-wrap; overflow-wrap: anywhere; }
-  .swatches.heights { font-size: 0.8rem; }
+  .swatches.heights { font-size: 0.8rem; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 26rem) {
   .controls { gap: calc(var(--vx) * 4) calc(var(--vx) * 6); }

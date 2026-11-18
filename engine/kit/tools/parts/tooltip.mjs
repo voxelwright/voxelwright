@@ -120,7 +120,11 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await onto('#s-below');
   await p.waitForTimeout(700);
   k = await rect('#s-below'); f = await rect('#ts-below');
-  say(await open('#ts-below') && f.top >= k.bottom && f.top - k.bottom < 16, `data-vx-side="bottom": it is under its key (key ends ${k.bottom}, tooltip starts ${f.top})`);
+  const gap = await p.evaluate(() => {
+    const tip = window.vx.live(document.querySelector('#ts-below'));
+    return (1.5 + tip.faceZ * 0.5) * tip.vx;
+  });
+  say(await open('#ts-below') && Math.abs(f.top - k.bottom - gap) <= 0.5, `data-vx-side="bottom": it is under its key (key ends ${k.bottom}, tooltip starts ${f.top})`);
   await away();
   await p.waitForTimeout(600);
   const rest = await p.evaluate(() => window.vx.stage.awake.size);

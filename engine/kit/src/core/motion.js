@@ -178,6 +178,29 @@ export function crumble(part, opts = {}) {
   };
 }
 
+/** The plate carries its front face, lettering and controls throughout its travel. */
+export function plateMotion(part, { duration = 0.4, top, out, still, start = out ? 1 : 0 }) {
+  const end = still ? 0.16 : duration;
+  return {
+    kind: out ? 'lower' : 'assemble', t: 0, end,
+    get progress() {
+      const t = clamp01(this.t / end);
+      return out ? start * (1 - t * t) : 1 - (1 - start) * (1 - t) ** 2;
+    },
+    get dz() { return still ? 0 : (this.progress - 1) * (top - 0.5); },
+    write(pos, o) {
+      const dz = this.dz;
+      for (let i = 0; i < part.count; i++, o += 8) {
+        pos[o] = part.rest[i * 3] + part.tx;
+        pos[o + 1] = part.rest[i * 3 + 1] + part.ty;
+        pos[o + 2] = part.rest[i * 3 + 2] + part.tz + dz;
+        pos[o + 3] = 1; pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
+      }
+      return this.t >= end;
+    },
+  };
+}
+
 /** Under reduced motion a build or a break is a short fade of scale only: nothing travels. */
 export function settle(part, opts = {}) {
   const n = part.count, rest = part.rest, total = opts.duration ?? 0.16, out = !!opts.out;

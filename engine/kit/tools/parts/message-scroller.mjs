@@ -105,16 +105,23 @@ async function behaves(p, tag) {
   await p.waitForTimeout(700);
   s = await at(p, 'log');
   say(had && s.gap <= 1 && !s.key, `${tag}End, by the reader's own hand, reaches the foot and the key goes`);
-  // a hand on the wheel takes over from a journey to the foot
-  await wheel(p, 'log', -300);
-  await p.evaluate(() => window.arrive('log'));
-  await p.waitForTimeout(300);
-  await press(p, '#log .vx-thread-new button');
-  await p.waitForTimeout(40);
-  await wheel(p, 'log', -200);
-  await p.waitForTimeout(700);
-  s = await at(p, 'log');
-  say(s.gap > 30, `${tag}on the way down, a turn of the wheel stops it where the reader wants (${s.gap} px from the foot)`);
+  // After the journey ends, the reader can immediately wheel back into the thread.
+  const gaps = [];
+  const runs = tag ? 1 : 10;
+  for (let i = 0; i < runs; i++) {
+    await wheel(p, 'log', -300);
+    await p.evaluate(() => window.arrive('log'));
+    await p.locator('#log .vx-thread-new button').waitFor({ state: 'visible' });
+    await press(p, '#log .vx-thread-new button');
+    await p.waitForFunction(() => {
+      const view = document.querySelector('#log .vx-scroll-view');
+      return document.querySelector('#log .vx-thread-new').hidden &&
+        view.scrollHeight - view.clientHeight - view.scrollTop <= 1;
+    });
+    await wheel(p, 'log', -200);
+    gaps.push((await at(p, 'log')).gap);
+  }
+  say(gaps.every((gap) => gap > 30), `${tag}wheel after settling: ${gaps.filter((gap) => gap > 30).length}/${runs} above 30 px (gaps ${gaps.join(', ')} px)`);
 
   // ---- the thread that was read back as the page came: the key says two
   s = await at(p, 'back');

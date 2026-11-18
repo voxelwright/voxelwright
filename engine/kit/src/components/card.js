@@ -5,24 +5,26 @@
 import { inlineX, watchDirection } from '../plain.js';
 import { listeners } from './util.js';
 
+export function cardSpine(live, m, depth, height = live.H) {
+  const edge = live.el.dataset.vxEdge;
+  if (!edge) return;
+  const width = live.look.round;
+  const spine = m.part('spine');
+  spine.grounded = false;
+  spine.box(inlineX(live)(0, width), width, depth, width, height - width * 2, 1, edge);
+}
+
 export const card = {
   name: 'card',
   selector: '.vx-card',
   pad: 7,
 
   build(live, m) {
-    const { W, H, el } = live;
+    const { W, H } = live;
     const body = m.part('body');
     const d = live.look.slab;
     body.slab(0, 0, 0, W, H, d, 'chalk', live.look.round);
-    const edge = el.dataset.vxEdge;
-    if (edge) {
-      const spine = m.part('spine');
-      spine.grounded = false;
-      const sw = live.look.round, sy = live.look.round; // the spine is as wide as the corner step, and starts below it
-      const x = inlineX(live);
-      spine.box(x(0, sw), sy, d, sw, H - sy * 2, 1, edge);
-    }
+    cardSpine(live, m, d);
     live.faceZ = d;
   },
 

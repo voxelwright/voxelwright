@@ -20,7 +20,7 @@ export const avatar = {
   glowStrength: halo(0.05),
 
   build(live, m) {
-    const D = live.look.well;
+    const D = Math.min(2, live.look.well); // keep the portrait clear of its two-course mounting lip
     hole(live, m, { depth: D, wall: lightName(live.el, 'light-warm'), floor: 'floor' });
     // the CSS lays what is in the well on its floor, and must know how deep that is
     if (live.state.deep !== D) live.el.style.setProperty('--vx-avatar-deep', live.state.deep = D);

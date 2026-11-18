@@ -38,7 +38,7 @@
 
 import { THEMES } from '../looks/lit.js';
 import { MATERIALS, defineMaterial } from '../core/materials.js';
-import { halo, byTheme } from '../core/light.js';
+import { pilot, halo, byTheme } from '../core/light.js';
 import { listeners } from './util.js';
 
 const KEY = 'vx-theme';
@@ -257,10 +257,8 @@ export const themePicker = {
 
   build(live, m) {
     const { W, H, el } = live;
-    // a lamp in its collar, as the kit's lamp is: the collar is a voxel wide, past the element's box
-    m.part('collar').slab(-1, -1, 0, W + 2, H + 2, 1, 'steel', 1).carve(0, 0, 0, W, H, 1);
-    m.part('lamp').box(0, 0, 0, W, H, 2, lightOf(nameOf(el)));
-    live.faceZ = 1;
+    pilot(m, W, H, lightOf(nameOf(el)));
+    live.faceZ = 2;
   },
 
   pose(live) {

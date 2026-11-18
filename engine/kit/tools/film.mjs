@@ -20,7 +20,7 @@ const args = process.argv.slice(2);
 const flag = (n, d) => { const i = args.indexOf('--' + n); return i < 0 ? d : args[i + 1]; };
 const has = (n) => args.includes('--' + n);
 const wanted = args.filter((a, i) => !a.startsWith('--') && !(args[i - 1] || '').match(/^--(w|page)$/));
-const port = process.env.PORT || 5985;
+const port = process.env.PORT || 5989;
 const FRAME = 1000 / 60;
 
 // A scene: what to film, how to start it, and how long the spec says it should take (ms).
@@ -44,7 +44,22 @@ const SCENES = {
   'grow': { el: '#shelf .vx-meter:nth-of-type(3)', frames: 90, every: 4, pad: 20, expect: [400, 1400], act: async (p) => { await p.evaluate(() => { const g = document.querySelector('#grow'); g.value = 100; g.dispatchEvent(new Event('input', { bubbles: true })); }); } },
 };
 
-const names = wanted.length ? wanted : Object.keys(SCENES);
+// The hardware pages use the same manual clock as the showcase.
+if (has('hardware')) {
+  Object.assign(SCENES, {
+    'key-latch': { el: '#s-off', path: 'toggle-button', frames: 28, pad: 24, expect: [80, 330],
+      act: async (p, b) => p.mouse.click(b.x + b.width / 2, b.y + b.height / 2) },
+    'hardware-menu': { ...SCENES['menu-open'], path: 'menu', el: '#project-menu', scroll: '#trigger',
+      act: async (p) => p.click('#trigger') },
+    'raise-plate': { ...SCENES['dialog-open'], path: 'dialog', el: '#rename', scroll: '#open-rename',
+      act: async (p) => p.click('#open-rename') },
+    'lower-plate': { ...SCENES['dialog-close'], path: 'dialog', el: '#rename', scroll: '#open-rename',
+      before: async (p) => { await p.click('#open-rename'); await p.clock.runFor(900); },
+      act: async (p) => p.keyboard.press('Escape') },
+  });
+}
+
+const names = wanted.length ? wanted : Object.keys(SCENES).filter((name) => !!SCENES[name].path === has('hardware'));
 await mkdir('shots/film', { recursive: true });
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let faults = 0;
@@ -56,7 +71,8 @@ for (const name of names) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  await page.goto(`http://127.0.0.1:${port}/kit/${flag('page', 'showcase/')}`);
+  const path = sc.path ? `showcase/parts/${sc.path}.html?theme=${has('dark') ? 'dark' : 'light'}` : flag('page', 'showcase/');
+  await page.goto(`http://127.0.0.1:${port}/kit/${path}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(500);
@@ -66,6 +82,10 @@ for (const name of names) {
   await page.clock.runFor(200);
   if (sc.before) await sc.before(page);
   await page.evaluate(() => { window.vx.stage.manual = true; });
+  const followsInk = ['menu-open', 'hardware-menu', 'dialog-open', 'raise-plate', 'dialog-close', 'lower-plate', 'toast'].includes(name);
+  if (followsInk) await page.evaluate(async () => {
+    window.measurePlateInk = (await import('/kit/tools/plate-ink.mjs')).plateInk;
+  });
 
   // read the voxels behind an element: positions and sizes, compared with the frame before
   const measure = () => page.evaluate((sel) => {
@@ -92,7 +112,7 @@ for (const name of names) {
       } else if (prev) changed = n;
     }
     window.__film = cur;
-    return { n, visible, maxStep, popped, changed };
+    return { n, visible, maxStep, popped, changed, ink: window.measurePlateInk?.(live) };
   }, sc.el);
 
   let box = sc.late ? null : await page.locator(sc.el).first().boundingBox();
@@ -100,6 +120,10 @@ for (const name of names) {
   if (!sc.late) await measure();
   await sc.act(page, box);
   await page.waitForTimeout(40); // real time, so the page has handled the input before frame 1
+  const firstInk = followsInk ? await page.evaluate(sel => {
+    const el = document.querySelector(sel), live = el && window.vx.live(el);
+    return live && window.measurePlateInk(live);
+  }, sc.el) : null;
   const shots = [], stats = [];
   const every = sc.every || 1;
   for (let f = 0; f < sc.frames; f++) {
@@ -150,6 +174,13 @@ for (const name of names) {
         if (before && after && before.visible > 0 && after.visible > 0 && m.visible === 0) { lines.push(`empty frame at ${ms(a + i)} ms`); faults++; }
       });
     }
+  }
+  if (followsInk) {
+    const samples = [firstInk, ...live.map(m => m.ink)].filter(Boolean);
+    const checked = samples.reduce((sum, sample) => sum + sample.checked, 0);
+    const unsupported = samples.reduce((sum, sample) => sum + sample.unsupported, 0);
+    if (!checked || unsupported) faults++;
+    lines.push(`app-clock text samples without a supporting cube: ${unsupported} of ${checked}, input through frame ${sc.frames}`);
   }
   for (const e of errors) { lines.push('page error: ' + e); faults++; }
   // collapse repeats (a pop on many frames is one fault to fix)

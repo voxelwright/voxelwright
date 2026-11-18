@@ -6,10 +6,10 @@
 //         </div>
 // The words are the page's own; the part draws only the groove, from data-vx-kind.
 
-import { hole, halo, byTheme, warmth } from '../core/light.js';
+import { hole, halo, byTheme } from '../core/light.js';
 import { listeners } from './util.js';
 
-const LIGHT = { note: 'light', done: 'light-go', warning: 'light-warm', failed: 'light-stop' };
+const LIGHT = { note: 'light', done: 'light-go', warning: 'caution', failed: 'light-stop' };
 
 export const callout = {
   name: 'callout',
@@ -26,8 +26,7 @@ export const callout = {
     hole(live, m, { x, w: 1, depth: live.look.groove, wall: mat, floor: mat });
   },
 
-  // the warm light is the room's own and stays as quiet as any groove; the others say something
-  pose(live) { live.glowStrength = halo(0.05) * (live.state.mat === 'light-warm' ? warmth(live) : byTheme(live)); },
+  pose(live) { live.glowStrength = halo(0.05) * byTheme(live); },
 
   bind(live) {
     const on = listeners();

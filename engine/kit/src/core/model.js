@@ -196,6 +196,13 @@ export class Part {
     const table = tableOf(look);
     for (let i = 0; i < this.count; i++) {
       const m = table[mats[i]];
+      if (look.finishes) {
+        const finish = look.finishes[m.name];
+        const chamfer = finish?.chamfer ?? 255;
+        const specular = finish?.specular ?? 0;
+        const word = i * 2 + 1;
+        this.ao[word] = (this.ao[word] & 0xffff) | (chamfer << 16) | (specular << 24);
+      }
       const base = theme === 'night' ? m.night : m.day;
       const x = Math.floor(rest[i * 3]), y = Math.floor(rest[i * 3 + 1]), z = Math.floor(rest[i * 3 + 2]);
       // a quiet look keeps the middle of a face plain; what glows keeps its grid, or it would lose its glow

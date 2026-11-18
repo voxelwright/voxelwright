@@ -25,7 +25,13 @@ async function open({ plain = false, still = false, width = 1180 } = {}) {
   return p;
 }
 const key = (name) => `#waiting .vx-close[aria-label="Remove ${name}"]`;
-const press = async (p, sel, fx = 0.5) => { const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width * fx, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
+const press = async (p, sel, fx = 0.5) => {
+  const target = p.locator(sel).first();
+  await target.scrollIntoViewIfNeeded();
+  const b = await target.boundingBox();
+  await p.mouse.move(b.x + b.width * fx, b.y + b.height / 2, { steps: 6 });
+  await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up();
+};
 const files = (p) => p.evaluate(() => [...document.querySelectorAll('#waiting .vx-attachment:not([data-vx-leaving])')].map((a) => a.querySelector('.vx-attachment-name').textContent));
 const focused = (p) => p.evaluate(() => { const a = document.activeElement; return a.getAttribute('aria-label') || a.id || a.textContent.trim() || a.tagName; });
 const said = (p) => p.evaluate(() => document.getElementById('said').textContent);

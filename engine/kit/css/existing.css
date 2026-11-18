@@ -69,7 +69,7 @@
   background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
 }
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
-[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); background-image: linear-gradient(var(--lit-stop), var(--lit-stop)); }
 
 /* ---------- lit: dialog ---------- */
 

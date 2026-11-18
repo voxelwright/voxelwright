@@ -260,8 +260,12 @@ async function hand(p, how) {
   await p.keyboard.press('Home');
   await p.evaluate(() => document.activeElement.blur());
   await p.mouse.move(5, 5);
-  await p.waitForTimeout(900);
-  if (live) { const awake = await p.evaluate(() => [...window.vx.stage.awake].map((l) => `${l.def.name}${l.el.id ? '#' + l.el.id : ''}`)); say(awake.length === 0, `voxels: at rest nothing runs${awake.length ? ` (awake: ${awake.join(', ')})` : ''}`); }
+  if (live) {
+    // The stage caps each time step under load. Wait for its last frame after the blur.
+    await p.waitForFunction(() => window.vx.stage.awake.size === 0, null, { timeout: 10000 });
+    const light = await p.evaluate(() => window.vx.live(document.getElementById('use-groove')).spring('lit').x);
+    say(light === 0, `voxels: at rest nothing runs and the groove has returned to its idle light (${light})`);
+  }
 }
 
 // ---- drawn in voxels

@@ -93,7 +93,20 @@ await settle(p);
 s = await read(p, '#d-bottom');
 say(!going.open && !s.shown && s.value === 'cancel' && s.focus === 'open-bottom', `let go past a third: it goes the rest of the way and closes, with "cancel"; the focus is back (${s.focus})`);
 await press(p, '#open-bottom'); await settle(p);
-await pull(p, '#d-bottom', 40, { steps: 3, ms: 8 }); await settle(p);
+// A 40 px flick in 24 ms. The drawer reads the pointer event timestamps, so give the
+// browser that gesture even when a shared GPU takes longer to process each input.
+{
+  const [x, y] = await mid(p, '#d-bottom .vx-drawer-handle');
+  const cdp = await p.context().newCDPSession(p);
+  const start = Date.now() / 1000 - 0.1;
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', buttons: 1, clickCount: 1, timestamp: start });
+  for (let i = 1; i <= 3; i++) {
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y: y + 40 * i / 3, buttons: 1, timestamp: start + i * 0.008 });
+  }
+  await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y: y + 40, button: 'left', clickCount: 1, timestamp: start + 0.025 });
+  await cdp.detach();
+}
+await settle(p);
 s = await read(p, '#d-bottom');
 say(!s.shown && s.value === 'cancel', 'thrown: a short quick flick closes it however little way it went');
 await press(p, '#open-bottom'); await settle(p);

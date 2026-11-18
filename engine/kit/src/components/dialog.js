@@ -1,6 +1,4 @@
-// Dialog. The one thing on the page that is plainly built in front of you: it assembles from its
-// centre when it opens and crumbles when it closes. Opening a dialog is occasional, so it can
-// afford half a second; the content appears as soon as there is a slab to carry it.
+// Dialog. An engraved plate rises carrying its controls and lowers intact to release the page.
 // Markup: <dialog class="vx-dialog"><header>Title</header><div class="vx-dialog-body">…</div>
 //           <footer><button class="vx-button" data-vx-close>Done</button></footer></dialog>
 
@@ -9,6 +7,7 @@ import { listeners } from './util.js';
 
 export const dialog = {
   name: 'dialog',
+  carryPlate: true,
   selector: 'dialog.vx-dialog',
   pad: 16,
 
@@ -27,29 +26,34 @@ export const dialog = {
   bind(live) {
     const on = listeners();
     const el = live.el;
-    let leaving = false;
+    let closing = null;
     const opened = () => {
-      leaving = false;
+      closing = null;
       el.removeAttribute('data-vx-leaving');
-      el.setAttribute('data-vx-building', '');
       live.rebuild();
       cue('build');
-      live.play('assemble', null, { from: [live.W / 2, live.H / 2], duration: 0.46, each: 0.24 });
-      setTimeout(() => el.removeAttribute('data-vx-building'), 340); // the words arrive once there is a slab to carry them
+      live.play('assemble', null, { duration: 0.46 });
     };
     const leave = async (value) => {
-      if (leaving || !el.open) return;
-      leaving = true;
+      if (closing || !el.open) return;
+      const request = closing = Symbol();
       el.setAttribute('data-vx-leaving', '');
-      cue('break');
-      await live.play('crumble', null, { duration: 0.27 });
+      cue('release');
+      await live.play('lower', null, { duration: 0.27 });
+      if (request !== closing || !el.open || live.destroyed) return;
       el.close(value);
       el.removeAttribute('data-vx-leaving');
-      for (const p of live.model.parts) p.hidden = false;
-      leaving = false;
+      closing = null;
     };
     live.state.leave = leave;
-    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => { if (el.open && !leaving) opened(); });
+    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
+      if (el.open) opened();
+      else {
+        closing = null;
+        live.stopMotion();
+        el.removeAttribute('data-vx-leaving');
+      }
+    });
     on(el, 'cancel', (e) => { e.preventDefault(); leave('cancel'); });
     on(el, 'click', (e) => {
       const b = e.target.closest('[data-vx-close]');
