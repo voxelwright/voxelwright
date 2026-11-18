@@ -14,7 +14,7 @@ for (const mode of ['live', 'plain']) {
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${mode}: ${what}`); };
-  const press = async (sel) => { const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
+  const press = (sel) => p.locator(sel).click({ delay: 80 });
   const state = (id) => p.evaluate((id) => {
     const i = document.getElementById(id), note = document.getElementById(id + '-error'), hint = document.getElementById(id + '-hint');
     const seen = (el) => !!el && getComputedStyle(el).visibility === 'visible' && el.getClientRects().length > 0;
