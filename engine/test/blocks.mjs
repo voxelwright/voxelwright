@@ -3,6 +3,7 @@
 // to what the Voxelmorphism kit is promised:
 //
 //   a material's front face comes out as the colour it was given, and the picture is clear where nothing is
+//   every cube shows as a cube: its edges towards the light are lit, those away from it shaded
 //   parts drawn together in one turn are the parts drawn each alone
 //   the page hides what is under it, except through a well
 //   at rest nothing is drawn, and the textures parts are drawn through are let go
@@ -25,6 +26,12 @@ try {
   else {
     check(Math.max(...[14, 34, 255, 255].map((v, i) => Math.abs(v - said.front[i]))) <= 1, `enamel's front face is #0e22ff (${said.front})`)
     check(said.corner.every((v) => v === 0), `the picture is clear where nothing is (${said.corner})`)
+    const expected = { middle: 200, left: 216, right: 180, top: 223, bottom: 172 }
+    check(Object.entries(expected).every(([side, value]) => Math.abs(said.cube[side] - value) <= 2), `a cube keeps its face colour and its chamfer follows the light (${JSON.stringify(said.cube)})`)
+    check(said.turnedApart.every(delta => delta <= 2), `quarter turns about x, y and z leave the lit edges in place (differences ${said.turnedApart})`)
+    check(said.flatFace.every(delta => delta <= 1), `a no-seam cube or a zero-seam light leaves the whole face flat (differences ${said.flatFace})`)
+    const [left, middle, right] = said.worldEdges
+    check(said.worldSmall === 0 && Math.abs(said.worldMiddle - 160) <= 2 && left > middle + 5 && right < middle - 5, `world edges disappear at 3 px (middle ${said.worldMiddle}, difference ${said.worldSmall}) and face the light at 8 px (${said.worldEdges})`)
     check(said.filled && said.aloneApart <= 2, `40 parts drawn in one turn, on ${said.sheets} sheet${said.sheets === 1 ? '' : 's'}, are the same drawn each alone (apart by ${said.aloneApart} of 255 at most)`)
     check(said.underPage === 0 && said.throughWell === 255, `a slab under the page is not seen (${said.underPage}), and is seen through a well (${said.throughWell})`)
     check(said.drawnAtRest.every((n) => n === 0) && said.heldAtRest < said.heldDrawing / 4, `at rest nothing is drawn (${said.drawnAtRest}), and ${(said.heldDrawing / 2 ** 20).toFixed(1)} MB held while drawing is ${(said.heldAtRest / 2 ** 20).toFixed(1)} MB`)

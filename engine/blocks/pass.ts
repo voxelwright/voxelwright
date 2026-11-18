@@ -91,6 +91,12 @@ export interface Blocks {
 /** How many looks into the map of depths a pixel takes, each way from its own: 25 in all, as the kit's own renderer took. */
 const LOOKS = 2
 
+const FACES = [
+  { n: [1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] }, { n: [-1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] },
+  { n: [0, 1, 0], a: [1, 0, 0], b: [0, 0, 1] }, { n: [0, -1, 0], a: [1, 0, 0], b: [0, 0, 1] },
+  { n: [0, 0, 1], a: [1, 0, 0], b: [0, 1, 0] }, { n: [0, 0, -1], a: [1, 0, 0], b: [0, 1, 0] },
+]
+
 const wgsl = (world: boolean) => /* wgsl */ `
 struct Part {
   clip: mat4x4f,    // from a place among the part's cubes to where it is seen
@@ -98,7 +104,7 @@ struct Part {
   area: vec4f,      // the part of the page that is this part's picture, in cubes: x0, y0, x1, y1
   sun: vec4f,       // towards the light, its strength
   ambient: vec4f,   // top, front, side, under
-  tint: vec4f,      // what shadowed faces lean to, how dark a seam is
+  tint: vec4f,      // what shadowed faces lean to, how strong a cube's edges are
   gleam: vec4f,     // what faces lit past 1 lean to, how much glowing cubes glow
   well: vec4f,      // the hole in the page
   shade: vec4f,     // the shadow on the page
@@ -135,8 +141,12 @@ struct Cube {
 struct Face {
   @builtin(position) at: vec4f,
   @location(0) n: vec3f, @location(1) p: vec3f, @location(2) uv: vec2f, @location(3) ao: f32, @location(4) color: vec4f,
+  // How far the face's two axes lean to the light: the one \`uv.x\` runs along, and the one \`uv.y\` does.
+  @location(5) lean: vec2f,
 }
 @vertex fn cube(i: Cube) -> Face {
+  const ALONG = array(${FACES.map(face => `vec3f(${face.a})`).join(', ')});
+  const ACROSS = array(${FACES.map(face => `vec3f(${face.b})`).join(', ')});
   let p = i.at.xyz + turned(i.pos * i.at.w, i.quat);
   let f = u32(i.face.x);
   let c = u32(i.face.y);
@@ -148,6 +158,7 @@ struct Face {
   o.uv = i.uv;
   o.ao = f32(bits & 3u);
   o.color = i.color;
+  o.lean = vec2f(dot(turned(ALONG[f], i.quat), part.sun.xyz), dot(turned(ACROSS[f], i.quat), part.sun.xyz));
   o.at = part.clip * vec4f(p, 1.0);
   return o;
 }
@@ -169,12 +180,28 @@ ${world ? `  // The page hides whatever sinks into it, except through a well cut
   var c = base * min(l, 1.0);
   c = mix(c * part.tint.rgb, c, clamp(direct / max(part.sun.w * 0.6, 0.0001), 0.0, 1.0));
   c = mix(c, part.gleam.rgb, clamp((l - 1.0) * 1.5, 0.0, 0.55));
-  // A seam along every edge of a cube, so the grid can be counted: one device pixel wide in a page, where a cube
-  // is a whole number of them; in the world as wide as a pixel is there.
-  let e = min(i.uv, 1.0 - i.uv) * ${world ? '(1.0 / max(fwidth(i.uv), vec2f(0.0001)))' : 'part.view.z'};
+  // Simulate a chamfer by lighting opposite edges differently. Page widths are measured on a full-size front face;
+  // the cabinet projection foreshortens the sides. In the world use the projected width of each face instead.
+  let px = ${world ? '1.0 / max(fwidth(i.uv), vec2f(0.0001))' : 'vec2f(part.view.z)'};
+  let d0 = i.uv * px;
+  let d1 = (1.0 - i.uv) * px;
   var seam = 0.0;
-  if (i.color.a >= 0.0) { seam = 1.0 - smoothstep(0.0, 1.0, min(e.x, e.y)); }
-  c *= 1.0 - seam * part.tint.a;
+  var relief = 0.0;
+  if (i.color.a >= 0.0) {
+    let e = min(d0, d1);
+    seam = 1.0 - smoothstep(0.0, 1.0, min(e.x, e.y));
+    let band = max(vec2f(${world ? '1.5' : '1.0'}), px * 0.2);
+    let w0 = 1.0 - smoothstep(vec2f(0.0), band, d0);
+    let w1 = 1.0 - smoothstep(vec2f(0.0), band, d1);
+    relief = dot(w1 - w0, i.lean);
+${world ? `    // The world's picture has one sample a pixel and cubes of any size: as a cube comes down to a few pixels its
+    // edges would beat against the pixels, so they fade out, and are gone by the time it is three across.
+    let visibility = smoothstep(3.0, 8.0, min(px.x, px.y));
+    relief *= visibility;
+    seam *= visibility;
+` : ''}  }
+  c *= 1.0 + relief * part.tint.a * 5.0;
+  c *= 1.0 - seam * part.tint.a * 0.5;
   // Cubes that glow keep their colour whatever the light does.
   let g = max(i.color.a, 0.0) * part.gleam.a;
   c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * (1.0 - seam * part.tint.a * 0.5), g * 0.36);
@@ -243,13 +270,8 @@ struct Halo { @builtin(position) at: vec4f, @location(0) c: vec2f, @location(1) 
 
 /** A cube's 36 corners, ten numbers each: where, its face's normal, which face and which corner of it, and where on the face. The order of faces and corners is the kit's (model.js `FACES`, `CORNERS`). */
 function cubeCorners(): Float32Array<ArrayBuffer> {
-  const faces = [
-    { n: [1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] }, { n: [-1, 0, 0], a: [0, 1, 0], b: [0, 0, 1] },
-    { n: [0, 1, 0], a: [1, 0, 0], b: [0, 0, 1] }, { n: [0, -1, 0], a: [1, 0, 0], b: [0, 0, 1] },
-    { n: [0, 0, 1], a: [1, 0, 0], b: [0, 1, 0] }, { n: [0, 0, -1], a: [1, 0, 0], b: [0, 1, 0] },
-  ]
   const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]], out: number[] = []
-  faces.forEach((F, f) => {
+  FACES.forEach((F, f) => {
     for (const c of [0, 1, 2, 0, 2, 3]) {
       const [sa, sb] = corners[c]
       for (let k = 0; k < 3; k++) out.push(0.5 * (F.n[k] + F.a[k] * sa + F.b[k] * sb))

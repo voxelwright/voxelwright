@@ -1710,6 +1710,22 @@ same picture, 86 ms later in Chrome, 311 in WebKit, 245 in real Safari.
 pixel is kept for each of the last four sheet sizes), 46 MB at the end of the proof, and 25 MB more of the parts'
 own canvases (a guess at WebGL2's: 40 MB and the same 25). Four seconds after the last part, 0.9 MB.
 
+### Cubes that show as cubes (November 17, after the kit's look was chosen)
+
+The block pass shades the edges of each cube like a bevel, without changing its geometry. On a full-size front
+face the band is a fifth of a cube wide, at least one device pixel, with a faint seam at the edge. Side faces are
+foreshortened. A cube marked for no seams, or a look with `light.seam` set to zero, has neither band nor seam.
+`node test/blocks.mjs` checks the picture: on a grey cube with the light at top left, the green channel reads 216
+at the left edge, 223 at the top, 180 at the right, 172 at the bottom and 200 in the middle. Turning the cube a
+quarter turn leaves those edges lit from the same direction.
+
+- **From here the pass no longer draws WebGL2's picture.** The comparisons with the kit's own renderer
+  (`run.mjs --motion`, `showcase.mjs`, `look.mjs`, and the figures above) were for the port, and are of the pass as
+  it was at a0cc2806. They go when the kit's WebGL2 renderer does.
+- In the world the picture has one sample a pixel, so the band is a pixel and a half at least and the edges fade
+  out as a cube comes down from eight pixels to three. Under a high sun a standing panel's cubes are lit on top
+  and shaded below and little at the sides: it reads as courses of tiles.
+
 ### In the world
 
 `blocks/world.ts` stands a panel of the kit's parts in a stage's world: `stand(on, kit, where)`. The panel is real

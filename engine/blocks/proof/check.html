@@ -7,6 +7,8 @@
 <!-- Parts made here by hand, not the kit's: what test/blocks.mjs holds the page stage to needs no other checkout. -->
 <script type="module">
 import { pageStage } from '../stage.ts'
+import { blocks } from '../pass.ts'
+import { depthFor } from '../../probe/gpu.ts'
 
 const light = { toLight: [-0.4767, -0.6674, 0.572], sun: 0.9, ambient: { top: 0.64, front: 0.485, side: 0.33, under: 0.26 }, ambientTint: [0.9, 0.93, 1], highlight: [1, 1, 0.98], shadow: [0.04, 0.07, 0.38, 0.3], seam: 0.05, glow: 0 }
 const S = 8, PAD = 6
@@ -22,6 +24,23 @@ const read = (c) => { const t = Object.assign(document.createElement('canvas'), 
 const apart = (a, b) => { let worst = 0; for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(a[i] - b[i])); return worst }
 const frame = () => new Promise((r) => requestAnimationFrame(r))
 
+function drawInWorld(pass, device, format, part, scale) {
+  const size = [10 * scale, 8 * scale], [width, height] = size
+  const canvas = Object.assign(document.createElement('canvas'), { width, height }), context = canvas.getContext('webgpu')
+  context.configure({ device, format })
+  const depth = depthFor(device, size), view = depth.createView(), color = context.getCurrentTexture().createView()
+  const encoder = device.createCommandEncoder()
+  encoder.beginRenderPass({ colorAttachments: [{ view: color, loadOp: 'clear', storeOp: 'store' }], depthStencilAttachment: { view, depthClearValue: 1, depthLoadOp: 'clear', depthStoreOp: 'store' } }).end()
+  const area = [-2, -2, 8, 6], dx = 2 * scale / width, dy = -2 * scale / height
+  const clip = new Float32Array([dx, 0, 0, 0, 0, dy, 0, 0, 0, 0, -0.01, 0, -1 - area[0] * dx, 1 - area[1] * dy, 0.5, 1])
+  pass.lay(part, { clip, area })
+  pass.draw(encoder, color, size, { depth: view })
+  device.queue.submit([encoder.finish()])
+  const pixels = read(canvas)
+  depth.destroy(); context.unconfigure()
+  return pixels
+}
+
 globalThis.check = async () => {
   const stage = await pageStage(), out = {}
   if (!stage) return { none: true }
@@ -33,6 +52,36 @@ globalThis.check = async () => {
   const [picture] = drawn([[enamel, ec]]), at = ((enamel.oy + (2.5 + 1) * S) * enamel.wpx + enamel.ox + (3.5 + 1) * S) * 4
   out.front = [...picture.slice(at, at + 4)]
   out.corner = [...picture.slice(0, 4)]
+
+  // Every cube shows as a cube: with the light from the top left, a face's left and top edges are lit and its
+  // right and bottom edges shaded, and its middle is the colour it was given.
+  const slate = slab(6, 4, 2, [195, 201, 222]), sl = canvasFor(slate)
+  const [grey] = drawn([[slate, sl]]), x0 = slate.ox + (3 + 1) * S, y0 = slate.oy + (2 + 1) * S
+  const green = (pixels, x, y, width = slate.wpx) => pixels[(y * width + x) * 4 + 1]
+  out.cube = { middle: green(grey, x0 + 4, y0 + 4), left: green(grey, x0, y0 + 4), right: green(grey, x0 + 7, y0 + 4), top: green(grey, x0 + 4, y0), bottom: green(grey, x0 + 4, y0 + 7) }
+  const quarter = Math.SQRT1_2
+  out.turnedApart = []
+  for (const rotation of [[quarter, 0, 0, quarter], [0, quarter, 0, quarter], [0, 0, quarter, quarter]]) {
+    const turned = { ...slate, pos: slate.pos.slice() }
+    for (let offset = 4; offset < turned.pos.length; offset += 8) turned.pos.set(rotation, offset)
+    out.turnedApart.push(apart(grey, drawn([[turned, sl]])[0]))
+  }
+  const unseamed = { ...slate, col: slate.col.slice() }
+  for (let offset = 3; offset < unseamed.col.length; offset += 4) unseamed.col[offset] = -1
+  out.flatFace = [unseamed, { ...slate, light: { ...light, seam: 0 } }].map(part => {
+    const [pixels] = drawn([[part, sl]])
+    let difference = 0
+    for (let y = y0; y < y0 + S; y++) for (let x = x0; x < x0 + S; x++) difference = Math.max(difference, Math.abs(green(pixels, x, y) - out.cube.middle))
+    return difference
+  })
+  const format = navigator.gpu.getPreferredCanvasFormat(), world = await blocks(stage.device, format, { world: true })
+  const inWorld = (part, scale) => drawInWorld(world, stage.device, format, part, scale)
+  const small = inWorld(slate, 3), large = inWorld(slate, 8)
+  out.worldSmall = apart(small, inWorld(unseamed, 3))
+  const acrossCube = (pixels, scale, offset) => green(pixels, 5 * scale + offset, 4 * scale + Math.floor(scale / 2), 10 * scale)
+  out.worldMiddle = acrossCube(small, 3, 1)
+  out.worldEdges = [0, 4, 7].map(offset => acrossCube(large, 8, offset))
+  world.destroy()
 
   // Parts drawn together in one turn are the parts drawn each alone.
   const colours = [[14, 34, 255], [255, 246, 0], [251, 252, 255], [195, 201, 222], [224, 51, 31], [35, 168, 75]]
