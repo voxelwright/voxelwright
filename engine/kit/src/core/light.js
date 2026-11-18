@@ -65,21 +65,71 @@ export function ring(part, x, y, z, w, h, mat, r = 0) {
 export function cap(part, x, y, z, w, h, d, mat, r = 1) {
   if (d >= 2 && w >= 5 && h >= 5) {
     part.slab(x, y, z, w, h, d - 1, mat, r);
-    part.slab(x + 1, y + 1, z + d - 1, w - 2, h - 2, 1, mat, r);
+    // A narrow key has a full-width reading face and a one-course front bevel.
+    const inset = mat === 'key' && Math.min(w, h) <= 9 ? 0 : 1;
+    part.slab(x + inset, y + 1, z + d - 1, w - 2 * inset, h - 2, 1, mat, r);
   } else part.slab(x, y, z, w, h, d, mat, r);
   return part;
+}
+
+/** The slit stays fixed. The linked sheet-metal tongue slides back under the cap. */
+export function seatIndicator(live, id, x, y, w, h, light = 'light', z = -1) {
+  const m = live.model;
+  const width = Math.max(1, Math.min(w - 2, Math.max(3, Math.round(w / 2))));
+  const left = x + Math.floor((w - width) / 2);
+  const front = y + h - 2;
+  const row = z < 0 ? front + 1 : front;
+  const socket = m.part('guide' + id);
+  socket.slab(left - 1, front - 1, z - 1, width + 2, 3, 1, 'gasket', 1);
+  const lens = m.part('lens' + id);
+  // An opal diffuser spreads the two end lamps along the slit.
+  lens.box(left, row, z, width, 1, 1, 'ivory');
+  lens.plot(left, row, z, light);
+  lens.plot(left + width - 1, row, z, light);
+  const tongue = m.part('tongue' + id);
+  // One cell of overlap on each side covers the light at this projection.
+  tongue.slab(left - 1, row - 1, z + 1, width + 2, 2, 1, 'slate', 1);
+  let lastTravel, lastTheme;
+  return (amount) => {
+    const travel = Math.max(0, Math.min(1, amount));
+    if (travel === lastTravel && live.theme === lastTheme) return;
+    lastTravel = travel;
+    lastTheme = live.theme;
+    tongue.ty = -2 * travel;
+    tongue.tz = -2 * travel;
+    // The two end lamps share the shutter's travel. In a closed slit even
+    // the edge of the diffuser exposed by the chamfer is neutral and unlit.
+    lens.tint(live.theme, live.look);
+    for (let i = 0; i < lens.col.length; i += 4) {
+      for (let c = i; c < i + 3; c++) lens.col[c] = 0.12 + (lens.col[c] - 0.12) * travel;
+      lens.col[i + 3] *= travel;
+    }
+  };
 }
 
 /** The same moulded cap, socket and travel for momentary and latching keys. */
 export function seatedKey(live, m, disabled, material, lamp) {
   const { W, H, look } = live;
   const small = Math.min(W, H) < 9;
-  const depth = disabled ? 1 : small ? Math.min(3, look.rise) : look.rise + (material === 'enamel' ? 2 : 0);
-  live.state.keyTravel = Math.min(look.travel, Math.max(0, depth - 1));
+  const depth = disabled || small ? 1 : look.rise + (material === 'enamel' ? 2 : 0);
+  m.keyTravel = Math.min(look.travel, Math.max(0, depth - 1));
   const key = m.part('cap');
   if (disabled) key.slab(0, 0, 0, W, H, 1, 'steel', 1);
-  else {
-    if (!small) ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
+  else if (small) {
+    // A low thumb plate travels a course into its socket. The wider rim stays fixed.
+    const inset = H > 2 ? 1 : 0;
+    const height = H - 2 * inset;
+    hole(live, m, { y: inset, h: height, depth: 2, wall: 'gasket', floor: 'slate' });
+    ring(m.part('socket'), -1, 0, 0, W + 2, H, 'steel');
+    const light = m.part('light');
+    light.sunk = true;
+    ring(light, 0, inset, -1, W, height, lamp);
+    key.grounded = false;
+    key.sunk = true;
+    key.slab(0, inset, 0, W, height, 1, material, Math.min(W, height) > 2 ? 1 : 0);
+    m.keyTravel = 1;
+  } else {
+    ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
     ring(m.part('light'), 0, 0, 0, W, H, lamp, 1);
     key.grounded = false;
     cap(key, 0, 0, 1, W, H, depth - 1, material);

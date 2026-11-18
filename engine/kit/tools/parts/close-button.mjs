@@ -38,7 +38,7 @@ const sign = (p, sel) => p.locator(sel).first().screenshot().then((png) => p.eva
 
 const p = await open();
 const box = await p.locator('#s-rest').boundingBox();
-say(box.width === 28 && box.height === 28, `its cap is seven voxels square (${box.width} by ${box.height} px)`);
+say(box.width === 28 && box.height === 28, `the button occupies seven voxels square (${box.width} by ${box.height} px)`);
 const room = await p.evaluate(() => { const c = getComputedStyle(document.getElementById('s-rest')), a = getComputedStyle(document.getElementById('s-rest'), '::after'); return [parseFloat(c.marginLeft) * 2 + 28, 28 - parseFloat(a.left) - parseFloat(a.right), 28 - parseFloat(a.top) - parseFloat(a.bottom)]; });
 say(room.join() === '44,44,44', `it keeps 44 px of room, and its target is 44 by 44 px (${room.join(', ')})`);
 const names = await p.evaluate(() => [...document.querySelectorAll('.vx-close')].map((b) => b.getAttribute('aria-label') || ''));
@@ -64,9 +64,16 @@ say(await shown(p), 'a press 26 px from its middle, past the target, does nothin
 let [x, y] = await mid(p, '#close');
 await p.mouse.move(x - 19, y + 19, { steps: 6 });
 await p.mouse.down();
-await p.waitForTimeout(160);
-const tz = await p.evaluate(() => { const l = window.vx.live(document.getElementById('close')); return [+l.model.byName.cap.tz.toFixed(2), Math.min(l.look.travel, l.faceZ - 1)]; });
-say(Math.abs(tz[0] - (0.5 - tz[1])) < 0.15, `held at the edge of its target, the cap still goes down (${tz[0]})`);
+await p.waitForFunction(() => {
+  const l = window.vx.live(document.getElementById('close'));
+  return !l.spring('press').moving && !l.spring('hover').moving;
+});
+const held = await p.evaluate(() => {
+  const l = window.vx.live(document.getElementById('close'));
+  return { height: l.faceZ, z: l.model.byName.cap.tz, socket: !!l.model.byName.socket };
+});
+say(held.socket && held.height === 1 && held.z === -0.5,
+  `the one-course key presses a full course from its half-course hover inside the socket (z ${held.z})`);
 await p.mouse.move(x - 19, y + 150, { steps: 6 });
 await p.mouse.up();
 await p.waitForTimeout(500);

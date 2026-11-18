@@ -21,10 +21,14 @@ the construction rules in the numbered sections.
   Tabs can sit on the cover with the words clear of its lip.
   Narrow enclosures have eight courses and a clear cover. Small plates use five.
   A steel bezel captures the slide paddle, and a steel socket seats each pilot lamp.
-- Keys stand on light. A seven-voxel-wide key rises three courses. Its hit target stays
-  eleven voxels wide. An ordinary full key rises six courses from its socket. The
-  group’s main key rises eight and uses blue enamel and 2.6 times the local light. A latched key holds
-  four courses down and lights a window across its lower lip. Shortcut legends sit one course below the surface.
+- Keys stand on light. Close is a seven-by-five thumb plate, one course thick, in a steel socket.
+  It travels one course and keeps a 44 px hit target. An ordinary key rises six courses. The
+  main key rises eight, with blue enamel and 2.6 times the local light.
+- Follow seats four courses down. Follow, tabs, single-choice key banks and page buttons
+  uncover the same fixed diffuser behind a sliding shutter. The end lamps dim with travel
+  and go dark when the shutter closes. The slot stays inside its seat and has at least four
+  clear pixel rows below the legend at the default scale. Shortcut legends sit one course
+  below the surface.
 - The kit supplies an optional finish per material to renderers that support it. Ordinary
   cubes use full chamfer and zero gloss. Steel and enamel catch direct light. The well
   floor is matte. The ground filter spans one voxel at the default four-pixel scale.
@@ -143,7 +147,10 @@ from the next), and whether it glows at night.
   read as a block at arm's length. Shadow length follows height, so the scale above is visible.
 - A trigger stays down while what it opened is open, and carries a chevron in voxels.
 - Press responds on pointer down, in the same frame. The press spring settles in about 110 ms
-  (`k = 1500, c = 76`); release takes about 190 ms with one soft overshoot (`k = 620, c = 34`).
+  (`k = 1500, c = 76`). A released key and a lifting plate share a damping ratio of 0.51.
+  At 60 steps per second Close, Follow and the dialog overshoot by 14% to 15% of travel.
+  They settle within 0.05 voxel of rest in 167, 267 and 450 ms respectively. Reversing a
+  press, latch or lift starts at its current height.
 - Sliders: while the pointer is down the thumb follows the value exactly. No easing, no spring.
 - Switches and tabs slide on a spring with a little carry (`k = 420, c = 30`, about 220 ms).
 - Hover lift is half a voxel and only for a mouse. Touch never hovers.

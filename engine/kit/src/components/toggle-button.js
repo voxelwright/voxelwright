@@ -1,13 +1,12 @@
 // Toggle button. A key that stays down while it is on, with its light held bright.
-// Tool: key. At rest and off it is the kit's key (key in looks/lit.js): the same ring, cap,
-// depths, springs and halo. The one thing added is that aria-pressed="true" holds it down.
+// The cap shares the ordinary key’s socket and travel. When latched, it uncovers a fixed light.
 // Markup: <button class="vx-toggle-button" type="button" aria-pressed="false">Mute</button>
 //         A press flips aria-pressed and sends vx-change ({ pressed }) from the button. Setting
 //         aria-pressed from code moves the key too. Off and on: a steel dent, a voxel deep.
 
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { hole, lightName, seatedKey, keyLight } from '../core/light.js';
+import { hole, lightName, seatIndicator, seatedKey, keyLight } from '../core/light.js';
 import { listeners, wrapLabel } from './util.js';
 
 const isOff = (el) => el.disabled || el.getAttribute('aria-disabled') === 'true';
@@ -50,15 +49,14 @@ export const toggleButton = {
       const cap = seatedKey(live, m, off, 'key', lightName(el));
       const depth = s.top;
       if (!off) {
-        // A window in the lower lip of the cap lights only when the latch is closed.
-        const lens = m.part('lens');
-        lens.grounded = false;
-        lens.box(2, H - 2, depth, Math.max(1, W - 4), 1, 1, lightName(el));
+        cap.carve(0, H - 3, 1, W, 3, depth);
+        m.byName.light.carve(0, H - 3, 0, W, 3, 1);
+        s.indicator = seatIndicator(live, '', 0, 0, W, H, lightName(el), 0);
       }
       live.label(label, () => s.top + cap.tz);
     }
     // where it rests: down while on. The first drawing is as it is, with nothing moving.
-    const rest = on && !off ? -s.keyTravel : 0, press = live.spring('press');
+    const rest = on && !off ? -live.model.keyTravel : 0, press = live.spring('press');
     if (!s.built || reducedMotion()) { press.snap(rest); s.flare = 0; s.lit = rest ? 1 : 0; }
     else if (!s.held) press.to(rest, rest ? PRESS.k : RELEASE.k, rest ? PRESS.c : RELEASE.c);
     s.built = true;
@@ -73,9 +71,7 @@ export const toggleButton = {
     }
     const press = live.spring('press').x, hover = live.spring('hover').x;
     cap.tz = press + hover;
-    const lens = live.model.byName.lens;
-    lens.hidden = !isOn(live.el);
-    lens.tz = cap.tz;
+    live.state.indicator(-press / Math.max(1, live.model.keyTravel));
     // the light answers as the key's does: brighter while aimed at, a flare as it goes down and
     // a slow fall after. On, it does not fall back to where it was: it is held bright.
     const f = live.state.flare ?? 0, lit = live.state.lit ?? 0;
@@ -104,13 +100,13 @@ export const toggleButton = {
     wire(el, on);
     const press = live.spring('press'), hover = live.spring('hover');
     const go = (spring, x, k, c) => { if (reducedMotion()) spring.snap(x); else spring.to(x, k, c); live.invalidate(); };
-    const rest = () => (isOn(el) && !s.off ? -s.keyTravel : 0);
+    const rest = () => (isOn(el) && !s.off ? -live.model.keyTravel : 0);
     // back to where it rests: up if it is off, down if it is on
     const settle = () => { s.held = false; const r = rest(); go(press, r, r ? PRESS.k : RELEASE.k, r ? PRESS.c : RELEASE.c); };
     // it went on with no hand on it long enough to be seen (the Enter key, or code): the light
     // still says so, with the flare of a press
     const flash = () => { if (isOn(el) && !s.off && !reducedMotion()) s.flare = Math.max(s.flare ?? 0, 1); };
-    const down = () => { if (s.off) return; s.held = true; go(press, -s.keyTravel, PRESS.k, PRESS.c); cue('press'); };
+    const down = () => { if (s.off) return; s.held = true; go(press, -live.model.keyTravel, PRESS.k, PRESS.c); cue('press'); };
     const drop = () => { if (s.held) settle(); };
     on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
     on(el, 'pointercancel', drop);

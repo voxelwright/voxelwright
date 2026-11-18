@@ -52,11 +52,15 @@ say(await p.evaluate(() => document.querySelector('#deploy .state-word').textCon
 const tip = await p.evaluate(() => { const s = document.querySelector('#deploy').getBoundingClientRect(), c = document.querySelector('#deploy .vx-cursor').getBoundingClientRect(); return [c.left, c.top, s.left, s.top]; });
 say(Math.abs(tip[0] - ax) < 2 && Math.abs(tip[1] - ay) < 2, `the voxel pointer's tip is under the real one (${tip[0].toFixed(1)}, ${tip[1].toFixed(1)} for ${ax.toFixed(1)}, ${ay.toFixed(1)})`);
 await press('#go');
-await p.waitForTimeout(900);
-say(await p.evaluate(() => document.querySelector('#deploy .state-word').textContent) === 'Building', 'pressing Deploy by hand starts a build');
-await p.screenshot({ path: 'shots/lit/hand-building.png' });
-await p.waitForTimeout(3600);
-say(await p.locator('#deploy .vx-toast[data-shown]').count() === 1 && await p.evaluate(() => document.querySelector('#deploy .state-word').textContent) === 'Live', 'and it ends with the notice, and Live');
+await p.waitForFunction(() => document.querySelector('#deploy .state-word').textContent === 'Building');
+say(true, 'pressing Deploy by hand starts a build');
+// Start observing before the screenshot. The notice has its own lifetime.
+await Promise.all([
+  p.waitForFunction(() => document.querySelector('#deploy .vx-toast[data-shown]:not([data-vx-leaving])') &&
+    document.querySelector('#deploy .state-word').textContent === 'Live'),
+  p.screenshot({ path: 'shots/lit/hand-building.png' }),
+]);
+say(true, 'and it ends with the notice, and Live');
 const was = await p.evaluate(() => document.querySelector('#deploy .auto input').checked);
 await press('#deploy .vx-switch');
 await p.waitForTimeout(400);

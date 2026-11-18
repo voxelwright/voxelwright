@@ -16,6 +16,7 @@ To start that server, run `PORT=5989 node tools/serve.mjs` in that directory.
 cd engine/kit
 PORT=5989 node tools/shift.mjs      # nothing moves when voxels take over from plain
 PORT=5989 node tools/board.mjs      # the board and tab strips fit narrow screens
+PORT=5989 node tools/latch-fit.mjs  # ink clears the shutter, light stays inside, closed lamps are dark
 PORT=5989 node tools/behave.mjs     # the same behaviour plain and live
 PORT=5989 node tools/keys.mjs       # keyboard: tab order, rings, arrows, Escape
 PORT=5989 node tools/crisp.mjs      # words on keys and canvases start on whole pixels
@@ -114,6 +115,36 @@ That is 63 to build and 76 in all.
 | 4 | 2026-11-18 | Adopted cast case on the whole showcase. 104 baseline shots, fit at 390 and 1280, all 69 part pages and four motion films. Sol reviewed the full gallery. Opus viewed the full showcase and five of nine component sheets. | Sol 8.22 (9/8/8/8.5/8.5/8/7/8/9). Opus 6.89 (7.5/7/7/7/7/6/6/7/7.5). |
 | 5 | 2026-11-18 | Both reviewers opened the same nine sheets, covering all 69 component pages, the whole showcase at 390 and 1280 by day and night, both hardware references, round 1 and the round 3 winner. Both ranked the seated lift above the drawer, and the drawer above round 4. | Lift: Sol 7.56 (8/7/7/7/8/7/8/7/9). Opus 6.33 (7/6/6/6/6/5/6/7/8). Opus marked type provisional at contact-sheet scale. |
 | 6 | 2026-11-18 | One warm header tube, quiet idle wells and an opaque lifting plate that catches at its mechanical stop. Both reviewers saw the same whole showcase, all nine component sheets, the two references, rounds 1, 3 and 5, four paired motion films and native 1×/2× crops. Both preferred round 6. | Sol 8.91 (9.2/8.8/8.6/9/9.1/8.5/8.8/9/9.2). Opus 7.33 (7.5/7.5/7/7.5/7/6.5/7/8/8). Mean 8.12, up 1.18 from round 5. |
+| 7 | 2026-11-18 | A one-course Close plate, shared latch window, clearer night key faces and mass-scaled returns. Both reviewers opened the same 14 sheets, including all parts, both references and the full tab strip at 2×. Both narrowly preferred the candidate to round 6. | Sol 8.67 (9/9/8.5/9/9/8/8.5/8/9). Opus 6.78 (7/7/7/7/7/6/7/6/7). Mean 7.72, down 0.40 from round 6. Trial only. Replaced in round 8. |
+| 8 | 2026-11-18 | Final regroup. A fixed lens in the bezel (A) and a fixed lit slot with a shutter (B). Both reviewers opened the same 15 panels, including all nine part sheets, the showcase at both sizes and times of day, the references, earlier rounds, 2× sections and three interrupted motions. Both chose B. | A scored 8.81 Sol and 7.72 Opus. B scored 9.08 Sol and 8.11 Opus. B’s mean of 8.59 is 0.47 above round 6 and 1.65 above round 5. |
+
+### Final regroup and ceiling
+
+| Criterion | Lens · Sol | Lens · Opus | Shutter · Sol | Shutter · Opus |
+|---|---:|---:|---:|---:|
+| Built from blocks | 9 | 8 | 9.2 | 8 |
+| Says what it does | 8.5 | 7 | 9.2 | 8.5 |
+| Level of detail | 8.8 | 7.5 | 9 | 8 |
+| Type | 9.1 | 8 | 9.1 | 8 |
+| Colour and light | 8.6 | 8 | 9.1 | 8 |
+| Motion and touch | 8.8 | 7.5 | 9 | 8 |
+| Composition and fit | 9 | 8 | 9 | 8 |
+| Consistency | 8.6 | 7.5 | 9 | 8.5 |
+| Its own voice | 8.9 | 8 | 9.1 | 8 |
+
+The round-7 lamp stuck out two pixels below the tab bezel. Pushing it up touched the g in Growing. The shutter lets the light stay in its own row. The selected solid finishes four pixels inside the bezel, its closed neighbour two. The lit strip clears the letters by six pixels at 390 and 1280. Follow shows 12 of 12 diffuser cells when latched and zero when released. Close travels one course in its socket. Close, Follow and the dialog overshoot by 14%, 14% and 15% and settle within 0.05 voxel of rest in 167, 267 and 450 ms. The input films show a second press, relatching and Escape reversing the lift at 83 ms with its words still on the plate.
+
+**Where the climb stopped.** Sol cleared all nine criteria. Opus gave 8.5 for reading state and consistency, and 8 for the other seven. The following options are ranked by likely gain for the effort. The ranking is the kit team's judgment.
+
+| Priority | What Opus saw | What could move it |
+|---|---|---|
+| 1 · Small kit changes | **Detail (8), state and consistency (8.5 each).** A blue tick remained on the closed grooves. The active band narrowed to one or two pixels at 1×. **Motion (8).** The cap reversed on time, but the lamp barely showed the unlatch. | After scoring, the end lamps and diffuser dim with shutter travel. Two emitting cells per closed groove fell to zero. Compare a two-device-pixel minimum band at native scale if state reading is revisited. |
+| 2 · One reading-page trial | **Type, composition and voice (8 each).** Opus found the glyphs crisp but called out long grey passages of small text. The reviewer also flagged a possible tooltip clip. | The native tooltip page showed two pinned examples overlapping. They now clear by 18 px at both widths. The owner can decide whether the catalogue should keep all examples open or show one worked example first, with the other states below. Try this on one dense page before changing all of them. |
+| 3 · Material reference, then a renderer trial if warranted | **Built from blocks and colour/light (8 each).** Opus saw the same casting and bevels in both trials and liked the quieter glow. Opus gave no specific shader or asset requirement. Sol saw more depth to the light in the physical references. | Choose one existing hardware reference and compare its metal lip and opal lamp at 4 px per cube. If the difference is in how they catch light, ask the #430 builder for a native comparison of steel gloss and softer shadows. A new matched day/night material study would help only if the existing references leave the finish undecided. |
+
+The third regroup ends here. The nine scores above belong to the council images. The closed-lamp correction and the tooltip spacing have measured checks and were made after scoring.
+
+### Earlier rounds
 
 Round 6 removed all 1,512 emitting wall cells from the idle log. The header pilot’s halo fell to one-fifth. The dialog rose 0.96 voxel past its seat and returned to level with opaque lettering. Reduced motion had zero travel. Both reviewers still found small secondary keys and selected states hard to read at night. The log divided them. The scored version has a quiet well. For shipping, the coordinator chose the passive warm reflection on the lower inside edge. It changes four pixel rows and has 312 warm wall cells with zero emission. The scored quiet version remains available with `?log=quiet`.
 

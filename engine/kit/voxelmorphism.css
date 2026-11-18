@@ -533,16 +533,16 @@ dialog.vx-dialog:focus-visible { outline: none; }
 :root[data-theme="dark"][data-vx-look="lit"], :root[data-theme="dark"] [data-vx-look="lit"] {
   --vx-ground: #08090f;
   --vx-ink: #e8eaf4;
-  --vx-ink-quiet: #a3a8be;
+  --vx-ink-quiet: #d1d5e3;
   --vx-enamel: var(--lit-cap-night, #315aca);
   --vx-signal: var(--lit-accent-night, #458fe3);
   --vx-chalk: #23313b;
   --vx-chalk-top: #252938;
   --vx-chalk-side: #10121c;
-  --vx-slate: #141b21;
+  --vx-slate: #283038;
   --vx-slate-side: #090a12;
   --vx-steel: #262938;
-  --vx-key: #434745;
+  --vx-key: #505966;
   --vx-floor: #141a1f;
   --vx-knob: #d7dbf0;
   --vx-shadow: rgb(0 0 5 / 0.6);
@@ -560,16 +560,16 @@ dialog.vx-dialog:focus-visible { outline: none; }
   :root:not([data-theme="light"])[data-vx-look="lit"], :root:not([data-theme="light"]) [data-vx-look="lit"] {
     --vx-ground: #08090f;
     --vx-ink: #e8eaf4;
-    --vx-ink-quiet: #a3a8be;
+    --vx-ink-quiet: #d1d5e3;
     --vx-enamel: var(--lit-cap-night, #315aca);
     --vx-signal: var(--lit-accent-night, #458fe3);
     --vx-chalk: #23313b;
     --vx-chalk-top: #252938;
     --vx-chalk-side: #10121c;
-    --vx-slate: #141b21;
+    --vx-slate: #283038;
     --vx-slate-side: #090a12;
     --vx-steel: #262938;
-    --vx-key: #434745;
+    --vx-key: #505966;
     --vx-floor: #141a1f;
     --vx-knob: #d7dbf0;
     --vx-shadow: rgb(0 0 5 / 0.6);
@@ -611,6 +611,9 @@ dialog.vx-dialog:focus-visible { outline: none; }
   text-shadow: 0 0 calc((4px + var(--lit, 0) * 10px) * var(--lit-night)) rgb(255 255 255 / calc(var(--lit-night) * (0.35 + var(--lit, 0) * 0.5)));
 }
 [data-vx-look="lit"] .vx-tabs > [role="tab"] { color: var(--vx-ink); font-weight: 400; }
+/* The short reading face leaves a fixed row for the latch mechanism. */
+[data-vx-look="lit"] :is(.vx-tabs[data-vx-live] [role="tab"], .vx-toggle-button[data-vx-live], .vx-toggle-group[data-vx-live] > label, .vx-pagination-pages[data-vx-live] a) > .vx-label { position: relative; top: calc(-1 * var(--vx)); }
+[data-vx-look="lit"] .vx-tabs > [role="tab"] .vx-label { padding-block-start: 0; }
 [data-vx-look="lit"] .vx-tabs > [role="tab"][aria-selected="true"] { color: var(--lit-legend); }
 [data-vx-look="lit"] .vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-key); color: var(--vx-ink); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent); }
 

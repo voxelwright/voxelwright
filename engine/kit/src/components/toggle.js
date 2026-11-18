@@ -2,7 +2,7 @@
 // Markup: <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Label</label>
 
 import { inlineX, watchDirection } from '../plain.js';
-import { SLIDE } from '../core/motion.js';
+import { PRESS, RELEASE, SLIDE } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
 
@@ -55,9 +55,9 @@ export const toggle = {
     const press = live.spring('press');
     let byKey = false;
     on(input, 'keydown', () => { byKey = true; });
-    on(input, 'pointerdown', () => { byKey = false; press.to(-1, 1500, 76); live.invalidate(); });
-    on(live.el.parentElement, 'pointerdown', () => { byKey = false; press.to(-1, 1500, 76); live.invalidate(); });
-    on(window, 'pointerup', () => { if (press.target !== 0) { press.to(0, 620, 34); live.invalidate(); } });
+    on(input, 'pointerdown', () => { byKey = false; press.to(-1, PRESS.k, PRESS.c); live.invalidate(); });
+    on(live.el.parentElement, 'pointerdown', () => { byKey = false; press.to(-1, PRESS.k, PRESS.c); live.invalidate(); });
+    on(window, 'pointerup', () => { if (press.target !== 0) { press.to(0, RELEASE.k, RELEASE.c); live.invalidate(); } });
     on(input, 'change', () => {
       // a key press moves it at once; a pointer slides it
       if (byKey) at.snap(input.checked ? 1 : 0); else at.to(input.checked ? 1 : 0);

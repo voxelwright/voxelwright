@@ -19,7 +19,7 @@
 //   </div>
 // Tool: keys (cap() on ring()) in a slot with a bezel (one of many); none of its own (several of many).
 
-import { ring, hole, bezel, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
+import { seatIndicator, ring, hole, bezel, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
@@ -89,7 +89,7 @@ export const toggleGroup = {
     // it is level with it.
     const top = s.top = 1 + look.travel;
     const mat = lightName(el, 'light');
-    s.caps = []; s.lamps = []; s.studs = [];
+    s.caps = []; s.lamps = []; s.studs = []; s.indicators = [];
     at.forEach(([x, y, w, h], i) => {
       const off = !!inputs[i]?.disabled;
       // The key stands on a steel ring. Chosen, the ring is light, and so is the floor of its seat
@@ -98,7 +98,7 @@ export const toggleGroup = {
       const [stud, lamp] = ['ring', 'lamp'].map((name, j) => {
         const p = m.part(name + i);
         p.sunk = true; p.grounded = false;
-        if (j) p.box(-1, -1, -D, w, h, 1, mat);
+        if (j) p.box(-1, -1, -D, w, h - 3, 1, mat);
         else ring(p, 0, 0, -D, w - 2, h - 2, 'steel');
         p.tx = x + 1; p.ty = y + 1;
         return p;
@@ -106,8 +106,9 @@ export const toggleGroup = {
       s.studs.push(stud);
       const cap = m.part('cap' + i);
       cap.grounded = false;
-      capOf(cap, 0, 0, 1 - D, w - 2, h - 2, D + look.travel, off ? 'steel' : 'key');
+      capOf(cap, 0, 0, 1 - D, w - 2, h - 4, D + look.travel, off ? 'steel' : 'key');
       cap.tx = x + 1; cap.ty = y + 1;
+      s.indicators.push(seatIndicator(live, i, x + 1, y + 1, w - 2, h - 2, mat));
       s.caps.push(cap); s.lamps.push(lamp);
       // the first drawing is as it is, with nothing moving
       const on = inputs[i]?.checked ? 1 : 0, spring = live.spring('on' + i, on);
@@ -131,6 +132,7 @@ export const toggleGroup = {
       cap.tz = -travel * on + live.spring('hold' + i).x;
       // its light comes on as it passes half way down, and only on one that can be changed
       const shown = on > 0.5 && !s.inputs[i]?.disabled;
+      s.indicators[i](s.inputs[i]?.disabled ? 0 : on);
       s.lamps[i].hidden = !shown;
       s.studs[i].hidden = shown;
       if (shown) lit = 1;

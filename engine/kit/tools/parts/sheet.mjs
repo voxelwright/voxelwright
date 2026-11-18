@@ -83,9 +83,22 @@ s = await read(p, '#filters');
 say(scrolled > 0 && s.scrollY === 0, `the page behind does not scroll under it (a wheel moved the page ${scrolled} px before, ${s.scrollY} px now)`);
 
 // Escape: it slides out, the focus goes back
-await p.keyboard.press('Escape'); await p.waitForTimeout(70);
-s = await read(p, '#filters');
-say(!s.open && s.shown && s.moved !== '0', `Escape closes it: it is no longer open, and is on its way out (${s.moved})`);
+// Sample the browser's exit transition at its midpoint. A wall-clock wait
+// can miss the entire 200 ms slide when the other part checks share the GPU.
+await p.locator('#filters').evaluate(el => {
+  el.addEventListener('cancel', () => {
+    const slide = el.getAnimations().find(a => a.transitionProperty === 'translate');
+    if (slide) slide.currentTime = slide.effect.getTiming().duration / 2;
+    const rect = el.getBoundingClientRect();
+    window.sheetExit = { open: el.open, shown: getComputedStyle(el).display !== 'none',
+      width: rect.width, outside: rect.right - document.documentElement.clientWidth };
+  }, { once: true });
+});
+await p.keyboard.press('Escape');
+const exitSample = await p.waitForFunction(() => window.sheetExit);
+const exit = await exitSample.jsonValue();
+say(!exit.open && exit.shown && exit.outside > 0 && exit.outside < exit.width,
+  `Escape closes the sheet and it slides out (${exit.outside.toFixed(1)} of ${exit.width} px outside at mid-travel)`);
 await settle(p);
 s = await read(p, '#filters');
 say(!s.shown && s.value === 'cancel' && s.focus === 'open-filters', `then it is gone, with "cancel", and the focus is back on the key that opened it (${s.focus})`);

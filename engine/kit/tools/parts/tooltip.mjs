@@ -11,14 +11,14 @@ const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gp
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 
-async function visit({ width = 1180, height = 900, plain = false, reduced = false, touch = false } = {}) {
+async function visit({ width = 1180, height = 900, plain = false, reduced = false, touch = false, demo = false } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, reducedMotion: reduced ? 'reduce' : 'no-preference', hasTouch: touch });
   const p = await ctx.newPage();
   const errors = [];
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   if (plain) await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/tooltip.html?theme=light&hand`);
+  await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/tooltip.html?theme=${demo ? 'dark' : 'light&hand'}`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);
@@ -197,6 +197,17 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await p.waitForTimeout(80);
   say(await focus() === 'k-deploy' && await open('#t-deploy'), 'plain: the focus shows it');
   say(errors.length === 0, 'plain: no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
+  await ctx.close();
+}
+
+// The catalogue opens several examples together. The long plate can flip
+// above its trigger and still has to leave the preceding example readable.
+for (const width of [390, 1280]) {
+  const { ctx, rect, open } = await visit({ width, height: 960, demo: true });
+  const below = await rect('#ts-below'), long = await rect('#ts-long');
+  const gap = long.top - below.bottom;
+  say(await open('#ts-below') && await open('#ts-long') && gap >= 0,
+    `${width} px: the two open example plates have ${gap} px between them`);
   await ctx.close();
 }
 

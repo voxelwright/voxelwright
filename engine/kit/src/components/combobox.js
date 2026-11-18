@@ -205,7 +205,7 @@ export const combobox = {
   name: 'combobox',
   selector: '.vx-combobox-float',
   pad: 11,
-  glowRadius: 6,
+  glowRadius: 2.2,
   glowStrength: halo(0.15),
 
   build(live, m) {
@@ -226,7 +226,7 @@ export const combobox = {
     // not while the plate is still being built: the mark would hang in the air
     pick.hidden = at == null || !!body.fx;
     if (at != null) pick.ty = at;
-    live.glowStrength = halo(live.theme === 'day' ? 0.18 : 0.15);
+    live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025);
   },
 
   // one more drawing after the build ends, so the mark appears on the finished plate

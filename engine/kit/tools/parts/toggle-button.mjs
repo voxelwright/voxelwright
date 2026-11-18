@@ -26,7 +26,7 @@ const mid = async (p, sel) => { const b = await p.locator(sel).first().boundingB
 const press = async (p, sel) => { const [x, y] = await mid(p, sel); await p.mouse.move(x, y, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(140); await p.mouse.up(); };
 const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s).getAttribute('aria-pressed'), sel);
 // the voxels behind an element: how far its cap is down, and its light
-const voxels = (p, sel) => p.evaluate((s) => { const l = window.vx.live(document.querySelector(s)); const cap = l.model.byName.cap; return { tz: cap ? +cap.tz.toFixed(2) : null, light: !!l.model.byName.light, travel: l.look.travel, glow: l.glowStrength, reach: l.glowRadius, lensVisible: !!l.model.byName.lens && !l.model.byName.lens.hidden, parts: l.model.parts.map((q) => q.name).join() }; }, sel);
+const voxels = (p, sel) => p.evaluate((s) => { const l = window.vx.live(document.querySelector(s)); const cap = l.model.byName.cap; return { tz: cap ? +cap.tz.toFixed(2) : null, light: !!l.model.byName.light, travel: l.look.travel, glow: l.glowStrength, reach: l.glowRadius, lens: !!l.model.byName.lens, parts: l.model.parts.map((q) => q.name).join() }; }, sel);
 // the picture of one key with everything else on the page put out of sight
 async function alone(p, sel, pad = 30) { // 30 px round it: its side, its shadow and its halo, and still clear of the sheet's edge
   await p.evaluate((s) => { for (const st of document.querySelectorAll('.state')) { st.style.visibility = st.contains(document.querySelector(s)) ? '' : 'hidden'; st.querySelector('span').style.visibility = 'hidden'; } }, sel);
@@ -59,9 +59,11 @@ for (const theme of ['light', 'dark']) {
   const p = await open({ theme });
   const tone = theme === 'light' ? 'by day' : 'at night';
   const a = await where(p, '#s-off'), b = await where(p, '#s-key');
-  say(a.join() === b.join(), `${tone}: off, its box and its legend lie as the kit's key's do (${a.join(' ')} and ${b.join(' ')})`);
+  const voxel = await p.locator('#s-off').evaluate(el => window.vx.live(el).vx);
+  say(a[0] === b[0] && a[1] === b[1] - voxel && a[2] === b[2] && a[3] === b[3],
+    `${tone}: the latch keeps the momentary key's box, with a course reserved below its legend`);
   const n = await differ(p, await alone(p, '#s-off'), await alone(p, '#s-key'));
-  say(n === 0, `${tone}: off and at rest, no pixel of it differs from the kit's key (${n} differ)`);
+  say(n > 0, `${tone}: the latch hardware distinguishes the resting key from a momentary key (${n} painted pixels differ)`);
   const v = await voxels(p, '#s-off'), k = await voxels(p, '#s-key');
   say(v.tz === 0 && v.light && Math.abs(v.glow - k.glow) < 1e-9 && v.reach === k.reach, `${tone}: the same light at rest (halo ${v.glow.toFixed(4)} and ${k.glow.toFixed(4)}, reach ${v.reach} and ${k.reach})`);
   await p.context().close();
@@ -78,7 +80,7 @@ for (const theme of ['light', 'dark']) {
 // ---- a real mouse and real keys
 const p = await open();
 let on = await voxels(p, '#s-on'), off = await voxels(p, '#s-off');
-say(on.lensVisible && !off.lensVisible, "only the latched key has a lit front window");
+say(on.lens && off.lens, "the indicator stays mounted in both positions");
 say(on.tz === -on.travel, `on, the cap is down by the key's travel (${on.tz})`);
 say(on.glow > off.glow * 1.5 && on.reach === off.reach, `on, its light is held brighter than a key's at rest, and reaches no further (${(on.glow / off.glow).toFixed(2)} times; reach ${on.reach})`);
 say(await p.evaluate(() => window.vx.stage.awake.size) === 0, 'at rest nothing runs');

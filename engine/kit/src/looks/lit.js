@@ -5,7 +5,7 @@
 import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM, SLIDE } from '../core/motion.js';
-import { pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { seatIndicator, pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel } from '../core/light.js';
 import { inlineX } from '../plain.js';
 import { toggle, KNOB } from '../components/toggle.js';
 import { meter } from '../components/meter.js';
@@ -30,7 +30,7 @@ const key = {
     live.state.off = off;
     live.label(el.querySelector(':scope > .vx-label'), () => live.state.top + cap.tz);
     // a key that is already held down as the page arrives (open, or pressed) is drawn down
-    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-live.state.keyTravel); }
+    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-m.keyTravel); }
   },
 
   pose(live) {
@@ -355,17 +355,24 @@ const choice = {
     const seat = live.state.seat = tabsEl.length ? Math.round(tabsEl[0].offsetWidth / vx) : W;
     const block = m.part('block');
     block.grounded = false;
-    ring(block, 1, 1, -D, seat - 2, H - 2, 'light');
-    capOf(block, 1, 1, 1 - D, seat - 2, H - 2, D - 1, 'key');
+    ring(block, 1, 1, -D, seat - 2, H - 4, 'light');
+    capOf(block, 1, 1, 1 - D, seat - 2, H - 4, D - 1, 'key');
+
     const index = Math.max(0, tabsEl.findIndex((t) => t.getAttribute('aria-selected') === 'true'));
     live.state.index = index;
     const xs = live.state.xs = tabsEl.map((t) => Math.round(t.offsetLeft / vx) + 1);
+    live.state.indicators = xs.map((x, i) => seatIndicator(live, i, x, 1, seat - 2, H - 2));
     live.spring('x', xs[index] ?? 1, SLIDE.k * 1.25, SLIDE.c * 1.12).snap(xs[index] ?? 1);
     tabsEl.forEach((t) => live.label(wrapLabel(t), () => live.faceZ));
   },
 
   pose(live) {
-    live.model.byName.block.tx = live.spring('x').x - 1;
+    const x = live.spring('x').x;
+    live.model.byName.block.tx = x - 1;
+    live.state.indicators.forEach((indicator, i) => {
+      const distance = Math.abs(x - live.state.xs[i]);
+      indicator(Math.max(0, 1 - distance / (live.state.seat / 2)));
+    });
     live.glowStrength = halo(0.07) * byTheme(live);
   },
 };
@@ -394,7 +401,7 @@ defineLook('lit', {
     'light-warm': { day: '#c1ac83', night: '#87704e', glow: 0.2 },
     steel: { day: '#aba58f', night: '#535b5b', jitter: 0.012 },   // bezels, bolts, collars, and what is switched off
     enamel: { day: '#174ec6', night: '#315aca', jitter: 0.012 },  // the cap of the one main key
-    key: { day: '#f2ebda', night: '#434745', jitter: 0.006 },     // an ordinary cap
+    key: { day: '#f2ebda', night: '#505966', jitter: 0.006 },     // an ordinary cap
     ivory: { day: '#fffefa', night: '#d7dbf0', jitter: 0.006 },
     light: { day: '#388de6', night: '#458fe3', glow: 0.68 },
     signal: { day: '#388de6', night: '#458fe3', glow: 1 }, // what is on: the accent's light

@@ -36,7 +36,8 @@ export class Spring {
 
 // Press: quick and firm on the way down, a small overshoot on the way back.
 export const PRESS = { k: 1500, c: 76 };   // settles in about 110 ms
-export const RELEASE = { k: 620, c: 34 };  // about 190 ms, one soft overshoot
+const RETURN_DAMPING = 0.51;
+export const RELEASE = { k: 1000, c: 2 * Math.sqrt(1000) * RETURN_DAMPING };
 export const SLIDE = { k: 420, c: 30 };    // toggles, tabs: about 220 ms with a little carry
 export const CALM = { k: 170, c: 26 };
 
@@ -187,9 +188,11 @@ export function plateMotion(part, { duration = 0.4, top, out, still, start = out
       const t = clamp01(this.t / end);
       if (out) return start * (1 - t) ** 2;
       if (still) return start + (1 - start) * t;
-      // A spring-loaded stop lets the plate pass its seat by about one course, then catch.
-      const left = 1 - t;
-      return 1 + (1 - start) * left * left * (2.15 - 3.15 * left);
+      // The return spring has the same damping as a released key. A heavier plate
+      // takes longer to reach its stop, where its first return to level ends the travel.
+      const ratio = RETURN_DAMPING / Math.sqrt(1 - RETURN_DAMPING ** 2);
+      const phase = t * (1.5 * Math.PI + Math.atan(ratio));
+      return 1 - (1 - start) * Math.exp(-ratio * phase) * (Math.cos(phase) + ratio * Math.sin(phase));
     },
     get dz() { return still ? 0 : (this.progress - 1) * (top - 0.5); },
     write(pos, o) {

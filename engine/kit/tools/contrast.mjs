@@ -21,4 +21,12 @@ for (const [name, t] of [['day', day], ['night', night]]) for (const [what, fg, 
   if (r < need) bad++;
   console.log(`${r < need ? 'FAIL' : 'ok  '} ${name.padEnd(5)} ${what.padEnd(24)} ${r.toFixed(2)}:1 (needs ${need}) ${t[fg]} on ${t[bg]}`);
 }
+// The hardware look supplies its own key material and legend colours.
+const hardwareDay = block(/\[data-vx-look="lit"\] \{([^}]*--vx-key:[^}]*)\}/);
+const hardwareNight = block(/:root\[data-theme="dark"\]\[data-vx-look="lit"\],[^{]*\{([^}]*)\}/);
+for (const [name, tokens] of [['day', hardwareDay], ['night', hardwareNight]]) {
+  const contrast = ratio(tokens['--vx-ink-quiet'], tokens['--vx-key']);
+  if (contrast < 4.5) bad++;
+  console.log(`${contrast < 4.5 ? 'FAIL' : 'ok  '} ${name} hardware secondary key   ${contrast.toFixed(2)}:1 (needs 4.5)`);
+}
 process.exit(bad ? 1 : 0);

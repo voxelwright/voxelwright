@@ -183,7 +183,7 @@ export const navigationMenuFloat = {
   name: 'navigation-menu-float',
   selector: '.vx-navigation-menu-float',
   pad: 11,
-  glowRadius: 6,
+  glowRadius: 2.2,
   glowStrength: halo(0.15),
 
   build(live, m) {
@@ -204,7 +204,7 @@ export const navigationMenuFloat = {
     part.tz = 0.03;
   },
 
-  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.18 : 0.15); },
+  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025); },
 
   bind(live) {
     const on = listeners();
