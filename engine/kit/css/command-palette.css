@@ -1,0 +1,51 @@
+/* ---------- Command palette ---------- */
+
+/* The kit's dialog, with a well at its top and rows of words under it. The well is in the
+   dialog's header, so the dialog's own groove parts it from the rows. The marked row has the
+   accent groove at its start.
+   Markup: <dialog class="vx-dialog vx-command-dialog" aria-label="Commands">
+             <header class="vx-command-head"><label class="vx-aloud" for="q">…</label><span class="vx-well"><input id="q" role="combobox" aria-controls="cmds" …></span></header>
+             <div class="vx-command-scroll"><div class="vx-command" id="cmds" role="listbox" aria-label="Commands" data-vx-chord="mod+k">…</div></div>
+             <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
+             <div class="vx-command-foot">…</div>
+           </dialog> */
+
+dialog.vx-command-dialog { inline-size: min(calc(var(--vx) * 140), calc(100vw - 32px)); margin-block-start: min(16vh, calc(var(--vx) * 30)); }
+.vx-command-dialog > header.vx-command-head { padding: calc(var(--vx) * 5) calc(var(--vx) * 4); font: inherit; }
+.vx-command-head .vx-well input { font-size: 1.0625rem; }
+
+/* the rows scroll by themselves. The list's own drawing reaches four voxels past its end; the
+   room at the scroller's end is that, so it adds nothing to what can be scrolled. */
+.vx-command-scroll {
+  max-block-size: min(calc(var(--vx) * 92), 52vh); overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: thin;
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4) calc(var(--vx) * 4);
+}
+.vx-command { position: relative; isolation: isolate; display: block; min-inline-size: 0; font-family: var(--vx-font); font-size: 1rem; line-height: calc(var(--vx) * 6); color: var(--vx-ink); }
+.vx-command [role="option"] {
+  display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 2) calc(var(--vx) * 2) calc(var(--vx) * 5);
+  overflow-wrap: anywhere; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.vx-command [role="option"][hidden], .vx-command [role="group"][hidden] { display: none; }
+.vx-command [role="option"][aria-disabled="true"] { color: var(--vx-ink-quiet); cursor: default; }
+.vx-command .vx-option-trail { margin-inline-start: auto; flex: none; color: var(--vx-ink-quiet); font-size: 0.875rem; }
+.vx-command-title { padding: calc(var(--vx) * 3) calc(var(--vx) * 2) calc(var(--vx) * 1) calc(var(--vx) * 5); font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet); }
+.vx-command [role="group"]:first-child > .vx-command-title, .vx-command > .vx-canvas + [role="group"] > .vx-command-title { padding-block-start: calc(var(--vx) * 1); }
+
+.vx-command-empty { margin: 0; padding: calc(var(--vx) * 2) calc(var(--vx) * 9) calc(var(--vx) * 6); color: var(--vx-ink-quiet); }
+.vx-command-empty[hidden] { display: none; }
+/* how it is used, in words with the names of keys */
+.vx-command-foot {
+  display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 5); color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 6);
+}
+.vx-command-foot > span { display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5); }
+/* a finger has no arrow keys to be told about */
+@media (hover: none) and (pointer: coarse) { .vx-command-foot { display: none; } }
+
+/* plain: the mark painted where its groove is cut */
+.vx-command:not([data-vx-live]) [role="option"][data-vx-active] {
+  background: linear-gradient(var(--lit-accent, var(--vx-enamel)), var(--lit-accent, var(--vx-enamel))) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: var(--vx) 50%;
+}
+.vx-command:not([data-vx-live]) [role="option"][data-vx-active]:dir(rtl) { background-position: calc(100% - var(--vx)) 50%; }

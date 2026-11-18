@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>List</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>List</h1>
+    <p class="what">Rows of words on the surface, parted by hairlines. The current row has an accent groove at its start. A row that holds a link or a button answers a press.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the projects of a team</h2>
+    <ul class="vx-list wide" id="projects">
+      <li aria-current="true"><a href="#harbor-api">harbor-api</a><span class="vx-row-meta">live</span></li>
+      <li><a href="#fog-site">fog-site</a><span class="vx-row-meta">building</span></li>
+      <li><a href="#tide-worker">tide-worker</a><span class="vx-row-meta">live</span></li>
+      <li><a href="#ferry-cron">ferry-cron</a><span class="vx-row-meta">failed 2 h ago</span></li>
+    </ul>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <ul class="vx-list wide" id="states">
+      <li>Words only: this row cannot be pressed<span class="vx-row-meta">none</span></li>
+      <li aria-current="true">The current row, words only<span class="vx-row-meta">current</span></li>
+      <li><button type="button" id="row-button">A row that is a button</button><span class="vx-row-meta">press</span></li>
+      <li><a href="#long" lang="uk">Розгорнути на сервері після кожного злиття в головну гілку, якщо тести пройшли</a><span class="vx-row-meta">long</span></li>
+    </ul>
+    <ul class="vx-list wide" role="listbox" aria-label="Regions to deploy to" aria-multiselectable="true">
+      <li role="option" aria-selected="true">Frankfurt</li>
+      <li role="option" aria-selected="false">Warsaw</li>
+      <li role="option" aria-selected="true">Kyiv</li>
+    </ul>
+    <ul class="vx-list wide" dir="rtl">
+      <li aria-current="true"><a href="#rtl-1">Right to left: the mark is at the start</a><span class="vx-row-meta">current</span></li>
+      <li><a href="#rtl-2">The second row</a><span class="vx-row-meta">row</span></li>
+    </ul>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { LOOKS } from '/packages/voxelmorphism/src/index.js';
+  import { parts } from '/packages/voxelmorphism/src/looks/lit-existing.js';
+  Object.assign(LOOKS.lit.parts, parts);
+  // the current row follows the link that was pressed
+  document.getElementById('projects').addEventListener('click', (e) => {
+    const li = e.target.closest('li');
+    if (!li) return;
+    e.preventDefault();
+    for (const other of li.parentElement.children) if (other.tagName === 'LI') other === li ? other.setAttribute('aria-current', 'true') : other.removeAttribute('aria-current');
+  });
+  window.pressed = 0;
+  document.getElementById('row-button').addEventListener('click', () => { window.pressed++; });
+  show();
+</script>
+</body>
+</html>

@@ -1,0 +1,21 @@
+/* ---------- Empty state ---------- */
+
+/* Words and one key, on the surface it belongs to: no box, no picture, no light of its own.
+   Markup: <div class="vx-empty">
+             <h3 class="vx-empty-title">No deploys yet</h3>
+             <p class="vx-empty-text">Push to main, or deploy by hand.</p>
+             <button class="vx-button" data-vx-kind="main">Deploy harbor-api</button>
+           </div>
+   The heading's level is the page's to choose. data-vx-align="start" sets it at the start of its
+   column, for a narrow place (a sidebar, a menu). */
+.vx-empty {
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: calc(var(--vx) * 2);
+  box-sizing: border-box; inline-size: 100%; max-inline-size: calc(var(--vx) * 110); margin-inline: auto;
+  padding-block: calc(var(--vx) * 10);
+  font-family: var(--vx-font); color: var(--vx-ink); text-align: center; overflow-wrap: anywhere;
+}
+.vx-empty-title { margin: 0; font-size: 1.125rem; line-height: 1.3; font-weight: 650; text-wrap: balance; }
+.vx-empty-text { margin: 0; color: var(--vx-ink-quiet); line-height: 1.55; text-wrap: pretty; }
+/* the one key stands clear of the words; a long legend may take the whole line and wrap there */
+.vx-empty > .vx-button { margin-block-start: calc(var(--vx) * 4); max-inline-size: 100%; }
+.vx-empty[data-vx-align="start"] { justify-items: start; text-align: start; margin-inline: 0; padding-block: calc(var(--vx) * 5); }

@@ -1,0 +1,47 @@
+/* ---------- Item ---------- */
+
+/* A row of words: a title, a line under it, something trailing, and something leading if you
+   like (an avatar, a lamp). None of the tools: no box, nothing raised.
+   Markup: <div class="vx-item">
+             <span class="vx-item-lead">…</span>                       optional
+             <span class="vx-item-text">
+               <span class="vx-item-title">harbor-api</span>
+               <span class="vx-item-line">Deployed four minutes ago by Mina</span>
+             </span>
+             <span class="vx-item-trail">…</span>                      optional: words, a badge, a key
+           </div>
+   A row you can press is the same thing written as a link or a button: <a class="vx-item" href>.
+   A long title wraps; data-vx-clip on the item keeps title and line to one line each, cut short
+   with an ellipsis (give the full words in a title attribute where they matter). */
+
+.vx-item {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  min-block-size: calc(var(--vx) * 11);
+  padding-block: calc(var(--vx) * 2);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: 1.375;
+  color: var(--vx-ink);
+  text-align: start;
+  text-decoration: none;
+}
+.vx-item-lead { flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.vx-item-text { flex: 1 1 auto; display: grid; gap: calc(var(--vx) * 0.5); min-inline-size: 0; }
+.vx-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.vx-item-line { font-size: 0.875rem; line-height: 1.43; color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-item-trail { flex: none; display: inline-flex; align-items: center; gap: calc(var(--vx) * 3); max-inline-size: 50%; margin-inline-start: auto; font-size: 0.875rem; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+.vx-item[data-vx-clip] :is(.vx-item-title, .vx-item-line) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* a row you can press: still words. The title is underlined under the pointer, and the row
+   takes the browser's focus ring, since there is no light in it to brighten. */
+:is(a, button).vx-item { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button.vx-item { appearance: none; inline-size: 100%; margin: 0; padding-inline: 0; border: 0; border-radius: 0; background: none; }
+:is(a, button).vx-item:hover .vx-item-title { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
+:is(a, button).vx-item:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+button.vx-item:disabled { cursor: default; }
+button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink-quiet); text-decoration: none; }

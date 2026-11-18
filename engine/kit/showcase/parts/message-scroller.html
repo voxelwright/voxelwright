@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Message scroller</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* this page's own: a chat (a thread and a composer under it), and a grid of states */
+  .chat { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .chat-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 calc(var(--vx) * 5); }
+  .chat-head h3 { font-size: 1.125rem; line-height: 1.3; }
+  .chat-head span { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: calc(var(--vx) * 4); }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
+  .state > p { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .state > .vx-scroll { justify-self: stretch; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Message scroller</h1>
+    <p class="what">The thread. It keeps to the newest message while you are at its foot, leaves you alone while you read back, and shows a key when something new has come below.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: shipping harbor-api with the deploy agent</h2>
+    <div class="chat">
+      <div class="chat-head"><h3>harbor-api</h3><span>You, Ada and the deploy agent</span></div>
+      <div class="vx-scroll vx-thread" id="chat" style="--vx-scroll-h: 112">
+        <div class="vx-scroll-well">
+          <div class="vx-scroll-view" role="log" aria-label="harbor-api" tabindex="0">
+            <div class="vx-marker"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-17">Today</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+            <article class="vx-message" aria-labelledby="c1-who c1-when">
+              <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">AL</span></span>
+              <div class="vx-message-body">
+                <header class="vx-message-head"><span class="vx-message-who" id="c1-who">Ada Lindqvist</span><time class="vx-message-when" id="c1-when" datetime="2026-11-17T17:41">17:41</time></header>
+                <div class="vx-bubble"><p>Build 214 is green. The log and the plan, in case it has to come back:</p></div>
+                <ul class="vx-attachments" aria-label="Attached files">
+                  <li class="vx-attachment"><span class="vx-attachment-tile"><a class="vx-attachment-name" href="#chat">build-214.log</a><span class="vx-attachment-size">Log, 48 KB</span></span></li>
+                  <li class="vx-attachment"><span class="vx-attachment-tile"><a class="vx-attachment-name" href="#chat">rollback-plan.pdf</a><span class="vx-attachment-size">PDF, 84 KB</span></span></li>
+                </ul>
+              </div>
+            </article>
+            <article class="vx-message" data-vx-from="me" aria-labelledby="c2-who c2-when">
+              <div class="vx-message-body">
+                <header class="vx-message-head"><span class="vx-message-who" id="c2-who">You</span><time class="vx-message-when" id="c2-when" datetime="2026-11-17T17:44">17:44</time></header>
+                <div class="vx-bubble"><p>Thank you. Agent, ship it once the backup is done.</p></div>
+              </div>
+            </article>
+            <article class="vx-message" aria-labelledby="c3-who c3-when">
+              <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><svg viewBox="0 0 8 8" shape-rendering="crispEdges"><rect width="8" height="8" fill="#22304f"/><rect x="1" y="2" width="1" height="1" fill="#e9edf7"/><rect x="2" y="3" width="1" height="1" fill="#e9edf7"/><rect x="1" y="4" width="1" height="1" fill="#e9edf7"/><rect x="4" y="5" width="3" height="1" fill="#9db8ff"/></svg></span>
+              <div class="vx-message-body">
+                <header class="vx-message-head"><span class="vx-message-who" id="c3-who">Deploy agent</span><time class="vx-message-when" id="c3-when" datetime="2026-11-17T18:00">18:00</time></header>
+                <div class="vx-bubble"><p>The backup finished at 17:58. Shipping build 214 now.</p></div>
+                <ol class="vx-trace" aria-label="What the agent did" aria-live="off">
+                  <li data-vx-state="done">
+                    <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+                    <details class="vx-collapsible">
+                      <summary><span class="vx-trace-what">Read build-214.log</span><span class="vx-trace-state">Done, 2 s</span></summary>
+                      <p>58 tests passed and 2 were skipped.</p>
+                    </details>
+                  </li>
+                  <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Rolled out to three machines</span><span class="vx-trace-state">Done, 41 s</span></p></li>
+                  <li data-vx-state="running"><span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Watching the health check</span><span class="vx-trace-state">In progress</span></p></li>
+                </ol>
+              </div>
+            </article>
+            <article class="vx-message" aria-labelledby="c4-who c4-when">
+              <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><svg viewBox="0 0 8 8" shape-rendering="crispEdges"><rect width="8" height="8" fill="#22304f"/><rect x="1" y="2" width="1" height="1" fill="#e9edf7"/><rect x="2" y="3" width="1" height="1" fill="#e9edf7"/><rect x="1" y="4" width="1" height="1" fill="#e9edf7"/><rect x="4" y="5" width="3" height="1" fill="#9db8ff"/></svg></span>
+              <div class="vx-message-body">
+                <header class="vx-message-head"><span class="vx-message-who" id="c4-who">Deploy agent</span><time class="vx-message-when" id="c4-when" datetime="2026-11-17T18:02">18:02</time></header>
+                <div class="vx-bubble"><p>One thing is yours to decide while I watch.</p></div>
+                <fieldset class="vx-questionnaire" id="keep">
+                  <legend>Keep build 213 for a week?</legend>
+                  <div class="vx-toggle-group" data-vx-way="down">
+                    <label><input type="radio" name="keep" value="keep">Keep it</label>
+                    <label><input type="radio" name="keep" value="remove">Remove it now</label>
+                  </div>
+                  <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+                  <p class="vx-questionnaire-note" role="status"></p>
+                </fieldset>
+              </div>
+            </article>
+          </div>
+          <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+        </div>
+        <span class="vx-scroll-bar" aria-hidden="true"></span>
+      </div>
+      <form class="composer" id="composer">
+        <label class="vx-field"><span class="vx-field-label">Message</span><span class="vx-well"><input type="text" id="words" autocomplete="off" placeholder="Write to the thread"></span></label>
+        <button class="vx-button" data-vx-kind="main" type="submit">Send</button>
+      </form>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state">
+        <p>In a recess, with plain messages. Scroll up, then let one arrive: the key appears, and nothing moves.</p>
+        <div class="vx-scroll vx-thread" id="log" style="--vx-scroll-h: 64">
+          <div class="vx-recess vx-scroll-well">
+            <div class="vx-scroll-view" role="log" aria-label="Deploys" tabindex="0"></div>
+            <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+          </div>
+          <span class="vx-scroll-bar" aria-hidden="true"></span>
+        </div>
+        <button class="vx-button" type="button" id="arrive">A message arrives</button>
+      </div>
+      <div class="state">
+        <p>Reading back while two arrived: the key says how many</p>
+        <div class="vx-scroll vx-thread" id="back" style="--vx-scroll-h: 64">
+          <div class="vx-recess vx-scroll-well">
+            <div class="vx-scroll-view" role="log" aria-label="Deploys, read back" tabindex="0"></div>
+            <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+          </div>
+          <span class="vx-scroll-bar" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="state">
+        <p>A short thread: nothing to scroll, no bar, no key</p>
+        <div class="vx-scroll vx-thread" id="short" style="--vx-scroll-h: 44">
+          <div class="vx-recess vx-scroll-well">
+            <div class="vx-scroll-view" role="log" aria-label="A short thread" tabindex="0">
+              <article class="vx-message" aria-labelledby="h1-who h1-when">
+                <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
+                <div class="vx-message-body">
+                  <header class="vx-message-head"><span class="vx-message-who" id="h1-who">Mina Okafor</span><time class="vx-message-when" id="h1-when" datetime="2026-11-17T09:12">09:12</time></header>
+                  <div class="vx-message-text"><p>The runners are warm again.</p></div>
+                </div>
+              </article>
+            </div>
+            <span class="vx-thread-new" hidden><button class="vx-button" type="button">New messages</button></span>
+          </div>
+          <span class="vx-scroll-bar" aria-hidden="true"></span>
+        </div>
+      </div>
+      <div class="state" lang="uk">
+        <p>Ukrainian: the key's words are the page's own</p>
+        <div class="vx-scroll vx-thread" id="uk" style="--vx-scroll-h: 44">
+          <div class="vx-recess vx-scroll-well">
+            <div class="vx-scroll-view" role="log" aria-label="Розгортання" tabindex="0"></div>
+            <span class="vx-thread-new" hidden data-vx-one="1 нове повідомлення" data-vx-many="Нових повідомлень: {n}" data-vx-more="Ще нижче"><button class="vx-button" type="button">Нові повідомлення</button></span>
+          </div>
+          <span class="vx-scroll-bar" aria-hidden="true"></span>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { adopt } from '/packages/voxelmorphism/src/index.js';
+  import { bubble } from '/packages/voxelmorphism/src/components/bubble.js';
+  import { attachment } from '/packages/voxelmorphism/src/components/attachment.js';
+  import { questionnaire } from '/packages/voxelmorphism/src/components/questionnaire.js';
+  import { trace } from '/packages/voxelmorphism/src/components/trace.js';
+  import { messageScroller } from '/packages/voxelmorphism/src/components/message-scroller.js';
+
+  // the page's own: messages to fill the small threads with, and to let arrive
+  const said = [
+    ['Mina Okafor', 'MO', 'Build 212 is out.'], ['Ada Lindqvist', 'AL', 'The cache is keyed on the lockfile now.'],
+    ['Tomas Reyes', 'TR', 'The runners are warm again.'], ['Mina Okafor', 'MO', 'Build 213 is green. It can go out after lunch.'],
+    ['Ada Lindqvist', 'AL', 'Fine by me. The queue is empty.'], ['Tomas Reyes', 'TR', 'I will watch the health check.'],
+    ['Mina Okafor', 'MO', 'Build 213 is out.'], ['Ada Lindqvist', 'AL', 'Timings are down by a fifth.'],
+  ];
+  const uk = [['Міна Окафор', 'МО', 'Збірка 213 готова.'], ['Ада Ліндквіст', 'АЛ', 'Розгорнути на сервері можна після перевірки.'], ['Міна Окафор', 'МО', 'Черга порожня.'], ['Ада Ліндквіст', 'АЛ', 'Тоді розгортаю.'], ['Міна Окафор', 'МО', 'Дякую.']];
+  let n = 0;
+  const message = ([who, initials, words], minute) => {
+    const id = `g${++n}`, when = `10:${String(minute).padStart(2, '0')}`;
+    const a = document.createElement('article');
+    a.className = 'vx-message';
+    a.setAttribute('aria-labelledby', `${id}-who ${id}-when`);
+    a.innerHTML = `<span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">${initials}</span></span><div class="vx-message-body"><header class="vx-message-head"><span class="vx-message-who" id="${id}-who">${who}</span><time class="vx-message-when" id="${id}-when" datetime="2026-11-17T${when}">${when}</time></header><div class="vx-message-text"><p></p></div></div>`;
+    a.querySelector('p').textContent = words;
+    return a;
+  };
+  const viewOf = (id) => document.querySelector(`#${id} .vx-scroll-view`);
+  const add = (id, from, minute) => { const a = message(from, minute); viewOf(id).append(a); adopt(a); return a; };
+  for (const id of ['log', 'back']) said.forEach((m, i) => viewOf(id).append(message(m, 10 + i * 3)));
+  uk.forEach((m, i) => viewOf('uk').append(message(m, 10 + i * 3)));
+
+  // a message arrives in the small thread
+  let arrived = 0;
+  const news = [['Mina Okafor', 'MO', 'Build 214 is green.'], ['Ada Lindqvist', 'AL', 'Shall I ship it before the backup?'], ['Tomas Reyes', 'TR', 'The backup starts at six.'], ['Mina Okafor', 'MO', 'Then ship it now.']];
+  window.arrive = (id = 'log') => add(id, news[arrived++ % news.length], 40 + arrived);
+  document.getElementById('arrive').addEventListener('click', () => window.arrive());
+
+  // the chat: what you send is added as yours, and the agent answers a moment later
+  const words = document.getElementById('words');
+  const bubbleOf = (who, text, mine) => {
+    const id = `g${++n}`, now = new Date(), when = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const a = document.createElement('article');
+    a.className = 'vx-message';
+    if (mine) a.dataset.vxFrom = 'me';
+    a.setAttribute('aria-labelledby', `${id}-who ${id}-when`);
+    a.innerHTML = `${mine ? '' : document.querySelector('#chat article:nth-of-type(3) .vx-avatar').outerHTML.replace(/ data-vx-live=""/, '').replace(/<canvas[^>]*><\/canvas>/, '')}<div class="vx-message-body"><header class="vx-message-head"><span class="vx-message-who" id="${id}-who">${who}</span><time class="vx-message-when" id="${id}-when">${when}</time></header><div class="vx-bubble"><p></p></div></div>`;
+    a.querySelector('.vx-bubble p').textContent = text;
+    viewOf('chat').append(a);
+    adopt(a);
+    return a;
+  };
+  window.say = (text) => bubbleOf('You', text, true);
+  window.reply = (text) => bubbleOf('Deploy agent', text, false);
+  document.getElementById('composer').addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = words.value.trim();
+    if (!text) return;
+    words.value = '';
+    window.say(text);
+    setTimeout(() => window.reply('Noted. I will say when the health check has passed.'), 900);
+  });
+  document.getElementById('keep').addEventListener('vx-answer', (e) => setTimeout(() => window.reply(e.detail.values[0] === 'keep' ? 'Build 213 stays until the 24th.' : 'Build 213 is removed.'), 700));
+
+  show(bubble, attachment, questionnaire, trace, messageScroller).then(() => {
+    // the second thread is shown as it is while reading back: scrolled up, and two have come
+    const v = viewOf('back');
+    v.scrollTop = 0;
+    requestAnimationFrame(() => requestAnimationFrame(() => { add('back', news[0], 41); add('back', news[1], 42); }));
+  });
+</script>
+</body>
+</html>

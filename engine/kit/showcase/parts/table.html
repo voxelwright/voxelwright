@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Table</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own */
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  .narrow { inline-size: 100%; max-inline-size: calc(var(--vx) * 96); }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Table</h1>
+    <p class="what">Words in rows and columns, on the surface. One groove between the head and the body; a hairline between rows. A wide table scrolls inside itself.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the week's deploys</h2>
+    <div class="vx-table wide" id="use">
+      <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="use-cap">
+        <table>
+          <caption id="use-cap">Deploys this week <small>fogline, 18 to 24 May. Build time is the median.</small></caption>
+          <thead>
+            <tr><th scope="col">Service</th><th scope="col">Last deploy</th><th scope="col">By</th><th scope="col" class="vx-num">Deploys</th><th scope="col" class="vx-num">Build time</th><th scope="col">State</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">harbor-api</th><td>Sun, 10:43</td><td>Mina</td><td class="vx-num">14</td><td class="vx-num">45 s</td><td>Live</td></tr>
+            <tr><th scope="row">fog-site</th><td>Sat, 16:02</td><td>Ada</td><td class="vx-num">6</td><td class="vx-num">1 min 12 s</td><td>Live</td></tr>
+            <tr><th scope="row">tide-worker</th><td>Fri, 09:30</td><td>Mina</td><td class="vx-num">3</td><td class="vx-num">38 s</td><td>Failed</td></tr>
+            <tr><th scope="row">ferry-cron</th><td>Mon, 08:15</td><td>Ada</td><td class="vx-num">1</td><td class="vx-num">21 s</td><td>Live</td></tr>
+          </tbody>
+          <tfoot>
+            <tr><th scope="row">All four</th><td></td><td></td><td class="vx-num">24</td><td class="vx-num">42 s</td><td></td></tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>Wider than its place: it scrolls inside itself, and takes focus so the arrow keys can move it. One cell wraps (.vx-wrap)</h3>
+    <div class="vx-table wide" id="wide">
+      <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="wide-cap">
+        <table>
+          <caption id="wide-cap">Builds of harbor-api</caption>
+          <thead>
+            <tr><th scope="col">Build</th><th scope="col">Commit</th><th scope="col">Message</th><th scope="col">Branch</th><th scope="col">Started</th><th scope="col" class="vx-num">Tests</th><th scope="col" class="vx-num">Build time</th><th scope="col" class="vx-num">Size</th><th scope="col">Runner</th><th scope="col">State</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">#212</th><td>4f2c9a1</td><td class="vx-wrap">Ask /ready, not /health</td><td>main</td><td>24 May, 10:42</td><td class="vx-num">148</td><td class="vx-num">45 s</td><td class="vx-num">18.4 MB</td><td>warm-eu-2</td><td>Live</td></tr>
+            <tr><th scope="row">#211</th><td>b07e113</td><td class="vx-wrap">Key the cache on the lockfile</td><td>main</td><td>23 May, 17:20</td><td class="vx-num">148</td><td class="vx-num">52 s</td><td class="vx-num">18.4 MB</td><td>warm-eu-1</td><td>Replaced</td></tr>
+            <tr><th scope="row">#210</th><td>91c0d5e</td><td class="vx-wrap">Try a smaller base image, and leave the build tools out of what is shipped</td><td>smaller-image</td><td>23 May, 11:05</td><td class="vx-num">146</td><td class="vx-num">3 min 40 s</td><td class="vx-num">12.9 MB</td><td>cold-eu-4</td><td>Failed</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <h3>Rows closer together (data-vx-size="small"), and a head that wraps</h3>
+    <div class="vx-table narrow" id="small" data-vx-size="small">
+      <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="small-cap">
+        <table>
+          <caption id="small-cap">Runners</caption>
+          <thead>
+            <tr><th scope="col">Runner</th><th scope="col" class="vx-num">Builds<br>today</th><th scope="col" class="vx-num">Waiting<br>now</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">warm-eu-1</th><td class="vx-num">31</td><td class="vx-num">0</td></tr>
+            <tr><th scope="row">warm-eu-2</th><td class="vx-num">28</td><td class="vx-num">2</td></tr>
+            <tr><th scope="row">cold-eu-4</th><td class="vx-num">4</td><td class="vx-num">0</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <h3>Long words, a second line in a cell, an empty cell, and Ukrainian</h3>
+    <div class="vx-table wide" id="words">
+      <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="words-cap">
+        <table lang="uk">
+          <caption id="words-cap">Середовища <small>Де працює кожен сервіс і що з ним можна зробити.</small></caption>
+          <thead>
+            <tr><th scope="col">Середовище</th><th scope="col">Адреса</th><th scope="col">Дія</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Основне <small>harbor-api</small></th><td>harbor-api.fogline.example</td><td>Розгорнути на сервері</td></tr>
+            <tr><th scope="row">Перевірочне <small>harbor-api-preview</small></th><td>preview-4f2c9a1e7b03.harbor-api.fogline.example</td><td>Розгорнути на сервері</td></tr>
+            <tr><th scope="row">Архівне</th><td></td><td>Немає</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { table } from '/packages/voxelmorphism/src/components/table.js';
+  show(table);
+</script>
+</body>
+</html>

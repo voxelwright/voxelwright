@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Popover</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* room under a key for what it opens, so the page's picture shows both */
+  .room { min-block-size: calc(var(--vx) * 98); align-content: start; }
+  .up { margin-block-start: calc(var(--vx) * 54); }
+  .service { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 6); }
+  .service strong { font-size: 1.25rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Popover</h1>
+    <p class="what">A plate that floats above everything on the accent's light, built out of the corner of the key that opened it. Escape or a press outside closes it.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section class="room">
+    <h2>In use: renaming a service</h2>
+    <div class="service">
+      <strong id="service-name">harbor-api</strong>
+      <button class="vx-button" id="rename-key" popovertarget="rename" aria-expanded="false">Rename</button>
+    </div>
+    <form class="vx-popover" id="rename" popover role="dialog" aria-labelledby="rename-title">
+      <h3 id="rename-title">Rename the service</h3>
+      <p>Its address changes with it. The old one keeps working for a week.</p>
+      <label class="vx-field">
+        <span class="vx-field-label">Name</span>
+        <span class="vx-well"><input id="rename-input" type="text" value="harbor-api" autocomplete="off" spellcheck="false" autofocus></span>
+      </label>
+      <div class="vx-popover-actions">
+        <button class="vx-button" type="button" popovertarget="rename" popovertargetaction="hide">Cancel</button>
+        <button class="vx-button" id="rename-save" data-vx-kind="main">Save</button>
+      </div>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row up">
+      <button class="vx-button" id="closed-key" popovertarget="closed" aria-expanded="false">Closed</button>
+      <div class="vx-popover" id="closed" popover role="dialog" aria-labelledby="closed-title">
+        <h3 id="closed-title">Build cache</h3>
+        <p>212 packages, 1.4 GB. Cleared when the lockfile changes.</p>
+      </div>
+      <button class="vx-button" id="held-key" popovertarget="held" aria-expanded="false">Stays open, above</button>
+      <div class="vx-popover" id="held" popover="manual" data-vx-side="top" role="dialog" aria-labelledby="held-title">
+        <h3 id="held-title">Розгорнути на сервері</h3>
+        <p>Збірка триває близько хвилини. A long word must wrap: harbor-api-production-eu-central-1.</p>
+        <div class="vx-popover-actions">
+          <button class="vx-button" popovertarget="held" popovertargetaction="hide">Close</button>
+        </div>
+      </div>
+      <button class="vx-button" id="end-key" popovertarget="end" aria-expanded="false">At the far edge</button>
+      <div class="vx-popover" id="end" popover data-vx-align="end" role="dialog" aria-labelledby="end-title">
+        <h3 id="end-title">Region</h3>
+        <p>fogline runs in Frankfurt. Moving it takes a deploy.</p>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { popover } from '/packages/voxelmorphism/src/components/popover.js';
+  // the popover is a form: Save and Enter in the field both submit it, and it closes
+  const input = document.getElementById('rename-input'), box = document.getElementById('rename');
+  box.addEventListener('submit', (e) => { e.preventDefault(); const v = input.value.trim(); if (v) document.getElementById('service-name').textContent = v; box.hidePopover(); });
+  await show(popover);
+  // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
+  if (!new URLSearchParams(location.search).has('hand')) {
+    document.getElementById('held').showPopover();
+    box.showPopover();
+    document.activeElement?.blur?.();
+  }
+</script>
+</body>
+</html>

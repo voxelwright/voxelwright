@@ -1,0 +1,53 @@
+/* ---------- Avatar ---------- */
+
+/* A picture or initials set in a small window, lit from its rim.
+   Markup: <span class="vx-avatar"><img src="mina.jpg" alt="Mina Okafor"></span>
+           <span class="vx-avatar" role="img" aria-label="Ada Lindqvist"><span class="vx-avatar-initials" aria-hidden="true">AL</span></span>
+           <span class="vx-avatar"><img src="…" alt="Tomas Reyes"><span class="vx-avatar-initials" aria-hidden="true">TR</span></span>
+             a picture with initials behind it: they show if the picture cannot be had
+           <span class="vx-avatar-stack" role="group" aria-label="Reviewers">…avatars…<span class="vx-avatar-more">+3<span class="vx-avatar-aloud"> more</span></span></span>
+   The name is said once: by the picture's alt, or by the well's own label where there are only
+   initials. data-vx-size: small (8 voxels), large (14); 10 without. */
+
+.vx-avatar {
+  --_size: calc(var(--vx) * 10);
+  /* how much of the opening the wall takes: half a voxel for each voxel the well is deep. The
+     part sets --vx-avatar-deep from the look; a well is two deep without it. */
+  --_wall: calc(var(--vx) * var(--vx-avatar-deep, 2) / 2);
+  position: relative;
+  isolation: isolate;
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  inline-size: var(--_size);
+  block-size: var(--_size);
+  font-family: var(--vx-font);
+  font-size: 0.875rem;
+  color: var(--vx-ink);
+  vertical-align: middle;
+  user-select: none;
+}
+.vx-avatar[data-vx-size="small"] { --_size: calc(var(--vx) * 8); font-size: 0.75rem; }
+.vx-avatar[data-vx-size="large"] { --_size: calc(var(--vx) * 14); font-size: 1.125rem; }
+
+/* What is in the well lies on its floor. The floor is seen up and to the left of the opening,
+   and the wall shows along the right and the bottom, whichever way the page reads: that is the
+   way the kit is looked at, not the way it is written, so these are left, top, right, bottom. */
+.vx-avatar > :is(img, svg, .vx-avatar-initials) { position: absolute; top: 0; left: 0; right: var(--_wall); bottom: var(--_wall); }
+.vx-avatar > :is(img, svg) { display: block; inline-size: calc(100% - var(--_wall)); block-size: calc(100% - var(--_wall)); object-fit: cover; }
+.vx-avatar-initials { display: grid; place-items: center; font-weight: 600; line-height: 1; letter-spacing: 0.02em; }
+/* a picture lies over the initials; one that cannot be had is taken away, and they show */
+.vx-avatar > img ~ .vx-avatar-initials { visibility: hidden; }
+.vx-avatar[data-vx-empty] > img { display: none; }
+.vx-avatar[data-vx-empty] > .vx-avatar-initials { visibility: visible; }
+/* the rim's shadow lies on a picture as it lies on the floor round initials: the voxels cannot
+   draw on what is in front of them, so it is painted here, as wide as theirs */
+.vx-avatar[data-vx-live]:has(> :is(img, svg)):not([data-vx-empty])::after { content: ""; position: absolute; top: 0; left: 0; right: var(--_wall); bottom: var(--_wall); box-shadow: inset calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); pointer-events: none; }
+
+/* plain: a painted floor, and the wall along the right and the bottom */
+.vx-avatar:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset calc(var(--_wall) * -1) calc(var(--_wall) * -1) 0 var(--vx-slate); }
+
+/* a short stack: wells side by side, then how many more as words */
+.vx-avatar-stack { display: inline-flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2); vertical-align: middle; }
+.vx-avatar-more { margin-inline-start: calc(var(--vx) * 1); font: 600 0.875rem/1.3 var(--vx-font); color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.vx-avatar-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

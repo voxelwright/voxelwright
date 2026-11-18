@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Floating label</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .form { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 90); justify-items: stretch; }
+  .form .send { margin-block-start: calc(var(--vx) * 3); }
+  .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Floating label</h1>
+    <p class="what">The well. Its label is words that rest inside while it is empty, and move above it when it has focus or holds something.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: sign in to fogline</h2>
+    <form class="form" id="signin">
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="mail">Email</label>
+        <span class="vx-well"><input id="mail" name="email" type="email" placeholder=" " autocomplete="username"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="pass">Password</label>
+        <span class="vx-well"><input id="pass" name="password" type="password" placeholder=" " autocomplete="current-password"></span>
+      </div>
+      <div class="send"><button class="vx-button" data-vx-kind="main" type="submit">Sign in</button></div>
+    </form>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-empty">Empty, at rest</label>
+        <span class="vx-well"><input id="s-empty" placeholder=" " autocomplete="off"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-full">Holding something</label>
+        <span class="vx-well"><input id="s-full" placeholder=" " value="harbor-api" autocomplete="off"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-words">With a placeholder of words</label>
+        <span class="vx-well"><input id="s-words" placeholder="mina@harbor.example" autocomplete="off"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-date">A kind that is never empty</label>
+        <span class="vx-well"><input id="s-date" type="date" placeholder=" "></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-off">Switched off, empty</label>
+        <span class="vx-well"><input id="s-off" placeholder=" " disabled></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-off-full">Switched off, holding</label>
+        <span class="vx-well"><input id="s-off-full" placeholder=" " value="fogline" disabled></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-bad">Wrong</label>
+        <span class="vx-well"><input id="s-bad" placeholder=" " value="mina@" aria-invalid="true" autocomplete="off"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-long">Розгорнути на сервері після успішної перевірки</label>
+        <span class="vx-well"><input id="s-long" placeholder=" " autocomplete="off"></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-area">A longer answer</label>
+        <span class="vx-well"><textarea id="s-area" placeholder=" "></textarea></span>
+      </div>
+      <div class="vx-field vx-floating">
+        <label class="vx-field-label" for="s-area-full">A longer answer, holding</label>
+        <span class="vx-well"><textarea id="s-area-full" placeholder=" ">Ships every Friday.</textarea></span>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+  document.getElementById('signin').addEventListener('submit', (e) => e.preventDefault());
+</script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Theme picker</title>
+<!-- the part's early script, as a site pastes it: what is remembered, set before the first paint -->
+<script>(function(){try{var d=document.documentElement,s=JSON.parse(localStorage.getItem('vx-theme'))||{},k;if(s.time=='light'||s.time=='dark')d.setAttribute('data-theme',s.time);else if(s.time=='system')d.removeAttribute('data-theme');if(s.theme)d.setAttribute('data-vx-theme',s.theme);for(k in s.vars)if(k.indexOf('--lit-')==0)d.style.setProperty(k,s.vars[k])}catch(e){}})()</script>
+<!-- the part's own CSS, until it is in the kit's stylesheet. It comes first on purpose: in that stylesheet it comes before the trench's own file -->
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // this page's own: ?theme=dark or ?theme=light fixes the time of day for someone who has chosen
+  // nothing; and what <html> carried before any module ran is kept, to be looked at
+  (function () {
+    var d = document.documentElement, t = new URLSearchParams(location.search).get('theme'), kept = null;
+    try { kept = localStorage.getItem('vx-theme'); } catch (e) {}
+    if (t && !kept) d.dataset.theme = t;
+    window.early = { time: d.getAttribute('data-theme'), theme: d.getAttribute('data-vx-theme'), accent: d.style.getPropertyValue('--lit-accent-day') };
+    setTimeout(function () { d.dataset.ready = '1'; }, 5000);
+  })();
+</script>
+<style>
+  /* the page's own: a site's header, and a little of the site under it */
+  .site { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; }
+  .bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 3) calc(var(--vx) * 6); }
+  .bar .brand { font-weight: 700; font-size: 1.125rem; letter-spacing: -0.01em; }
+  .bar nav { display: flex; gap: calc(var(--vx) * 5); font-size: 0.9375rem; margin-inline-end: auto; }
+  .bar nav a { color: var(--vx-ink-quiet); text-decoration: none; }
+  .bar nav a[aria-current] { color: var(--vx-ink); font-weight: 600; }
+  .panel { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
+  .panel .name { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 4); font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+  .panel .keys { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 4); }
+  .panel .build { display: grid; gap: calc(var(--vx) * 2); inline-size: 100%; max-inline-size: calc(var(--vx) * 90); font-size: 0.9375rem; font-weight: 600; }
+  .panel p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .panel a { color: var(--vx-link); }
+  .heard { color: var(--vx-ink-quiet); font-size: 0.875rem; min-block-size: 1.55em; font-variant-numeric: tabular-nums; }
+  .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; min-inline-size: 0; }
+  .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 4); }
+  .each h3:first-child { margin-block-start: 0; }
+  .each > * { max-inline-size: 100%; }
+  .each .vx-code { inline-size: 100%; }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Theme picker</h1>
+    <p class="what">The one place a site's theme is set from. A bank of seats for the theme, each with a lamp of that theme's accent, and a bank for the time of day. It remembers, and tells the page.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: in the header of a site</h2>
+    <div class="site">
+      <div class="bar">
+        <span class="brand">fogline</span>
+        <nav aria-label="Site"><a href="#deploys" aria-current="page">Deploys</a><a href="#logs">Logs</a><a href="#team">Team</a></nav>
+        <div class="vx-theme-picker" id="picker">
+          <div class="vx-toggle-group" role="radiogroup" aria-label="Theme" data-vx-pick="theme" data-vx-size="small"></div>
+          <div class="vx-toggle-group" role="radiogroup" aria-label="Time of day" data-vx-pick="time" data-vx-size="small">
+            <label><input type="radio" name="time" value="light">Day</label>
+            <label><input type="radio" name="time" value="dark">Night</label>
+            <label><input type="radio" name="time" value="system" checked>System</label>
+          </div>
+        </div>
+      </div>
+      <div class="vx-groove" role="separator"></div>
+      <div class="panel">
+        <div class="name">harbor-api <span class="vx-badge" data-vx-size="large"><span class="vx-lamp" data-vx-light="go"></span>Live</span></div>
+        <div class="keys">
+          <button class="vx-button" type="button" data-vx-kind="main">Deploy</button>
+          <button class="vx-button" type="button">Roll back</button>
+        </div>
+        <div class="build"><span>Build</span><span class="vx-meter"><progress value="0.7" max="1">70%</progress></span></div>
+        <label class="vx-check"><input type="checkbox" checked><span class="vx-box"></span>Deploy on push</label>
+        <p>Build 212 went out at 10:43. <a href="#log">Read its log</a></p>
+      </div>
+    </div>
+    <p class="heard" id="heard" role="status">The page has heard nothing yet.</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="each">
+      <h3>In a settings page: each bank under its name. It follows the one in the header, and the header follows it</h3>
+      <div class="vx-theme-picker" data-vx-way="down" id="settings">
+        <span class="vx-theme-picker-name" id="s-theme">Theme</span>
+        <div class="vx-toggle-group" role="radiogroup" aria-labelledby="s-theme" data-vx-pick="theme"></div>
+        <span class="vx-theme-picker-name" id="s-time">Time of day</span>
+        <div class="vx-toggle-group" role="radiogroup" aria-labelledby="s-time" data-vx-pick="time">
+          <label><input type="radio" name="s-time" value="light">Day</label>
+          <label><input type="radio" name="s-time" value="dark">Night</label>
+          <label><input type="radio" name="s-time" value="system" checked>As the system has it</label>
+        </div>
+      </div>
+      <h3>Seats written out by the site, in its own words; a theme left out of the markup still gets its seat</h3>
+      <div class="vx-theme-picker" lang="uk" id="written">
+        <div class="vx-toggle-group" role="radiogroup" aria-label="Тема" data-vx-pick="theme" data-vx-size="small">
+          <label><input type="radio" name="w-theme" value="bay"><span class="vx-theme-lamp"></span><span class="vx-label">Затока</span></label>
+          <label><input type="radio" name="w-theme" value="rose"><span class="vx-theme-lamp"></span><span class="vx-label">Троянда</span></label>
+          <label><input type="radio" name="w-theme" value="dusk"><span class="vx-theme-lamp"></span><span class="vx-label">Сутінки</span></label>
+        </div>
+        <div class="vx-toggle-group" role="radiogroup" aria-label="Час доби" data-vx-pick="time" data-vx-size="small">
+          <label><input type="radio" name="w-time" value="light">День</label>
+          <label><input type="radio" name="w-time" value="dark">Ніч</label>
+          <label><input type="radio" name="w-time" value="system" checked>Як у системі</label>
+        </div>
+      </div>
+      <h3>The theme alone, and the time of day alone</h3>
+      <div class="row">
+        <div class="vx-theme-picker" id="only-theme">
+          <div class="vx-toggle-group" role="radiogroup" aria-label="Theme" data-vx-pick="theme" data-vx-size="small"></div>
+        </div>
+        <div class="vx-theme-picker" id="only-time">
+          <div class="vx-toggle-group" role="radiogroup" aria-label="Time of day" data-vx-pick="time" data-vx-size="small">
+            <label><input type="radio" name="o-time" value="light">Day</label>
+            <label><input type="radio" name="o-time" value="dark">Night</label>
+            <label><input type="radio" name="o-time" value="system" checked>System</label>
+          </div>
+        </div>
+      </div>
+      <h3>A theme the site defines itself: this page added Tide to THEMES, and every bank above has its seat</h3>
+      <div class="vx-code vx-recess"><pre tabindex="0" role="region" aria-label="A theme of the site's own"><code>import { THEMES, adopt } from 'voxelmorphism';
+THEMES.tide = {
+  light: { day: '#0a9fd0', night: '#35c4f0' },
+  cap: { day: '#00719e', night: '#0a7fae' },
+  link: { day: '#005f85', night: '#9be3ff' },
+  legend: '#dff6ff',
+};
+adopt();</code></pre></div>
+      <h3>Before first paint: paste this into the head, before the stylesheets</h3>
+      <div class="vx-code vx-recess" data-vx-wrap><pre tabindex="0" role="region" aria-label="The early script"><code id="early"></code></pre></div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { THEMES } from '/packages/voxelmorphism/src/index.js';
+  import { themePicker, EARLY } from '/packages/voxelmorphism/src/components/theme-picker.js';
+
+  // a theme of the site's own: the picker reads THEMES, so it only has to be there before adopt()
+  THEMES.tide = {
+    light: { day: '#0a9fd0', night: '#35c4f0' },
+    cap: { day: '#00719e', night: '#0a7fae' },
+    link: { day: '#005f85', night: '#9be3ff' },
+    legend: '#dff6ff',
+  };
+
+  document.getElementById('early').textContent = `<script>${EARLY}</` + 'script>';
+  const heard = document.getElementById('heard');
+  window.heard = [];
+  document.addEventListener('vx-theme', (e) => {
+    window.heard.push(e.detail);
+    heard.textContent = `The page heard vx-theme: theme ${e.detail.theme ?? 'none'}, time ${e.detail.time}, ${e.detail.night ? 'night' : 'day'}.`;
+  });
+  show(themePicker);
+</script>
+</body>
+</html>

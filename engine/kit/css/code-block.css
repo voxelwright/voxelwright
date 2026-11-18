@@ -1,0 +1,64 @@
+/* ---------- Code block ----------
+   Code, read as set apart: a recess (the kit's .vx-recess), with the code a level below the
+   surface. Tool: well. No script: the text is the page's own, so it selects and copies as written.
+     <div class="vx-code vx-recess"><pre tabindex="0" role="region" aria-label="…"><code>…</code></pre></div>
+   With a name above it (a file, a shell), which is words on the surface:
+     <figure class="vx-code"><figcaption>deploy.sh</figcaption>
+       <div class="vx-recess"><pre tabindex="0" role="region" aria-label="deploy.sh"><code>…</code></pre></div></figure>
+   A long line scrolls inside the block; the page never moves sideways. The <pre> is what scrolls,
+   so it takes focus (tabindex="0") and the arrow keys move it.
+   data-vx-wrap on .vx-code wraps long lines instead. data-vx-lines numbers the lines: write each
+   line as <span class="vx-line">…</span>; the numbers are not text, and are not copied.
+   --vx-code-max is the most it may be tall before it scrolls down as well. */
+
+.vx-code { display: block; min-inline-size: 0; max-inline-size: 100%; margin: 0; }
+figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns: minmax(0, 1fr); }
+.vx-code figcaption { font: 500 0.8125rem/1.4 var(--vx-mono); line-height: round(up, 1.4em, var(--vx)); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+
+/* the recess: its rim is one voxel all round, and the code keeps clear of it */
+.vx-code.vx-recess, .vx-code > .vx-recess { box-sizing: border-box; min-inline-size: 0; padding: var(--vx); }
+
+.vx-code pre {
+  box-sizing: border-box;
+  margin: 0;
+  max-block-size: var(--vx-code-max, none);
+  overflow: auto;
+  color: var(--vx-ink);
+  font: 400 0.875rem/1.45 var(--vx-mono);
+  line-height: round(up, 1.4em, var(--vx)); /* 20 px: five voxels a line */
+  font-variant-ligatures: none;
+  tab-size: 2;
+  white-space: pre;
+  text-align: start;
+  direction: ltr; /* code reads left to right whatever the page does */
+  unicode-bidi: isolate;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vx-steel) transparent;
+  -webkit-text-size-adjust: 100%;
+}
+/* the padding is the code's, so the end of the longest line has room when it is scrolled to */
+.vx-code pre > code { display: block; inline-size: max-content; min-inline-size: 100%; box-sizing: border-box; padding: calc(var(--vx) * 3) calc(var(--vx) * 4); font: inherit; }
+.vx-code[data-vx-wrap] pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.vx-code[data-vx-wrap] pre > code { inline-size: auto; }
+
+/* in focus (it scrolls, so it can be): the ring is drawn round the recess, clear of its light */
+.vx-code pre:focus { outline: 0; }
+.vx-code.vx-recess:has(pre:focus-visible), .vx-code > .vx-recess:has(pre:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+
+/* what is said quietly in code: a comment, a prompt, output */
+.vx-code .vx-code-quiet { color: var(--vx-ink-quiet); }
+
+/* numbered lines */
+.vx-code[data-vx-lines] pre { counter-reset: vx-line; }
+.vx-code[data-vx-lines] .vx-line::before {
+  counter-increment: vx-line;
+  content: counter(vx-line);
+  display: inline-block;
+  inline-size: 2ch;
+  margin-inline-end: calc(var(--vx) * 4);
+  text-align: end;
+  color: var(--vx-ink-quiet);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}

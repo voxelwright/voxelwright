@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code block</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own: a few words round the blocks */
+  .note { max-inline-size: 60ch; }
+  .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Code block</h1>
+    <p class="what">Code, set a level below the surface. A long line scrolls inside the block. The text is the page's own: it selects and copies as written.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: setting up harbor-api</h2>
+    <p class="note">Install the command line tool, sign in, and deploy from the folder that holds your service.</p>
+    <figure class="vx-code wide" id="use">
+      <figcaption>Terminal</figcaption>
+      <div class="vx-recess"><pre tabindex="0" role="region" aria-label="Terminal: install and deploy"><code>npm install --global fogline
+fogline login
+fogline deploy harbor-api --env production</code></pre></div>
+    </figure>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <h3>A long line scrolls inside the block</h3>
+    <figure class="vx-code wide" id="long">
+      <figcaption>deploy.config.js</figcaption>
+      <div class="vx-recess"><pre tabindex="0" role="region" aria-label="deploy.config.js"><code><span class="vx-code-quiet">// what a deploy of harbor-api does, and in what order</span>
+export default {
+  service: 'harbor-api',
+  healthCheck: { path: '/ready', timeout: 30, retries: 3, onFailure: 'roll back to the last build that passed and tell the team channel' },
+  cache: { key: ['package-lock.json'], paths: ['node_modules', '.fogline/cache'] },
+};</code></pre></div>
+    </figure>
+    <h3>Wrapped instead (data-vx-wrap)</h3>
+    <div class="vx-code vx-recess wide" id="wrap" data-vx-wrap><pre><code>curl --request POST https://deploys.fogline.example/v1/services/harbor-api/deploys --header "Authorization: Bearer $FOGLINE_TOKEN" --data '{"ref":"main"}'</code></pre></div>
+    <h3>Numbered lines (data-vx-lines)</h3>
+    <figure class="vx-code wide" id="lines" data-vx-lines>
+      <figcaption>ready.py</figcaption>
+      <div class="vx-recess"><pre tabindex="0" role="region" aria-label="ready.py"><code><span class="vx-line">def ready(service):</span>
+<span class="vx-line">    <span class="vx-code-quiet"># answers as soon as the service can take traffic</span></span>
+<span class="vx-line">    if not service.database.connected:</span>
+<span class="vx-line">        return 503</span>
+<span class="vx-line">    return 200</span></code></pre></div>
+    </figure>
+    <h3>Only so tall (--vx-code-max), then it scrolls down as well</h3>
+    <figure class="vx-code wide" id="tall" style="--vx-code-max: calc(var(--vx) * 36)">
+      <figcaption>Build log</figcaption>
+      <div class="vx-recess"><pre tabindex="0" role="region" aria-label="Build log"><code><span class="vx-code-quiet">10:42:17</span>  Cloned main at 4f2c9a1
+<span class="vx-code-quiet">10:42:19</span>  Restored the cache for package-lock.json
+<span class="vx-code-quiet">10:42:31</span>  Installed 212 packages
+<span class="vx-code-quiet">10:42:33</span>  Ran 148 tests
+<span class="vx-code-quiet">10:43:02</span>  Built in 45 s
+<span class="vx-code-quiet">10:43:04</span>  Uploaded the build
+<span class="vx-code-quiet">10:43:09</span>  Started harbor-api
+<span class="vx-code-quiet">10:43:11</span>  /ready answered 200
+<span class="vx-code-quiet">10:43:11</span>  Live</code></pre></div>
+    </figure>
+    <h3>One line, and Ukrainian in a comment</h3>
+    <div class="vx-code vx-recess wide" id="one"><pre tabindex="0" role="region" aria-label="One line"><code>fogline deploy harbor-api  <span class="vx-code-quiet"># Розгорнути на сервері</span></code></pre></div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

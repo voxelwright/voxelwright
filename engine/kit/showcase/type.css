@@ -1,0 +1,185 @@
+/* The type study. Every candidate is set on the real kit: only --vx-font and --vx-mono change per screen. */
+
+@font-face { font-family: "Overpass"; src: url("/packages/voxelmorphism/fonts/overpass/overpass-latin-wght-normal.woff2") format("woff2"); font-weight: 100 900; font-style: normal; font-display: swap; }
+@font-face { font-family: "Overpass"; src: url("/packages/voxelmorphism/fonts/overpass/overpass-latin-wght-italic.woff2") format("woff2"); font-weight: 100 900; font-style: italic; font-display: swap; }
+@font-face { font-family: "Overpass Mono"; src: url("/packages/voxelmorphism/fonts/overpass-mono/overpass-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 300 700; font-style: normal; font-display: swap; }
+@font-face { font-family: "IBM Plex Sans"; src: url("/packages/voxelmorphism/fonts/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2") format("woff2"); font-weight: 100 700; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("/packages/voxelmorphism/fonts/ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "IBM Plex Mono"; src: url("/packages/voxelmorphism/fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+/* Ukrainian for the text face: fetched only when a page has Cyrillic in it */
+@font-face { font-family: "IBM Plex Sans"; src: url("/packages/voxelmorphism/fonts/ibm-plex-sans/ibm-plex-sans-cyrillic-wght-normal.woff2") format("woff2"); font-weight: 100 700; font-display: swap; unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "IBM Plex Mono"; src: url("/packages/voxelmorphism/fonts/ibm-plex-mono/ibm-plex-mono-cyrillic-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116; }
+@font-face { font-family: "Atkinson Hyperlegible Next"; src: url("/packages/voxelmorphism/fonts/atkinson-hyperlegible-next/atkinson-hyperlegible-next-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Atkinson Hyperlegible Mono"; src: url("/packages/voxelmorphism/fonts/atkinson-hyperlegible-mono/atkinson-hyperlegible-mono-latin-wght-normal.woff2") format("woff2"); font-weight: 200 800; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("/packages/voxelmorphism/fonts/barlow/barlow-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("/packages/voxelmorphism/fonts/barlow/barlow-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("/packages/voxelmorphism/fonts/barlow/barlow-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Barlow"; src: url("/packages/voxelmorphism/fonts/barlow/barlow-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Chakra Petch"; src: url("/packages/voxelmorphism/fonts/chakra-petch/chakra-petch-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Chakra Petch"; src: url("/packages/voxelmorphism/fonts/chakra-petch/chakra-petch-latin-500-normal.woff2") format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Chakra Petch"; src: url("/packages/voxelmorphism/fonts/chakra-petch/chakra-petch-latin-600-normal.woff2") format("woff2"); font-weight: 600; font-display: swap; }
+@font-face { font-family: "Chakra Petch"; src: url("/packages/voxelmorphism/fonts/chakra-petch/chakra-petch-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "B612"; src: url("/packages/voxelmorphism/fonts/b612/b612-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "B612"; src: url("/packages/voxelmorphism/fonts/b612/b612-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+@font-face { font-family: "Geist Pixel"; src: url("/packages/voxelmorphism/fonts/geist-pixel/geist-pixel-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Departure Mono"; src: url("/packages/voxelmorphism/fonts/departure-mono/departure-mono-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Vox Text"; src: url("/packages/voxelmorphism/fonts/vox-text/vox-text-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Vox Text"; src: url("/packages/voxelmorphism/fonts/vox-text/vox-text-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
+
+/* Vox Block and Vox Sign are inlined above (about 2 KB each): a heading must never be drawn in a
+   fallback of another height, because its box is the box the voxels will take.
+   Rebuild them with tools/vox-text-build.py and tools/type-inline.py after changing a glyph. */
+
+/* No faux bold, no faux italic: a missing weight must show as missing. */
+html { font-synthesis: none; }
+
+.type-top { display: grid; gap: 1.25rem; justify-items: start; margin-block-end: 3rem; }
+.type-top .lede { max-inline-size: 40em; }
+.type-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 2rem; }
+.type-controls > span { font-weight: 600; font-size: 0.94rem; display: grid; gap: 0.5rem; }
+
+.screens { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr)); gap: 3.5rem 3rem; align-items: start; }
+
+/* One screen: a phone-wide column of the real kit, set in one face. */
+.screen { font-family: var(--vx-font); display: grid; gap: 1.5rem; align-content: start; min-inline-size: 0; }
+.screen .tag { display: grid; gap: 0.15rem; padding-block-end: 0.75rem; border-block-end: var(--vx) solid var(--vx-slate); }
+.screen .tag b { font-size: 1.3rem; line-height: 1.2; font-weight: 700; }
+.screen .tag span { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); }
+.screen .tag .status[data-bad] { color: var(--vx-brick); font-weight: 700; }
+.screen h2.vx-sign { margin: 0; min-block-size: 0; }
+.screen h3 { margin: 0 0 -0.75rem; font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.01em; }
+.screen p { margin: 0; }
+.screen .row { display: flex; flex-wrap: wrap; gap: 1.25rem 1.5rem; align-items: center; }
+.screen .vx-list, .screen .vx-card, .screen .vx-field { inline-size: 100%; }
+.screen .vx-tabs { justify-self: start; }
+.screen .vx-toast { justify-self: start; }
+.screen dialog.vx-dialog { position: relative; inset: auto; margin: calc(var(--vx) * 2) 0 calc(var(--vx) * 3) calc(var(--vx) * 3); inline-size: calc(100% - var(--vx) * 6); color: var(--vx-ink); }
+.screen .meta { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.screen code, .screen pre { font-family: var(--vx-mono); }
+.screen :not(pre) > code { font-size: 0.88em; }
+.screen pre { margin: 0; font-size: 0.82rem; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+body.solo { padding: 16px; max-inline-size: none; }
+body.solo .type-top, body.solo .screen:not([data-solo]), body.solo #lettering, body.solo #pairings, body.solo .foot { display: none; }
+body.solo .screens { display: block; }
+body.solo section { margin: 0; }
+body.solo #text > h2, body.solo #text > .intro { display: none; }
+
+/* ---------- lettering ---------- */
+
+.directions { display: grid; gap: 4.5rem; }
+.direction { display: grid; gap: 1.75rem; min-inline-size: 0; }
+.direction > header { display: grid; gap: 0.35rem; max-inline-size: 44em; }
+.direction > header b { font-size: 1.3rem; line-height: 1.2; font-weight: 700; }
+.direction > header span { color: var(--vx-ink-quiet); }
+.direction .set { display: grid; gap: 1.5rem; min-inline-size: 0; }
+.direction .cap { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); margin-block-end: -0.75rem; }
+
+.vx-lettering { position: relative; isolation: isolate; display: block; margin: 0; -webkit-tap-highlight-color: transparent; max-inline-size: 100%; }
+.vx-lettering[data-vx-live] { font-size: 0; line-height: 0; color: transparent; }
+/* The plain version of lettering is the same glyphs as a web font, one voxel per cell, so a
+   heading has the same footprint with and without voxels and nothing moves when they arrive.
+   Ten cells to the em: font-size is ten voxels times the scale. The box is trimmed to the cap
+   line and the baseline, which is exactly the box the voxels are given. */
+.vx-lettering:not([data-vx-live]) { --_s: 1; font-weight: 400; font-synthesis: none; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; letter-spacing: 0; text-wrap: balance; color: var(--vx-ink); cursor: default;
+  font-size: calc(var(--vx) * 10 * var(--_s)); text-box: trim-both cap alphabetic; }
+.vx-lettering[data-vx-scale="2"]:not([data-vx-live]) { --_s: 2; }
+.vx-lettering[data-vx-scale="3"]:not([data-vx-live]) { --_s: 3; }
+.vx-lettering[data-vx-font^="block"]:not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); line-height: 1.5; text-transform: uppercase; }
+.vx-lettering[data-vx-font^="sign"]:not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; text-transform: uppercase; }
+.vx-lettering[data-vx-font^="sentence"]:not([data-vx-live]) { font-family: "Vox Text", var(--vx-font); line-height: 1.1; }
+/* a board: the lettering, a margin, and a frame one voxel in */
+.vx-lettering:not([data-vx-board="none"]):not([data-vx-live]) { display: inline-block; inline-size: fit-content; white-space: nowrap; padding: calc(var(--vx) * 5 * var(--_s) + var(--vx)); background: var(--vx-enamel); color: var(--vx-signal);
+  box-shadow: inset 0 0 0 var(--vx) var(--vx-enamel), inset 0 0 0 calc(var(--vx) * 2) var(--vx-signal), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow); }
+/* The board cannot ask its script which glyph set fits, so the plain version decides by the width
+   of its column, with the script's own sums: (lettering + margins + frame) in voxels, times 4 px.
+   The widths are for the word on this board, in each language; a page sets them for its own word.
+   "Voxelmorphism" is 112 cells in Vox Block: 496 px at one voxel per cell, 984 px at two.
+   "Вокселморфізм" is 116 cells: 512 px and 1016 px.
+   The last letter's advance carries one letter gap (one cell in Vox Sign, two in Vox Block), which
+   the voxel board does not have, so the plain board's right padding is that much less. */
+.pairing .page { container-type: inline-size; }
+.vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; padding: calc(var(--vx) * 4); padding-inline-end: calc(var(--vx) * 3); }
+@container (min-width: 496px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
+@container (min-width: 984px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+@container (min-width: 512px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { font-family: "Vox Block", var(--vx-font); padding: calc(var(--vx) * 6); padding-inline-end: calc(var(--vx) * 4); } }
+@container (min-width: 1016px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]):not([data-vx-live]) { --_s: 2; padding: calc(var(--vx) * 11); padding-inline-end: calc(var(--vx) * 7); } }
+/* Narrow phones. In Vox Sign 2 the word needs 81 voxels of column in English (324 px) and 83 in
+   Ukrainian (332 px). Below that the board, and only the board, is built from a smaller voxel:
+   3 px, then 2 px. Its letters, margin, frame and shadow all follow, in the voxels and in the
+   plain version alike, because both read the board's own --vx. The word is never broken. */
+@container (width < 324px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 3px; } }
+@container (width < 243px) { .pairing:not([lang="uk"]) .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 2px; } }
+@container (width < 332px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 3px; } }
+@container (width < 249px) { .pairing[lang="uk"] .vx-lettering[data-vx-font="block sign"]:not([data-vx-board="none"]) { --vx: 2px; } }
+
+body.solo-lettering { padding: 24px; }
+body.solo-lettering .type-top, body.solo-lettering #text, body.solo-lettering #pairings, body.solo-lettering .foot, body.solo-lettering #lettering > h2 { display: none; }
+body.solo-lettering section { margin: 0; }
+
+/* ---------- pairings ---------- */
+
+.pairings { display: grid; gap: 5rem; }
+.pairing { display: grid; gap: 2rem; min-inline-size: 0; }
+.pairing .tag { display: grid; gap: 0.25rem; max-inline-size: 46em; padding-block-end: 0.75rem; border-block-end: var(--vx) solid var(--vx-slate); }
+.pairing .tag b { font-size: 1.3rem; line-height: 1.2; font-weight: 700; }
+.pairing .tag span { color: var(--vx-ink-quiet); }
+.pairing .page { font-family: var(--text-font); display: grid; gap: 1.5rem; justify-items: start; min-inline-size: 0; }
+.pairing .page > * { max-inline-size: 100%; }
+.pairing .page > .rule { inline-size: 100%; }
+.pairing .page > h2 { margin: 1.5rem 0 0.5rem; min-block-size: 0; }
+.pairing .lede { margin-block-end: 0.5rem; }
+.pairing .show .row { display: flex; flex-wrap: wrap; gap: 1.25rem 1.75rem; align-items: center; }
+.pairing .show .vx-tabs, .pairing .show .vx-toast { justify-self: start; }
+.pairing .show .vx-list, .pairing .show .vx-card, .pairing .show .vx-field { inline-size: 100%; }
+.pairing h3 { font-family: var(--text-font); }
+.pairing h3.vx-lettering { margin: 0; }
+.pairing .meta { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.pairing code { font-family: var(--vx-mono); font-size: 0.88em; }
+.pairing .vx-card, .pairing .vx-field-hint, .pairing .vx-dialog-body { font-family: var(--text-font); }
+
+/* One set of cells: label text is five voxels to the em, so its cell is half a voxel and every
+   edge of every letter lands on a pixel. It scales with --vx like the rest of the kit. */
+.pairing[data-cells] { --cell: calc(var(--vx) / 2); --label: calc(var(--vx) * 5); }
+/* Legends. What is written on a key is cut from the same cells as the key: buttons, tabs and menu
+   items are set in Vox Text. Everything else, the words you read and the words you type, is print. */
+.pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"], .vx-menu [role^="menuitem"]) {
+  font-family: var(--vx-font); font-size: var(--label); letter-spacing: 0; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.pairing[data-cells] :is(.vx-toggle, .vx-list, .vx-field, .vx-well :is(input, textarea), .vx-toast, .vx-dialog) { font-family: var(--text-font); }
+.pairing[data-cells] :is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; }
+
+body.solo-pair { padding: 16px; }
+body.solo-pair .type-top, body.solo-pair #text, body.solo-pair #lettering, body.solo-pair .foot, body.solo-pair #pairings > h2, body.solo-pair #pairings > .intro, body.solo-pair .pairing .tag { display: none; }
+body.solo-pair section { margin: 0; }
+@media (min-width: 60rem) { body.solo-pair { padding: 48px 64px; } }
+
+/* ---------- the page on the voxel grid ----------
+   A pixel face is only sharp when its box starts on a whole pixel, and so is a voxel. So inside a
+   pairing every gap, padding and line height is a whole number of voxels: round() does it for
+   anything that follows the text size or the window. Nothing here is a fraction of a block. */
+.pairing .page { gap: calc(var(--vx) * 6); line-height: round(1.6em, var(--vx)); }
+.pairing .page .lede { line-height: round(1.45em, var(--vx)); margin-block-end: calc(var(--vx) * 2); }
+.pairing .page > h2 { margin: calc(var(--vx) * 6) 0 calc(var(--vx) * 2); }
+.pairing .rule { grid-template-columns: minmax(0, calc(var(--vx) * 115)) minmax(0, 1fr); gap: calc(var(--vx) * 8) round(clamp(2rem, 6vw, 5rem), var(--vx)); }
+.pairing .say { gap: calc(var(--vx) * 4); }
+.pairing .show { gap: calc(var(--vx) * 7); }
+.pairing .show .row { gap: calc(var(--vx) * 5) calc(var(--vx) * 7); }
+.pairing h3 { font-size: 1.3rem; line-height: round(1.25em, var(--vx)); margin: 0; }
+.pairing .meta { line-height: round(1.4em, var(--vx)); }
+.pairing .vx-card { line-height: round(1.45em, var(--vx)); }
+.pairing .vx-card > p + p { margin-block-start: calc(var(--vx) * 1); }
+.pairing .vx-field { gap: calc(var(--vx) * 2); }
+.pairing .vx-field-label { line-height: round(1.35em, var(--vx)); }
+.pairing .vx-field-hint { line-height: round(1.4em, var(--vx)); margin-block-start: 0; }
+.pairing .vx-well :is(input, textarea) { line-height: round(1.5em, var(--vx)); }
+.pairing .vx-list > li, .pairing .vx-row, .pairing .vx-toast { line-height: round(1.4em, var(--vx)); }
+.pairing .vx-toggle { line-height: round(1.4em, var(--vx)); }
+/* The kit nudges every label down by 0.12em because Overpass draws its capitals high in its box.
+   A face that sits level (Plex is 0.4 px low at 16 px, Overpass 1.6 px high) does not want it. */
+.pairing[data-level] :is(.vx-button .vx-label, .vx-tabs > [role="tab"] .vx-label) { padding-block-start: 0; }
+@media (max-width: 52rem) { .pairing .rule { grid-template-columns: minmax(0, 1fr); } }
+
+/* this page's own headings are set in the recommended lettering */
+.type-top > .vx-lettering { margin: 0; }
+section > h2.vx-lettering { margin-block: 0 clamp(2rem, 4vw, 3rem); }

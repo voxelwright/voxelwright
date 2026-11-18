@@ -1,0 +1,17 @@
+/* ---------- Context menu ---------- */
+
+/* The region a right press (or a long press, or the menu key) opens the kit's menu on, and the
+   menu while it is open at a point. The menu is the kit's own (.vx-menu); its look is the menu's.
+   Markup: see src/components/context-menu.js. */
+
+/* the region: a long press is the menu's, not the phone's own callout over a link or a picture */
+[data-vx-contextmenu] { position: relative; -webkit-touch-callout: none; }
+/* and on a touch screen not the start of a selection either; a text field in it keeps both */
+@media (pointer: coarse) {
+  [data-vx-contextmenu] { -webkit-user-select: none; user-select: none; }
+  [data-vx-contextmenu] :is(input, textarea, [contenteditable]:not([contenteditable="false"])) { -webkit-user-select: text; user-select: text; -webkit-touch-callout: default; }
+}
+
+/* Opened by a hand, the menu itself holds the focus until an arrow goes to a row: it shows no
+   ring for that, as a dialog does not; its rows show theirs. */
+.vx-menu[data-vx-at]:focus { outline: none; }

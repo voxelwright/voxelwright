@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Button group</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* this page's own */
+  .doc-head { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 6); inline-size: 100%; }
+  .doc-head .name { font-weight: 600; margin-inline-end: auto; }
+  .said { color: var(--vx-ink-quiet); font-size: 0.875rem; min-block-size: 1.55em; }
+  /* a caption stands four voxels above what it names: a keycap's side and the light at its foot are drawn two and a half voxels above its face, and a bezel reaches two past its slot */
+  .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; min-inline-size: 0; max-inline-size: 100%; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .row { align-items: start; }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Button group</h1>
+    <p class="what">A bank of keys, read as one group: things that belong to one job. Each is still a key of its own.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a release note being written</h2>
+    <div class="doc-head">
+      <span class="name">Notes for build 214</span>
+      <div class="vx-button-group" role="group" aria-label="History" id="history">
+        <button class="vx-button" type="button" id="undo">Undo</button>
+        <button class="vx-button" type="button" id="redo" disabled>Redo</button>
+      </div>
+      <div class="vx-button-group" role="group" aria-label="Save" id="save">
+        <button class="vx-button" type="button" data-vx-kind="main" id="publish">Publish</button>
+        <button class="vx-button" type="button" id="draft">Save draft</button>
+      </div>
+    </div>
+    <p class="said" id="said" role="status">3 changes since the last draft</p>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row">
+      <div class="state"><span>Two keys</span>
+        <div class="vx-button-group" role="group" aria-label="Pages"><button class="vx-button" type="button">Previous</button><button class="vx-button" type="button">Next</button></div>
+      </div>
+      <div class="state"><span>Three, one of them the main one</span>
+        <div class="vx-button-group" role="group" aria-label="Review"><button class="vx-button" type="button" data-vx-kind="main">Approve</button><button class="vx-button" type="button">Comment</button><button class="vx-button" type="button">Skip</button></div>
+      </div>
+      <div class="state"><span>One is off</span>
+        <div class="vx-button-group" role="group" aria-label="Build"><button class="vx-button" type="button">Start</button><button class="vx-button" type="button" disabled>Stop</button><button class="vx-button" type="button">Restart</button></div>
+      </div>
+      <div class="state"><span>One destroys something</span>
+        <div class="vx-button-group" role="group" aria-label="Branch"><button class="vx-button" type="button">Rename</button><button class="vx-button" type="button" data-vx-kind="danger">Delete</button></div>
+      </div>
+      <div class="state"><span>Standing</span>
+        <div class="vx-button-group" data-vx-way="down" role="group" aria-label="Move"><button class="vx-button" type="button">To the top</button><button class="vx-button" type="button">Up</button><button class="vx-button" type="button">Down</button></div>
+      </div>
+      <div class="state"><span>Long names: the row wraps</span>
+        <div class="vx-button-group" role="group" aria-label="Розгортання" lang="uk"><button class="vx-button" type="button">Розгорнути на сервері</button><button class="vx-button" type="button">Повернути попередню</button><button class="vx-button" type="button">Скасувати</button></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  const said = document.getElementById('said'), undo = document.getElementById('undo'), redo = document.getElementById('redo');
+  let done = 3, undone = 0;
+  const say = (what) => { undo.disabled = !done; redo.disabled = !undone; said.textContent = what ?? `${done} change${done === 1 ? '' : 's'} since the last draft`; };
+  undo.addEventListener('click', () => { if (done) { done--; undone++; say(); } });
+  redo.addEventListener('click', () => { if (undone) { undone--; done++; say(); } });
+  document.getElementById('draft').addEventListener('click', () => { done = 0; undone = 0; say('Draft saved'); });
+  document.getElementById('publish').addEventListener('click', () => { done = 0; undone = 0; say('Published'); });
+  show();
+</script>
+</body>
+</html>

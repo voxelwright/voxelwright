@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Badge</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* the page's own: a few lines of a product to hang the badges on */
+  .services { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
+  .services > div { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 10); }
+  .services .name { font-weight: 600; min-inline-size: 0; overflow-wrap: anywhere; }
+  .inbox { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 8); }
+  .inbox > span { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); font-weight: 500; }
+  .title { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 4); font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Badge</h1>
+    <p class="what">A lamp and a word. A count is words. No box round either.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the services of a team</h2>
+    <div class="services">
+      <div><span class="name">harbor-api</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></div>
+      <div><span class="name">fog-site</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="accent"></span>Building</span></div>
+      <div><span class="name">tide-worker</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></div>
+      <div><span class="name">ferry-cron</span><span class="vx-badge">Paused</span></div>
+    </div>
+    <div class="inbox">
+      <span>Alerts <span class="vx-badge">3<span class="vx-badge-aloud"> open</span></span></span>
+      <span>Reviews <span class="vx-badge">12<span class="vx-badge-aloud"> waiting</span></span></span>
+      <span>Builds <span class="vx-badge">1,204<span class="vx-badge-aloud"> this month</span></span></span>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="row">
+      <span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Done</span>
+      <span class="vx-badge"><span class="vx-lamp" data-vx-light="accent"></span>At work</span>
+      <span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span>
+      <span class="vx-badge">Paused</span>
+      <span class="vx-badge">Draft</span>
+      <span class="vx-badge">99+<span class="vx-badge-aloud"> new</span></span>
+    </div>
+  </section>
+  <section>
+    <h2>Beside a title, and a long one</h2>
+    <div class="title">harbor-api <span class="vx-badge" data-vx-size="large"><span class="vx-lamp" data-vx-light="go"></span>Live</span></div>
+    <span class="vx-badge"><span class="vx-lamp" data-vx-light="accent"></span>Розгортається на сервері у Франкфурті, залишилося близько трьох хвилин</span>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show(); // nothing of its own to draw: the lamp is the kit's
+</script>
+</body>
+</html>

@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marker</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* this page's own */
+  .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 1); }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Marker</h1>
+    <p class="what">A line across a thread with a word in it. A date is in the room's own light; where what is new begins, the line is the accent's.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a thread that runs over two days</h2>
+    <div class="talk" role="log" aria-label="Deploys, harbor-api" id="talk">
+      <div class="vx-marker" id="day"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-16">Yesterday</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+      <article class="vx-message" aria-labelledby="a1-who a1-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Mina Okafor</span><time class="vx-message-when" id="a1-when" datetime="2026-11-16T17:48">17:48</time></header>
+          <div class="vx-message-text"><p>Build 213 is out. I will look at the timings in the morning.</p></div>
+        </div>
+      </article>
+      <div class="vx-marker"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-17">Today</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+      <article class="vx-message" aria-labelledby="a2-who a2-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">AL</span></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a2-who">Ada Lindqvist</span><time class="vx-message-when" id="a2-when" datetime="2026-11-17T09:20">09:20</time></header>
+          <div class="vx-message-text"><p>The cache is keyed on the lockfile now.</p></div>
+        </div>
+      </article>
+      <div class="vx-marker" data-vx-kind="new" id="new"><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span><span class="vx-marker-word">New<span class="vx-aloud"> messages</span></span><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span></div>
+      <article class="vx-message" aria-labelledby="a3-who a3-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a3-who">Mina Okafor</span><time class="vx-message-when" id="a3-when" datetime="2026-11-17T10:42">10:42</time></header>
+          <div class="vx-message-text"><p>Build 214 is green. I would like it out before the backup.</p></div>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="stack">
+      <div class="state"><span>A date</span>
+        <div class="vx-marker"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-12">Thursday, 12 November</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+      </div>
+      <div class="state"><span>New: the accent's light, and the word says what is new</span>
+        <div class="vx-marker" data-vx-kind="new"><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span><span class="vx-marker-word">3 new<span class="vx-aloud"> messages</span></span><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span></div>
+      </div>
+      <div class="state"><span>The word near the start</span>
+        <div class="vx-marker" data-vx-align="start" id="start"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word">Ada joined the thread</span><span class="vx-groove" aria-hidden="true"></span></div>
+      </div>
+      <div class="state"><span>A long one: the words wrap between the grooves</span>
+        <div class="vx-marker" id="long"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word">Mina moved this thread from the general channel to harbor-api, where the deploys are talked about</span><span class="vx-groove" aria-hidden="true"></span></div>
+      </div>
+      <div class="state"><span>Ukrainian</span>
+        <div class="vx-marker" lang="uk"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-17">Сьогодні, 17 листопада</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+      </div>
+      <div class="state" dir="rtl" lang="ar"><span>من اليمين إلى اليسار</span>
+        <div class="vx-marker" data-vx-align="start"><span class="vx-groove" aria-hidden="true"></span><span class="vx-marker-word"><time datetime="2026-11-17">اليوم</time></span><span class="vx-groove" aria-hidden="true"></span></div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  show();
+</script>
+</body>
+</html>

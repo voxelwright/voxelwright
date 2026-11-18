@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drawer</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .deploys { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
+  .facts { display: grid; margin-block-start: calc(var(--vx) * 4) !important; grid-template-columns: max-content minmax(0, 1fr); gap: calc(var(--vx) * 2) calc(var(--vx) * 5); margin: 0; }
+  .facts dt { color: var(--vx-ink-quiet); }
+  .facts dd { margin: 0; overflow-wrap: anywhere; }
+  /* Every state: a drawer at the bottom of a small window (a phone) and at the side of a wide
+     one, standing open so that it can be looked at. These are not modal and do not slide. */
+  .frames { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: calc(var(--vx) * 5) calc(var(--vx) * 6); inline-size: 100%; }
+  .frames h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-end: calc(var(--vx) * 2); }
+  .frame { position: relative; isolation: isolate; overflow: clip; block-size: calc(var(--vx) * 76); background: var(--vx-ground); color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .frame > p { padding: calc(var(--vx) * 4) calc(var(--vx) * 5) 0; }
+  .frame::after { content: ""; position: absolute; inset: 0; background: rgb(8 9 15 / 0.5); }
+  .frame dialog[open] { position: absolute; z-index: 1; --_w: calc(var(--vx) * 52); transition: none; }
+  @media (max-width: 600px) { .frames { grid-template-columns: minmax(0, 1fr); } }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Drawer</h1>
+    <p class="what">The sheet, made for where the window is: up from the bottom on a phone, in from the end on a wide screen. On a phone its handle drags it shut; let go short of a third of the way, it springs back.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: a deploy of harbor-api</h2>
+    <div class="row">
+      <button class="vx-button" id="open-deploy" commandfor="deploy" command="show-modal">Deploy 213</button>
+      <span class="chosen" id="result" role="status">Nothing rolled back</span>
+    </div>
+    <div class="deploys">
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 213</span><span class="vx-item-line">main at 4f2c9a1, by Mina, four minutes ago</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></span></div>
+      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 212</span><span class="vx-item-line">fogline-cache at 9be01d7, by Ada, yesterday</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></span></div>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <p class="what">Where the window is narrow it comes from the bottom and has a handle; where it is wide it comes from the end. One edge can be fixed: these two always come from the bottom.</p>
+    <div class="row">
+      <button class="vx-button" id="open-bottom" commandfor="d-bottom" command="show-modal">From the bottom</button>
+      <button class="vx-button" id="open-uk" commandfor="d-uk" command="show-modal" lang="uk">Розгорнути</button>
+    </div>
+    <div class="frames">
+      <div>
+        <h3>On a phone</h3>
+        <div class="frame">
+          <p>harbor-api: 213 deploys, the last one four minutes ago.</p>
+          <dialog class="vx-drawer" open data-vx-side="bottom" aria-labelledby="f-phone-h">
+            <header><h2 id="f-phone-h">Deploy 213</h2></header>
+            <div class="vx-drawer-body"><p>main at 4f2c9a1, by Mina.</p></div>
+            <footer><button class="vx-button" type="button" tabindex="-1">Close</button></footer>
+            <button class="vx-drawer-handle" type="button" data-vx-close="cancel" aria-label="Close" tabindex="-1"></button>
+          </dialog>
+        </div>
+      </div>
+      <div>
+        <h3>On a wide screen</h3>
+        <div class="frame">
+          <p>harbor-api: 213 deploys, the last one four minutes ago.</p>
+          <dialog class="vx-drawer" open data-vx-side="end" aria-labelledby="f-wide-h">
+            <header><h2 id="f-wide-h">Deploy 213</h2></header>
+            <div class="vx-drawer-body"><p>main at 4f2c9a1, by Mina, four minutes ago. Live.</p></div>
+            <footer><button class="vx-button" type="button" tabindex="-1">Close</button></footer>
+            <button class="vx-drawer-handle" type="button" data-vx-close="cancel" aria-label="Close" tabindex="-1"></button>
+          </dialog>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<dialog class="vx-drawer" id="deploy" aria-labelledby="deploy-h" aria-describedby="deploy-p">
+  <header><h2 id="deploy-h">Deploy 213</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close deploy 213">×</button></header>
+  <div class="vx-drawer-body">
+    <p id="deploy-p">Live since 10:25, four minutes ago.</p>
+    <dl class="facts">
+      <dt>Branch</dt><dd>main</dd>
+      <dt>Commit</dt><dd>4f2c9a1</dd>
+      <dt>By</dt><dd>Mina</dd>
+      <dt>Address</dt><dd>harbor-api.fogline.example</dd>
+    </dl>
+  </div>
+  <footer>
+    <button class="vx-button" type="button" data-vx-close="cancel">Close</button>
+    <button class="vx-button" data-vx-kind="main" type="button" data-vx-close="rollback">Roll back to 212</button>
+  </footer>
+  <button class="vx-drawer-handle" type="button" data-vx-close="cancel" aria-label="Close deploy 213" tabindex="-1"></button>
+</dialog>
+
+<dialog class="vx-drawer" id="d-bottom" data-vx-side="bottom" aria-labelledby="d-bottom-h">
+  <header><h2 id="d-bottom-h">Build 213</h2></header>
+  <div class="vx-drawer-body"><p>48 tests passed in 48 seconds. Deployed to harbor-api.fogline.example.</p></div>
+  <footer><button class="vx-button" type="button" data-vx-close="done">Done</button></footer>
+  <button class="vx-drawer-handle" type="button" data-vx-close="cancel" aria-label="Close the log" tabindex="-1"></button>
+</dialog>
+
+<dialog class="vx-drawer" id="d-uk" data-vx-side="bottom" lang="uk" aria-labelledby="d-uk-h">
+  <header><h2 id="d-uk-h">Розгорнути на сервері</h2></header>
+  <div class="vx-drawer-body"><p>Збірка harbor-api з 4f2c9a1 пройшла перевірки три хвилини тому.</p></div>
+  <footer><button class="vx-button" type="button" data-vx-close="cancel">Не зараз</button><button class="vx-button" data-vx-kind="main" type="button" data-vx-close="deploy">Розгорнути</button></footer>
+  <button class="vx-drawer-handle" type="button" data-vx-close="cancel" aria-label="Закрити" tabindex="-1"></button>
+</dialog>
+
+<script type="module">
+  import { show } from './parts.js';
+  import { drawer } from '/packages/voxelmorphism/src/components/drawer.js';
+  const $ = (id) => document.getElementById(id);
+  $('deploy').addEventListener('close', () => { $('result').textContent = $('deploy').returnValue === 'rollback' ? 'Rolled back to deploy 212' : 'Nothing rolled back'; });
+  show(drawer);
+</script>
+</body>
+</html>

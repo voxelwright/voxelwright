@@ -1,0 +1,46 @@
+/* ---------- Callout (alert) ---------- */
+
+/* Words on the surface with a standing groove at their start, in the light of its kind. Not a
+   card: nothing is raised and nothing is boxed.
+   Markup: <div class="vx-callout" data-vx-kind="failed" role="alert">
+             <p class="vx-callout-title">The build failed</p>
+             <p>Step 3 of 5 ran out of memory.</p>
+             <div class="vx-callout-actions"><button class="vx-button">Run it again</button></div>
+           </div>
+   data-vx-kind: note (the default; the accent), done (green), warning (warm), failed (red).
+   The role is yours to write, because it must hold with no script: role="alert" for a failure
+   that has just happened, role="status" for the others when they arrive while the page is open,
+   and for what is simply part of the page a plain region (<aside aria-labelledby>) with the
+   title as its heading. Say the kind in the title's words: a light alone tells nobody. */
+
+.vx-callout {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: calc(var(--vx) * 1);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  padding-block: calc(var(--vx) * 1);
+  padding-inline-start: calc(var(--vx) * 5);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--vx-ink);
+  overflow-wrap: anywhere;
+}
+.vx-callout > :is(p, h2, h3, h4, h5, h6) { margin: 0; }
+.vx-callout-title { font-size: 1rem; line-height: 1.5; font-weight: 650; }
+.vx-callout-actions { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 4); margin-block: calc(var(--vx) * 2) calc(var(--vx) * 1); }
+
+/* plain: the groove is a painted line */
+.vx-callout:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-callout[data-vx-kind="done"]:not([data-vx-live])::before { background: var(--lit-go, var(--vx-leaf)); }
+.vx-callout[data-vx-kind="warning"]:not([data-vx-live])::before { background: var(--lit-warm, var(--vx-walnut)); }
+.vx-callout[data-vx-kind="failed"]:not([data-vx-live])::before { background: var(--lit-stop, var(--vx-brick)); }

@@ -1,0 +1,48 @@
+/* ---------- Trace ---------- */
+
+/* What an agent did, step by step: a standing groove with a lamp at each step (green done, the
+   accent in progress, red failed, dark not begun). Each step is a line of words; one with more
+   to show opens, and is the kit's collapsible.
+   Markup: <ol class="vx-trace" aria-label="What the agent did" aria-live="off">
+             <li data-vx-state="done">
+               <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+               <details class="vx-collapsible">
+                 <summary><span class="vx-trace-what">Read build-214.log</span><span class="vx-trace-state">Done, 2 s</span></summary>
+                 <p>What it found.</p>            or <pre class="vx-trace-out">what it printed</pre>
+               </details>
+             </li>
+             <li data-vx-state="running">
+               <span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span>
+               <p class="vx-trace-line"><span class="vx-trace-what">Building the image</span><span class="vx-trace-state">In progress</span></p>
+             </li>
+           </ol>
+   data-vx-state: done, running, failed, waiting. The state is always said in words
+   (.vx-trace-state); the lamp repeats it. */
+
+.vx-trace { position: relative; isolation: isolate; display: grid; grid-template-columns: minmax(0, 1fr); box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%; margin: 0; padding: 0; list-style: none; font-family: var(--vx-font); font-size: 1rem; color: var(--vx-ink); }
+/* a step: the lamp's column (a lamp is two voxels, its collar four), then the words */
+.vx-trace > li { position: relative; display: grid; grid-template-columns: calc(var(--vx) * 4) minmax(0, 1fr); column-gap: calc(var(--vx) * 3); align-items: start; min-inline-size: 0; }
+/* the lamp stands level with the middle of the step's first line (a row is eleven voxels) */
+.vx-trace > li > .vx-lamp { grid-column: 1; margin-block-start: calc(var(--vx) * 4.5); margin-inline-start: calc(var(--vx) * 1); }
+.vx-trace > li > :not(.vx-lamp) { grid-column: 2; min-inline-size: 0; }
+
+/* a step that does not open: one row of words, as tall as one that does */
+.vx-trace-line { display: flex; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 3); box-sizing: border-box; min-block-size: calc(var(--vx) * 11); margin: 0; padding-block: calc(var(--vx) * 2.5); line-height: calc(var(--vx) * 6); overflow-wrap: anywhere; }
+/* one that opens is the kit's collapsible; a step's words are lighter than a heading's */
+.vx-trace .vx-collapsible > summary { flex-wrap: wrap; row-gap: 0; font-weight: 400; }
+.vx-trace-what { min-inline-size: 0; font-weight: 500; }
+.vx-trace-state { font-size: 0.875rem; font-weight: 400; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+/* failed: said in words, and the words are in the colour for what went wrong */
+.vx-trace > li[data-vx-state="failed"] .vx-trace-state { color: var(--vx-danger-text); font-weight: 600; }
+/* not begun: quieter words, and a dark lamp (the part draws it; the kit's lamp has no dark) */
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) .vx-trace-what { color: var(--vx-ink-quiet); }
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) > .vx-lamp > .vx-canvas { visibility: hidden; }
+
+/* what a step shows when it is open: words, or what was printed */
+.vx-trace .vx-collapsible > :not(summary) { font-size: 0.9375rem; color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-trace .vx-trace-out { margin: 0; font: 400 0.8125rem/calc(var(--vx) * 5) var(--vx-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.vx-trace-status { margin: 0; }
+
+/* plain: the rail is painted from each lamp to the next, and a dark lamp is painted steel */
+.vx-trace:not([data-vx-live]) > li:not(:last-child)::before { content: ""; position: absolute; inset-block: calc(var(--vx) * 6.5) calc(var(--vx) * -4.5); inset-inline-start: calc(var(--vx) * 1); inline-size: calc(var(--vx) * 2); background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-trace > li:not([data-vx-state="done"], [data-vx-state="running"], [data-vx-state="failed"]) > .vx-lamp:not([data-vx-live]) { background: var(--vx-steel); }

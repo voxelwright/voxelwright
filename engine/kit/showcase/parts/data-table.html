@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data table</title>
+<!-- the part's own CSS, until it is in the kit's stylesheet. It comes first on purpose: its rules must hold by what they name, not by coming later -->
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+<style>
+  /* the page's own */
+  .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; min-inline-size: 0; }
+  .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 4); }
+  .each h3:first-child { margin-block-start: 0; }
+  .each > * { max-inline-size: 100%; }
+  .state { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); }
+  .state .vx-lamp { inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }
+  .tools { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); min-block-size: calc(var(--vx) * 11); }
+  .tools .heard { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  .narrow { max-inline-size: calc(var(--vx) * 110); }
+</style>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Data table</h1>
+    <p class="what">The kit's table, with heads you can press to sort, a checkbox a row and one for all of them, and the kit's pagination under it.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the services of a project, five to a page</h2>
+    <div class="vx-data-table" id="deploys" data-vx-rows="5">
+      <div class="vx-table">
+        <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="deploys-cap">
+          <table>
+            <caption id="deploys-cap">Services <small>fogline, the week to 24 May. Build time is the median.</small></caption>
+            <thead>
+              <tr>
+                <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every service on this page"><span class="vx-box"></span></label></th>
+                <th scope="col" aria-sort="ascending"><button type="button" class="vx-data-table-sort">Service</button></th>
+                <th scope="col"><button type="button" class="vx-data-table-sort">Last deploy</button></th>
+                <th scope="col"><button type="button" class="vx-data-table-sort">By</button></th>
+                <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">Deploys</button></th>
+                <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">Build time</button></th>
+                <th scope="col">State</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose buoy-auth"><span class="vx-box"></span></label></td><th scope="row">buoy-auth</th><td data-vx-value="2026-05-24T09:05">Sun, 09:05</td><td>Oren</td><td class="vx-num">9</td><td class="vx-num" data-vx-value="64">1 min 4 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose dune-media"><span class="vx-box"></span></label></td><th scope="row">dune-media</th><td data-vx-value="2026-05-19T17:55">Tue, 17:55</td><td>Oren</td><td class="vx-num">4</td><td class="vx-num" data-vx-value="96">1 min 36 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose ferry-cron"><span class="vx-box"></span></label></td><th scope="row">ferry-cron</th><td data-vx-value="2026-05-18T08:15">Mon, 08:15</td><td>Ada</td><td class="vx-num">1</td><td class="vx-num" data-vx-value="21">21 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose fog-site"><span class="vx-box"></span></label></td><th scope="row">fog-site</th><td data-vx-value="2026-05-23T16:02">Sat, 16:02</td><td>Ada</td><td class="vx-num">6</td><td class="vx-num" data-vx-value="72">1 min 12 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose gull-metrics"><span class="vx-box"></span></label></td><th scope="row">gull-metrics</th><td data-vx-value="2026-05-23T08:20">Sat, 08:20</td><td>Ada</td><td class="vx-num">21</td><td class="vx-num" data-vx-value="51">51 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose harbor-api"><span class="vx-box"></span></label></td><th scope="row">harbor-api</th><td data-vx-value="2026-05-24T10:43">Sun, 10:43</td><td>Mina</td><td class="vx-num">14</td><td class="vx-num" data-vx-value="45">45 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose kelp-search"><span class="vx-box"></span></label></td><th scope="row">kelp-search</th><td data-vx-value="2026-05-21T13:40">Thu, 13:40</td><td>Ada</td><td class="vx-num">10</td><td class="vx-num" data-vx-value="220">3 min 40 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="accent"></span>Building</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose pier-mail"><span class="vx-box"></span></label></td><th scope="row">pier-mail</th><td data-vx-value="2026-05-20T11:12">Wed, 11:12</td><td>Mina</td><td class="vx-num">2</td><td class="vx-num" data-vx-value="29">29 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose reef-billing"><span class="vx-box"></span></label></td><th scope="row">reef-billing</th><td data-vx-value="2026-05-22T15:31">Fri, 15:31</td><td>Mina</td><td class="vx-num">7</td><td class="vx-num" data-vx-value="83">1 min 23 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose salt-queue"><span class="vx-box"></span></label></td><th scope="row">salt-queue</th><td data-vx-value="2026-05-24T07:48">Sun, 07:48</td><td>Oren</td><td class="vx-num">12</td><td class="vx-num" data-vx-value="33">33 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose tide-worker"><span class="vx-box"></span></label></td><th scope="row">tide-worker</th><td data-vx-value="2026-05-22T09:30">Fri, 09:30</td><td>Mina</td><td class="vx-num">3</td><td class="vx-num" data-vx-value="38">38 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></td></tr>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose wharf-docs"><span class="vx-box"></span></label></td><th scope="row">wharf-docs</th><td data-vx-value="2026-05-17T12:00">Sun, 17 May</td><td>Ada</td><td class="vx-num">0</td><td class="vx-num"></td><td><span class="state">Never built</span></td></tr>            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="vx-data-table-foot">
+        <p class="vx-data-table-count" role="status" data-vx-words="Services {from} to {to} of {all}"></p>
+        <nav class="vx-pagination" aria-label="Pages of services" hidden>
+          <a class="vx-button" rel="prev" role="link" aria-disabled="true" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+          <ol class="vx-pagination-pages"></ol>
+          <a class="vx-button" rel="next" role="link" aria-disabled="true" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+        </nav>
+      </div>
+    </div>
+    <div class="tools">
+      <button class="vx-button" type="button" id="redeploy" data-vx-kind="main" disabled>Redeploy chosen</button>
+      <span class="heard" id="heard" role="status">Nothing chosen.</span>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="each">
+      <h3>Words sorted in the table's own language: Ukrainian, so Ґ follows Г and Є, І, Ї take their places. Some rows chosen: the head's box is half way. No pages</h3>
+      <div class="vx-data-table narrow" id="people" lang="uk">
+        <div class="vx-table">
+          <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="people-cap">
+            <table>
+              <caption id="people-cap">Чергові</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати всіх"><span class="vx-box"></span></label></th>
+                  <th scope="col"><button type="button" class="vx-data-table-sort">Ім'я</button></th>
+                  <th scope="col"><button type="button" class="vx-data-table-sort">Служба</button></th>
+                  <th scope="col" class="vx-num" aria-sort="descending"><button type="button" class="vx-data-table-sort">Чергувань</button></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Яр"><span class="vx-box"></span></label></td><th scope="row">Яр</th><td>harbor-api</td><td class="vx-num">9</td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Ґанна" checked><span class="vx-box"></span></label></td><th scope="row">Ґанна</th><td>fog-site</td><td class="vx-num">10</td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Іван"><span class="vx-box"></span></label></td><th scope="row">Іван</th><td>tide-worker</td><td class="vx-num">2</td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Борис" checked><span class="vx-box"></span></label></td><th scope="row">Борис</th><td>ferry-cron</td><td class="vx-num"></td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Євген"><span class="vx-box"></span></label></td><th scope="row">Євген</th><td>buoy-auth</td><td class="vx-num">1 200</td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Галина"><span class="vx-box"></span></label></td><th scope="row">Галина</th><td>kelp-search</td><td class="vx-num">7</td></tr>
+                <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Вибрати: Їжа"><span class="vx-box"></span></label></td><th scope="row">Їжа</th><td>pier-mail</td><td class="vx-num">3</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="vx-data-table-foot">
+          <p class="vx-data-table-count" role="status" data-vx-words="Усього {all}" data-vx-chosen="вибрано {chosen}"></p>
+        </div>
+      </div>
+      <h3>Sorted somewhere else: the page hears vx-sort, says no to the part, and writes the rows itself (here, a moment later, as a server would)</h3>
+      <div class="vx-data-table narrow" id="server">
+        <div class="vx-table" data-vx-size="small">
+          <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="server-cap">
+            <table>
+              <caption id="server-cap">Runners</caption>
+              <thead>
+                <tr>
+                  <th scope="col"><button type="button" class="vx-data-table-sort">Runner</button></th>
+                  <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">Builds today</button></th>
+                  <th scope="col" class="vx-num">Waiting</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">warm-eu-1</th><td class="vx-num">31</td><td class="vx-num">0</td></tr>
+                <tr><th scope="row">warm-eu-2</th><td class="vx-num">28</td><td class="vx-num">2</td></tr>
+                <tr><th scope="row">cold-eu-4</th><td class="vx-num">4</td><td class="vx-num">0</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      <h3>No rows</h3>
+      <div class="vx-data-table narrow" id="empty" data-vx-rows="5">
+        <div class="vx-table">
+          <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="empty-cap">
+            <table>
+              <caption id="empty-cap">Failed deploys</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every failed deploy on this page"><span class="vx-box"></span></label></th>
+                  <th scope="col"><button type="button" class="vx-data-table-sort">Service</button></th>
+                  <th scope="col" class="vx-num"><button type="button" class="vx-data-table-sort">When</button></th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="vx-data-table-foot">
+          <p class="vx-data-table-count" role="status" data-vx-words="{all} failed deploys this week"></p>
+          <nav class="vx-pagination" aria-label="Pages of failed deploys" hidden>
+            <a class="vx-button" rel="prev" role="link" aria-disabled="true" aria-label="Previous page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+            <ol class="vx-pagination-pages"></ol>
+            <a class="vx-button" rel="next" role="link" aria-disabled="true" aria-label="Next page"><span class="vx-pagination-chevron" aria-hidden="true"></span></a>
+          </nav>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { checkbox } from '/packages/voxelmorphism/src/components/checkbox.js';
+  import { pagination } from '/packages/voxelmorphism/src/components/pagination.js';
+  import { table } from '/packages/voxelmorphism/src/components/table.js';
+  import { dataTable } from '/packages/voxelmorphism/src/components/data-table.js';
+
+  // what the page does with what is chosen
+  const deploys = document.getElementById('deploys'), go = document.getElementById('redeploy'), heard = document.getElementById('heard');
+  window.heard = [];
+  for (const type of ['vx-sort', 'vx-select', 'vx-page']) document.addEventListener(type, (e) => window.heard.push({ type, id: e.target.id, ...e.detail, head: undefined, rows: e.detail.rows?.length }));
+  deploys.addEventListener('vx-select', (e) => {
+    go.disabled = !e.detail.count;
+    heard.textContent = e.detail.count ? `${e.detail.count} chosen: ${e.detail.rows.map((r) => r.querySelector('th').textContent).join(', ')}.` : 'Nothing chosen.';
+  });
+
+  // a table sorted on a server: the part is told no, and the rows come back a moment later
+  const server = document.getElementById('server');
+  server.addEventListener('vx-sort', (e) => {
+    e.preventDefault();
+    const { column, direction } = e.detail, body = server.querySelector('tbody'), way = direction === 'descending' ? -1 : 1;
+    setTimeout(() => {
+      const rows = [...body.rows].sort((a, b) => (column === 0 ? a.cells[0].textContent.localeCompare(b.cells[0].textContent) : a.cells[column].textContent - b.cells[column].textContent) * way);
+      body.replaceChildren(...rows);
+    }, 600);
+  });
+
+  show(checkbox, pagination, table, dataTable);
+</script>
+</body>
+</html>

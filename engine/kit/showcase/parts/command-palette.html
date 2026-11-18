@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Command palette</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .hint { color: var(--vx-ink-quiet); font-size: 0.9375rem; display: inline-flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2); }
+  /* the palettes shown open stand in the page's own flow, so the page has room for them */
+  .stand { grid-template-columns: minmax(0, 1fr); }
+  .stand dialog[open] { position: relative; inset: auto; margin: calc(var(--vx) * 2) 0 calc(var(--vx) * 8); inline-size: min(calc(var(--vx) * 140), 100%); }
+  .stand > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Command palette</h1>
+    <p class="what">A dialog with a well at its top and rows of words under it. Type, and the rows hold what matches; the arrow keys move the accent groove; Enter does the marked one. A chord brings it from anywhere on the page.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: going anywhere in fogline</h2>
+    <div class="row">
+      <button class="vx-button" type="button" id="find" commandfor="palette" command="show-modal" data-vx-command="cmds" aria-haspopup="dialog">Find</button>
+      <span class="hint">or press <kbd class="vx-keys" data-vx-chord-for="cmds"><kbd class="vx-kbd" data-vx-mod>Ctrl</kbd><kbd class="vx-kbd">K</kbd></kbd> anywhere</span>
+    </div>
+    <p class="chosen" id="done" role="status">Nothing done yet.</p>
+  </section>
+  <section class="stand">
+    <h2>Every state</h2>
+    <p>Open, with every row, the third marked</p>
+    <dialog class="vx-dialog vx-command-dialog" id="still" open aria-label="Commands, shown open">
+      <header class="vx-command-head">
+        <label class="vx-aloud" for="still-q">Find a command or a project</label>
+        <span class="vx-well"><input id="still-q" type="text" role="combobox" aria-expanded="true" aria-controls="still-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Find a command or a project"></span>
+      </header>
+      <div class="vx-command-scroll">
+        <div class="vx-command" id="still-list" role="listbox" aria-label="Commands">
+          <div role="group" aria-label="Projects">
+            <div class="vx-command-title" aria-hidden="true">Projects</div>
+            <div role="option">harbor-api <span class="vx-option-trail">Frankfurt</span></div>
+            <div role="option">fog-site <span class="vx-option-trail">Amsterdam</span></div>
+          </div>
+          <div role="group" aria-label="Do">
+            <div class="vx-command-title" aria-hidden="true">Do</div>
+            <div role="option" id="still-3">Deploy harbor-api</div>
+            <div role="option">Roll back to 4f2c9a1</div>
+            <div role="option" lang="uk">Розгорнути на сервері</div>
+          </div>
+        </div>
+      </div>
+      <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
+    </dialog>
+    <p>Nothing matches: said in words</p>
+    <dialog class="vx-dialog vx-command-dialog" id="none" open aria-label="Commands, nothing found">
+      <header class="vx-command-head">
+        <label class="vx-aloud" for="none-q">Find a command or a project</label>
+        <span class="vx-well"><input id="none-q" type="text" role="combobox" aria-expanded="true" aria-controls="none-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" value="lighthouse"></span>
+      </header>
+      <div class="vx-command-scroll">
+        <div class="vx-command" id="none-list" role="listbox" aria-label="Commands">
+          <div role="option">harbor-api</div>
+          <div role="option">fog-site</div>
+        </div>
+      </div>
+      <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
+    </dialog>
+  </section>
+</main>
+<dialog class="vx-dialog vx-command-dialog" id="palette" aria-label="Commands">
+  <header class="vx-command-head">
+    <label class="vx-aloud" for="q">Find a command or a project</label>
+    <span class="vx-well"><input id="q" type="text" role="combobox" aria-expanded="true" aria-controls="cmds" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Find a command or a project"></span>
+  </header>
+  <div class="vx-command-scroll">
+    <div class="vx-command" id="cmds" role="listbox" aria-label="Commands" data-vx-chord="mod+k">
+      <div role="group" aria-label="Projects">
+        <div class="vx-command-title" aria-hidden="true">Projects</div>
+        <div role="option" data-vx-value="Open harbor-api">harbor-api <span class="vx-option-trail">Frankfurt</span></div>
+        <div role="option" data-vx-value="Open fog-site">fog-site <span class="vx-option-trail">Amsterdam</span></div>
+        <div role="option" data-vx-value="Open tide-worker">tide-worker <span class="vx-option-trail">Warsaw</span></div>
+        <div role="option" data-vx-value="Open ferry-cron">ferry-cron <span class="vx-option-trail">Frankfurt</span></div>
+      </div>
+      <div role="group" aria-label="Do">
+        <div class="vx-command-title" aria-hidden="true">Do</div>
+        <div role="option" data-vx-keywords="ship release">Deploy harbor-api</div>
+        <div role="option" data-vx-keywords="undo revert">Roll back to 4f2c9a1</div>
+        <div role="option" data-vx-keywords="team people">Invite Mina to fog-site</div>
+        <div role="option" lang="uk" data-vx-keywords="deploy">Розгорнути на сервері</div>
+        <div role="option" aria-disabled="true">Merge the queue <span class="vx-option-trail">nothing waiting</span></div>
+      </div>
+      <div role="group" aria-label="Settings">
+        <div class="vx-command-title" aria-hidden="true">Settings</div>
+        <div role="option" data-vx-keywords="dark theme">Switch to night</div>
+        <div role="option" data-vx-keywords="log out">Sign out of fogline</div>
+      </div>
+    </div>
+  </div>
+  <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
+  <div class="vx-command-foot" aria-hidden="true">
+    <span><kbd class="vx-kbd">↑</kbd><kbd class="vx-kbd">↓</kbd> to move</span>
+    <span><kbd class="vx-kbd">Enter</kbd> to do it</span>
+    <span><kbd class="vx-kbd">Esc</kbd> to close</span>
+  </div>
+</dialog>
+<script type="module">
+  import { show } from './parts.js';
+  import { commandPalette } from '/packages/voxelmorphism/src/components/command-palette.js';
+  const $ = (id) => document.getElementById(id);
+  $('cmds').addEventListener('vx-choose', (e) => { $('done').textContent = `Done: ${e.detail.value}.`; });
+  await show(commandPalette);
+  // the ones shown open: the part reads aria-activedescendant and the field like any other state
+  $('still-q').setAttribute('aria-activedescendant', 'still-3');
+  $('none-q').dispatchEvent(new Event('input'));
+</script>
+</body>
+</html>

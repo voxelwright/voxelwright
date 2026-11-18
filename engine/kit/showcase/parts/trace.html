@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trace</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<link rel="stylesheet" href="parts.css">
+<style>
+  /* this page's own */
+  .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
+  .talk .vx-button { margin-block-start: calc(var(--vx) * 3); }
+  .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); align-content: start; }
+  .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+</style>
+<script>
+  // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
+  (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
+</script>
+</head>
+<body>
+<main class="vx-card sheet">
+  <header>
+    <h1>Trace</h1>
+    <p class="what">What an agent did, step by step: a standing groove with a lamp at each step. Green is done, the accent is in progress, red has failed. A step with more to show opens.</p>
+  </header>
+  <div class="vx-groove" role="separator"></div>
+  <section>
+    <h2>In use: the agent ships build 214</h2>
+    <div class="talk" role="log" aria-label="Deploy agent" id="talk">
+      <article class="vx-message" aria-labelledby="a1-who a1-when">
+        <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><svg viewBox="0 0 8 8" shape-rendering="crispEdges"><rect width="8" height="8" fill="#22304f"/><rect x="1" y="2" width="1" height="1" fill="#e9edf7"/><rect x="2" y="3" width="1" height="1" fill="#e9edf7"/><rect x="1" y="4" width="1" height="1" fill="#e9edf7"/><rect x="4" y="5" width="3" height="1" fill="#9db8ff"/></svg></span>
+        <div class="vx-message-body">
+          <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Deploy agent</span><time class="vx-message-when" id="a1-when" datetime="2026-11-17T18:00">18:00</time></header>
+          <div class="vx-message-text"><p>Shipping build 214 of harbor-api, as you asked.</p></div>
+          <ol class="vx-trace" id="ship" aria-label="What the agent did" aria-live="off">
+            <li data-vx-state="done">
+              <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+              <details class="vx-collapsible" id="read">
+                <summary><span class="vx-trace-what">Read build-214.log</span><span class="vx-trace-state">Done, 2 s</span></summary>
+                <p>58 tests passed and 2 were skipped. Nothing in the log says the build should wait.</p>
+              </details>
+            </li>
+            <li data-vx-state="done">
+              <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+              <details class="vx-collapsible">
+                <summary><span class="vx-trace-what">Checked that the queue is empty</span><span class="vx-trace-state">Done, 1 s</span></summary>
+                <pre class="vx-trace-out">queue harbor-api: 0 waiting, 0 running
+last job finished 17:52:08</pre>
+              </details>
+            </li>
+            <li data-vx-state="running">
+              <span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span>
+              <p class="vx-trace-line"><span class="vx-trace-what">Rolling out to the first of three machines</span><span class="vx-trace-state">In progress, <span class="secs">12</span> s</span></p>
+            </li>
+            <li data-vx-state="waiting">
+              <span class="vx-lamp" aria-hidden="true"></span>
+              <p class="vx-trace-line"><span class="vx-trace-what">Watch the health check for five minutes</span><span class="vx-trace-state">Not begun</span></p>
+            </li>
+          </ol>
+          <button class="vx-button" type="button" id="again">Run it through</button>
+        </div>
+      </article>
+    </div>
+  </section>
+  <section>
+    <h2>Every state</h2>
+    <div class="states">
+      <div class="state"><span>Done, in progress, failed, not begun: each said in words</span>
+        <ol class="vx-trace" id="four" aria-label="Four steps" aria-live="off">
+          <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Cloned main</span><span class="vx-trace-state">Done</span></p></li>
+          <li data-vx-state="running"><span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Installing packages</span><span class="vx-trace-state">In progress</span></p></li>
+          <li data-vx-state="failed"><span class="vx-lamp" data-vx-light="stop" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Ran the tests</span><span class="vx-trace-state">Failed</span></p></li>
+          <li data-vx-state="waiting"><span class="vx-lamp" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Build the image</span><span class="vx-trace-state">Not begun</span></p></li>
+        </ol>
+      </div>
+      <div class="state"><span>A failed step, open: what went wrong is in words</span>
+        <ol class="vx-trace" id="failed" aria-label="A failed run" aria-live="off">
+          <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Installed 212 packages</span><span class="vx-trace-state">Done, 12 s</span></p></li>
+          <li data-vx-state="failed">
+            <span class="vx-lamp" data-vx-light="stop" aria-hidden="true"></span>
+            <details class="vx-collapsible" open>
+              <summary><span class="vx-trace-what">Ran the tests</span><span class="vx-trace-state">Failed: 2 of 58</span></summary>
+              <pre class="vx-trace-out">queue/retry: expected 3 tries, got 2
+queue/backoff: timed out after 5000 ms</pre>
+            </details>
+          </li>
+        </ol>
+      </div>
+      <div class="state"><span>One step</span>
+        <ol class="vx-trace" id="one" aria-label="One step" aria-live="off">
+          <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Looked up the last deploy</span><span class="vx-trace-state">Done</span></p></li>
+        </ol>
+      </div>
+      <div class="state"><span>Long words, and Ukrainian: they wrap, and the rail runs on</span>
+        <ol class="vx-trace" id="wide" aria-label="Кроки" aria-live="off" lang="uk">
+          <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Розгорнути на сервері після нічного резервного копіювання бази даних</span><span class="vx-trace-state">Готово, 45 с</span></p></li>
+          <li data-vx-state="done">
+            <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
+            <details class="vx-collapsible">
+              <summary><span class="vx-trace-what">Fetched harbor-api-4f2c9a1d7e03b85c6a9f1e2d3c4b5a69788f0e1d.tar.zst</span><span class="vx-trace-state">Готово, 3 с</span></summary>
+              <p>18 МБ.</p>
+            </details>
+          </li>
+          <li data-vx-state="running"><span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">Перевірка стану</span><span class="vx-trace-state">Триває</span></p></li>
+        </ol>
+      </div>
+      <div class="state" dir="rtl" lang="ar"><span>من اليمين إلى اليسار</span>
+        <ol class="vx-trace" id="rtl" aria-label="الخطوات" aria-live="off">
+          <li data-vx-state="done"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">قراءة السجل</span><span class="vx-trace-state">تم</span></p></li>
+          <li data-vx-state="running"><span class="vx-lamp" data-vx-light="accent" aria-hidden="true"></span><p class="vx-trace-line"><span class="vx-trace-what">نشر النسخة 214</span><span class="vx-trace-state">جارٍ</span></p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module">
+  import { show } from './parts.js';
+  import { trace } from '/packages/voxelmorphism/src/components/trace.js';
+  // the page's own: the run goes on to its end, a step at a time. The seconds of the step in
+  // progress tick, and are not read out; each change of state is, once.
+  const ship = document.getElementById('ship'), steps = [...ship.children];
+  const set = (li, state, words) => { li.querySelector('.vx-trace-state').innerHTML = words; li.dataset.vxState = state; };
+  let timers = [];
+  window.run = (ms = 900) => {
+    for (const t of timers) { clearTimeout(t); clearInterval(t); }
+    set(steps[2], 'running', 'In progress, <span class="secs">0</span> s');
+    set(steps[3], 'waiting', 'Not begun');
+    let n = 0;
+    const tick = setInterval(() => { const s = ship.querySelector('.secs'); if (s) s.textContent = ++n; }, ms / 4);
+    timers = [tick,
+      setTimeout(() => { set(steps[2], 'done', 'Done, 14 s'); set(steps[3], 'running', 'In progress, <span class="secs">0</span> s'); n = 0; }, ms),
+      setTimeout(() => { clearInterval(tick); set(steps[3], 'done', 'Done, 5 min'); }, ms * 2),
+    ];
+  };
+  document.getElementById('again').addEventListener('click', () => window.run());
+  show(trace);
+</script>
+</body>
+</html>

@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxelmorphism lab</title>
+<link rel="stylesheet" href="/packages/voxelmorphism/voxelmorphism.css">
+<style>
+  html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); }
+  body { margin: 0; padding: 40px 48px 120px; max-width: 1180px; }
+  .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: center; margin-bottom: 48px; }
+  .col { display: grid; gap: 24px; align-content: start; }
+  h2 { font-size: 1rem; margin: 0 0 20px; font-weight: 600; color: var(--vx-ink-quiet); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+</style>
+<body>
+  <div class="row"><h1 class="vx-sign" data-vx-max="3">Voxelmorphism</h1></div>
+
+  <h2>Buttons</h2>
+  <div class="row">
+    <button class="vx-button">Plant a seed</button>
+    <button class="vx-button" id="pressed">Water it</button>
+    <button class="vx-button" data-vx-material="signal">Let it bloom</button>
+    <button class="vx-button" data-vx-material="chalk">Not yet</button>
+    <button class="vx-button" data-vx-material="brick">Pull it up</button>
+    <button class="vx-button" disabled>Asleep</button>
+    <button class="vx-button" data-vx-material="chalk" popovertarget="more" id="more-btn">More</button>
+    <div class="vx-menu" id="more" popover role="menu">
+      <button role="menuitem">Water it</button>
+      <button role="menuitem">Move to another shelf</button>
+      <button role="menuitem">Show the session</button>
+      <button role="menuitem">Pull it up</button>
+    </div>
+    <button class="vx-button" id="open-dialog">Open dialog</button>
+    <button class="vx-button" data-vx-material="chalk" id="toast-btn">Toast</button>
+  </div>
+
+  <div class="grid">
+    <div class="col">
+      <h2>Toggle, slider, tabs</h2>
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch" disabled><span class="vx-switch"></span>Let visitors water</label>
+      <span class="vx-slider" style="max-width: 320px"><input type="range" min="0" max="10" value="6" aria-label="Waterings before a bud"></span>
+      <div><div class="vx-tabs" role="tablist" aria-label="Garden view">
+        <button role="tab" aria-selected="true" aria-controls="p1">Growing</button>
+        <button role="tab" aria-selected="false" aria-controls="p2">Bloomed</button>
+        <button role="tab" aria-selected="false" aria-controls="p3">Wilted</button>
+      </div></div>
+      <span class="vx-meter" style="max-width: 320px"><progress value="3" max="5">3 of 5</progress></span>
+      <label class="vx-field" style="max-width: 420px"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+      <label class="vx-field" style="max-width: 420px"><span class="vx-field-label">Water it</span><span class="vx-well"><textarea placeholder="What did you learn about this idea today?"></textarea></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
+    </div>
+    <div class="col">
+      <h2>Note card, list, growth meter</h2>
+      <article class="vx-card" data-vx-edge="leaf" style="max-width: 420px">
+        <p><strong>Watered on 14 November</strong></p>
+        <p>The egg should hide in the footer. Typing the old cheat code turns every heading into voxels for a minute.</p>
+      </article>
+      <ul class="vx-list" style="max-width: 420px">
+        <li aria-current="true"><a href="#a">A new easter egg for the blog</a><span class="vx-row-meta">bud</span></li>
+        <li><a href="#b">Console greeting</a><span class="vx-row-meta">sprout</span></li>
+        <li><a href="#c">The LOG page as a changelog</a><span class="vx-row-meta">seed</span></li>
+      </ul>
+      <div class="row" style="gap: 12px; margin: 0">
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="2"><progress value="0.2"></progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="5"><progress value="0.5"></progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="9"><progress value="0.78"></progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="4" id="grower"><progress value="1"></progress></span>
+      </div>
+    </div>
+  </div>
+
+  <dialog class="vx-dialog" id="dlg">
+    <header>Let it bloom?</header>
+    <div class="vx-dialog-body"><p>A coding session will start on your Mac. It reads every watering, makes the change, tests it and shows you a preview.</p></div>
+    <footer>
+      <button class="vx-button" data-vx-material="chalk" data-vx-close="no">Not yet</button>
+      <button class="vx-button" data-vx-material="signal" data-vx-close="yes">Let it bloom</button>
+    </footer>
+  </dialog>
+
+  <script type="module">
+    import { adopt, live, toast } from '/packages/voxelmorphism/src/index.js';
+    adopt();
+    document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
+    document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
+    window.vx = { live, toast };
+    document.documentElement.dataset.ready = '1';
+  </script>
+</body>
+</html>
