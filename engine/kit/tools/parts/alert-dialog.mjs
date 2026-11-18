@@ -95,6 +95,19 @@ async function checkReopened(page) {
     return el.returnValue;
   });
   say(explicit === 'reserved', 'a page can veto cancellation and requestClose keeps an explicit result');
+  for (const prevent of [true, false]) {
+    await dialog.evaluate((el, prevent) => {
+      el.showModal();
+      el.addEventListener('keydown', e => {
+        el.requestClose('');
+        if (prevent) e.preventDefault();
+      }, { once: true });
+    }, prevent);
+    await page.keyboard.press('Escape');
+    await dialog.evaluate(() => new Promise(requestAnimationFrame));
+    say(await dialog.evaluate(el => !el.open && el.returnValue === ''),
+      `an explicit empty result survives closing inside keydown (preventDefault: ${prevent})`);
+  }
 }
 // the danger key
 await press(p, '#open-delete'); await p.waitForTimeout(600);

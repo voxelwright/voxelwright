@@ -17,8 +17,10 @@ export function wireDialog(el, on) {
     setTimeout(() => { if (cancel === e) { cancel = null; escape = null; } }, 0);
   });
   on(el, 'beforetoggle', e => {
-    const accepted = e.newState === 'closed' && cancel && !cancel.defaultPrevented;
-    normalizeEscape = accepted && escape && !escape.defaultPrevented;
+    const accepted = e.newState === 'closed' && cancel?.eventPhase === Event.NONE && !cancel.defaultPrevented;
+    // The key's native default runs after dispatch. requestClose() inside a
+    // key listener is an explicit application request, even when its value is ''.
+    normalizeEscape = accepted && escape?.eventPhase === Event.NONE && !escape.defaultPrevented;
     // Some browsers keep the previous result if no new value is supplied.
     if (accepted) el.returnValue = 'cancel';
     cancel = escape = null;
