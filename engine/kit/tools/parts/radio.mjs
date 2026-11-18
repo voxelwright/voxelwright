@@ -1,6 +1,7 @@
 // A person at the radio group: a real mouse and real keys, with voxels and plain. Says ok or FAIL
 // for each thing that must hold.
 //   PORT=5989 node tools/parts/radio.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
@@ -14,7 +15,7 @@ for (const mode of ['live', 'plain']) {
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${mode}: ${what}`); };
-  const press = async (loc, fx = 0.5) => { const b = await loc.boundingBox(); await p.mouse.move(b.x + b.width * fx, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
+  const press = async (loc, fx = 0.5) => { await loc.scrollIntoViewIfNeeded(); const b = await loc.boundingBox(); await p.mouse.move(b.x + b.width * fx, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
   // the group as the inputs say it, and as the voxels show it
   const read = (name) => p.evaluate((name) => {
     const all = [...document.querySelectorAll(`input[name="${name}"]`)];
@@ -44,8 +45,7 @@ for (const mode of ['live', 'plain']) {
   }
 
   // keys: one tab stop, arrows move the choice and go round
-  await p.evaluate(() => document.body.focus());
-  await p.keyboard.press('Tab');
+  await reachByTab(p, '#where input');
   s = await read('where');
   say(s.focus === 'fra', 'Tab comes into the group at the chosen one');
   await p.keyboard.press('ArrowDown');

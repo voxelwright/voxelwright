@@ -39,7 +39,11 @@ const read = (id) => p.evaluate(async (id) => {
     focus: links.indexOf(document.activeElement), width: n.width,
   };
 }, id);
-const linkBox = (id, i) => p.locator(`#${id} a`).nth(i).boundingBox();
+const linkBox = async (id, i) => {
+  const link = p.locator(`#${id} a`).nth(i);
+  await link.scrollIntoViewIfNeeded();
+  return link.boundingBox();
+};
 const click = async (id, i) => { const b = await linkBox(id, i); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 }); await p.mouse.down(); await p.waitForTimeout(50); await p.mouse.up(); await p.waitForTimeout(350); };
 const under = (m) => m.well && Math.abs(m.well[0] - (m.link.left + m.link.padL)) <= 2 && Math.abs(m.well[2] - (m.link.right - m.link.padR)) <= 2 && m.well[3] <= m.link.bottom && m.well[1] >= m.link.bottom - 12;
 const beside = (m) => m.well && m.well[0] <= 8 && m.well[2] - m.well[0] === 4 && m.well[1] >= m.link.top && m.well[3] <= m.link.bottom;

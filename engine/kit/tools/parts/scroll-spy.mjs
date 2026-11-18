@@ -1,6 +1,7 @@
 // The scroll spy, under a real wheel, a real mouse and real keys: does it mark the section being
 // read, and does it leave the page where the person put it?
 //   PORT=5989 node tools/parts/scroll-spy.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 
 const port = process.env.PORT || 5989;
@@ -40,7 +41,7 @@ async function spy(p, how) {
   say(s.y === 0 && s.current.join() === '#install' && s.word === 'location', `${how}: on arrival the page is where it was (0), and one link is marked: ${s.current.join()} (aria-current="${s.word}")`);
   say(beside(s) && s.live === (how === 'voxels'), `${how}: the groove stands at the start of that link, a voxel wide, two voxels short of it at each end`);
   // the keyboard, before anything else is touched: Tab to the links, Enter on one
-  await p.keyboard.press('Tab'); await p.keyboard.press('Tab'); await p.keyboard.press('Tab');
+  await reachByTab(p, '#toc a'); await p.keyboard.press('Tab'); await p.keyboard.press('Tab');
   const focus = await p.evaluate(() => [document.activeElement.getAttribute('href'), getComputedStyle(document.activeElement).outlineStyle]);
   const yWas = await p.evaluate(() => scrollY);
   await p.keyboard.press('Enter');
@@ -123,7 +124,7 @@ const q = await open({ reducedMotion: 'reduce' });
 s = await read(q);
 say(s.move === '0s', 'prefers-reduced-motion: the groove does not travel, it is at the new link at once');
 await q.mouse.move(700, 350);
-await q.mouse.wheel(0, 560);
+await q.mouse.wheel(0, await q.locator('#configure').evaluate(el => el.getBoundingClientRect().top));
 await q.waitForTimeout(450);
 s = await read(q);
 say(s.current.join() === '#configure' && beside(s), 'and it still marks the section being read');

@@ -1,6 +1,7 @@
 // A person at the resizable panels' page: a real mouse on the groove, real keys, a finger, a
 // window that narrows. Says ok or FAIL for each thing that must hold; exit 1 on a failure.
 //   PORT=5989 node tools/parts/resizable.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
@@ -126,8 +127,7 @@ async function hand(p, how) {
   // ---- real keys
   await p.mouse.move(5, 5);
   await p.evaluate(() => { document.activeElement.blur(); scrollTo(0, 0); });
-  await p.mouse.click(5, 5); // Tab goes on from where the last press was: from the top of the page now, not from the groove
-  await p.keyboard.press('Tab');
+  await reachByTab(p, '#use-groove');
   await p.waitForTimeout(250);
   s = await read(p, 'use');
   say(s.grooves[0].focus && s.grooves[0].ring === 'solid', `${how}: Tab reaches the groove, and the focus can be seen (outline ${s.grooves[0].ring})`);
