@@ -27,17 +27,17 @@ the construction rules in the numbered sections.
 - Follow seats four courses down. Follow, tabs, single-choice key banks and page buttons
   uncover the same fixed diffuser behind a sliding shutter. The end lamps dim with travel
   and go dark when the shutter closes. The slot stays inside its seat and has at least four
-  clear pixel rows below the legend at the default scale. Shortcut legends sit one course
-  below the surface.
+  clear pixel rows below the legend at the default scale. Inline keyboard shortcuts use miniature keycaps. Give each cap a visible
+  top for its legend and a sidewall above the support. Its silhouette identifies the physical key.
+  Keep the native `<kbd>` inline and outside the tab order.
+  <!-- 2026-11-18: “we can make them look like real keys” -->
 - The kit supplies an optional finish per material to renderers that support it. Ordinary
   cubes use full chamfer and zero gloss. Steel and enamel catch direct light. The well
   floor is matte. The ground filter spans one voxel at the default four-pixel scale.
 - One warm tube lights the header groove. The idle well walls emit no light. The deploy log has a passive warm reflection on its lower inside edge. Set `?log=quiet` on the demo for the unlined well. A pale slide paddle reveals a green slit. Pilot lamps light their socket locally.
 - Two dark cells separate each pair of meter lamps. A warning uses amber in the daytime.
   A destructive menu row carries a red tracking light when selected.
-- The chart opens at the reading in its table and animates a subsequent change. A menu, toast or dialog rises on an intact
-  plate. Its lettering stays opaque on the moving plate and follows its projection from the first drawn frame. The plate overshoots its seat by about one course and catches at level. With reduced motion it stays in place and fades. Closing a dialog
-  reverses from the current height and fades its scrim. Dismissing a toast still breaks it.
+- The chart opens at the reading in its table and animates a subsequent change.
 
 ## 1. Principles
 
@@ -87,8 +87,13 @@ the construction rules in the numbered sections.
 
 ## 4. Materials
 
-A material is a front-face colour for day and one for night, a grain (how much one voxel differs
-from the next), and whether it glows at night.
+**Give each light a source and each material an optical response.** Clear plastic can reveal
+the emitter, frost spreads its light, and an opaque cap can pass it through a translucent legend.
+Apply the same reasoning to validation lights. Check where the bright core sits and how its
+light falls across the field housing when the material changes.
+<!-- 2026-11-18: “how light propagates through and interacts with materials” -->
+
+The base palette gives each material a day and night color, grain and emission.
 
 | Material | Day | Night | Job |
 |---|---|---|---|
@@ -107,8 +112,12 @@ from the next), and whether it glows at night.
 - Text on enamel and brick is white. Text on signal is ink `#0a0f3d` in both themes. Text on chalk
   is `--vx-ink`. Body text contrast is 7:1 or better; quiet text is 4.5:1 or better.
 - One enamel thing per group: enamel marks the main action. Secondary buttons are chalk.
-- Signal is state, never an action and never decoration: no yellow buttons. If nothing is on or
-  current, nothing is yellow.
+- Reserve signal lights for state. Put decorative case lighting on its own control so changing the
+  case color preserves the meaning of selection, success and error.
+- **Give every dedicated status LED a visible unlit fitting.** Put a lens or slot where the light
+  originates, then illuminate that same fitting in place. A user can see where the signal will
+  come from before selecting a row.
+  <!-- 2026-11-18: “LED indicators already exist where needed, they just glow up when active.” -->
 - At night, order by lightness is ground, slate, steel, chalk: a disabled control (steel) is
   always duller than a live one beside it.
 - Add a material with `defineMaterial(name, { day, night, jitter, glow })`. Give it one job.
@@ -169,9 +178,11 @@ Decide by how often it happens (from the site-craft rules):
 - **Assembly** marks making a new object. A note can rise out of the page in bricks of two
   to seven voxels laid in a running bond. Each brick rises through the surface, overshoots
   by about 8% and settles. The page hides the courses still below it.
-- **Overlay plates** carry their engraving and controls together. A menu rises in 200 ms,
-  a toast in 300 ms and a dialog in 460 ms. A dialog lowers intact in 270 ms. Text and
-  plate positions come from the same frame. With reduced motion the whole plate fades in place.
+- **Assemble newly added objects and disassemble removed objects in blocks.** This includes
+  toasts and dialogs. Seeing the blocks come together distinguishes making an object from
+  changing its state or scrolling it into view. Keep each control usable during the transition.
+  With reduced motion, keep the overlay in place and fade it.
+  <!-- 2026-11-18: “when something is added to a page - it's built from blocks ... and if it removed - it breaks down.” -->
 - **Crumble** marks removal: the thing breaks into the same bricks, which fall down the page
   turning as they go and shrink away at the end. 270 to 340 ms, always shorter than the build.
   Content fades out in 80 ms first, so text is never seen breaking.
@@ -197,6 +208,10 @@ Decide by how often it happens (from the site-craft rules):
 
 - Off by default. Nothing sounds, and no audio context exists, until the page calls `sound(true)`
   from a click or a key press.
+- **Design a key’s downstroke and return as distinct events.** Audition both a quick tap and a
+  held press. Check that the cap travels to its stop and the recorded impacts land with contact
+  and return. Their timing gives a virtual switch its tactile feel.
+  <!-- 2026-11-18: “Each click must be satisfying.” -->
 - A key plays two short local recordings of a Cherry MX Brown switch under a PBT cap. The downstroke
   lands on press and the lighter return lands on release. Other cues use Web Audio synthesis.
 - Cues: `press`, `release`, `slide`, `tick` (a slider step), `build`, `break`, `poke`, `done`,
@@ -236,7 +251,7 @@ Decide by how often it happens (from the site-craft rules):
     outside it. `data-vx-press="text"` on a board, or `"play"` on a heading, swaps this.
   - `PORT=5989 node tools/select.mjs` checks all of it with real pointer input, in two browsers.
 - A dialog may be modal (`showModal()`) or not (`show()`, when the page behind must stay usable
-  while a setting changes). Both assemble and lower the same way; only a modal one has a backdrop.
+  while a setting changes). Both assemble on entry and break down on exit; only a modal one has a backdrop.
 - A value set from code (`input.value = 3`, `input.checked = true`) is drawn at once, with no
   sound and no slide: the hand did not move it. `vx-change` fires only when a person chooses.
 - Toasts are `role="status"`, or `role="alert"` for a failure. Their clock stops on hover and

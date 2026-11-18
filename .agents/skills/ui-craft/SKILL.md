@@ -17,6 +17,12 @@ bar. His whole skill was "look at the new screenshot, compare it to the other
 products and the old screenshot, score it, do it again" (25:47-25:59), "very,
 very basic" (25:37).
 
+**Read screenshot feedback as a diagnosis.** Name what feels wrong and judge the repair in the
+working control. If an LED seems to appear out of nowhere, inspect the same fitting before and
+after activation. Its housing can differ between an aluminum plate and a translucent case.
+This keeps the reference useful across the kit while leaving room for a better mechanism.
+<!-- 2026-11-18: “I'm just saying what feels wrong, not how to solve it” -->
+
 ## Loop
 
 1. Capture the real thing. Drive the app with Playwright and take screenshots at
