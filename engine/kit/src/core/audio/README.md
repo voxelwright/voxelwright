@@ -1,8 +1,9 @@
-Cherry MX Brown, PBT keycaps, KeyA press and release recordings by Mechvibes.
-Source: https://github.com/hainguyents13/mechvibes/tree/main/soundpacks/keyboard/cherrymx-brown-pbt
+Cherry MX Brown, PBT keycaps, KeyJ press and release recordings by Mechvibes.
+Source: https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt
 Redistributed under the upstream MIT license (included in LICENSE).
-Extracted mono WAV from sound.ogg using config.json KeyA timing:
-press 22.869–22.968 seconds; release 22.968–23.067 seconds.
+Mono excerpts from sound.ogg around the KeyJ transients in config.json.
+Press runs from 24.953 to 25.011 seconds and release from 25.084 to 25.140.
+The leading silence is trimmed, with short edge fades and a quieter release.
 
 Public API remains `sound(true)` / `sound(false)` / `sound()` and
 `cue('press')` / `cue('release')`, exported from src/index.js.
