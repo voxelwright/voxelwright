@@ -16,6 +16,7 @@
   .part > h3 small { display: block; font: 400 0.8125rem/1.4 var(--vx-font); color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 1); }
   .side { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); justify-items: start; align-content: start; min-inline-size: 0; }
   .side > * { max-inline-size: 100%; }
+  .side .vx-tabs [role="tab"] { min-inline-size: 0; padding-inline: clamp(.25rem, 1.8vw, 1rem); }
   .heads { display: grid; grid-template-columns: calc(var(--vx) * 34) minmax(0, 1fr) minmax(0, 1fr); gap: calc(var(--vx) * 9); color: var(--vx-ink-quiet); font-size: 0.9375rem; font-weight: 600; }
   .keys { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 5); }
   .wide { inline-size: 100%; }

@@ -33,7 +33,7 @@ const read = (id) => p.evaluate(async (id) => {
   return {
     tag: el.tagName, label: el.getAttribute('aria-label'), hrefs: links.filter((a) => a.matches('a[href]')).length, links: links.length,
     current: cur?.textContent.trim() ?? null, word: cur?.getAttribute('aria-current') ?? null, count: links.filter((a) => a.hasAttribute('aria-current')).length,
-    walls: made(walls), block: made(block), well: l.well?.map((v) => v * l.vx) ?? null,
+    walls: made(walls), block: made(block), well: l.well?.map((v, i) => v * l.vx + (i % 2 ? l.cssH - l.H * l.vx : l.cssW - l.W * l.vx) / 2) ?? null,
     blockAt: block ? [l.spring('x').x * l.vx, l.spring('y').x * l.vx] : null, moving: l.spring('x').moving || l.spring('y').moving,
     link: r ? { left: r.left - n.left, right: r.right - n.left, top: r.top - n.top, bottom: r.bottom - n.top, padL: parseFloat(cs.paddingLeft), padR: parseFloat(cs.paddingRight) } : null,
     focus: links.indexOf(document.activeElement), width: n.width,

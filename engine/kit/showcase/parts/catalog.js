@@ -24,8 +24,10 @@ function filter() {
       if (!row.hidden) matches++;
     }
     group.hidden = !matches;
+    document.querySelector('.family-index a[href="#' + group.id + '"]').hidden = group.hidden;
     count += matches;
   }
+  document.querySelector('.family-index').hidden = !count;
   document.querySelector('#count').value = count === 0 ? 'No matching parts' : count === 1 ? '1 part' : count + ' parts';
 }
 

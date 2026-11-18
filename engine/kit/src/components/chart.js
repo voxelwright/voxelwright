@@ -33,6 +33,7 @@
 //   draws itself from the left) only when its numbers change. The first reading is complete.
 
 import { hole, halo, byTheme, lightName, warmth } from '../core/light.js';
+import { LOOKS } from '../core/look.js';
 import { reducedMotion } from '../core/motion.js';
 import { lamp as lampPart } from '../looks/lit.js';
 import { listeners } from './util.js';
@@ -202,12 +203,28 @@ function write(win, L, adoptLamp) {
   fig.setAttribute('data-vx-drawn', '');
 }
 
+// Single-series charts can expose the final row beside the scale. Preserve the
+// table's displayed units; the accessible equivalent is the row itself.
+function readout(fig) {
+  const strip = fig.querySelector(':scope > .vx-chart-reading');
+  if (!strip) return;
+  const rows = fig.querySelector('table')?.tBodies[0]?.rows;
+  const row = rows?.item(rows.length - 1);
+  const value = row?.cells[1];
+  strip.hidden = row?.cells.length !== 2 || !Number.isFinite(valueOf(value));
+  if (strip.hidden) return;
+  const number = document.createElement('strong');
+  number.textContent = value.textContent.trim() || value.dataset.vxValue;
+  strip.replaceChildren(row.cells[0].textContent.trim(), number);
+}
+
 // What the chart does with or without voxels: it lays itself out and writes its words, and does
 // so again when its numbers or its size change. `changed` is told, to draw the voxels again.
 function wire(win, on, changed = () => {}, adoptLamp) {
   const fig = win.closest('.vx-chart') ?? win.parentElement;
   let last = '';
   const again = (news) => {
+    readout(fig);
     const L = lay(win);
     const sig = JSON.stringify([L.W, L.H, L.kind, L.places, L.series, L.max]);
     if (sig === last) return;
@@ -241,7 +258,9 @@ export const chart = {
     const { el } = live, D = live.look.well;
     const L = live.state.L = lay(el);
     const { W, H } = live;
-    hole(live, m, { depth: D, wall: lightName(el, 'light-warm'), floor: 'floor' });
+    const smoked = live.look === LOOKS.instrument;
+    const socket = smoked ? 'slate' : 'steel';
+    hole(live, m, { depth: D, wall: smoked ? 'slate' : lightName(el, 'light-warm'), floor: smoked ? 'gasket' : 'floor' });
     const used = new Set(); // cells that hold a lamp or a stud: the scale's marks keep off them
     const studs = m.part('studs'), fill = m.part('fill');
     studs.sunk = true; studs.grounded = false;
@@ -255,7 +274,7 @@ export const chart = {
         for (let i = 0; i < c.w; i++) {
           const x = c.x + i;
           used.add(x + ',' + y);
-          studs.box(x, y, -D, 1, 1, 1, 'steel');
+          studs.box(x, y, -D, 1, 1, 1, socket);
           if (r < c.n) for (let k = -D; k < 0; k++) fill.plot(x, y, k, c.light, (r + 0.5) / L.rows);
         }
       }
@@ -273,7 +292,7 @@ export const chart = {
       for (const p of L.points) for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
         const x = p.x + i, y = p.y + j;
         used.add(x + ',' + y);
-        studs.box(x, y, -D, 1, 1, 1, 'steel');
+        studs.box(x, y, -D, 1, 1, 1, socket);
         for (let k = -D; k < 0; k++) fill.plot(x, y, k, p.light, (x + 0.5) / W);
       }
     }

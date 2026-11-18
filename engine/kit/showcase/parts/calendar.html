@@ -12,7 +12,7 @@
   .plan .said p:first-child { font-weight: 600; }
   .plan .said p + p { color: var(--vx-ink-quiet); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; }
-  .state { display: grid; gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
   .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
 </style>
 <script>

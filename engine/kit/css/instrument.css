@@ -30,12 +30,7 @@
 [data-shell] .vx-tabs[data-vx-live] > [aria-selected="true"] { color: var(--lit-legend); }
 
 [data-shell] { --vx-reading-plate: var(--panel); }
-[data-shell] .vx-pagination-pages > li > a { color: var(--lit-legend); }
-[data-shell] .vx-pagination-pages:not([data-vx-live]) > li > a { background-color: var(--vx-key); }
 
 [data-shell] .vx-nav[data-vx-mark="seats"] { color: #f5f2e5; --vx-slate: #515754; }
 [data-shell] .vx-nav[data-vx-mark="seats"] a:hover { color: inherit; }
-[data-shell] .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]),
-[data-shell] .vx-calendar-week > :is([data-vx-mark="one"],[data-vx-mark="start"],[data-vx-mark="end"]) > .vx-calendar-day { color: var(--lit-legend); }
-[data-shell] .vx-pagination-gap { color: #f5f2e5; }
-[data-shell] .vx-pagination-pages:not([data-vx-live]) { background-color: #515754; }
+[data-shell] .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend); }

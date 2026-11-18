@@ -134,8 +134,16 @@ for (const plain of [false, true]) {
     const none = await key(p, '#nocurrent');
     say(none.at === null && none.lit === null && none.stand === none.caps && none.well !== null, `${tag}: a bank with no current page has no button down and no light`);
   } else {
-    const painted = await p.evaluate(() => [...document.querySelectorAll('#few ol a')].map((a) => getComputedStyle(a).boxShadow !== 'none'));
-    say(painted.join() === 'false,false,true', `${tag}: aria-current set from code: the painted key is on the new seat`);
+    const lit = await p.evaluate(() => {
+      const bank = document.querySelector('#few ol');
+      const sample = document.createElement('span');
+      sample.style.color = 'var(--lit-accent, var(--vx-signal))';
+      bank.append(sample);
+      const accent = getComputedStyle(sample).color;
+      sample.remove();
+      return [...bank.querySelectorAll('a')].map(a => getComputedStyle(a).boxShadow.includes(accent));
+    });
+    say(lit.join() === 'false,false,true', `${tag}: aria-current set from code: only the new seat has a lit edge`);
   }
 
   // what cannot be pressed, and what can

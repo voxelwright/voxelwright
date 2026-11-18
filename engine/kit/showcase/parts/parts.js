@@ -26,9 +26,9 @@ function connectPartFooter() {
   nav.className = 'part-nav';
   nav.setAttribute('aria-label', 'Instrument library');
   const home = desk.cloneNode(false);
-  home.textContent = 'Village Instruments';
+  home.textContent = 'Signal Desk';
   const browse = list.cloneNode(false);
-  browse.textContent = 'Browse parts';
+  browse.textContent = 'Parts catalog';
   nav.append(home, browse);
   document.body.prepend(nav);
   document.body.append(footer);

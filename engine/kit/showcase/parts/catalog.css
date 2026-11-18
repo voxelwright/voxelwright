@@ -6,7 +6,7 @@ main { max-width: 70rem; margin: auto; padding: clamp(1rem, 4vw, 3rem) clamp(1re
 a { color: inherit; text-underline-offset: .22em; }
 a:focus-visible, input:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .back, .toolbar, .specimens output { font-size: .875rem; }
-h1 { margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .98; letter-spacing: -.055em; }
+h1 { font-weight: 620; margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .98; letter-spacing: -.055em; }
 .specimens { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.4rem; padding: 1.25rem clamp(.875rem, 2vw, 1.75rem); }
 .specimens article { position: relative; min-width: 0; }
 .tray { display: grid; place-items: center; min-height: 7.5rem; padding: .75rem; }
@@ -19,10 +19,10 @@ h1 { margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .
 .sheets, #count { padding-block: .6rem; }
 .sheets input { vertical-align: middle; }
 #count { color: var(--vx-ink-quiet); min-width: 4rem; text-align: end; font-variant-numeric: tabular-nums; }
-.group { display: grid; grid-template-columns: minmax(9rem, 1fr) 3fr; gap: 1rem; border-top: 1px solid var(--vx-slate); padding: 1.15rem 0; }
-.group h2 { margin: .4rem 0; font-size: 1.125rem; }
+.group { display: grid; grid-template-columns: minmax(9rem, 1fr) 3fr; gap: 1rem; border-block-end: 1px solid var(--vx-slate); padding: 1.35rem 0; }
+.group h2 { margin: .4rem 0; align-self: start; font-size: 1.45rem; line-height: 1.1; }
 .group ul { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .15rem .75rem; margin: 0; padding: 0; list-style: none; }
-.group li > a:first-child { display: block; width: fit-content; padding: .4rem 0; text-decoration: none; }
+.group li > a:first-child { display: flex; align-items: baseline; gap: .6rem; padding: .4rem 0; text-decoration: none; }
 .group li a:is(:hover,:focus-visible) { text-decoration: underline; }
 .sheet-link { display: none; }
 .with-sheets .sheet-link { display: block; }
@@ -33,7 +33,7 @@ h1 { margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .
   .tray { min-height: 5.25rem; padding: 1rem .65rem; }
   .specimens article + article { border-block-start: 1px solid color-mix(in srgb, currentColor 20%, transparent); }
   .specimens h2 { border: 0; padding: 0; flex-direction: column; justify-content: center; }
-  .group { grid-template-columns: 1fr; gap: .25rem; }
+  .group { grid-template-columns: 1fr; gap: .6rem; }
   .group ul { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .toolbar { gap: .25rem 1rem; }
   .search { flex-basis: 100%; }
@@ -45,4 +45,21 @@ h1 { margin: 2rem 0 1.5rem; font-size: clamp(2.75rem, 6vw, 5rem); line-height: .
 [data-shell] .search input { color: #263028; }
 [data-shell] :is(.toolbar, #count) { color: #454e46; }
 [data-shell] .group { border-color: #b9c3b7; }
-[data-shell] .group h2 { letter-spacing: -.03em; }
+
+/* A printed index on the desk, with the working sample plate above it. */
+[data-shell] .sheet-note { color: #46544c; }
+.back { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; }
+.specimens h2, .group h2 { letter-spacing: -.03em; }
+.specimens output, .toolbar output, .family-index, .search, .sheets { font-family: var(--vx-mono); }
+.search input { font: 1rem/1.5 var(--vx-font); }
+.family-index {
+  display: flex; flex-wrap: wrap; gap: .2rem 1.15rem; padding-block: .75rem;
+  border-block: 1px solid #919c91; font-size: .8125rem;
+}
+.family-index a { display: inline-flex; align-items: center; min-height: 44px; }
+.group li > a:first-child::before { content: ""; flex: none; align-self: baseline; height: 1px; width: .55rem; background: currentColor; opacity: .55; }
+@media (max-width: 42rem) {
+  .group li > a:first-child { align-items: center; min-height: 44px; }
+  .family-index { gap: 0 1rem; }
+  h1 { margin-top: .5rem; }
+}

@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Parts catalog · Voxelmorphism</title>
+  <title>Parts catalog · Signal Desk</title>
   <link rel="stylesheet" href="../../voxelmorphism.css">
   <link rel="stylesheet" href="catalog.css">
 </head>
 <body>
 <main>
-  <a class="back" href="../">← Showcase</a>
+  <a class="back" href="../">← Signal Desk</a>
   <h1>Parts catalog</h1>
   <div class="vx-card specimens">
     <article>
@@ -35,7 +35,16 @@
     <output id="count" aria-live="polite"></output>
   </div>
   <p class="sheet-note" id="sheet-note" role="status" hidden></p>
-  <section class="group"><h2>Controls</h2>
+  <nav class="family-index" aria-label="Part families">
+    <a href="#controls">Controls</a>
+    <a href="#forms">Forms</a>
+    <a href="#reading">Reading</a>
+    <a href="#overlays">Overlays</a>
+    <a href="#navigation">Navigation</a>
+    <a href="#data-tools">Data & tools</a>
+    <a href="#conversation">Conversation</a>
+  </nav>
+  <section class="group" id="controls"><h2>Controls</h2>
     <ul>
       <li><a href="checkbox.html">Checkbox</a></li>
       <li><a href="slider.html">Slider</a></li>
@@ -46,7 +55,7 @@
       <li><a href="lettering.html">Lettering</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Forms</h2>
+  <section class="group" id="forms"><h2>Forms</h2>
     <ul>
       <li><a href="radio.html">Radio</a></li>
       <li><a href="select.html">Select</a></li>
@@ -61,7 +70,7 @@
       <li><a href="close-button.html">Close button</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Reading</h2>
+  <section class="group" id="reading"><h2>Reading</h2>
     <ul>
       <li><a href="prose.html">Prose</a></li>
       <li><a href="code-block.html">Code block</a></li>
@@ -85,7 +94,7 @@
       <li><a href="direction.html">Direction</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Overlays</h2>
+  <section class="group" id="overlays"><h2>Overlays</h2>
     <ul>
       <li><a href="accordion.html">Accordion</a></li>
       <li><a href="collapsible.html">Collapsible</a></li>
@@ -98,7 +107,7 @@
       <li><a href="context-menu.html">Context menu</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Navigation</h2>
+  <section class="group" id="navigation"><h2>Navigation</h2>
     <ul>
       <li><a href="navbar.html">Navbar</a></li>
       <li><a href="navs.html">Navs</a></li>
@@ -109,7 +118,7 @@
       <li><a href="combobox.html">Combobox</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Data & tools</h2>
+  <section class="group" id="data-tools"><h2>Data & tools</h2>
     <ul>
       <li><a href="calendar.html">Calendar</a></li>
       <li><a href="date-picker.html">Date picker</a></li>
@@ -121,7 +130,7 @@
       <li><a href="theme-picker.html">Theme picker</a></li>
     </ul>
   </section>
-  <section class="group"><h2>Conversation</h2>
+  <section class="group" id="conversation"><h2>Conversation</h2>
     <ul>
       <li><a href="message.html">Message</a></li>
       <li><a href="bubble.html">Bubble</a></li>

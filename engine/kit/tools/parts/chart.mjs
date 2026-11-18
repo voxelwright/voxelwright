@@ -96,9 +96,9 @@ for (const plain of [false, true]) {
     say(d.cols.every((c) => c.light === null || c.light === (c.series ? 'light-stop' : 'light-go')), `${tag}: went out is on the green light, failed on the red`);
     const sun = d.cols.filter((c) => c.place === 6);
     say(sun.every((c) => c.litRows === 0 && c.studs > 0), `${tag}: Sunday, nought: no light, and its studs still show where its columns stand (${sun.map((c) => c.studs).join(', ')} studs)`);
-    const allowed = ['floor', 'light', 'light-go', 'light-stop', 'light-warm', 'slate', 'steel'];
+    const allowed = ['floor', 'gasket', 'light', 'light-go', 'light-stop', 'light-warm', 'slate', 'steel'];
     const mats = [...new Set([...(await read(p, 'build')).mats, ...d.mats, ...(await read(p, 'hours')).mats])];
-    say(mats.every((m) => allowed.includes(m)), `${tag}: its colours are only the look's lights, and steel, slate and floor: ${mats.join(' ')}`);
+    say(mats.every((m) => allowed.includes(m)), `${tag}: its colours are only the look's lights, and the socket and window materials: ${mats.join(' ')}`);
     say(d.scales[0] === 1 && d.g === 1, `${tag}: once grown, all its light is in`);
     say(await p.evaluate(() => window.vx.stage.awake.size) === 0, `${tag}: at rest nothing runs`);
   } else {
@@ -115,6 +115,8 @@ for (const plain of [false, true]) {
 
   // the line
   const b = await read(p, 'build');
+  const readout = p.locator('#build .vx-chart-reading strong');
+  say(await readout.textContent() === '38 s', `${tag}: the readout carries the final point with its unit`);
   say(b.ticks.map((t) => t.text).join() === '0,20,40,60,80', `${tag}: the line's scale: ${b.ticks.map((t) => t.text).join(' ')}`);
   const sixty = b.ticks.find((t) => t.text === '60');
   const wedP = plain ? b.points[2] : b.points.find((q) => q.place === 2);
@@ -152,6 +154,8 @@ for (const plain of [false, true]) {
     say(await p.evaluate(() => window.vx.stage.awake.size) === 0, `${tag}: then nothing runs`);
   } else say(d.rows[0][0] === 8 && d.cols[0].litRows === want(8, Math.round(d.ticks[0].y - d.ticks.at(-1).y), 15), `${tag}: the numbers change: the painted columns follow (Mon ${d.rows[0][0]})`);
   say(d.ticks.map((t) => t.text).join() === '0,5,10,15', `${tag}: the scale is written again (${d.ticks.map((t) => t.text).join(' ')})`);
+
+  say(await readout.textContent() === '42 s', `${tag}: turning back one week also changes the build-time readout`);
 
   await p.locator('#deploys').screenshot({ path: `shots/parts/chart/hand-${tag}.png` });
   say(p.errors.length === 0, `${tag}: no errors` + (p.errors.length ? ': ' + [...new Set(p.errors)].join(' | ') : ''));
