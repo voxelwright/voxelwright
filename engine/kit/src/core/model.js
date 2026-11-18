@@ -43,6 +43,32 @@ function neighborhoodKey(cells, ground) {
   };
 }
 
+// Estimate a moulded surface normal from occupied neighbours. Sample three
+// parallel pairs of planes in the voxel grid. Geometry and shadow depth still
+// use the six cube faces, including the tread and riser of every step.
+function mouldNormals(part, radius) {
+  const normals = new Int8Array(part.count * 4);
+  const half = Math.round(radius / 2);
+  const offsets = [...new Set([-radius, -half, 0, half, radius])];
+  for (let i = 0; i < part.count; i++) {
+    const x = Math.floor(part.rest[3 * i]), y = Math.floor(part.rest[3 * i + 1]), z = Math.floor(part.rest[3 * i + 2]);
+    let nx = 0, ny = 0, nz = 0;
+    // Bounded samples on each plane keep baking independent of filter width.
+    for (const a of offsets) for (const b of offsets) {
+      nx += part.has(x - radius, y + a, z + b) - part.has(x + radius, y + a, z + b);
+      ny += part.has(x + a, y - radius, z + b) - part.has(x + a, y + radius, z + b);
+      nz += part.has(x + a, y + b, z - radius) - part.has(x + a, y + b, z + radius);
+    }
+    const length = Math.hypot(nx, ny, nz);
+    if (!length) continue;
+    normals[i * 4] = Math.round(127 * nx / length);
+    normals[i * 4 + 1] = Math.round(127 * ny / length);
+    normals[i * 4 + 2] = Math.round(127 * nz / length);
+    normals[i * 4 + 3] = 112; // retain some of the individual cube face normal
+  }
+  return normals;
+}
+
 export class Part {
   constructor(name) {
     this.name = name;
@@ -180,6 +206,7 @@ export class Part {
     }
     this.count = mats.length;
     this.rest = new Float32Array(pos);
+    if (this.mouldRadius) this.normals = mouldNormals(this, this.mouldRadius);
     this.ao = new Uint32Array(ao);
     this.mats = new Uint8Array(mats);
     this.birth = new Float32Array(births);

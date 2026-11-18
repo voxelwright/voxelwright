@@ -23,7 +23,7 @@ const latched = el => el.getAttribute('aria-expanded') === 'true' || el.getAttri
 
 // A stroke belongs to the finger or key that began it. CSS supplies the plain
 // pressed pose; a rendered key also moves its spring at contact and release.
-function wireStroke(el, on, push, lift) {
+function wireStroke(el, on, { push, lift, momentary } = {}) {
   let held = null;
   const down = source => {
     if (held !== null || el.matches(':disabled, [aria-disabled="true"]')) return;
@@ -34,7 +34,7 @@ function wireStroke(el, on, push, lift) {
   const up = (source, returned) => {
     if (held === null || held !== source) return;
     held = null;
-    if (latched(el)) return;
+    if (!momentary && latched(el)) return;
     lift?.();
     if (returned && !el.matches(':disabled, [aria-disabled="true"]')) cue('release');
   };
@@ -50,7 +50,7 @@ function wireStroke(el, on, push, lift) {
 
 export const button = {
   name: 'button',
-  selector: '.vx-button',
+  selector: '.vx-button:not([data-lamp])',
   pad: 7,
 
   build(live, m) {
@@ -89,18 +89,23 @@ export const button = {
       else press.to(target, spring.k, spring.c);
       live.invalidate();
     };
-    const reset = wireStroke(el, on, () => {
-      const stop = -travel();
-      // A tap that fits between two paint frames still releases from a displaced cap.
-      press.x = Math.min(press.x, stop * 0.36);
-      move(stop, PRESS);
-    }, () => move(0, RELEASE));
+    const momentary = live.def.momentary;
+    const reset = wireStroke(el, on, {
+      momentary,
+      push() {
+        const stop = -travel();
+        // A tap that fits between two paint frames still releases from a displaced cap.
+        press.x = Math.min(press.x, stop * 0.36);
+        move(stop, PRESS);
+      },
+      lift: () => move(0, RELEASE),
+    });
     watchFieldsets(el, on, () => {
       if (el.matches(':disabled')) { reset(); press.snap(0); hover.snap(0); }
       live.rebuild();
     });
     on(el, 'pointerenter', e => {
-      if (e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
+      if (!momentary && e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
         hover.to(0.5, CALM.k * 2, CALM.c * 1.4);
         live.invalidate();
       }
@@ -118,6 +123,7 @@ export const button = {
         }
         return live.rebuild();
       }
+      if (momentary) return live.invalidate();
       // a trigger stays down while what it opened is open
       const open = latched(el);
       reset();

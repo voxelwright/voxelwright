@@ -19,18 +19,21 @@ layout(location=4) in vec4 iPos;    // centre xyz, scale
 layout(location=5) in vec4 iQuat;
 layout(location=6) in vec4 iColor;  // rgb, glow
 layout(location=7) in uvec2 iAo;
+layout(location=8) in vec4 iMould;
 uniform vec4 uView;   // origin x, origin y (device px), px per voxel, 0
 uniform vec2 uShear;
 uniform vec2 uSize;
-out vec3 vN; out vec3 vP; out vec2 vUv; out float vAo; out vec4 vColor;
+out float vSpecular; out float vBias; out vec3 vN; out vec3 vP; out vec2 vUv; out float vAo; out vec4 vColor;
 vec3 rot(vec3 v, vec4 q) { return v + 2.0 * cross(q.xyz, cross(q.xyz, v) + q.w * v); }
 void main() {
   vec3 p = iPos.xyz + rot(aPos * iPos.w, iQuat);
-  vN = rot(aNormal, iQuat);
+  vSpecular = float(iAo.y >> 24u) / 255.0;
+  vBias = iMould.w;
+  vN = rot(mix(aNormal, iMould.xyz, iMould.w), iQuat);
   vP = p; vUv = aUv; vColor = iColor;
   int f = int(aFace.x); int c = int(aFace.y);
   uint bits = f < 4 ? (iAo.x >> uint(f * 8 + c * 2)) : (iAo.y >> uint((f - 4) * 8 + c * 2));
-  vAo = float(bits & 3u);
+  vAo = float(bits & 3u) * (1.0 - iMould.w * 0.8);
   float px = uView.x + (p.x + uShear.x * p.z) * uView.z;
   float py = uView.y + (p.y + uShear.y * p.z) * uView.z;
   gl_Position = vec4(px / uSize.x * 2.0 - 1.0, 1.0 - py / uSize.y * 2.0, -p.z / ${Z_RANGE}.0, 1.0);
@@ -54,7 +57,7 @@ float lit(vec3 p, vec3 n) {
 
 const FS = `#version 300 es
 precision highp float;
-in vec3 vN; in vec3 vP; in vec2 vUv; in float vAo; in vec4 vColor;
+in float vSpecular; in float vBias; in vec3 vN; in vec3 vP; in vec2 vUv; in float vAo; in vec4 vColor;
 uniform vec3 uToLight;
 uniform float uSun;
 uniform vec4 uAmbient;      // top, front, side, under
@@ -78,7 +81,7 @@ void main() {
             + n2.y * (n.y < 0.0 ? uAmbient.x : uAmbient.w)
             + n2.z * (n.z > 0.0 ? uAmbient.y : uAmbient.w);
   float ndl = max(dot(n, uToLight), 0.0);
-  float sh = ndl > 0.0 ? lit(vP, n) : 0.0;
+  float sh = ndl > 0.0 ? lit(vP + n * vBias * 0.65, n) : 0.0;
   float ao = 1.0 - vAo * 0.17;
   float direct = uSun * ndl * sh;
   float l = amb * ao + direct;
@@ -86,7 +89,11 @@ void main() {
   vec3 base = vColor.rgb;
   vec3 c = base * min(l, 1.0);
   c = mix(c * uAmbientTint, c, clamp(direct / (uSun * 0.6), 0.0, 1.0));
-  c = mix(c, uHighlight, clamp((l - 1.0) * 1.5, 0.0, 0.55));
+  c = mix(c, uHighlight, mix(1.0, vSpecular, vBias) * clamp((l - 1.0) * 1.5, 0.0, 0.55));
+  if (vBias > 0.0 && direct > 0.0) {
+    vec3 halfVector = normalize(uToLight + normalize(vec3(-uWellShear, 1.0)));
+    c += uHighlight * (vSpecular * direct * pow(max(dot(n, halfVector), 0.0), 6.0));
+  }
   // Seams: one device pixel along every voxel edge, so the grid stays countable.
   vec2 e = min(vUv, 1.0 - vUv) * uPx;
   float seam = vColor.a < 0.0 ? 0.0 : 1.0 - smoothstep(0.0, 1.0, min(e.x, e.y));
@@ -240,6 +247,7 @@ export class Renderer {
 
     this.bufPos = gl.createBuffer();   // per instance: xyz, scale, quat
     this.bufCol = gl.createBuffer();   // per instance: rgb, glow
+    this.bufNormals = gl.createBuffer();
     this.bufAo = gl.createBuffer();    // per instance: two uint32
     this.capacity = 0;
 
@@ -385,6 +393,17 @@ export class Renderer {
 
     if (count) {
       // voxels
+      gl.bindVertexArray(this.vaoCube);
+      if (frame.normals) {
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.bufNormals);
+        gl.bufferData(gl.ARRAY_BUFFER, frame.normals.subarray(0, count * 4), gl.DYNAMIC_DRAW);
+        gl.enableVertexAttribArray(8);
+        gl.vertexAttribPointer(8, 4, gl.BYTE, true, 0, 0);
+        gl.vertexAttribDivisor(8, 1);
+      } else {
+        gl.disableVertexAttribArray(8);
+        gl.vertexAttrib4f(8, 0, 0, 0, 0);
+      }
       gl.useProgram(this.main.p);
       const u = this.main.u;
       gl.uniform4fv(u.uView, view);

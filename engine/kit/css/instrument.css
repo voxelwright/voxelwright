@@ -2,11 +2,11 @@
 [data-profile="high"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * 2.25); }
 [data-profile="low"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * .75); }
 [data-profile] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):is(:active,[aria-pressed="true"],[aria-expanded="true"]) { --_lift: calc(var(--vx) * .5); }
-[data-caps="field"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):not([data-vx-kind],[data-vx-step]) {
+[data-caps="field"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):not([data-vx-kind],[data-vx-step],[data-lamp]) {
  background: radial-gradient(ellipse at 26% 160%,#677c6d 0 45%,#96a089 45% 50%,transparent 51%),var(--vx-key);
 }
 [data-caps="opal"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { background-color: color-mix(in srgb,var(--vx-key) 82%,transparent); }
-[data-caps="carbon"] :is(.vx-button,.vx-toggle-button):not(:disabled):not([data-vx-kind]) .vx-label {
+[data-caps="carbon"] :is(.vx-button,.vx-toggle-button):not(:disabled):not([data-vx-kind],[data-lamp]) .vx-label {
  color: color-mix(in srgb,var(--case-lamp) calc(58% * var(--lamp-level)),#eee9de);
  text-shadow: 0 0 calc(4px * var(--lamp-level)) color-mix(in srgb,var(--case-lamp) calc(50% * var(--lamp-level)),transparent);
 }
@@ -156,3 +156,43 @@
 /* A tall cap projects backwards beyond its box. A bank reserves this room
    above the first key as well as between rows. */
 [data-shell] .vx-toggle-group[role="toolbar"] { margin-block-start: calc(var(--vx) * 2); row-gap: calc(var(--vx) * 5); }
+
+/* A lamp key includes the floor and flange within the button's hit target. */
+.vx-button[data-lamp] {
+  aspect-ratio: 1.18; height: auto; min-width: max(44px,calc(16 * var(--vx))); min-height: max(44px,calc(16 * var(--vx)));
+  justify-content: start; padding: 0; padding-inline-start: 29%; color: var(--lit-legend,#352c23);
+}
+.vx-button[data-lamp] i { display: none; }
+[data-shell] .vx-button[data-lamp] .vx-label { color: var(--lit-legend,#352c23); text-shadow: none; }
+:root .vx-button[data-lamp]:not([data-vx-live]),
+:root .vx-button[data-lamp]:not([data-vx-live]):is([aria-pressed],:active):not(:disabled) {
+  isolation: isolate; transform: none; background: #1c211d;
+  box-shadow: inset 0 0 0 var(--vx) #343a34;
+}
+:root .vx-button[data-lamp]:not([data-vx-live])::before {
+  content: ""; position: absolute; inset: 7% 7% 8%; z-index: -1;
+  background: var(--vx-key,#eee4cd); border: 0;
+  border-inline: calc(var(--vx) * 1.5) solid var(--_side);
+  border-bottom: calc(var(--vx) * 3) solid var(--_side);
+  box-shadow: inset 1px 1px 0 var(--_top);
+}
+[data-caps="field"] .vx-button[data-lamp]:not([data-vx-live])::before {
+  background: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%),var(--vx-key);
+}
+.vx-button[data-lamp]:not([data-vx-live])::after {
+  content: ""; position: absolute; top: 31%; left: 29%; width: 12%; height: var(--vx);
+  background: #414a42; pointer-events: none;
+}
+.vx-button[data-vx-pilot="status"] { --vx-pilot-level: 1; }
+.vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live])::after {
+  background: color-mix(in srgb,var(--case-lamp,#71e2cd) calc(100% * var(--vx-pilot-level,var(--lamp-level,1))),#414a42);
+}
+:root .vx-button[data-lamp]:not([data-vx-live]):active:enabled::before {
+  translate: calc(-1 * var(--vx)) calc(-1 * var(--vx)); border-bottom-width: var(--vx);
+}
+.vx-button[data-lamp]:not([data-vx-live]):active:enabled .vx-label,
+.vx-button[data-lamp]:not([data-vx-live]):active:enabled::after { translate: calc(-1 * var(--vx)) calc(-1 * var(--vx)); }
+
+@media (max-width: 400px) {
+  .vx-button[data-lamp] { justify-content: center; padding-inline: 0; }
+}

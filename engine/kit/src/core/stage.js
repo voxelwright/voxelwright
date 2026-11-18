@@ -59,6 +59,7 @@ export class Live {
     this.model.bake(this.theme, this.look);
     let n = 0, glows = false;
     for (const p of this.model.parts) { n += p.count; for (let i = 0; i < p.count; i++) if (p.col[i * 4 + 3] > 0) { glows = true; break; } }
+    this.normals = this.model.parts.some(p => p.normals) ? new Int8Array(n * 4) : null;
     this.capacity = n;
     this.pos = new Float32Array(n * 8);
     this.col = new Float32Array(n * 4);
@@ -225,12 +226,16 @@ export class Live {
           this.writeRest(p, o);
         }
       } else this.writeRest(p, o);
+      if (this.normals) {
+        if (p.normals) this.normals.set(p.normals, n * 4);
+        else this.normals.fill(0, n * 4, (n + cnt) * 4);
+      }
       col.set(p.col, n * 4);
       ao.set(p.ao, n * 2);
       o += cnt * 8; n += cnt;
     }
     const ok = this.stage.renderer.draw({
-      pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
+      pos, col, ao, normals: this.normals, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
       soft: this.form.soft, groundSoft: this.look.groundSoft, surfaceBytes: !!this.look.finishes,
       // a part may turn its own light up and down as it is used (live.glowStrength, live.glowRadius)

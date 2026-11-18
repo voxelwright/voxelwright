@@ -5,6 +5,7 @@ import { Stage } from './core/stage.js';
 import { Renderer } from './core/gl.js';
 import { renderer as engine } from './engine.js';
 import { button } from './components/button.js';
+import { lampKey } from './components/lamp-key.js';
 import { toggle } from './components/toggle.js';
 import { instrument, settings } from './looks/instrument.js';
 import { backplane } from './components/backplane.js';
@@ -84,7 +85,7 @@ export { plant, pot, STAGES, stageOf } from './core/plant.js';
 export { sound, cue } from './core/sound.js';
 
 export const components = [
-  button, toggle, slider, rotary, backplane, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
+  button, lampKey, toggle, slider, rotary, backplane, field, card, list, tabs, meter, menu, dialog, toastDef, lettering, block, groove, recess, lamp, pointer,
   accordion, avatar, callout, checkbox, collapsible, hoverCard, kbd, listGroup, pagination, popover, prose, radio, scrollArea, scrollSpy, select, skeleton, spinner, stepper, table, toggleButton, toggleGroup, tooltip, validation,
   bubble, messageScroller, attachment, questionnaire, trace, sheet, drawer, contextMenu, dataTable, chart, themePicker,
   navs, navbar, sidebar, navigationMenu, navigationMenuFloat, menubar, commandPalette, combobox,
