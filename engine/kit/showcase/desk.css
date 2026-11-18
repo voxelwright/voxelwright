@@ -64,6 +64,7 @@ h1 span { color: #ae512f; }
 .keybed [aria-pressed="true"] i { background: var(--case-lamp); box-shadow: 0 0 5px color-mix(in srgb,var(--case-lamp) calc(var(--lamp-level) * 80%),transparent); }
 [data-caps="opal"] .vx-label { text-shadow: 0 0 3px var(--case-lamp); }
 .caption { font-size: 10px; color: #5c635a; padding: .75rem .2rem; }
+.caption .study-link { display: inline-flex; align-items: center; min-height: 26px; text-decoration: underline; text-underline-offset: .22em; }
 .caption i { background: #607853; width: 6px; height: 6px; border-radius: 50%; vertical-align: .05em; }
 .setup { padding: 1rem 0 0; border-top: 2px solid #334435; }
 .setup h2,.library h2 { font-weight: 570; letter-spacing: -.045em; line-height: 1.1; font-size: 2rem; }

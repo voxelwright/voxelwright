@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit" data-shell="walnut">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Tide key · Village Instruments</title>
+  <link rel="stylesheet" href="../voxelmorphism.css">
+  <link rel="stylesheet" href="desk.css">
+  <link rel="stylesheet" href="tide.css">
+</head>
+<body class="key-study">
+  <header class="mast">
+    <a class="brand" href="./"><i class="mark" aria-hidden="true"></i> Village <b>Instruments</b></a>
+    <nav aria-label="Showcase"><a href="./#lamp-bank">Back to Signal Desk</a></nav>
+  </header>
+  <main>
+    <h1>Tide key<span>.</span></h1>
+    <section class="key-tester" aria-label="Single-switch tester">
+      <div class="key-stage">
+        <div class="hardware">
+          <div class="vx-backplane" aria-hidden="true"></div>
+          <div class="deckscrews" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+          <div class="faceplate">
+            <div class="keybed"><button class="vx-button" type="button" data-lamp="tide" aria-pressed="false" aria-describedby="key-help"><i aria-hidden="true"></i>Tide</button></div>
+          </div>
+        </div>
+      </div>
+      <div class="tester-controls">
+        <p id="key-help">Press and hold Tide to feel the travel. Release to switch its lamp.</p>
+        <label class="choice" for="caps">Keycap<select id="caps"></select></label>
+        <label class="choice" for="shell">Enclosure<select id="shell"></select></label>
+        <fieldset class="profile"><legend>Key profile</legend><div>
+          <label><input type="radio" name="profile" value="low">Low</label>
+          <label><input type="radio" name="profile" value="high" checked>Sculpted</label>
+        </div></fieldset>
+        <label class="sound" for="sound"><input id="sound" type="checkbox">Switch sound <small>Cherry MX Brown</small></label>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="tide.js"></script>
+</body>
+</html>
