@@ -1,32 +1,37 @@
 // A static server for the showcase. Port 5985 by default; 127.0.0.1 only.
+// The kit lives in the Village engine (engine/kit), and its renderer is the engine's own source (engine/blocks), so
+// this serves the engine folder: the kit under /kit/, and the two folders its renderer reads (blocks/, probe/), each .ts
+// with its types stripped as the engine's servers do. The root goes to /kit/showcase/.
 // The engine's renderer is the kit's default now. --engine still hands it over by name before a
 // page's own script runs, and has each page tell this server what drew it (milestones/seen.log),
 // which is how a phone's answer is read: PORT=5986 node tools/serve.mjs --engine
 import { createServer } from 'node:http';
+import { stripTypeScriptTypes } from 'node:module';
 import { appendFile, readFile, rename, stat } from 'node:fs/promises';
 import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+const root = resolve(fileURLToPath(new URL('../..', import.meta.url)));
+const kit = join(root, 'kit');
 const port = Number(process.env.PORT || 5985);
 const engine = process.argv.includes('--engine');
 // The Village engine's built folder (its engine/dist, after `npm run player`), sent under /engine/ and never
 // written: with it a kit panel can stand in the engine's world, on this one port, as
-//   /engine/landing/index.html?kit=/packages/voxelmorphism/&hour=17.8&scale=1
+//   /engine/landing/index.html?kit=/kit/&hour=17.8&scale=1
 //   ENGINE_DIST=<Village>/engine/dist PORT=5989 node tools/serve.mjs
 const world = process.env.ENGINE_DIST ? resolve(process.env.ENGINE_DIST) : null;
 // module scripts run in document order, so this one runs before the page's own.
 // It also tells this server what ended up drawing the page, so a phone's answer can be read here.
-const HAND = `<script type="module">import { use, ready } from '/packages/voxelmorphism/src/index.js'; import { renderer } from '/packages/voxelmorphism/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname), { method: 'POST' }).catch(() => {})));</script>\n`;
-const seen = join(root, 'milestones', 'seen.log');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4' };
+const HAND = `<script type="module">import { use, ready } from '/kit/src/index.js'; import { renderer } from '/kit/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname), { method: 'POST' }).catch(() => {})));</script>\n`;
+const seen = join(kit, 'milestones', 'seen.log');
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4', '.ts': 'text/javascript; charset=utf-8' };
 
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
     let path = decodeURIComponent(url.pathname);
     // the pages name their own files by relative address, so the root has to move, not just answer
-    if (path === '/') { res.writeHead(302, { location: '/showcase/' + url.search, 'cache-control': 'no-store' }).end(); return; }
+    if (path === '/') { res.writeHead(302, { location: '/kit/showcase/' + url.search, 'cache-control': 'no-store' }).end(); return; }
     if (engine && path === '/__seen') {
       // A note per page load, from fixed words only. Only a page this server served may leave one:
       // a GET writes nothing, and neither does a request another site's page made. A refusal is
@@ -50,11 +55,12 @@ createServer(async (req, res) => {
     const built = world && path.startsWith('/engine/');
     const base = built ? world : root;
     const file = normalize(join(base, built ? path.slice(7) : path));
-    // nothing whose name starts with a dot is served: .git, .claude, an env file
-    if (!file.startsWith(base + '/') || /\/node_modules\//.test(file) || /\/\./.test(file.slice(base.length))) { res.writeHead(403).end('no'); return; }
+    // nothing whose name starts with a dot is served: .git, .claude, an env file; of the engine only the kit and what its renderer reads
+    if (!file.startsWith(base + '/') || /\/node_modules\//.test(file) || /\/\./.test(file.slice(base.length)) || (!built && !['kit', 'blocks', 'probe'].includes(file.slice(base.length + 1).split('/')[0]))) { res.writeHead(403).end('no'); return; }
     const s = await stat(file);
     if (!s.isFile()) throw new Error('not a file');
     let body = await readFile(file);
+    if (file.endsWith('.ts')) body = stripTypeScriptTypes(body.toString('utf8'));
     // a clip is asked for a piece at a time (Safari plays nothing otherwise)
     const piece = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || ''));
     if (piece && file.endsWith('.mp4') && (piece[1] || piece[2])) {
