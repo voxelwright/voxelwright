@@ -144,6 +144,16 @@ export function keyLight(live, hover, flare, held = 0) {
   live.glowRadius = 2.3 + flare * 0.8;
 }
 
+/**
+ * A row lens: a strip of smoked glass set flush in the surface, one course proud of it so its
+ * glass catches the light. Every row of a list carries one, so the choice moving is a lens going
+ * dark and another lighting, and nothing appears from nowhere. `on` lights it with `light`.
+ */
+export function rowLens(part, x, y, w, h, on, light = 'light') {
+  part.box(x, y, 0, w, h, 1, on ? light : 'lens');
+  return part;
+}
+
 /** A pilot lamp has a steel socket, a raised lens and one pale facet facing the light. */
 export function pilot(m, w, h, material) {
   m.part('collar').slab(-1, -1, 0, w + 2, h + 2, 2, 'steel', 1).carve(0, 0, 0, w, h, 2);

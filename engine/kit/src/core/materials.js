@@ -49,6 +49,8 @@ const defs = {
   'light-go': { day: '#12b556', night: '#35e07a', jitter: 0, glow: 1 },
   caution: { day: '#ac6615', night: '#efb664', jitter: 0, glow: 0.55 },
   'light-stop': { day: '#f0442e', night: '#ff5a44', jitter: 0, glow: 1 },
+  // Lens: an unlit lamp window, smoked glass. It is there before it lights, and stays when it goes out.
+  lens: { day: '#7a766c', night: '#14171b', jitter: 0.004 },
   // Key: the cap of an ordinary key.
   key: { day: '#fffefa', night: '#2b3046', jitter: 0.004 },
   // Pointer-edge: the outline of the voxel pointer.

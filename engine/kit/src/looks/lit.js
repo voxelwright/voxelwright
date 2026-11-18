@@ -5,11 +5,11 @@
 import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM, SLIDE } from '../core/motion.js';
-import { seatIndicator, pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { seatIndicator, pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel, rowLens } from '../core/light.js';
 import { inlineX } from '../plain.js';
 import { toggle, KNOB } from '../components/toggle.js';
 import { meter } from '../components/meter.js';
-import { wrapLabel } from '../components/util.js';
+import { wrapLabel, listeners } from '../components/util.js';
 import { cardSpine } from '../components/card.js';
 import { capIcon } from '../components/button.js';
 import { parts as existing } from './lit-existing.js';
@@ -94,6 +94,18 @@ export const groove = {
 
   build(live, m) {
     const { W, H, el } = live;
+    // A row lens (data-vx-lens): every row of a list carries the same smoked lens, and only the
+    // current row's is lit. Nothing appears from nowhere when the choice moves; a lens lights.
+    if (el.hasAttribute('data-vx-lens')) {
+      const on = currentRow(el);
+      live.state.lens = on;
+      const w = Math.min(W, H), h = Math.max(W, H);
+      if (W >= H) rowLens(m.part('lens'), 0, 0, h, w, on, lightName(el, 'light'));
+      else rowLens(m.part('lens'), 0, 0, w, h, on, lightName(el, 'light'));
+      live.faceZ = 0;
+      return;
+    }
+    live.state.lens = undefined;
     const mat = lightName(el, 'light-warm');
     const header = !el.dataset.vxLight && W > H && el.parentElement?.matches('.vx-card')
       && el.parentElement.querySelector(':scope > .vx-groove') === el;
@@ -105,8 +117,32 @@ export const groove = {
     }
   },
 
-  pose(live) { live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live)); },
+  pose(live) {
+    if (live.state.lens !== undefined) { live.glowStrength = live.state.lens ? halo(0.05) * byTheme(live) : 0; return; }
+    live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live));
+  },
+
+  // a lens follows its row: when aria-current moves, the old lens goes dark and the new one lights
+  bind(live) {
+    if (!live.el.hasAttribute('data-vx-lens')) return null;
+    const row = rowOf(live.el);
+    if (!row) return null;
+    const on = listeners();
+    on.watch(row, { attributes: true, attributeFilter: ['aria-current', 'aria-selected'] }, () => {
+      if (currentRow(live.el) !== live.state.lens) live.rebuild?.();
+    });
+    return on.done;
+  },
 };
+
+// the row a lens belongs to, and whether it is the current one
+const rowOf = (el) => el.closest('li, a, [role="option"], [role="tab"], [role="treeitem"]');
+function currentRow(el) {
+  const row = rowOf(el);
+  if (!row) return false;
+  const c = row.getAttribute('aria-current'), s = row.getAttribute('aria-selected');
+  return (c !== null && c !== 'false') || s === 'true';
+}
 
 // ---------------------------------------------------------------------------------------------
 // Bar. A trench in the surface that fills with light, one column at a time.
@@ -386,7 +422,7 @@ defineLook('lit', {
   finishes: {
     chalk: { chamfer: 75 }, floor: { chamfer: 0 }, slate: { chamfer: 80 },
     steel: { chamfer: 195, specular: 165 }, enamel: { chamfer: 175, specular: 105 },
-    key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 },
+    key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 }, lens: { chamfer: 40, specular: 150 },
   },
   rise: 6, travel: 4, step: 1,
   slab: 5, round: 2, float: 6, dialog: 7, well: 4,

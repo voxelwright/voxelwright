@@ -622,6 +622,10 @@ dialog.vx-dialog:focus-visible { outline: none; }
 .vx-groove[data-vx-way="down"] { block-size: auto; inline-size: var(--vx); align-self: stretch; }
 .vx-groove:not([data-vx-live]) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
 .vx-groove[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+/* a row lens: smoked and unlit until its row is the current one */
+.vx-groove[data-vx-lens]:not([data-vx-live]) { background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate)); }
+:is(li, a, [role="option"], [role="tab"])[aria-current]:not([aria-current="false"]) > .vx-groove[data-vx-lens]:not([data-vx-live]),
+[aria-selected="true"] > .vx-groove[data-vx-lens]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
 
 /* Lamp: a small light that says a state. data-vx-light: go (the default), stop, warm, accent. */
 .vx-lamp { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }

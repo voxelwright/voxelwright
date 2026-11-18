@@ -59,12 +59,15 @@
 .vx-list-group > li > .vx-item:hover { text-decoration: none; }
 .vx-list-group > li > .vx-item:focus-visible { outline: 0; }
 
-/* plain: the mark is a painted line where the groove will be */
-.vx-list-group:not([data-vx-live]) > li:is([aria-current], :has(> [aria-current])):not([aria-current="false"], :has(> [aria-current="false"]))::before {
+/* plain: every row has its lens painted where the voxel one will be; the current row's is lit */
+.vx-list-group:not([data-vx-live]) > li::before {
   content: "";
   position: absolute;
   inset-block: calc(var(--vx) * 2);
   inset-inline-start: var(--vx);
   inline-size: var(--vx);
+  background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate));
+}
+.vx-list-group:not([data-vx-live]) > li:is([aria-current], :has(> [aria-current])):not([aria-current="false"], :has(> [aria-current="false"]))::before {
   background: var(--lit-accent, var(--vx-enamel));
 }
