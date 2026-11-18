@@ -19,6 +19,35 @@ export function capIcon(live, cap, z, mat) {
   }
 }
 
+const latched = el => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
+
+// A stroke belongs to the finger or key that began it. CSS supplies the plain
+// pressed pose; a rendered key also moves its spring at contact and release.
+function wireStroke(el, on, push, lift) {
+  let held = null;
+  const down = source => {
+    if (held !== null || el.matches(':disabled, [aria-disabled="true"]')) return;
+    held = source;
+    push?.();
+    cue('press');
+  };
+  const up = (source, returned) => {
+    if (held === null || held !== source) return;
+    held = null;
+    if (latched(el)) return;
+    lift?.();
+    if (returned && !el.matches(':disabled, [aria-disabled="true"]')) cue('release');
+  };
+  on(el, 'pointerdown', e => { if (e.button === 0) down(e.pointerId); });
+  on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
+  on(el, 'pointercancel', e => up(e.pointerId, false));
+  on(el, 'pointerleave', e => up(e.pointerId, false));
+  on(el, 'keydown', e => { if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key); });
+  on(el, 'keyup', e => up(e.key, true));
+  on(el, 'blur', () => up(held, false));
+  return () => { held = null; };
+}
+
 export const button = {
   name: 'button',
   selector: '.vx-button',
@@ -54,62 +83,44 @@ export const button = {
     watchDirection(live, on);
     wrapLabel(el);
     const press = live.spring('press'), hover = live.spring('hover');
-    let held = null;
     const travel = () => live.model.keyTravel ?? Math.min(live.look.travel, Math.max(0, (live.state.top ?? live.look.rise) - 1));
-    const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
     const move = (target, spring) => {
       if (reducedMotion()) press.snap(target);
       else press.to(target, spring.k, spring.c);
       live.invalidate();
     };
-    const down = source => {
-      if (held !== null || el.matches(':disabled, [aria-disabled="true"]')) return;
-      held = source;
+    const reset = wireStroke(el, on, () => {
       const stop = -travel();
-      // Take up the first part of the stroke at contact. A tap that fits between
-      // two paint frames still releases from a displaced cap.
+      // A tap that fits between two paint frames still releases from a displaced cap.
       press.x = Math.min(press.x, stop * 0.36);
       move(stop, PRESS);
-      cue('press');
-    };
-    const up = (source, returned) => {
-      if (held === null || held !== source) return;
-      held = null;
-      if (holds()) return;
-      move(0, RELEASE);
-      if (returned) cue('release');
-    };
-    on(el, 'pointerdown', e => { if (e.button === 0) down(e.pointerId); });
-    on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
-    on(el, 'pointercancel', e => up(e.pointerId, false));
+    }, () => move(0, RELEASE));
     on(el, 'pointerenter', e => {
       if (e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
         hover.to(0.5, CALM.k * 2, CALM.c * 1.4);
         live.invalidate();
       }
     });
-    on(el, 'pointerleave', e => {
+    on(el, 'pointerleave', () => {
       hover.to(0, CALM.k * 2, CALM.c * 1.4);
-      up(e.pointerId, false);
       live.invalidate();
     });
-    on(el, 'keydown', e => { if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key); });
-    on(el, 'keyup', e => up(e.key, true));
-    on(el, 'blur', () => up(held, false));
     on.watch(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] }, (list) => {
       if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) {
         if (el.matches(':disabled, [aria-disabled="true"]')) {
-          held = null;
+          reset();
           press.snap(0);
           hover.snap(0);
         }
         return live.rebuild();
       }
       // a trigger stays down while what it opened is open
-      const open = holds();
-      held = null;
+      const open = latched(el);
+      reset();
       move(open ? -travel() : 0, open ? PRESS : RELEASE);
     });
     return on.done;
   },
+
+  plain: wireStroke,
 };

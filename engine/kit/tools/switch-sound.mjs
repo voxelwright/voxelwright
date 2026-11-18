@@ -59,6 +59,19 @@ try {
   await page.getByRole('link', {name: 'Parts catalog', exact: true}).click();
   assert.equal(await page.getByRole('checkbox', {name: 'Switch sound'}).isChecked(), true);
   assert.equal(await page.evaluate(() => window.decoded), 0);
+  await page.addInitScript(() => {
+    new MutationObserver((_, observer) => {
+      if (!document.documentElement) return;
+      document.documentElement.setAttribute('data-vx-plain', '');
+      observer.disconnect();
+    }).observe(document, {childList: true});
+  });
+  await page.goto('http://127.0.0.1:' + port + '/kit/showcase/parts/button-group.html');
+  await page.locator('#draft').click();
+  await page.waitForFunction(() => window.decoded === 2);
+  assert.equal(await page.locator('#draft[data-vx-live]').count(), 0);
+  await page.locator('#draft').press('Space');
+  assert.equal(await page.evaluate(() => window.strokes.length), 2);
   console.log('Recorded down/up, repeat suppression, opt-in, mute, and catalog navigation passed.');
 } finally {
   await browser.close();
