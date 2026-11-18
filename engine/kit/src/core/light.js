@@ -89,12 +89,12 @@ export function seatIndicator(live, id, x, y, w, h, light = 'light', z = -1) {
   const tongue = m.part('tongue' + id);
   // One cell of overlap on each side covers the light at this projection.
   tongue.slab(left - 1, row - 1, z + 1, width + 2, 2, 1, 'slate', 1);
-  let lastTravel, lastTheme;
+  let lastTravel, lastTint;
   return (amount) => {
     const travel = Math.max(0, Math.min(1, amount));
-    if (travel === lastTravel && live.theme === lastTheme) return;
+    if (travel === lastTravel && live.tintRevision === lastTint) return;
     lastTravel = travel;
-    lastTheme = live.theme;
+    lastTint = live.tintRevision;
     tongue.ty = -2 * travel;
     tongue.tz = -2 * travel;
     // The two end lamps share the shutter's travel. In a closed slit even

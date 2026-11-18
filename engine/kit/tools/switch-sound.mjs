@@ -19,6 +19,12 @@ try {
       window.decoded++;
       return buffer;
     };
+    const createFilter = BaseAudioContext.prototype.createBiquadFilter;
+    BaseAudioContext.prototype.createBiquadFilter = function () {
+      const filter = createFilter.call(this);
+      (window.filters ??= []).push(filter);
+      return filter;
+    };
     const start = AudioBufferSourceNode.prototype.start;
     AudioBufferSourceNode.prototype.start = function (...args) {
       window.strokes.push(this.buffer.duration);
@@ -32,6 +38,11 @@ try {
   const sound = page.getByRole('checkbox', {name: 'Switch sound'});
   await sound.check();
   await page.waitForFunction(() => window.decoded === 2);
+  await page.evaluate(async () => {
+    const { fitInstrument } = await import('/kit/src/index.js');
+    fitInstrument({ shell: 'alloy' });
+  });
+  await page.waitForFunction(() => window.filters?.some(f => f.type === 'highshelf' && f.gain.value > 1.9));
   await key.focus();
   await page.keyboard.down('Space');
   await page.keyboard.down('Space');

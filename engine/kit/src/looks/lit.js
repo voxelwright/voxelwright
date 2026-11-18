@@ -487,6 +487,7 @@ export const THEMES = {
 export function applyTheme(t = 'bay') {
   const th = typeof t === 'string' ? THEMES[t] ?? THEMES.bay : t;
   const look = LOOKS.lit;
+  look.appliedTheme = th;
   look.materials.enamel = th.cap;
   look.materials.light = { ...th.light, glow: 0.68 };
   look.materials.signal = { ...th.light, glow: 1 };

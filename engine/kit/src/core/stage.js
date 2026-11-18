@@ -19,6 +19,7 @@ export class Live {
     this.visible = true;
     this.dirty = true;
     this.fxCount = 0;
+    this.tintRevision = 0;
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'vx-canvas';
     this.canvas.setAttribute('aria-hidden', 'true');
@@ -77,6 +78,7 @@ export class Live {
   }
 
   recolor() {
+    this.tintRevision++;
     this.model.tint(this.theme, this.look);
     this.glows = this.model.parts.some(p => p.col.some((channel, i) => i % 4 === 3 && channel > 0));
     this.invalidate();

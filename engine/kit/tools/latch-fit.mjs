@@ -4,7 +4,7 @@ import { chromium } from 'playwright';
 
 const base = `http://127.0.0.1:${process.env.PORT || 5989}/kit/showcase/`;
 const controls = [
-  { name: 'tabs', path: '', selector: '.tabcard .vx-tabs', legend: '[aria-selected="true"] .vx-label' },
+  { name: 'tabs', path: 'principles.html', selector: '.tabcard .vx-tabs', legend: '[aria-selected="true"] .vx-label' },
   { name: 'follow', path: 'parts/toggle-button.html', selector: '#s-off', legend: ':scope > .vx-label' },
   { name: 'bank', path: 'parts/toggle-group.html', selector: '#range', legend: 'label:has(input:checked) .vx-label' },
   { name: 'pager', path: 'parts/pagination.html', selector: '#pager ol', legend: '[aria-current="page"] .vx-label' },

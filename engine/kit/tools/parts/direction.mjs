@@ -3,7 +3,6 @@
 // names the file and line where it is to be mended. The light is not measured: it stays upper
 // left, and shadows fall right and down, whatever the language.
 //   PORT=5989 node tools/parts/direction.mjs
-// Exit 2 singles out the known Vox Text script-coverage gap. Other failures exit 1.
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
@@ -171,9 +170,13 @@ const faces = async (sel) => { const { root } = await cdp.send('DOM.getDocument'
 await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
 const en = await faces(ltr('p-button', '.vx-button .vx-label')), ar = await faces(rtl('p-button', '.vx-button .vx-label')), body = await faces(rtl('p-empty', '.vx-empty-text'));
 say(/Vox Text/.test(en), `a legend in English is drawn in the key face (${en})`);
-const missingArabic = !/Vox Text/.test(ar);
-say(!missingArabic, `a legend in Arabic belongs in a key face too; it is drawn in ${ar}, the system's, because Vox Text has no Arabic (nor Hebrew) glyphs. Mend: fonts/vox-text (the glyph set), or name a face for these scripts in --vx-key-font at voxelmorphism.css:58`);
-note(`reading text in Arabic is drawn in ${body}: IBM Plex Sans is shipped in Latin and Cyrillic only (voxelmorphism.css:5-26), so Arabic and Hebrew are the system's face`);
+say(/Plex Sans Arabic/.test(ar) && /Plex Sans Arabic/.test(body), `Arabic legends and body use the shipped script face (${ar}, ${body})`);
+const hebrewLegend = rtl('p-button', '.vx-button .vx-label');
+await p.locator(hebrewLegend).first().scrollIntoViewIfNeeded();
+await p.locator(hebrewLegend).first().evaluate(el => { el.lang = 'he'; el.textContent = 'שמירה'; });
+await p.evaluate(async () => { await document.fonts.load('400 16px "IBM Plex Sans Hebrew"', 'שמירה'); await new Promise(requestAnimationFrame); });
+const he = await faces(hebrewLegend);
+say(/Plex Sans Hebrew/.test(he), `Hebrew legends use the shipped script face (${he})`);
 await p.context().close();
 
 // ============================================================ plain
@@ -232,4 +235,4 @@ await q.context().close();
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
 await browser.close();
 console.log(bad ? `${bad} to mend` : 'everything turns');
-process.exit(missingArabic && bad === 1 ? 2 : bad ? 1 : 0);
+process.exit(bad ? 1 : 0);

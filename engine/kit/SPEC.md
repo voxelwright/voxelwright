@@ -213,7 +213,8 @@ Decide by how often it happens (from the site-craft rules):
   and return. Their timing gives a virtual switch its tactile feel.
   <!-- 2026-11-18: “Each click must be satisfying.” -->
 - A key plays two short local recordings of a Cherry MX Brown switch under a PBT cap. The downstroke
-  lands on press and the lighter return lands on release. Other cues use Web Audio synthesis.
+  lands on press and the lighter return lands on release. The enclosure voices both through a
+  high shelf. Walnut softens the treble and alloy lifts it. Other cues use Web Audio synthesis.
 - Cues: `press`, `release`, `slide`, `tick` (a slider step), `build`, `break`, `poke`, `done`,
   `failed`. The picture changes first; the sound follows in the same frame.
 - A hidden tab is silent.

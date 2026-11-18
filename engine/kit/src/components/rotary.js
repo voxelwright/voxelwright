@@ -1,6 +1,7 @@
 // A stopped encoder on a native range. The outer edge tracks angle, and a drag
 // starting at the spindle uses vertical travel (useful at small touch sizes).
 import { clamp, listeners } from './util.js';
+import { cue } from '../core/sound.js';
 
 const sweep = Math.PI * 1.5;
 const valueOf = input => clamp((input.valueAsNumber - Number(input.min || 0)) /
@@ -44,7 +45,11 @@ function wire(el, on, redraw = () => {}) {
     if (changed) input.dispatchEvent(new Event('change', { bubbles: true }));
   }
   for (const type of ['pointerup','pointercancel','lostpointercapture']) on(input, type, finish);
-  on(input, 'input', paint);
+  on(input, 'input', event => {
+    paint();
+    const stops = (Number(input.max || 100) - Number(input.min || 0)) / Number(input.step || 1);
+    if (stops > 0 && stops <= 32 && (event.isTrusted || drag)) cue('tick');
+  });
   on.heed(input, 'value', paint);
   on.watch(input, { attributes: true, attributeFilter: ['min','max','step','value'] }, paint);
   paint();
@@ -56,7 +61,13 @@ export const rotary = {
     const { W, H } = live;
     const x = W / 2, y = H / 2, radius = Math.max(3, Math.min(x, y) - 2);
     const collar = m.part('collar'), drum = m.part('drum');
-    drum.axle = { x, y, angle: 0 };
+    const face = m.part('face');
+    // The axisymmetric face keeps its reflection under the room light. The
+    // marker, side knurl and their shadows rotate with the shaft.
+    face.tx = Math.floor(x);
+    face.ty = Math.floor(y);
+    const index = m.part('index');
+    index.axle = drum.axle = { x, y, angle: 0 };
     for (let row = 0; row < H; row++) for (let col = 0; col < W; col++) {
       const dx = col + .5 - x, dy = row + .5 - y;
       const r = Math.hypot(dx, dy), a = Math.atan2(dx, -dy);
@@ -64,8 +75,11 @@ export const rotary = {
       if (r > radius) continue;
       const flute = Math.cos(a * 24);
       if (r < radius - 1 || flute > -.3) drum.box(col, row, 2, 1, 1, 5, flute > .25 ? 'steel' : 'slate');
-      if (r < radius - 1) drum.plot(col, row, 7, 'warm-metal');
-      if (r < radius - 2) drum.plot(col, row, 8, Math.abs(dx) < 1 && dy < -radius * .34 ? 'gasket' : 'warm-metal');
+      if (r < radius - 1) {
+        face.plot(col - face.tx, row - face.ty, 7, 'warm-metal');
+        if (r < radius - 2) face.plot(col - face.tx, row - face.ty, 8, 'spun-brass');
+      }
+      if (Math.abs(dx) < .85 && dy < -radius * .38 && r < radius - 3) index.plot(col, row, 9, 'gasket');
     }
     live.faceZ = 6;
   },

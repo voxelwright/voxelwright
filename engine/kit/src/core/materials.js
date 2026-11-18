@@ -18,6 +18,13 @@ const defs = {
   floor: { day: '#fbfcff', night: '#3a4692', jitter: 0.006 },
   // Slate: the recessed floor of a well, a track, a socket.
   slate: { day: '#c3c9de', night: '#222963', jitter: 0.012 },
+  // Turned stock catches two soft lobes across its concentric tool marks.
+  // Coordinates on the disc are centred on the spindle.
+  'spun-brass': { day: '#ba9765', night: '#b18f61', jitter: 0.002, grain(x, y) {
+    const dx = x + 0.5, dy = y + 0.5, radius = Math.hypot(dx, dy);
+    const alignment = (0.86 * dx - 0.51 * dy) / radius;
+    return 0.22 * alignment ** 6 - 0.045 + 0.015 * Math.sin(radius * 2.6);
+  } },
   'warm-metal': { day: '#d4b383', night: '#ac895b', jitter: 0.003 },
   gasket: { day: '#565447', night: '#151c21', jitter: 0.008 },
   // Steel: neutral parts and anything switched off.

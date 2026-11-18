@@ -2,7 +2,16 @@
 // Nothing sounds, and no audio context exists, until the page turns sound on after the visitor
 // has interacted. Sounds are short, a little different each time, and quieter than speech.
 
-let ctx = null, master = null, on = false;
+let ctx = null, master = null, switchFilter = null, on = false;
+let treble = 0;
+
+// Voice the recorded impact for the enclosure. Keep the attack time and the
+// two different strokes in the recording. A change never starts audio.
+export function switchTreble(db) {
+  if (treble === db) return;
+  treble = db;
+  if (switchFilter) switchFilter.gain.setTargetAtTime(db, ctx.currentTime, .012);
+}
 const samples = new Map();
 let loading = null;
 function loadSamples() {
@@ -19,7 +28,7 @@ function mechanical(name, at) {
   if (!buffer) return; // Never replay a press after loading finishes.
   const source = ctx.createBufferSource();
   source.buffer = buffer;
-  source.connect(master);
+  source.connect(switchFilter);
   source.onended = () => source.disconnect();
   source.start(at);
 }
@@ -32,6 +41,11 @@ function ensure() {
   master = ctx.createGain();
   master.gain.value = 0.32;
   master.connect(ctx.destination);
+  switchFilter = ctx.createBiquadFilter();
+  switchFilter.type = 'highshelf';
+  switchFilter.frequency.value = 2450;
+  switchFilter.gain.value = treble;
+  switchFilter.connect(master);
   return ctx;
 }
 

@@ -3,6 +3,7 @@
 // through the front sheet; grain is sampled in model space across the slab.
 import { defineLook, LOOKS } from '../core/look.js';
 import './lit.js';
+import { switchTreble } from '../core/sound.js';
 import { defineMaterial } from '../core/materials.js';
 
 for (const [name, day] of Object.entries({
@@ -15,11 +16,11 @@ function walnut(x, y, z) {
 }
 const finish = (chamfer, specular = 0) => ({ chamfer, specular });
 export const cases = {
-  walnut: { name: 'Walnut', plate: '#b98c65', ground: '#efece3', mat: '#355347', grain: walnut, face: finish(35, 12) },
-  alloy: { name: 'Anodized', plate: '#445964', ground: '#e3e8e7', mat: '#253e4e', face: finish(140, 122) },
-  smoke: { name: 'Smoke', plate: '#49505c', ground: '#dddde4', mat: '#433e53', transmission: .23, face: finish(195, 138) },
-  frost: { name: 'Frost', plate: '#ece9dd', ground: '#e5e9e5', mat: '#4c6560', transmission: .36, face: finish(100, 44) },
-  clear: { name: 'Clear', plate: '#c4e4df', ground: '#dfe8e7', mat: '#365b62', transmission: .56, face: finish(220, 145) },
+  walnut: { name: 'Walnut', treble: -3, plate: '#b98c65', ground: '#efece3', mat: '#355347', grain: walnut, face: finish(35, 12) },
+  alloy: { name: 'Anodized', treble: 2, plate: '#445964', ground: '#e3e8e7', mat: '#253e4e', face: finish(140, 122) },
+  smoke: { name: 'Smoke', treble: -1.5, plate: '#49505c', ground: '#dddde4', mat: '#433e53', transmission: .23, face: finish(195, 138) },
+  frost: { name: 'Frost', treble: -1, plate: '#ece9dd', ground: '#e5e9e5', mat: '#4c6560', transmission: .36, face: finish(100, 44) },
+  clear: { name: 'Clear', treble: 0, plate: '#c4e4df', ground: '#dfe8e7', mat: '#365b62', transmission: .56, face: finish(220, 145) },
 };
 export const caps = {
   field: { name: 'Ridgeline PBT', key: '#e9dfc5', legend: '#352c23', face: finish(48, 16) },
@@ -32,18 +33,20 @@ export const lamps = {
   lilac: { name: 'Lilac', hue: '#d5b0ff' }, ember: { name: 'Ember', hue: '#ff9479' },
 };
 const paint = (day, rest = {}) => ({ day, night: day, ...rest });
-export const defaults = { shell: 'walnut', caps: 'field', profile: 'high', lamp: 'amber', level: 7 };
+export const defaults = { shell: 'walnut', caps: 'field', profile: 'high', lamp: 'amber', level: 7, rail: 'steady' };
 export function settings(value = {}) {
   const has = (items, key) => Object.hasOwn(items, key);
   return { shell: has(cases, value?.shell) ? value.shell : defaults.shell,
     caps: has(caps, value?.caps) ? value.caps : defaults.caps,
     profile: value?.profile === 'low' ? 'low' : 'high',
     lamp: has(lamps, value?.lamp) ? value.lamp : defaults.lamp,
+    rail: value?.rail === 'spectrum' ? 'spectrum' : 'steady',
     level: Number.isFinite(value?.level) ? Math.max(0, Math.min(10, Math.round(value.level))) : defaults.level };
 }
 
 export function instrument(s, root, stage) {
   const shell = cases[s.shell], cap = caps[s.caps], light = lamps[s.lamp].hue;
+  switchTreble(shell.treble);
   const ink = ['smoke','alloy'].includes(s.shell) ? '#fbf5e9' : '#262b25';
   const quiet = ['smoke','alloy'].includes(s.shell) ? '#e0e7e5' : '#3e4037';
   const panel = { walnut: '#e3d8be', alloy: '#40545c', smoke: '#363b49', clear: '#d2e4dc', frost: '#e3e7dd' }[s.shell];
@@ -59,11 +62,11 @@ export function instrument(s, root, stage) {
   if (retool) {
     look = defineLook('instrument', { from: 'lit', tooling: shape, artwork: s.caps === 'field', rise: s.profile === 'high' ? 7 : 3,
       travel: s.profile === 'high' ? 4 : 2, grain: 1, seam: .45,
-      finishes: { ...LOOKS.lit.finishes, chalk: shell.face, key: cap.face, 'warm-metal': finish(65, 105) },
+      finishes: { ...LOOKS.lit.finishes, chalk: shell.face, key: cap.face, 'warm-metal': finish(65, 105), 'spun-brass': finish(10, 85) },
       materials: { panel: paint(panel), chalk: paint(shell.plate, { grain: shell.grain, transmission: shell.transmission, jitter: .004 }),
         key: paint(cap.key, { transmission: cap.transmission, jitter: .009 }), ink: paint(ink),
         steel: paint('#9d998a'), gasket: paint('#232824'), slate: paint('#515754'),
-        floor: paint(vars['--vx-floor']), ivory: paint('#dcd5c1'), enamel: root.dataset.vxTheme ? LOOKS.lit.materials.enamel : paint('#aa4a27'),
+        floor: paint(vars['--vx-floor']), ivory: paint('#dcd5c1'), enamel: LOOKS.lit.appliedTheme?.cap ?? paint('#aa4a27'),
         'warm-metal': paint('#baaa8b', { grain: (x,y) => .013 * Math.sin(Math.hypot(x,y)*2.5) }) } });
   }
   // Only the decorative light pipe and the cap diffuser follow this dimmer.
@@ -87,6 +90,7 @@ export function instrument(s, root, stage) {
   }
   vars['--vx-key'] = look.materials.key.day;
   for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
+  root.dataset.rail = s.rail;
   root.dataset.shell = s.shell;
   root.dataset.caps = s.caps;
   root.dataset.profile = s.profile;

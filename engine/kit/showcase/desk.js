@@ -5,11 +5,19 @@ import { connectSound } from './switch-sound.js';
 
 const $ = selector => document.querySelector(selector);
 let build = recall();
+const hardware = $('.hardware');
 const gain = $('#gain'), contour = $('#contour'), screen = $('#scope');
 const keys = [...document.querySelectorAll('[data-lamp]')];
-let scan = 1;
-function drawScope() {
-  const ctx = screen.getContext('2d');
+let scan = 1, sweepFrame = 0;
+const phosphor = document.createElement('canvas');
+phosphor.width = screen.width;
+phosphor.height = screen.height;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+function drawScope(rescan = false) {
+  cancelAnimationFrame(sweepFrame);
+  const sweep = rescan === true && !reduceMotion.matches;
+  const ctx = (sweep ? phosphor : screen).getContext('2d');
   if (!ctx) return;
   const { width: w, height: h } = screen;
   const color = lamps[build.lamp].hue;
@@ -36,11 +44,28 @@ function drawScope() {
   }
   ctx.globalAlpha = 1;
   $('#contour-out').value = contour.value.padStart(2,'0');
+  if (!sweep) return;
+  const display = screen.getContext('2d');
+  const start = performance.now();
+  // Replace the previous trace a strip at a time. A second scan starts from
+  // the phosphor already visible, and touching the fader takes over at once.
+  let left = 0;
+  function expose(now) {
+    const edge = Math.round(w * Math.min(1, (now - start) / 210));
+    if (edge > left) {
+      display.clearRect(left, 0, edge - left, h);
+      display.drawImage(phosphor, left, 0, edge - left, h, left, 0, edge - left, h);
+      left = edge;
+    }
+    if (left < w) sweepFrame = requestAnimationFrame(expose);
+  }
+  sweepFrame = requestAnimationFrame(expose);
 }
 function sync() {
   $('#caps').value = build.caps;
-  for (const input of document.querySelectorAll('[name="shell"],[name="profile"]')) input.checked = build[input.name] === input.value;
+  for (const input of document.querySelectorAll('[name="shell"],[name="profile"],[name="rail"]')) input.checked = build[input.name] === input.value;
   gain.value = build.level;
+  hardware.toggleAttribute('data-unlit', build.level === 0);
   $('#gain-out').value = String(build.level).padStart(2, '0');
   $('#shell-name').value = cases[build.shell].name;
   $('#display-lamp').textContent = lamps[build.lamp].name.toUpperCase();
@@ -54,21 +79,28 @@ function apply(fields) {
   build = change(fields);
   sync();
 }
-for (const input of document.querySelectorAll('[name="shell"],[name="profile"]')) {
+for (const input of document.querySelectorAll('[name="shell"],[name="profile"],[name="rail"]')) {
   input.addEventListener('change', () => apply({ [input.name]: input.value }));
 }
 $('#caps').addEventListener('change', e => apply({ caps: e.target.value }));
 for (const key of keys) key.addEventListener('click', () => apply({ lamp: key.dataset.lamp }));
 gain.addEventListener('input', () => apply({ level: gain.valueAsNumber }));
-contour.addEventListener('input', drawScope);
+contour.addEventListener('input', () => drawScope());
+reduceMotion.addEventListener('change', () => drawScope());
 $('#scan').addEventListener('click', () => {
   scan++;
   $('#sweep').value = 'FIELD SCOPE / ' + String(scan).padStart(2,'0');
-  drawScope();
+  drawScope(true);
 });
 addEventListener('pageshow', event => {
   if (event.persisted) { build = recall(); sync(); }
 });
+// Pause the optional light cycle when the enclosure leaves the workbench viewport.
+if ('IntersectionObserver' in window) {
+  new IntersectionObserver(([entry]) => {
+    hardware.toggleAttribute('data-out-of-view', !entry.isIntersecting);
+  }).observe(hardware);
+}
 connectSound($('#sound'));
 sync();
 adopt();
