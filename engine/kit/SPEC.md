@@ -45,7 +45,7 @@ the construction rules in the numbered sections.
 2. **The front face sits on the pixel grid.** The view is a fixed projection, not a camera, so text
    stays sharp and a control is where its box says it is.
 3. **Height says what you can do.** Proud means press me. A well means type here. Low means off.
-4. **Material says what it is for.** Colour is a material, and a material has one job.
+4. **A control keeps its purpose across finishes.** Its shape and travel explain the action. Its finish determines how it catches or transmits light.
 5. **One light, real shadows.** Light comes from the top left. Shadows are cast, never painted.
 6. **Things are built, and they break.** Making and unmaking are shown. Nothing else is animated
    for show.
@@ -120,7 +120,7 @@ The base palette gives each material a day and night color, grain and emission.
   <!-- 2026-11-18: “LED indicators already exist where needed, they just glow up when active.” -->
 - At night, order by lightness is ground, slate, steel, chalk: a disabled control (steel) is
   always duller than a live one beside it.
-- Add a material with `defineMaterial(name, { day, night, jitter, glow })`. Give it one job.
+- Register a palette material with `defineMaterial(name, { day, night, jitter, glow })`.
 
 ## 5. Light
 
