@@ -39,9 +39,22 @@ try {
   const strokes = await page.evaluate(() => window.strokes);
   assert.equal(strokes.length, 2);
   assert.notEqual(strokes[0], strokes[1]);
+  const tap = await key.evaluate(el => {
+    const press = window.vx.live(el).spring('press');
+    press.snap(0);
+    const send = type => el.dispatchEvent(new PointerEvent(type, {pointerId: 8, button: 0}));
+    send('pointerdown');
+    el.dispatchEvent(new KeyboardEvent('keyup', {key: 'Enter'}));
+    const held = press.target;
+    send('pointercancel');
+    return {held, released: press.target, position: press.x, samples: window.strokes.length};
+  });
+  assert.ok(tap.held < 0 && tap.position < 0);
+  assert.equal(tap.released, 0);
+  assert.equal(tap.samples, 3); // cancelled stroke has no return sound
   await sound.uncheck();
   await key.click();
-  assert.equal(await page.evaluate(() => window.strokes.length), 2);
+  assert.equal(await page.evaluate(() => window.strokes.length), 3);
   await sound.check();
   await page.getByRole('link', {name: 'Parts catalog', exact: true}).click();
   assert.equal(await page.getByRole('checkbox', {name: 'Switch sound'}).isChecked(), true);

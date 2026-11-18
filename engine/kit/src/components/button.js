@@ -2,7 +2,7 @@
 // be pressed, and it goes down into the page when you press it. A disabled button sits low.
 
 import { inlineX, watchDirection } from '../plain.js';
-import { PRESS, RELEASE, CALM } from '../core/motion.js';
+import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
 import { listeners, wrapLabel } from './util.js';
@@ -54,33 +54,62 @@ export const button = {
     watchDirection(live, on);
     wrapLabel(el);
     const press = live.spring('press'), hover = live.spring('hover');
-    let held = false;
+    let held = null;
     const travel = () => live.model.keyTravel ?? Math.min(live.look.travel, Math.max(0, (live.state.top ?? live.look.rise) - 1));
-    const down = (e) => { if (held || el.disabled || el.getAttribute('aria-disabled') === 'true' || (e?.type === 'pointerdown' && e.button !== 0)) return; held = true; press.to(-travel(), PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
     const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
-    const up = (e) => { if (e?.type === 'keyup' && e.key !== ' ' && e.key !== 'Enter') return; if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); if (!['blur', 'pointerleave', 'pointercancel'].includes(e?.type)) cue('release'); live.invalidate(); };
-    const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(e); };
-    const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
-    const leave = (e) => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(e); live.invalidate(); };
-    el.addEventListener('pointerdown', down);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-    el.addEventListener('pointerenter', enter);
-    el.addEventListener('pointerleave', leave);
-    el.addEventListener('keydown', key);
-    el.addEventListener('keyup', up);
-    el.addEventListener('blur', up);
-    on.watch(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] }, (list) => {
-      if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) return live.rebuild();
-      // a trigger stays down while what it opened is open
-      const open = holds();
-      held = false;
-      press.to(open ? -travel() : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
+    const move = (target, spring) => {
+      if (reducedMotion()) press.snap(target);
+      else press.to(target, spring.k, spring.c);
+      live.invalidate();
+    };
+    const down = source => {
+      if (held !== null || el.matches(':disabled, [aria-disabled="true"]')) return;
+      held = source;
+      const stop = -travel();
+      // Take up the first part of the stroke at contact. A tap that fits between
+      // two paint frames still releases from a displaced cap.
+      press.x = Math.min(press.x, stop * 0.36);
+      move(stop, PRESS);
+      cue('press');
+    };
+    const up = (source, returned) => {
+      if (held === null || held !== source) return;
+      held = null;
+      if (holds()) return;
+      move(0, RELEASE);
+      if (returned) cue('release');
+    };
+    on(el, 'pointerdown', e => { if (e.button === 0) down(e.pointerId); });
+    on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
+    on(el, 'pointercancel', e => up(e.pointerId, false));
+    on(el, 'pointerenter', e => {
+      if (e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
+        hover.to(0.5, CALM.k * 2, CALM.c * 1.4);
+        live.invalidate();
+      }
+    });
+    on(el, 'pointerleave', e => {
+      hover.to(0, CALM.k * 2, CALM.c * 1.4);
+      up(e.pointerId, false);
       live.invalidate();
     });
-    return () => {
-      on.done();
-      for (const [t, f] of [['pointerdown', down], ['pointerup', up], ['pointercancel', up], ['pointerenter', enter], ['pointerleave', leave], ['keydown', key], ['keyup', up], ['blur', up]]) el.removeEventListener(t, f);
-    };
+    on(el, 'keydown', e => { if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key); });
+    on(el, 'keyup', e => up(e.key, true));
+    on(el, 'blur', () => up(held, false));
+    on.watch(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] }, (list) => {
+      if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) {
+        if (el.matches(':disabled, [aria-disabled="true"]')) {
+          held = null;
+          press.snap(0);
+          hover.snap(0);
+        }
+        return live.rebuild();
+      }
+      // a trigger stays down while what it opened is open
+      const open = holds();
+      held = null;
+      move(open ? -travel() : 0, open ? PRESS : RELEASE);
+    });
+    return on.done;
   },
 };
