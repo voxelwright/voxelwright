@@ -58,6 +58,30 @@ export function ring(part, x, y, z, w, h, mat, r = 0) {
 }
 
 /**
+ * A cap: the solid of a key, a knob, anything a finger lands on. Two voxels high or more, and
+ * big enough, its top is one voxel smaller all round, as a keycap's is. Every part that stands a
+ * cap up draws it with this, so that all of them are the same object.
+ */
+export function cap(part, x, y, z, w, h, d, mat, r = 1) {
+  if (d >= 2 && w >= 5 && h >= 5) {
+    part.slab(x, y, z, w, h, d - 1, mat, r);
+    part.slab(x + 1, y + 1, z + d - 1, w - 2, h - 2, 1, mat, r);
+  } else part.slab(x, y, z, w, h, d, mat, r);
+  return part;
+}
+
+/**
+ * A bezel: a frame one voxel high standing on the surface round a slot (x, y, w, h), `by` voxels
+ * wide. For what slides in a slot: a switch, a fader. It reaches `by` voxels past the element's
+ * box, into the part's pad.
+ */
+export function bezel(m, x, y, w, h, { by = 2, mat = 'steel', name = 'bezel' } = {}) {
+  const b = m.part(name);
+  b.slab(x - by, y - by, 0, w + by * 2, h + by * 2, 1, mat, 1).carve(x, y, 0, w, h, 1);
+  return b;
+}
+
+/**
  * A hole in the surface: walls round it and a floor under it, `depth` voxels down. The walls
  * carry the light if `wall` is a light. The floor runs under the walls, so every cell of it that
  * shows is the middle of a face, and stays plain. Sets live.well and live.faceZ. Anything else

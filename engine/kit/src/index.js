@@ -46,7 +46,7 @@ import { behave, unbehave, plainPart } from './plain.js';
 export { Model, Part } from './core/model.js';
 export { MATERIALS, LIGHTS, defineMaterial } from './core/materials.js';
 export { LOOKS, defineLook } from './core/look.js';
-export { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole } from './core/light.js';
+export { FULL, halo, byTheme, warmth, lightName, kindOf, ring, hole, cap, bezel } from './core/light.js';
 export { THEMES } from './looks/lit.js';
 export { listeners, clamp } from './components/util.js';
 export { wrapLabel } from './components/util.js';

@@ -6,7 +6,7 @@
 // The <select> is the control and stays one: it lies over the whole key, so every press, key and
 // touch goes to the browser, and the picker that opens is the browser's, on a phone as on a desk.
 
-import { ring, halo, byTheme, lightName } from '../core/light.js';
+import { ring, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
@@ -40,7 +40,7 @@ export const select = {
       // key, and its halo on the surface round it
       ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
       cap.grounded = false;
-      cap.slab(0, 0, 1, W, H, depth - 1, 'key', 1);
+      capOf(cap, 0, 0, 1, W, H, depth - 1, 'key');
     }
     // the chevron is set into the face at its far end, level with it: the face stays plain
     const g = ICONS.chevron, rtl = getComputedStyle(el).direction === 'rtl';

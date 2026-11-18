@@ -16,7 +16,7 @@
 // when it moves from one seat to another the key slides there; when the seats themselves are
 // written again the key is simply where the current one is.
 
-import { hole, ring, halo, byTheme } from '../core/light.js';
+import { hole, ring, halo, byTheme, cap as capOf } from '../core/light.js';
 import { SLIDE, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
@@ -53,7 +53,7 @@ export const pagination = {
     const block = m.part('block');
     block.grounded = false;
     ring(block, 1, 1, -D, w - 2, H - 2, 'light');
-    block.slab(1, 1, 1 - D, w - 2, H - 2, Math.max(1, D - 1), 'key', 1);
+    capOf(block, 1, 1, 1 - D, w - 2, H - 2, Math.max(1, D - 1), 'key');
     const s = live.spring('x', x0, SLIDE.k * 1.25, SLIDE.c * 1.12);
     if (glide && live.state.was !== undefined) { s.to(x0); if (live.state.was !== x0) cue('slide'); } else s.snap(x0);
     live.state.was = x0;

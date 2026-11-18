@@ -283,8 +283,17 @@ export class Stage {
         l.nudge = [nx, ny];
         l.canvas.style.left = l.base + nx + 'px'; l.canvas.style.top = l.base + ny + 'px';
       }
-      for (const [b, x, y] of labels) if (Math.abs(x - (b.nx ?? 0)) > 0.005 || Math.abs(y - (b.ny ?? 0)) > 0.005) { b.nx = x; b.ny = y; moved = true; }
-      if (moved) l.invalidate(); // the next draw applies the labels' nudges
+      for (const [b, x, y] of labels) {
+        if (Math.abs(x - (b.nx ?? 0)) <= 0.005 && Math.abs(y - (b.ny ?? 0)) <= 0.005) continue;
+        // Put the words there now. A part that is out of sight is not drawn, and its words would
+        // otherwise wait off the pixel grid until it is scrolled to.
+        const tx = (b.ax ?? 0) - (b.nx ?? 0), ty = (b.ay ?? 0) - (b.ny ?? 0);
+        b.nx = x; b.ny = y; b.ax = tx + x; b.ay = ty + y;
+        const t = Math.abs(b.ax) < 0.01 && Math.abs(b.ay) < 0.01 ? '' : `translate(${b.ax.toFixed(3)}px, ${b.ay.toFixed(3)}px)`;
+        if (b.last !== t) { b.node.style.transform = t; b.last = t; }
+        moved = true;
+      }
+      if (moved) l.invalidate(); // the next draw keeps them there as the face moves
     }
   }
 

@@ -16,7 +16,7 @@
 //   </div>
 // Tool: trench with a key in it (one of many); none of its own (several of many).
 
-import { ring, hole, halo, byTheme, lightName } from '../core/light.js';
+import { ring, hole, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
 import { reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
@@ -86,7 +86,7 @@ export const toggleGroup = {
     const block = m.part('block');
     block.grounded = false;
     if (!off) ring(block, 1, 1, -D, w - 2, h - 2, lightName(el, 'light'));
-    block.slab(1, 1, 1 - D, w - 2, h - 2, D - 1, off ? 'steel' : 'key', 1);
+    capOf(block, 1, 1, 1 - D, w - 2, h - 2, D - 1, off ? 'steel' : 'key');
     block.hidden = index < 0;
     s.shape = [w, h, off, index < 0].join();
     live.spring('x', x, 260, 30).snap(x);

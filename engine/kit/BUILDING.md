@@ -19,6 +19,10 @@ The look is **lit**: one system of depth and light. Its owner chose it, in these
   headers we had)"
 - "right now it looks still early in development, we'll need much more polish and grounded look"
   (polish comes later, over the whole kit; do not spend your time tuning glow numbers)
+- "The designs I see so far lean toward minimalistic voxels but I am looking more for
+  skeuomorphism on voxels". Shown the choice between the same parts with more material and
+  controls modelled on real devices, he chose the devices. So a part is an object: a keycap, a
+  slide switch in a bezel, a row of lamps in a slot, a panel bolted down. Section 2a says how.
 
 ## 2. The four tools, and "none"
 
@@ -46,12 +50,41 @@ Rules that follow, each with its reason:
    attachment removed) **or is there for play** (the voxel headings). Use `live.play('crumble')`.
 6. **Words are words.** Body text is the text face (`--vx-font`). Only legends on keys use the
    key face (`--vx-key-font`). Never set reading text in a pixel face.
-7. **Faces you read from are plain.** The look is "quiet": the middle of a face has no grid. Do
-   not add texture.
+7. **The cubes show.** Every face is visibly made of cubes; that is the material. Do not add any
+   other texture, and do not hide the cubes.
 8. **State is shown one way everywhere:** on = full of the accent's light; current = an accent
    groove beside it or a key level with the surface in a trench; focus = the part's own light
    brighter (a well's rim turns to the accent) plus the browser's focus ring where there is no
    light to brighten.
+
+## 2a. A part is an object
+
+Ask what real thing this control is, and build that thing out of cubes. Not a picture of it: the
+thing, at the scale of a hand, with the thickness, the edges and the mechanism it would have.
+
+| What it is | The device | How |
+|---|---|---|
+| What you press | A keycap: a body and a top one voxel smaller all round, on its light | `cap()` on `ring()`. Every cap in the kit is drawn by `cap()`; never draw one with `slab()` |
+| What slides | A knob in a slot, the slot in a bezel that stands a voxel proud; ridges on the knob to grip | `bezel()` round `hole()`; see the switch in `src/looks/lit.js` |
+| What fills | A row of lamps in a slot, each two voxels of light, a voxel apart; one that is not lit is a dark stud | see `bar` in `src/looks/lit.js` |
+| What shows a state | A lamp in a collar | `.vx-lamp` |
+| What you type or read in | A window cut into the panel, lit from its rim | `hole()` with a light for its wall |
+| A region | A thick panel, bolted down at its corners | `.vx-card` (bolts come by themselves on a large one) |
+| What appears for a moment | A plate above everything, on its light. A plate, not a keycap: its top has no step | `ring()` and `slab()` |
+
+Rules for objects:
+
+1. **One mechanism, used everywhere.** If your part has something you press, it is the keycap.
+   If something slides, it is the knob in a bezelled slot. Do not invent a second kind of key.
+2. **Steel is for hardware:** bezels, bolts, collars, studs, and anything switched off. It never
+   carries words.
+3. **A bezel only where something moves in a slot.** A window you type in has no bezel; its edge
+   is the panel's own.
+4. **Thickness is part of the object.** Take every depth from `live.look` (`rise`, `travel`,
+   `well`, `groove`, `slab`, `float`, `dialog`), never a number: the look sets how thick things
+   are, and it has changed once already.
+5. **Words stay words.** An object's legend is still real text laid on its face, and a part that
+   is only words (rule 1 of section 2) still has no object at all.
 
 ## 3. Which tool each part uses
 
@@ -158,7 +191,7 @@ A part is three files that you own, and nothing else:
 
 ```
 packages/voxelmorphism/src/components/<name>.js     the part
-packages/voxelmorphism/css/<name>.css               its CSS: layout, the plain version
+packages/voxelmorphism/css/<name>.css               its CSS: layout, the plain version (tools/css.mjs puts it in the kit's one stylesheet)
 showcase/parts/<name>.html                          its own page
 tools/parts/<name>.mjs                              (if it has behaviour) a check with real input
 ```
@@ -168,7 +201,21 @@ It is the example to hold yours beside. Read `src/looks/lit.js` for a key, a wel
 fills, a switch, a float, and `src/core/light.js` for the helpers.
 
 A part with "none" as its tool has no `.js` file unless it needs behaviour. If it needs behaviour
-and no voxels, write the `.js` with only `plain(el, on)` and call it from `bind` too.
+and no voxels, write the `.js` with an empty `build() {}`, the behaviour in `plain(el, on)`, and
+call the same from `bind`.
+
+The kit's one stylesheet, `voxelmorphism.css`, is made from the files in `css/` by
+`node tools/css.mjs`. Never edit it by hand. Run the tool after you change a file in `css/`; a
+page then needs only the kit's stylesheet. A part that is not yet in `src/index.js` is registered
+by its own page (`show(part)` in `showcase/parts/parts.js`); one that is already there needs
+nothing.
+
+Things that exist and should be used, not written again: `.vx-aloud` (words for a screen reader
+only); `place`, `anchored` and `slabOnLight` in `src/components/popover.js` (anything that floats
+by a trigger); `steady` in `src/components/accordion.js` (a row that opens on a large panel);
+the kit's own parts (`.vx-button`, `.vx-well`, `.vx-groove`, `.vx-lamp`, `.vx-recess`,
+`.vx-tabs`, `.vx-check`, the menu, the dialog, the popover). Read `showcase/parts/index.html`
+for the whole list; each part's file begins with its markup.
 
 ```js
 export const thing = {
@@ -200,9 +247,10 @@ Space: x right, y down, z toward you; the surface is z = 0. A voxel of height sh
 right and down on screen, so you see a solid's left and top sides, and its shadow falls right and
 down. The light is upper left.
 
-Depths, in voxels (one scale for every part; do not invent another): groove 1 down, well 2 down,
-surface slab 2, a key 3 (a ring of light 1 and a cap 2) going 2 down when pressed, a float 5, a
-dialog 6.
+Depths come from `live.look` and are never written as numbers in a part. Today they are: a
+groove 1 down (`groove`), a well 2 down (`well`), a panel 4 thick (`slab`), a key 5 high (`rise`:
+a ring of light 1 and a cap 4, its top a voxel smaller all round) going 2 down when pressed
+(`travel`), a float 6 (`float`), a dialog 7 (`dialog`).
 
 Materials: `chalk` (the surface), `key` (an ordinary cap), `enamel` (the main cap), `floor` (the
 bottom of a well), `slate` (trays, trenches), `steel` (switched off), `ivory` (a knob), `ink`,
@@ -210,6 +258,7 @@ bottom of a well), `slate` (trays, trenches), `steel` (switched off), `ivory` (a
 a theme recolours these, and yours would be left behind.
 
 Helpers (from `src/core/light.js`): `ring(part, x, y, z, w, h, material, cornerStep)`,
+`cap(part, x, y, z, w, h, depth, material)` (a keycap), `bezel(m, x, y, w, h, { by, mat })`,
 `hole(live, m, { x, y, w, h, depth, wall, floor })`, `halo(strength)`, `byTheme(live)`,
 `warmth(live)`, `lightName(el, fallback)` (reads `data-vx-light`), `kindOf(el)` (reads
 `data-vx-kind`). Motion (`src/core/motion.js`): springs `PRESS`, `RELEASE`, `SLIDE`, `CALM`.
@@ -242,7 +291,8 @@ no WebGPU, or a page with `data-vx-plain`, shows. It does not have to be pretty 
 1. Read this, the checkbox's three files, and the parts of `src/looks/lit.js` nearest yours.
 2. Write the part. Start with the plain HTML and CSS, then the voxels.
 3. Its page shows it first **in use** (a few lines of a believable product), then **every state**.
-4. Run `PORT=5989 node tools/part.mjs <name>` and open `shots/parts/<name>/sheet.png` yourself.
+4. Run `PORT=5989 node tools/part.mjs <name>` and open `shots/parts/<name>/sheet.png` yourself
+   (`PORT=5989 node tools/parts.mjs <name> <name>` runs the harness and the checks of several).
    Fix what it prints, then what you see: the largest fault first. Hold it beside the checkbox's
    sheet and the pictures in `shots/lit/`.
 5. Press it: write `tools/parts/<name>.mjs` (copy the shape of `tools/lit-hand.mjs`: a real mouse
@@ -251,8 +301,9 @@ no WebGPU, or a page with `data-vx-plain`, shows. It does not have to be pretty 
 
 ## 7. Hard rules
 
-- **Only your own files.** Never edit `voxelmorphism.css`, `src/index.js`, `src/looks/lit.js`,
-  `src/core/*`, `src/engine/*`, another part's files, or anything outside this worktree. If a
+- **Only your own files.** Never edit `voxelmorphism.css` by hand, `css/_kit.css`, `src/index.js`,
+  `src/looks/lit.js`, `src/core/*`, `src/engine/*`, another part's files, or anything outside
+  this worktree. If a
   shared file needs a change, write the exact change in your report; the coordinator makes it.
 - **No git.** Do not commit, stash, switch branch or push. The coordinator commits.
 - **One server: port 5989,** already running and serving this folder. Start no server, open no

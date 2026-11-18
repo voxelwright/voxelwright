@@ -8,7 +8,7 @@
 //   Object.assign(LOOKS.lit.parts, parts);
 //
 // Their CSS under the look is css/existing.css.
-import { halo, byTheme, ring, hole, lightName, UNDER } from '../core/light.js';
+import { halo, byTheme, ring, hole, lightName, UNDER, cap as capOf } from '../core/light.js';
 import { clamp, wrapLabel } from '../components/util.js';
 
 const rtl = (el) => getComputedStyle(el).direction === 'rtl';
@@ -41,7 +41,7 @@ const slider = {
     const thumb = m.part('thumb');
     thumb.grounded = false;
     if (!off) ring(thumb, 0, 0, -DEEP, KEY, TRENCH - 2, 'light');
-    thumb.slab(0, 0, 1 - DEEP, KEY, TRENCH - 2, DEEP, off ? 'steel' : 'ivory', 1);
+    capOf(thumb, 0, 0, 1 - DEEP, KEY, TRENCH - 2, DEEP, off ? 'steel' : 'ivory');
     thumb.ty = y + 1;
     live.state.travel = Math.max(0, W - 2 - KEY);
     live.state.flip = rtl(el);
@@ -131,7 +131,7 @@ const menu = {
     // the light and the slab are one part, so both are built out of the corner together
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, 'light', 1);
-    panel.slab(0, 0, 1, W, H, d - 1, 'key', 1);
+    panel.slab(0, 0, 1, W, H, d - 1, 'key', 1); // a float is a plate, not a keycap
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const h = items[0] ? Math.max(2, Math.round(items[0].offsetHeight / vx)) : 2;
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));
