@@ -22,7 +22,7 @@
 
 import { halo, warmth, UNDER } from '../core/light.js';
 import { listeners } from './util.js';
-import { rouse } from './popover.js';
+import { rouse, nativeRelease } from './popover.js';
 
 const OVER = 4;  // voxels the panel reaches past the window on the sides it does not show
 const INSET = 4; // voxels the groove stops short of the panel's edges
@@ -64,6 +64,7 @@ export function panel(live, m) {
  */
 export function wire(el, on, live) {
   const root = document.documentElement;
+  nativeRelease(live, on, ['panel', 'groove'], 0.16);
   let opener = null, bar = 0;
   // A key that names it opens it: <button commandfor="id" command="show-modal">. Where the
   // browser does not know these yet, the part does what they say.
@@ -84,7 +85,12 @@ export function wire(el, on, live) {
   });
   const opened = () => {
     // closed, it had no box: it and what is in it are measured and drawn now, on the first frame
-    if (live) rouse(live);
+    if (live) {
+      rouse(live);
+      const edge = live.state.edge;
+      const from = [edge === 'right' ? live.W : 0, edge === 'bottom' ? live.H : 0];
+      live.play('assemble', ['panel', 'groove'], { duration: 0.24, surface: 'rim', from });
+    }
     // the page behind does not scroll (CSS), and does not shift for want of its scrollbar
     if (el.matches(':modal') && bar > 0) root.style.scrollbarGutter = 'stable';
   };

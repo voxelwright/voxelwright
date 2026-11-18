@@ -76,7 +76,7 @@ say(await p.evaluate(() => document.getElementById('chosen').textContent) === 'C
 await p.focus('#trigger'); await p.keyboard.press('Shift+Tab'); await p.keyboard.press('Tab');
 await p.keyboard.press('Enter'); await p.waitForTimeout(40);
 m = await read('project-menu');
-say(m.open && m.building === 'assemble' && !m.shown, 'Enter on its key opens it; while it is being built the mark waits');
+say(m.open && m.building === 'assemble' && m.shown && m.focus === 0, 'Enter opens it with the focus mark on the first row during assembly');
 await p.waitForTimeout(450);
 m = await read('project-menu');
 say(m.focus === 0 && m.active === 0 && m.shown && m.markY === m.rowY[0], 'opened from the keyboard, focus is on the first row and the mark is beside it');
@@ -111,6 +111,33 @@ const t2 = await p.locator('#trigger').boundingBox();
 await p.mouse.click(t2.x + t2.width / 2, t2.y + t2.height / 2); await p.waitForTimeout(500);
 m = await read('project-menu');
 say(m.open && m.rect.left >= 0 && m.rect.left + m.rect.width <= 390, `at 390 px it is inside the window (${m.rect.left} to ${m.rect.left + m.rect.width})`);
+
+await p.keyboard.press('Escape');
+await p.setViewportSize({ width: 390, height: 270 });
+await p.locator('#project-menu').evaluate(menu => {
+  for (const label of ['View logs', 'Copy URL', 'Manage access', 'Pause builds', 'Resume builds', 'Archive project']) {
+    const item = document.createElement('button');
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    menu.append(item);
+  }
+});
+await p.locator('#trigger').focus();
+await p.keyboard.press('Shift+Tab');
+await p.keyboard.press('Tab');
+await p.keyboard.press('Enter');
+await p.keyboard.press('End');
+await p.waitForTimeout(180);
+const short = await p.locator('#project-menu').evaluate(menu => {
+  const r = menu.getBoundingClientRect(), item = document.activeElement, row = item.getBoundingClientRect();
+  return item.textContent === 'Archive project' && menu.contains(item) && menu.querySelector('.vx-menu-rows')?.scrollTop > 0
+    && r.top >= 0 && r.bottom <= innerHeight && row.top >= r.top && row.bottom <= r.bottom;
+});
+say(short, 'in a 270px-high viewport End scrolls the last choice fully into the fixed plate');
+await p.screenshot({ path: 'shots/parts/menu/hand-short.png' });
+await p.keyboard.press('Enter');
+say(!(await read('project-menu')).open && await focusId() === 'trigger'
+  && await p.locator('#chosen').textContent() === 'Chosen: Archive project', 'the last choice commits, closes the short menu and restores focus');
 
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
 await browser.close();

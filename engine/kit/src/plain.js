@@ -35,6 +35,18 @@ export function menuAnchor(el, on, gap) {
   let source;
   const invoker = () => source ?? (el.id ? document.querySelector(`[popovertarget="${CSS.escape(el.id)}"]`) : null);
   const put = () => {
+    // Only a menu taller than the window needs a scrollport. Leave the plate fixed
+    // and scroll its rows, so End, pointer selection and the rim share one coordinate system.
+    if (el.offsetHeight > innerHeight - 24 && !el.querySelector(':scope > .vx-menu-rows')) {
+      const rows = document.createElement('div');
+      rows.className = 'vx-menu-rows';
+      const children = [...el.childNodes].filter(child => !child.classList?.contains('vx-canvas'));
+      const focused = el.contains(document.activeElement) ? document.activeElement : null;
+      el.append(rows);
+      for (const child of children) rows.append(child);
+      focused?.focus({ preventScroll: true });
+      if (focused) rows.scrollTop = Math.max(0, focused.offsetTop + focused.offsetHeight - rows.clientHeight);
+    }
     const t = invoker();
     return t ? place(el, t, { gap: gap() }) : [0, 0];
   };
@@ -44,6 +56,7 @@ export function menuAnchor(el, on, gap) {
     const t = invoker();
     if (t && changes.some(({ target }) => target.contains(t))) put();
   });
+  on(window, 'resize', () => { if (el.matches(':popover-open') && invoker()) put(); });
   return { invoker, put };
 }
 

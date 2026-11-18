@@ -68,7 +68,7 @@ for (let i = 0; i < 4; i++) { await p.keyboard.press('Tab'); const r = await rea
 say(!stops.some((s) => s.startsWith('OUT:') && !/^OUT:(BODY|HTML)$/.test(s)) && stops.includes('Delete harbor-api'), `Tab goes between its keys and never reaches the page (${stops.join(', ')})`);
 await p.keyboard.press('Escape'); await p.waitForTimeout(60);
 d = await read(p, 'delete');
-say(d.open && d.made.fx === 'lower', 'Escape: the plate lowers first');
+say(!d.open && d.made.fx === 'crumble', 'Escape: the face breaks up first');
 await gone(p);
 d = await read(p, 'delete');
 say(!d.open && d.value === 'cancel' && d.focus === 'open-delete' && await result(p) === 'Nothing deleted', `then it is closed with "cancel", nothing is deleted, the focus is back on Delete project (${d.focus})`);
@@ -83,7 +83,7 @@ say(!d.open && d.value === 'cancel' && await result(p) === 'Nothing deleted', 'E
 await press(p, '#open-delete'); await p.waitForTimeout(600);
 await press(p, '#delete [data-vx-kind="danger"]'); await p.waitForTimeout(60);
 d = await read(p, 'delete');
-say(d.made.fx === 'lower', 'a press on Delete harbor-api: the plate lowers');
+say(d.made.fx === 'crumble', 'a press on Delete harbor-api: the face breaks up');
 await gone(p);
 d = await read(p, 'delete');
 say(!d.open && d.value === 'delete' && await result(p) === 'harbor-api deleted' && d.focus === 'open-delete', 'and closes with "delete"; the page heard it');

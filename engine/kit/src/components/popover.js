@@ -38,7 +38,8 @@ export function place(el, trigger, { side = 'bottom', align = 'start', gap = 8, 
   left = Math.round(Math.max(EDGE, Math.min(left, vw - EDGE - w)));
   const below = r.bottom + gap + lift, above = r.top - gap - h;
   const belowFits = below + h <= vh - EDGE, aboveFits = above >= EDGE;
-  const top = Math.round(side === 'top' ? (aboveFits || !belowFits ? above : below) : belowFits || !aboveFits ? below : above);
+  const preferred = side === 'top' ? (aboveFits || !belowFits ? above : below) : belowFits || !aboveFits ? below : above;
+  const top = Math.round(el.matches('.vx-menu') ? Math.max(EDGE, Math.min(preferred, vh - EDGE - h)) : preferred);
   el.style.margin = '0';
   el.style.inset = `${top}px auto auto ${left}px`;
   const x = Math.abs(left - r.left) < 1 ? 0 : Math.abs(left + w - r.right) < 1 ? w : Math.max(0, Math.min(w, r.left + r.width / 2 - left));
@@ -79,21 +80,54 @@ function heed(yes) {
   window[f]('scroll', again, { capture: true, passive: true });
 }
 
+// The browser closes the control immediately. Keeping its box through the overlay transition
+// keeps the painted rim available for its short release, with no hit target or tab stop.
+export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim') {
+  if (!live) return;
+  const el = live.el;
+  let request;
+  const clear = () => {
+    delete el.dataset.vxNativeExit;
+    for (const key of ['display', 'x', 'y', 'w', 'h']) el.style.removeProperty('--vx-exit-' + key);
+  };
+  on(el, 'beforetoggle', e => {
+    const current = request = Symbol();
+    clear();
+    if (e.newState === 'open' || !live.model) return;
+    if (el.matches('[popover], .vx-dialog')) el.style.setProperty('--vx-exit-display', getComputedStyle(el).display);
+    if (el.matches('dialog.vx-dialog')) {
+      // Closing drops :modal and [open] positioning before the last course has left.
+      const rect = el.getBoundingClientRect();
+      for (const [key, px] of Object.entries({ x: rect.x, y: rect.y, w: rect.width, h: rect.height })) {
+        el.style.setProperty('--vx-exit-' + key, px + 'px');
+      }
+    }
+    el.dataset.vxNativeExit = '';
+    live.play('crumble', parts, { duration, surface }).then(() => {
+      if (current !== request) return;
+      clear();
+      live.clearSurface();
+    });
+  });
+}
+
 /**
  * What every float does when it opens, whoever opened it (its key, a timer, the page's own code):
  * it is placed by its trigger before it is seen, built from the corner nearest the trigger, and
  * kept by the trigger while the page scrolls or the window changes.
  * opts: trigger() the element it belongs to; side, align (see place); gap: the clear space between
- *       the two, in voxels; build: [seconds for all of it, seconds for a brick]; still(): true to
+ *       the two, in voxels; duration: seconds for the rim to seat; still(): true to
  *       appear with no building.
  */
-export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, build = [0.2, 0.14], still } = {}) {
+export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, duration = 0.18, still } = {}) {
   const vx = () => live?.vx ?? (parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4);
   const put = () => {
     const t = trigger();
     // a voxel of height shows half a voxel of side above the face
     return t ? place(el, t, { side: el.dataset.vxSide || side, align: el.dataset.vxAlign || align, gap: gap * vx(), lift: live ? live.faceZ * vx() / 2 : 0 }) : null;
   };
+  const parts = ['body', 'panel', 'light'];
+  nativeRelease(live, on, parts);
   on(el, 'beforetoggle', (e) => {
     if (e.newState !== 'open') return;
     // it has no box until it is open, and by then it has been seen: give it one for a moment
@@ -101,7 +135,7 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     const from = put();
     if (live) {
       rouse(live);
-      if (from && !still?.()) live.play('assemble', null, { from: [from[0] / live.vx, from[1] / live.vx], duration: build[0], each: build[1] });
+      if (from && !still?.()) live.play('assemble', parts, { surface: 'rim', from: [from[0] / live.vx, from[1] / live.vx], duration });
     }
     el.removeAttribute('data-vx-measure');
   });

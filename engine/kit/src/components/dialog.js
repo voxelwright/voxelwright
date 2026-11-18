@@ -1,13 +1,13 @@
-// Dialog. An engraved plate rises carrying its controls and lowers intact to release the page.
+// Dialog. The face assembles in courses and breaks back into them when dismissed.
 // Markup: <dialog class="vx-dialog"><header>Title</header><div class="vx-dialog-body">…</div>
 //           <footer><button class="vx-button" data-vx-close>Done</button></footer></dialog>
 
 import { cue } from '../core/sound.js';
+import { nativeRelease } from './popover.js';
 import { listeners } from './util.js';
 
 export const dialog = {
   name: 'dialog',
-  carryPlate: true,
   selector: 'dialog.vx-dialog',
   pad: 16,
 
@@ -26,44 +26,42 @@ export const dialog = {
   bind(live) {
     const on = listeners();
     const el = live.el;
-    let closing = null;
+    const palette = el.classList.contains('vx-command-dialog');
+    const surface = palette ? 'rim' : 'courses';
+    nativeRelease(live, on, null, palette ? 0.1 : 0.23, surface);
     const opened = () => {
-      closing = null;
-      el.removeAttribute('data-vx-leaving');
+      live.visible = true;
       live.rebuild();
       cue('build');
-      live.play('assemble', null, { duration: 0.46 });
+      live.play('assemble', null, { duration: palette ? 0.16 : 0.32, surface });
     };
-    const leave = async (value) => {
-      if (closing || !el.open) return;
-      const request = closing = Symbol();
-      el.setAttribute('data-vx-leaving', '');
-      cue('release');
-      await live.play('lower', null, { duration: 0.27 });
-      if (request !== closing || !el.open || live.destroyed) return;
-      el.close(value);
-      el.removeAttribute('data-vx-leaving');
-      closing = null;
-    };
-    live.state.leave = leave;
+    live.state.leave = value => el.close(value);
+    // Keep the native cancel and submit defaults. A page can veto either, even
+    // from a listener registered after adoption. Only an accepted close plays.
+    let cancel, acceptedCancel = false;
+    on(el, 'cancel', e => {
+      cancel = e;
+      setTimeout(() => { if (cancel === e) cancel = null; }, 0);
+    });
+    on(el, 'beforetoggle', e => {
+      if (e.newState === 'closed') {
+        acceptedCancel = !!cancel && !cancel.defaultPrevented;
+        cue('release');
+      }
+      cancel = null;
+    });
     on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
       if (el.open) opened();
-      else {
-        closing = null;
-        live.stopMotion();
-        el.removeAttribute('data-vx-leaving');
-      }
+      // The UA writes requestClose(value) after beforetoggle. Keep its explicit
+      // value, and give Escape its established result before close is delivered.
+      else if (acceptedCancel && !el.returnValue) el.returnValue = 'cancel';
+      acceptedCancel = false;
     });
-    on(el, 'cancel', (e) => { e.preventDefault(); leave('cancel'); });
-    on(el, 'click', (e) => {
+    on(el, 'click', e => {
+      if (e.defaultPrevented) return;
       const b = e.target.closest('[data-vx-close]');
-      if (b) { e.preventDefault(); leave(b.value || b.dataset.vxClose || ''); }
-      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) leave('cancel');
-    });
-    on(el, 'submit', (e) => {
-      if (e.target.method !== 'dialog') return;
-      e.preventDefault();
-      leave(e.submitter?.value || '');
+      if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
+      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
     });
     if (el.open) queueMicrotask(opened);
     return on.done;

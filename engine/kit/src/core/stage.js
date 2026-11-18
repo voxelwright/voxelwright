@@ -3,7 +3,7 @@
 
 import { Model } from './model.js';
 import { lookOf, lightOf } from './look.js';
-import { Spring, assemble, crumble, plateMotion, settle, reducedMotion } from './motion.js';
+import { Spring, assemble, crumble, surfaceCourses, settle, reducedMotion } from './motion.js';
 import { listeners } from '../components/util.js';
 
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
@@ -122,47 +122,56 @@ export class Live {
     let top = 1;
     for (const p of this.model.parts) for (let i = 0; i < p.count; i++) top = Math.max(top, p.rest[i * 3 + 2] + 0.5);
     const shared = { W: this.W, H: this.H, top, ...opts };
-    const exiting = effect === 'crumble' || effect === 'lower';
-    const carried = this.form.carryPlate && effect !== 'crumble';
-    const still = reducedMotion(), start = this.carried?.progress;
-    this.clearPlate();
+    const out = effect === 'crumble' || effect === 'lower', still = reducedMotion();
+    const surface = opts.surface ?? this.form.surface;
+    const prior = this.surface;
+    this.clearSurface();
+    // Resolve superseded runs now. Their callers can distinguish cancellation from landing.
+    this.waiters = (this.waiters ?? []).filter(waiter => {
+      if (!waiter.list.some(part => list.includes(part))) return true;
+      waiter.resolve(false);
+      return false;
+    });
     for (const p of list) {
-      if (carried || effect === 'lower') p.fx = plateMotion(p, { ...shared, out: exiting, still, start });
-      else if (still) p.fx = settle(p, { out: exiting });
-      else p.fx = (effect === 'crumble' ? crumble : assemble)(p, shared);
+      if (surface) p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still,
+        rim: surface === 'rim', start: prior?.progress ?? (out ? 1 : 0),
+        from: prior?.from ?? opts.from ?? [0, this.H] });
+      else if (still) p.fx = settle(p, { out });
+      else p.fx = (out ? crumble : assemble)(p, shared);
       p.hidden = false;
     }
-    if (carried && list.length) {
-      this.carried = list[0].fx;
-      this.el.dataset.vxCarried = still ? 'still' : 'moving';
-      this.el.removeAttribute('data-vx-cover-legends');
-      this.carryWords();
+    if (surface && list.length) {
+      this.surface = list[0].fx;
+      this.el.dataset.vxSurface = still ? 'still' : surface;
+      this.paintSurface();
     }
     this.invalidate();
-    if (!list.length) return Promise.resolve();
-    return new Promise((resolve) => { (this.waiters ??= []).push({ list, resolve }); });
+    if (!list.length) return Promise.resolve(true);
+    return new Promise(resolve => this.waiters.push({ list, resolve }));
   }
 
-  carryWords() {
-    const { dz, progress } = this.carried;
-    this.el.style.setProperty('--vx-plate-x', dz * SHEAR[0] * this.vx + 'px');
-    this.el.style.setProperty('--vx-plate-y', dz * SHEAR[1] * this.vx + 'px');
-    const ink = this.el.dataset.vxCarried === 'still' ? progress : Number(progress > 0);
-    this.el.style.setProperty('--vx-plate-ink', Math.max(0, Math.min(1, ink)));
+  paintSurface() {
+    const { progress, still, rim, release } = this.surface;
+    const alpha = still ? progress : rim && release ? Math.min(1, progress * 2) : 1;
+    const reveal = release ? (progress - 0.9) / 0.1 : (progress - 0.78) / 0.18;
+    const ink = still || rim ? alpha : Math.max(0, Math.min(1, reveal));
+    this.el.style.setProperty('--vx-surface-alpha', alpha);
+    this.el.style.setProperty('--vx-surface-ink', ink);
   }
 
   stopMotion() {
-    this.clearPlate();
+    this.clearSurface();
     for (const part of this.model?.parts ?? []) part.fx = null;
-    for (const waiter of this.waiters ?? []) waiter.resolve();
+    for (const waiter of this.waiters ?? []) waiter.resolve(false);
     this.waiters = [];
   }
 
-  clearPlate() {
-    if (!this.carried) return;
-    this.carried = null;
-    this.el.removeAttribute('data-vx-carried');
-    for (const name of ['--vx-plate-x', '--vx-plate-y', '--vx-plate-ink']) this.el.style.removeProperty(name);
+  clearSurface() {
+    if (!this.surface) return;
+    this.surface = null;
+    delete this.el.dataset.vxSurface;
+    this.el.style.removeProperty('--vx-surface-alpha');
+    this.el.style.removeProperty('--vx-surface-ink');
   }
 
   invalidate() {
@@ -184,7 +193,7 @@ export class Live {
       p.fx.t += dt;
       if (p.fx.t >= p.fx.end && (!this.visible || p.hidden || !p.count)) {
         // draw() skips hidden geometry, including a menu's inactive selection mark.
-        if (p.fx.kind === 'lower' || p.fx.kind === 'crumble') p.hidden = true;
+        if (p.fx.kind === 'crumble') p.hidden = true;
         p.fx = null;
         this.dirty = true;
         this.settled(p);
@@ -208,7 +217,7 @@ export class Live {
         if (done) {
           const kind = p.fx.kind;
           p.fx = null;
-          if (kind === 'crumble' || kind === 'lower') p.hidden = true;
+          if (kind === 'crumble') p.hidden = true;
           this.settled(p);
           if (p.hidden) continue; // nothing left to draw
           this.writeRest(p, o);
@@ -226,9 +235,9 @@ export class Live {
       glowRadius: this.glowRadius ?? this.form.glowRadius, glowStrength: this.glowStrength ?? this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx ?? this.canvas);
-    if (ok && this.carried) {
-      this.carryWords();
-      if (this.carried.t >= this.carried.end && this.carried.kind !== 'lower') this.clearPlate();
+    if (ok && this.surface) {
+      this.paintSurface();
+      if (this.surface.t >= this.surface.end && this.surface.kind !== 'crumble') this.clearSurface();
     }
     // labels follow their faces
     const k = this.vx;
@@ -271,7 +280,7 @@ export class Live {
     if (!this.waiters) return;
     this.waiters = this.waiters.filter((w) => {
       if (w.list.some((p) => p.fx)) return true;
-      w.resolve();
+      w.resolve(true);
       return false;
     });
   }

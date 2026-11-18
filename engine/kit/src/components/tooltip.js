@@ -65,7 +65,7 @@ function wire(el, on, live) {
     if (focus || shown || performance.now() - lastGone < WARM) show(true);
     else timer = setTimeout(() => show(false), WAIT);
   };
-  anchored(el, on, live, { trigger: () => t, side: 'top', align: 'center', gap: 1.5, build: [0.14, 0.1], still: () => atOnce });
+  anchored(el, on, live, { trigger: () => t, side: 'top', align: 'center', gap: 1.5, duration: 0.14, still: () => atOnce });
   on(el, 'toggle', (e) => {
     if (e.newState === 'open') { if (!up.size) document.addEventListener('keydown', escape, true); up.add(dismiss); return; }
     up.delete(dismiss);

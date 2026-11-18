@@ -149,7 +149,7 @@ function wire(el, on, live) {
     const vx = live?.vx ?? (parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4);
     el.style.inlineSize = `${Math.max(Math.round(well.offsetWidth / vx), 40) * vx}px`;
   });
-  put = anchored(el, on, live, { trigger: () => well, gap: 2, build: [0.16, 0.12] });
+  put = anchored(el, on, live, { trigger: () => well, gap: 2, duration: 0.16 });
   on(el, 'toggle', (e) => {
     const yes = e.newState === 'open';
     if ((input.getAttribute('aria-expanded') === 'true') !== yes) input.setAttribute('aria-expanded', String(yes));
@@ -222,18 +222,10 @@ export const combobox = {
   },
 
   pose(live) {
-    const { pick, body } = live.model.byName, at = live.state.at;
-    // not while the plate is still being built: the mark would hang in the air
-    pick.hidden = at == null || !!body.fx;
+    const { pick } = live.model.byName, at = live.state.at;
+    pick.hidden = at == null;
     if (at != null) pick.ty = at;
     live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025);
-  },
-
-  // one more drawing after the build ends, so the mark appears on the finished plate
-  step(live) {
-    const building = !!live.model.byName.body?.fx, was = live.state.building;
-    live.state.building = building;
-    return !!was && !building;
   },
 
   bind(live) {

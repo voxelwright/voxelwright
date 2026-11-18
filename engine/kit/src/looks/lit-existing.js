@@ -168,21 +168,13 @@ const menu = {
   },
 
   pose(live) {
-    const { pick, panel } = live.model.byName, a = live.state.active;
-    // not while the slab is still being built: the mark would hang in the air
-    pick.hidden = !(a >= 0) || !!panel.fx;
+    const { pick } = live.model.byName, a = live.state.active;
+    pick.hidden = !(a >= 0);
     const danger = live.model.byName.danger;
     danger.hidden = pick.hidden || live.state.items[a]?.dataset.vxKind !== 'danger';
     if (!danger.hidden) pick.hidden = true;
-    if (a >= 0) danger.ty = pick.ty = live.state.ys[a] ?? 0;
+    if (a >= 0) danger.ty = pick.ty = (live.state.ys[a] ?? 0) - (live.state.scrollY ?? 0);
     live.glowStrength = halo(MENU_GLOW) * (live.theme === 'day' ? 1.2 : 1);
-  },
-
-  // one more drawing after the build ends, so the mark appears on the finished slab
-  step(live) {
-    const building = !!live.model.byName.panel?.fx, was = live.state.building;
-    live.state.building = building;
-    return !!was && !building;
   },
 };
 

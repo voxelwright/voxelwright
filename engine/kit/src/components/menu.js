@@ -4,13 +4,13 @@
 //         <div class="vx-menu" id="m" popover role="menu"><button role="menuitem">…</button>…</div>
 
 import { listeners, wrapLabel } from './util.js';
+import { nativeRelease } from './popover.js';
 import { menuAnchor, menuEnabled, menuTarget, watchDirection } from '../plain.js';
 
 export const menu = {
   name: 'menu',
   selector: '.vx-menu',
   pad: 9,
-  carryPlate: true,
 
   build(live, m) {
     const { W, H, el, vx } = live;
@@ -30,8 +30,8 @@ export const menu = {
 
   pose(live) {
     const pick = live.model.byName.pick, a = live.state.active;
-    pick.hidden = !(a >= 0) || pick.fx != null && false;
-    if (a >= 0) pick.ty = live.state.ys[a] ?? 0;
+    pick.hidden = !(a >= 0);
+    if (a >= 0) pick.ty = (live.state.ys[a] ?? 0) - (live.state.scrollY ?? 0);
   },
 
   bind(live) {
@@ -46,23 +46,43 @@ export const menu = {
       live.invalidate();
     };
     const { invoker, put } = menuAnchor(el, on, () => live.vx * 3);
-    on(el, 'beforetoggle', (e) => el.toggleAttribute('data-vx-cover-legends', e.newState === 'open'));
-    on(el, 'toggle', (e) => {
-      invoker()?.setAttribute('aria-expanded', String(e.newState === 'open'));
-      if (e.newState !== 'open') { live.stopMotion(); setActive(-1); return; }
-      // A context menu without an invoker has already been placed at the pointer.
-      if (!el.dataset.vxFrom || invoker()) put();
-      live.rebuild();
-      live.model.byName.pick.hidden = true;
-      live.play('assemble', ['panel'], { duration: 0.2 });
-      const viaKey = invoker()?.matches(':focus-visible');
-      if (viaKey) live.state.items.find(menuEnabled)?.focus();
+    nativeRelease(live, on, ['panel']);
+    let initialFocus;
+    on(el, 'beforetoggle', e => {
+      initialFocus?.removeAttribute('autofocus');
+      initialFocus = null;
+      if (e.newState !== 'open') { setActive(-1); return; }
+      el.setAttribute('data-vx-cover-legends', '');
+      if (invoker()?.matches(':focus-visible') && !el.querySelector('[autofocus]')) {
+        initialFocus = [...el.querySelectorAll('[role^="menuitem"]')].find(menuEnabled);
+        initialFocus?.setAttribute('autofocus', '');
+      }
     });
+    on(el, 'toggle', e => {
+      initialFocus?.removeAttribute('autofocus');
+      initialFocus = null;
+      invoker()?.setAttribute('aria-expanded', String(e.newState === 'open'));
+      if (e.newState !== 'open') { el.removeAttribute('data-vx-cover-legends'); return; }
+      const anchor = put();
+      const origin = el.dataset.vxFrom && !invoker() ? el.dataset.vxFrom.trim().split(/\s+/).map(Number) : anchor.map(px => px / live.vx);
+      live.visible = true;
+      live.state.scrollY = (el.querySelector(':scope > .vx-menu-rows')?.scrollTop ?? 0) / live.vx;
+      live.rebuild();
+      live.play('assemble', ['panel'], { duration: 0.17, surface: 'rim', from: origin });
+      if (invoker()?.matches(':focus-visible')) live.state.items.find(menuEnabled)?.focus();
+      live.draw();
+      el.removeAttribute('data-vx-cover-legends');
+    });
+    on(el, 'scroll', e => {
+      if (!e.target.classList?.contains('vx-menu-rows')) return;
+      live.state.scrollY = e.target.scrollTop / live.vx;
+      live.invalidate();
+    }, true);
     on(el, 'pointermove', (e) => { const it = e.target.closest('[role^="menuitem"]'); setActive(menuEnabled(it) ? live.state.items.indexOf(it) : -1); });
     on(el, 'pointerleave', () => setActive(-1));
     on(el, 'focusin', (e) => { const i = live.state.items.indexOf(e.target); if (i >= 0) setActive(i); });
     on(el, 'keydown', (e) => {
-      const items = live.state.items;
+      const items = [...el.querySelectorAll('[role^="menuitem"]')];
       // from the item that has focus; the pointer may be resting somewhere else
       const from = items.includes(document.activeElement) ? document.activeElement : items[live.state.active];
       const to = menuTarget(e.key, items, from);
