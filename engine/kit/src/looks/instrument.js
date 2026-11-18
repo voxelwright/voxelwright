@@ -47,14 +47,17 @@ export function settings(value = {}) {
 export function instrument(s, root, stage) {
   const shell = cases[s.shell], cap = caps[s.caps], light = lamps[s.lamp].hue;
   switchTreble(shell.treble);
-  const ink = ['smoke','alloy'].includes(s.shell) ? '#fbf5e9' : '#262b25';
-  const quiet = ['smoke','alloy'].includes(s.shell) ? '#e0e7e5' : '#3e4037';
+  const darkPanel = s.shell === 'smoke' || s.shell === 'alloy';
+  const ink = darkPanel ? '#fbf5e9' : '#262b25';
+  const quiet = darkPanel ? '#e0e7e5' : '#3e4037';
   const panel = { walnut: '#e3d8be', alloy: '#40545c', smoke: '#363b49', clear: '#d2e4dc', frost: '#e3e7dd' }[s.shell];
   const vars = { '--vx-look': 'instrument', '--mat': shell.mat, '--vx-ground': shell.ground,
     '--vx-key': cap.key, '--lit-legend': cap.legend, '--vx-chalk': shell.plate, '--vx-ink': ink,
-    '--vx-ink-quiet': quiet, '--vx-floor': ['alloy','smoke'].includes(s.shell) ? '#313b40' : '#d4cbb5',
+    '--vx-ink-quiet': quiet, '--vx-floor': darkPanel ? '#313b40' : '#d4cbb5',
     '--vx-steel': '#a79d88', '--vx-knob': '#d8c5a1', '--vx-enamel': 'var(--lit-cap-day,#aa4a27)',
     '--panel': panel, '--case-lamp': light, '--vx-signal': 'var(--lit-accent)', '--vx-focus': '#b95329', '--lamp-level': s.level / 10,
+    '--vx-danger-text': darkPanel ? '#ffd4c9' : '#85261c',
+    '--vx-danger-legend': s.caps === 'carbon' ? '#ffd4c9' : '#85261c',
     '--vx-link': ink, '--vx-on-enamel': '#fff8e8' };
   const shape = [s.shell, s.caps, s.profile].join('/');
   const retool = LOOKS.instrument?.tooling !== shape;

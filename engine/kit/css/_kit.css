@@ -622,8 +622,8 @@ dialog.vx-dialog:focus-visible { outline: none; }
    main action of a group (the accent cap); data-vx-kind="danger" destroys something (a red light). */
 [data-vx-look="lit"] .vx-button { --_face: var(--vx-key); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--lit-legend); font-weight: 400; }
 [data-vx-look="lit"] .vx-button:is([data-vx-kind="main"], [data-vx-material="enamel"]) { --_face: var(--vx-enamel); --_top: var(--vx-enamel-top); --_side: var(--vx-enamel-side); --_on: var(--vx-on-enamel); }
-[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-text); }
-[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
 [data-vx-look="lit"] .vx-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); }
 [data-vx-look="lit"] .vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
 /* at night the legend shines through, and flares with the light as the key goes down (--lit is

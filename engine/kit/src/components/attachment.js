@@ -79,7 +79,7 @@ export const attachment = {
     const { W, H } = live, look = live.look;
     const d = Math.max(1, Math.round(look.slab / 2)); // low: half as thick as a panel
     const tile = m.part('tile');
-    tile.slab(0, 0, 0, W, H, d, live.look.readingPlate, 1);
+    tile.slab(0, 0, 0, W, H, d, live.look.readingPlate ?? 'key', 1);
     // one corner is cut, as a card's is: three steps at the top right
     if (W >= 8 && H >= 8) for (let j = 0; j < 3; j++) tile.carve(W - 3 + j, j, 0, 3 - j, 1, d);
     live.faceZ = d;

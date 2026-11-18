@@ -82,7 +82,7 @@
 }
 /* plain: a painted float, and a painted groove under the header */
 [data-vx-look="lit"] .vx-dialog:not([data-vx-live]) {
-  background: var(--vx-chalk);
+  background: var(--vx-reading-plate, var(--vx-chalk));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-dialog:not([data-vx-live]) > header {

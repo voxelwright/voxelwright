@@ -150,7 +150,7 @@ const menu = {
     // the light and the slab are one part, so both are built out of the corner together
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, 'light', 1);
-    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate, 1); // a float is a plate, not a keycap
+    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'key', 1); // a float is a plate, not a keycap
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const h = items[0] ? Math.max(2, Math.round(items[0].offsetHeight / vx)) : 2;
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));
@@ -203,7 +203,7 @@ const dialog = {
     const { W, H, el, vx } = live, d = live.look.dialog, r = live.look.round, GROOVE = live.look.groove;
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, lightName(el, 'light'), r);
-    panel.slab(0, 0, 1, W, H, d - 1, 'chalk', r);
+    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'chalk', r);
     const head = el.querySelector(':scope > header');
     const y = head ? Math.round((head.offsetTop + head.offsetHeight) / vx) - 1 : 0;
     if (y > 1 && y < H - 2 && W > INSET * 2 + 2) {

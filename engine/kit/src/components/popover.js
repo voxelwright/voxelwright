@@ -66,7 +66,7 @@ export function slabOnLight(live, m) {
   ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
   const body = m.part('body');
   body.grounded = false;
-  body.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate, 1);
+  body.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'key', 1);
   live.faceZ = d;
 }
 

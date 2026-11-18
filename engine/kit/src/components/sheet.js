@@ -41,7 +41,7 @@ export function panel(live, m) {
   const x0 = edge === 'right' ? 0 : -OVER, x1 = edge === 'left' ? W : W + OVER;
   const y0 = edge === 'bottom' ? 0 : -OVER, y1 = edge === 'top' ? H : H + OVER;
   const body = m.part('panel');
-  body.box(x0, y0, 0, x1 - x0, y1 - y0, d, 'chalk');
+  body.box(x0, y0, 0, x1 - x0, y1 - y0, d, live.look.readingPlate ?? 'chalk');
   const head = el.querySelector(':scope > header');
   const y = head ? Math.round((head.offsetTop + head.offsetHeight) / vx) - 1 : 0;
   if (y > 1 && y < H - 2 && W > INSET * 2 + 2 && d > g + 1) {
