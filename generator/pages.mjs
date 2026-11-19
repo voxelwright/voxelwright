@@ -292,17 +292,36 @@ ${rendered.html}
   };
 }
 
+// Lost in the fog: the city's poster swallowed by the marine layer, and a park sign with the
+// ways out. The fog is CSS and stands still on its own (no script, reduced motion); with motion
+// allowed, static/lost/fog.js drifts it on a 2D canvas and lets the pointer clear it. It is
+// served for every unknown address, at any depth, so every URL here is absolute.
 export function notFoundPage(site) {
   return {
     path: "/404.html",
     kind: "not-found",
     title: "Not found",
-    html: `<div class="vx-empty not-found">
-${lettering("404")}
-<h2 class="vx-empty-title">Nothing lives at this address</h2>
-<p class="vx-empty-text">The page may have moved, or the link has a typo. The blog lists everything there is to read.</p>
-<a class="vx-button" data-vx-kind="main" href="/blog/">Go to the blog</a>
-</div>`,
+    description: "Nothing stands at this address. Ways back to the city, the blog and Voxelmorphism.",
+    stylesheets: ["/lost/lost.css"],
+    html: `<div class="lost">
+<div class="lost-scene" aria-hidden="true">
+<img class="lost-city" src="/landing/ina.webp" width="2018" height="864" alt="" fetchpriority="high">
+<div class="lost-banks"><i></i><i></i><i></i><i></i></div>
+<canvas class="lost-fog" hidden></canvas>
+<div class="lost-glow"></div>
+</div>
+<section class="lost-sign" aria-labelledby="lost-title">
+<p class="lost-head"><span>Fog advisory</span><span class="lost-code">404</span></p>
+<h1 class="lost-title" id="lost-title">Nothing here but fog</h1>
+<p class="lost-note">No page stands at <span class="lost-where">this address</span>. Either it was never built, or Karl the Fog has it.</p>
+<nav class="lost-ways" aria-label="Ways out">
+<a class="lost-home" href="/">Back to the city</a>
+<a href="/blog/">Blog</a>
+<a href="/voxelmorphism/">Voxelmorphism</a>
+</nav>
+</section>
+</div>
+<script type="module" src="/lost/lost.js"></script>`,
   };
 }
 

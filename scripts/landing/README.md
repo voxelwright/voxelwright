@@ -79,3 +79,20 @@ PLAYWRIGHT=/path/to/node_modules/playwright node scripts/landing/check-postcard.
 ```
 
 It makes a night and a day card in the live city and shares one through a stubbed share sheet. It then makes a card by touch from the GPU-free still on a 390 px phone, and one by keyboard on the plain page. Each PNG comes from the real download and must have the card’s size and a varied picture in its photo window. The night card must be darker than the day card. `test/landing-postcard.test.mjs` covers the layout, crop, date and file name, and the HTML twins.
+
+## Lost in the fog (404)
+
+The 404 page (`notFoundPage` in `generator/pages.mjs`, with `static/lost/`) reuses the skyline poster, `static/landing/ina.webp`, under the marine layer. It is served for every unknown address at any depth (`notFoundHandling: "404-page"` in `cloudflare.config.ts`, and the same in `scripts/serve.mjs`), so every URL on it is absolute.
+
+- **Fog.** `lost.css` draws a veil and four banks with gradients. That is the whole picture without a script and under reduced motion or forced colours. With motion allowed, `lost.js` loads `fog.js`, which paints the same veil and banks on one 2D canvas at about a third of the page size, at 30 frames a second, with about sixty soft sprites from a seeded field. The fog drifts left, as the bank moves east, away from the park, in `landing/fog.js`. There is no WebGPU. The fog stops if reduced motion or forced colours turn on.
+- **Night.** It follows the system's dark setting and the Night key, as the kit does. The city dims and the bank is navy, lit orange from below by a screen-blended glow: the 3D fog's night colours, in 2D. The canvas reads its colours from the CSS custom properties again on `vx-night`.
+- **Interaction.** It is decorative only, and the canvas is `aria-hidden`. A mouse or pen clears a little fog where it moves, and a press or tap on the scene parts it. The gap closes in about two seconds.
+- **Sign.** It is HTML and CSS in the park directory's colours from `landing/sign-paint.js`: enamel, rim, rivets, brass and cream, with plates that turn brass on hover, focus and press. The painter itself draws into the 3D sign atlas, and only its atlas export is public, so the page copies its palette rather than calling it. The sign names the asked-for address when a script runs, and says "this address" when none does.
+- **Twin.** There is no Markdown twin: `/404.html` is not a page route, and the Worker falls back to this HTML.
+
+```sh
+npm run build
+PLAYWRIGHT=/path/to/node_modules/playwright node scripts/check-lost.mjs
+```
+
+It checks the 404 status at several depths, including a request that accepts Markdown. It follows each way out and runs without a script. It checks reduced motion, including when it turns on mid-visit, and night from the system, a saved Night and a saved day. At 390 px it uses a long address and checks the edges and plate sizes. It also checks that the pointer and a tap clear the fog. Screenshots go to `.shots/lost` (or `OUT`).
