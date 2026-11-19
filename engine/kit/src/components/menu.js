@@ -69,9 +69,9 @@ export const menu = {
       live.visible = true;
       live.state.scrollY = (el.querySelector(':scope > .vx-menu-rows')?.scrollTop ?? 0) / live.vx;
       const resume = live.rebuild();
-      const { parts, surface, openDuration = 0.17 } = motion();
+      const { parts, surface, openDuration = 0.17, from } = motion();
       // A fresh context point supplies its own origin even during a reversed exit.
-      if (resume && el.hasAttribute('data-log-actions')) resume.from = origin;
+      if (resume && from) resume.from = from;
       live.play('assemble', parts, { resume, duration: openDuration, surface, from: origin });
       if (invoker()?.matches(':focus-visible')) live.state.items.find(menuEnabled)?.focus();
       live.draw();
