@@ -156,6 +156,7 @@ export const groove = {
       if (el.dataset.vxLens === 'flush') {
         hole(live, m, { depth: 2, wall: 'steel', floor: 'gasket' });
         // Seat the light under smoked resin; the unpowered ends stay dark.
+        live.state.resinTint = null;
         const core = m.part('core');
         core.sunk = true;
         core.box(1, 1, -2, W - 2, H - 2, 1, 'gasket');
@@ -188,6 +189,24 @@ export const groove = {
 
   pose(live) {
     if (live.el.dataset.vxLens === 'flush') {
+      if (live.state.lens && live.state.resinTint !== live.tintRevision) {
+        live.state.resinTint = live.tintRevision;
+        const { core, lens } = live.model.byName;
+        const source = core.col.findIndex((value, i) => i % 4 === 3 && value > 0) - 3;
+        if (source >= 0) {
+          for (let i = 0; i < lens.count; i++) {
+            // Frost carries light to adjacent resin. Preserve its transmission channel.
+            if (lens.col[4 * i + 3] >= 0) continue;
+            const y = lens.rest[3 * i + 1];
+            const endDistance = Math.max(0, 2.5 - y, y - (live.H - 2.5));
+            const scatter = .45 / (1 + endDistance * endDistance);
+            for (let c = 0; c < 3; c++) {
+              const at = 4 * i + c;
+              lens.col[at] += (core.col[source + c] - lens.col[at]) * scatter;
+            }
+          }
+        }
+      }
       live.glowRadius = 1.5;
       live.glowStrength = live.state.lens ? halo(0.018) * byTheme(live) : 0;
       return;

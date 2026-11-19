@@ -67,6 +67,10 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
   border-block-color: var(--vx-slate);
 }
 
+@media (forced-colors: active) {
+  #deploy .projects .mark:not([data-vx-live]) { forced-color-adjust: none; background: Canvas; }
+  #deploy .projects [aria-current]:not([aria-current="false"]) > .mark:not([data-vx-live]) { background: Highlight; border: 2px solid CanvasText; }
+}
 .main { display: grid; gap: calc(var(--vx) * 7); align-content: start; padding: calc(var(--vx) * 7) calc(var(--vx) * 3) calc(var(--vx) * 12) calc(var(--vx) * 8); min-inline-size: 0; }
 .head { display: flex; align-items: center; gap: calc(var(--vx) * 5); flex-wrap: wrap; }
 .name { font-size: 1.875rem; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
