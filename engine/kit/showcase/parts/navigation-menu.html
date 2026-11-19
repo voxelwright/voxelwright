@@ -9,6 +9,26 @@
 <style>
   .site { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 6); inline-size: 100%; }
   .brand { font-weight: 700; font-size: 1.0625rem; color: var(--vx-ink); text-decoration: none; }
+  #site > ul { position: relative; }
+  #site > .vx-canvas { z-index: 1; }
+  #site > ul > li > :is(a, button) { min-block-size: 56px; padding-block: 4px 16px; }
+  #site > ul > li > button {
+    padding-inline: 16px;
+    font-weight: 600;
+  }
+  #site button[data-vx-live] {
+    --vx: 2px;
+    isolation: isolate;
+    color: var(--lit-legend);
+  }
+  #site button[data-vx-live]::after { content: none; }
+  #site button[data-vx-live] .vx-label { display: inline-flex; align-items: center; gap: 8px; }
+  #site button[data-vx-live] .vx-label::after {
+    content: "";
+    inline-size: 10px; block-size: 6px; background: currentColor;
+    clip-path: polygon(0 0,20% 0,20% 33%,40% 33%,40% 66%,60% 66%,60% 33%,80% 33%,80% 0,100% 0,100% 33%,80% 33%,80% 66%,60% 66%,60% 100%,40% 100%,40% 66%,20% 66%,20% 33%,0 33%);
+  }
+  #site button[aria-expanded="true"] .vx-label::after { scale: 1 -1; }
   .app { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; }
   .app > .vx-groove { margin-block-start: calc(var(--vx) * -1); }
   .where { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -94,6 +114,7 @@
 <script type="module">
   import { show } from './parts.js';
   import { navigationMenu, navigationMenuFloat } from '../../src/components/navigation-menu.js';
+  import { disclosureKey, pageLenses } from './fogline-navigation.js';
   // The page stands in for a router: a link that is followed becomes the current one.
   document.addEventListener('click', (e) => {
     const a = e.target.closest?.('.vx-navigation-menu a[href]');
@@ -102,7 +123,7 @@
     for (const o of nav.querySelectorAll('a')) if (o === a) o.setAttribute('aria-current', 'page'); else o.removeAttribute('aria-current');
     if (nav.id === 'site') document.getElementById('where').textContent = `You are on ${(a.querySelector('.vx-nm-name') ?? a).textContent.trim()}.`;
   });
-  await show(navigationMenu, navigationMenuFloat);
+  await show(navigationMenu, navigationMenuFloat, disclosureKey, pageLenses);
   // one float is shown out, so that it can be looked at; ?closed leaves it shut
   const still = document.getElementById('still-float');
   if (!new URLSearchParams(location.search).has('closed')) still.showPopover();
