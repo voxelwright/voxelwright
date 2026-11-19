@@ -16,6 +16,35 @@
   .rows .mark { flex: none; display: grid; place-items: center; inline-size: calc(var(--vx) * 10); block-size: calc(var(--vx) * 10); color: var(--vx-ink-quiet); font: 600 0.8125rem/1 var(--vx-mono); }
   .rows .name { font-weight: 600; line-height: calc(var(--vx) * 6); }
   .rows .when { color: var(--vx-ink-quiet); line-height: calc(var(--vx) * 6); }
+  .other-deploys { display: contents; }
+  #deploy-reading { inline-size: 100%; }
+  #deploy-reading .mark, .deploy-slug { position: relative; isolation: isolate; }
+  #deploy-reading .mark { color: #f7edd7; padding-left: calc(2 * var(--vx)); font-size: .9375rem; }
+  #deploy-reading .mark:not([data-vx-live]) { background: #343936; border: 1px solid var(--vx-steel); }
+  #deploy-reading .mark:not([data-vx-live])::after {
+    content: ""; position: absolute; left: var(--vx); top: 50%; translate: 0 -50%; inline-size: var(--vx);
+    block-size: calc(3 * var(--vx)); background: #555d56;
+  }
+  [aria-busy="true"] #deploy-reading .mark:not([data-vx-live])::after { background: #e8bc81; }
+  [aria-busy="true"] #deploy-reading .mark:not([data-vx-live])::before {
+    content: ""; inline-size: calc(5 * var(--vx)); block-size: var(--vx);
+    position: absolute; left: calc(3 * var(--vx)); top: 50%; translate: 0 -50%;
+    background: linear-gradient(to right, #868a79 40%, transparent 40% 60%, #868a79 60%);
+  }
+  .deploy-slug { display: inline-block; vertical-align: top; }
+  .deploy-slug::before {
+    content: ""; position: absolute; inset-inline: 0; inset-block-start: 50%; translate: 0 -50%;
+    block-size: calc(2 * var(--vx)); background: var(--vx-slate);
+  }
+  .deploy-slug[data-vx-live]::before { display: none; }
+  #deploy-reading .when .deploy-slug::before { block-size: var(--vx); }
+  #deploy-reading .ink { transition: opacity 110ms ease-out 55ms; }
+  [aria-busy="true"] #deploy-reading .ink { visibility: hidden; opacity: 0; }
+  .deploy-slug > canvas, .deploy-slug::before { transition: opacity 65ms ease-out; }
+  [aria-busy="false"] .deploy-slug > canvas, [aria-busy="false"] .deploy-slug::before { opacity: 0; }
+  @media (prefers-reduced-motion: reduce) {
+    #deploy-reading .ink, .deploy-slug > canvas, .deploy-slug::before { transition: none; }
+  }
   .states { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 6); inline-size: 100%; }
   .states .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); }
   .states .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -44,9 +73,17 @@
       <!-- the words stand outside the busy region; they are changed when the loading ends -->
       <p class="vx-skeleton-word" role="status" id="word">Loading the deploys</p>
       <div class="vx-skeleton rows" id="list" aria-busy="true" aria-labelledby="deploys-title">
-        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 44"></span><span class="vx-bone" style="--vx-bone-w: 68"></span></div></div>
-        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 60"></span></div></div>
-        <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 52"></span><span class="vx-bone" style="--vx-bone-w: 56"></span></div></div>
+        <div class="one" id="deploy-reading">
+          <span class="mark"><span class="ink">4f</span></span>
+          <div class="text">
+            <span class="name"><span class="deploy-slug"><span class="ink">Cloned</span></span> <span class="deploy-slug"><span class="ink">main</span></span> <span class="deploy-slug"><span class="ink">at</span></span> <span class="deploy-slug"><span class="ink">4f2c9a1</span></span></span>
+            <span class="when"><span class="deploy-slug"><span class="ink">Mina,</span></span> <span class="deploy-slug"><span class="ink">10:43</span></span></span>
+          </div>
+        </div>
+        <div class="other-deploys">
+          <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 60"></span></div></div>
+          <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 52"></span><span class="vx-bone" style="--vx-bone-w: 56"></span></div></div>
+        </div>
       </div>
     </div>
   </section>
@@ -92,31 +129,73 @@
 <script type="module">
   import { show } from './parts.js';
   import { skeleton } from '../../src/components/skeleton.js';
-  import { adopt, release } from '../../src/index.js';
+  import { adopt, release, hole, halo, listeners } from '../../src/index.js';
 
   // What a product does when what was coming is here: the bones go, the region is no longer
   // busy, and the words a screen reader hears change.
   const list = document.getElementById('list'), word = document.getElementById('word'), flip = document.getElementById('flip');
-  const bones = list.innerHTML;
-  const rows = [['4f2c9a1', 'Cloned main at 4f2c9a1', 'Mina, 10:43'], ['9be07d2', 'Rolled back to 9be07d2', 'Ada, yesterday'], ['c41e6f0', 'Built in 45 s', 'Mina, Monday']];
+  const others = list.querySelector('.other-deploys');
+  const bones = others.innerHTML;
+  // Word-sized blocks use the actual font metrics, including after a line wraps.
+  const slug = {
+    name: 'deploy-slug', selector: '#deploy-reading .deploy-slug', pad: 1,
+    build(live, m) {
+      const { W, H, el } = live;
+      const secondary = el.closest('.when');
+      const height = secondary ? 1 : 2;
+      hole(live, m, { y: Math.floor((H - height) / 2), w: W, h: height,
+        depth: 1, wall: 'steel', floor: secondary ? 'steel' : 'slate' });
+    },
+  };
+  const windowMark = {
+    name: 'deploy-window', selector: '#deploy-reading .mark', pad: 1,
+    glowRadius: 1.6, glowStrength: halo(.035),
+    build(live, m) {
+      const { W, H } = live;
+      hole(live, m, { depth: 1, wall: 'steel', floor: 'gasket' });
+      const x = Math.floor((W - 5) / 2) + 1, y = Math.floor(H / 2) - 1;
+      const dashes = m.part('dashes');
+      dashes.sunk = true;
+      dashes.box(x, y, -1, 2, 1, 1, 'slate');
+      dashes.box(x + 3, y, -1, 2, 1, 1, 'slate');
+      const lens = m.part('diffuser');
+      lens.sunk = true;
+      lens.box(1, y - 2, -1, 1, 5, 1, 'lens');
+      const filament = m.part('filament');
+      filament.sunk = true;
+      filament.box(1, y - 1, -1, 1, 3, 1, 'lamp');
+      filament.tz = .08;
+    },
+    pose(live) {
+      const loaded = list.getAttribute('aria-busy') === 'false';
+      live.model.byName.filament.hidden = loaded;
+      live.model.byName.dashes.hidden = loaded;
+    },
+    bind(live) {
+      const on = listeners();
+      on.watch(list, { attributes: true, attributeFilter: ['aria-busy'] }, () => live.invalidate());
+      return on.done;
+    },
+  };
+  const rows = [['9be07d2', 'Rolled back to 9be07d2', 'Ada, yesterday'], ['c41e6f0', 'Built in 45 s', 'Mina, Monday']];
   const label = (text) => { (flip.querySelector('.vx-label') ?? flip).textContent = text; };
   flip.addEventListener('click', () => {
     const busy = list.getAttribute('aria-busy') === 'true';
-    release(list);
+    release(others);
     if (busy) {
-      list.innerHTML = rows.map(([id, what, who]) => `<div class="one"><span class="mark">${id.slice(0, 2)}</span><div class="text"><span class="name">${what}</span><span class="when">${who}</span></div></div>`).join('');
+      others.innerHTML = rows.map(([id, what, who]) => `<div class="one"><span class="mark">${id.slice(0, 2)}</span><div class="text"><span class="name">${what}</span><span class="when">${who}</span></div></div>`).join('');
       list.setAttribute('aria-busy', 'false');
       word.textContent = 'Deploys loaded';
       label('Load again');
     } else {
-      list.innerHTML = bones;
+      others.innerHTML = bones;
       list.setAttribute('aria-busy', 'true');
       word.textContent = 'Loading the deploys';
       label('Finish loading');
-      adopt(list);
+      adopt(others);
     }
   });
-  show(skeleton);
+  show(skeleton, slug, windowMark);
 </script>
 </body>
 </html>
