@@ -35,6 +35,13 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .stage[data-own] { cursor: none; }
 .stage[data-own] :is(button, a, input, label) { cursor: none; }
 
+.vx-cursor[data-demo-pointer] {
+  inline-size: calc(var(--vx) * 7);
+  block-size: calc(var(--vx) * 10);
+  transition: none;
+}
+.vx-cursor[data-demo-pointer][data-vx-surface="courses"] { opacity: 1; }
+
 .window { display: grid; padding: 0; line-height: 1.55; }
 .window > * + * { margin-block-start: 0; }
 .window > .vx-groove { margin-inline: calc(var(--vx) * 6); }

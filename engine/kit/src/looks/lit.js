@@ -453,6 +453,19 @@ const ARROW = [
   '#...#o#.',
   '.....##.',
 ];
+// A brass face and an ivory sight line inside the dark perimeter.
+const DEMO_TIP = [
+  '#',
+  'b#',
+  'bi#',
+  'bib#',
+  'bibb#',
+  'bibbb#',
+  'bib####',
+  'b#.#b',
+  '#..#b#',
+  '....##',
+];
 const HOVER = 6;
 export const pointer = {
   name: 'cursor',
@@ -462,7 +475,14 @@ export const pointer = {
   build(live, m) {
     const arrow = m.part('arrow');
     arrow.grounded = false;
-    ARROW.forEach((row, j) => [...row].forEach((c, i) => { if (c !== '.') arrow.box(i, j, HOVER, 1, 1, 2, c === '#' ? 'pointer-edge' : 'ivory'); }));
+    const demo = live.el.hasAttribute('data-demo-pointer');
+    const shape = demo ? DEMO_TIP : ARROW;
+    shape.forEach((row, y) => [...row].forEach((cell, x) => {
+      if (cell === '.') return;
+      const face = cell === '#' ? 'pointer-edge' : cell === 'b' ? 'warm-metal' : 'ivory';
+      arrow.plot(x, y, HOVER, demo ? 'pointer-edge' : face);
+      arrow.plot(x, y, HOVER + 1, face);
+    }));
     live.faceZ = HOVER + 2;
   },
 

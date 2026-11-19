@@ -47,7 +47,16 @@ function hand(stage) {
     el, stage,
     get run() { return run; },
     stop() { run++; if (over) { fire(over, 'pointerup'); fire(over, 'pointerleave'); over = null; } dip(false); },
-    show(on = true) { el.toggleAttribute('data-on', on); },
+    show(on = true) {
+      if (on === el.hasAttribute('data-on')) return;
+      el.toggleAttribute('data-on', on);
+      if (el.hasAttribute('data-demo-pointer')) {
+        const part = live(el);
+        part?.play(on ? 'assemble' : 'crumble', null, {
+          surface: 'courses', from: [0, 0], duration: on ? 0.22 : 0.16,
+        }).then(finished => { if (finished && !on) part.clearSurface(); });
+      }
+    },
     place, dip,
     put(target, fx = 0.5, fy = 0.5) { place(...at(target, fx, fy)); },
     wait(ms) { const id = run; return new Promise((res, rej) => setTimeout(() => (id === run ? res() : rej(new Stop())), ms)); },
@@ -91,6 +100,7 @@ function deploy() {
   const stage = $('#deploy'), h = hand(stage);
   const go = $('#go'), meter = $('.vx-meter', stage), prog = $('progress', stage), num = $('.build-num', stage);
   const lamp = $('.vx-lamp', stage), word = $('.state-word', stage), note = $('.vx-toast', stage), log = $('.log', stage);
+  const park = h.el.hasAttribute('data-demo-pointer') ? [go, 1.06, 1.18] : [$('.actions', stage), 0.5, 0.66];
   const BUILDS = [
     ['10:42:17', 'Cloned main at 4f2c9a1', '10:42:31', 'Installed 212 packages', '10:43:02', 'Built in 45 s'],
     ['10:51:40', 'Cloned main at 9be01d3', '10:51:52', 'Installed 212 packages', '10:52:21', 'Built in 41 s'],
@@ -139,7 +149,7 @@ function deploy() {
     for (const p of live(note)?.model.parts ?? []) { p.fx = null; p.hidden = false; }
   };
   async function play() {
-    h.put($('.actions', stage), 0.5, 0.66);
+    h.put(...park);
     h.show();
     for (;;) {
       await h.wait(1500);
@@ -158,7 +168,7 @@ function deploy() {
     bar(0);
     for (const l of lines().reverse()) { l.setAttribute('data-out', ''); await h.wait(70); }
     await h.wait(260);
-    if (shown) h.move($('.actions', stage), 0.5, 0.66, 1.25).catch(() => {}); // it rests on empty surface, near its next move
+    if (shown) h.move(...park, 1.25).catch(() => {}); // it rests on empty surface, near its next move
     n++;
     write(BUILDS[n % 2]);
     const ls = lines();
@@ -176,8 +186,13 @@ function deploy() {
     await notice(false);
   }
   // a person's own press does the same
-  go.addEventListener('click', (e) => { if (!e.isTrusted) return; h.stop(); build(false).catch((err) => { if (!(err instanceof Stop)) throw err; }); });
-  return { stage, h, play, rest };
+  let manualBuild;
+  go.addEventListener('click', (e) => {
+    if (!e.isTrusted) return;
+    h.stop();
+    manualBuild = build(false).catch((err) => { if (!(err instanceof Stop)) throw err; });
+  });
+  return { stage, h, play, rest, get manualBuild() { return manualBuild; } };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -258,19 +273,42 @@ function direct(story) {
   const halt = () => { h.stop(); h.show(false); rest(); };
   new IntersectionObserver(([e]) => { const was = seen; seen = e.isIntersecting; if (seen && !was) start(); else if (!seen && was && !own) halt(); }, { threshold: 0.35 }).observe(stage);
   const log = stage.querySelector('.log-view');
-  log?.addEventListener('focusin', () => {
-    clearTimeout(back);
-    h.stop();
-    h.show(false);
-    for (const line of log.querySelectorAll('[data-out]')) line.removeAttribute('data-out');
-  });
-  log?.addEventListener('focusout', () => {
-    clearTimeout(back);
-    back = setTimeout(() => {
-      if (!stage.matches(':hover')) { own = false; stage.removeAttribute('data-own'); }
-      start();
-    }, 2600);
-  });
+  // This pointer narrates the demo. Leave the operating system in charge of actual input.
+  if (h.el.hasAttribute('data-demo-pointer')) {
+    let inside = false;
+    const take = () => {
+      clearTimeout(back);
+      if (!own) {
+        own = true;
+        if (reading()) {
+          h.stop();
+          h.show(false);
+          for (const line of log.querySelectorAll('[data-out]')) line.removeAttribute('data-out');
+        } else halt();
+      }
+    };
+    const resume = () => {
+      clearTimeout(back);
+      const timer = back = setTimeout(async () => {
+        // Let a tap finish its build even after the finger lifts off the glass.
+        await story.manualBuild;
+        if (back !== timer || inside || stage.querySelector(':focus-visible')) return;
+        own = false;
+        start();
+      }, 2600);
+    };
+    const enter = e => { if (e.isTrusted) { inside = true; take(); } };
+    const leave = e => { if (e.isTrusted) { inside = false; resume(); } };
+    stage.addEventListener('pointerenter', enter);
+    stage.addEventListener('pointerdown', enter);
+    stage.addEventListener('pointerleave', leave);
+    stage.addEventListener('pointercancel', leave);
+    stage.addEventListener('focusin', take);
+    stage.addEventListener('focusout', resume);
+    inside = stage.matches(':hover');
+    if (inside || stage.querySelector(':focus-visible')) take();
+    return { start, halt };
+  }
   const real = (e) => e.isTrusted && e.pointerType === 'mouse';
   stage.addEventListener('pointermove', (e) => {
     if (!e.isTrusted) return;
