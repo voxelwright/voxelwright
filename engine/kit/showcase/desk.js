@@ -6,7 +6,10 @@ import { connectSound } from './switch-sound.js';
 import { contourFader } from './contour-fader.js';
 import { cue } from '../src/core/sound.js';
 
+import { scanKey } from './scan-key.js';
+
 define(contourFader);
+define(scanKey);
 const $ = selector => document.querySelector(selector);
 let build = recall();
 const hardware = $('.hardware');

@@ -181,7 +181,24 @@ select { padding: .35rem .6rem; font: 400 .85rem "IBM Plex Sans",sans-serif; col
 :is([data-shell="clear"],[data-shell="frost"]) .gain output { color: #24352d; }
 
 .vx-backplane:not([data-vx-live]) { background-image: repeating-linear-gradient(0deg,transparent 0 8px,#bda67c55 8px 9px,transparent 9px 21px); }
-.facehead .scan { --vx: 2px; min-width: 62px; height: 28px; font: 600 11px "IBM Plex Mono",monospace; }
-.facehead .scan::after { content: ""; position: absolute; inset: -5px; }
-
+#scan {
+  --vx: 1px;
+  --scan-face: #303635;
+  position: relative; isolation: isolate; display: grid; place-items: center;
+  width: 72px; height: 30px; border: 0; padding: 0; background: transparent;
+  color: #fff1d8; font: 600 12px/1 "IBM Plex Mono", monospace;
+  cursor: pointer; touch-action: manipulation; user-select: none;
+}
+#scan::after { content: ""; position: absolute; inset: -7px 0; }
+#scan:focus-visible { outline: 2px solid #ffe7ac; outline-offset: 3px; }
+[data-caps="linen"] #scan, [data-caps="opal"] #scan {
+  --scan-face: var(--vx-key); color: var(--lit-legend);
+}
+#scan:not([data-vx-live]) { background: #602d36; }
+#scan:not([data-vx-live]) .vx-label {
+  display: grid; place-items: center; position: absolute; inset: 2px 4px;
+  background: var(--scan-face); border-bottom: 2px solid #151a18;
+  transform: translate(1px, 1px);
+}
+#scan:not([data-vx-live]):is(:active, [data-held]) .vx-label { transform: translate(-2px, -2px); }
 @media(max-width:360px) { .readout { font-size: 8px; letter-spacing: .035em; } }
