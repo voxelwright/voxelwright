@@ -9,6 +9,7 @@
 //         The links may stand in a list. In a column the groove stands at the start of the current
 //         link; in a row (data-vx-way="across") it lies under it. data-vx-offset is how far below
 //         the top of what scrolls a section's top may be and still count as reached (px, 64).
+// data-vx-follow-scroll reads the actual section position even while a link is being activated.
 // It only watches: it marks the current link with aria-current and never scrolls anything. A
 // link pressed is the browser's own jump. With no script the link marked in the markup shows.
 
@@ -99,11 +100,18 @@ function wire(el, on) {
   // by themselves (a short last section may never reach the line). It is let go when its jump
   // has ended, and by anything the person does next, wherever the pointer is: a press comes
   // before its click, so pressing another link lets go of this one and then holds that one.
-  on(el, 'click', (e) => { const a = e.target.closest?.('a'); if (a && links().includes(a) && section(a)) { held = a; update(); } });
-  const free = () => { held = null; };
-  for (const type of ['scrollend', 'wheel', 'touchstart', 'keydown', 'pointerdown']) on(document, type, free, { capture: true, passive: true });
+  const followsScroll = el.hasAttribute('data-vx-follow-scroll');
+  if (!followsScroll) {
+    on(el, 'click', (e) => { const a = e.target.closest?.('a'); if (a && links().includes(a) && section(a)) { held = a; update(); } });
+    const free = () => { held = null; };
+    for (const type of ['scrollend', 'wheel', 'touchstart', 'keydown', 'pointerdown']) on(document, type, free, { capture: true, passive: true });
+  }
   const sizes = new ResizeObserver(() => update(true));
   sizes.observe(el);
+  // A heading can cross the reading line after content or fonts reflow without scrolling.
+  if (followsScroll) {
+    for (const target of links().map(section).filter(Boolean)) sizes.observe(target, { box: 'border-box' });
+  }
   on.watch(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] }, () => update(true));
 
   el.setAttribute('data-vx-on', '');

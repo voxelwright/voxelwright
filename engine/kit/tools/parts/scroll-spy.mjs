@@ -24,22 +24,29 @@ const open = async (opts = {}, plain = false) => {
 const read = (p, id = 'toc') => p.evaluate((id) => {
   const nav = document.getElementById(id), mark = nav.querySelector('.vx-spy-mark');
   const cur = [...nav.querySelectorAll('a[aria-current]')];
-  const a = cur[0], r = a?.getBoundingClientRect(), m = mark.getBoundingClientRect(), n = nav.getBoundingClientRect();
+  const a = cur[0], fitting = a?.querySelector('.reading-lens') ?? mark;
+  const r = a?.getBoundingClientRect(), m = fitting.getBoundingClientRect(), n = nav.getBoundingClientRect();
+  const lenses = [...nav.querySelectorAll('.reading-lens')];
+  const lit = lenses.filter(el => {
+    const glass = window.vx?.live(el)?.model.byName.glass;
+    return glass?.col.some((v, i) => i % 4 === 3 && v > 0);
+  });
   return {
     current: cur.map((x) => x.getAttribute('href')), word: a?.getAttribute('aria-current'),
     link: r && { x: r.x, y: r.y, w: r.width, h: r.height, right: r.right, bottom: r.bottom }, mark: { x: m.x, y: m.y, w: m.width, h: m.height, right: m.right, bottom: m.bottom }, nav: { x: n.x, right: n.right },
-    shown: getComputedStyle(mark).visibility === 'visible' && getComputedStyle(mark).opacity === '1', live: mark.hasAttribute('data-vx-live'),
-    y: scrollY, move: getComputedStyle(mark).transitionDuration,
+    shown: getComputedStyle(fitting).visibility === 'visible' && getComputedStyle(fitting).opacity === '1',
+    live: fitting.hasAttribute('data-vx-live'), powered: lit.map(el => el.parentElement.hash),
+    y: scrollY, move: getComputedStyle(fitting).transitionDuration,
   };
 }, id);
 const near = (a, b, by = 1.5) => Math.abs(a - b) <= by;
-const beside = (s) => s.shown && near(s.mark.x, s.nav.x) && s.mark.w === 4 && near(s.mark.y, s.link.y + 8) && near(s.mark.bottom, s.link.bottom - 8);
+const beside = (s) => s.shown && near(s.mark.x, s.link.x + 4) && near(s.mark.y + s.mark.h / 2, s.link.y + s.link.h / 2) && (!s.live || s.powered.join() === s.current.join());
 const settle = (p) => p.waitForTimeout(450);
 
 async function spy(p, how) {
   let s = await read(p);
   say(s.y === 0 && s.current.join() === '#install' && s.word === 'location', `${how}: on arrival the page is where it was (0), and one link is marked: ${s.current.join()} (aria-current="${s.word}")`);
-  say(beside(s) && s.live === (how === 'voxels'), `${how}: the groove stands at the start of that link, a voxel wide, two voxels short of it at each end`);
+  say(beside(s) && s.live === (how === 'voxels'), `${how}: its fixed fitting is centered beside the current link`);
   // the keyboard, before anything else is touched: Tab to the links, Enter on one
   await reachByTab(p, '#toc a'); await p.keyboard.press('Tab'); await p.keyboard.press('Tab');
   const focus = await p.evaluate(() => [document.activeElement.getAttribute('href'), getComputedStyle(document.activeElement).outlineStyle]);
@@ -61,7 +68,7 @@ async function spy(p, how) {
     if (s.current.length !== 1 || !beside(s)) { seen.push('!'); break; }
     if (seen.at(-1) !== s.current[0]) seen.push(s.current[0]);
   }
-  say(seen.join(' ') === '#install #configure #deploy #roll-back #logs', `${how}: wheeling down, each section is marked in turn, one at a time, the groove beside it: ${seen.join(' ')}`);
+  say(seen.join(' ') === '#install #configure #deploy #roll-back #logs', `${how}: wheeling down, each section is marked in turn, one at a time, its fitting beside it: ${seen.join(' ')}`);
   const before = await p.evaluate(() => scrollY);
   await p.waitForTimeout(700);
   say(await p.evaluate(() => scrollY) === before, `${how}: left alone, the page stays where the wheel put it (${before})`);
@@ -97,8 +104,29 @@ async function spy(p, how) {
 
 // ---- voxels
 const p = await open();
-say(await p.evaluate(() => { const n = document.getElementById('toc'); return n.tagName === 'NAV' && n.getAttribute('aria-label') === 'On this page' && n.querySelector('.vx-spy-mark').getAttribute('aria-hidden') === 'true' && [...n.querySelectorAll('a')].every((a) => a.getBoundingClientRect().height >= 44); }), 'it is a named nav of real links, each 44 px to press; the groove is hidden from a screen reader');
+say(await p.evaluate(() => { const n = document.getElementById('toc'); return n.tagName === 'NAV' && n.getAttribute('aria-label') === 'On this page' && n.querySelectorAll('.reading-lens[aria-hidden="true"]').length === 5 && [...n.querySelectorAll('a')].every((a) => a.getBoundingClientRect().height >= 44); }), 'it is a named nav of real links, each 44 px to press; the five fittings are hidden from a screen reader');
 await spy(p, 'voxels');
+// Cancel navigation, then move the page without a wheel or a second pointer event.
+await p.locator('#toc a[href="#logs"]').evaluate(a => {
+  a.addEventListener('click', e => e.preventDefault(), { once: true });
+  a.click();
+});
+await settle(p);
+say((await read(p)).current.join() === '#install', 'a canceled jump leaves the lamp on the section still in view');
+await p.locator('#deploy').evaluate(el => el.scrollIntoView());
+await settle(p);
+const programmatic = await read(p);
+say(programmatic.current.join() === '#deploy' && beside(programmatic), 'a programmatic scroll lights only the reached section');
+await p.evaluate(() => {
+  document.documentElement.style.overflowAnchor = 'none';
+  document.getElementById('install').style.paddingBottom = innerHeight * 2 + 'px';
+});
+await settle(p);
+say((await read(p)).current.join() === '#install', 'reflow moves a different section under the reading line');
+await p.evaluate(() => {
+  document.getElementById('install').style.removeProperty('padding-bottom');
+  document.documentElement.style.removeProperty('overflow-anchor');
+});
 // the row that watches a box
 let s = await read(p, 'versions');
 const under = (s) => s.shown && near(s.mark.x, s.link.x) && near(s.mark.w, s.link.w, 3) && s.mark.h === 4 && near(s.mark.bottom, s.link.bottom);
@@ -122,7 +150,7 @@ await p.context().close();
 // ---- prefers-reduced-motion
 const q = await open({ reducedMotion: 'reduce' });
 s = await read(q);
-say(s.move === '0s', 'prefers-reduced-motion: the groove does not travel, it is at the new link at once');
+say(s.move === '0s', 'prefers-reduced-motion: the current fitting changes without travel');
 await q.mouse.move(700, 350);
 await q.mouse.wheel(0, await q.locator('#configure').evaluate(el => el.getBoundingClientRect().top));
 await q.waitForTimeout(450);
@@ -137,7 +165,9 @@ await r.context().close();
 
 // ---- no script at all
 const n = await open({ javaScriptEnabled: false });
-say(await n.evaluate(() => { const a = document.querySelector('#toc a[aria-current="location"]'), m = getComputedStyle(a, '::before'); return a.getAttribute('href') === '#install' && m.content !== 'none' && m.width === '4px' && getComputedStyle(document.querySelector('#toc .vx-spy-mark')).visibility === 'hidden'; }), 'no script: the link marked in the markup carries a painted mark, and the links still work');
+say(await n.evaluate(() => { const a = document.querySelector('#toc a[aria-current="location"]'), other = a.nextElementSibling;
+  return a.hash === '#install' && getComputedStyle(a.firstElementChild).backgroundColor !== getComputedStyle(other.firstElementChild).backgroundColor;
+}), 'no script: the current fitting has a distinct fill');
 await n.locator('#toc a[href="#deploy"]').click();
 await n.waitForTimeout(300);
 say(await n.evaluate(() => location.hash === '#deploy' && Math.abs(document.getElementById('deploy').getBoundingClientRect().top) <= 1), 'no script: a link pressed jumps to its section');

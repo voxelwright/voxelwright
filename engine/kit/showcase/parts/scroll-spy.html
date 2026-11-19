@@ -26,6 +26,19 @@
     .docs .toc { position: static; display: flex; flex-wrap: wrap; column-gap: calc(var(--vx) * 2); }
     .docs .toc a { padding-inline: calc(var(--vx) * 2); }
   }
+  #toc a { gap: calc(var(--vx) * 2); padding-inline-start: var(--vx); background-image: none; }
+  #toc a::before { content: none; }
+  #toc a[aria-current="location"] { font-weight: 700; }
+  #toc .reading-lens {
+    --vx: 2px;
+    position: relative; display: inline-block; flex: none; pointer-events: none;
+    inline-size: calc(6 * var(--vx)); block-size: calc(10 * var(--vx));
+  }
+  #toc .reading-lens:not([data-vx-live]) {
+    box-sizing: border-box; border: var(--vx) solid var(--vx-steel);
+    background: var(--vx-slate);
+  }
+  #toc [aria-current="location"] .reading-lens:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -36,19 +49,18 @@
 <main class="vx-card sheet">
   <header>
     <h1>Scroll spy</h1>
-    <p class="what">Words that lead to the sections of a page, with an accent groove that moves to the one being read. It only watches: the page is never moved for you.</p>
+    <p class="what">Words that lead to the sections of a page, with a fixed lens beside each link. The lit lens marks the section being read. It only watches: the page is never moved for you.</p>
   </header>
   <div class="vx-groove" role="separator"></div>
   <section>
     <h2>In use: the guide to harbor-api</h2>
     <div class="docs">
-      <nav class="vx-spy toc" id="toc" aria-label="On this page">
-        <span class="vx-groove vx-spy-mark" data-vx-light="accent" aria-hidden="true"></span>
-        <a href="#install" aria-current="location">Install</a>
-        <a href="#configure">Configure</a>
-        <a href="#deploy">Deploy</a>
-        <a href="#roll-back">Roll back</a>
-        <a href="#logs">Read the logs</a>
+      <nav class="vx-spy toc" id="toc" data-vx-follow-scroll aria-label="On this page">
+        <a href="#install" aria-current="location"><span class="reading-lens" aria-hidden="true"></span>Install</a>
+        <a href="#configure"><span class="reading-lens" aria-hidden="true"></span>Configure</a>
+        <a href="#deploy"><span class="reading-lens" aria-hidden="true"></span>Deploy</a>
+        <a href="#roll-back"><span class="reading-lens" aria-hidden="true"></span>Roll back</a>
+        <a href="#logs"><span class="reading-lens" aria-hidden="true"></span>Read the logs</a>
       </nav>
       <div class="vx-groove" data-vx-way="down" role="separator"></div>
       <article class="guide">
@@ -143,7 +155,8 @@ pnpm harbor init</pre>
   import { show } from './parts.js';
   import { scrollSpy } from '../../src/components/scroll-spy.js';
   import { scrollArea } from '../../src/components/scroll-area.js';
-  show(scrollSpy, scrollArea);
+  import { readingLens } from './scroll-spy-lens.js';
+  show(scrollSpy, scrollArea, readingLens);
 </script>
 </body>
 </html>
