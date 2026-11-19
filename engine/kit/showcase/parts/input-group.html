@@ -39,6 +39,10 @@
     outline: 2px solid var(--vx-focus);
     outline-offset: 2px;
   }
+  @media (max-width: 360px) {
+    .address-well > label.vx-addon { padding-inline: calc(var(--vx) * 2); }
+    .vx-input-group .address-well > input { padding-inline: var(--vx); }
+  }
   .states { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
 </style>
 <script>
@@ -142,7 +146,12 @@
 <script type="module">
   import { show } from './parts.js';
   import './address-insert.js';
+  import { live } from '../../src/index.js';
   show();
+  // The two labels can change width after a font swap without resizing the casting.
+  const frame = document.querySelector('.address-well');
+  const fittings = new ResizeObserver(() => live(frame)?.rebuild());
+  for (const label of frame.querySelectorAll('.vx-addon')) fittings.observe(label);
   const form = document.getElementById('claim'), said = document.getElementById('said');
   form.addEventListener('submit', (e) => {
     e.preventDefault();
