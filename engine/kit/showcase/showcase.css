@@ -82,6 +82,8 @@ h3 { font-size: 1.3rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.0
 .bench.gridded { --vx: 8px; --_line: color-mix(in oklab, var(--vx-ink) 9%, transparent); padding: calc(var(--vx) * 4); justify-content: center;
   background-image: linear-gradient(to right, var(--_line) 1px, transparent 1px), linear-gradient(to bottom, var(--_line) 1px, transparent 1px);
   background-size: var(--vx) var(--vx); }
+.bench.gridded:has(#depth-block) { container: depth-bench / inline-size; }
+@container depth-bench (max-width: 260px) { #depth-block { --vx: 4px; } }
 .grow { flex: 1 1 14rem; }
 .pair { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 6); }
 

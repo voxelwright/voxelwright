@@ -21,7 +21,7 @@ export const block = {
         sample.slab(x, y, 0, 4, 5, 1, 'steel');
         sample.carve(x + 1, y + 2, 0, 2, 1, 1);
       }
-      sample.slab(0, 0, 1, W, H, d, el.dataset.vxMaterial);
+      sample.slab(0, 0, 1, W, H, d, el.dataset.vxMaterial || 'chalk');
       // An inlaid scale on the exposed edge, with a longer mark every fourth course.
       for (let z = 2; z <= d; z += 2) {
         sample.box(3, 0, z, z % 4 === 0 ? 3 : 1, 1, 1, 'steel');
