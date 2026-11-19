@@ -23,7 +23,7 @@ export const lens = {
     const { W, H } = live;
     const fitting = model.part('socket');
     fitting.slab(0, 0, 0, W, H, 1, 'steel');
-    fitting.box(1, 1, 0, W - 2, H - 2, 1, 'backlight');
+    fitting.box(1, 1, 0, W - 2, H - 2, 1, 'light');
     live.faceZ = 1;
   },
 };
@@ -43,7 +43,8 @@ function stroke(el, on, move) {
     if (sounded) cue('release');
   }
   on(el, 'pointerdown', e => { if (e.button === 0 && e.isPrimary) down(e.pointerId); });
-  on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
+  on(el, 'pointermove', e => { if (!(e.buttons & 1)) up(e.pointerId, true); });
+  on(el, 'pointerup', e => up(e.pointerId, true));
   for (const event of ['pointercancel', 'pointerleave']) on(el, event, e => up(e.pointerId, false));
   on(el, 'keydown', e => { if (e.key === 'Enter' && !e.repeat) down(e.key); });
   on(el, 'keyup', e => up(e.key, true));
@@ -73,5 +74,5 @@ export const returnKey = {
     });
     return on.done;
   },
-  plain: stroke,
+  plain(el, on) { stroke(el, on, down => el.toggleAttribute('data-held', down)); },
 };

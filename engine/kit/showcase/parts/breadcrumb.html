@@ -36,7 +36,7 @@
   }
   #trail a:not([data-vx-live]) { background: var(--vx-key, #eee6d6); }
   #trail a:hover { color: var(--lit-legend, #302b24); text-decoration-color: currentColor; }
-  #trail a:focus-visible { outline: 2px solid #ffe7a7; outline-offset: 1px; }
+  #trail a:focus-visible { outline: 2px solid #ffe7a7; outline-offset: -2px; }
   #trail .legend { position: relative; pointer-events: none; }
   #trail [aria-current] {
     gap: 6px; color: #fff7e5; font-weight: 700;
@@ -47,7 +47,7 @@
     width: 12px; height: 8px;
   }
   #trail .locator:not([data-vx-live]) {
-    border: 2px solid #9d998a; background: color-mix(in srgb, var(--case-lamp, #ffb45f) calc(var(--lamp-level, 0.7) * 100%), #2a2a2a);
+    border: 2px solid #9d998a; background: var(--case-lamp, #ffb45f);
   }
   @media (max-width: 27rem) {
     #trail { padding-inline: 10px; }
@@ -57,9 +57,7 @@
   @media (max-width: 23rem) {
     #trail ol { display: grid; grid-template-columns: repeat(2, minmax(0, auto)); }
   }
-  @media (prefers-reduced-motion: no-preference) {
-    #trail a:not([data-vx-live]):active .legend { transform: translate(-1px, -1px); }
-  }
+  #trail a:not([data-vx-live]):is(:active, [data-held]) .legend { transform: translate(-1px, -1px); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds

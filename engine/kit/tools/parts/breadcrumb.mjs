@@ -21,6 +21,8 @@ async function open({ width = 1180, plain = false, reduced = false } = {}) {
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);
+  const fitted = await p.locator('#trail [data-vx-live]').count();
+  say(fitted === (plain ? 0 : 5), plain ? 'the breadcrumb uses CSS throughout' : 'the rail, locator and three keys use the shared renderer');
   return p;
 }
 const press = async (p, sel) => { await p.locator(sel).first().scrollIntoViewIfNeeded(); const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
