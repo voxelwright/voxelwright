@@ -4,7 +4,7 @@ import { halo } from '../../src/core/light.js';
 import { defineMaterial } from '../../src/core/materials.js';
 import { PRESS, RELEASE, reducedMotion } from '../../src/core/motion.js';
 import { cue } from '../../src/core/sound.js';
-import { listeners } from '../../src/components/util.js';
+import { listeners, watchFieldsets } from '../../src/components/util.js';
 
 defineMaterial('test-latch-core', { day: '#b5ffcf', night: '#9cf5bc', glow: 1, jitter: 0 });
 defineMaterial('test-latch-diffuser', { day: '#63d48c', night: '#55ce82', glow: .55, jitter: .005 });
@@ -36,6 +36,9 @@ export const testLatch = {
     // The dark pane stays bonded into the cap. Power travels through only the
     // clear check-shaped stencil. The opaque shoulder retains the cap finish.
     cap.carve(5, 6, 11, 18, 16, 1);
+    const disabled = live.el.previousElementSibling.matches(':disabled');
+    const core = disabled ? 'steel' : 'test-latch-core';
+    const diffuser = disabled ? 'test-latch-glass-edge' : 'test-latch-diffuser';
     for (const name of ['glass', 'tick', 'bar']) {
       const pane = model.part(name);
       pane.grounded = false;
@@ -44,10 +47,10 @@ export const testLatch = {
         for (let x = 7; x <= 20; x++) {
           const y = 15 - Math.abs(x - 12);
           pane.box(x, y - 1, 11, 1, 6, 1, 'test-latch-glass-edge')
-            .box(x, y, 11, 1, 4, 1, 'test-latch-diffuser')
-            .box(x, y + 1, 11, 1, 2, 1, 'test-latch-core');
+            .box(x, y, 11, 1, 4, 1, diffuser)
+            .box(x, y + 1, 11, 1, 2, 1, core);
         }
-      } else if (name === 'bar') pane.box(9, 13, 11, 10, 2, 1, 'test-latch-core');
+      } else if (name === 'bar') pane.box(9, 13, 11, 10, 2, 1, core);
     }
     live.faceZ = 3;
     live.spring('height').snap(rest(live.el.previousElementSibling));
@@ -96,6 +99,13 @@ export const testLatch = {
     on(input, 'blur', () => up('Space'));
     on(window, 'blur', () => { if (held !== null) up(held); });
     on(input, 'change', () => move(rest(input), input.matches(':focus-visible')));
+    if (input.form) on(input.form, 'reset', () => setTimeout(() => move(rest(input), true)));
+    function availability() {
+      if (input.matches(':disabled')) held = null;
+      live.rebuild();
+    }
+    on.watch(input, { attributes: true, attributeFilter: ['disabled'] }, availability);
+    watchFieldsets(input, on, availability);
     for (const prop of ['checked', 'indeterminate'])
       on.heed(input, prop, () => move(held === null ? rest(input) : stop, true));
     return on.done;

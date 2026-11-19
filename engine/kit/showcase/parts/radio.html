@@ -10,6 +10,8 @@
   .form { display: grid; gap: calc(var(--vx) * 6); justify-items: start; margin: 0; max-inline-size: 100%; }
   #where [data-vx-pilot-radio][data-vx-live] { --vx: 1px; inline-size: 28px; block-size: 28px; }
   #where input + [data-vx-pilot-radio]:not([data-vx-live])::before { inset: 34%; }
+  #where .vx-radio:active input:enabled + [data-vx-pilot-radio]:not([data-vx-live]) { translate: none; }
+  #where .vx-radio:active input:enabled + [data-vx-pilot-radio]:not([data-vx-live])::before { translate: 0 2px; }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
 </style>
 <script>

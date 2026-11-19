@@ -37,6 +37,7 @@ export const radio = {
 
   build(live, m) {
     const input = live.state.input = inputOf(live.el);
+    live.state.tintPilot = null;
     const build = live.el.hasAttribute('data-vx-pilot-radio') ? pilotRadio : latch;
     build(live, m, { r: 2, off: !!input?.matches(':disabled') });
     // the first drawing is as it is, with nothing moving
