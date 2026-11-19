@@ -1,6 +1,7 @@
 // From engine/kit, run PORT=5989 node tools/tide-tester.mjs against the showcase.
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
+import { assertNativeVoxels } from './native-voxels.mjs';
 
 const base = new URL(`http://127.0.0.1:${process.env.PORT || 5989}/kit/showcase/`);
 const browser = await chromium.launch({
@@ -22,19 +23,7 @@ try {
     assert.equal(await page.locator('#caps').inputValue(), 'carbon');
     assert.equal(await key.getAttribute('aria-pressed'), 'false');
     await page.locator('#caps').selectOption('opal');
-    const usesVoxels = await key.evaluate(async el => {
-      const kit = await import('../src/index.js');
-      const { Model, Part } = await import('../src/core/model.js');
-      const instance = kit.live(el);
-      if (!instance) return false;
-      return instance.stage === kit.getStage() &&
-        instance.model instanceof Model &&
-        instance.model.parts.every(part => part instanceof Part) &&
-        instance.model.parts.some(part => part.cells.size > 0 && part.count > 0) &&
-        el.querySelectorAll('canvas').length === 1 &&
-        el.querySelector('canvas') === instance.canvas;
-    });
-    assert.equal(usesVoxels, !plain, 'the enhanced key must be drawn by the shared voxel stage');
+    await assertNativeVoxels(key, { plain });
     const depths = () => key.evaluate(async el => {
       const { live } = await import('../src/index.js');
       await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
