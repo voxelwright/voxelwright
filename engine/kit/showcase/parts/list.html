@@ -12,7 +12,7 @@
   #projects > li { --vx: 4px; }
   #projects .vx-row-meta { font-weight: 400; }
   #projects .vx-row, #projects > li:not(:has(> .vx-row)) { padding-inline-start: 32px; }
-  #projects a { -webkit-tap-highlight-color: transparent; text-underline-offset: .18em; }
+  #projects a { font-weight: 600; -webkit-tap-highlight-color: transparent; text-underline-offset: .18em; }
   #projects a:active { text-decoration: underline; }
   @media (hover: hover) {
     #projects a:hover { text-decoration: underline; }
@@ -27,7 +27,7 @@
   }
 </style>
 <noscript><style>
-  #projects > li:target, #projects:not(:has(:target)) > li:first-child { font-weight: 650; }
+  #projects > li:target a, #projects:not(:has(:target)) > li:first-child a { text-decoration: underline; }
   #projects > li:target::before, #projects:not(:has(:target)) > li:first-child::before { background: var(--lit-accent); }
 </style></noscript>
 <script>
@@ -70,6 +70,29 @@
     </ul>
   </section>
 </main>
+<script>
+  // Native fragment navigation owns scrolling, :target and history. Keep the
+  // workspace selection with each entry when another example uses the hash.
+  (() => {
+    const projects = document.getElementById('projects');
+    function followProject() {
+      const target = projects.querySelector(':scope > li:target');
+      const current = projects.querySelector(':scope > li[aria-current]');
+      const saved = document.getElementById(history.state?.currentProject);
+      const next = target ?? (saved?.parentElement === projects ? saved : current ?? projects.querySelector('li'));
+      if (current !== next) {
+        current?.removeAttribute('aria-current');
+        next.setAttribute('aria-current', 'true');
+      }
+      if (history.state?.currentProject !== next.id) {
+        history.replaceState({ ...history.state, currentProject: next.id }, '');
+      }
+    }
+    followProject();
+    addEventListener('hashchange', followProject);
+    addEventListener('pageshow', followProject);
+  })();
+</script>
 <script type="module">
   import { show } from './parts.js';
   import { LOOKS } from '../../src/index.js';
@@ -90,28 +113,6 @@
     },
   });
 
-  // The fragment identifies the project on a direct visit or a history traversal.
-  const links = [...projects.querySelectorAll('a')];
-  function followProject() {
-    const current = projects.querySelector('li[aria-current]');
-    const link = links.find(a => a.hash === location.hash);
-    if (!link && location.hash && current) return;
-    const next = (link ?? links[0]).closest('li');
-    if (current === next) return;
-    current?.removeAttribute('aria-current');
-    next.setAttribute('aria-current', 'true');
-  }
-  // An in-place choice should keep the other projects visible for comparison.
-  projects.addEventListener('click', event => {
-    const link = event.target.closest('a[href]');
-    if (!link || event.defaultPrevented || event.button !== 0 ||
-        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    if (location.hash !== link.hash) history.pushState(null, '', link.hash);
-    followProject();
-  });
-  followProject();
-  addEventListener('hashchange', followProject);
   window.pressed = 0;
   document.getElementById('row-button').addEventListener('click', () => { window.pressed++; });
   show();
