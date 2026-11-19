@@ -77,6 +77,7 @@ const CUES = {
   release: (t) => mechanical('release', t),
   slide: (t) => { tock(t, 240, 0.05, 0.35, 0.7); tock(t + 0.11, 330, 0.05, 0.3, 0.8); },
   tick: (t) => tock(t, 760, 0.025, 0.14, 0.9),
+  detent: (t) => samples.has('release') ? mechanical('release', t) : CUES.tick(t),
   build: (t) => { for (let i = 0; i < 9; i++) tock(t + 0.03 + i * 0.04 * (1 - i * 0.04), 420 + i * 55, 0.035, 0.16, 0.85); },
   break: (t) => { grit(t, 0.22, 0.3); for (let i = 0; i < 6; i++) tock(t + i * 0.03, 520 - i * 50, 0.04, 0.16, 0.7); },
   poke: (t) => { grit(t, 0.1, 0.22); tock(t, 150, 0.09, 0.5, 0.5); },
