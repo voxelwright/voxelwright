@@ -9,6 +9,38 @@
 <style>
   /* a window: the sidebar and what it is beside, in one row on the sheet's own surface */
   .window { display: flex; align-items: stretch; inline-size: 100%; min-inline-size: 0; }
+  #side { --vx-sidebar-w: 60; }
+  #side .vx-nav a {
+    gap: .75rem;
+    padding-inline: .5rem;
+    min-block-size: max(44px, 2.75rem);
+    line-height: 1.45;
+    background: none;
+  }
+  #side .vx-nav-title { padding-inline-start: 2.25rem; }
+  #side a[aria-current="page"] { font-weight: 700; }
+  /* A flush pilot sits in the plate beside each legend. The whole row is the link. */
+  #side .row-pilot {
+    --vx: 2px;
+    position: relative;
+    isolation: isolate;
+    pointer-events: none;
+    order: -1;
+    flex: 0 0 16px;
+    block-size: 10px;
+  }
+  #side .row-pilot:not([data-vx-live]) {
+    background: #454c49;
+    border: 2px solid var(--vx-steel);
+  }
+  #side [aria-current="page"] .row-pilot:not([data-vx-live]) {
+    background: var(--lit-accent, var(--vx-enamel));
+  }
+  @media (max-width: 767.98px) {
+    #side[popover] > nav { overflow: hidden auto; }
+    #side[popover] > nav > .vx-canvas { display: none; }
+    .window:has(> #side:not([data-vx-on])) { flex-direction: column; }
+  }
   .content { flex: 1 1 0; min-inline-size: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; padding-block: calc(var(--vx) * 2) calc(var(--vx) * 4); }
   .vx-sidebar:not([hidden], [popover]) + .content { padding-inline-start: calc(var(--vx) * 6); }
   .content .top { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 5); }
@@ -39,19 +71,19 @@
     <h2>In use: a workspace and its projects</h2>
     <div class="window">
       <div class="vx-sidebar" id="side">
-        <nav class="vx-nav" data-vx-mark="groove" data-vx-way="down" aria-label="fogline">
+        <nav class="vx-nav" data-vx-way="down" aria-label="fogline">
           <p class="vx-nav-title" id="side-projects">Projects</p>
           <ul aria-labelledby="side-projects">
-            <li><a href="#harbor-api" aria-current="page">harbor-api</a></li>
-            <li><a href="#fog-site">fog-site</a></li>
-            <li><a href="#tide-worker">tide-worker</a></li>
-            <li><a href="#ferry-cron">ferry-cron</a></li>
+            <li><a href="#harbor-api" aria-current="page">harbor-api<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
+            <li><a href="#fog-site">fog-site<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
+            <li><a href="#tide-worker">tide-worker<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
+            <li><a href="#ferry-cron">ferry-cron<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
           </ul>
           <p class="vx-nav-title" id="side-workspace">Workspace</p>
           <ul aria-labelledby="side-workspace">
-            <li><a href="#team">Team <span class="vx-nav-trail">6</span></a></li>
-            <li><a href="#usage">Usage</a></li>
-            <li><a href="#uk" lang="uk">Розгорнути на сервері</a></li>
+            <li><a href="#team">Team <span class="vx-nav-trail">6</span><span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
+            <li><a href="#usage">Usage<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
+            <li><a href="#uk" lang="uk">Розгорнути на сервері<span class="row-pilot" aria-hidden="true" data-vx-lens></span></a></li>
           </ul>
         </nav>
         <span class="vx-groove" data-vx-way="down" aria-hidden="true"></span>
@@ -128,14 +160,47 @@
   import { show } from './parts.js';
   import { navs } from '../../src/components/navs.js';
   import { sidebar } from '../../src/components/sidebar.js';
+  import { groove } from '../../src/looks/lit.js';
+  import { halo } from '../../src/core/light.js';
+
+  const rowPilot = {
+    name: 'sidebar-pilot',
+    selector: '#side .row-pilot',
+    pad: 3,
+    glowRadius: 2.4,
+    glowStrength: halo(.055),
+    bind: groove.bind,
+    build(live, model) {
+      const on = live.el.closest('a').getAttribute('aria-current') === 'page';
+      live.state.lens = on;
+      // The stamped rim and smoked shoulders stay in place around the lit window.
+      const fitting = model.part('fitting');
+      fitting.slab(0, 0, 0, 8, 5, 1, 'gasket', 1);
+      fitting.slab(0, 0, 1, 8, 5, 1, 'steel', 1);
+      fitting.box(1, 1, 1, 6, 3, 1, 'lens');
+      fitting.box(2, 1, 1, 4, 3, 1, on ? 'light' : 'lens');
+    },
+  };
   // The page stands in for a router: a link that is followed becomes the current one.
   document.addEventListener('click', (e) => {
     const a = e.target.closest?.('.vx-nav a[href]');
-    if (!a) return;
+    if (!a || a.closest('#side')) return;
     for (const other of a.closest('.vx-nav').querySelectorAll('a')) if (other === a) other.setAttribute('aria-current', 'page'); else other.removeAttribute('aria-current');
-    if (a.closest('#side')) document.getElementById('name').textContent = a.firstChild.textContent.trim();
   });
-  await show(navs, sidebar);
+  const links = [...document.querySelectorAll('#side nav a')];
+  function showLocation() {
+    const current = links.find(link => link.hash === location.hash)
+      ?? (location.hash ? null : links[0]);
+    if (!current) return;
+    for (const link of links) {
+      if (link === current) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
+    }
+    document.getElementById('name').textContent = current.firstChild.textContent.trim();
+  }
+  addEventListener('hashchange', showLocation);
+  showLocation();
+  await show(navs, sidebar, rowPilot);
   // ?over opens the one in use as the page arrives, for a picture of it over the page on a phone
   if (new URLSearchParams(location.search).has('over')) document.getElementById('side-key').setAttribute('aria-expanded', 'true');
 </script>
