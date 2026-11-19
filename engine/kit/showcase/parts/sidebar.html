@@ -34,7 +34,7 @@
     border: 2px solid var(--vx-steel);
   }
   #side [aria-current="page"] .row-pilot:not([data-vx-live]) {
-    background: var(--lit-accent, var(--vx-enamel));
+    background: linear-gradient(to right, #454c49 2px, var(--lit-accent, var(--vx-enamel)) 2px calc(100% - 2px), #454c49 calc(100% - 2px));
   }
   @media (max-width: 767.98px) {
     #side[popover] > nav { overflow: hidden auto; }
@@ -175,10 +175,12 @@
       live.state.lens = on;
       // The stamped rim and smoked shoulders stay in place around the lit window.
       const fitting = model.part('fitting');
-      fitting.slab(0, 0, 0, 8, 5, 1, 'gasket', 1);
-      fitting.slab(0, 0, 1, 8, 5, 1, 'steel', 1);
-      fitting.box(1, 1, 1, 6, 3, 1, 'lens');
-      fitting.box(2, 1, 1, 4, 3, 1, on ? 'light' : 'lens');
+      fitting.grounded = false;
+      fitting.sunk = true;
+      fitting.slab(0, 0, -2, 8, 5, 1, 'gasket', 1);
+      fitting.slab(0, 0, -1, 8, 5, 1, 'steel', 1);
+      fitting.box(1, 1, -1, 6, 3, 1, 'lens');
+      fitting.box(2, 1, -1, 4, 3, 1, on ? 'light' : 'lens');
     },
   };
   // The page stands in for a router: a link that is followed becomes the current one.
@@ -189,14 +191,14 @@
   });
   const links = [...document.querySelectorAll('#side nav a')];
   function showLocation() {
-    const current = links.find(link => link.hash === location.hash)
-      ?? (location.hash ? null : links[0]);
-    if (!current) return;
+    const current = links.find(link => link.hash === location.hash) ?? links[0];
     for (const link of links) {
       if (link === current) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
-    document.getElementById('name').textContent = current.firstChild.textContent.trim();
+    const heading = document.getElementById('name');
+    heading.textContent = current.firstChild.textContent.trim();
+    heading.lang = current.closest('[lang]').lang;
   }
   addEventListener('hashchange', showLocation);
   showLocation();
