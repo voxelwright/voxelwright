@@ -16,7 +16,7 @@ export function connectSound(input) {
     if (event.persisted) restoreChoice();
   });
   function arm(event) {
-    if (!event.repeat && enabled && !sound()) sound(true);
+    if (!event.repeat && enabled) sound(true);
   }
   document.addEventListener('pointerdown', arm, true);
   document.addEventListener('pointerup', arm, true);

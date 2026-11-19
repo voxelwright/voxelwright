@@ -13,6 +13,8 @@ export function switchTreble(db) {
 }
 const samples = new Map();
 let loading = null;
+let resuming = null;
+let muteRevision = 0;
 function loadSamples(decoder) {
   if (loading) return loading;
   loading = Promise.all(['press', 'release'].map(async (name) => {
@@ -101,15 +103,25 @@ export function sound(enable) {
   on = !!enable;
   if (on && ensure()) {
     master.gain.setValueAtTime(0.32, ctx.currentTime);
-    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    if (ctx.state === 'suspended') resuming = ctx.resume().catch(() => {});
     void loadSamples(ctx);
-  } else if (master) master.gain.setValueAtTime(0, ctx.currentTime);
+  } else {
+    muteRevision++;
+    if (master) master.gain.setValueAtTime(0, ctx.currentTime);
+  }
   return on;
 }
 
 /** Play a cue: press, release, slide, tick, build, break, poke, done, failed. Silent unless on. */
 export function cue(name) {
-  if (!on || !ctx || ctx.state !== 'running' || document.hidden) return;
   const fn = CUES[name];
-  if (fn) fn(ctx.currentTime + 0.001);
+  if (!on || !ctx || !fn || document.hidden) return;
+  if (ctx.state === 'running') return fn(ctx.currentTime + 0.001);
+  if (ctx.state !== 'suspended' || !resuming) return;
+  // WebKit can unlock output just after dispatching the first tap.
+  const contact = performance.now(), revision = muteRevision;
+  resuming.then(() => {
+    if (ctx.state === 'running' && on && revision === muteRevision && !document.hidden && performance.now() - contact < 120)
+      fn(ctx.currentTime + 0.001);
+  });
 }

@@ -101,7 +101,8 @@ contour.addEventListener('input', event => {
   if (event.isTrusted && (contour.value === contour.min || contour.value === contour.max)) cue('press');
 });
 reduceMotion.addEventListener('change', () => drawScope());
-$('#scan').addEventListener('click', () => {
+$('#scan').addEventListener('click', event => {
+  if (event.currentTarget.matches(':disabled, [aria-disabled="true"]')) return;
   scan++;
   $('#sweep').value = 'FIELD SCOPE / ' + String(scan).padStart(2,'0');
   drawScope(true);

@@ -199,6 +199,11 @@ function wireSlide(el, on, live) {
     }
   });
   on(label, 'click', e => {
+    if (pointer !== null && e.detail > 0 && e.pointerId !== pointer) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (consumed !== null && e.detail > 0 && (e.pointerId == null || e.pointerId === consumed)) {
       e.preventDefault();
       e.stopPropagation();
