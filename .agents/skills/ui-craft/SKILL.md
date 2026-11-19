@@ -32,6 +32,9 @@ voxel stage. Then operate it at normal size beside its siblings. For a recessed 
 compare rest and full travel from the same view. Check which parts stay fixed, what clears
 the lip, and which surfaces catch light from the fitting. A detail can look convincing up
 close while the whole control still appears to float above its mount.
+The specimen's browser test calls `assertNativeVoxels(locator)` on the model host. The
+[specimen runner](../../../engine/kit/tools/physical-specimens.mjs) exercises real controls
+and their plain fallbacks. Run it with `--audit` to check visible hosts across the showcase.
 <!-- 2026-11-18: “one specimen for every new physical control family” -->
 
 1. Capture the real thing. Drive the app with Playwright and take screenshots at
