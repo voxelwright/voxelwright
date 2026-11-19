@@ -6,6 +6,15 @@
 <title>Checkbox</title>
 <link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
+<style>
+  .test-latch { --vx: 1px; width: 28px; height: 28px; position: relative; isolation: isolate; flex: none; }
+  #tests:focus-visible + .test-latch[data-vx-live] { outline: 2px solid var(--vx-focus); outline-offset: 6px; }
+  #tests:has(+ .test-latch:not([data-vx-live])) {
+    position: static; width: 28px; height: 28px; flex: none; opacity: 1; accent-color: #31644c;
+  }
+  /* Keep the same measured canvas host available when the stage adopts the plain control. */
+  #tests + .test-latch:not([data-vx-live]) { position: absolute; pointer-events: none; }
+</style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
@@ -21,7 +30,7 @@
   <section>
     <h2>In use: what a deploy does</h2>
     <div class="col">
-      <label class="vx-check"><input type="checkbox" id="tests" checked><span class="vx-box"></span>Run the tests first</label>
+      <label class="vx-check"><input type="checkbox" id="tests" checked><span class="test-latch" aria-hidden="true"></span>Run the tests first</label>
       <label class="vx-check"><input type="checkbox" id="post"><span class="vx-box"></span>Post to the team channel</label>
       <label class="vx-check"><input type="checkbox" id="keep" checked><span class="vx-box"></span>Keep the last three builds</label>
     </div>
@@ -39,9 +48,9 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { checkbox } from '../../src/components/checkbox.js';
+  import { testLatch } from './test-latch.js';
   document.getElementById('some').indeterminate = true;
-  show(checkbox);
+  show(testLatch);
 </script>
 </body>
 </html>
