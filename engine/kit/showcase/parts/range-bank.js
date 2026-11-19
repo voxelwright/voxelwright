@@ -76,7 +76,7 @@ function pose(live) {
     const hold = live.spring('hold' + i).x;
     cap.tz = clamp(-look.travel * latch + hold, -look.travel - look.step, .35);
 
-    const lit = latch > 0.5 && !state.inputs[i].matches(':disabled');
+    const lit = state.inputs[i].matches(':disabled') ? 0 : clamp(latch, 0, 1);
     if (state.lamps[i] === lit && state.tint === live.tintRevision) return;
     state.lamps[i] = lit;
     // Two amber dies behind a fixed smoked bar. Its rubber seal picks up
@@ -92,7 +92,7 @@ function pose(live) {
         const x = part.rest[j * 3] - left, y = part.rest[j * 3 + 1] - 1;
         const distance = Math.hypot(Math.min(Math.abs(x - 2), Math.abs(x - 5)), y);
         const glass = part === lens;
-        const power = (glass ? .98 : .24) / (1 + .09 * distance ** 2);
+        const power = lit * (glass ? .98 : .24) / (1 + .09 * distance ** 2);
         for (const [channel, amber] of [1, .69, .26].entries()) {
           const n = j * 4 + channel;
           part.col[n] += (amber - part.col[n]) * power;

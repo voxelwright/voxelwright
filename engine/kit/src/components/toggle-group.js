@@ -174,7 +174,8 @@ export const toggleGroup = {
     on(el, 'pointerdown', (e) => { if (e.button === 0) hold(seatOf(e.target), 'pointer'); });
     for (const type of ['pointerup', 'pointercancel', 'pointerleave']) on(el, type, () => let_go('pointer'));
     on(el, 'keydown', (e) => { if (e.key === ' ' && !e.repeat) hold(seatOf(e.target), 'key'); });
-    for (const type of ['keyup', 'focusout']) on(el, type, () => let_go('key'));
+    on(el, 'keyup', e => { if (e.key === ' ') let_go('key'); });
+    on(el, 'focusout', () => let_go('key'));
     on(el, 'change', e => sync(false, live.form.instantKeyboardChoice && e.target.matches(':focus-visible')));
     // chosen from code (input.checked = true): it follows, without a sound
     for (const input of el.querySelectorAll(':scope > label > input')) on.heed(input, 'checked', () => sync(true));

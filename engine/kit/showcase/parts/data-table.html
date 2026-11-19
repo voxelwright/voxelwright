@@ -66,6 +66,12 @@
     clip-path: polygon(50% 0, 100% 40%, 0 40%, 50% 0, 50% 100%, 0 60%, 100% 60%, 50% 100%);
     background: linear-gradient(var(--up, #575c58) 50%, var(--down, #575c58) 50%);
   }
+  @media (forced-colors: active) {
+    #deploys[data-vx-table] [aria-sort] .vx-data-table-sort:not([data-vx-live])::after {
+      background: ButtonText; forced-color-adjust: none; clip-path: polygon(50% 15%, 100% 75%, 0 75%);
+    }
+    #deploys[data-vx-table] [aria-sort="descending"] .vx-data-table-sort:not([data-vx-live])::after { transform: rotate(180deg); }
+  }
   #deploys [aria-sort="ascending"] { --up: #b25b0c; }
   #deploys [aria-sort="descending"] { --down: #b25b0c; }
   #deploys:not([data-vx-table]) .vx-data-table-sort { color: inherit; }

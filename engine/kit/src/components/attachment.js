@@ -118,7 +118,9 @@ export const attachment = {
     const on = listeners();
     const progress = live.el.querySelector('progress');
     if (live.el.hasAttribute('data-vx-transfer') && progress) {
-      on.watch(progress, { attributes: true, attributeFilter: ['value', 'max'] }, () => live.rebuild());
+      on.watch(progress, { attributes: true, attributeFilter: ['value', 'max'] }, () => {
+        if (!live.el.closest('[data-vx-leaving]')) live.rebuild();
+      });
     }
     wire(live.el, on, async (item, e) => {
       // the tile and the key beside it break together, from the point pressed (a key press:

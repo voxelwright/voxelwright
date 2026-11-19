@@ -33,7 +33,7 @@
     --vx-look: deploy-month; --vx-ink: #24322d; --vx-ink-quiet: #485349;
     --vx-reading-plate: #e5e3cf; --vx-focus: #a64217;
   }
-  #ship-pick { --lit-legend: #24322d; }
+  #ship-pick :is(.vx-calendar-week, .vx-button)[data-vx-live] { --lit-legend: #24322d; }
   .form .note, .state > p { color: var(--vx-ink-quiet); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; gap: calc(var(--vx) * 2); align-content: start; justify-items: start; min-inline-size: 0; }
