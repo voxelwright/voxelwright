@@ -13,6 +13,7 @@
   box-shadow: inset 0 2px 0 #23272c, 0 2px 0 #58616b;
 }
 .vx-toggle input + .ship-latch:not([data-vx-live])::after {
+  transform: translateX(var(--ship-offset, 0px));
   inset-block: 3px;
   inset-inline-start: 2px;
   inline-size: 18px;
@@ -20,7 +21,7 @@
   box-shadow: inset 0 2px 0 #ffffff30, 1px 2px 0 #181d22;
 }
 .vx-toggle input:checked + .ship-latch:not([data-vx-live])::after {
-  transform: translateX(calc(24px * var(--_inline-sign)));
+  transform: translateX(var(--ship-offset, calc(24px * var(--_inline-sign))));
 }
 .ship-latch:not([data-vx-live])::before {
   content: "";
@@ -37,3 +38,11 @@
 .vx-toggle input:focus-visible + .ship-latch:not([data-vx-live])::after { transition: none; }
 
 .vx-toggle:has(> .ship-latch) { touch-action: pan-y pinch-zoom; }
+
+@media (forced-colors: active) {
+  .vx-toggle input + .ship-latch:not([data-vx-live])::after {
+    background: ButtonText;
+    border: 2px solid ButtonText;
+    forced-color-adjust: none;
+  }
+}

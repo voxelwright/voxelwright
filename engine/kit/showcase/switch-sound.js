@@ -4,21 +4,25 @@ import { sound } from '../src/core/sound.js';
 // document is armed on user activation, including the click following a touch.
 export function connectSound(input) {
   const key = 'vx-showcase-switch-sound';
+  let enabled = false;
   function restoreChoice() {
-    try { input.checked = sessionStorage.getItem(key) === 'on'; } catch {}
-    if (!input.checked) sound(false);
+    try { enabled = sessionStorage.getItem(key) === 'on'; } catch {}
+    if (input) input.checked = enabled;
+    if (!enabled) sound(false);
   }
   restoreChoice();
   addEventListener('pageshow', event => {
     if (event.persisted) restoreChoice();
   });
   function arm(event) {
-    if (!event.repeat && input.checked && !sound()) sound(true);
+    if (!event.repeat && enabled && !sound()) sound(true);
   }
+  document.addEventListener('pointerup', arm, true);
   document.addEventListener('click', arm, true);
   document.addEventListener('keydown', arm, true);
-  input.addEventListener('change', () => {
-    sound(input.checked);
+  input?.addEventListener('change', () => {
+    enabled = input.checked;
+    sound(enabled);
     try { sessionStorage.setItem(key, input.checked ? 'on' : 'off'); } catch {}
   });
 }

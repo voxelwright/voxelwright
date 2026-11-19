@@ -14,6 +14,7 @@ try {
       const response = await route.fetch();
       await route.fulfill({ response, body: (await response.text()).replace('<html lang', '<html data-vx-plain lang') });
     });
+    await page.addInitScript(() => sessionStorage.setItem('vx-showcase-switch-sound', 'on'));
     await page.goto(`http://127.0.0.1:${process.env.PORT || 5985}/kit/showcase/lab.html`);
     await page.waitForFunction(() => window.vx);
     const latch = page.locator('.ship-latch');
@@ -65,6 +66,16 @@ try {
       await touch('touchCancel', []);
       assert.deepEqual(await step(60), off);
       assert.equal(await input.isChecked(), false);
+      let changes = 0;
+      await input.evaluate(el => el.addEventListener('change', () => { el.dataset.changes = String(Number(el.dataset.changes || 0) + 1); }));
+      for (const [start, end, expected] of [[16, 44, true], [44, 16, false]]) {
+        await touch('touchStart', [{ x: box.x + start, y: box.y + 16 }]);
+        await touch('touchMove', [{ x: box.x + end, y: box.y + 16 }]);
+        await touch('touchEnd', []);
+        await step(60);
+        assert.equal(await input.isChecked(), expected);
+        assert.equal(await input.getAttribute('data-changes'), String(++changes));
+      }
       await cdp.detach();
       // Pull part-way, return to the original detent, then throw it the full distance.
       const left = box.x + 16, centre = box.y + 16;
@@ -105,10 +116,24 @@ try {
       assert.equal(await tray(), onTray);
       await input.press('Space');
       assert.equal(await offset(), on);
-      console.log('plain: touch, Space, distinct thumb positions');
+      const box = await latch.boundingBox();
+      for (const [dx, checked] of [[-8, true], [-24, false]]) {
+        await page.mouse.move(box.x + 40, box.y + 16);
+        await page.mouse.down();
+        await page.mouse.move(box.x + 40 + dx, box.y + 16);
+        await page.mouse.up();
+        assert.equal(await input.isChecked(), checked);
+      }
+      await page.emulateMedia({ forcedColors: 'active' });
+      await input.focus();
+      const off = await latch.screenshot();
+      await input.press('Space');
+      assert.ok(!off.equals(await latch.screenshot()));
+      console.log('plain: touch, Space, near and far drag, distinguishable forced-color stops');
     }
     assert.equal(await page.getByRole('switch', { name: 'Hold every bloom for review' }).isChecked(), false);
     assert.equal(await page.getByRole('switch', { name: 'Let visitors water' }).isDisabled(), true);
+    assert.ok(await page.evaluate(async () => (await import('/kit/src/core/sound.js')).sound()));
     assert.deepEqual(errors, []);
     await page.close();
   }

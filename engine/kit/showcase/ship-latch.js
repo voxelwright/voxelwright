@@ -106,85 +106,110 @@ define({
   },
 
   bind(live) {
-    const on = listeners(), label = live.el.parentElement;
-    const input = live.state.input = label.querySelector('input');
-    const at = live.spring('at', Number(input.checked), SLIDE.k, SLIDE.c);
-    const press = live.spring('press');
-    let pointer = null, drag = null, drop = null;
-    function pressure(value, spring) {
-      if (reducedMotion()) press.snap(value);
-      else press.to(value, spring.k, spring.c);
-      live.invalidate();
-    }
-    function release(commit = false) {
-      if (pointer === null) return;
-      if (drag?.moving) {
-        if (commit) drop = at.x >= 0.5;
-        if (reducedMotion()) at.snap(Number(input.checked));
-        else at.to(Number(input.checked));
-      }
-      pointer = null;
-      drag = null;
-      pressure(0, RELEASE);
-    }
-    on(label, 'pointerdown', e => {
-      if (!e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
-      drop = null;
-      pointer = e.pointerId;
-      const box = live.el.getBoundingClientRect();
-      if (e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom) {
-        drag = { x: e.clientX, y: e.clientY, start: at.x, moving: false };
-      }
-      pressure(-1, PRESS);
-    });
-    on(window, 'pointermove', e => {
-      if (pointer !== e.pointerId || !drag) return;
-      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-      if (!drag.moving) {
-        if (Math.abs(dx) < 4 || Math.abs(dx) <= Math.abs(dy)) return;
-        drag.moving = true;
-        input.setPointerCapture(pointer);
-        live.state.impact = false;
-      }
-      const direction = live.state.x(1) - live.state.x(0);
-      at.snap(clamp(drag.start + direction * dx / (travel * live.vx), 0, 1));
-      live.invalidate();
-    });
-    for (const type of ['pointerup', 'pointercancel']) {
-      on(window, type, e => { if (pointer === e.pointerId) release(type === 'pointerup'); });
-    }
-    on(window, 'blur', () => release());
-    on(document, 'visibilitychange', () => {
-      if (document.hidden) {
-        live.state.impact = false;
-        release();
-      }
-    });
-    // Native keyboard and assistive clicks commit immediately. Pointer clicks seat on the spring.
-    let slide = false;
-    on(input, 'click', e => {
-      slide = e.detail > 0;
-      // A checkbox has already toggled during click dispatch. Cancel that default
-      // if the hand returned to the starting detent. No change event is synthesized.
-      if (slide && drop !== null && input.checked !== drop) e.preventDefault();
-      drop = null;
-    });
-    function sync(user) {
-      live.state.impact = user;
-      if (user && slide && !reducedMotion()) at.to(Number(input.checked));
-      else at.snap(Number(input.checked));
-      live.invalidate();
-    }
-    on(input, 'change', () => sync(true));
-    on.heed(input, 'checked', () => sync(false));
-    on.watch(input, { attributes: true, attributeFilter: ['checked', 'disabled'] }, () => sync(false));
-    if (input.form) on(input.form, 'reset', () => queueMicrotask(() => sync(false)));
+    const on = listeners();
+    wireSlide(live.el, on, live);
     watchDirection(live, on);
     return on.done;
   },
 
-  plain(el, on) {
-    const input = el.parentElement.querySelector('input');
-    on(input, 'change', () => contact(input.checked));
-  },
+  plain: wireSlide,
 });
+
+function wireSlide(el, on, live) {
+  const label = el.parentElement;
+  const input = label.querySelector('input');
+  if (live) live.state.input = input;
+  const at = live?.spring('at', Number(input.checked), SLIDE.k, SLIDE.c);
+  const press = live?.spring('press');
+  let pointer = null, drag = null, consumed = null, slide = false;
+
+  function pressure(value, spring) {
+    if (!press) return;
+    if (reducedMotion()) press.snap(value);
+    else press.to(value, spring.k, spring.c);
+    live.invalidate();
+  }
+
+  function release(commit = false) {
+    if (pointer === null) return;
+    if (drag?.moving) {
+      consumed = pointer;
+      if (commit && !input.matches(':disabled') && input.checked !== (drag.position >= 0.5)) {
+        // Native checkbox activation sends input/change once even on a touch drag without click.
+        // A later compatibility click from this pointer is consumed below.
+        input.click();
+      }
+      at?.to(Number(input.checked));
+      if (reducedMotion()) at?.snap(Number(input.checked));
+      el.style.removeProperty('--ship-offset');
+    }
+    pointer = null;
+    drag = null;
+    pressure(0, RELEASE);
+  }
+
+  on(label, 'pointerdown', e => {
+    if (!e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
+    consumed = null;
+    pointer = e.pointerId;
+    const box = el.getBoundingClientRect();
+    if (e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom) {
+      const start = at?.x ?? Number(input.checked);
+      const pitch = parseFloat(getComputedStyle(el).getPropertyValue('--vx'));
+      const sign = getComputedStyle(el).direction === 'rtl' ? -1 : 1;
+      drag = { x: e.clientX, y: e.clientY, start, position: start, distance: sign * travel * pitch, moving: false };
+    }
+    pressure(-1, PRESS);
+  });
+  on(window, 'pointermove', e => {
+    if (pointer !== e.pointerId || !drag) return;
+    const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.moving) {
+      if (Math.abs(dx) < 4 || Math.abs(dx) <= Math.abs(dy)) return;
+      drag.moving = true;
+      input.setPointerCapture(pointer);
+      if (live) live.state.impact = false;
+    }
+    drag.position = clamp(drag.start + dx / drag.distance, 0, 1);
+    if (live) {
+      at.snap(drag.position);
+      live.invalidate();
+    } else {
+      el.style.setProperty('--ship-offset', drag.position * drag.distance + 'px');
+    }
+  });
+  for (const type of ['pointerup', 'pointercancel']) {
+    on(window, type, e => { if (pointer === e.pointerId) release(type === 'pointerup'); });
+  }
+  on(window, 'blur', () => release());
+  on(document, 'visibilitychange', () => {
+    if (document.hidden) {
+      if (live) live.state.impact = false;
+      release();
+    }
+  });
+  on(label, 'click', e => {
+    if (consumed !== null && e.detail > 0 && (e.pointerId == null || e.pointerId === consumed)) {
+      e.preventDefault();
+      e.stopPropagation();
+      consumed = null;
+    }
+  }, true);
+  on(input, 'click', e => { slide = e.detail > 0 || !!drag?.moving; });
+  function sync(user) {
+    if (!live) {
+      if (user) contact(input.checked);
+      return;
+    }
+    live.state.impact = user;
+    if (user && slide && !reducedMotion()) at.to(Number(input.checked));
+    else at.snap(Number(input.checked));
+    live.invalidate();
+  }
+  on(input, 'change', () => sync(true));
+  if (live) {
+    on.heed(input, 'checked', () => sync(false));
+    on.watch(input, { attributes: true, attributeFilter: ['checked', 'disabled'] }, () => sync(false));
+    if (input.form) on(input.form, 'reset', () => queueMicrotask(() => sync(false)));
+  }
+}

@@ -170,6 +170,8 @@
     import './garden-modes.js';
     import './lab-meter.js';
     import './ship-latch.js';
+    import { connectSound } from './switch-sound.js';
+    connectSound();
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
