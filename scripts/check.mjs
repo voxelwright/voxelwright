@@ -208,7 +208,7 @@ function decode(s) {
 // ---------------------------------------------------------------------------
 
 // Run as a script; tests import shareProblems.
-if (import.meta.main) {
+if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
   try {
     const prod = await run("production", { outDir: path.join(ROOT, "dist") });

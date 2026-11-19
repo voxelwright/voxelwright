@@ -366,7 +366,8 @@ export async function renderCards(jobs, { root, frame = FRAME }) {
   const { chromium } = require(process.env.PLAYWRIGHT ?? "playwright");
   const server = await startServer({ root, port: 0, host: "127.0.0.1" });
   const base = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ channel: "chrome" });
+  // software canvas, so the same inputs give the same bytes on every run
+  const browser = await chromium.launch({ channel: "chrome", args: ["--disable-gpu"] });
   try {
     const page = await browser.newPage({ viewport: { width: CARD.width, height: CARD.height }, deviceScaleFactor: 2 });
     const errors = [];
