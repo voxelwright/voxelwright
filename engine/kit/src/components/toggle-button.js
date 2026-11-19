@@ -114,7 +114,6 @@ export const toggleButton = {
       cue('press');
     };
     const drop = () => { if (s.held) settle(); };
-    on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
     let owner = null;
     const hold = source => {
       if (owner !== null || s.off) return;

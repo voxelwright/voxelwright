@@ -39,7 +39,8 @@ function wireStroke(el, on, { push, lift, momentary } = {}) {
     if (returned && !el.matches(':disabled, [aria-disabled="true"]')) cue('release');
   };
   on(el, 'pointerdown', e => { if (e.button === 0) down(e.pointerId); });
-  on(el, 'pointerup', e => { if (e.button === 0) up(e.pointerId, true); });
+  on(el, 'pointermove', e => { if (e.pointerType === 'mouse' && !(e.buttons & 1)) up(e.pointerId, true); });
+  on(el, 'pointerup', e => up(e.pointerId, true));
   on(el, 'pointercancel', e => up(e.pointerId, false));
   on(el, 'pointerleave', e => up(e.pointerId, false));
   on(el, 'keydown', e => {

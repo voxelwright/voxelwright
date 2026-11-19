@@ -76,8 +76,8 @@ function wire(el, on) {
     // a click with no press before it is a key from the keyboard, or a screen reader
     on(key, 'click', e => {
       const handled = e.detail > 0 && steppedKey === key;
-      steppedKey = null;
-      if (!handled) step(dir);
+      if (handled) steppedKey = null;
+      else step(dir);
     });
   }
   // wherever the pointer comes up, the holding ends; a press that got no click is forgotten

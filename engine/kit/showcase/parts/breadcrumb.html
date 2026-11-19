@@ -36,7 +36,7 @@
   }
   #trail a:not([data-vx-live]) { background: var(--vx-key, #eee6d6); }
   #trail a:hover { color: var(--lit-legend, #302b24); text-decoration-color: currentColor; }
-  #trail a:focus-visible { outline: 2px solid #ffe7a7; outline-offset: -2px; }
+  #trail a:focus-visible { outline: 2px solid var(--lit-legend, #302b24); outline-offset: -3px; }
   #trail .legend { position: relative; pointer-events: none; }
   #trail [aria-current] {
     gap: 6px; color: #fff7e5; font-weight: 700;
@@ -47,7 +47,7 @@
     width: 12px; height: 8px;
   }
   #trail .locator:not([data-vx-live]) {
-    border: 2px solid #9d998a; background: var(--case-lamp, #ffb45f);
+    border: 2px solid #9d998a; background: var(--lit-accent, #388de6);
   }
   @media (max-width: 27rem) {
     #trail { padding-inline: 10px; }
