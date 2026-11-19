@@ -22,7 +22,7 @@ async function shatter(el, live, e) {
   const from = e && (e.clientX || e.clientY) ? [(e.clientX - r.left) / live.vx, (e.clientY - r.top) / live.vx] : undefined;
   if (from) cue('break');
   const duration = el.dataset.vxSpecimen === 'deploy' ? 0.29 : 0.19;
-  await live.play('crumble', null, { duration, from });
+  await live.play('crumble', null, { duration, from, contact: !!from });
 }
 
 export const toastDef = {

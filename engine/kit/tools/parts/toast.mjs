@@ -109,12 +109,16 @@ const handoff = await p.evaluate(() => {
   const receipt = live(el);
   for (let i = 0; i < 9; i++) stage.advance(1 / 60);
   const entry = receipt.pos.slice(), progress = receipt.surface.progress;
-  el.click();
+  const box = el.getBoundingClientRect();
+  const tap = new MouseEvent('click', { bubbles: true, clientX: box.right - 16, clientY: box.top + 12 });
+  el.dispatchEvent(tap);
   stage.advance(0);
   const continuous = entry.every((value, i) => value === receipt.pos[i]);
+  const fromTap = receipt.surface.from[0] === (tap.clientX - box.left) / receipt.vx &&
+    receipt.surface.from[1] === (tap.clientY - box.top) / receipt.vx;
   stage.manual = false;
   stage.schedule();
-  return continuous && receipt.surface.kind === 'crumble' && progress > 0 && progress < 1
+  return fromTap && continuous && receipt.surface.kind === 'crumble' && progress > 0 && progress < 1
     && receipt.surface.progress === progress && document.activeElement.id === 'deploy';
 });
 say(handoff, 'dismissal during assembly retains every voxel transform and Deploy keeps focus');

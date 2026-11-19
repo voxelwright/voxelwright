@@ -136,10 +136,16 @@ export class Live {
       return false;
     });
     for (const p of list) {
-      if (surface) p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still,
-        rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
-        from: prior?.from ?? opts.from ?? [0, this.H] });
-      else if (still) p.fx = settle(p, { out });
+      if (surface) {
+        let contactPose;
+        if (!still && opts.contact && out && prior?.kind === 'assemble' && p.fx) {
+          contactPose = new Float32Array(p.count * 8);
+          p.fx.write(contactPose, 0, p);
+        }
+        p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still, contactPose,
+          rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
+          from: contactPose ? opts.from : prior?.from ?? opts.from ?? [0, this.H] });
+      } else if (still) p.fx = settle(p, { out });
       else p.fx = (out ? crumble : assemble)(p, shared);
       p.hidden = false;
     }
