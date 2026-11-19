@@ -14,14 +14,21 @@
   #spin { position: relative; flex: none; inline-size: calc(16 * var(--vx)); block-size: calc(4 * var(--vx)); }
   #spin:not([data-vx-live]) { background: var(--vx-steel); box-shadow: 0 1px 0 var(--vx-ink-quiet); }
   #spin:not([data-vx-live])::before {
-    content: ""; position: absolute; inset: var(--vx); background: #505755;
+    content: ""; position: absolute; inset: var(--vx); background: var(--glass, #505755);
     mask: repeating-linear-gradient(90deg, black 0 calc(2 * var(--vx)), transparent 0 calc(3 * var(--vx)));
   }
   .line:not([data-done]) #spin:not([data-vx-live])::before {
-    background: radial-gradient(ellipse at center, #daeaff, var(--lit-accent) 38%, transparent 74%) 0 50% / 38% 140% no-repeat, #505755;
+    background: radial-gradient(ellipse at center, var(--core, #daeaff), var(--lamp, var(--lit-accent)) 38%, transparent 74%) 0 50% / calc(6 * var(--vx)) 140% no-repeat, var(--glass, #505755);
     animation: build-sweep 850ms ease-in-out infinite alternate;
   }
-  @keyframes build-sweep { to { background-position: 100% 50%; } }
+  /* The lens centers are one voxel in from the mask's two edges. */
+  @keyframes build-sweep {
+    from { background-position: calc(-2 * var(--vx)) 50%; }
+    to { background-position: calc(100% + 2 * var(--vx)) 50%; }
+  }
+  @media (forced-colors: active) {
+    #spin:not([data-vx-live]) { forced-color-adjust: none; background: GrayText; --glass: Canvas; --core: CanvasText; --lamp: Highlight; }
+  }
   @media (prefers-reduced-motion: reduce) {
     .line:not([data-done]) #spin:not([data-vx-live])::before { animation: none; background-position: center; }
   }

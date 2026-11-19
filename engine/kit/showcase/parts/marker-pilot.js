@@ -6,11 +6,16 @@ export const markerPilot = {
   glowStrength: 0,
   build(live, model) {
     const on = live.el.closest('#new').dataset.vxKind === 'new';
-    model.part('ferrule').slab(0, 0, 0, 13, 9, 1, 'steel', 3);
-    model.part('seat').slab(1, 1, 1, 11, 7, 1, 'gasket', 2).carve(5, 3, 1, 3, 3, 1);
-    model.part('lens').slab(2, 2, 2, 9, 5, 1, 'lens', 2);
-    model.part('die').box(5, 3, 1, 3, 3, 1, on ? 'light' : 'lens');
-    live.faceZ = 2;
+    live.well = [0, 0, 13, 9];
+    model.part('ferrule').slab(0, 0, -3, 13, 9, 1, 'steel', 3);
+    model.part('seat').slab(1, 1, -2, 11, 7, 1, 'gasket', 2).carve(5, 3, -2, 3, 3, 1);
+    model.part('lens').slab(2, 2, -1, 9, 5, 1, 'lens', 2);
+    model.part('die').box(5, 3, -2, 3, 3, 1, on ? 'light' : 'lens');
+    for (const part of model.parts) {
+      part.grounded = false;
+      part.sunk = true;
+    }
+    live.faceZ = 0;
     live.state.tint = null;
   },
   pose(live) {

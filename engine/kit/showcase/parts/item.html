@@ -20,6 +20,8 @@
     flex: none;
     inline-size: 18px;
     block-size: 10px;
+    align-self: flex-start;
+    margin-block-start: calc((1lh - 10px) / 2);
   }
   .presence-optic:not([data-vx-live]) {
     border: 2px solid var(--vx-steel);
@@ -110,14 +112,20 @@
     build(live, model) {
       const { W, H } = live;
       const collar = model.part('ferrule');
-      collar.slab(0, 0, 0, W, H, 2, 'steel', 3);
-      collar.carve(2, 2, 1, W - 4, H - 4, 1);
-      const x = Math.floor(W / 2) - 2, y = Math.floor(H / 2) - 1;
-      collar.carve(x, y, 0, 4, 2, 1);
-      model.part('diode').box(x, y, 0, 4, 2, 1, live.el.dataset.vxLight === 'go' ? 'light-go' : 'lens');
       const lens = model.part('diffuser');
-      lens.slab(2, 2, 1, W - 4, H - 4, 1, 'lens', 1);
-      live.faceZ = 2;
+      const diode = model.part('diode');
+      live.well = [0, 0, W, H];
+      for (const part of [collar, lens, diode]) {
+        part.grounded = false;
+        part.sunk = true;
+      }
+      collar.slab(0, 0, -2, W, H, 2, 'steel', 3);
+      collar.carve(2, 2, -1, W - 4, H - 4, 1);
+      const x = Math.floor(W / 2) - 2, y = Math.floor(H / 2) - 1;
+      collar.carve(x, y, -2, 4, 2, 1);
+      diode.box(x, y, -2, 4, 2, 1, live.el.dataset.vxLight === 'go' ? 'light-go' : 'lens');
+      lens.slab(2, 2, -1, W - 4, H - 4, 1, 'lens', 1);
+      live.faceZ = 0;
       live.state.tinted = null;
     },
     pose(live) {
