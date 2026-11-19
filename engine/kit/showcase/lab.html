@@ -37,6 +37,51 @@
   @media (forced-colors: active) {
     .seed-field .vx-well input { background: Field; color: FieldText; caret-color: auto; border: 1px solid FieldText; }
   }
+  #garden-modes {
+    --vx-look: garden-modes;
+    --vx: 2px;
+    position: relative;
+    isolation: isolate;
+    box-sizing: border-box;
+    display: inline-grid;
+    grid-auto-flow: column;
+    grid-auto-columns: 1fr;
+    width: min(328px, calc(100vw - 64px));
+    padding: 12px 8px 4px;
+    background: #575951;
+  }
+  #garden-modes[data-vx-live] { background: transparent; }
+  #garden-modes button {
+    position: relative;
+    height: 44px;
+    border: 0;
+    margin: 0;
+    padding: 0;
+    background: #303330;
+    color: #eceae1;
+    font: 600 15px/1 var(--vx-font);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  #garden-modes[data-vx-live] button { background: transparent; }
+  #garden-modes button[aria-selected="true"] { color: #ffe2a1; }
+  #garden-modes button:focus-visible { outline: 2px solid #d7eeff; outline-offset: -5px; }
+  #garden-modes .vx-label { display: inline-block; }
+  #garden-modes:not([data-vx-live]) button { border-inline: 2px solid #575951; }
+  #garden-modes:not([data-vx-live]) button::before {
+    content: "";
+    position: absolute;
+    width: 14px;
+    height: 4px;
+    top: -8px;
+    left: calc(50% - 7px);
+    background: #282c28;
+  }
+  #garden-modes:not([data-vx-live]) [aria-selected="true"]::before { background: #ffd071; }
+  @media (forced-colors: active) {
+    #garden-modes [aria-selected="true"] { text-decoration: underline; }
+    #garden-modes button:focus-visible { outline-color: Highlight; }
+  }
 </style>
 <body>
   <div class="row"><h1 class="vx-sign" data-vx-max="3">Voxelmorphism</h1></div>
@@ -67,10 +112,10 @@
       <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
       <label class="vx-toggle"><input type="checkbox" role="switch" disabled><span class="vx-switch"></span>Let visitors water</label>
       <span class="vx-slider" style="max-width: 320px"><input type="range" min="0" max="10" value="6" aria-label="Waterings before a bud"></span>
-      <div><div class="vx-tabs" role="tablist" aria-label="Garden view">
-        <button role="tab" aria-selected="true" aria-controls="p1">Growing</button>
-        <button role="tab" aria-selected="false" aria-controls="p2">Bloomed</button>
-        <button role="tab" aria-selected="false" aria-controls="p3">Wilted</button>
+      <div><div id="garden-modes" role="tablist" aria-label="Garden view">
+        <button role="tab" aria-selected="true">Growing</button>
+        <button role="tab" aria-selected="false" tabindex="-1">Bloomed</button>
+        <button role="tab" aria-selected="false" tabindex="-1">Wilted</button>
       </div></div>
       <span class="vx-meter" style="max-width: 320px"><progress value="3" max="5">3 of 5</progress></span>
       <label class="vx-field seed-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
@@ -108,6 +153,7 @@
   <script type="module">
     import { adopt, live, toast } from '../src/index.js';
     import './seed-readout.js';
+    import './garden-modes.js';
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
