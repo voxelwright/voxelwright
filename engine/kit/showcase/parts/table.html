@@ -13,6 +13,23 @@
 <style>
   /* the page's own */
   .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  #use {
+    --vx-ink: #f5f0df;
+    --vx-ink-quiet: #d0d9ce;
+    --vx-slate: #53615c;
+    --vx-steel: #8b9990;
+    padding: calc(var(--vx) * 5) calc(var(--vx) * 7) calc(var(--vx) * 3);
+  }
+  #use:not([data-vx-live]) { background: #252d29; }
+  #use caption { font-size: 1.1875rem; }
+  #use caption small { margin-block-start: var(--vx); }
+  #use td[data-state="failed"] { color: #ffbc9f; font-weight: 600; }
+  #use thead tr:last-child th { border-block-end-color: #a79d88; }
+  #use[data-vx-live] thead tr:last-child th { border-block-end-color: transparent; }
+  @media (forced-colors: active) {
+    #use .vx-canvas { visibility: hidden; }
+    #use[data-vx-live] thead tr:last-child th { border-block-end-color: CanvasText; }
+  }
   .narrow { inline-size: 100%; max-inline-size: calc(var(--vx) * 96); }
 </style>
 </head>
@@ -25,7 +42,7 @@
   <div class="vx-groove" role="separator"></div>
   <section>
     <h2>In use: the week's deploys</h2>
-    <div class="vx-table wide" id="use">
+    <div class="vx-table wide" id="use" data-vx-table="register">
       <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="use-cap">
         <table>
           <caption id="use-cap">Deploys this week <small>fogline, 18 to 24 May. Build time is the median.</small></caption>
@@ -35,7 +52,7 @@
           <tbody>
             <tr><th scope="row">harbor-api</th><td>Sun, 10:43</td><td>Mina</td><td class="vx-num">14</td><td class="vx-num">45 s</td><td>Live</td></tr>
             <tr><th scope="row">fog-site</th><td>Sat, 16:02</td><td>Ada</td><td class="vx-num">6</td><td class="vx-num">1 min 12 s</td><td>Live</td></tr>
-            <tr><th scope="row">tide-worker</th><td>Fri, 09:30</td><td>Mina</td><td class="vx-num">3</td><td class="vx-num">38 s</td><td>Failed</td></tr>
+            <tr><th scope="row">tide-worker</th><td>Fri, 09:30</td><td>Mina</td><td class="vx-num">3</td><td class="vx-num">38 s</td><td data-state="failed">Failed</td></tr>
             <tr><th scope="row">ferry-cron</th><td>Mon, 08:15</td><td>Ada</td><td class="vx-num">1</td><td class="vx-num">21 s</td><td>Live</td></tr>
           </tbody>
           <tfoot>

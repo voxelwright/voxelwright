@@ -29,6 +29,19 @@ export const table = {
     // a caption or a head that is not a whole number of voxels tall: the groove goes where the
     // head really ends, not to the nearest voxel
     if (off) { walls.ty = off; floor.ty = off; live.well = [0, y + off, W, y + 1 + off]; }
+    if (el.dataset.vxTable === 'register') {
+      // A single screen-printed fascia, cut through to the header channel.
+      // Flush slotted fasteners occupy its margins, clear of the text.
+      const face = m.part('faceplate');
+      face.slab(0, 0, 0, W, live.H, 1, 'gasket', 1);
+      const inset = Math.round(parseFloat(getComputedStyle(el).paddingInlineStart) / vx);
+      face.carve(inset, y, 0, W - inset * 2, 1, 1);
+      for (const x of [2, W - 6]) for (const row of [2, live.H - 5]) {
+        face.box(x + 1, row, 0, 2, 3, 1, 'steel');
+        face.box(x, row + 1, 0, 4, 1, 1, 'steel');
+        face.box(x + 1, row + 1, 0, 2, 1, 1, 'slate');
+      }
+    }
   },
 
   pose(live) { live.glowStrength = halo(0.05) * warmth(live); },
