@@ -31,6 +31,13 @@
   #deploys .display-rim { position: absolute; inset: 0; pointer-events: none; }
   #deploys .vx-table-scroll { position: relative; }
   #deploys table, #deploys caption { color: #eef1e8; }
+  #deploys table { table-layout: fixed; min-inline-size: 52rem; }
+  #deploys col:first-child { width: 3rem; }
+  #deploys col:nth-child(2) { width: 20%; }
+  #deploys col:nth-child(3) { width: 16%; }
+  #deploys col:nth-child(4) { width: 9%; }
+  #deploys col:nth-child(5) { width: 12%; }
+  #deploys col:nth-child(6) { width: 17%; }
   #deploys caption { padding: 4px 0 12px 8px; }
   #deploys caption small, #deploys thead th { color: #c4cfc6; }
   #deploys tbody tr + tr > * { border-color: #48564f; }
@@ -53,6 +60,14 @@
   #deploys[data-vx-table] .vx-data-table-sort:not([data-vx-live]) {
     background: var(--vx-key, #e9dfc5); border: 2px solid #46514b; padding-inline: 8px;
   }
+  #deploys[data-vx-table] .vx-data-table-sort:not([data-vx-live])::after {
+    content: ''; position: relative; flex: none; width: 10px; height: 14px;
+    mask: none; transform: none; opacity: 1;
+    clip-path: polygon(50% 0, 100% 40%, 0 40%, 50% 0, 50% 100%, 0 60%, 100% 60%, 50% 100%);
+    background: linear-gradient(var(--up, #575c58) 50%, var(--down, #575c58) 50%);
+  }
+  #deploys [aria-sort="ascending"] { --up: #b25b0c; }
+  #deploys [aria-sort="descending"] { --down: #b25b0c; }
   #deploys:not([data-vx-table]) .vx-data-table-sort { color: inherit; }
   #deploys tbody tr > :last-child { padding-inline-end: 8px; }
 </style>
@@ -72,6 +87,7 @@
         <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="deploys-cap">
           <table>
             <caption id="deploys-cap">Services <small>fogline, the week to 24 May. Build time is the median.</small></caption>
+            <colgroup><col><col><col><col><col><col><col></colgroup>
             <thead>
               <tr>
                 <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every service on this page"><span class="vx-box"></span></label></th>

@@ -21,7 +21,8 @@
   /* The joint occupies the old groove and its two margins, within the key gap. */
   .key-seam { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 3); block-size: calc(var(--vx) * 11); }
   .key-seam:not([data-vx-live])::before {
-    content: ""; position: absolute; inset: var(--vx);
+    content: ""; position: absolute; inset-block: var(--vx);
+    left: calc(-2 * var(--vx)); width: calc(2 * var(--vx)); box-sizing: border-box;
     background: var(--vx-slate); border-inline-end: 1px solid var(--vx-steel);
   }
   .sizes { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 3); }

@@ -33,6 +33,9 @@ export const table = {
       // A single screen-printed fascia, cut through to the header channel.
       // Flush slotted fasteners occupy its margins, clear of the text.
       const face = m.part('faceplate');
+      face.sunk = true;
+      face.tz = -1;
+      face.ty = off;
       face.slab(0, 0, 0, W, live.H, 1, 'gasket', 1);
       const inset = Math.round(parseFloat(getComputedStyle(el).paddingInlineStart) / vx);
       face.carve(inset, y, 0, W - inset * 2, 1, 1);

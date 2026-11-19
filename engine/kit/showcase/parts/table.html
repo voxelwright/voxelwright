@@ -20,7 +20,13 @@
     --vx-steel: #8b9990;
     padding: calc(var(--vx) * 5) calc(var(--vx) * 7) calc(var(--vx) * 3);
   }
-  #use:not([data-vx-live]) { background: #252d29; }
+  #use:not([data-vx-live]) {
+    --pin: linear-gradient(to bottom, var(--vx-steel) 40%, var(--vx-slate) 40% 65%, var(--vx-steel) 65%);
+    background: var(--pin) left 8px top 8px, var(--pin) right 8px top 8px,
+      var(--pin) left 8px bottom 8px, var(--pin) right 8px bottom 8px, #252d29;
+    background-size: 12px 10px;
+    background-repeat: no-repeat;
+  }
   #use caption { font-size: 1.1875rem; }
   #use caption small { margin-block-start: var(--vx); }
   #use td[data-state="failed"] { color: #ffbc9f; font-weight: 600; }
