@@ -22,6 +22,7 @@ defineLook('garden-modes', {
 
 function wire(el, on, live) {
   const keys = [...el.querySelectorAll('[role="tab"]')];
+  if (!live) keys.forEach(key => wrapLabel(key));
   const current = () => keys.findIndex(key => key.getAttribute('aria-selected') === 'true');
   chooseTab(keys, current());
   function choose(index) {
@@ -51,6 +52,8 @@ function wire(el, on, live) {
       if (instant || reducedMotion()) spring.snap(z);
       else spring.to(z, k, c);
       live.invalidate();
+    } else {
+      keys[index].toggleAttribute('data-held', down);
     }
     cue(down ? 'press' : 'release');
   }

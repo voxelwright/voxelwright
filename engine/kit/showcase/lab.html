@@ -48,7 +48,7 @@
     display: inline-grid;
     grid-auto-flow: column;
     grid-auto-columns: 1fr;
-    width: min(328px, calc(100vw - 64px));
+    width: min(328px, 100%);
     padding: 12px 8px 4px;
     background: #575951;
   }
@@ -69,7 +69,20 @@
   #garden-modes button[aria-selected="true"] { color: #ffe2a1; }
   #garden-modes button:focus-visible { outline: 2px solid #d7eeff; outline-offset: -5px; }
   #garden-modes .vx-label { display: inline-block; }
-  #garden-modes:not([data-vx-live]) button { border-inline: 2px solid #575951; }
+  #garden-modes:not([data-vx-live]) button {
+    border-inline: 2px solid #575951;
+    box-shadow: inset 0 -3px #191d19;
+  }
+  #garden-modes:not([data-vx-live]) button:where(:active,[data-held]) {
+    box-shadow: inset 0 3px #191d19;
+  }
+  #garden-modes:not([data-vx-live]) button:where(:active,[data-held]) .vx-label { translate: 0 2px; }
+  @media (max-width: 700px) {
+    body { padding: 24px clamp(8px, 3vw, 20px) 64px; }
+    .grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .col { min-width: 0; grid-template-columns: minmax(0, 1fr); }
+    #garden-modes button { font-size: clamp(12px, 5vw, 15px); }
+  }
   #garden-modes:not([data-vx-live]) button::before {
     content: "";
     position: absolute;
