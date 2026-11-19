@@ -14,7 +14,7 @@ export function inspectNativeVoxels(hosts, { plain = false, families = [] } = {}
           const observer = new IntersectionObserver(([entry]) => {
             observer.disconnect();
             resolve(entry.intersectionRect.width === 0 || entry.intersectionRect.height === 0);
-          }, { root: el });
+          }, { root: el.parentElement });
           observer.observe(canvas);
         });
       }

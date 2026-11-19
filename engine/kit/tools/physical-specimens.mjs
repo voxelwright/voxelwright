@@ -57,9 +57,13 @@ async function specimens(plain) {
 
     if (!plain) {
       const fitted = page.locator('label:has(#post) .vx-box');
-      await fitted.locator('canvas').evaluate(canvas => { canvas.style.clipPath = 'inset(50%)'; });
-      await assert.rejects(assertNativeVoxels(fitted), { code: 'ERR_ASSERTION', message: /fully clipped/ });
-      await fitted.locator('canvas').evaluate(canvas => { canvas.style.removeProperty('clip-path'); });
+      for (const layer of [fitted, fitted.locator('canvas')]) {
+        await layer.evaluate(el => { el.style.clipPath = 'inset(50%)'; });
+        await assert.rejects(assertNativeVoxels(fitted), { code: 'ERR_ASSERTION', message: /fully clipped/ });
+        await layer.evaluate(el => { el.style.clipPath = 'inset(10%)'; });
+        await assertNativeVoxels(fitted);
+        await layer.evaluate(el => { el.style.removeProperty('clip-path'); });
+      }
       await assertNativeVoxels(fitted);
       // A real kit instance and canvas still need geometry.
       await page.evaluate(async () => {
