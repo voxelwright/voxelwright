@@ -158,7 +158,8 @@ function wire(el, on, live) {
     sync();
   });
 
-  on(window, 'resize', () => { if (isOpen()) { sizeToField(); put(); measure(); } });
+  const fit = () => { if (isOpen()) { sizeToField(); put(); measure(); } };
+  on(window, 'resize', fit);
   on(input, 'input', () => {
     const n = filter();
     open();
@@ -201,12 +202,13 @@ function wire(el, on, live) {
   on.watch(list, { childList: true, subtree: true }, () => { nameOptions(list); if (isOpen()) { filter(); sync(); } });
   sift(list, input.value);
   sync();
-  if (live) {
-    const resize = new ResizeObserver(measure);
-    resize.observe(list);
-    resize.observe(well);
-    return () => resize.disconnect();
-  }
+  const resize = new ResizeObserver(entries => {
+    if (entries.some(entry => entry.target === well)) fit();
+    else measure();
+  });
+  resize.observe(well);
+  if (live) resize.observe(list);
+  return () => resize.disconnect();
 }
 
 export const combobox = {
@@ -242,5 +244,5 @@ export const combobox = {
     return () => { stopResize?.(); on.done(); };
   },
 
-  plain(el, on) { wire(el, on, null); },
+  plain(el, on) { return wire(el, on, null); },
 };
