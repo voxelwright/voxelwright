@@ -7,7 +7,6 @@ import os from "node:os";
 import path from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { build, ContentError } from "../generator/build.mjs";
-import { outName } from "../generator/looks.mjs";
 import { loadPosts } from "../generator/posts.mjs";
 import { markdownTwin, postPath } from "../lib/paths.mjs";
 
@@ -88,7 +87,7 @@ function checkOutput(label, out, { posts, site }) {
     for (const m of html.matchAll(/<model-note\b([^>]*)>([\s\S]*?)<\/model-note>/g)) {
       embeds++;
       if (!/\smodel="[^"]+"/.test(m[1]) || !/\smaker="[^"]+"/.test(m[1])) fail(label, `${route}: <model-note> without model and maker`);
-      if (!m[2].includes('class="model-note-by"')) fail(label, `${route}: <model-note> without its attribution line`);
+      if (!/class="[^"]*\bmodel-note-by\b/.test(m[2])) fail(label, `${route}: <model-note> without its attribution line`);
     }
   }
 
@@ -176,8 +175,8 @@ function decode(s) {
 
 const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
 try {
-  const prod = await run("production", { outDir: path.join(ROOT, outName("dist")) });
-  if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, outName("dist")))} draft(s) kept out`);
+  const prod = await run("production", { outDir: path.join(ROOT, "dist") });
+  if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"))} draft(s) kept out`);
   await run("with drafts", { outDir: draftsDir, drafts: true });
 } finally {
   fs.rmSync(draftsDir, { recursive: true, force: true });

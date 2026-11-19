@@ -1,20 +1,20 @@
-// Instrument markup adapted from Village PR 443, engine/kit/showcase/index.html.
+// /voxelmorphism/: the Signal Desk, an instrument made from Village's Voxelmorphism kit, shown on
+// the instrument's mat. The desk's hardware and its controller are the kit's showcase desk
+// (Village engine/kit/showcase); its settings are built here from the kit's own parts.
 export function voxelmorphismPage(site) {
   const description = "Play the Signal Desk, a mechanical control surface built with Village’s Voxelmorphism kit.";
+  const shell = (value, name, title, sample, checked = false) =>
+    `<label class="sample" title="${title}"><input type="radio" name="shell" value="${value}"${checked ? " checked" : ""}><i style="--sample:${sample}" aria-hidden="true"></i><span>${name}</span></label>`;
   return {
     path: "/voxelmorphism/",
     kind: "voxelmorphism",
     title: "Voxelmorphism",
     description,
-    stylesheets: [
-      "/vendor/village/kit/voxelmorphism.css",
-      "/vendor/village/kit/showcase/desk.css",
-      "/voxelmorphism/site.css",
-    ],
-    html: `<header class="signal-intro">
-  <p>Voxelmorphism</p>
-  <h1>Signal Desk</h1>
-  <p>Press a lamp key to change the trace. Slide the contour fader to shape it, then scan for a new field.</p>
+    stylesheets: ["/vendor/village/kit/showcase/desk.css", "/voxelmorphism/desk.css"],
+    script: "/voxelmorphism/desk.js",
+    html: `<header class="page-head">
+<h1 class="vx-sign page-title" data-vx-board="none">Signal Desk</h1>
+<p class="page-lead">An instrument built from Voxelmorphism, the kit every page of this site is made of. Press a lamp key to change the trace, slide the contour fader to shape it, then scan for a new field.</p>
 </header>
 <div class="signal-desk">
 <div class="workbench">
@@ -35,23 +35,26 @@ export function voxelmorphismPage(site) {
 <button class="vx-button" data-vx-pilot="status" data-lamp="ember" aria-pressed="false"><i></i>Ember</button>
 </div></div></div>
 <span class="mat-tag">Village <b>Field series</b></span></div>
-<div class="caption"><span id="desk-fallback">Interactive controls require JavaScript.</span><a id="view-mode" href="?view=2d" hidden>Use plain controls</a><span id="gain-help" hidden>Turn the dial or use the arrow keys.</span></div>
+<p class="desk-note"><span id="desk-fallback">The controls need JavaScript.</span><span id="gain-help" hidden>Turn the dial or use the arrow keys.</span></p>
 </section>
-<aside class="setup" aria-label="Build settings" inert><header><h2>Finish &amp; fittings</h2></header>
-<fieldset id="shells"><legend>Enclosure <output id="shell-name">Walnut</output></legend><div class="samples">
-<label title="Walnut"><input type="radio" name="shell" value="walnut" checked><i style="--sample:url(/vendor/village/kit/showcase/materials/walnut.jpg) center / cover" aria-hidden="true"></i><span>Walnut</span></label>
-<label title="Anodized aluminum"><input type="radio" name="shell" value="alloy"><i style="--sample:linear-gradient(130deg,#788b91,#2b404b)"></i><span>Alloy</span></label>
-<label title="Smoked acrylic"><input type="radio" name="shell" value="smoke"><i style="--sample:linear-gradient(135deg,#33313e,#89838f 70%,#474552)"></i><span>Smoke</span></label>
-<label title="Frosted acrylic"><input type="radio" name="shell" value="frost"><i style="--sample:linear-gradient(130deg,#c3cfc8,#eeeae1 65%,#afbdb7)"></i><span>Frost</span></label>
-<label title="Clear acrylic"><input type="radio" name="shell" value="clear"><i style="--sample:linear-gradient(130deg,#98bdbb,#f4ffff 42%,#b9d9d7 48%,#edf4eb)"></i><span>Clear</span></label>
+<aside class="vx-card fittings" aria-labelledby="fittings-title" data-vx-bolts="none" inert>
+<h2 id="fittings-title">Finish and fittings</h2>
+<p class="fittings-note">The whole site is fitted like the desk: change the enclosure and every page follows for this visit.</p>
+<div class="vx-groove" role="separator"></div>
+<fieldset class="fitting"><legend>Enclosure <output id="shell-name">Walnut</output></legend><div class="samples">
+${shell("walnut", "Walnut", "Walnut", "url(/vendor/village/kit/showcase/materials/walnut.jpg) center / cover", true)}
+${shell("alloy", "Alloy", "Anodized aluminum", "linear-gradient(130deg,#788b91,#2b404b)")}
+${shell("smoke", "Smoke", "Smoked acrylic", "linear-gradient(135deg,#33313e,#89838f 70%,#474552)")}
+${shell("frost", "Frost", "Frosted acrylic", "linear-gradient(130deg,#c3cfc8,#eeeae1 65%,#afbdb7)")}
+${shell("clear", "Clear", "Clear acrylic", "linear-gradient(130deg,#98bdbb,#f4ffff 42%,#b9d9d7 48%,#edf4eb)")}
 </div></fieldset>
-<label class="choice" for="caps">Keycaps<select id="caps"><option value="field">Ridgeline PBT</option><option value="linen">Parchment</option><option value="carbon">Carbon PBT</option><option value="opal">Opal</option></select></label>
-<fieldset class="profile"><legend>Key profile</legend><div><label><input type="radio" name="profile" value="low">Low</label><label><input type="radio" name="profile" value="high" checked>Sculpted</label></div></fieldset>
-<fieldset class="profile rail-choice"><legend>Case lighting</legend><div><label><input type="radio" name="rail" value="steady" checked>Steady</label><label><input type="radio" name="rail" value="spectrum">Spectrum</label></div></fieldset>
-<label class="sound vx-toggle"><input id="sound" type="checkbox" role="switch"><span class="vx-switch"></span><span>Switch sound<small>Cherry MX Brown</small></span></label>
+<div class="fitting"><label for="caps">Keycaps</label><span class="vx-select"><select id="caps"><option value="field">Ridgeline PBT</option><option value="linen">Parchment</option><option value="carbon">Carbon PBT</option><option value="opal">Opal</option></select></span></div>
+<fieldset class="fitting"><legend>Key profile</legend><div class="vx-toggle-group" role="radiogroup" aria-label="Key profile"><label><input type="radio" name="profile" value="low">Low</label><label><input type="radio" name="profile" value="high" checked>Sculpted</label></div></fieldset>
+<fieldset class="fitting"><legend>Case lighting</legend><div class="vx-toggle-group" role="radiogroup" aria-label="Case lighting"><label><input type="radio" name="rail" value="steady" checked>Steady</label><label><input type="radio" name="rail" value="spectrum">Spectrum</label></div></fieldset>
+<div class="vx-groove" role="separator"></div>
+<label class="vx-toggle fitting-sound"><input id="sound" type="checkbox" role="switch"><span class="vx-switch"></span><span>Switch sound <small>Cherry MX Brown</small></span></label>
 </aside></div>
-</div>
-<script type="module" src="/voxelmorphism/desk.js"></script>`,
+</div>`,
     markdown: `# Signal Desk
 
 ${description}

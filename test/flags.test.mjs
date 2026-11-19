@@ -125,7 +125,7 @@ test("a feature cannot replace a page through another spelling of its address", 
 
 test("a feature cannot replace a page or a file the site already has", async () => {
   const page = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: "/blog/", title: "Mine", html: "", markdown: "" }] };` });
-  const file = fixture({ "features/grab/static/style.css": "nope" });
+  const file = fixture({ "features/grab/static/site.css": "nope" });
   const made = fixture({ "features/grab/static/robots.txt": "nope" });
   const twin = fixture({ "features/grab/static/blog.md": "nope" });
   try {

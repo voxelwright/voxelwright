@@ -4,13 +4,17 @@ import fs from "node:fs";
 import path from "node:path";
 import MarkdownIt from "markdown-it";
 import { createHighlighter } from "shiki";
-import { LOOKS, BASELINE_CODE } from "./looks.mjs";
 import { validateSession } from "../lib/session/format.mjs";
 import { findLeaks } from "../lib/session/redact.mjs";
 import { sessionHtml, sessionFeedHtml, sessionMarkdown } from "../lib/session/render.mjs";
 
 const LANGS = ["ts", "tsx", "js", "jsx", "json", "bash", "shell", "html", "css", "md", "yaml", "toml", "rust", "python", "glsl", "wgsl", "diff", "sql"];
-const THEMES = [...new Set([...BASELINE_CODE, ...Object.values(LOOKS).flatMap((l) => l.code)])];
+// Code on a page is shown in the instrument's code window, which is dark by day and at night,
+// so pages take one dark theme (its colours pass 4.5:1 on the window). The feed keeps the
+// GitHub pair as inline light-dark() colours, so feed readers show colour without the site's CSS.
+export const PAGE_CODE = "everforest-dark";
+export const BASELINE_CODE = ["github-light", "github-dark"];
+const THEMES = [...BASELINE_CODE, PAGE_CODE];
 const highlighter = await createHighlighter({ themes: THEMES, langs: LANGS });
 const loadedLangs = new Set(highlighter.getLoadedLanguages());
 
@@ -45,7 +49,7 @@ export function renderPost(source, ctx) {
   findStrayEmbeds(tokens, ctx, errors);
   let html;
   try {
-    codeOptions = pageCodeOptions(ctx.look, ctx.dev);
+    codeOptions = PAGE_CODE_OPTIONS;
     html = md.renderer.render(tokens, md.options, env);
   } finally {
     codeOptions = FEED_CODE;
@@ -61,23 +65,13 @@ export function renderInline(text) {
   return md.renderInline(text, { ctx: { basePath: "/", origin: "" }, errors: [], absolute: false });
 }
 
-// Code colours. The feed (and the baseline look) keep the GitHub pair as inline light-dark()
-// colours, so feed readers show colour without the site's CSS. A look's pages carry its own
-// pair as --shiki-light / --shiki-dark variables, which its stylesheet applies; dev builds
-// also carry every other look's pair (--shiki-<look>-light/-dark) so ?look= can switch them.
 const FEED_CODE = { themes: { light: BASELINE_CODE[0], dark: BASELINE_CODE[1] }, defaultColor: "light-dark()" };
+// The window paints its own glass: the theme gives the words their colours and nothing else.
+const PAGE_CODE_OPTIONS = {
+  theme: PAGE_CODE,
+  transformers: [{ pre(node) { delete node.properties.style; node.properties.role = "region"; node.properties["aria-label"] = this.options.lang && this.options.lang !== "text" ? `Code (${this.options.lang})` : "Code"; } }],
+};
 let codeOptions = FEED_CODE;
-
-function pageCodeOptions(look, dev) {
-  if (!look) return FEED_CODE;
-  const themes = { light: LOOKS[look].code[0], dark: LOOKS[look].code[1] };
-  if (dev) {
-    for (const [name, other] of Object.entries(LOOKS)) {
-      if (name !== look) Object.assign(themes, { [`${name}-light`]: other.code[0], [`${name}-dark`]: other.code[1] });
-    }
-  }
-  return { themes, defaultColor: false };
-}
 
 const md = new MarkdownIt({
   html: true,
@@ -85,10 +79,12 @@ const md = new MarkdownIt({
   typographer: true,
   highlight(code, lang) {
     const language = (lang || "").trim().toLowerCase();
-    if (!loadedLangs.has(language)) {
-      return `<pre class="shiki"><code>${escapeHtml(code)}</code></pre>`;
-    }
-    return highlighter.codeToHtml(code, { lang: language, ...codeOptions });
+    const onPage = codeOptions === PAGE_CODE_OPTIONS;
+    const html = loadedLangs.has(language)
+      ? highlighter.codeToHtml(code, { lang: language, ...codeOptions })
+      : `<pre class="shiki"${onPage ? ' tabindex="0" role="region" aria-label="Code"' : ""}><code>${escapeHtml(code)}</code></pre>`;
+    // on a page, code is set into the kit's code block: a recess, a level below the reading surface
+    return onPage ? `<div class="vx-code vx-recess">${html}</div>` : html;
   },
 });
 
@@ -102,8 +98,13 @@ md.renderer.rules.image = (tokens, idx, opts, env, self) => {
   const token = tokens[idx];
   token.attrSet("src", resolveUrl(token.attrGet("src"), env));
   token.attrSet("loading", "lazy");
-  return defaultImage(tokens, idx, opts, env, self);
+  const img = defaultImage(tokens, idx, opts, env, self);
+  // on a page a picture is set in a recess (the kit's figure); the feed keeps a bare <img>
+  return env.absolute ? img : `<span class="vx-figure"><span class="vx-recess">${img}</span></span>`;
 };
+// A table is the kit's: it scrolls inside itself, never the page.
+md.renderer.rules.table_open = (_t, _i, _o, env) => (env.absolute ? "<table>\n" : '<div class="vx-table"><div class="vx-table-scroll" tabindex="0" role="region" aria-label="Table"><table>\n');
+md.renderer.rules.table_close = (_t, _i, _o, env) => (env.absolute ? "</table>\n" : "</table></div></div>\n");
 md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
   const token = tokens[idx];
   const href = token.attrGet("href");
@@ -284,8 +285,8 @@ function renderEmbedHtml(meta, env) {
     const body = md.render(meta.body, env);
     return (
       `<model-note model="${attr(a.model)}" maker="${attr(a.maker)}">` +
-      `<aside class="model-note" aria-label="Note from ${attr(who)}">` +
-      `<p class="model-note-by">Note from <strong>${escapeHtml(a.model)}</strong> (${escapeHtml(a.maker)}). Not the author's words.</p>\n` +
+      `<aside class="${env.absolute ? "" : "vx-callout "}model-note" aria-label="Note from ${attr(who)}">` +
+      `<p class="${env.absolute ? "" : "vx-callout-title "}model-note-by">Note from <strong>${escapeHtml(a.model)}</strong> (${escapeHtml(a.maker)}). Not the author’s words.</p>\n` +
       body +
       `</aside></model-note>\n`
     );
@@ -295,10 +296,12 @@ function renderEmbedHtml(meta, env) {
     .join(" ");
   const caption = a.caption || LABELS[meta.name];
   return (
-    `<figure class="embed embed-${meta.name}">` +
+    `<figure class="${env.absolute ? "" : "vx-figure "}embed embed-${meta.name}">` +
+    (env.absolute ? "" : `<div class="vx-recess">`) +
     `<${meta.name} ${elementAttrs}>` +
     (a.poster ? `<img src="${attr(url(a.poster))}" alt="${attr(a.alt ?? "")}" loading="lazy">` : `<p class="embed-text">${escapeHtml(a.alt)}</p>`) +
     `</${meta.name}>` +
+    (env.absolute ? "" : `</div>`) +
     `<figcaption>${escapeHtml(caption)}</figcaption></figure>\n`
   );
 }

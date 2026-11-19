@@ -69,8 +69,7 @@ npm run session -- cut posts/<slug>/founding.session.json t4,t9-t12
 ```
 
 Redaction runs before anything is written, and the build checks every session again. The format
-and the import options are in `notes/ai-session-format.md`. `node scripts/writing-demo.mjs`
-serves the demo post in the fresh and blend looks on port 5976.
+and the import options are in `notes/ai-session-format.md`.
 
 ## What the build writes
 
@@ -80,16 +79,24 @@ serves the demo post in the fresh and blend looks on port 5976.
 
 ## Settings
 
-`site.config.mjs` holds the title, description, canonical origin (`https://zahynailo.dev`), Ink blog look,
+`site.config.mjs` holds the title, description, canonical origin (`https://zahynailo.dev`),
 social links, and `negotiateMarkdown`.
 
-### Looks
+### Voxelmorphism
 
-Three designs share the same HTML: `notebook`, `street` and `editorial`. Each is one stylesheet
-in `static/looks/` plus a Shiki theme pair in `generator/looks.mjs`; `look:` in the config picks
-one. In `npm run dev`, `?look=street` switches the current tab (code colours too); `?look=` goes
-back to the configured one. Fonts are self-hosted in `static/fonts/`, each with its OFL licence.
-The rules the looks are designed against are in `.claude/skills/site-craft/SKILL.md`.
+Every page is built from Voxelmorphism, Village's UI kit, vendored in `static/vendor/village/kit/`
+(see `notes/voxelmorphism.md`). The page stands on the kit's ground and is fitted as the Signal
+Desk's instrument (walnut case, Ridgeline caps; at night the same case with its lights down). The
+bar is the kit's navbar, post lists are its list groups, an article is its prose, code sits in its
+code window, a model note is its callout. `static/site.css` places these and holds no colours or
+controls; `static/site.js` starts the kit. Pages work without script: the kit's stylesheet is the
+plain version. `?view=2d`, the footer's "Plain page" link, reduced motion, or no WebGPU keep a page
+plain; the Night key in the bar switches the time of day. Choosing a finish on the Signal Desk
+refits every page for the rest of the visit.
+
+A part the site needs and the kit lacks goes into the kit (Village `engine/kit`), not into
+`site.css`; `notes/voxelmorphism-dogfood.md` lists what building the site found. The rules the
+site is designed against are in `.claude/skills/site-craft/SKILL.md`.
 
 ### Markdown by `Accept` header
 
@@ -110,9 +117,9 @@ site.config.mjs         settings
 generator/              build: posts, Markdown and embeds, pages, feeds
 lib/paths.mjs           URL rules shared by build, Worker, checks and dev server
 src/worker.mjs          Markdown negotiation Worker
-static/looks/           the looks, one stylesheet each
+static/site.css         layout of the kit's parts; static/site.js starts the kit
+static/vendor/village/  the Voxelmorphism kit and renderer (scripts/refresh-voxelmorphism.mjs)
 static/fonts/           self-hosted fonts and their licences
-static/style.css        plain baseline, used when no look is set
 scripts/                new, build, dev, check, Node dev server
 test/                   Worker and build-failure tests
 cloudflare.config.ts    Worker config for the cf CLI

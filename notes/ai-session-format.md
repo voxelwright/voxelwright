@@ -119,7 +119,7 @@ a test and read `review` before publishing.
 ```
 
 - `open`: the exchanges shown unfolded, by prompt number, or `all`. Default: the first.
-- Page: the block described in `static/ai-session.css`; looks map their tokens onto `--ais-*`.
+- Page: the block described in `static/ai-session.css`, on the Voxelmorphism kit's tokens, keys and grooves.
 - Markdown twin and llms: a bold header line with the models and counts and a link to the JSON,
   then every prompt and reply as a labelled quote, tool calls as one italic line each.
 - Feed: the same content as simple HTML with no folds or scripts.

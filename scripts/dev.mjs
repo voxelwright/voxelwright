@@ -6,13 +6,12 @@ import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
 import { startServer } from "./serve.mjs";
-import { outName } from "../generator/looks.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
-const DEV_DIR = outName(".dev");
+const DEV_DIR = ".dev";
 const PORT = Number(process.env.PORT ?? 4321);
 const RELOAD_PORT = PORT + 1; // the dev pages listen here (see generator/pages.mjs)
-const WATCH = ["designs", "posts", "static", "generator", "lib", "src", "site.config.mjs"];
+const WATCH = ["posts", "static", "generator", "lib", "src", "site.config.mjs"];
 
 const rebuild = () => spawnSync(process.execPath, ["scripts/build.mjs", "--dev"], { cwd: ROOT, stdio: "inherit" }).status === 0;
 

@@ -1,31 +1,44 @@
-# Signal Desk
+# Voxelmorphism on the site
 
-The generator exports `voxelmorphismPage(site)` from `generator/voxelmorphism.mjs`. Register its return value once in the normal HTML/Markdown page list. The result has kind `voxelmorphism`, route `/voxelmorphism/` and twin `/voxelmorphism.md`.
+Every page is built from the kit. The vendored copy in `static/vendor/village/` comes from one
+Village commit, pinned as `PIN` in `scripts/refresh-voxelmorphism.mjs` and written to
+`kit/REVISION`. `test/kit.test.mjs` fails when the copy names no commit (a working-files refresh)
+or when a page uses a `vx-` class the copy does not style.
 
-## Source and refresh
+## Refresh
 
-The hardware, scope algorithm, case finishes, material textures, component models, lighting, motion, audio and renderer come from `the private source repository` PR 443 at `dda49b0f8f6353e1ed3bee76b15600f4e8cf4b31`. The integration keeps the desk in `engine/kit/showcase/index.html` from the workbench through its settings. The site template owns the heading, instructions, view switch and no-script description. The two material images are the exact files introduced in Village commit `01252909` under `engine/kit/showcase/materials/`.
-
-With Node 24+ and Git, run these from the site checkout. Substitute a path to an existing Village clone.
+With Node 24+ and Git, from the site checkout, with a Village clone that has the commit:
 
 ```sh
 npm ci
-git -C ../Village fetch origin refs/pull/443/head
-node scripts/refresh-voxelmorphism.mjs ../Village
+node scripts/refresh-voxelmorphism.mjs ../Village            # the pinned commit
+node scripts/refresh-voxelmorphism.mjs ../Village <commit>   # another commit; then update PIN
 git diff --exit-code -- static/vendor/village
 ```
 
-The script reads the exact commit object even when the clone is on a different branch. A clone already containing the object works offline. Dependency installation and refresh are development steps. The ordinary site build copies the checked-in static files.
+To change the kit and the site together, refresh from a Village checkout's working files with
+`--worktree`, build, look, and repeat. Commit the kit change in Village first, then refresh from
+that commit; the test refuses a working-files copy.
 
-The refresh bundles the upstream desk controller, shared kit registry and WebGPU blocks renderer with the site's locked esbuild. It limits registration to the desk's component families, removes the showcase auto-start and console handle, scopes its stylesheet, and copies the base, rotary and instrument styles. Desktop and mobile layouts, the scanned trace, shell-specific sound EQ and plain-control behavior come from upstream. The output omits the catalog, demos, standalone HTML, dev tools, source maps and world scenes. When advancing the pin, also compare the upstream workbench markup against the generator template before refreshing.
+The script takes only the parts in `PARTS` (the kit's registry is cut to them, so esbuild drops the
+rest) and their stylesheets, put together in the kit's own order (`tools/css.mjs`). A new part on
+a page means a line in `PARTS`. It also bundles the Signal Desk's controller from the kit's
+showcase, without the showcase's boot, and scopes the desk's stylesheet to `.signal-desk`.
 
 ## Runtime contract
 
-- `/vendor/village/kit/src/index.js` exports `use`, `adopt`, `release`, `ready`, `getStage`, `live`, `fitInstrument`, `LIGHTS` and `sound`. These ESM entry points share one module instance per document.
-- Load `/vendor/village/kit/voxelmorphism.css` for the kit parts. The base registry supports push buttons, latching lamp keys, sliders, rotary dials, toggles and the instrument backplane. The desk entry adds its special Scan key, fader and dial finish.
-- A world hosting controls can call `await use(worldRenderer)` before its first `adopt(panel)`. The renderer implements Village’s `draw(frame, target)` contract. Pass `null` for plain behavior. This keeps the world on its existing device.
-- A standalone panel can import `renderer` from `/vendor/village/blocks/renderer.js` and pass `renderer()` to `use`. Await `ready()` to determine whether a stage is available. On the desk, the query `?view=2d`, reduced motion, or an unavailable GPU retains plain controls. Sound requires opt-in.
-- The generator adds the desk stylesheet and host module only on its own page. Include the entire `kit/shared/` directory beside the entry points, including the switch samples. Relative imports and recording URLs work on a static host.
+- `/vendor/village/kit/src/index.js` exports `adopt`, `use`, `release`, `ready`, `live`, `refresh`,
+  `getStage`, `fitInstrument`, `toast`, `LIGHTS` and `sound`. One module instance per document.
+- Each page's `<html>` names its fitting (`data-vx-look="lit" data-shell="walnut" data-caps="field"
+  data-profile="high" data-rail="steady"`); the kit's `css/fittings.css` colours the page from it,
+  by day and at night, before any script runs, and the first `adopt()` fits the voxels the same way.
+- `static/site.js` calls `use(renderer())` (or `use(null)` when the page stays plain) before the
+  first `adopt()`, so the kit never opens a second WebGPU device. A page with its own setup sets
+  `script` on its page object; that script imports `boot` from `/site.js` and passes `before`.
+- Plain or voxels: `?view=2d`/`?view=3d`, then the saved choice (`vx-plain` in localStorage, the
+  footer's link), then reduced motion. The head's early script sets `data-vx-plain` before paint.
+- The Night key saves `vx-theme`; the Signal Desk's build (`vx-instrument-build` in sessionStorage)
+  refits every page for the visit.
 
 ## Asset provenance
 
