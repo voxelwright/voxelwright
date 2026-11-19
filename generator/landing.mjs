@@ -71,7 +71,7 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 <button class="vx-button" type="button" data-egg="rick">Tune the tow banner</button>
 <button class="vx-button" type="button" data-egg="lives">Konami code</button>
 </div></details></details><p class="egg-status" role="status" aria-live="polite"></p>
-</div><script type="module" src="/landing/home.js"></script>`;
+</div>`;
   const markdown =
     [
       "# " + site.title,

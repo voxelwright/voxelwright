@@ -50,7 +50,7 @@ that live in this repo.
   changelog.
 - The support button has no real contact anywhere: that is the joke. Keep the button itself keyboard- and
   screen-reader-friendly.
-- The blog look is iter-1 ("Ink"); site.config.mjs is set.
+- The blog look is iter-1 ("Ink"); site.config.mjs is set. Superseded Nov 19: see below.
 - His face photo is the cropped selfie at `~/.village/site/face/owner-face.jpg` (private, mode 600). Use only this
   crop, never the original group photo. Do not send it to outside services without asking him.
 - Socials: X `pasha_knz`, LinkedIn `pavlo-zahynailo`, Twitch `p_bender`, no YouTube for now. They can be logos on
@@ -91,3 +91,20 @@ that live in this repo.
   - `engine/kit` ignores milestones/, shots/ and the skills folders before the first push;
   - the garden's copy includes `showcase/showcase.css`.
   The font thread has been told.
+
+## Nov 19: the whole site is built from Voxelmorphism
+
+The owner asked for every page to be built with the kit, nothing implemented twice. Done on site
+branch `vx/site-on-kit` (fast-forwarded into main):
+
+- One layout for every page (generator/pages.mjs): the kit's ground, navbar, list groups, prose,
+  code window, figures, callouts, lettering and keys, fitted as the Signal Desk's walnut
+  instrument from the HTML, with a night. Ink (iter-1), the other looks, designs/*, world-shell.css
+  and the fresh/blend demo scripts are retired. The landing's plain page is on the kit too; the
+  city keeps its painted signs but shares the site's faces and its choices (night, plain, sound).
+- The vendored kit is pinned to Village `feature/442-site-dogfood`, PR 448, stacked on PR 443 and
+  not merged. Merging 443 then 448 and re-pinning to main is the owner's step.
+- What building the site found in the kit, and what is still open: notes/voxelmorphism-dogfood.md.
+- The writing branches (writing-1, writing-2) predate the kit: their editor and pages use the
+  retired looks and need moving onto the kit's parts before they land.
+- Dev server for this lane: port 5986, tailnet 10986 (`tailscale serve --https=10986 off`).

@@ -1,6 +1,6 @@
 # Ina Coolbrith Park
 
-The ordinary site build copies the files in `static/landing/`. It needs neither a Village checkout nor a running Village server. The live view imports the PR 443 device owner at `/vendor/village/blocks/renderer.js`, supplied by the Signal Desk distribution. The tow banner uses the kit’s Vox Text lettering. The marquee is built from solid letters and the park signs use the site’s self-hosted fonts.
+The ordinary site build copies the files in `static/landing/`. It needs neither a Village checkout nor a running Village server. The live view imports the Village device owner at `/vendor/village/blocks/renderer.js`, vendored with the Voxelmorphism kit (pinned in `scripts/refresh-voxelmorphism.mjs`). The tow banner uses the kit’s Vox Text lettering. The marquee is built from solid letters and the park signs use the site’s faces: IBM Plex Sans from the kit and Source Serif 4.
 
 ## Source
 
@@ -11,7 +11,7 @@ The ordinary site build copies the files in `static/landing/`. It needs neither 
 | Light and materials | Display paths of `engine/page/matte.ts`, `march.ts`, and `glow.ts` at that same commit. The adapter uses a single depth pass with an 8 m near plane, a cached city texture and procedural night windows. |
 | Plane, clock and graphics settings | `bdd9e9675a50a21d3e7543eeefa129c17ca2a19b` on `feature/424-sky`, particularly `engine/landing/plane.ts`, `sky.ts`, `player/graphics.ts`, `player/smooth.ts` (FXAA) and the pacing rules in `player/stage.ts`. Low uses directional light, Medium adds baked shadows and FXAA, High adds reflected sky on glass-faced landmarks, and Ultra also supersamples at 1.4×. The landing adapts the backing canvas within the chosen limit, using active frame intervals after warmup. |
 | Navigation and egg | The half-second departure follows `feature/421-landing`’s sign push. Keyboard activation follows the native link immediately. The Konami sequence from the site’s #426 notes changes the plane’s banner. |
-| Shared device and sign type | Village PR 443, `dda49b0f8f6353e1ed3bee76b15600f4e8cf4b31`. See the demo lane’s refresh script. |
+| Shared device and sign type | The Voxelmorphism kit's vendored renderer, at the commit pinned as `PIN` in `scripts/refresh-voxelmorphism.mjs`. |
 
 The city uses USGS 3DEP lidar, DataSF buildings, Mapterhorn terrain, OpenStreetMap contributors and Overture Maps Foundation landmark outlines. Building colours, illumination and camera fitting reference Frank Schulenburg’s CC BY-SA 4.0 photograph. The page credits the image and links to its source and licence. The export uses the unpainted city pack exclusively. It contains no photographic atlas, reference picture, overlay or diagnostic render.
 

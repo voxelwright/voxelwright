@@ -5,7 +5,7 @@
 // (see notes/voxelmorphism.md): the page stands on the kit's ground, the bar is the kit's navbar,
 // lists are its list groups and items, an article is its prose. static/site.css lays these out
 // and holds no colours or controls of its own; static/site.js starts the kit.
-import { escapeHtml as e, renderInline } from "./markdown.mjs";
+import { escapeHtml as e } from "./markdown.mjs";
 import { markdownTwin, postPath, tagPath, slugify } from "../lib/paths.mjs";
 
 export const KIT = "/vendor/village/kit";
@@ -105,8 +105,12 @@ const EARLY = `<script>
   if (t === "dark" || t === "light") r.dataset.theme = t;
   // the Signal Desk's enclosure and caps, chosen this visit, fit every page
   try { const b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k]; } catch {}
-  // plain or voxels: the saved choice, then the address, then reduced motion (static/site.js)
-  if (p === "1" || q === "2d" || (q !== "3d" && matchMedia("(prefers-reduced-motion: reduce)").matches)) r.setAttribute("data-vx-plain", "");
+  // plain or voxels: the saved choice, then the address, then reduced motion, forced colours or
+  // Save-Data (static/site.js; the city reads the same answer)
+  const calm = ["(prefers-reduced-motion: reduce)", "(forced-colors: active)"].some((m) => matchMedia(m).matches) || navigator.connection?.saveData;
+  if (p === "1" || q === "2d" || (q !== "3d" && calm)) r.setAttribute("data-vx-plain", "");
+  // the home page that will try the city takes the whole window from its first paint
+  else if (location.pathname === "/") r.dataset.city = "";
 }
 </script>
 `;
@@ -245,19 +249,6 @@ ${lettering("404")}
 <p class="vx-empty-text">The page may have moved, or the link has a typo. The blog lists everything there is to read.</p>
 <a class="vx-button" data-vx-kind="main" href="/blog/">Go to the blog</a>
 </div>`,
-  };
-}
-
-// The home page for builds that have no landing (generator/landing.mjs replaces it).
-export function homePage(site, posts) {
-  const latest = posts.slice(0, 5);
-  return {
-    path: "/",
-    kind: "home",
-    title: site.title,
-    description: site.description,
-    html: `<h1>${e(site.title)}</h1>\n<p>${renderInline(site.intro)}</p>\n${postListHtml(latest)}`,
-    markdown: `# ${site.title}\n\n${site.intro}\n\n${postListMd(latest, site)}\n`,
   };
 }
 
