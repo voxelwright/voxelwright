@@ -135,8 +135,8 @@ function wire(el, on, live) {
   drag(el, on, live);
   if (el.hasAttribute('data-vx-carriage')) {
     sheetWire(el, on, live, { surface: 'courses', parts: ['panel', 'chassis', 'pull'] });
-    on(el, 'transitionend', e => {
-      if (e.target === el && !e.pseudoElement && e.propertyName === 'translate') cue(el.open ? 'press' : 'release');
+    on(el, 'toggle', e => {
+      if (e.oldState !== e.newState) cue(e.newState === 'open' ? 'press' : 'release');
     });
   } else sheetWire(el, on, live);
 }

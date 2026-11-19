@@ -1,6 +1,6 @@
 // The four finish samples in Fogline's header. The picker still owns the radios,
 // theme events and storage. The shared toggle-group binding supplies the springs.
-import { defineLook, defineMaterial, THEMES, cue, listeners } from '../../src/index.js';
+import { defineLook, defineMaterial, THEMES, cue } from '../../src/index.js';
 
 const samples = {
   bay:  { name: 'Alloy', color: '#365e7c', ink: '#fff4de', gloss: 78 },
@@ -109,20 +109,18 @@ export function fitFinishSamples(bank) {
   defineLook('finish-samples', {
     from: 'lit', quiet: false, seam: .23, grain: 1, step: 1,
     materials, finishes, parts: {
-      'toggle-group': { build: buildBank, pose: poseBank, pad: 4 },
+      'toggle-group': { build: buildBank, pose: poseBank, pad: 4, recordedReturn: true, instantKeyboardChoice: true },
       'theme-picker': { build: buildLens, pose: poseLens, pad: 2 },
     },
   });
 }
 
-// The native bank supplies the downstroke in the renderer. Complete its
-// recorded pair here and use the same two cues in the plain version.
-function strokes(el, on, bank) {
+function strokes(el, on) {
   let held = null;
   const begin = (kind, target) => {
     if (held !== null || !target.closest('label')?.querySelector('input:enabled')) return;
     held = kind;
-    if (!bank) cue('press');
+    cue('press');
   };
   const end = kind => {
     if (held !== kind) return;
@@ -134,19 +132,10 @@ function strokes(el, on, bank) {
   on(el, 'keydown', e => { if (e.key === ' ' && !e.repeat) begin('space', e.target); });
   on(el, 'keyup', e => { if (e.key === ' ') end('space'); });
   on(el, 'focusout', () => end('space'));
-  if (bank) on(el, 'change', e => {
-    if (!e.target.matches(':focus-visible')) return;
-    bank.state.inputs.forEach((input, i) => bank.spring('on' + i).snap(+input.checked));
-    bank.invalidate();
-  });
+
 }
 
 export const sampleReturn = {
   name: 'sample-return', selector: '#picker > [data-vx-pick="theme"]',
-  bind({ el, stage }) {
-    const on = listeners();
-    strokes(el, on, stage.lives.get(el));
-    return on.done;
-  },
-  plain(el, on) { strokes(el, on, null); },
+  plain: strokes,
 };

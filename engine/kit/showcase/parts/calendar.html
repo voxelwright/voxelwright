@@ -29,7 +29,13 @@
   #deploy .vx-button[aria-disabled="true"] .vx-label { opacity: .55; }
   #deploy .vx-button:not([data-vx-live]) {
     color: #fff5dc; background: #343d39; box-shadow: inset 0 -3px #202723;
-    border: 4px solid #303833;
+    border: 4px solid #303833; transform: none;
+  }
+  #deploy .vx-button:not([data-vx-live], [aria-disabled="true"]):active {
+    box-shadow: inset 0 2px #202723;
+  }
+  #deploy .vx-button:not([data-vx-live], [aria-disabled="true"]):active .vx-label {
+    translate: 0 2px;
   }
   #deploy .vx-button:not([data-vx-live])::before { content: none; }
   #deploy .vx-button[aria-disabled="true"]:not([data-vx-live]) { color: #9c9f94; transform: none; }

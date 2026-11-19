@@ -107,12 +107,18 @@ function wire(el, on) {
     for (const type of ['scrollend', 'wheel', 'touchstart', 'keydown', 'pointerdown']) on(document, type, free, { capture: true, passive: true });
   }
   const sizes = new ResizeObserver(() => update(true));
-  sizes.observe(el);
-  // A heading can cross the reading line after content or fonts reflow without scrolling.
-  if (followsScroll) {
-    for (const target of links().map(section).filter(Boolean)) sizes.observe(target, { box: 'border-box' });
-  }
-  on.watch(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] }, () => update(true));
+  const observeSections = () => {
+    sizes.disconnect();
+    sizes.observe(el);
+    if (followsScroll) {
+      for (const target of links().map(section).filter(Boolean)) sizes.observe(target, { box: 'border-box' });
+    }
+  };
+  observeSections();
+  on.watch(el, { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] }, () => {
+    observeSections();
+    update(true);
+  });
 
   el.setAttribute('data-vx-on', '');
   on({ addEventListener() {}, removeEventListener() { sizes.disconnect(); if (asked) cancelAnimationFrame(asked); el.removeAttribute('data-vx-on'); } }, 'end', update);
