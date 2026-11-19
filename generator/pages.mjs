@@ -74,7 +74,7 @@ ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="stylesheet" href="${KIT}/voxelmorphism.css">
 <link rel="stylesheet" href="/site.css">
 ${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
-${EARLY}</head>
+${EARLY}${BETWEEN}${SPECULATION}</head>
 <body class="vx-page" data-page="${page.kind}"${page.script ? ' data-boot="page"' : ""}>
 ${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
 <div class="vx-page-column">
@@ -168,6 +168,76 @@ export function shareMeta(page, site) {
     .map(([key, value]) => `<meta ${key.startsWith("og:") ? "property" : "name"}="${key}" content="${e(String(value))}">`)
     .join("\n");
 }
+
+// Between pages: the site moves as one place (site.css, "Between pages"). A browser without
+// cross-document view transitions just navigates; this script only names and sorts them.
+//   - The bar stays put and the page's title travels into the next one's: the city sign that was
+//     pressed rises into the Blog's lettering, a list's row grows into its post's title, and back.
+//   - Back to the city is instant: the city waits whole in the back/forward cache.
+// What it names for one departure is cleared when the page shows again, since the back/forward
+// cache keeps the page as it left. A page prepared ahead (prerendered, see SPECULATION) takes up
+// the night and the instrument chosen since, as the early script would have.
+const BETWEEN = `<script>
+{
+  const r = document.documentElement, still = matchMedia("(prefers-reduced-motion: reduce)");
+  const at = (u) => { try { const x = new URL(u, location.href); return x.origin === location.origin ? x : null; } catch { return null; } };
+  const city = (x) => x?.pathname === "/" && x.searchParams.get("view") !== "2d";
+  const seen = (el) => { const b = el?.getBoundingClientRect(); return !!b && b.width > 1 && b.height > 1 && b.bottom > 0 && b.right > 0 && b.top < innerHeight && b.left < innerWidth; };
+  const named = new Set();
+  const name = (el, n) => { el.style.viewTransitionName = n; named.add(el); };
+  const forget = () => { for (const el of named) el.style.viewTransitionName = ""; named.clear(); };
+  const travellers = () => document.querySelectorAll(".site-bar, .page-title, .post-title");
+  // a skipped transition rejects its ready promise; nobody waits on it here
+  const skip = (vt) => { vt.ready.catch(() => {}); vt.skipTransition(); };
+  // the row in a list that opens the page at x
+  const row = (x) => [...document.querySelectorAll(".post-list a.vx-item")].find((a) => at(a.href)?.pathname === x?.pathname)?.querySelector(".vx-item-title");
+  // the title travels from (or to) a stand-in for it on this page; the page's own title stays
+  const stand = (el) => { if (!seen(el)) return; for (const t of document.querySelectorAll(".page-title, .post-title")) name(t, "none"); name(el, "page-title"); };
+  // a bar or title off screen would fly in from above the window; it fades with the page instead
+  const settle = () => { for (const el of travellers()) if (!named.has(el) && !seen(el)) name(el, "none"); };
+  let pressed = null;
+  addEventListener("click", (e) => { pressed = e.target.closest?.("a[href]") ?? null; }, true);
+  addEventListener("pageswap", (e) => {
+    const vt = e.viewTransition, to = at(e.activation?.entry.url ?? pressed?.href ?? "");
+    if (!vt) return;
+    if (city(to) && e.activation?.navigationType === "traverse") return skip(vt);
+    if (still.matches || !to) return;
+    if (pressed?.matches(".park-sign a[data-hit]") && at(pressed.href)?.pathname === to.pathname) stand(pressed);
+    else stand(row(to));
+    settle();
+  });
+  addEventListener("pagereveal", (e) => {
+    const vt = e.viewTransition, a = window.navigation?.activation, from = at(a?.from?.url ?? document.referrer);
+    if (!vt) return;
+    if (city(at(location.href)) && a?.navigationType === "traverse") return skip(vt);
+    if (still.matches) return;
+    if (city(from)) vt.types?.add("from-city");
+    else if (city(at(location.href))) vt.types?.add("to-city");
+    if (from && from.pathname !== location.pathname) stand(row(from));
+    settle();
+    vt.finished.finally(forget);
+  });
+  addEventListener("pageshow", forget);
+  document.addEventListener("prerenderingchange", () => {
+    let t = null, b = null;
+    try { t = localStorage.getItem("vx-theme"); b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); } catch {}
+    if (t === "dark" || t === "light") r.dataset.theme = t; else delete r.dataset.theme;
+    for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k];
+  }, { once: true });
+}
+</script>
+`;
+
+// The next page, ready before the press. A page route the pointer rests on (or presses) is
+// prerendered: its kit waits for the page to be shown before it opens a GPU device (site.js).
+// The city ("/", and its plain address) is only prefetched: prerendered, it would open the GPU
+// and start its world in a background tab. Links with a query (?view=) change a saved choice when
+// pressed, so they are left to load as they are.
+const SPECULATION = `<script type="speculationrules">
+{"prerender":[{"where":{"and":[{"href_matches":"/*/"},{"not":{"selector_matches":"[href*='?'], [href^='#'], [download]"}}]},"eagerness":"moderate"}],
+"prefetch":[{"where":{"href_matches":"/"},"eagerness":"moderate"}]}
+</script>
+`;
 
 const DEV_RELOAD = `<script type="module">
 // dev only: reload when the build changes
