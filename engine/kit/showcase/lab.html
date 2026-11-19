@@ -78,6 +78,8 @@
   }
   #garden-modes:not([data-vx-live]) button:where(:active,[data-held]) .vx-label { translate: 0 2px; }
   @media (max-width: 700px) {
+    html { overflow-x: clip; }
+    .vx-sign { max-width: 100%; font-size: clamp(22px, 7vw, 34px); }
     body { padding: 24px clamp(8px, 3vw, 20px) 64px; }
     .grid { grid-template-columns: minmax(0, 1fr); gap: 32px; }
     .col { min-width: 0; grid-template-columns: minmax(0, 1fr); }

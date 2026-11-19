@@ -43,7 +43,7 @@ function wire(el, on, live) {
     keys[index].focus();
   });
 
-  let pointer = null, held = -1;
+  let pointer = null, held = -1, heldKey = null;
   function stroke(index, down, instant = false) {
     if (live) {
       const spring = live.spring('cap' + index);
@@ -60,6 +60,7 @@ function wire(el, on, live) {
   function release() {
     if (held >= 0) stroke(held, false, pointer === null);
     held = -1;
+    heldKey = null;
     pointer = null;
   }
   on(el, 'pointerdown', e => {
@@ -77,10 +78,11 @@ function wire(el, on, live) {
     const index = keys.indexOf(e.target);
     if (index >= 0 && activation(e) && !e.repeat && held < 0) {
       held = index;
+      heldKey = e.key;
       stroke(index, true, true);
     }
   });
-  on(el, 'keyup', e => { if (activation(e) && pointer === null) release(); });
+  on(el, 'keyup', e => { if (heldKey === e.key) release(); });
   on(el, 'focusout', () => { if (pointer === null) release(); });
   on(window, 'blur', release);
 }

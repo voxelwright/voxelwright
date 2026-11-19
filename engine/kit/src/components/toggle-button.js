@@ -115,15 +115,31 @@ export const toggleButton = {
     };
     const drop = () => { if (s.held) settle(); };
     on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
-    const up = () => { if (s.held && live.model.keyStop != null) cue('release'); drop(); };
-    on(el, 'pointerup', up);
-    on(el, 'pointercancel', drop);
-    on(el, 'pointerenter', (e) => { if (e.pointerType === 'mouse' && !s.off && !reducedMotion()) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
-    on(el, 'pointerleave', () => { go(hover, 0, CALM.k * 2, CALM.c * 1.4); drop(); });
-    on(el, 'keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); });
-    on(el, 'keyup', e => { if (e.key === ' ' || e.key === 'Enter') up(); });
-    on(el, 'blur', drop);
-    on(window, 'blur', drop);
+    let owner = null;
+    const hold = source => {
+      if (owner !== null || s.off) return;
+      owner = source;
+      down();
+    };
+    const up = (source, sound) => {
+      if (owner !== source || owner === null) return;
+      owner = null;
+      if (sound && s.held && live.model.keyStop != null) cue('release');
+      drop();
+    };
+    on(el, 'pointerdown', e => { if (e.button === 0) hold(e.pointerId); });
+    on(el, 'pointerup', e => up(e.pointerId, true));
+    on(el, 'pointercancel', e => up(e.pointerId, false));
+    on(el, 'pointerenter', e => { if (e.pointerType === 'mouse' && !s.off && !reducedMotion()) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
+    on(el, 'pointerleave', e => { go(hover, 0, CALM.k * 2, CALM.c * 1.4); up(e.pointerId, false); });
+    on(el, 'keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (!e.repeat) hold(e.key);
+      else if (e.key === 'Enter' && live.model.keyStop != null) e.preventDefault();
+    });
+    on(el, 'keyup', e => up(e.key, true));
+    on(el, 'blur', () => up(owner, false));
+    on(window, 'blur', () => up(owner, false));
     // the press that flips it is the click (wire, above, has already flipped it): the key then
     // goes where its new state rests
     on(el, 'click', () => {

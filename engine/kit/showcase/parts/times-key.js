@@ -72,7 +72,7 @@ export const timesKey = {
     m.keyStop = 3;
     state.off = el.matches(':disabled,[aria-disabled="true"]');
     const on = el.getAttribute('aria-pressed') === 'true';
-    live.spring('press').snap(on ? -m.keyTravel : 0);
+    live.spring('press').snap(state.held && !state.off ? -m.keyStop : on ? -m.keyTravel : 0);
     state.lit = Number(on);
     state.lensPower = null;
     live.label(wrapLabel(el), () => 9 + cap.tz);
