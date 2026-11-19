@@ -24,6 +24,7 @@ export function homePage(site, posts, tagsWithPosts) {
 <img class="park-skyline" src="/landing/ina.webp" width="2018" height="864" fetchpriority="high" alt="From Ina Coolbrith Park, the Bay Bridge, Transamerica Pyramid and Salesforce Tower rise above the roofs of North Beach.">
 <canvas class="park-canvas" aria-hidden="true" hidden></canvas>
 <canvas class="park-still" aria-hidden="true" hidden></canvas>
+<i class="postcard-flash" aria-hidden="true"></i>
 <nav class="park-sign" aria-label="Park directory">
 ${links()}
 ${links(true)}
@@ -37,6 +38,7 @@ ${links(true)}
 <a data-sign="about-still" href="/?view=2d#about-view">About this view</a>
 <button type="button" data-sign="support-still">Support</button>
 <a data-sign="plain-still" data-view="2d" href="/?view=2d">Plain page</a>
+<button type="button" data-sign="postcard" aria-haspopup="dialog" title="Make a postcard">Make a postcard</button>
 <details class="display-settings"><summary data-sign="view">View</summary>
 <div class="view-panel"><fieldset><legend>Graphics</legend>
 <label data-sign="preset">Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
@@ -49,9 +51,17 @@ ${links(true)}
 <a data-sign="plain" data-view="2d" href="/?view=2d">Plain page</a></div></details>
 </div></div>
 <figcaption><div class="park-caption"><strong>Ina Coolbrith Park</strong><span>North Beach skyline, built in Village.</span>
-<a class="vx-button" data-view="3d" href="/?view=3d" hidden>City view</a>
+<span class="park-caption-actions"><a class="vx-button" data-view="3d" href="/?view=3d" hidden>City view</a>
+<button type="button" class="vx-button" data-vx-material="chalk" data-postcard-plain aria-haspopup="dialog" hidden>Make a postcard</button></span>
 <button type="button" class="offline-car" data-sign="car" hidden><i aria-hidden="true"></i>Hop the offline cable car</button></div></figcaption>
 </figure>
+<dialog class="vx-dialog postcard" aria-labelledby="postcard-title">
+<header id="postcard-title">Your postcard</header>
+<div class="vx-dialog-body"><img class="postcard-print" alt=""><p class="postcard-status" role="status" aria-live="polite"></p></div>
+<footer><button type="button" class="vx-button" data-vx-material="chalk" data-postcard-close>Close</button>
+<button type="button" class="vx-button" data-vx-material="chalk" data-postcard-share hidden>Share</button>
+<a class="vx-button" data-vx-material="chalk" data-postcard-save href="#" download>Download PNG</a></footer>
+</dialog>
 ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title"><h2 id="recent-title">Recent writing</h2>${postListHtml(latest)}</section>` : ""}
 <section class="park-log" id="site-log" tabindex="-1" aria-labelledby="log-title" hidden>
 <h2 id="log-title">Site log</h2>
