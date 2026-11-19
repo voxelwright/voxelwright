@@ -51,8 +51,16 @@ h1 span { color: #ae512f; }
 .gain label { font-weight: 500; margin-top: 2px; }
 .gain output { color: var(--case-lamp); }
 .dial-scale { display: grid; place-items: center; width: 80px; height: 80px; position: relative; }
-.dial-scale::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: repeating-conic-gradient(from -136deg,#d6d5be 0 2deg,transparent 2deg 22.5deg); mask: radial-gradient(circle,transparent 60%,black 61% 68%,transparent 69%),conic-gradient(from -137deg,black 0 274deg,transparent 274deg); mask-composite: intersect; }
-.gain .vx-rotary { width: 60px; height: 60px; }
+.dial-scale::before { content: ""; position: absolute; inset: 0; border-radius: 50%; background: repeating-conic-gradient(from -136.25deg,currentColor 0 2.5deg,transparent 2.5deg 27deg); mask: radial-gradient(circle,transparent 58%,black 59% 68%,transparent 69%),conic-gradient(from -137deg,black 0 274deg,transparent 274deg); mask-composite: intersect; }
+.gain .vx-rotary { --vx: 1px; --vx-look: desk-dimmer; width: 60px; height: 60px; }
+.gain .vx-rotary:not([data-vx-live])::before {
+  inset: 9%; border: 1px solid #b38a48;
+  background: conic-gradient(from 32deg,#d7ae62,#f1d89c 68deg,#be934b 142deg,#d9b165 195deg,#f4dba2 245deg,#c49a52 312deg,#d7ae62);
+  box-shadow: inset 0 1px 1px #ffebbc, -1px -2px 0 1px #9c793e, -2px -4px 0 2px #64502e, -3px -5px 0 3px #201f1c;
+}
+.gain .vx-rotary:not([data-vx-live])::after {
+  inset: 9%; background: linear-gradient(#302a22,#302a22) center top / 3px 33% no-repeat;
+}
 .mix { margin: 12px 0 19px; gap: 16px; }
 .mix label { color: #c4c8bc; }
 .mix .vx-slider { --vx: 2px; flex: 1; height: 23px; }

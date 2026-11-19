@@ -1,3 +1,4 @@
+import './lamp-dial.js';
 import { adopt, ready, getStage, live } from '../src/index.js';
 import { cases, lamps } from '../src/looks/instrument.js';
 import { recall, change } from './build-settings.js';
@@ -66,7 +67,9 @@ function sync() {
   for (const input of document.querySelectorAll('[name="shell"],[name="profile"],[name="rail"]')) input.checked = build[input.name] === input.value;
   gain.value = build.level;
   hardware.toggleAttribute('data-unlit', build.level === 0);
-  $('#gain-out').value = String(build.level).padStart(2, '0');
+  const brightness = `${build.level * 10}%`;
+  gain.setAttribute('aria-valuetext', brightness);
+  $('#gain-out').value = brightness;
   $('#shell-name').value = cases[build.shell].name;
   $('#display-lamp').textContent = lamps[build.lamp].name.toUpperCase();
   for (const key of keys) {

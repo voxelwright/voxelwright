@@ -48,7 +48,7 @@ function wire(el, on, redraw = () => {}) {
   on(input, 'input', event => {
     paint();
     const stops = (Number(input.max || 100) - Number(input.min || 0)) / Number(input.step || 1);
-    if (stops > 0 && stops <= 32 && (event.isTrusted || drag)) cue('tick');
+    if (stops > 0 && stops <= 32 && (event.isTrusted || drag)) cue(el.dataset.vxDetent === 'release' ? 'release' : 'tick');
   });
   on.heed(input, 'value', paint);
   on.watch(input, { attributes: true, attributeFilter: ['min','max','step','value'] }, paint);
