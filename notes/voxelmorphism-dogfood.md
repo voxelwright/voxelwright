@@ -25,14 +25,21 @@ kit (Village branch `feature/site-dogfood`), not worked around here.
    Source Serif 4.
 7. **Links on an instrument were the ink colour**, so in running text only the underline marked
    them. They follow the theme's link colour, like the lit look.
+8. **A part too big for one GPU texture was not drawn.** Each live part gets a canvas the size of
+   its element; a 400-line code block at 3x asked for 2088x24264 px and WebGPU refused it (the
+   limit every GPU must allow is 8192), and a list of 60 posts reached 11925. Such a part now
+   draws at the largest whole number of pixels a voxel that fits: softer, never missing.
 
 ## Open (worth doing in the kit next)
 
-- **A tall surface cannot be voxels.** Each live part gets a canvas the size of its element plus
-  padding, so a card around a long article would pass the GPU's texture limit (8192 px at most on
-  many devices; a 6000 px post at 2x is 12000). The site keeps reading text on the ground ("reach
-  for none first"), but the kit should tile, cap or refuse such a surface rather than fail.
-- **Themes are script-only too.** `theme('rose')` writes inline tokens like the old fittings did,
+- **A tall surface is soft.** Since fix 8 a long part draws at a lower density instead of failing,
+  but a card around a whole article would be visibly soft on a phone, and past 32768 CSS px it
+  still fails. The site keeps reading text on the ground ("reach for none first"); tiling a tall
+  part across several canvases would remove the limit.
+- **A site's handler on a toggle key fights the kit.** The kit's toggle button flips
+  `aria-pressed` on click and sends `vx-change`; a page that also flips it in its own click handler
+  undoes the press. The part's header says so, but nothing warns; a dev-mode warning when
+  `aria-pressed` is set during the kit's own click would catch it.- **Themes are script-only too.** `theme('rose')` writes inline tokens like the old fittings did,
   so a themed page flashes. The fittings' generated-CSS approach would serve `data-vx-theme`.
 - **The showcase desk's settings panel is not kit parts.** `showcase/desk.css` draws its own
   segmented controls and select for profile, lighting and keycaps. The site's Signal Desk page

@@ -48,3 +48,23 @@ test("the vendored kit comes from a pinned Village commit", async () => {
   assert.match(revision, /^[0-9a-f]{40}$/, "vendored from working files: run the refresh script with a revision before committing");
   assert.equal(revision, PIN, "REVISION and the script's PIN disagree");
 });
+
+test("every vendored part is used by the site", async () => {
+  const { PARTS } = await import("../scripts/refresh-voxelmorphism.mjs");
+  function* walk(dir) {
+    for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+      const rel = path.join(dir, e.name);
+      if (rel.startsWith(path.join("static", "vendor"))) continue;
+      if (e.isDirectory()) yield* walk(rel);
+      else if (/\.(mjs|js|css)$/.test(e.name)) yield fs.readFileSync(path.join(ROOT, rel), "utf8");
+    }
+  }
+  const sources = ["generator", "lib", "static"].flatMap((dir) => [...walk(dir)]).join("\n");
+  // the class a part is asked for by, where it differs from its stylesheet's name
+  const CLASS = { codeBlock: "vx-code", emptyState: "vx-empty", lampKey: "data-lamp", lettering: "vx-sign", page: "vx-page", backplane: "vx-backplane", toggle: "vx-toggle", navs: "vx-nav" };
+  const unused = Object.entries(PARTS)
+    .filter(([name, [script, css]]) => script || css)
+    .filter(([name, [script, css]]) => !sources.includes(CLASS[name] ?? `vx-${css ?? script}`))
+    .map(([name]) => name);
+  assert.deepEqual(unused, [], "parts vendored but never used: take them out of PARTS");
+});

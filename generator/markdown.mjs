@@ -10,7 +10,7 @@ import { sessionHtml, sessionFeedHtml, sessionMarkdown } from "../lib/session/re
 
 const LANGS = ["ts", "tsx", "js", "jsx", "json", "bash", "shell", "html", "css", "md", "yaml", "toml", "rust", "python", "glsl", "wgsl", "diff", "sql"];
 // Code on a page is shown in the instrument's code window, which is dark by day and at night,
-// so pages take one dark theme (its colours pass 4.5:1 on the window). The feed keeps the
+// so pages take one dark theme (every token at 4.5:1 or more on the window, comments lifted). The feed keeps the
 // GitHub pair as inline light-dark() colours, so feed readers show colour without the site's CSS.
 export const PAGE_CODE = "everforest-dark";
 export const BASELINE_CODE = ["github-light", "github-dark"];
@@ -69,6 +69,8 @@ const FEED_CODE = { themes: { light: BASELINE_CODE[0], dark: BASELINE_CODE[1] },
 // The window paints its own glass: the theme gives the words their colours and nothing else.
 const PAGE_CODE_OPTIONS = {
   theme: PAGE_CODE,
+  // the theme's comment grey is 4.1:1 on the window's lighter edge; its next grey up passes
+  colorReplacements: { "#859289": "#9da9a0" },
   transformers: [{ pre(node) { delete node.properties.style; node.properties.role = "region"; node.properties["aria-label"] = this.options.lang && this.options.lang !== "text" ? `Code (${this.options.lang})` : "Code"; } }],
 };
 let codeOptions = FEED_CODE;

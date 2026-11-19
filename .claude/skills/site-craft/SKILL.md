@@ -1,6 +1,6 @@
 ---
 name: site-craft
-description: Rules for designing and building the site's look, motion and feel: typography, reading column, colour, light and dark, motion curves and durations, press feedback, juice for the playful parts, and how the 2D page and the later 3D world relate. Use for any change to static/looks/*.css, static/style.css, page templates, or anything that moves, makes sound or reacts to touch.
+description: Rules for designing and building the site's look, motion and feel: typography, reading column, colour, light and dark, motion curves and durations, press feedback, juice for the playful parts, and how the 2D page and the later 3D world relate. Use for any change to static/site.css, the Voxelmorphism kit's parts on the site, page templates, or anything that moves, makes sound or reacts to touch.
 ---
 
 # Site craft
@@ -65,7 +65,8 @@ out; everything here is plain CSS, HTML and small vanilla JS.
 - Visited links are distinguishable but quiet.
 - Focus is always visible: a 2px outline in the accent with an offset, on every
   focusable thing, using `:focus-visible`. Never remove an outline without a replacement.
-- Code blocks use a Shiki theme pair chosen for the look; the block background comes from
+- Code blocks use a Shiki theme chosen for the look (on the kit: one dark theme for the
+  instrument's code window, by day and at night); the block background comes from
   the look, not from Shiki. Most bundled light themes fall under 4.5:1 for some tokens;
   deepen them with `color-mix(in oklab, <token colour> N%, #000)` rather than giving up the
   theme's hues.

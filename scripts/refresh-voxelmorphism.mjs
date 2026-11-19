@@ -13,14 +13,16 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { build, version } from "esbuild";
 
-export const PIN = "c87d9b692142bfb75ac3a0f2d47e37b9b50aae12";
+export const PIN = "6967829be151c3ed49cbd63294d3988166ccee5c";
 
-// Every part the site's pages use: the name its definition is exported as in the kit's
-// src/index.js (null for a part with no script), and its stylesheet in css/.
+// Every part the site's pages use: [its script in the kit's src/components (null for a part with
+// no script of its own), its stylesheet in css/ (null when it lives in the core sheet)], keyed
+// by the name its definition is exported as. test/kit.test.mjs checks each is named in the
+// site's source, so a part nobody uses does not ride along.
 export const PARTS = {
   // the instrument and its controls (the Signal Desk, settings, the park's controls)
   button: ["button", null], lampKey: ["lamp-key", null], toggle: ["toggle", null], slider: ["slider", null],
-  rotary: ["rotary", "rotary"], backplane: ["backplane", null], select: ["select", "select"], radio: ["radio", "radio"],
+  rotary: ["rotary", "rotary"], backplane: ["backplane", null], select: ["select", "select"],
   toggleGroup: ["toggle-group", "toggle-group"], toggleButton: ["toggle-button", "toggle-button"],
   // surfaces, grooves, wells and lamps (lit.js and the core sheet)
   card: ["card", null], groove: [null, null], recess: [null, null], lamp: [null, null], lettering: ["lettering", null],
@@ -28,10 +30,8 @@ export const PARTS = {
   page: [null, "page"], navbar: ["navbar", "navbar"], navs: ["navs", "navs"],
   // reading
   prose: ["prose", "prose"], codeBlock: [null, "code-block"], figure: [null, "figure"], table: ["table", "table"],
-  callout: ["callout", "callout"], kbd: ["kbd", "kbd"], badge: [null, "badge"], separator: [null, "separator"],
+  callout: ["callout", "callout"], badge: [null, "badge"],
   item: [null, "item"], listGroup: ["list-group", "list-group"], emptyState: [null, "empty-state"],
-  // an AI session: words, a trace of what the agent did, markers between turns
-  message: [null, "message"], trace: ["trace", "trace"], collapsible: ["collapsible", "collapsible"], marker: [null, "marker"],
 };
 // Sheets every page needs whatever its parts: the instrument's fittings and its lit look.
 const SHEETS = ["fittings", "instrument", "instrument-library", "existing"];

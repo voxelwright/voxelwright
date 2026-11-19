@@ -14,10 +14,8 @@ export default {
   // `npm run dev` always negotiates, whatever this says.
   negotiateMarkdown: false,
 
-  // The look (owner picked iter-1, "Ink", Nov 17): a design in designs/<name>/, or "notebook", "street", "editorial" (static/looks/<name>.css and its code
-  // colours, see generator/looks.mjs). Leave it out for the plain baseline in static/style.css.
-  // In `npm run dev`, add ?look=<name> to a URL to try another look for that tab.
-  look: "iter-1",
+  // Every page is built from the Voxelmorphism kit (generator/pages.mjs, notes/voxelmorphism.md);
+  // there are no alternative looks. The Ink design (iter-1) was retired on Nov 19.
 
   // Features behind flags: a folder in features/<name>/ is built in only when its name is true
   // here. Off is the default. Turning one on is the owner's step. See features/README.md.
