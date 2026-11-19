@@ -38,9 +38,13 @@ async function specimens(plain) {
     const x = dial.x + dial.width / 2, y = dial.y + dial.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
+    const atContact = Number(await page.locator('#gain').inputValue());
+    assert.equal(atContact, 0, 'spindle contact holds its current setting');
     await page.mouse.move(x, y - 38, { steps: 4 });
+    const dragged = Number(await page.locator('#gain').inputValue());
+    assert.ok(dragged > atContact, 'vertical movement while held must turn the spindle');
     await page.mouse.up();
-    assert.ok(Number(await page.locator('#gain').inputValue()) > 0, 'a spindle drag must advance brightness');
+    assert.equal(Number(await page.locator('#gain').inputValue()), dragged, 'release keeps the detent');
     await page.getByRole('button', { name: 'Scan field' }).press('Enter');
     assert.equal(await page.locator('#sweep').textContent(), 'FIELD SCOPE / 02');
 
@@ -52,6 +56,11 @@ async function specimens(plain) {
     await assertNativeVoxels(page.locator('label:has(#post) .vx-box'), { plain });
 
     if (!plain) {
+      const fitted = page.locator('label:has(#post) .vx-box');
+      await fitted.locator('canvas').evaluate(canvas => { canvas.style.clipPath = 'inset(50%)'; });
+      await assert.rejects(assertNativeVoxels(fitted), { code: 'ERR_ASSERTION', message: /fully clipped/ });
+      await fitted.locator('canvas').evaluate(canvas => { canvas.style.removeProperty('clip-path'); });
+      await assertNativeVoxels(fitted);
       // A real kit instance and canvas still need geometry.
       await page.evaluate(async () => {
         const { adopt, define } = await import('/kit/src/index.js');
