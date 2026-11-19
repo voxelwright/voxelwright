@@ -21,6 +21,7 @@
 // left, to the element named by data-vx-return on the list (its id: the key that attaches a
 // file, the field), or to the list itself. With no voxels it is the same, without the shatter.
 
+import { halo } from '../core/light.js';
 import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
 
@@ -70,12 +71,40 @@ function wire(tile, on, shatter, gone) {
   });
 }
 
+// A shallow label carrier with a five-window transfer gauge at the binding edge.
+function transferPlate(live, model) {
+  const { W, H } = live;
+  const carrier = model.part('carrier');
+  carrier.slab(0, 0, 0, W, H, 2, 'steel', 1);
+  const label = model.part('label');
+  label.box(8, 1, 2, W - 10, H - 2, 1, live.look.readingPlate ?? 'chalk');
+  // Two folded retaining tabs hold the right edge of the slip.
+  for (const y of [2, H - 4]) {
+    carrier.box(W - 2, y, 2, 1, 2, 1, 'warm-metal');
+    carrier.box(W - 4, y, 3, 3, 2, 1, 'warm-metal');
+  }
+
+  const gauge = model.part('gauge');
+  gauge.box(1, 1, 2, 7, H - 2, 1, 'gasket');
+  const filled = live.el.querySelector('progress').position * 5;
+  const bottom = Math.floor((H - 9) / 2) + 8;
+  for (let segment = 0; segment < 5; segment++) {
+    const y = bottom - 2 * segment;
+    gauge.box(2, y, 2, 5, 1, 1, 'lens');
+    if (segment + 1 <= filled) gauge.box(3, y, 2, 3, 1, 1, 'light');
+  }
+  live.glowRadius = 1.7;
+  live.glowStrength = halo(0.12);
+  live.faceZ = 3;
+}
+
 export const attachment = {
   name: 'attachment',
   selector: '.vx-attachment-tile',
   pad: 12, // room for its bricks to fall in
 
   build(live, m) {
+    if (live.el.hasAttribute('data-vx-transfer')) return transferPlate(live, m);
     const { W, H } = live, look = live.look;
     const d = Math.max(1, Math.round(look.slab / 2)); // low: half as thick as a panel
     const tile = m.part('tile');
