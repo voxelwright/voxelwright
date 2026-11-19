@@ -6,19 +6,21 @@ export function voxelmorphismPage(site) {
     kind: "voxelmorphism",
     title: "Voxelmorphism",
     description,
-    html: `<link rel="stylesheet" href="/vendor/village/kit/voxelmorphism.css">
-<link rel="stylesheet" href="/vendor/village/kit/showcase/desk.css">
-<link rel="stylesheet" href="/voxelmorphism/site.css">
-<header class="signal-intro">
+    stylesheets: [
+      "/vendor/village/kit/voxelmorphism.css",
+      "/vendor/village/kit/showcase/desk.css",
+      "/voxelmorphism/site.css",
+    ],
+    html: `<header class="signal-intro">
   <p>Voxelmorphism</p>
   <h1>Signal Desk</h1>
   <p>Press a lamp key to change the trace. Slide the contour fader to shape it, then scan for a new field.</p>
 </header>
 <div class="signal-desk">
-<div class="workbench" hidden>
+<div class="workbench">
 <section id="desk" aria-label="Signal Desk instrument">
 <div class="mat"><div class="stitch"></div>
-<div class="hardware"><div class="case-light" aria-hidden="true"><i></i><i></i></div><div class="vx-backplane" data-vx-casting aria-hidden="true"></div><div class="deckscrews" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div class="hardware" inert><div class="case-light" aria-hidden="true"><i></i><i></i></div><div class="vx-backplane" data-vx-casting aria-hidden="true"></div><div class="deckscrews" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
 <div class="faceplate">
 <div class="facehead"><strong>Village <em>/</em> SD–01</strong><button type="button" id="scan" aria-label="Scan field"><span class="vx-label">Scan</span></button></div>
 <div class="console">
@@ -33,9 +35,9 @@ export function voxelmorphismPage(site) {
 <button class="vx-button" data-vx-pilot="status" data-lamp="ember" aria-pressed="false"><i></i>Ember</button>
 </div></div></div>
 <span class="mat-tag">Village <b>Field series</b></span></div>
-<div class="caption"><a id="view-mode" href="?view=2d">Use plain controls</a><span id="gain-help">Turn the dial or use the arrow keys.</span></div>
+<div class="caption"><span id="desk-fallback">Interactive controls require JavaScript.</span><a id="view-mode" href="?view=2d" hidden>Use plain controls</a><span id="gain-help" hidden>Turn the dial or use the arrow keys.</span></div>
 </section>
-<aside class="setup" aria-label="Build settings"><header><h2>Finish &amp; fittings</h2></header>
+<aside class="setup" aria-label="Build settings" inert><header><h2>Finish &amp; fittings</h2></header>
 <fieldset id="shells"><legend>Enclosure <output id="shell-name">Walnut</output></legend><div class="samples">
 <label title="Walnut"><input type="radio" name="shell" value="walnut" checked><i style="--sample:url(/vendor/village/kit/showcase/materials/walnut.jpg) center / cover" aria-hidden="true"></i><span>Walnut</span></label>
 <label title="Anodized aluminum"><input type="radio" name="shell" value="alloy"><i style="--sample:linear-gradient(130deg,#788b91,#2b404b)"></i><span>Alloy</span></label>
@@ -48,7 +50,6 @@ export function voxelmorphismPage(site) {
 <fieldset class="profile rail-choice"><legend>Case lighting</legend><div><label><input type="radio" name="rail" value="steady" checked>Steady</label><label><input type="radio" name="rail" value="spectrum">Spectrum</label></div></fieldset>
 <label class="sound vx-toggle"><input id="sound" type="checkbox" role="switch"><span class="vx-switch"></span><span>Switch sound<small>Cherry MX Brown</small></span></label>
 </aside></div>
-<p id="desk-fallback">The Signal Desk pairs a field scope with four latching lamp keys, a brass dimmer and a contour fader. The interactive controls use JavaScript.</p>
 </div>
 <script type="module" src="/voxelmorphism/desk.js"></script>`,
     markdown: `# Signal Desk

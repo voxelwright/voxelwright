@@ -25,7 +25,7 @@ export function layout(page, site, { dev }) {
   const canonical = site.origin + page.path;
   const home = page.kind === "home";
   return `<!doctype html>
-<html lang="${e(site.language)}">
+<html lang="${e(site.language)}"${page.kind === "voxelmorphism" ? ' data-vx-look="lit"' : ""}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -36,6 +36,7 @@ ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
 <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
 <link rel="stylesheet" href="${home ? "/world-shell.css" : lookStylesheet(site.look)}">
+${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
 ${dev && !home ? DEV_LOOK : ""}</head>
 <body data-page="${page.kind}">
 ${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
