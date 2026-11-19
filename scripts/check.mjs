@@ -62,6 +62,12 @@ function checkOutput(label, out, { posts, site }) {
   for (const [i, file] of pageFiles.entries()) {
     const route = pageRoutes[i];
     const html = fs.readFileSync(file, "utf8");
+    const support = [...html.matchAll(/<support-button\b([^>]*)>/g)];
+    if (route === "/") {
+      if (support.length !== 1 || !support[0][1].includes('version="instrument"') || !html.includes('src="/support/support-button.js"')) {
+        fail(label, "the landing must mount the enamel support button directly");
+      }
+    } else if (support.length) fail(label, `${route}: support belongs on the landing`);
     const twin = markdownTwin(route);
     if (!exists(twin)) fail(label, `${route}: missing Markdown twin ${twin}`);
     if (!html.includes(`<link rel="alternate" type="text/markdown" href="${twin}"`)) fail(label, `${route}: missing <link rel="alternate" type="text/markdown" href="${twin}">`);

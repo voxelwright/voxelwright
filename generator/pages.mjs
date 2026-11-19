@@ -41,13 +41,14 @@ ${dev && !home ? DEV_LOOK : ""}</head>
 ${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
 ${home ? "" : `<header class="site-header">${masthead(page, site)}</header>`}
 <main id="main" tabindex="-1">
+${home ? `<span id="support-dock" aria-hidden="true"></span>
+<support-button version="instrument" dock="support-dock"></support-button>
+<script type="module" src="/support/support-button.js"></script>` : ""}
 ${page.html}
 </main>
 <footer class="site-footer">
 <ul class="footer-links">${twin ? `<li><a href="${e(twin)}">Markdown</a></li>` : ""}<li><a href="/llms.txt">llms.txt</a></li><li><a href="/feed.xml">Atom feed</a></li></ul>
 ${site.links?.length ? `<ul class="footer-links social-links" aria-label="Elsewhere">${site.links.map((l) => `<li><a href="${e(l.url)}" rel="me">${e(l.name)}</a></li>`).join("")}</ul>` : ""}
-${home ? `<details id="support-desk" hidden><summary>Contact support</summary><template><iframe title="Support button" src="/support/desk.html"></iframe></template></details>
-<script type="module" src="/support/desk.js"></script>` : ""}
 </footer>
 ${dev ? DEV_RELOAD : ""}</body>
 </html>
