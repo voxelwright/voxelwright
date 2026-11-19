@@ -58,8 +58,6 @@ export function layout(page, site, { dev }) {
   const canonical = site.origin + page.path;
   const home = page.kind === "home";
   const fitted = Object.entries(FITTING).map(([k, v]) => ` data-${k}="${v}"`).join("");
-  // The landing keeps its own world shell until it moves onto the kit (generator/landing.mjs).
-  if (home) return homeLayout(page, site, { dev, twin, canonical });
   return `<!doctype html>
 <html lang="${e(site.language)}" data-vx-look="lit"${fitted}>
 <head>
@@ -76,11 +74,11 @@ ${twin ? `<link rel="canonical" href="${e(canonical)}">
 ${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
 ${EARLY}</head>
 <body class="vx-page" data-page="${page.kind}"${page.script ? ' data-boot="page"' : ""}>
-<a class="skip" href="#main">Skip to content</a>
+${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
 <div class="vx-page-column">
 ${navbar(page, site)}
 <main id="main" tabindex="-1">
-${page.html}
+${home ? SUPPORT : ""}${page.html}
 </main>
 ${footer(page, site, twin)}
 </div>
@@ -89,6 +87,12 @@ ${dev ? DEV_RELOAD : ""}</body>
 </html>
 `;
 }
+
+// The support character lives on the home page, in the city and on the plain page alike.
+const SUPPORT = `<span id="support-dock" aria-hidden="true"></span>
+<support-button version="instrument" dock="support-dock"></support-button>
+<script type="module" src="/support/support-button.js"></script>
+`;
 
 // Before the first paint: the Night key's saved choice, and whether the page stays plain, so
 // neither the colours nor the controls change under the reader.
@@ -100,7 +104,8 @@ const EARLY = `<script>
   if (t === "dark" || t === "light") r.dataset.theme = t;
   // the Signal Desk's enclosure and caps, chosen this visit, fit every page
   try { const b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k]; } catch {}
-  if (q === "2d" || (q !== "3d" && (p === "1" || matchMedia("(prefers-reduced-motion: reduce)").matches))) r.setAttribute("data-vx-plain", "");
+  // plain or voxels: the saved choice, then the address, then reduced motion (static/site.js)
+  if (p === "1" || q === "2d" || (q !== "3d" && matchMedia("(prefers-reduced-motion: reduce)").matches)) r.setAttribute("data-vx-plain", "");
 }
 </script>
 `;
@@ -111,38 +116,6 @@ const es = new EventSource("http://localhost:" + (Number(location.port) + 1) + "
 es.onmessage = () => location.reload();
 </script>
 `;
-
-function homeLayout(page, site, { dev, twin, canonical }) {
-  return `<!doctype html>
-<html lang="${e(site.language)}">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${e(site.title)}</title>
-<meta name="description" content="${e(page.description || site.description)}">
-<meta name="color-scheme" content="light dark">
-<link rel="canonical" href="${e(canonical)}">
-<link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">
-<link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
-<link rel="stylesheet" href="/world-shell.css">
-${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
-</head>
-<body data-page="home">
-<a class="skip" href="/?view=2d#main">Plain page</a>
-<main id="main" tabindex="-1">
-<span id="support-dock" aria-hidden="true"></span>
-<support-button version="instrument" dock="support-dock"></support-button>
-<script type="module" src="/support/support-button.js"></script>
-${page.html}
-</main>
-<footer class="site-footer">
-<ul class="footer-links"><li><a href="${e(twin)}">Markdown</a></li><li><a href="/llms.txt">llms.txt</a></li><li><a href="/feed.xml">Atom feed</a></li></ul>
-${site.links?.length ? `<ul class="footer-links social-links" aria-label="Elsewhere">${site.links.map((l) => `<li><a href="${e(l.url)}" rel="me">${e(l.name)}</a></li>`).join("")}</ul>` : ""}
-</footer>
-${dev ? DEV_RELOAD : ""}</body>
-</html>
-`;
-}
 
 // ---------------------------------------------------------------------------
 // Page headings. An index page's title is voxel lettering: words built from voxels that break
@@ -289,7 +262,7 @@ export function homePage(site, posts) {
 
 // ---------------------------------------------------------------------------
 
-function postListHtml(posts) {
+export function postListHtml(posts) {
   if (!posts.length) return "";
   return `<ul class="vx-list-group post-list">\n${posts
     .map(

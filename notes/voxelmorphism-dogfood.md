@@ -29,6 +29,9 @@ kit (Village branch `feature/site-dogfood`), not worked around here.
    its element; a 400-line code block at 3x asked for 2088x24264 px and WebGPU refused it (the
    limit every GPU must allow is 8192), and a list of 60 posts reached 11925. Such a part now
    draws at the largest whole number of pixels a voxel that fits: softer, never missing.
+9. **A plain card had a pale band on top.** The lit look's case shoulder is a transparent top
+   border, and the plain version filled it with the plate's colour; the showcase covered it with
+   page CSS. The kit paints it in the case's material now.
 
 ## Open (worth doing in the kit next)
 
@@ -47,6 +50,15 @@ kit (Village branch `feature/site-dogfood`), not worked around here.
 - **The navbar demo needs 30 lines of page CSS** (the brand window, route sockets). If they are
   part of the navbar, they belong in `navbar.css`; if not, the demo should not suggest them.
 - **The showcase parts still use `parts.css`** for their ground and plate instead of `page.css`.
-- **The vendored stylesheet is 163 KB** (the site's 28 sheets). `existing.css` and
+- **The city's own controls are painted, not kit parts.** The landing's Night, Pause, Sound and
+  View controls are drawn onto the park sign by `static/landing/sign-paint.js` in a 2D canvas,
+  with invisible native controls laid over the painted faces. They now share the site's faces
+  (IBM Plex Sans, Source Serif 4) and its choices (night, sound, plain), but not the kit's keys.
+  Handing the kit the city's renderer (`use(worldRenderer)`, the `draw(frame, target)` contract)
+  and mounting real keys on the sign is the way to make them one system; it needs the kit to
+  draw into a world-space quad rather than a page-space canvas.
+- **The support character has its own sound switch** (`support-button-muted`), apart from the
+  site's one sound choice, and its own fonts (Overpass, Fraunces).
+- **The vendored stylesheet is 140 KB** (the site's 21 sheets). `existing.css` and
   `instrument-library.css` carry rules for parts the site does not use; per-part files would let a
   site take only what it needs.

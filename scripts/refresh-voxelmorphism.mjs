@@ -13,7 +13,7 @@ import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { build, version } from "esbuild";
 
-export const PIN = "6967829be151c3ed49cbd63294d3988166ccee5c";
+export const PIN = "1d5e341b600d8fa6f62282d5a791944929461e63";
 
 // Every part the site's pages use: [its script in the kit's src/components (null for a part with
 // no script of its own), its stylesheet in css/ (null when it lives in the core sheet)], keyed
