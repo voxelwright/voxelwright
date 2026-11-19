@@ -16,6 +16,21 @@
   .vx-carousel-slide p { text-wrap: pretty; }
   .vx-carousel-slide a { color: var(--vx-link); }
   .vx-carousel-slide a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+  #week .kind { display: flex; justify-content: space-between; align-items: baseline; margin-block-end: var(--vx); }
+  #week .position { font: 500 .8125rem/1 var(--vx-mono); font-variant-numeric: tabular-nums; }
+  #week .vx-carousel-bar { gap: calc(var(--vx) * 6); }
+  #week .vx-carousel-lamps {
+    --vx-look: week-index;
+    inline-size: calc(var(--vx) * (var(--vx-carousel-n) * 7 + 1));
+    outline: none;
+  }
+  #week .vx-carousel-lamps:not([data-vx-live]) {
+    background: repeating-linear-gradient(to right, #736f65 0 calc(var(--vx) * 5), transparent 0 calc(var(--vx) * 7)) content-box, #333731;
+  }
+  #week .vx-carousel-lamps:not([data-vx-live])::after {
+    inline-size: calc(var(--vx) * 5);
+    inset-inline-start: calc(var(--vx) * (1 + 7 * var(--_at, 0)));
+  }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; }
   .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -36,26 +51,26 @@
     <h2>In use: what changed this week</h2>
     <div class="week">
       <div class="week-head"><h3>This week in fogline</h3><span>Four notes, 17 November</span></div>
-      <section class="vx-carousel" id="week" aria-roledescription="carousel" aria-label="This week in fogline">
+      <section class="vx-carousel" id="week" data-vx-scroll="instant" aria-roledescription="carousel" aria-label="This week in fogline">
         <div class="vx-recess vx-carousel-window">
           <div class="vx-carousel-track" tabindex="0">
             <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="1 of 4">
-              <p class="kind">Deploys</p>
+              <p class="kind">Deploys<span class="position" aria-hidden="true">1 / 4</span></p>
               <h4>Roll back from the deploy list</h4>
               <p>Every deploy of harbor-api now has a Roll back key beside it. The build it goes back to is kept warm for a day, so going back takes seconds.</p>
             </div>
             <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="2 of 4">
-              <p class="kind">Logs</p>
+              <p class="kind">Logs<span class="position" aria-hidden="true">2 / 4</span></p>
               <h4>Logs keep their place</h4>
               <p>Leave a build log and come back: it is where you left it, with the new lines under a mark. <a href="#week">Read how it works</a></p>
             </div>
             <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="3 of 4">
-              <p class="kind">Teams</p>
+              <p class="kind">Teams<span class="position" aria-hidden="true">3 / 4</span></p>
               <h4>Mina and Ada can approve</h4>
               <p>A deploy to production can ask for a second pair of eyes. Name who may approve it in the project's settings.</p>
             </div>
             <div class="vx-carousel-slide" role="group" aria-roledescription="slide" aria-label="4 of 4">
-              <p class="kind">Regions</p>
+              <p class="kind">Regions<span class="position" aria-hidden="true">4 / 4</span></p>
               <h4>Frankfurt is open</h4>
               <p>fogline can run in Frankfurt from today. Moving a service there takes one deploy and no change to its address.</p>
             </div>
@@ -176,6 +191,7 @@
   </section>
 </main>
 <script type="module">
+  import './week-index.js';
   import { show } from './parts.js';
   import { carousel } from '../../src/components/carousel.js';
   const q = new URLSearchParams(location.search), tips = document.getElementById('rotating');
@@ -186,6 +202,28 @@
   const last = document.querySelector('#last .vx-carousel-track');
   last.scrollTo({ left: last.scrollWidth, behavior: 'instant' });
   show(carousel);
+  // A key indexes the deck at release. Only the incoming note settles into the window.
+  // Swipes keep native scroll snap, and keyboard navigation reads immediately.
+  const week = document.getElementById('week');
+  const lamps = week.querySelector('.vx-carousel-lamps');
+  const slides = week.querySelectorAll('.vx-carousel-slide');
+  let arrival = [];
+  week.addEventListener('click', event => {
+    const key = event.target.closest('[data-vx-step]');
+    if (!key || !event.detail || key.getAttribute('aria-disabled') === 'true') return;
+    const dir = key.dataset.vxStep === 'next' ? 1 : -1;
+    requestAnimationFrame(() => {
+      arrival.forEach(animation => animation.cancel());
+      if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      const slide = slides[Number(lamps.style.getPropertyValue('--_at'))];
+      if (!slide) return;
+      const x = getComputedStyle(week).direction === 'rtl' ? -dir : dir;
+      arrival = [...slide.children].map(child => child.animate([
+        { transform: `translateX(${x * 12}px)`, opacity: .78 },
+        { transform: 'none', opacity: 1 },
+      ], { duration: 145, easing: 'cubic-bezier(.16, 1, .3, 1)' }));
+    });
+  }, true);
 </script>
 </body>
 </html>
