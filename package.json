@@ -12,6 +12,7 @@
     "session": "node scripts/session.mjs",
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
+    "cards": "node scripts/cards.mjs",
     "flag-proof": "node scripts/flag-proof.mjs",
     "check": "node scripts/check.mjs && node --test \"test/*.test.mjs\"",
     "test": "node --test \"test/*.test.mjs\"",

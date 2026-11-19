@@ -66,6 +66,7 @@ export function layout(page, site, { dev }) {
 <title>${e(page.path === "/" ? site.title : `${page.title} · ${site.title}`)}</title>
 <meta name="description" content="${e(page.description || site.description)}">
 <meta name="color-scheme" content="light dark">
+${shareMeta(page, site)}
 ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
 <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
@@ -119,6 +120,54 @@ const EARLY = `<script>
 }
 </script>
 `;
+
+// ---------------------------------------------------------------------------
+// Share cards: what a link to a page shows on X, LinkedIn, iMessage, Slack and Discord. A card is
+// the city with the page's title on the park sign, painted by `npm run cards` (scripts/cards.mjs)
+// into static/og/. Which card a page has depends on its kind, never on which files exist, so
+// `npm run check` can fail when a page links a card that isn't there.
+
+export const CARD = { width: 1200, height: 630 };
+const HOME_CARD = "/og/home.png";
+const OWN_CARDS = { home: HOME_CARD, blog: "/og/blog.png", tags: "/og/tags.png", voxelmorphism: "/og/voxelmorphism.png" };
+
+/** The page's own card, or null when it shows the home card (tags, 404, features, draft posts). */
+export function shareCard(page) {
+  // a draft's Markdown twin says so in its front matter (postPage)
+  if (page.kind === "post") return /^draft: true$/m.test(page.markdown) ? null : `/og${page.path.replace(/\/$/, "")}.png`;
+  return OWN_CARDS[page.kind] ?? null;
+}
+
+/** Open Graph and Twitter tags, every URL absolute from site.origin. */
+export function shareMeta(page, site) {
+  const own = shareCard(page);
+  const image = site.origin + (own ?? HOME_CARD);
+  const title = page.kind === "home" ? site.title : page.title;
+  const description = page.description || site.description;
+  const alt = `A voxel model of San Francisco seen from Ina Coolbrith Park, with “${own ? title : site.title}” on the park sign`;
+  const tags = [
+    ["og:type", page.kind === "post" ? "article" : "website"],
+    ["og:site_name", site.title],
+    ["og:title", title],
+    ["og:description", description],
+    // the 404 page answers at every missing address, so it names none
+    markdownTwin(page.path) && ["og:url", site.origin + page.path],
+    ["og:image", image],
+    ["og:image:type", "image/png"],
+    ["og:image:width", CARD.width],
+    ["og:image:height", CARD.height],
+    ["og:image:alt", alt],
+    ["twitter:card", "summary_large_image"],
+    ["twitter:title", title],
+    ["twitter:description", description],
+    ["twitter:image", image],
+    ["twitter:image:alt", alt],
+  ];
+  return tags
+    .filter(Boolean)
+    .map(([key, value]) => `<meta ${key.startsWith("og:") ? "property" : "name"}="${key}" content="${e(String(value))}">`)
+    .join("\n");
+}
 
 const DEV_RELOAD = `<script type="module">
 // dev only: reload when the build changes

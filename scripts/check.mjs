@@ -71,6 +71,7 @@ function checkOutput(label, out, { posts, site }) {
     if (!exists(twin)) fail(label, `${route}: missing Markdown twin ${twin}`);
     if (!html.includes(`<link rel="alternate" type="text/markdown" href="${twin}"`)) fail(label, `${route}: missing <link rel="alternate" type="text/markdown" href="${twin}">`);
     for (const m of html.matchAll(/\s(?:href|src|poster|before|after)="([^"]*)"/g)) checkLink(route, decode(m[1]));
+    for (const problem of shareProblems(route, html, site, out)) fail(label, problem);
 
     for (const m of html.matchAll(/<(engine-scene|model-compare)\b([^>]*)>([\s\S]*?)<\/\1>/g)) {
       embeds++;
@@ -90,6 +91,8 @@ function checkOutput(label, out, { posts, site }) {
       if (!/class="[^"]*\bmodel-note-by\b/.test(m[2])) fail(label, `${route}: <model-note> without its attribution line`);
     }
   }
+
+  for (const problem of shareProblems("/404.html", fs.readFileSync(path.join(out, "404.html"), "utf8"), site, out)) fail(label, problem);
 
   // Markdown twins and llms.txt: links resolve, no raw embed tags outside code.
   for (const file of files.filter((f) => f.endsWith(".md") || f.endsWith("llms.txt"))) {
@@ -145,6 +148,37 @@ function checkOutput(label, out, { posts, site }) {
   return { pages: pageRoutes.length, posts: posts.length, embeds, links };
 }
 
+/**
+ * Open Graph and Twitter tags: all there, absolute on site.origin, and pointing at a share card
+ * that exists in the built site (`out`) at the size the page states. Returns the problems.
+ */
+export function shareProblems(route, html, site, out) {
+  const problems = [];
+  const meta = new Map();
+  for (const m of html.matchAll(/<meta (?:property|name)="((?:og|twitter):[^"]+)" content="([^"]*)">/g)) meta.set(m[1], decode(m[2]));
+  const required = ["og:type", "og:site_name", "og:title", "og:description", "og:image", "og:image:width", "og:image:height", "og:image:alt", "twitter:card", "twitter:title", "twitter:description", "twitter:image", "twitter:image:alt"];
+  if (html.includes('<link rel="canonical"')) required.push("og:url");
+  for (const key of required) if (!meta.get(key)) problems.push(`${route}: missing <meta ${key}>`);
+  if (meta.has("twitter:card") && meta.get("twitter:card") !== "summary_large_image") problems.push(`${route}: twitter:card must be summary_large_image`);
+  for (const key of ["og:url", "og:image", "twitter:image"]) {
+    if (meta.has(key) && !meta.get(key).startsWith(site.origin + "/")) problems.push(`${route}: ${key} must be an absolute URL on ${site.origin}, got ${meta.get(key)}`);
+  }
+  const image = meta.get("og:image");
+  if (!image?.startsWith(site.origin + "/")) return problems;
+  if (meta.get("twitter:image") !== image) problems.push(`${route}: twitter:image and og:image differ`);
+  const card = image.slice(site.origin.length);
+  const file = path.join(out, decodeURIComponent(card));
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+    problems.push(`${route}: its share card ${card} does not exist. Run \`npm run cards\` (with PLAYWRIGHT=<path to playwright>) and commit static/og/.`);
+    return problems;
+  }
+  const png = fs.readFileSync(file);
+  const size = png.length > 24 ? `${png.readUInt32BE(16)}×${png.readUInt32BE(20)}` : "not a PNG";
+  const stated = `${meta.get("og:image:width")}×${meta.get("og:image:height")}`;
+  if (size !== stated) problems.push(`${route}: ${card} is ${size}, but the page says ${stated}. Run \`npm run cards\`.`);
+  return problems;
+}
+
 /** Production builds must not mention a draft anywhere: pages, twins, llms.txt, feed, sitemap, tags, assets. */
 function checkNoDrafts(out) {
   const { posts: all } = loadPosts(path.join(ROOT, "posts"), { includeDrafts: true });
@@ -173,17 +207,20 @@ function decode(s) {
 
 // ---------------------------------------------------------------------------
 
-const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
-try {
-  const prod = await run("production", { outDir: path.join(ROOT, "dist") });
-  if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"))} draft(s) kept out`);
-  await run("with drafts", { outDir: draftsDir, drafts: true });
-} finally {
-  fs.rmSync(draftsDir, { recursive: true, force: true });
-}
+// Run as a script; tests import shareProblems.
+if (import.meta.main) {
+  const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
+  try {
+    const prod = await run("production", { outDir: path.join(ROOT, "dist") });
+    if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"))} draft(s) kept out`);
+    await run("with drafts", { outDir: draftsDir, drafts: true });
+  } finally {
+    fs.rmSync(draftsDir, { recursive: true, force: true });
+  }
 
-if (failures.length) {
-  console.error(`\n${failures.length} problem(s):\n  ${failures.join("\n  ")}`);
-  process.exit(1);
+  if (failures.length) {
+    console.error(`\n${failures.length} problem(s):\n  ${failures.join("\n  ")}`);
+    process.exit(1);
+  }
+  console.log("Output checks passed.");
 }
-console.log("Output checks passed.");
