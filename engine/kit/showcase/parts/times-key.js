@@ -1,7 +1,7 @@
 // The build log's G915-style memory key. The metal shoulder carries its own pilot.
 import { toggleButton } from '../../src/components/toggle-button.js';
 import { defineMaterial } from '../../src/core/materials.js';
-import { cue } from '../../src/core/sound.js';
+import { button } from '../../src/components/button.js';
 import { wrapLabel } from '../../src/components/util.js';
 
 defineMaterial('times-deck', { day: '#535a5c', night: '#495257', jitter: 0.006,
@@ -27,7 +27,12 @@ export const timesKey = {
 
   plain(el, on) {
     toggleButton.plain(el, on);
-    on(el, 'vx-change', event => cue(event.detail.pressed ? 'press' : 'release'));
+    wrapLabel(el);
+    button.plain(el, on, {
+      momentary: true,
+      push: () => el.toggleAttribute('data-held', true),
+      lift: () => el.removeAttribute('data-held'),
+    });
   },
 
   build(live, m) {
@@ -64,6 +69,7 @@ export const timesKey = {
       lens.box(xx, yy, 1, width, 1, 1, 'pilot-glass');
     });
     m.keyTravel = 2;
+    m.keyStop = 3;
     state.off = el.matches(':disabled,[aria-disabled="true"]');
     const on = el.getAttribute('aria-pressed') === 'true';
     live.spring('press').snap(on ? -m.keyTravel : 0);
