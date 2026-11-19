@@ -10,7 +10,7 @@ const THUMB = 5;
 
 export const slider = {
   name: 'slider',
-  selector: '.vx-slider',
+  selector: '.vx-slider:not(.contour-fader)',
   pad: 6,
 
   build(live, m) {

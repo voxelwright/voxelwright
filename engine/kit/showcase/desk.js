@@ -1,9 +1,12 @@
 import './lamp-dial.js';
-import { adopt, ready, getStage, live } from '../src/index.js';
+import { define, adopt, ready, getStage, live } from '../src/index.js';
 import { cases, lamps } from '../src/looks/instrument.js';
 import { recall, change } from './build-settings.js';
 import { connectSound } from './switch-sound.js';
+import { contourFader } from './contour-fader.js';
+import { cue } from '../src/core/sound.js';
 
+define(contourFader);
 const $ = selector => document.querySelector(selector);
 let build = recall();
 const hardware = $('.hardware');
@@ -90,7 +93,10 @@ for (const key of keys) key.addEventListener('click', () => {
   if (!key.matches(':disabled, [aria-disabled="true"]')) apply({ lamp: key.dataset.lamp });
 });
 gain.addEventListener('input', () => apply({ level: gain.valueAsNumber }));
-contour.addEventListener('input', () => drawScope());
+contour.addEventListener('input', event => {
+  drawScope();
+  if (event.isTrusted && (contour.value === contour.min || contour.value === contour.max)) cue('press');
+});
 reduceMotion.addEventListener('change', () => drawScope());
 $('#scan').addEventListener('click', () => {
   scan++;

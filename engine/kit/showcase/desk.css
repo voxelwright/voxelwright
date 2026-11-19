@@ -61,10 +61,31 @@ h1 span { color: #ae512f; }
 .gain .vx-rotary:not([data-vx-live])::after {
   inset: 9%; background: linear-gradient(#302a22,#302a22) center top / 3px 33% no-repeat;
 }
-.mix { margin: 12px 0 19px; gap: 16px; }
+.mix { margin: 2px 0 8px; gap: 16px; }
 .mix label { color: #c4c8bc; }
-.mix .vx-slider { --vx: 2px; flex: 1; height: 23px; }
-.mix input { min-height: 32px; }
+.mix .contour-fader { --vx: 2px; flex: 1; height: 44px; }
+.contour-fader #contour { padding-inline: 8px; }
+.contour-fader #contour::-webkit-slider-thumb { width: 22px; }
+.contour-fader #contour::-moz-range-thumb { width: 22px; }
+
+/* The nine marks in the plate register with the native thumb centre. */
+.contour-fader:not([data-vx-live])::before {
+  content: ""; position: absolute; inset: 3px 18px auto; height: 5px;
+  background: linear-gradient(to right,#aaa99a 2px,transparent 2px) left / calc((100% - 2px) / 8) 100% repeat-x;
+}
+.contour-fader:not([data-vx-live]) #contour {
+  --saddle: linear-gradient(90deg,#282c28,#484c44 14%,#303630 24% 45%,#ded8c3 45% 55%,#303630 55% 76%,#484c44 86%,#282c28);
+}
+.contour-fader #contour::-webkit-slider-runnable-track { border-color: #464c43; }
+.contour-fader #contour::-moz-range-track { border-color: #464c43; }
+.contour-fader:not([data-vx-live]) #contour::-webkit-slider-thumb {
+  height: 30px; margin-top: -13px; border-radius: 2px;
+}
+.contour-fader:not([data-vx-live]) #contour::-moz-range-thumb {
+  height: 30px; border-radius: 2px;
+}
+.contour-fader #contour:active::-webkit-slider-thumb { transform: none; }
+.contour-fader #contour:active::-moz-range-thumb { transform: none; }
 .keybed { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 2px; padding: 3px; border: 1px solid #262b26; background: #333932; }
 .keybed .vx-button { --vx: 2px; width: 100%; font: 600 12px "IBM Plex Mono",monospace; }
 .caption { font-size: 10px; color: #5c635a; padding: .75rem .2rem; }
