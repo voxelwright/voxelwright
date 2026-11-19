@@ -153,6 +153,21 @@ export const groove = {
     if (el.hasAttribute('data-vx-lens')) {
       const on = currentRow(el);
       live.state.lens = on;
+      if (el.dataset.vxLens === 'flush') {
+        hole(live, m, { depth: 2, wall: 'steel', floor: 'gasket' });
+        // Seat the light under smoked resin; the unpowered ends stay dark.
+        const core = m.part('core');
+        core.sunk = true;
+        core.box(1, 1, -2, W - 2, H - 2, 1, 'gasket');
+        const lamp = on ? lightName(el) : 'lens';
+        core.box(1, 2, -2, W - 2, H - 4, 1, lamp);
+        const lens = m.part('lens');
+        lens.sunk = true;
+        lens.box(1, 1, -1, W - 2, H - 2, 1, 'groove-resin');
+        // The polished exit stripe carries the core's light up to the flush face.
+        lens.box(1, 2, -1, 1, H - 4, 1, lamp);
+        return;
+      }
       const w = Math.min(W, H), h = Math.max(W, H);
       if (W >= H) rowLens(m.part('lens'), 0, 0, h, w, on, lightName(el, 'light'));
       else rowLens(m.part('lens'), 0, 0, w, h, on, lightName(el, 'light'));
@@ -172,6 +187,11 @@ export const groove = {
   },
 
   pose(live) {
+    if (live.el.dataset.vxLens === 'flush') {
+      live.glowRadius = 1.5;
+      live.glowStrength = live.state.lens ? halo(0.018) * byTheme(live) : 0;
+      return;
+    }
     if (live.state.lens !== undefined) { live.glowStrength = live.state.lens ? halo(0.05) * byTheme(live) : 0; return; }
     live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live));
   },
@@ -500,12 +520,16 @@ const choice = {
 };
 
 // ---------------------------------------------------------------------------------------------
+const grooveResin = { day: '#999b90', night: '#737b7a', jitter: 0.004, transmission: 0.64 };
+defineMaterial('groove-resin', grooveResin);
+
 defineLook('lit', {
   // Objects, not flat faces: the cubes show on every face, slabs and caps are thick, a key is a
   // keycap, what slides has a bezel, a panel is bolted down.
   quiet: false,
   groundSoft: 1,
   finishes: {
+    'groove-resin': { chamfer: 55, specular: 105 },
     chalk: { chamfer: 75 }, floor: { chamfer: 0 }, slate: { chamfer: 80 },
     steel: { chamfer: 195, specular: 165 }, enamel: { chamfer: 175, specular: 105 },
     key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 }, lens: { chamfer: 40, specular: 150 },
@@ -517,6 +541,7 @@ defineLook('lit', {
     night: { glow: FULL, seam: 0.016, sun: 0.63, shadow: [0, 0, 0.02, 0.6] },
   },
   materials: {
+    'groove-resin': grooveResin,
     chalk: { day: '#e9dcc5', night: '#23313b', jitter: 0.006 },   // the surface
     floor: { day: '#c8bda7', night: '#141a1f', jitter: 0.004 },   // the bottom of a well
     slate: { day: '#9f998a', night: '#283038', jitter: 0.008 },   // trays, trenches
