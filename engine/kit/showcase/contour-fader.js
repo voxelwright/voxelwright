@@ -52,7 +52,8 @@ export const contourFader = {
 
   pose({ state, model }) {
     const { input, travel, rtl } = state;
-    const min = Number(input.min || 0), max = Number(input.max || 100);
+    const bound = (raw, fallback) => raw.trim() && Number.isFinite(Number(raw)) ? Number(raw) : fallback;
+    const min = bound(input.min, 0), max = bound(input.max, 100);
     const t = max > min ? (input.valueAsNumber - min) / (max - min) : 0;
     model.byName.thumb.tx = leftStop + Math.round((rtl ? 1 - t : t) * travel);
   },

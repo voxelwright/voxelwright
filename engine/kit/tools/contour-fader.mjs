@@ -70,13 +70,17 @@ try {
       await fader.evaluate(el => el.disabled = true);
       assert.notEqual(await finish(), enabled, 'the disabled thumb must lose its bright index');
     } else {
-      await fader.evaluate(el => { el.dir = 'ltr'; el.removeAttribute('max'); });
+      await fader.evaluate(el => { el.dir = 'ltr'; });
+      await page.waitForFunction(() => !window.vx.live(document.querySelector('#contour').parentElement).state.rtl);
+      await fader.evaluate(el => el.removeAttribute('max'));
       await fader.press('End');
       await assertValue(100);
       await page.waitForFunction(() => {
         const live = window.vx.live(document.querySelector('#contour').parentElement);
         return live.model.byName.thumb.tx === 6 + live.state.travel;
       });
+      await fader.evaluate(el => { el.max = 'bogus'; });
+      await page.waitForFunction(() => { const l = window.vx.live(document.querySelector('#contour').parentElement); return l.model.byName.thumb.tx === 6 + l.state.travel; });
       await fader.evaluate(el => {
         el.max = '9';
         el.value = '5';
@@ -88,6 +92,8 @@ try {
       await page.mouse.move(small.x + small.width / 2 + 9, small.y + 36);
       await page.mouse.down();
       await assertValue(5);
+      await page.mouse.move(small.x + small.width / 2 + 9 + (small.width - 32) / 8, small.y + 36);
+      await assertValue(6);
       await page.mouse.up();
     }
     assert.deepEqual(errors, []);
