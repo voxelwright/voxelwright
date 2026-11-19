@@ -71,7 +71,16 @@ const slide = async (sel) => {
   const r = await p.locator(sel).boundingBox(), x = r.x + r.width * 0.8, y = r.y + r.height / 2;
   await p.mouse.click(x, y);
   await p.waitForTimeout(350);
-  const s = await p.evaluate((sel) => { const el = document.querySelector(sel), l = window.vx.live(el), t = l.model.byName.thumb; return { value: Number(el.querySelector('input').value), thumb: el.getBoundingClientRect().left + (t.tx + (l.well ? 3.5 : 2.5)) * l.vx }; }, sel);
+  const s = await p.evaluate(async sel => {
+    const { SHEAR } = await import('/kit/src/core/stage.js');
+    const el = document.querySelector(sel), l = window.vx.live(el), thumb = l.model.byName.thumb;
+    const index = thumb.mats.findIndex(id => id === window.vx.MATERIALS.ivory.id);
+    if (index < 0) throw new Error('Missing fader index');
+    const x = thumb.tx + thumb.rest[index * 3];
+    const z = thumb.tz + thumb.rest[index * 3 + 2] + .5;
+    const projected = l.canvas.getBoundingClientRect().left + (l.ox + (x + SHEAR[0] * z) * l.s) / devicePixelRatio;
+    return { value: Number(el.querySelector('input').value), thumb: projected };
+  }, sel);
   await p.evaluate((sel) => { document.querySelector(sel + ' input').value = 20; }, sel);
   return { ...s, x };
 };
@@ -130,7 +139,14 @@ const tray = (sel) => p.evaluate((sel) => {
   const el = document.querySelector(sel), l = window.vx.live(el), row = l.model.byName.row0;
   const cs = getComputedStyle(el.querySelector('.vx-row'));
   const pad = [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)];
-  // the lit look draws the mark as a groove (a hole) at the row's start
+  const lens = l.model.byName.lens;
+  if (lens) {
+    const xs = [];
+    for (let i = 0; i < lens.count; i++) if (lens.col[i * 4 + 3] > 0) xs.push(lens.rest[i * 3]);
+    if (!xs.length) throw new Error('No powered row lens');
+    return { W: l.W, mark: [Math.min(...xs), Math.max(...xs)], pad };
+  }
+  // Other looks can use a groove or a raised row marker.
   if (!row && l.well) return { W: l.W, mark: [l.well[0], l.well[2] - 1], pad };
   let top = -Infinity; for (let i = 0; i < row.count; i++) top = Math.max(top, row.rest[i * 3 + 2]);
   const xs = []; for (let i = 0; i < row.count; i++) if (row.rest[i * 3 + 2] === top) xs.push(row.rest[i * 3]);

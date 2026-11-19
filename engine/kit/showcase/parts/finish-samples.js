@@ -137,5 +137,6 @@ function strokes(el, on) {
 
 export const sampleReturn = {
   name: 'sample-return', selector: '#picker > [data-vx-pick="theme"]',
+  bind() {}, // The live toggle group owns both recorded cues.
   plain: strokes,
 };
