@@ -122,6 +122,14 @@ try {
   assert.equal(await plate.evaluate((b) => document.activeElement === b), true, "focus returns to the plate");
   // The directory came back after the shutter.
   assert.equal(await page.locator('[data-sign="time"][data-hit]').count(), 1);
+  // With the View panel open, the plate folds the panel away and prints the view it covered.
+  const settings = page.locator(".display-settings");
+  await settings.locator("summary").click();
+  assert.notEqual(await settings.getAttribute("open"), null);
+  const folded = await take(page, () => plate.click(), "live-panel-" + hour, { portrait: false });
+  assert.equal(await settings.getAttribute("open"), null, "the panel is closed for the postcard");
+  await folded.dialog.locator("[data-postcard-close]").click();
+  await folded.dialog.waitFor({ state: "hidden" });
   await page.locator("[data-time]").click();
   const other = await page.locator(".overlook").getAttribute("data-hour");
   assert.notEqual(other, hour);
