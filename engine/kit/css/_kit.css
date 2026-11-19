@@ -78,6 +78,8 @@
   --vx-theme: day;
   --vx-font: "IBM Plex Sans", "IBM Plex Sans Arabic", "IBM Plex Sans Hebrew", "Avenir Next", "Segoe UI", sans-serif;
   --vx-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* the reading face for display words in an article: headings and quotes in an instrument's prose */
+  --vx-serif: Georgia, "Times New Roman", serif;
   /* What is written on a key (buttons, tabs, menu items) is cut from the same cells as the key.
      Five voxels to the em, so a cell is half a voxel and every edge lands on a pixel. */
   --vx-key-font: "Vox Text", var(--vx-font);
@@ -571,7 +573,7 @@ dialog.vx-dialog[data-vx-native-exit]:not([open]) {
   --lit-stop: #c5301c;
   --lit-night: 0; /* 1 at night: what shines only then is multiplied by it */
 }
-:root[data-theme="dark"][data-vx-look="lit"], :root[data-theme="dark"] [data-vx-look="lit"] {
+:root[data-theme="dark"]:not([data-shell])[data-vx-look="lit"], :root[data-theme="dark"]:not([data-shell]) [data-vx-look="lit"] {
   --vx-ground: #08090f;
   --vx-ink: #e8eaf4;
   --vx-ink-quiet: #d1d5e3;
@@ -597,8 +599,9 @@ dialog.vx-dialog[data-vx-native-exit]:not([open]) {
   --lit-stop: #ff7a66;
   --lit-night: 1;
 }
+/* an instrument (data-shell) has its own night: its night enclosure, in css/fittings.css */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"])[data-vx-look="lit"], :root:not([data-theme="light"]) [data-vx-look="lit"] {
+  :root:not([data-theme="light"], [data-shell])[data-vx-look="lit"], :root:not([data-theme="light"], [data-shell]) [data-vx-look="lit"] {
     --vx-ground: #08090f;
     --vx-ink: #e8eaf4;
     --vx-ink-quiet: #d1d5e3;

@@ -11,7 +11,7 @@
 
 /* Reading. Set the article like the inside of a field manual. Only things
    that actually display machine output get a window. */
-[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: Georgia, "Times New Roman", serif; font-weight: 500; }
+[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: var(--vx-serif); font-weight: 500; }
 [data-shell] .vx-prose h2 { font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: round(up, 1.12em, var(--vx)); letter-spacing: -.035em; }
 [data-shell] .vx-prose blockquote { font-style: italic; max-inline-size: 45ch; }
 [data-shell] .vx-prose blockquote footer { font: 400 .8125rem/1.25rem var(--vx-mono); margin-block-start: .5rem; }

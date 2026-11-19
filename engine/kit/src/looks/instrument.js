@@ -5,33 +5,13 @@ import { defineLook, LOOKS } from '../core/look.js';
 import './lit.js';
 import { switchTreble } from '../core/sound.js';
 import { defineMaterial } from '../core/materials.js';
+import { cases, caps, lamps, finish, shellTokens } from './fittings.js';
+export { cases, caps, lamps };
 
 for (const [name, day] of Object.entries({
   panel: '#e2d8c1', backlight: '#ffb45f', 'cap-inlay': '#909b80', 'cap-ridge': '#637a6c',
 })) defineMaterial(name, { day, jitter: .006 });
 
-function walnut(x, y, z) {
-  const course = y * .73 + .8 * Math.sin(x * .031) + .42 * Math.sin(x * .047 + y * .11) + z * .23;
-  return .022 * Math.sin(course) + .009 * Math.sin(course * 4.2);
-}
-const finish = (chamfer, specular = 0) => ({ chamfer, specular });
-export const cases = {
-  walnut: { name: 'Walnut', treble: -3, plate: '#b98c65', ground: '#efece3', mat: '#355347', grain: walnut, face: finish(35, 12) },
-  alloy: { name: 'Anodized', treble: 2, plate: '#445964', ground: '#e3e8e7', mat: '#253e4e', face: finish(140, 122) },
-  smoke: { name: 'Smoke', treble: -1.5, plate: '#49505c', ground: '#dddde4', mat: '#433e53', transmission: .23, face: finish(195, 138) },
-  frost: { name: 'Frost', treble: -1, plate: '#ece9dd', ground: '#e5e9e5', mat: '#4c6560', transmission: .36, face: finish(100, 44) },
-  clear: { name: 'Clear', treble: 0, plate: '#c4e4df', ground: '#dfe8e7', mat: '#365b62', transmission: .56, face: finish(220, 145) },
-};
-export const caps = {
-  field: { name: 'Ridgeline PBT', key: '#e9dfc5', legend: '#352c23', face: finish(48, 16) },
-  linen: { name: 'Parchment', key: '#eee4cd', legend: '#352c23', face: finish(48, 16) },
-  carbon: { name: 'Carbon PBT', key: '#393f3f', legend: '#f7ead4', face: finish(66, 14) },
-  opal: { name: 'Opal', key: '#c8dfdf', legend: '#152c32', transmission: .24, face: finish(130, 90) },
-};
-export const lamps = {
-  amber: { name: 'Amber', hue: '#ffb45f' }, tide: { name: 'Tide', hue: '#71e2cd' },
-  lilac: { name: 'Lilac', hue: '#d5b0ff' }, ember: { name: 'Ember', hue: '#ff9479' },
-};
 const paint = (day, rest = {}) => ({ day, night: day, ...rest });
 export const defaults = { shell: 'walnut', caps: 'field', profile: 'high', lamp: 'amber', level: 7, rail: 'steady' };
 export function settings(value = {}) {
@@ -45,32 +25,28 @@ export function settings(value = {}) {
 }
 
 export function instrument(s, root, stage) {
-  const shell = cases[s.shell], cap = caps[s.caps], light = lamps[s.lamp].hue;
+  // The page's tokens come from css/fittings.css, keyed on the attributes set below, so they hold
+  // before and without the script; here the voxels get the same colours, by day and at night,
+  // and the lamp's live values are set.
+  const shellName = s.shell;
+  const shell = cases[shellName], cap = caps[s.caps], light = lamps[s.lamp].hue;
   switchTreble(shell.treble);
-  const darkPanel = s.shell === 'smoke' || s.shell === 'alloy';
-  const ink = darkPanel ? '#fbf5e9' : '#262b25';
-  const quiet = darkPanel ? '#e0e7e5' : '#3e4037';
-  const panel = { walnut: '#e3d8be', alloy: '#40545c', smoke: '#363b49', clear: '#d2e4dc', frost: '#e3e7dd' }[s.shell];
-  const vars = { '--vx-look': 'instrument', '--mat': shell.mat, '--vx-ground': shell.ground,
-    '--vx-key': cap.key, '--lit-legend': cap.legend, '--vx-chalk': shell.plate, '--vx-ink': ink,
-    '--vx-ink-quiet': quiet, '--vx-floor': darkPanel ? '#313b40' : '#d4cbb5',
-    '--vx-steel': '#a79d88', '--vx-knob': '#d8c5a1', '--vx-enamel': 'var(--lit-cap-day,#aa4a27)',
-    '--panel': panel, '--case-lamp': light, '--vx-signal': 'var(--lit-accent)', '--vx-focus': '#b95329', '--lamp-level': s.level / 10,
-    '--vx-danger-text': darkPanel ? '#ffd4c9' : '#85261c',
-    '--vx-danger-legend': s.caps === 'carbon' ? '#ffd4c9' : '#85261c',
-    '--vx-link': ink, '--vx-on-enamel': '#fff8e8' };
-  const shape = [s.shell, s.caps, s.profile].join('/');
+  const page = shellTokens(shellName), dark = shellTokens(shellName, true);
+  const two = (key) => ({ day: page[key], night: dark[key] });
+  const ink = two('--vx-ink'), panel = two('--panel');
+  const vars = { '--case-lamp': light, '--lamp-level': s.level / 10 };
+  const shape = [shellName, s.caps, s.profile].join('/');
   const retool = LOOKS.instrument?.tooling !== shape;
   let look = LOOKS.instrument;
   if (retool) {
     look = defineLook('instrument', { from: 'lit', tooling: shape, readingPlate: 'panel', artwork: s.caps === 'field', rise: s.profile === 'high' ? 7 : 3,
       travel: s.profile === 'high' ? 4 : 2, grain: 1, seam: .45,
       finishes: { ...LOOKS.lit.finishes, chalk: shell.face, key: cap.face, 'lamp-cap': cap.face, 'warm-metal': finish(65, 105), 'spun-brass': finish(10, 85) },
-      materials: { panel: paint(panel), chalk: paint(shell.plate, { grain: shell.grain, transmission: shell.transmission, jitter: .004 }),
+      materials: { panel: { ...panel }, chalk: paint(shell.plate, { grain: shell.grain, transmission: shell.transmission, jitter: .004 }),
         'lamp-cap': paint(cap.key, { transmission: cap.transmission, jitter: .007 }),
-        key: paint(cap.key, { transmission: cap.transmission, jitter: .009 }), ink: paint(ink),
+        key: paint(cap.key, { transmission: cap.transmission, jitter: .009 }), ink: { ...ink },
         steel: paint('#9d998a'), gasket: paint('#232824'), slate: paint('#515754'),
-        floor: paint(vars['--vx-floor']), ivory: paint('#dcd5c1'), enamel: LOOKS.lit.appliedTheme?.cap ?? paint('#aa4a27'),
+        floor: two('--vx-floor'), ivory: paint('#dcd5c1'), enamel: LOOKS.lit.appliedTheme?.cap ?? paint('#aa4a27'),
         'warm-metal': paint('#baaa8b', { grain: (x,y) => .013 * Math.sin(Math.hypot(x,y)*2.5) }) } });
   }
   // Only the decorative light pipe and the cap diffuser follow this dimmer.
@@ -92,8 +68,9 @@ export function instrument(s, root, stage) {
     }
     delete look._table;
   }
-  vars['--vx-key'] = look.materials.key.day;
-  vars['--vx-lamp-resin'] = cap.key;
+  // a cap that lets light through takes the lamp's tint; the others keep their stylesheet colour
+  if (cap.transmission) vars['--vx-key'] = look.materials.key.day;
+  else root.style.removeProperty('--vx-key');
   for (const [key, value] of Object.entries(vars)) root.style.setProperty(key, value);
   root.dataset.rail = s.rail;
   root.dataset.shell = s.shell;

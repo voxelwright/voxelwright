@@ -1,0 +1,392 @@
+/* ---------- Fittings ----------
+   Made by tools/fittings-css.mjs from src/looks/fittings.js. Do not edit: edit that, and run it again.
+   An instrument named in the page's HTML is fitted before any script runs, and where none runs:
+     <html data-vx-look="lit" data-shell="walnut" data-caps="field" data-profile="high">
+   At night (the system's dark setting, or data-theme="dark") the same enclosure has its lights
+   down; data-theme="light" keeps it by day. The first adopt() reads these attributes and gives
+   the voxels the same materials (fitInstrument() called earlier wins). */
+
+:root[data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #355347;
+  --vx-ground: #efece3;
+  --vx-chalk: #b98c65;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3d8be;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #253e4e;
+  --vx-ground: #26323a;
+  --vx-chalk: #445964;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #40545c;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #433e53;
+  --vx-ground: #25242d;
+  --vx-chalk: #49505c;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #363b49;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #4c6560;
+  --vx-ground: #e5e9e5;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3e7dd;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #365b62;
+  --vx-ground: #dfe8e7;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #d2e4dc;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+
+/* at night */
+:root[data-theme="dark"][data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #16231d;
+  --vx-ground: #151a17;
+  --vx-chalk: #b98c65;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #262b26;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #0f1a21;
+  --vx-ground: #10171b;
+  --vx-chalk: #445964;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #24323a;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1c1a24;
+  --vx-ground: #131218;
+  --vx-chalk: #49505c;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #272a34;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1d2a28;
+  --vx-ground: #131918;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #283130;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #172629;
+  --vx-ground: #10191b;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #253234;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-shell="walnut"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #16231d;
+    --vx-ground: #151a17;
+    --vx-chalk: #b98c65;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #262b26;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="alloy"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #0f1a21;
+    --vx-ground: #10171b;
+    --vx-chalk: #445964;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #24323a;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="smoke"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1c1a24;
+    --vx-ground: #131218;
+    --vx-chalk: #49505c;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #272a34;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="frost"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1d2a28;
+    --vx-ground: #131918;
+    --vx-chalk: #ece9dd;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #283130;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="clear"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #172629;
+    --vx-ground: #10191b;
+    --vx-chalk: #c4e4df;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #253234;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+:root[data-caps="field"] {
+  --vx-key: #e9dfc5;
+  --vx-lamp-resin: #e9dfc5;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="linen"] {
+  --vx-key: #eee4cd;
+  --vx-lamp-resin: #eee4cd;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="carbon"] {
+  --vx-key: #393f3f;
+  --vx-lamp-resin: #393f3f;
+  --lit-legend: #f7ead4;
+  --vx-danger-legend: #ffd4c9;
+}
+:root[data-caps="opal"] {
+  --vx-key: #c8dfdf;
+  --vx-lamp-resin: #c8dfdf;
+  --lit-legend: #152c32;
+  --vx-danger-legend: #85261c;
+}

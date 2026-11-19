@@ -198,6 +198,7 @@ export function adopt(root = document) {
     return null;
   }
   loadKeyFonts();
+  fitFromMarkup();
   const st = getStage();
   // plain: no voxels, but tabs, dialogs and menus still get their behaviour
   if (!st) { behave(root); return null; }
@@ -243,9 +244,20 @@ export function theme(t) {
   return th;
 }
 
+let fittedNow = null;
+// A page that names its fittings in its HTML (<html data-shell="walnut" data-caps="field">) is
+// fitted by its first adopt(): the stylesheet has its colours already, by day and at night, and
+// this gives the voxels the same. fitInstrument() called earlier wins.
+function fitFromMarkup() {
+  const d = document.documentElement.dataset;
+  if (fittedNow || !d.shell) return;
+  fitInstrument({ shell: d.shell, caps: d.caps, profile: d.profile, rail: d.rail });
+}
+
 /** Fit an enclosure, cap set, profile and backlight to the lit kit. May be called before adopt(). */
 export function fitInstrument(choice) {
   const fitted = settings(choice);
+  fittedNow = fitted;
   instrument(fitted, document.documentElement, stage);
   return fitted;
 }

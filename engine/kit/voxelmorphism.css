@@ -1,4 +1,4 @@
-/* Made by tools/css.mjs from css/_kit.css and the 66 files beside it. Do not edit: edit those, and run it again. */
+/* Made by tools/css.mjs from css/_kit.css and the 68 files beside it. Do not edit: edit those, and run it again. */
 
 /* Voxelmorphism. Everything here works with no script: it is the plain version.
    Where the script runs, each element gets data-vx-live and its painted faces step aside
@@ -80,6 +80,8 @@
   --vx-theme: day;
   --vx-font: "IBM Plex Sans", "IBM Plex Sans Arabic", "IBM Plex Sans Hebrew", "Avenir Next", "Segoe UI", sans-serif;
   --vx-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* the reading face for display words in an article: headings and quotes in an instrument's prose */
+  --vx-serif: Georgia, "Times New Roman", serif;
   /* What is written on a key (buttons, tabs, menu items) is cut from the same cells as the key.
      Five voxels to the em, so a cell is half a voxel and every edge lands on a pixel. */
   --vx-key-font: "Vox Text", var(--vx-font);
@@ -573,7 +575,7 @@ dialog.vx-dialog[data-vx-native-exit]:not([open]) {
   --lit-stop: #c5301c;
   --lit-night: 0; /* 1 at night: what shines only then is multiplied by it */
 }
-:root[data-theme="dark"][data-vx-look="lit"], :root[data-theme="dark"] [data-vx-look="lit"] {
+:root[data-theme="dark"]:not([data-shell])[data-vx-look="lit"], :root[data-theme="dark"]:not([data-shell]) [data-vx-look="lit"] {
   --vx-ground: #08090f;
   --vx-ink: #e8eaf4;
   --vx-ink-quiet: #d1d5e3;
@@ -599,8 +601,9 @@ dialog.vx-dialog[data-vx-native-exit]:not([open]) {
   --lit-stop: #ff7a66;
   --lit-night: 1;
 }
+/* an instrument (data-shell) has its own night: its night enclosure, in css/fittings.css */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"])[data-vx-look="lit"], :root:not([data-theme="light"]) [data-vx-look="lit"] {
+  :root:not([data-theme="light"], [data-shell])[data-vx-look="lit"], :root:not([data-theme="light"], [data-shell]) [data-vx-look="lit"] {
     --vx-ground: #08090f;
     --vx-ink: #e8eaf4;
     --vx-ink-quiet: #d1d5e3;
@@ -2181,6 +2184,401 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 .vx-figure figcaption a { color: var(--vx-link); text-underline-offset: 0.2em; }
 .vx-figure figcaption a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
 
+/* ==== css/fittings.css ==== */
+
+/* ---------- Fittings ----------
+   Made by tools/fittings-css.mjs from src/looks/fittings.js. Do not edit: edit that, and run it again.
+   An instrument named in the page's HTML is fitted before any script runs, and where none runs:
+     <html data-vx-look="lit" data-shell="walnut" data-caps="field" data-profile="high">
+   At night (the system's dark setting, or data-theme="dark") the same enclosure has its lights
+   down; data-theme="light" keeps it by day. The first adopt() reads these attributes and gives
+   the voxels the same materials (fitInstrument() called earlier wins). */
+
+:root[data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #355347;
+  --vx-ground: #efece3;
+  --vx-chalk: #b98c65;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3d8be;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #253e4e;
+  --vx-ground: #26323a;
+  --vx-chalk: #445964;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #40545c;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #433e53;
+  --vx-ground: #25242d;
+  --vx-chalk: #49505c;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #363b49;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #4c6560;
+  --vx-ground: #e5e9e5;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3e7dd;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #365b62;
+  --vx-ground: #dfe8e7;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #d2e4dc;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+
+/* at night */
+:root[data-theme="dark"][data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #16231d;
+  --vx-ground: #151a17;
+  --vx-chalk: #b98c65;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #262b26;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #0f1a21;
+  --vx-ground: #10171b;
+  --vx-chalk: #445964;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #24323a;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1c1a24;
+  --vx-ground: #131218;
+  --vx-chalk: #49505c;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #272a34;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1d2a28;
+  --vx-ground: #131918;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #283130;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #172629;
+  --vx-ground: #10191b;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #253234;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-shell="walnut"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #16231d;
+    --vx-ground: #151a17;
+    --vx-chalk: #b98c65;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #262b26;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="alloy"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #0f1a21;
+    --vx-ground: #10171b;
+    --vx-chalk: #445964;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #24323a;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="smoke"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1c1a24;
+    --vx-ground: #131218;
+    --vx-chalk: #49505c;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #272a34;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="frost"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1d2a28;
+    --vx-ground: #131918;
+    --vx-chalk: #ece9dd;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #283130;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="clear"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #172629;
+    --vx-ground: #10191b;
+    --vx-chalk: #c4e4df;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #253234;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+:root[data-caps="field"] {
+  --vx-key: #e9dfc5;
+  --vx-lamp-resin: #e9dfc5;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="linen"] {
+  --vx-key: #eee4cd;
+  --vx-lamp-resin: #eee4cd;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="carbon"] {
+  --vx-key: #393f3f;
+  --vx-lamp-resin: #393f3f;
+  --lit-legend: #f7ead4;
+  --vx-danger-legend: #ffd4c9;
+}
+:root[data-caps="opal"] {
+  --vx-key: #c8dfdf;
+  --vx-lamp-resin: #c8dfdf;
+  --lit-legend: #152c32;
+  --vx-danger-legend: #85261c;
+}
+
 /* ==== css/floating-label.css ==== */
 
 /* ---------- Floating label ---------- */
@@ -2333,7 +2731,7 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 
 /* Reading. Set the article like the inside of a field manual. Only things
    that actually display machine output get a window. */
-[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: Georgia, "Times New Roman", serif; font-weight: 500; }
+[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: var(--vx-serif); font-weight: 500; }
 [data-shell] .vx-prose h2 { font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: round(up, 1.12em, var(--vx)); letter-spacing: -.035em; }
 [data-shell] .vx-prose blockquote { font-style: italic; max-inline-size: 45ch; }
 [data-shell] .vx-prose blockquote footer { font: 400 .8125rem/1.25rem var(--vx-mono); margin-block-start: .5rem; }
@@ -3253,6 +3651,63 @@ a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-of
 .vx-nav[data-vx-mark="seats"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
   background: var(--vx-key, var(--vx-chalk));
   box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate);
+}
+
+/* ==== css/page.css ==== */
+
+/* ---------- Page ----------
+   The page itself: the ground every part stands on, and the column a site is laid out in.
+   Tool: none. Most of a page is words on the ground; parts stand on it where they belong.
+     <body class="vx-page">
+       <div class="vx-page-column">
+         <header class="vx-card vx-navbar-surface" data-vx-bolts="none">…the navbar…</header>
+         <main>…</main>
+         <footer class="vx-page-foot">…words and links…</footer>
+       </div>
+     </body>
+   --vx-page-width is the widest the column grows. The page clips sideways (overflow-x: clip),
+   so a part's shadow and light may pass its edge without the page scrolling. */
+
+html:has(> body.vx-page) { background: var(--vx-ground); overflow-x: clip; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.vx-page {
+  margin: 0;
+  min-block-size: 100dvh;
+  overflow-x: clip;
+  background: var(--vx-ground);
+  color: var(--vx-ink);
+  font: 400 1rem/1.55 var(--vx-font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vx-page-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: calc(var(--vx) * 10);
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: var(--vx-page-width, calc(var(--vx) * 280));
+  min-block-size: 100dvh;
+  margin-inline: auto;
+  padding: calc(var(--vx) * 4) clamp(16px, 4vw, calc(var(--vx) * 10)) calc(var(--vx) * 8);
+}
+/* the foot keeps to the bottom of a short page */
+.vx-page-column > .vx-page-foot { align-self: end; }
+
+/* the foot: words and links on the ground, parted from what is above by a groove when it has one */
+.vx-page-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: calc(var(--vx) * 1) calc(var(--vx) * 8);
+  font-size: 0.875rem; color: var(--vx-ink-quiet);
+}
+.vx-page-foot :is(ul, ol) { display: flex; flex-wrap: wrap; gap: 0 calc(var(--vx) * 6); margin: 0; padding: 0; list-style: none; }
+/* a standalone link down here is still a 44 px target, though its words are small */
+.vx-page-foot a { display: inline-flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: inherit; text-underline-offset: 0.22em; }
+.vx-page-foot a:hover { color: var(--vx-ink); text-decoration-thickness: 2px; }
+.vx-page-foot a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+
+@media (max-width: 35rem) {
+  .vx-page-column { gap: calc(var(--vx) * 8); }
 }
 
 /* ==== css/pagination.css ==== */
