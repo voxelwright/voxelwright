@@ -26,7 +26,7 @@ const read = (id) => p.evaluate(async (id) => {
   const items = l.state.items;
   return {
     open: el.matches(':popover-open'), parts: l.model.parts.map((q) => q.name).join(','), panel: made(panel), panelCubes: panel.count, pick: made(pick), pickCubes: pick.count,
-    danger: !l.model.byName.danger.hidden, active: l.state.active, shown: !pick.hidden || !l.model.byName.danger.hidden, markY: pick.ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
+    danger: !l.model.byName.danger.hidden, active: l.state.active, shown: !pick.hidden || !l.model.byName.danger.hidden, markY: (l.model.byName.danger.hidden ? pick : l.model.byName.danger).ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
     building: panel.fx?.kind ?? null, top: l.faceZ, float: l.look.float, focus: items.indexOf(document.activeElement),
     expanded: document.querySelector(`[popovertarget="${id}"]`).getAttribute('aria-expanded'), rect: (({ left, top, width, height }) => ({ left, top, width, height }))(el.getBoundingClientRect()),
   };
@@ -54,7 +54,7 @@ await p.mouse.down(); await p.waitForTimeout(60); await p.mouse.up();
 await p.waitForTimeout(40);
 m = await read('project-menu');
 say(m.open && m.building === 'assemble', 'a press on its key opens it, and it is being built');
-say(!m.parts.split(',').includes('light') && m.panel === 'light+panel', 'its light is part of what is built, so light and slab rise out of the corner together');
+say(m.panel === 'chalk+floor+gasket+slate' && m.parts.split(',').filter(name => name.startsWith('lens-')).length === 4, 'the command glass sits in its casting with a fitted lens for each row');
 say(Math.abs(m.rect.left - t.x) < 1 && m.rect.top > t.y + t.height, `it opens under its key, from the key's corner (left ${m.rect.left} for ${t.x})`);
 await p.waitForTimeout(450);
 m = await read('project-menu');
