@@ -25,3 +25,13 @@ git diff --exit-code -- static/landing
 ```
 
 The cache must contain `home/.village/engine/place/ina/index.json`, its named binary blocks, and the original model capture under `shots/`. Prep verifies the capture’s digest, checks block lengths and face counts, groups matching byte positions for gzip, and emits the display shaders and sky code from the pinned Git objects. The scripts, build cache and screenshot evidence live outside the published static directory.
+
+## Park secrets (#426)
+
+The short tap and held press follow the interaction in Village `feature/421-landing` at `ef68e752dc98135994e8f6ffaaaa9fc987a4e481`. On this directory, hold the B for at least 540 ms and release, or focus Blog and press Space. LOG opens a fragment on the same home page. Mend restores the Blog link. IDDQD mends the sign and protects it until the code is entered again. The log describes site commits `311b936`, `9606bb8` and `cf84767`.
+
+The moon uses the sky pass and cycles through three disc radii on a night tap. The banner hit test projects the tow cloth endpoints from the Village plane. Tapping the cloth changes its message and a dancer appears on the directory. The Konami sequence changes that same cloth to +30 lives. Type “do a barrel roll” for a plane and compass roll, or “neo” / “wake up” for a brief fall of window glyphs. Going offline while the home page is loaded uncovers a two-stop cable car in the caption.
+
+About this view → Park secrets carries native button equivalents, including a moon-size sample and banner text on the plain page. The B bitmap, cable car, dancer, glyph arrangement, console skyline and procedural lunar marks are original to this adapter. The roll is a small addition to the pinned plane shader in the refresh script. There are no downloaded sprites, audio, or new runtime dependencies.
+
+For the interaction smoke test, serve the production build on loopback, then run `node scripts/landing/check-eggs.mjs`. Set `BASE` to the local URL, `PLAYWRIGHT` to the installed Playwright module and `OUT` to the screenshot directory if overriding the defaults. The test uses Chrome with WebGPU, then changes the viewport and reduced-motion preference for the fallback checks.

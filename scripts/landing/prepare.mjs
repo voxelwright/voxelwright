@@ -102,6 +102,12 @@ write(
 let plane = between(source(sky, "landing/plane.ts"), "type V3", "/**\n * The plane's sound");
 plane = plane
   .replace(/const NEAR = 1.0;/g, "const NEAR = 80.0;")
+  .replace("draw(encoder, to, v, time)", "draw(encoder, to, v, time, roll = 0)")
+  .replace("...along, 0, ...side", "...along, roll, ...side")
+  .replace("  let world = u.origin", `  let spin = mat2x2f(cos(u.pad1), sin(u.pad1), -sin(u.pad1), cos(u.pad1));
+  p = vec3f(p.x, spin * p.yz);
+  nn = vec3f(nn.x, spin * nn.yz);
+  let world = u.origin`)
   .replace("depthWriteEnabled: true", "depthWriteEnabled: false")
   .replace("shader(device, 'plane', CODE)", "device.createShaderModule({code: CODE})");
 plane = plane.replace(
