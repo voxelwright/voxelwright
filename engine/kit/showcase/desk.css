@@ -207,3 +207,11 @@ select { padding: .35rem .6rem; font: 400 .85rem "IBM Plex Sans",sans-serif; col
 
 #scan:is(:disabled,[aria-disabled="true"]) { --scan-face: #a0a6a2; color: #26312c; cursor: default; }
 #scan:not([data-vx-live]):is(:disabled,[aria-disabled="true"]) .vx-label { transform: translate(-2px,-2px); border-color: #656e68; }
+.vx-backplane[data-vx-casting] { visibility: visible; }
+.vx-backplane[data-vx-casting]:not([data-vx-live]) {
+ inset: 0; padding: inherit; display: grid;
+}
+.vx-backplane[data-vx-casting]:not([data-vx-live])::before {
+ content: ""; margin: -3px; border: 1px solid #555b54; border-radius: 11px; box-shadow: inset 0 0 0 2px #252b26;
+}
+:is([data-shell="walnut"],[data-shell="alloy"]) .vx-backplane[data-vx-casting] { background: none; }
