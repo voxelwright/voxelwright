@@ -6,6 +6,8 @@ import { lookOf, lightOf } from './look.js';
 import { Spring, assemble, crumble, surfaceCourses, settle, reducedMotion } from './motion.js';
 import { listeners } from '../components/util.js';
 
+const MAX_CANVAS = 8192;
+
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
 
 const IDENTITY = [0, 0, 0, 1];
@@ -88,9 +90,15 @@ export class Live {
   }
 
   layout() {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
     const padPx = this.pad * this.vx;
     const cw = this.cssW + padPx * 2, ch = this.cssH + padPx * 2;
+    // A canvas may be no larger than the smallest texture every GPU must allow (8192 px a side).
+    // A part bigger than that at this screen's density (a long code block, a long list, on a
+    // phone at 3x) is drawn at a lower one, a whole number of pixels a voxel: softer, never
+    // missing. (Past 32768 CSS px, one pixel a voxel is still too many; no page has needed it.)
+    let dpr = Math.max(1, window.devicePixelRatio || 1);
+    const most = Math.max(cw, ch);
+    if (most * dpr > MAX_CANVAS) dpr = Math.max(1, Math.floor(this.vx * MAX_CANVAS / most)) / this.vx;
     const c = this.canvas;
     this.wpx = Math.round(cw * dpr); this.hpx = Math.round(ch * dpr);
     if (c.width !== this.wpx) c.width = this.wpx;
