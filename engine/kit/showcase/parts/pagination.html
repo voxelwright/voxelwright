@@ -38,6 +38,9 @@
   #pager a[data-seen]:not([aria-current]) { text-decoration: underline dotted; text-underline-offset: .18em; }
   #pager a:visited { color: color-mix(in srgb, var(--lit-legend, var(--vx-ink)) 85%, #864f89); }
   #pager a[aria-disabled] { color: #34372e; }
+  @media (forced-colors: active) {
+    #pager a[aria-disabled] .vx-pagination-chevron { forced-color-adjust: none; background: GrayText; }
+  }
   #pager a:focus-visible { outline: 2px solid currentColor; outline-offset: -5px; }
   #pager .vx-pagination-chevron { inline-size: 8px; block-size: 14px; }
   #pager .vx-pagination-gap { min-inline-size: 14px; padding: 0; color: #f1ecdf; font: 600 14px/1 var(--vx-mono); }
@@ -222,7 +225,7 @@
     if (target !== page) go(target, focus);
     history.replaceState({ ...history.state, deployPage: page }, '');
   });
-  narrow.addEventListener('change', () => go(page, false));
+  narrow.addEventListener('change', () => go(page, list.contains(document.activeElement)));
   go(fromUrl(), false);
   history.replaceState({ ...history.state, deployPage: page }, '');
 </script>

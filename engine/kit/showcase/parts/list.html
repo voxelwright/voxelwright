@@ -13,6 +13,9 @@
   #projects .vx-row-meta { font-weight: 400; }
   #projects .vx-row, #projects > li:not(:has(> .vx-row)) { padding-inline-start: 32px; }
   #projects a { font-weight: 600; -webkit-tap-highlight-color: transparent; text-underline-offset: .18em; }
+  @media (forced-colors: active) {
+    #projects li[aria-current] a { text-decoration: underline; }
+  }
   #projects a:active { text-decoration: underline; }
   @media (hover: hover) {
     #projects a:hover { text-decoration: underline; }
@@ -27,8 +30,8 @@
   }
 </style>
 <noscript><style>
-  #projects > li:target a, #projects:not(:has(:target)) > li:first-child a { text-decoration: underline; }
-  #projects > li:target::before, #projects:not(:has(:target)) > li:first-child::before { background: var(--lit-accent); }
+  #projects > li:has(a:target) a, #projects:not(:has(:target)) > li:first-child a { text-decoration: underline; }
+  #projects > li:has(a:target)::before, #projects:not(:has(:target)) > li:first-child::before { background: var(--lit-accent); }
 </style></noscript>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -45,10 +48,10 @@
   <section>
     <h2>In use: the projects of a team</h2>
     <ul class="vx-list wide" id="projects">
-      <li id="harbor-api"><a href="#harbor-api">harbor-api</a><span class="vx-row-meta">live</span></li>
-      <li id="fog-site"><a href="#fog-site">fog-site</a><span class="vx-row-meta">building</span></li>
-      <li id="tide-worker"><a href="#tide-worker">tide-worker</a><span class="vx-row-meta">live</span></li>
-      <li id="ferry-cron"><a href="#ferry-cron">ferry-cron</a><span class="vx-row-meta">failed 2 h ago</span></li>
+      <li><a id="harbor-api" href="#harbor-api">harbor-api</a><span class="vx-row-meta">live</span></li>
+      <li><a id="fog-site" href="#fog-site">fog-site</a><span class="vx-row-meta">building</span></li>
+      <li><a id="tide-worker" href="#tide-worker">tide-worker</a><span class="vx-row-meta">live</span></li>
+      <li><a id="ferry-cron" href="#ferry-cron">ferry-cron</a><span class="vx-row-meta">failed 2 h ago</span></li>
     </ul>
   </section>
   <section>
@@ -76,16 +79,17 @@
   (() => {
     const projects = document.getElementById('projects');
     function followProject() {
-      const target = projects.querySelector(':scope > li:target');
+      const target = projects.querySelector(':scope > li:has(a:target)');
       const current = projects.querySelector(':scope > li[aria-current]');
-      const saved = document.getElementById(history.state?.currentProject);
+      const saved = document.getElementById(history.state?.currentProject)?.closest('li');
       const next = target ?? (saved?.parentElement === projects ? saved : current ?? projects.querySelector('li'));
       if (current !== next) {
         current?.removeAttribute('aria-current');
         next.setAttribute('aria-current', 'true');
       }
-      if (history.state?.currentProject !== next.id) {
-        history.replaceState({ ...history.state, currentProject: next.id }, '');
+      const project = next.querySelector('a').id;
+      if (history.state?.currentProject !== project) {
+        history.replaceState({ ...history.state, currentProject: project }, '');
       }
     }
     followProject();

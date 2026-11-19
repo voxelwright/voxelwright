@@ -31,6 +31,7 @@ function wireKeys(el, on, live) {
   function release(source) {
     if (!held || held.source !== source) return;
     const seat = live?.state.seats.find(s => s.key === held.key);
+    if (!seat && live) live.spring(held.key).snap(0);
     held = null;
     if (live) live.state.heldKey = null;
     if (seat) move(seat, seat.a.matches('[aria-current], [aria-disabled="true"]'), source === 'Enter');
