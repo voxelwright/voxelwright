@@ -92,7 +92,7 @@ try {
       await page.mouse.move(small.x + small.width / 2 + 9, small.y + 36);
       await page.mouse.down();
       await assertValue(5);
-      await page.mouse.move(small.x + small.width / 2 + 9 + (small.width - 32) / 8, small.y + 36);
+      await page.mouse.move(small.x + small.width / 2 + (small.width - 32) / 8, small.y + 36);
       await assertValue(6);
       await page.mouse.up();
     }
