@@ -18,10 +18,11 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   const press = async (loc, fx = 0.5) => { const b = await loc.boundingBox(); await p.mouse.move(b.x + b.width * fx, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
   const focused = () => p.evaluate(() => document.activeElement?.id || '');
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
-  let allowFont;
+  let allowFont, intercepted = false;
   if (mode === 'live') {
     const fontGate = new Promise(resolve => { allowFont = resolve; });
     await p.route('**/ibm-plex-sans-latin-wght-normal.woff2', async route => {
+      intercepted = true;
       await fontGate;
       await route.continue();
     });
@@ -30,8 +31,10 @@ for (const mode of ['live', 'plain']) for (const width of [1180, 390]) {
   if (allowFont) {
     try {
       await p.waitForFunction(() => window.vx?.live(document.querySelector('.address-well'))?.capacity > 0);
+      say(intercepted, 'the Latin font request is held through the first live draw');
     } finally { allowFont(); }
     await p.evaluate(() => document.fonts.ready);
+    say(await p.evaluate(() => [...document.fonts].some(face => face.family.includes('IBM Plex Sans') && face.status === 'loaded')), 'Plex Sans loaded after the held request');
     await p.waitForFunction(() => {
       const el = document.querySelector('.address-well'), frame = window.vx.live(el);
       const r = el.querySelector('input').getBoundingClientRect();
