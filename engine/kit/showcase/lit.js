@@ -3,6 +3,7 @@
 // day, the theme, and the two short stories (written the way Benji Taylor's Stageshow skill
 // teaches: a finished screen, one gesture, a result that stays, a reset with a cause).
 import { adopt, ready, live, refresh, getStage, theme, THEMES, PRESS, RELEASE } from '../src/index.js';
+import './deploy-pilot.js';
 
 const root = document.documentElement;
 const q = new URLSearchParams(location.search);

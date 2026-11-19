@@ -60,6 +60,22 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .head { display: flex; align-items: center; gap: calc(var(--vx) * 5); flex-wrap: wrap; }
 .name { font-size: 1.875rem; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
 .state { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2.5); color: var(--vx-ink-quiet); font-weight: 600; font-size: 0.9375rem; }
+#deploy-pilot {
+  --vx-look: deploy-pilot;
+  --vx: 2px;
+  inline-size: calc(9 * var(--vx));
+  block-size: calc(5 * var(--vx));
+}
+#deploy-pilot:not([data-vx-live]) {
+  border: var(--vx) solid var(--vx-steel);
+  background: #49534e;
+}
+#deploy-pilot[data-vx-light="go"]:not([data-vx-live]) {
+  background: radial-gradient(ellipse at 22% 50%, var(--lit-go) 10%, #49534e 80%);
+}
+#deploy-pilot[data-vx-light="accent"]:not([data-vx-live]) {
+  background: radial-gradient(ellipse at 78% 50%, var(--lit-accent) 10%, #49534e 80%);
+}
 .state-word { transition: opacity 160ms var(--vx-ease-out); }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: calc(var(--vx) * 5); }
 .actions .auto { margin-inline-start: calc(var(--vx) * 3); font-size: 0.9375rem; }
