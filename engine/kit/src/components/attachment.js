@@ -86,7 +86,7 @@ function transferPlate(live, model) {
 
   const gauge = model.part('gauge');
   gauge.box(1, 1, 2, 7, H - 2, 1, 'gasket');
-  const filled = live.el.querySelector('progress').position * 5;
+  const filled = (live.el.querySelector('progress')?.position ?? 0) * 5;
   const bottom = Math.floor((H - 9) / 2) + 8;
   for (let segment = 0; segment < 5; segment++) {
     const y = bottom - 2 * segment;
@@ -116,6 +116,10 @@ export const attachment = {
 
   bind(live) {
     const on = listeners();
+    const progress = live.el.querySelector('progress');
+    if (live.el.hasAttribute('data-vx-transfer') && progress) {
+      on.watch(progress, { attributes: true, attributeFilter: ['value', 'max'] }, () => live.rebuild());
+    }
     wire(live.el, on, async (item, e) => {
       // the tile and the key beside it break together, from the point pressed (a key press:
       // from the key)
