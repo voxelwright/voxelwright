@@ -67,13 +67,15 @@ h1 span { color: #ae512f; }
 .contour-fader #contour { padding-inline: 8px; }
 .contour-fader #contour::-webkit-slider-thumb { width: 22px; }
 .contour-fader #contour::-moz-range-thumb { width: 22px; }
+.contour-fader[data-vx-live] #contour::-webkit-slider-thumb { height: 44px; }
+.contour-fader[data-vx-live] #contour::-moz-range-thumb { height: 44px; }
 
 /* The nine marks in the plate register with the native thumb centre. */
 .contour-fader:not([data-vx-live])::before {
   content: ""; position: absolute; inset: 3px 18px auto; height: 5px;
   background: linear-gradient(to right,#aaa99a 2px,transparent 2px) left / calc((100% - 2px) / 8) 100% repeat-x;
 }
-.contour-fader:not([data-vx-live]) #contour {
+.contour-fader:not([data-vx-live]) #contour:enabled {
   --saddle: linear-gradient(90deg,#282c28,#484c44 14%,#303630 24% 45%,#ded8c3 45% 55%,#303630 55% 76%,#484c44 86%,#282c28);
 }
 .contour-fader #contour::-webkit-slider-runnable-track { border-color: #464c43; }

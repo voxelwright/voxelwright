@@ -64,6 +64,32 @@ try {
     await assertValue(9);
     await page.locator('input[name="shell"][value="clear"]').check();
     await assertValue(9);
+    if (backend === 'plain') {
+      const finish = () => fader.evaluate(el => getComputedStyle(el).getPropertyValue('--saddle'));
+      const enabled = await finish();
+      await fader.evaluate(el => el.disabled = true);
+      assert.notEqual(await finish(), enabled, 'the disabled thumb must lose its bright index');
+    } else {
+      await fader.evaluate(el => { el.dir = 'ltr'; el.removeAttribute('max'); });
+      await fader.press('End');
+      await assertValue(100);
+      await page.waitForFunction(() => {
+        const live = window.vx.live(document.querySelector('#contour').parentElement);
+        return live.model.byName.thumb.tx === 6 + live.state.travel;
+      });
+      await fader.evaluate(el => {
+        el.max = '9';
+        el.value = '5';
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await page.setViewportSize({ width: 320, height: 844 });
+      await fader.scrollIntoViewIfNeeded();
+      const small = await fader.boundingBox();
+      await page.mouse.move(small.x + small.width / 2 + 9, small.y + 36);
+      await page.mouse.down();
+      await assertValue(5);
+      await page.mouse.up();
+    }
     assert.deepEqual(errors, []);
     console.log(backend + ': nine positions, stops, readout, touch, RTL and clear enclosure passed');
     await page.close();

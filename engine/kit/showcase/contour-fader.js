@@ -52,7 +52,7 @@ export const contourFader = {
 
   pose({ state, model }) {
     const { input, travel, rtl } = state;
-    const min = Number(input.min), max = Number(input.max);
+    const min = Number(input.min || 0), max = Number(input.max || 100);
     const t = max > min ? (input.valueAsNumber - min) / (max - min) : 0;
     model.byName.thumb.tx = leftStop + Math.round((rtl ? 1 - t : t) * travel);
   },
@@ -63,7 +63,7 @@ export const contourFader = {
     watchDirection(live, on);
     on(input, 'input', () => live.invalidate());
     on.heed(input, 'value', () => live.invalidate());
-    on.watch(input, { attributes: true, attributeFilter: ['disabled', 'value', 'min', 'max'] }, () => live.rebuild());
+    on.watch(input, { attributes: true, attributeFilter: ['disabled', 'value', 'min', 'max', 'dir'] }, () => live.rebuild());
     return on.done;
   },
 };
