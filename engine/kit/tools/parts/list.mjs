@@ -29,7 +29,7 @@ const read = (sel) => p.evaluate((sel) => {
     fitted.add(rows.findIndex(r => y >= r.top && y < r.top + r.h));
     if (lens.col[i * 4 + 3] > 0) lit.push([x, y]);
   }
-  const litBounds = lit.length && [lit[0][0], Math.min(...lit.map(p => p[1])), lit[0][0] + l.vx, Math.max(...lit.map(p => p[1])) + l.vx];
+  const litBounds = lit.length && [Math.min(...lit.map(p => p[0])), Math.min(...lit.map(p => p[1])), Math.max(...lit.map(p => p[0])) + l.vx, Math.max(...lit.map(p => p[1])) + l.vx];
   return { parts: l.model.parts.map(q => q.name), cubes: l.model.count, litBounds, fitted: fitted.size, rows, glow: l.glowStrength, width: el.clientWidth, voxel: l.vx };
 }, sel);
 // two CSS translates, the same to a twentieth of a pixel (at rest the words may be nudged a fraction, onto whole pixels)
@@ -38,9 +38,15 @@ const near = (a, b) => { const [ax, ay] = shift(a), [bx, by] = shift(b); return 
 const rowBox = (sel, i) => p.locator(`${sel} > li`).nth(i).boundingBox();
 
 let m = await read('#projects');
-say(m.parts.join() === 'lens' && m.fitted === m.rows.length, `every row has a fitted lens (parts: ${m.parts.join(', ')}; ${m.cubes} cubes)`);
+say(m.parts.join() === 'socket,lens,diode' && m.fitted === m.rows.length, `every row has a fitted lens (parts: ${m.parts.join(', ')}; ${m.cubes} cubes)`);
 const cur = m.rows.findIndex((r) => r.current);
-say(cur === 0 && m.litBounds && Math.abs(m.litBounds[1] - (m.rows[0].top + 8)) < 1 && Math.abs(m.litBounds[3] - (m.rows[0].top + m.rows[0].h - 8)) < 1 && m.litBounds[0] === 4, `the lens is at the start of the current row (${m.litBounds})`);
+const litOn = (m, i) => {
+  const row = m.rows[i], bounds = m.litBounds;
+  return bounds && bounds[0] === 3 * m.voxel && bounds[2] === 7 * m.voxel
+    && bounds[1] >= row.top && bounds[3] <= row.top + row.h
+    && bounds[3] - bounds[1] === 10 * m.voxel;
+};
+say(cur === 0 && litOn(m, cur), `the current project's fixed window lights (${m.litBounds})`);
 const shadows = await p.evaluate(() => [...document.querySelectorAll('#projects > li')].map((li) => getComputedStyle(li).boxShadow));
 say(shadows[0] === 'none' && shadows.slice(1).every((s) => /inset/.test(s) && /1px/.test(s)), 'rows are parted by hairlines, with none above the first');
 const grid = await p.evaluate(() => [...document.querySelectorAll('.vx-list > li')].every((li) => li.offsetHeight % 4 === 0 && li.offsetTop % 4 === 0));
@@ -54,18 +60,18 @@ say(tint.trim() !== '', `under the pointer the row is tinted (${tint.trim().slic
 const still = m.rows[1].moved;
 await p.mouse.down(); await p.waitForTimeout(140);
 m = await read('#projects');
-say(m.rows[1].press < 0 && m.rows[1].x < -0.3 && !near(m.rows[1].moved, still), `held, the row's words go into the surface (${m.rows[1].x.toFixed(2)} voxels; ${m.rows[1].moved})`);
+say(m.rows[1].press < 0 && m.rows[1].x < -0.3 && near(m.rows[1].moved, still), `holding the link leaves the words in place (${m.rows[1].x.toFixed(2)} voxels; ${m.rows[1].moved})`);
 say(m.rows.every((r, i) => i === 1 || r.press === 0), 'and no other row moves');
 await p.mouse.up(); await p.waitForTimeout(450);
 m = await read('#projects');
-say(m.rows[1].press === 0 && Math.abs(m.rows[1].x) < 0.02 && near(m.rows[1].moved, still), `let go, they come back (${m.rows[1].moved || 'no shift'})`);
-say(m.rows[1].current && !m.rows[0].current && Math.abs(m.litBounds[1] - (m.rows[1].top + 8)) < 1, `the row that was pressed is now current, and the lens is beside it (${m.litBounds})`);
+say(m.rows[1].press === 0 && Math.abs(m.rows[1].x) < 0.02 && near(m.rows[1].moved, still), `on release, pressure settles and the words stay in place (${m.rows[1].moved || 'no shift'})`);
+say(m.rows[1].current && !m.rows[0].current && litOn(m, 1) && new URL(p.url()).hash === '#fog-site', `the row that was pressed is now current, and the lens is beside it (${m.litBounds})`);
 
 // the whole row is the target: its far end, where the trailing word is
 b = await rowBox('#projects', 3);
 await p.mouse.click(b.x + b.width - 6, b.y + b.height - 6); await p.waitForTimeout(300);
 m = await read('#projects');
-say(m.rows[3].current && Math.abs(m.litBounds[1] - (m.rows[3].top + 8)) < 1, 'a press at the far end of a row chooses it too');
+say(m.rows[3].current && litOn(m, 3), 'a press at the far end of a row chooses it too');
 await p.screenshot({ path: 'shots/parts/list/hand.png' });
 
 // the mark's light answers a press on its own row

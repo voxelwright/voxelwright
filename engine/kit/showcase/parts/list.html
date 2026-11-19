@@ -6,6 +6,30 @@
 <title>List</title>
 <link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
+<style>
+  /* A finer grid for the instrument fittings. The rows retain the kit's reading scale. */
+  #projects { --vx: 2px; }
+  #projects > li { --vx: 4px; }
+  #projects .vx-row-meta { font-weight: 400; }
+  #projects .vx-row, #projects > li:not(:has(> .vx-row)) { padding-inline-start: 32px; }
+  #projects a { -webkit-tap-highlight-color: transparent; text-underline-offset: .18em; }
+  #projects a:active { text-decoration: underline; }
+  @media (hover: hover) {
+    #projects a:hover { text-decoration: underline; }
+  }
+  @media (hover: none) {
+    #projects > li:hover:not(:active) { --_tint: transparent; }
+  }
+  #projects:not([data-vx-live]) > li::before {
+    inset-inline-start: 6px; inset-block: auto; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 22px; border: 2px solid var(--vx-steel);
+    box-shadow: 0 0 0 1px var(--vx-slate), inset 1px 1px 0 #181c2059;
+  }
+</style>
+<noscript><style>
+  #projects > li:target, #projects:not(:has(:target)) > li:first-child { font-weight: 650; }
+  #projects > li:target::before, #projects:not(:has(:target)) > li:first-child::before { background: var(--lit-accent); }
+</style></noscript>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
@@ -21,10 +45,10 @@
   <section>
     <h2>In use: the projects of a team</h2>
     <ul class="vx-list wide" id="projects">
-      <li aria-current="true"><a href="#harbor-api">harbor-api</a><span class="vx-row-meta">live</span></li>
-      <li><a href="#fog-site">fog-site</a><span class="vx-row-meta">building</span></li>
-      <li><a href="#tide-worker">tide-worker</a><span class="vx-row-meta">live</span></li>
-      <li><a href="#ferry-cron">ferry-cron</a><span class="vx-row-meta">failed 2 h ago</span></li>
+      <li id="harbor-api"><a href="#harbor-api">harbor-api</a><span class="vx-row-meta">live</span></li>
+      <li id="fog-site"><a href="#fog-site">fog-site</a><span class="vx-row-meta">building</span></li>
+      <li id="tide-worker"><a href="#tide-worker">tide-worker</a><span class="vx-row-meta">live</span></li>
+      <li id="ferry-cron"><a href="#ferry-cron">ferry-cron</a><span class="vx-row-meta">failed 2 h ago</span></li>
     </ul>
   </section>
   <section>
@@ -50,14 +74,44 @@
   import { show } from './parts.js';
   import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
-  Object.assign(LOOKS.lit.parts, parts);
-  // the current row follows the link that was pressed
-  document.getElementById('projects').addEventListener('click', (e) => {
-    const li = e.target.closest('li');
-    if (!li) return;
-    e.preventDefault();
-    for (const other of li.parentElement.children) if (other.tagName === 'LI') other === li ? other.setAttribute('aria-current', 'true') : other.removeAttribute('aria-current');
+  import { buildProjectReadout, lightProjectReadout } from './project-readout.js';
+  const projects = document.getElementById('projects');
+  Object.assign(LOOKS.lit.parts, parts, {
+    list: {
+      ...parts.list,
+      build(live, model) {
+        if (live.el === projects) buildProjectReadout(live, model);
+        else parts.list.build(live, model);
+      },
+      pose(live) {
+        if (live.el === projects) lightProjectReadout(live);
+        parts.list.pose(live);
+      },
+    },
   });
+
+  // The fragment identifies the project on a direct visit or a history traversal.
+  const links = [...projects.querySelectorAll('a')];
+  function followProject() {
+    const current = projects.querySelector('li[aria-current]');
+    const link = links.find(a => a.hash === location.hash);
+    if (!link && location.hash && current) return;
+    const next = (link ?? links[0]).closest('li');
+    if (current === next) return;
+    current?.removeAttribute('aria-current');
+    next.setAttribute('aria-current', 'true');
+  }
+  // An in-place choice should keep the other projects visible for comparison.
+  projects.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (!link || event.defaultPrevented || event.button !== 0 ||
+        event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (location.hash !== link.hash) history.pushState(null, '', link.hash);
+    followProject();
+  });
+  followProject();
+  addEventListener('hashchange', followProject);
   window.pressed = 0;
   document.getElementById('row-button').addEventListener('click', () => { window.pressed++; });
   show();
