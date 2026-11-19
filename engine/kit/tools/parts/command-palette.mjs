@@ -12,6 +12,8 @@ let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };
 hear(p);
+const gl = process.argv.includes('--webgl2');
+if (gl) await p.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 const open = async () => {
@@ -62,6 +64,80 @@ let m = await read('cmds');
 say(!m.open && m.role === 'combobox' && m.listRole === 'listbox', 'shut as the page arrives; a field with role="combobox" and a listbox of rows');
 const legend = await p.evaluate(() => document.querySelector('[data-vx-chord-for="cmds"] [data-vx-mod]').textContent.trim());
 say(legend === (mac ? '⌘' : 'Ctrl'), `the chord is shown as this computer names it (${legend} K)`);
+
+// At 80 ms the command under the pointer must already be fully readable.
+const early = await p.evaluate(async () => {
+  const dialog = document.querySelector('#palette');
+  dialog.showModal();
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const row = dialog.querySelector('[role="option"]'), box = row.getBoundingClientRect();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  let opacity = 1;
+  for (let el = row; el; el = el.parentElement) opacity *= Number(getComputedStyle(el).opacity);
+  return { x, y, opacity, hit: row.contains(document.elementFromPoint(x, y)),
+    engine: !!window.vx.stage.renderer.ownsCanvas };
+});
+say(early.engine !== gl, 'active renderer: ' + (early.engine ? 'WebGPU' : 'WebGL2'));
+say(early.hit && early.opacity === 1, 'the pointer and the readable first row agree at 80 ms');
+await p.mouse.click(early.x, early.y);
+say((await read('cmds')).done === 'Done: Open harbor-api.', 'the visible row accepts the pointer');
+await p.waitForTimeout(300);
+
+// The chord can go directly to a readable row and invoke it.
+await p.keyboard.press(CHORD);
+await p.keyboard.press('ArrowDown');
+m = await read('cmds');
+say(m.active === 'fog-site' && fitted(m) && m.focus, 'the chord goes straight to keyboard selection');
+await p.keyboard.press('Enter');
+say((await read('cmds')).done === 'Done: Open fog-site.', 'Enter chooses that row during entry');
+await p.waitForTimeout(300);
+
+// A reversal belongs to the same invocation. A completed dismissal ends it.
+await p.keyboard.press(CHORD);
+await p.keyboard.type('roll');
+await p.waitForFunction(() => {
+  const el = document.querySelector('#palette');
+  return el.offsetHeight === window.vx.live(el).cssH;
+});
+const reverse = await p.evaluate(async () => {
+  const el = document.querySelector('#palette'), height = el.offsetHeight;
+  el.close();
+  const row = el.querySelector('[data-vx-active]').getBoundingClientRect();
+  const hit = el.contains(document.elementFromPoint(row.x + row.width / 2, row.y + row.height / 2));
+  const exiting = el.hasAttribute('data-vx-native-exit');
+  el.showModal();
+  await new Promise(requestAnimationFrame);
+  return { exiting, hit, height, reopened: el.offsetHeight, model: window.vx.live(el).cssH };
+});
+say(!reverse.hit, 'the departing row has no pointer target');
+say(reverse.exiting && reverse.height === reverse.reopened && reverse.model === reverse.height
+  && (await read('cmds')).value === 'roll', `interrupted release retains the filtered height (${reverse.height} px) and query`);
+await p.keyboard.type(' b');
+await p.setViewportSize({ width: 390, height: 800 });
+await p.waitForFunction(() => {
+  const el = document.querySelector('#palette'), live = window.vx.live(el);
+  return el.offsetWidth === live.cssW && el.offsetHeight === live.cssH;
+});
+m = await read('cmds');
+say(m.value === 'roll b' && m.shown.length === 1 && m.active === m.shown[0] && fitted(m),
+  'typing and resizing the reopened panel keeps the single row and its fitted lens');
+await p.setViewportSize({ width: 1180, height: 900 });
+await p.keyboard.press('Escape');
+await p.waitForTimeout(300);
+
+const partial = await p.evaluate(async () => {
+  const { adopt, release } = await import('/kit/src/index.js');
+  const el = document.createElement('dialog');
+  el.className = 'vx-dialog vx-command-dialog';
+  el.dataset.vxCommandDeck = '';
+  document.body.append(el);
+  try {
+    adopt(el); el.showModal();
+    await new Promise(requestAnimationFrame);
+    return !!window.vx.live(el)?.model.byName.panel;
+  } finally { el.close(); release(el); el.remove(); }
+});
+say(partial, 'adopting a deck before its scroller exists builds a carrier');
 
 // the chord
 await p.mouse.click(1100, 860);
@@ -167,7 +243,8 @@ await p.mouse.click(1100, 860);
 await key(CHORD); await p.waitForTimeout(300);
 await p.keyboard.type('fog', { delay: 20 }); await key('ArrowDown');
 m = await read('cmds');
-const paint = await p.evaluate(() => getComputedStyle(document.querySelector('#cmds [data-vx-active]')).backgroundImage !== 'none');
+const paint = await p.evaluate(() => getComputedStyle(document.querySelector('#cmds [data-vx-active]'), '::before').backgroundColor
+  !== getComputedStyle(document.querySelector('#cmds [role="option"]:not([hidden], [data-vx-active])'), '::before').backgroundColor);
 say(await p.evaluate(() => document.querySelectorAll('[data-vx-live]').length) === 0 && m.open && m.active === 'Invite Mina to fog-site' && paint, `with no voxels it works the same, and the mark is painted (${m.shown.join(', ')})`);
 await key('Enter'); await p.waitForTimeout(200);
 m = await read('cmds');

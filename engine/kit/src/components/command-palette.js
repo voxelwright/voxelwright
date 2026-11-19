@@ -53,6 +53,7 @@ function wire(el, on, live) {
   const input = el.id && document.querySelector(`[aria-controls~="${CSS.escape(el.id)}"]`);
   if (!input) return;
   const dialog = el.closest('dialog');
+  const deck = dialog?.hasAttribute('data-vx-command-deck');
   const empty = dialog?.querySelector('.vx-command-empty') ?? null;
   nameOptions(el);
   const active = () => { const id = input.getAttribute('aria-activedescendant'); return (id && el.contains(document.getElementById(id)) && document.getElementById(id)) || null; };
@@ -75,7 +76,7 @@ function wire(el, on, live) {
     const n = sift(el, input.value);
     sayEmpty(empty, input.value, n);
     // Filtering can rearrange the fitted windows while keeping the same active option.
-    if (live && dialog?.hasAttribute('data-vx-command-deck')) live.state.at = undefined;
+    if (live && deck) live.state.at = undefined;
     mark(shownOf(el)[0] ?? null);
     const scroller = el.parentElement;
     if (scroller && !active()) scroller.scrollTop = 0;
@@ -87,7 +88,7 @@ function wire(el, on, live) {
     if (d?.state.leave) d.state.leave(value); else dialog.close(value);
   };
   const choose = (o) => {
-    if (!o || o.getAttribute('aria-disabled') === 'true') return;
+    if ((deck && !dialog.open) || !o || o.getAttribute('aria-disabled') === 'true') return;
     const value = valueOf(o);
     el.dispatchEvent(new CustomEvent('vx-choose', { bubbles: true, detail: { option: o, value } }));
     close(value);
@@ -98,10 +99,13 @@ function wire(el, on, live) {
     const i = all.indexOf(active());
     mark(all[i < 0 ? (by > 0 ? 0 : all.length - 1) : (i + by + all.length) % all.length]);
   };
+  let reversing = false;
   const begin = () => {
-    // it opens empty, with every row and the first marked
-    input.value = '';
-    filter();
+    if (!reversing) {
+      input.value = '';
+      filter();
+    }
+    reversing = false;
     input.focus({ preventScroll: true });
   };
 
@@ -123,6 +127,11 @@ function wire(el, on, live) {
   });
 
   if (dialog) {
+    // A reversal keeps the current query, selection and measured display height.
+    // Capture before nativeRelease removes the closing pose.
+    if (deck) on(dialog, 'beforetoggle', e => {
+      reversing = e.newState === 'open' && dialog.hasAttribute('data-vx-native-exit');
+    }, true);
     // each time it opens it begins again; the dialog's own open is heard, whoever opened it
     on.watch(dialog, { attributes: true, attributeFilter: ['open'] }, () => { if (dialog.open) begin(); });
     // the chord: from anywhere on the page, to open it, and again to close it

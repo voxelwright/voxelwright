@@ -22,6 +22,15 @@
     background: #27322f;
   }
   #palette[data-vx-live] .vx-command-scroll { background: transparent; box-shadow: none; }
+  /* Keep the mounted reading surface at full contrast through a rim reversal. */
+  #palette[open][data-vx-surface="rim"] { opacity: 1; }
+  #palette:not([data-vx-live]) [role="option"] { position: relative; background-image: none; }
+  #palette:not([data-vx-live]) [role="option"]::before {
+    content: ""; position: absolute; inset-inline-start: calc(2 * var(--vx));
+    inline-size: var(--vx); block-size: calc(2 * var(--vx)); background: #677976;
+    box-shadow: 0 0 0 var(--vx) #465350;
+  }
+  #palette:not([data-vx-live]) [role="option"][data-vx-active]::before { background: var(--lit-accent, var(--vx-signal)); }
   #palette .vx-command-title { letter-spacing: .045em; }
   #palette [role="option"] { padding-inline-start: calc(6 * var(--vx)); }
   #palette [role="option"][data-vx-active] { background-color: rgb(174 204 199 / .12); }
