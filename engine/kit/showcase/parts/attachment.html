@@ -18,7 +18,7 @@
   .state > .vx-message { inline-size: 100%; }
   #sending-recording .vx-attachment-tile {
     min-block-size: calc(var(--vx) * 14);
-    padding-inline: calc(var(--vx) * 10) calc(var(--vx) * 5);
+    padding-inline: calc(var(--vx) * 10) clamp(8px, 4vw, calc(var(--vx) * 5));
     border-inline-start: 0;
   }
   #sending-recording .vx-attachment-size { display: block; }
