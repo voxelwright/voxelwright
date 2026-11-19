@@ -10,7 +10,9 @@
  color: color-mix(in srgb,var(--case-lamp) calc(58% * var(--lamp-level)),#eee9de);
  text-shadow: 0 0 calc(4px * var(--lamp-level)) color-mix(in srgb,var(--case-lamp) calc(50% * var(--lamp-level)),transparent);
 }
-[data-shell] .vx-card:not([data-vx-live]) { background-color: var(--panel); box-shadow: inset 0 0 0 var(--vx) var(--vx-chalk),2px 4px var(--vx-slate),4px 8px 12px #14181355; }
+/* The plate lies in the case; the case's shoulder above it (the card's top border in the lit
+   look) is the case's own material, as it is with voxels. */
+[data-shell] .vx-card:not([data-vx-live]) { background-color: var(--panel); background-clip: padding-box; border-top-color: color-mix(in srgb, var(--vx-chalk) 82%, #000); box-shadow: inset 0 0 0 var(--vx) var(--vx-chalk),2px 4px var(--vx-slate),4px 8px 12px #14181355; }
 /* The rubber saddle and its index stripe sit on the native range thumb. */
 [data-shell] .vx-slider:not([data-vx-live]) input {
   appearance: none;
