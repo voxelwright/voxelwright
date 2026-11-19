@@ -39,7 +39,7 @@ export function place(el, trigger, { side = 'bottom', align = 'start', gap = 8, 
   const below = r.bottom + gap + lift, above = r.top - gap - h;
   const belowFits = below + h <= vh - EDGE, aboveFits = above >= EDGE;
   const preferred = side === 'top' ? (aboveFits || !belowFits ? above : below) : belowFits || !aboveFits ? below : above;
-  const top = Math.round(el.matches('.vx-menu') ? Math.max(EDGE, Math.min(preferred, vh - EDGE - h)) : preferred);
+  const top = Math.round(el.matches('.vx-menu, [data-vx-fitting="service"]') ? Math.max(EDGE, Math.min(preferred, vh - EDGE - h)) : preferred);
   el.style.margin = '0';
   el.style.inset = `${top}px auto auto ${left}px`;
   const x = Math.abs(left - r.left) < 1 ? 0 : Math.abs(left + w - r.right) < 1 ? w : Math.max(0, Math.min(w, r.left + r.width / 2 - left));
@@ -72,6 +72,48 @@ export function slabOnLight(live, m) {
   live.faceZ = d;
 }
 
+// The service editor sits on a thin insulating foot. A short diffuser is let
+// into its near edge; the rest of the enclosure carries no emission.
+function servicePlate(live, model) {
+  const { W, H } = live;
+  const body = model.part('body');
+  body.slab(1, 1, 0, W - 2, H - 2, 1, 'gasket', 2);
+  body.slab(0, 0, 1, W, H, 2, 'chalk', 2);
+  body.slab(1, 1, 3, W - 2, H - 2, 1, live.look.readingPlate ?? 'key', 1);
+  if (W >= 24) {
+    const x = getComputedStyle(live.el).direction === 'rtl' ? W - 17 : 5;
+    body.box(x, 0, 2, 12, 1, 1, 'gasket');
+    live.state.pipeX = x + 1;
+    body.box(x + 1, 0, 2, 10, 1, 1, 'backlight');
+  }
+  live.state.litRevision = null;
+  live.faceZ = 4;
+}
+
+// The edge beside the pipe reflects a little of its light. A translucent
+// case also carries it through the shoulder under the reading plate.
+function lightServiceEdge(live) {
+  if (live.state.litRevision === live.tintRevision) return;
+  live.state.litRevision = live.tintRevision;
+  const start = live.state.pipeX;
+  if (start == null || !live.look.dimmer) return;
+  const shell = live.look.materials.chalk;
+  const reach = 2 + 4 * (shell?.transmission ?? 0);
+  const rgb = [1, 3, 5].map(i => parseInt(live.look.illuminant.slice(i, i + 2), 16) / 255);
+  const body = live.model.byName.body;
+  for (let i = 0; i < body.count; i++) {
+    const x = body.rest[i * 3], y = body.rest[i * 3 + 1], z = body.rest[i * 3 + 2];
+    if (y > reach || z < 1 || body.col[i * 4 + 3] > 0) continue;
+    const distance = Math.hypot(Math.max(start - x, 0, x - start - 10), y, z - 2.5);
+    if (distance >= reach) continue;
+    const spill = live.look.dimmer * 0.34 * (1 - distance / reach) ** 2;
+    for (let c = 0; c < 3; c++) {
+      const at = i * 4 + c;
+      body.col[at] += (rgb[c] - body.col[at]) * spill;
+    }
+  }
+}
+
 // The floats that are open, and how each is put by its trigger again when the page moves under it.
 const open = new Map();
 const again = () => { for (const [el, put] of open) if (el.isConnected && el.matches(':popover-open')) put(); else open.delete(el); if (!open.size) heed(false); };
@@ -83,7 +125,7 @@ function heed(yes) {
 
 // The browser closes the control immediately. Keeping its box through the overlay transition
 // keeps the painted rim available for its short release, with no hit target or tab stop.
-export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim') {
+export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim', origin) {
   if (!live) return;
   const el = live.el;
   let request;
@@ -104,7 +146,7 @@ export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim')
       }
     }
     el.dataset.vxNativeExit = '';
-    live.play('crumble', parts, { duration, surface }).then(() => {
+    live.play('crumble', parts, { duration, surface, from: origin?.() }).then(() => {
       if (current !== request) return;
       clear();
       live.clearSurface();
@@ -120,15 +162,19 @@ export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim')
  *       the two, in voxels; duration: seconds to assemble; surface: rim or full courses; still(): true to
  *       appear with no building.
  */
-export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, duration = 0.18, surface = 'rim', still } = {}) {
+export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, duration = 0.18, surface = 'rim', release = 0.12, still } = {}) {
   const vx = () => live?.vx ?? (parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4);
+  let origin;
   const put = () => {
     const t = trigger();
     // a voxel of height shows half a voxel of side above the face
-    return t ? place(el, t, { side: el.dataset.vxSide || side, align: el.dataset.vxAlign || align, gap: gap * vx(), lift: live ? live.faceZ * vx() / 2 : 0 }) : null;
+    if (!t) return null;
+    const from = place(el, t, { side: el.dataset.vxSide || side, align: el.dataset.vxAlign || align, gap: gap * vx(), lift: live ? live.faceZ * vx() / 2 : 0 });
+    origin = from.map(px => px / vx());
+    return from;
   };
   const parts = ['body', 'panel', 'light'];
-  nativeRelease(live, on, parts, 0.12, surface);
+  nativeRelease(live, on, parts, release, surface, surface === 'courses' ? () => origin : undefined);
   on(el, 'beforetoggle', (e) => {
     if (e.newState !== 'open') return;
     // it has no box until it is open, and by then it has been seen: give it one for a moment
@@ -136,7 +182,7 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     const from = put();
     if (live) {
       const resume = rouse(live);
-      if (from && !still?.()) live.play('assemble', parts, { surface, resume, from: [from[0] / live.vx, from[1] / live.vx], duration });
+      if (from && !still?.()) live.play('assemble', parts, { surface, resume, from: origin, duration });
     }
     el.removeAttribute('data-vx-measure');
   });
@@ -163,7 +209,8 @@ function wire(el, on, live) {
     if (e.newState === 'open') source = all.includes(e.source) ? e.source : all[0] ?? null;
     for (const t of all) t.setAttribute('aria-expanded', String(e.newState === 'open' && t === source));
   });
-  anchored(el, on, live, { trigger: () => source ?? openers(el)[0] });
+  const fitting = el.dataset.vxFitting === 'service' ? { gap: 1, surface: 'courses', duration: 0.24, release: 0.16 } : {};
+  anchored(el, on, live, { trigger: () => source ?? openers(el)[0], ...fitting });
   on(el, 'toggle', (e) => { for (const t of openers(el)) t.setAttribute('aria-expanded', String(e.newState === 'open' && t === source)); });
   // Tab out of it and it closes: it must not lie over what has the focus now. Focus that goes to
   // its own key, or into another float it opened, leaves it open; and popover="manual" stays
@@ -182,9 +229,15 @@ export const popover = {
   glowRadius: 2.2,
   glowStrength: halo(0.15),
 
-  build(live, m) { slabOnLight(live, m); },
+  build(live, m) {
+    if (live.el.dataset.vxFitting === 'service') servicePlate(live, m);
+    else slabOnLight(live, m);
+  },
 
-  pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025); },
+  pose(live) {
+    live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025);
+    if (live.el.dataset.vxFitting === 'service') lightServiceEdge(live);
+  },
 
   bind(live) {
     const on = listeners();
