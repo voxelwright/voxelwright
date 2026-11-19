@@ -99,7 +99,9 @@ export const testLatch = {
     on(input, 'blur', () => up('Space'));
     on(window, 'blur', () => { if (held !== null) up(held); });
     on(input, 'change', () => move(rest(input), input.matches(':focus-visible')));
-    if (input.form) on(input.form, 'reset', () => setTimeout(() => move(rest(input), true)));
+    on(input.ownerDocument, 'reset', e => {
+      if (e.target === input.form) queueMicrotask(() => move(rest(input), true));
+    }, true);
     function availability() {
       if (input.matches(':disabled')) held = null;
       live.rebuild();
