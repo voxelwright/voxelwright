@@ -117,10 +117,10 @@ export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim')
  * it is placed by its trigger before it is seen, built from the corner nearest the trigger, and
  * kept by the trigger while the page scrolls or the window changes.
  * opts: trigger() the element it belongs to; side, align (see place); gap: the clear space between
- *       the two, in voxels; duration: seconds for the rim to seat; still(): true to
+ *       the two, in voxels; duration: seconds to assemble; surface: rim or full courses; still(): true to
  *       appear with no building.
  */
-export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, duration = 0.18, still } = {}) {
+export function anchored(el, on, live, { trigger, side = 'bottom', align = 'start', gap = 2, duration = 0.18, surface = 'rim', still } = {}) {
   const vx = () => live?.vx ?? (parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4);
   const put = () => {
     const t = trigger();
@@ -128,7 +128,7 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     return t ? place(el, t, { side: el.dataset.vxSide || side, align: el.dataset.vxAlign || align, gap: gap * vx(), lift: live ? live.faceZ * vx() / 2 : 0 }) : null;
   };
   const parts = ['body', 'panel', 'light'];
-  nativeRelease(live, on, parts);
+  nativeRelease(live, on, parts, 0.12, surface);
   on(el, 'beforetoggle', (e) => {
     if (e.newState !== 'open') return;
     // it has no box until it is open, and by then it has been seen: give it one for a moment
@@ -136,7 +136,7 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     const from = put();
     if (live) {
       const resume = rouse(live);
-      if (from && !still?.()) live.play('assemble', parts, { surface: 'rim', resume, from: [from[0] / live.vx, from[1] / live.vx], duration });
+      if (from && !still?.()) live.play('assemble', parts, { surface, resume, from: [from[0] / live.vx, from[1] / live.vx], duration });
     }
     el.removeAttribute('data-vx-measure');
   });
