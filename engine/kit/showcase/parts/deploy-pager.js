@@ -1,5 +1,6 @@
 // The deploy selector is one drilled rail. A number latches, its lamp stays in
 // the rail, and the two end keys always return. The DOM owns every hit target.
+import { watchDirection } from '../../src/plain.js';
 import { halo } from '../../src/core/light.js';
 import { PRESS, RELEASE, reducedMotion } from '../../src/core/motion.js';
 import { cue } from '../../src/core/sound.js';
@@ -18,7 +19,8 @@ function wireKeys(el, on, live) {
     const a = e.target.closest('a[href]');
     if (!a || held || a.hasAttribute('aria-current')) return;
     const seat = live?.state.seats.find(s => s.a === a);
-    held = { a, source };
+    held = { key: a.rel || a.hash, source };
+    if (live) live.state.heldKey = held.key;
     if (seat) {
       seat.spring.x = Math.min(seat.spring.x, -seat.travel * .4);
       move(seat, true, source === 'Enter');
@@ -28,8 +30,9 @@ function wireKeys(el, on, live) {
   }
   function release(source) {
     if (!held || held.source !== source) return;
-    const seat = live?.state.seats.find(s => s.a === held.a);
+    const seat = live?.state.seats.find(s => s.key === held.key);
     held = null;
+    if (live) live.state.heldKey = null;
     if (seat) move(seat, seat.a.matches('[aria-current], [aria-disabled="true"]'), source === 'Enter');
     live?.invalidate();
     cue('release');
@@ -53,7 +56,6 @@ export const deployPager = {
     const deck = 3 + travel;
     const plate = model.part('rail').slab(0, 0, 0, W, H, deck, 'slate', 2);
     const bed = model.part('switch-bed');
-    const lenses = model.part('windows');
     live.state.windowTint = -1;
     const bounds = el.getBoundingClientRect();
     live.faceZ = deck + travel + 1;
@@ -78,6 +80,7 @@ export const deployPager = {
       if (!arrow) {
         const left = x + Math.floor((w - 5) / 2), front = y + h - 2;
         plate.box(left - 1, front - 1, deck - 1, 7, 3, 1, 'gasket');
+        const lenses = model.part(current ? 'windows' : 'smoked-windows');
         lenses.box(left, front, deck - 1, 5, 1, 1, current ? 'light' : 'lens');
         lenses.plot(left, front, deck - 1, current ? 'ivory' : 'slate');
         // Two metal retaining tabs frame the smoked window in its black seal.
@@ -86,8 +89,9 @@ export const deployPager = {
         clips.plot(left - 1, front, deck - 1, 'steel');
         clips.plot(left + 5, front, deck - 1, 'steel');
       }
-      const seat = { a, part, travel, spring: live.spring('cap' + i) };
-      move(seat, current || disabled, !live.state.animate);
+      const key = a.rel || a.hash;
+      const seat = { a, key, part, travel, spring: live.spring(key) };
+      move(seat, current || disabled || key === live.state.heldKey, !live.state.animate);
       live.label(wrapLabel(a), () => live.faceZ + part.tz);
       return seat;
     });
@@ -119,6 +123,7 @@ export const deployPager = {
   bind(live) {
     const on = listeners();
     wireKeys(live.el, on, live);
+    watchDirection(live, on);
     return on.done;
   },
 };

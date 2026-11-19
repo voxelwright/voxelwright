@@ -48,12 +48,13 @@ const deployState = p => p.locator('#pager').evaluate(el => {
   const down = pages.filter(s => Math.abs(s.part.tz + s.travel) < .01);
   const windows = live.model.byName.windows;
   const lit = [];
+  const bounds = el.getBoundingClientRect();
   for (let i = 0; i < windows.count; i++) {
-    if (windows.col[4 * i + 3] > 0) lit.push(el.getBoundingClientRect().left + windows.rest[3 * i] * live.vx);
+    if (windows.col[4 * i + 3] > 0) lit.push([bounds.left + windows.rest[3 * i] * live.vx, bounds.top + windows.rest[3 * i + 1] * live.vx]);
   }
   const r = el.querySelector('[aria-current]').getBoundingClientRect();
   return down.length === 1 && down[0].a.hasAttribute('aria-current') &&
-    lit.length > 0 && lit.every(x => x >= r.left && x < r.right) &&
+    lit.length > 0 && lit.every(([x, y]) => x >= r.left && x < r.right && y >= r.top && y < r.bottom) &&
     pages.every(s => s === down[0] || s.part.tz === 0);
 });
 // everything of the part that reaches past the sheet's inner edge
@@ -188,7 +189,12 @@ for (const plain of [false, true]) {
   await press(p, '#pager ol a[href="#page-20"]');
   await p.waitForTimeout(600);
   say(await current(p) === '20' && await seats(p) === '1 … 18 19 20', `${tag}: a press on 20: ${await seats(p)}`);
-  if (!plain) say(await deployState(p), 'Phone rail has the correct latch and light');
+  await p.setViewportSize({width:320, height:720});
+  await p.waitForFunction(() => {
+    const pager = document.querySelector('#pager'), live = window.vx?.live(pager);
+    return pager.offsetHeight > 52 && (!live || live.cssH === pager.offsetHeight);
+  });
+  if (!plain) say(await deployState(p), 'Wrapped phone rail has the current latch and light on the same row');
   say(p.errors.length === 0, `${tag}: no errors` + (p.errors.length ? ': ' + [...new Set(p.errors)].join(' | ') : ''));
   await p.context().close();
 }

@@ -46,7 +46,8 @@
     border: 2px solid #454c48; background: var(--vx-key, #eee4cd);
     box-shadow: inset 0 -3px #0003;
   }
-  #pager:not([data-vx-live]) a:is(:active, [aria-current]) { box-shadow: inset 0 2px 2px #0004; }
+  #pager:not([data-vx-live]) a[href]:is(:active, [aria-current]) { box-shadow: inset 0 2px 2px #0004; }
+  #pager:not([data-vx-live]) a[aria-disabled] { color: #293134; background: #a9b0ab; box-shadow: inset 0 2px 2px #0004; }
   #pager:not([data-vx-live]) a[aria-current] { border-block-end-color: var(--lit-accent, #d49a51); }
   @media (max-width: 600px) { #pager li[data-vx-when="wide"] { display: none; } }
 </style>
@@ -213,12 +214,17 @@
     if (location.hash !== a.hash) history.pushState(null, '', a.href);
     go(target, list.contains(a) || target === 1 || target === TOTAL, e.detail > 0);
   });
-  const fromUrl = () => Number(/^#page-(\d+)$/.exec(location.hash)?.[1] ?? 5);
+  const fromUrl = () => Number(/^#page-(\d+)$/.exec(location.hash)?.[1] ?? history.state?.deployPage ?? 5);
   addEventListener('hashchange', () => {
-    if (!location.hash || /^#page-\d+$/.test(location.hash)) go(fromUrl(), false);
+    const from = /^#page-(\d+)$/.exec(location.hash);
+    const target = Number(from?.[1] ?? history.state?.deployPage ?? page);
+    const focus = list.contains(document.activeElement);
+    if (target !== page) go(target, focus);
+    history.replaceState({ ...history.state, deployPage: page }, '');
   });
   narrow.addEventListener('change', () => go(page, false));
   go(fromUrl(), false);
+  history.replaceState({ ...history.state, deployPage: page }, '');
 </script>
 </body>
 </html>

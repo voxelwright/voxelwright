@@ -11,19 +11,21 @@ const controls = [
     name: 'bank', path: 'parts/toggle-group.html', selector: '.vx-toggle-group[data-vx-size="small"]',
     legend: 'label:has(input:checked) .vx-label', value, profile,
   }))),
-  { name: 'pager', path: 'parts/pagination.html', selector: '#pager ol', legend: '[aria-current="page"] .vx-label' },
+  { name: 'pager', path: 'parts/pagination.html', selector: '#pager', legend: '[aria-current="page"] .vx-label' },
 ];
 
 function geometry(el, name) {
   const live = window.vx.live(el);
-  const selected = { tabs: live.state.index, follow: '', bank: live.state.index, pager: live.state.latched }[name];
+  const selected = { tabs: live.state.index, follow: '', bank: live.state.index }[name];
   const partsFor = key => ['lens', 'guide', 'tongue'].map(prefix => live.model.byName[prefix + key]);
   const seatEnd = key => name === 'bank' ? live.state.at[key][1] + live.state.at[key][3] : live.H;
   const canvas = live.canvas.getBoundingClientRect();
   const originX = canvas.x + live.ox / devicePixelRatio;
   const originY = canvas.y + live.oy / devicePixelRatio;
-  const lowerEdge = originY + seatEnd(selected) * live.vx;
-  const assembly = partsFor(selected);
+  const pager = name === 'pager';
+  const pageKey = pager && el.querySelector('[aria-current="page"]').getBoundingClientRect();
+  const lowerEdge = pager ? pageKey.bottom : originY + seatEnd(selected) * live.vx;
+  const assembly = pager ? [live.model.byName.windows, live.model.byName['lit-clips']] : partsFor(selected);
   const lens = assembly[0];
   const centres = [];
   for (let i = 0; i < lens.count; i++) {
@@ -34,6 +36,16 @@ function geometry(el, name) {
   }
 
   let solidClear = Infinity, inactiveCells = 0, inactiveLit = 0;
+  if (pager) {
+    const smoked = live.model.byName['smoked-windows'];
+    inactiveCells = smoked.count;
+    for (let i = 0; i < smoked.count; i++) if (smoked.col[i * 4 + 3] > 0) inactiveLit++;
+    for (const part of assembly) for (let i = 0; i < part.count; i++) {
+      const y = part.rest[3 * i + 1] + .5;
+      const z = part.rest[3 * i + 2] + .5;
+      solidClear = Math.min(solidClear, lowerEdge - originY - (y + z / 2) * live.vx);
+    }
+  }
   for (const glass of live.model.parts.filter(p => /^lens\d*$/.test(p.name))) {
     const key = glass.name.slice(4);
     const inactive = key !== String(selected) || (name === 'follow' && el.getAttribute('aria-pressed') === 'false');
