@@ -48,6 +48,7 @@ function wireStroke(el, on, { push, lift, momentary } = {}) {
   });
   on(el, 'keyup', e => up(e.key, true));
   on(el, 'blur', () => up(held, false));
+  on(window, 'blur', () => up(held, false));
   return () => { held = null; };
 }
 

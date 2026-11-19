@@ -4,6 +4,7 @@ import { defineLook, FONTS, hole, listeners, measureText } from '../../src/index
 import { watchDirection } from '../../src/plain.js';
 
 const colors = (day, night = day) => ({ day, night });
+const keyFace = 8;
 
 const plunger = {
   build(live, m) {
@@ -14,15 +15,16 @@ const plunger = {
     // The underside stays inside the guide throughout the stroke. At a limit
     // the whole key parks against its stop, leaving just the face above the rim.
     const seat = m.part('seat');
-    seat.slab(-1, -1, 0, W + 2, H + 2, 4, 'gasket', 2)
-      .carve(0, 0, 1, W, H, 3);
+    // The plate ends four CSS pixels above the origin, two key cells up.
+    seat.slab(-1, -1, 2, W + 2, H + 2, 4, 'gasket', 2)
+      .carve(0, 0, 3, W, H, 3);
     const cx = Math.floor(W / 2), cy = Math.floor(H / 2);
     seat.grounded = false;
-    seat.box(cx - 3, cy - 3, -5, 7, 7, 5, 'gasket')
-      .carve(cx - 2, cy - 2, -4, 5, 5, 5);
+    seat.box(cx - 3, cy - 3, -3, 7, 7, 5, 'gasket')
+      .carve(cx - 2, cy - 2, -2, 5, 5, 5);
     const cap = m.part('cap');
     cap.grounded = false;
-    const z = off ? 1 : 4;
+    const z = off ? 3 : 6;
     cap.box(cx - 1, cy - 1, z - 5, 3, 3, 5, 'steel');
     cap.slab(1, 1, z, W - 2, H - 2, 3, 'key', 2);
     cap.slab(1, 2, z + 3, W - 2, H - 4, 1, 'key', 2);
@@ -30,7 +32,7 @@ const plunger = {
     const legend = off ? 'steel' : 'ivory';
     cap.box(cx - 4, cy - 1, z + 3, 7, 1, 1, legend);
     if (el.dataset.vxStep === 'up') cap.box(cx - 1, cy - 4, z + 3, 1, 7, 1, legend);
-    live.faceZ = 6;
+    live.faceZ = keyFace;
   },
   pose(live) {
     live.model.byName.cap.tz = live.state.off ? 0 : Math.max(-3, Math.min(0, live.spring('press').x));
@@ -91,7 +93,10 @@ export const replicaPlate = {
       const w = Math.round(el.offsetWidth / live.vx), h = Math.round(el.offsetHeight / live.vx);
       if (el.matches('button')) {
         // The socket flange bears on the panel. Only its guide passes through.
-        plate.carve(x + Math.floor(w / 2) - 11, y + Math.floor(h / 2) - 11, 0, 14, 14, 4);
+        const unit = parseFloat(getComputedStyle(el).getPropertyValue('--vx')) / live.vx;
+        const origin = (live.faceZ - keyFace * unit) / 2;
+        const bore = extent => Math.round(origin + (Math.floor(extent / (2 * unit)) - 3) * unit);
+        plate.carve(x + bore(w), y + bore(h), 0, 7 * unit, 7 * unit, 4);
         const limit = el.dataset.vxStep === 'down' ? input.min : input.max;
         if (/^\d{1,2}$/.test(limit)) {
           const width = measureText(FONTS.block, limit);

@@ -88,7 +88,7 @@ function wire(el, on) {
   on.watch(input, { attributes: true, attributeFilter: ['min', 'max', 'step', 'disabled', 'readonly'] }, sync);
   if (input.form) on(input.form, 'reset', () => setTimeout(sync));
   watchFieldsets(input, on, sync);
-  on(window, 'blur', stop);
+  on(window, 'blur', () => { stop(); stepped = false; });
   sync();
 }
 
