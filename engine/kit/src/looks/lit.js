@@ -278,6 +278,18 @@ export const recess = {
 
   build(live, m) {
     const { W, H, el } = live, D = live.look.well;
+    if (el.dataset.vxTray === 'build-log') {
+      // The folded metal edge finishes flush with the plate. A dark seal seats
+      // the reading surface four courses below it, behind the fixed opening.
+      const { walls } = hole(live, m, { depth: D, wall: 'steel', floor: 'floor' });
+      ring(walls, 0, 0, -1, W, H, 'steel', 1);
+      for (let z = -D + 1; z < -1; z++) ring(walls, 0, 0, z, W, H, 'slate');
+      ring(walls, 0, 0, -D, W, H, 'gasket');
+      if (el.dataset.vxReflection === 'warm') {
+        walls.box(2, H - 1, -D + 1, W - 4, 1, 1, 'warm-metal');
+      }
+      return;
+    }
     const { walls } = hole(live, m, { depth: D, wall: lightName(el, 'light-warm'), floor: 'floor' });
     if (el.dataset.vxReflection === 'warm' && W > 4) {
       walls.box(2, H, -D, W - 4, 1, Math.min(D, 2), 'warm-metal');

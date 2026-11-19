@@ -94,10 +94,12 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .build-top { display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9375rem; }
 .build-num { font-variant-numeric: tabular-nums; color: var(--vx-ink-quiet); }
 .build .vx-meter { display: block; block-size: calc(var(--vx) * 5); }
-.log { display: grid; align-content: start; gap: calc(var(--vx) * 1); padding: calc(var(--vx) * 4) calc(var(--vx) * 5); min-block-size: calc(var(--vx) * 27); font: 400 0.8125rem/1.5 var(--vx-mono); }
+.log { display: grid; padding: calc(var(--vx) * 3) calc(var(--vx) * 4); block-size: calc(var(--vx) * 27); font: 400 0.8125rem/1.5 var(--vx-mono); }
+.log-view { min-block-size: 0; min-inline-size: 0; overflow: auto; display: grid; align-content: start; gap: var(--vx); padding: var(--vx); cursor: text; }
+.log-view:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 0; }
 .log .line { transition: opacity 260ms var(--vx-ease-out), translate 260ms var(--vx-ease-out); }
 .log .line[data-out] { opacity: 0; translate: 0 6px; }
-.log .at { color: var(--vx-ink-quiet); margin-inline-end: calc(var(--vx) * 4); }
+.log .at { color: color-mix(in srgb, var(--vx-ink-quiet) 75%, var(--vx-ink)); margin-inline-end: calc(var(--vx) * 4); }
 
 #deploy .vx-toast { position: absolute; inset-inline-end: calc(var(--vx) * 9); inset-block-end: calc(var(--vx) * -5); z-index: 5; margin: 0; padding: calc(var(--vx) * 3.5) calc(var(--vx) * 6); font: 600 0.9375rem/1.35 var(--vx-font); visibility: hidden; }
 #deploy .vx-toast[data-shown] { visibility: visible; }
