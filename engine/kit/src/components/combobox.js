@@ -96,6 +96,7 @@ function wire(el, on, live) {
     if (!a || !isOpen() || a.closest('[hidden]')) { live.state.at = null; live.invalidate(); return; }
     const r = a.getBoundingClientRect(), b = el.getBoundingClientRect(), box = list.getBoundingClientRect();
     // a row scrolled half out of sight is not marked: the mark would hang over the edge
+    live.state.rowHeight = r.height / live.vx;
     live.state.at = r.top >= box.top - 1 && r.bottom <= box.bottom + 1 ? Math.round((r.top - b.top) / live.vx) : null;
     live.invalidate();
   };

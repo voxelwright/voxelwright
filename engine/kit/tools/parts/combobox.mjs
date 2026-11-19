@@ -164,6 +164,29 @@ m = await read('use');
 const fits = await p.evaluate(() => { const f = document.querySelector('#use .vx-combobox-float').getBoundingClientRect(); return f.left >= 0 && f.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; });
 say(m.open && m.shown.includes('Розгорнути на сервері') && fits, `at 390 px the float stays in the window, and a Ukrainian row is found by its letters (${m.shown.join(', ')}; ${fits ? 'inside' : 'cut'}; "${m.value}", ${m.open ? 'out' : 'shut'}, focus ${m.focus})`);
 await p.screenshot({ path: 'shots/parts/combobox/hand-phone.png' });
+await p.setViewportSize({ width: 320, height: 720 });
+await p.locator('#use-q').fill('Розгорнути');
+await p.waitForFunction(() => {
+  const tray = document.querySelector('#use .vx-combobox-float'), live = window.vx.live(tray);
+  const row = tray.querySelector('[data-vx-active]');
+  if (!row || !live || !live.model.byName.pick) return false;
+  const center = row.getBoundingClientRect().top - tray.getBoundingClientRect().top + row.offsetHeight / 2;
+  return Math.abs((live.model.byName.pick.ty + 5.5) * live.vx - center) <= live.vx / 2;
+});
+say(true, 'cursor is centered on the complete Ukrainian row at 320px');
+await p.locator('#use-q').fill('');
+await p.keyboard.press('Escape');
+await p.evaluate(() => scrollTo(0, 0));
+await p.keyboard.press('ArrowDown');
+const float = p.locator('#use .vx-combobox-float');
+await p.waitForFunction(() => window.vx.live(document.querySelector('#use .vx-combobox-float')).state.above);
+const initialTop = await float.evaluate(el => el.style.top);
+await float.evaluate(el => {
+  const live = window.vx.live(el), well = document.querySelector('#use .vx-well');
+  scrollBy(0, Math.round(well.getBoundingClientRect().bottom + (2 + live.faceZ / 2) * live.vx - parseFloat(el.style.top)));
+});
+await p.waitForFunction(() => window.vx.live(document.querySelector('#use .vx-combobox-float')).model.byName.panel.ty === 0);
+say(await float.evaluate(el => el.style.top) === initialTop, 'slides flip to the field when the tray changes sides at the same viewport position');
 await p.setViewportSize({ width: 1180, height: 900 });
 
 // plain

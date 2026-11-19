@@ -73,7 +73,8 @@ defineLook('project-register', {
         const { pick, panel } = live.model.byName;
         const at = live.state.at;
         pick.hidden = at == null;
-        if (at != null) pick.ty = at;
+        // The five-cell lens starts three cells into a standard eleven-cell row.
+        if (at != null) pick.ty = at + Math.round((live.state.rowHeight - 11) / 2);
         panel.ty = live.state.above ? live.H + 2 : 0;
         live.glowStrength = halo(.055);
       },
@@ -85,22 +86,8 @@ export function connectRegister(root) {
   const well = root.querySelector('.vx-well');
   const popup = root.querySelector('.vx-combobox-float');
   const input = root.querySelector('#use-q');
-  // place() may flip a running tray when scrolling or filtering changes its space.
-  let lastTop;
-  const align = () => {
-    const tray = liveFor(popup);
-    if (!tray || !popup.matches(':popover-open') || popup.style.top === lastTop) return;
-    lastTop = popup.style.top;
-    tray.state.above = popup.getBoundingClientRect().top < well.getBoundingClientRect().top;
-    tray.invalidate();
-  };
-  new MutationObserver(align).observe(popup, { attributes: true, attributeFilter: ['style'] });
-  popup.addEventListener('beforetoggle', () => liveFor(well)?.invalidate());
-  popup.addEventListener('toggle', () => {
-    lastTop = null;
-    align();
-    liveFor(well)?.invalidate();
-  });
+  const updateLamp = () => liveFor(well)?.invalidate();
+  popup.addEventListener('toggle', updateLamp);
   // One recorded detent when a project seats. Typing and moving the cursor stay quiet.
   input.addEventListener('vx-choose', () => cue('release'));
 }

@@ -172,6 +172,11 @@ export function anchored(el, on, live, { trigger, side = 'bottom', align = 'star
     // a voxel of height shows half a voxel of side above the face
     if (!t) return null;
     const from = place(el, t, { side: el.dataset.vxSide || side, align: el.dataset.vxAlign || align, gap: gap * vx(), lift: live ? live.faceZ * vx() / 2 : 0 });
+    const above = from[1] > 0;
+    if (live && live.state.above !== above) {
+      live.state.above = above;
+      live.invalidate();
+    }
     origin = from.map(px => px / vx());
     return from;
   };
