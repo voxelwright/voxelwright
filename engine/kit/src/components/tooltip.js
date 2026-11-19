@@ -92,6 +92,16 @@ export const tooltip = {
 
   build(live, m) {
     const { W, H } = live, d = live.look.slab;
+    if (live.el.dataset.vxFitting === 'legend') {
+      // Side clips catch the stage light one course above the matte legend.
+      const body = m.part('body');
+      body.slab(0, 0, 0, W, H, 1, 'steel', 1);
+      body.slab(0, 0, 1, W, H, 1, 'slate', 1);
+      body.box(1, 1, 1, W - 2, H - 2, 1, 'gasket');
+      for (const x of [0, W - 1]) body.box(x, 2, 2, 1, H - 4, 1, 'warm-metal');
+      live.faceZ = 2;
+      return;
+    }
     m.part('body').slab(0, 0, 0, W, H, d, live.look.readingPlate ?? 'key', 1);
     live.faceZ = d;
   },
