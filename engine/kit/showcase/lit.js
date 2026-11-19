@@ -253,15 +253,19 @@ function direct(story) {
   const { stage, h, play, rest } = story;
   let seen = false, own = false, back = 0;
   // force: start whatever the page thinks (a film starts it by hand, once its clock is in place)
-  const start = (force = false) => { if (!force && (own || !seen || reduced || q.has('still'))) return; h.stop(); rest(); play().catch((e) => { if (!(e instanceof Stop)) throw e; }); };
+  const reading = () => stage.querySelector('.log-view:focus-within');
+  const start = (force = false) => { if (!force && (own || reading() || !seen || reduced || q.has('still'))) return; h.stop(); rest(); play().catch((e) => { if (!(e instanceof Stop)) throw e; }); };
   const halt = () => { h.stop(); h.show(false); rest(); };
   new IntersectionObserver(([e]) => { const was = seen; seen = e.isIntersecting; if (seen && !was) start(); else if (!seen && was && !own) halt(); }, { threshold: 0.35 }).observe(stage);
+  const log = stage.querySelector('.log-view');
+  log?.addEventListener('focusin', () => { clearTimeout(back); h.stop(); h.show(false); });
+  log?.addEventListener('focusout', () => { clearTimeout(back); back = setTimeout(() => start(), 2600); });
   const real = (e) => e.isTrusted && e.pointerType === 'mouse';
   stage.addEventListener('pointermove', (e) => {
     if (!e.isTrusted) return;
     clearTimeout(back);
-    if (!own) { own = true; h.stop(); rest(); if (e.pointerType === 'mouse') stage.setAttribute('data-own', ''); }
-    if (!real(e)) return h.show(false);
+    if (!own) { own = true; h.stop(); if (!reading()) rest(); if (e.pointerType === 'mouse') stage.setAttribute('data-own', ''); }
+    if (!real(e) || log?.contains(e.target)) return h.show(false);
     const s = stage.getBoundingClientRect();
     h.place(e.clientX - s.left, e.clientY - s.top);
     h.show();
@@ -272,7 +276,7 @@ function direct(story) {
     if (!e.isTrusted || !own) return;
     h.show(false);
     back = setTimeout(() => {
-      if (stage.contains(document.activeElement) && document.activeElement.matches('input')) return; // someone is typing
+      if (reading() || (stage.contains(document.activeElement) && document.activeElement.matches('input'))) return; // someone is typing
       own = false; stage.removeAttribute('data-own'); start();
     }, 2600);
   });
