@@ -11,6 +11,19 @@
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
 </script>
 <style>
+  #range { --vx-look: range-bank; --vx: 2px; }
+  #range > label {
+    min-block-size: 44px; min-inline-size: 0; padding: 8px 14px 2px;
+    font: 600 .9375rem/1.25 var(--vx-font);
+  }
+  #range .vx-label { pointer-events: none; }
+  #range[data-vx-live] > label { color: #f5ede0; }
+  #range > label:has(input:focus-visible) {
+    z-index: 1; outline: 2px solid var(--vx-focus); outline-offset: 2px;
+  }
+  #range[data-vx-live] > label:has(input:focus-visible) {
+    outline-color: #b7e7ee; outline-offset: -6px;
+  }
   /* this page's own */
   .ask { display: grid; grid-template-columns: auto 1fr; align-items: center; justify-items: start; gap: calc(var(--vx) * 7) calc(var(--vx) * 6); }
   .ask .name { font-weight: 600; font-size: 0.9375rem; }
@@ -34,9 +47,9 @@
     <div class="ask">
       <span class="name" id="g-range">Range</span>
       <div class="vx-toggle-group" role="radiogroup" aria-labelledby="g-range" id="range">
-        <label><input type="radio" name="range" value="day" checked>Day</label>
-        <label><input type="radio" name="range" value="week">Week</label>
-        <label><input type="radio" name="range" value="month">Month</label>
+        <label><input type="radio" name="range" value="day" checked><span class="vx-label">Day</span></label>
+        <label><input type="radio" name="range" value="week"><span class="vx-label">Week</span></label>
+        <label><input type="radio" name="range" value="month"><span class="vx-label">Month</span></label>
       </div>
       <span class="name" id="g-kinds">Show</span>
       <div class="vx-toggle-group" role="toolbar" aria-labelledby="g-kinds" id="kinds">
@@ -89,6 +102,7 @@
   </section>
 </main>
 <script type="module">
+  import './range-bank.js';
   import { show } from './parts.js';
   import { toggleButton } from '../../src/components/toggle-button.js';
   import { toggleGroup } from '../../src/components/toggle-group.js';
