@@ -123,6 +123,7 @@ function wireSlide(el, on, live) {
   const press = live?.spring('press');
   let pointer = null, drag = null, consumed = null, slide = false;
 
+  const blocked = new Map();
   function pressure(value, spring) {
     if (!press) return;
     if (reducedMotion()) press.snap(value);
@@ -158,7 +159,12 @@ function wireSlide(el, on, live) {
   }
 
   on(label, 'pointerdown', e => {
-    if (pointer !== null || !e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
+    if (e.button !== 0 || input.matches(':disabled')) return;
+    if (pointer !== null || !e.isPrimary) {
+      if (pointer !== e.pointerId) blocked.set(e.pointerId, {});
+      return;
+    }
+    blocked.delete(e.pointerId);
     consumed = null;
     pointer = e.pointerId;
     const box = el.getBoundingClientRect();
@@ -189,7 +195,14 @@ function wireSlide(el, on, live) {
     }
   });
   for (const type of ['pointerup', 'pointercancel']) {
-    on(window, type, e => { if (pointer === e.pointerId) release(e); });
+    on(window, type, e => {
+      if (pointer === e.pointerId) release(e);
+      const stroke = blocked.get(e.pointerId);
+      if (stroke) {
+        if (type === 'pointercancel') blocked.delete(e.pointerId);
+        else setTimeout(() => { if (blocked.get(e.pointerId) === stroke) blocked.delete(e.pointerId); }, 500);
+      }
+    });
   }
   on(window, 'blur', () => release());
   on(document, 'visibilitychange', () => {
@@ -199,7 +212,7 @@ function wireSlide(el, on, live) {
     }
   });
   on(label, 'click', e => {
-    if (pointer !== null && e.detail > 0 && e.pointerId !== pointer) {
+    if (e.detail > 0 && (blocked.delete(e.pointerId) || (pointer !== null && e.pointerId !== pointer))) {
       e.preventDefault();
       e.stopPropagation();
       return;

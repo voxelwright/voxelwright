@@ -71,7 +71,7 @@ export const menu = {
       const resume = live.rebuild();
       const { parts, surface, openDuration = 0.17, from } = motion();
       // A fresh context point supplies its own origin even during a reversed exit.
-      if (resume && from) resume.from = from;
+      if (resume && (from || el.hasAttribute('data-vx-from'))) resume.from = from ?? origin;
       live.play('assemble', parts, { resume, duration: openDuration, surface, from: origin });
       if (invoker()?.matches(':focus-visible')) live.state.items.find(menuEnabled)?.focus();
       live.draw();

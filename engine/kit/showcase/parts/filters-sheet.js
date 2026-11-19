@@ -92,9 +92,9 @@ function headerPull(el) {
   });
   head.addEventListener('pointerup', e => {
     if (grip?.id !== e.pointerId) return;
-    const flick = e.timeStamp - grip.time < 80 && grip.speed > 0.55 && grip.distance > 20;
-    const pulled = (e.clientX - grip.start) * grip.sign > 3;
-    release(pulled && (grip.distance > el.offsetWidth * 0.4 || flick));
+    const pulled = (e.clientX - grip.start) * grip.sign;
+    const flick = e.timeStamp - grip.time < 80 && grip.speed > 0.55 && pulled > 20;
+    release(pulled > el.offsetWidth * 0.4 || flick);
   });
   head.addEventListener('lostpointercapture', e => { if (grip?.id === e.pointerId) release(false); });
   el.addEventListener('close', () => release(false));
