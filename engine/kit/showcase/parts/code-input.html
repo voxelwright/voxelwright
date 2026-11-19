@@ -25,6 +25,13 @@
   #sign .vx-otp:has(> [data-vx-live]) > input::selection {
     color: #172522; background: #bedbce;
   }
+  #sign .vx-otp-cell:not([data-vx-live])::after {
+    content: ''; position: absolute; pointer-events: none; bottom: var(--vx); left: 50%;
+    width: calc(3 * var(--vx)); height: var(--vx); translate: -50% 0; background: var(--cell-light, #535651);
+  }
+  #sign .vx-otp-cell[data-vx-active] { --cell-light: var(--lit-accent); }
+  #sign .vx-otp:has(input[aria-invalid="true"]:enabled) { --cell-light: var(--lit-stop, var(--vx-brick)); }
+  #sign .vx-otp:has(input[aria-invalid="true"]:enabled) .vx-otp-cell { --cell-light: var(--lit-stop, var(--vx-brick)); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds

@@ -135,7 +135,7 @@ const readoutCell = {
   build(live, m) {
     const { W, H, el } = live;
     const input = el.parentElement.querySelector('input');
-    const on = !input.disabled && el.hasAttribute('data-vx-active');
+    const on = !input.disabled && (input.getAttribute('aria-invalid') === 'true' || el.hasAttribute('data-vx-active'));
     const lens = on ? (input.getAttribute('aria-invalid') === 'true' ? 'light-stop' : 'light') : 'lens';
     const { floor } = hole(live, m, { y: 1, h: H - 2, depth: 1, wall: 'slate', floor: 'gasket' });
 

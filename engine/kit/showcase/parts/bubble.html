@@ -13,6 +13,12 @@
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
   .state > .vx-message { inline-size: 100%; }
+  #reply:not([data-vx-live])::before, #reply:not([data-vx-live])::after {
+    content: ''; position: absolute; pointer-events: none; top: 50%; translate: 0 -50%;
+    width: 4px; height: 12px; background: linear-gradient(to right, var(--vx-steel), #747c79);
+  }
+  #reply:not([data-vx-live])::before { inset-inline-start: 0; }
+  #reply:not([data-vx-live])::after { inset-inline-end: 0; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds

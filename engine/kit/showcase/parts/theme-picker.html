@@ -47,6 +47,7 @@
     padding: 0 calc(var(--vx) * 2) calc(var(--vx) * 4);
     color: var(--legend, var(--vx-ink));
   }
+  #picker > [data-vx-pick="theme"]:not([data-vx-live]) > label::after { content: none; }
   #picker > [data-vx-pick="theme"] .vx-label {
     font: 650 .9375rem/1.1 var(--vx-font); letter-spacing: -.01em; pointer-events: none;
   }
@@ -68,7 +69,7 @@
     box-shadow: inset 0 0 0 2px var(--legend);
   }
   #picker > [data-vx-pick="theme"]:not([data-vx-live]) label:has(:checked) .vx-theme-lamp {
-    background: var(--_day);
+    background: var(--lit-accent, var(--_day));
   }
   #picker > [data-vx-pick="theme"] > label:has(input:focus-visible) {
     outline: 2px solid var(--vx-focus); outline-offset: 3px; z-index: 1;

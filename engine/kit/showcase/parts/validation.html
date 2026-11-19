@@ -16,7 +16,7 @@
   /* The plain well keeps the same fixed lens and room for the address. */
   #invite [data-vx-mail-pilot]:not([data-vx-live]) {
     position: relative;
-    background: var(--vx-floor);
+    background-color: var(--vx-floor);
     box-shadow: inset 0 0 0 2px var(--vx-steel);
   }
   #invite [data-vx-mail-pilot]:not([data-vx-live])::after {
@@ -25,7 +25,7 @@
     background: linear-gradient(var(--pilot, #766f62) 0 0) center / calc(var(--vx) * 3) calc(var(--vx) * 2) no-repeat,
       linear-gradient(#343935 0 0) center / calc(var(--vx) * 5) calc(var(--vx) * 4) no-repeat, var(--vx-chalk);
   }
-  #invite [data-vx-mail-pilot]:has(#mail:is([aria-invalid="true"], :user-invalid):enabled) { --pilot: var(--lit-stop, var(--vx-brick)); }
+  #invite [data-vx-mail-pilot]:has(#mail[aria-invalid="true"]:enabled) { --pilot: var(--lit-stop, var(--vx-brick)); }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 5) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
 </style>
 <script>

@@ -3,7 +3,7 @@ import { menubar } from '../../src/components/menubar.js';
 import { boxOf } from '../../src/components/navs.js';
 import { button } from '../../src/components/button.js';
 import { listeners } from '../../src/components/util.js';
-import { cap, halo, hole } from '../../src/core/light.js';
+import { cap, halo } from '../../src/core/light.js';
 import { PRESS, RELEASE, reducedMotion } from '../../src/core/motion.js';
 
 const keys = el => el.querySelectorAll(':scope > li > [popovertarget]');
@@ -37,9 +37,6 @@ export const programBank = {
       const width = Math.max(3, Math.floor(w / 3));
       const left = x + Math.floor((w - width) / 2), front = y + h - 2;
       rail.carve(left, front, 0, width, 1, 2);
-      if (open(key)) {
-        hole(live, model, { x: left, y: front, w: width, h: 1, depth: 1, wall: 'light', floor: 'light' });
-      }
       fit.box(left, front, 1, width, 1, 1, open(key) ? 'signal' : 'lens');
     }
   },

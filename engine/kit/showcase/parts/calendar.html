@@ -46,6 +46,10 @@
   #deploy .vx-calendar-week:not([data-vx-live]) [aria-selected="true"] .vx-calendar-day {
     background: linear-gradient(#343d39 0 0) center / calc(100% - 8px) calc(100% - 8px) no-repeat;
   }
+  #deploy .vx-calendar-week:not([data-vx-live]) .vx-calendar-day::after {
+    content: ''; position: absolute; pointer-events: none; inset: auto auto 2px calc(50% - 4px);
+    width: 8px; height: 3px; background: #5a5d53;
+  }
   #deploy .vx-calendar-week:not([data-vx-live]) [aria-current="date"]::after {
     inset-block-start: auto; inset-block-end: 2px; inset-inline-start: calc(50% - 4px);
     inline-size: 8px; background: #cf8223;

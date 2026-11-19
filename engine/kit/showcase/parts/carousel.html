@@ -25,8 +25,9 @@
     outline: none;
   }
   #week .vx-carousel-lamps:not([data-vx-live]) {
-    background: repeating-linear-gradient(to right, #736f65 0 calc(var(--vx) * 5), transparent 0 calc(var(--vx) * 7)) content-box, #333731;
+    background: repeating-linear-gradient(var(--week-direction, to right), #736f65 0 calc(var(--vx) * 5), transparent 0 calc(var(--vx) * 7)) content-box, #333731;
   }
+  #week:dir(rtl) { --week-direction: to left; }
   #week .vx-carousel-lamps:not([data-vx-live])::after {
     inline-size: calc(var(--vx) * 5);
     inset-inline-start: calc(var(--vx) * (1 + 7 * var(--_at, 0)));
@@ -206,7 +207,15 @@
   // Swipes keep native scroll snap, and keyboard navigation reads immediately.
   const week = document.getElementById('week');
   const lamps = week.querySelector('.vx-carousel-lamps');
-  const slides = week.querySelectorAll('.vx-carousel-slide');
+  const track = week.querySelector('.vx-carousel-track');
+  const slides = () => [...track.querySelectorAll('.vx-carousel-slide')];
+  new MutationObserver(() => {
+    const current = slides();
+    current.forEach((slide, i) => {
+      const position = slide.querySelector('.position');
+      if (position) position.textContent = (i + 1) + ' / ' + current.length;
+    });
+  }).observe(track, { childList: true });
   let arrival = [];
   week.addEventListener('click', event => {
     const key = event.target.closest('[data-vx-step]');
@@ -215,7 +224,7 @@
     requestAnimationFrame(() => {
       arrival.forEach(animation => animation.cancel());
       if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      const slide = slides[Number(lamps.style.getPropertyValue('--_at'))];
+      const slide = slides()[Number(lamps.style.getPropertyValue('--_at'))];
       if (!slide) return;
       const x = getComputedStyle(week).direction === 'rtl' ? -dir : dir;
       arrival = [...slide.children].map(child => child.animate([

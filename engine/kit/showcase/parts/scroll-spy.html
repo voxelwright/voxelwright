@@ -28,7 +28,7 @@
   }
   #toc a { gap: calc(var(--vx) * 2); padding-inline-start: var(--vx); background-image: none; }
   #toc a::before { content: none; }
-  #toc a[aria-current="location"] { font-weight: 700; }
+  #toc a[aria-current="location"] { font-weight: inherit; text-decoration: underline; text-underline-offset: .18em; }
   #toc .reading-lens {
     --vx: 2px;
     position: relative; display: inline-block; flex: none; pointer-events: none;
