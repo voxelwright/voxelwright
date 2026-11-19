@@ -9,6 +9,36 @@
 <style>
   .form { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); justify-items: stretch; margin: 0; }
   .said { margin: 0; color: var(--vx-ink-quiet); font-size: 0.875rem; line-height: calc(var(--vx) * 5); min-block-size: calc(var(--vx) * 5); overflow-wrap: anywhere; }
+  .vx-input-group > .address-well {
+    --vx-look: address-insert;
+    flex-basis: 18rem; /* Both fittings and room for the name before Check wraps. */
+  }
+  .address-well > label.vx-addon {
+    position: relative;
+    align-self: stretch;
+    align-content: center;
+    padding-inline: calc(var(--vx) * 3);
+    color: #f4ecda;
+    font-size: .875rem;
+    font-weight: 550;
+  }
+  .vx-input-group .address-well > input {
+    padding-inline: calc(var(--vx) * 3);
+    color: #20342d;
+    caret-color: currentColor;
+  }
+  #claim .address-well:not([data-vx-live]) {
+    background: #49544e;
+    box-shadow: inset 0 0 0 1px #777e70;
+  }
+  .address-well:not([data-vx-live]) > input {
+    background: #d3dfcb;
+    box-shadow: inset 0 var(--vx) #4a554d, inset 0 calc(-1 * var(--vx)) #555f56;
+  }
+  #claim .address-well:has(:focus-visible) {
+    outline: 2px solid var(--vx-focus);
+    outline-offset: 2px;
+  }
   .states { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
 </style>
 <script>
@@ -29,7 +59,7 @@
       <div class="vx-field">
         <label class="vx-field-label" for="site">Address</label>
         <div class="vx-input-group">
-          <span class="vx-well">
+          <span class="vx-well address-well">
             <label class="vx-addon" for="site">https://</label>
             <input id="site" name="site" value="harbor-api" autocomplete="off" autocapitalize="none" spellcheck="false">
             <label class="vx-addon" for="site">.fogline.app</label>
@@ -111,6 +141,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
+  import './address-insert.js';
   show();
   const form = document.getElementById('claim'), said = document.getElementById('said');
   form.addEventListener('submit', (e) => {
