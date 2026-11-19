@@ -17,6 +17,19 @@
   .shortcuts li + li { border-block-start: 1px solid var(--vx-slate); }
   .sheet .words { max-inline-size: 34rem; font-size: 1.0625rem; line-height: calc(var(--vx) * 7); }
   .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  /* A finer mould inside the same seven-course inline box. */
+  .project-key {
+    --vx: 1px;
+    --vx-look: project-key;
+    block-size: 1.4em;
+    min-inline-size: 1.4em;
+    padding-inline: .4em;
+    color: #f7ead4;
+  }
+  .project-key:not([data-vx-live]) {
+    background: #393f3f;
+    box-shadow: inset 1px 2px #535a58, inset -1px -2px #292e2e, 1px 2px #242823;
+  }
 </style>
 </head>
 <body>
@@ -29,7 +42,7 @@
   <section>
     <h2>In use: shortcuts in the deploys panel</h2>
     <ul class="shortcuts">
-      <li>Find a project <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd></li>
+      <li>Find a project <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd project-key">K</kbd></kbd></li>
       <li>Deploy the open project <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">Enter</kbd></kbd></li>
       <li>Roll back <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">Shift</kbd>+<kbd class="vx-kbd">Z</kbd></kbd></li>
       <li>Show the build log <kbd class="vx-kbd">L</kbd></li>
@@ -74,6 +87,40 @@
 <script type="module">
   import { show } from './parts.js';
   import { kbd } from '../../src/components/kbd.js';
+  import { defineLook } from '../../src/index.js';
+  import { caps } from '../../src/looks/instrument.js';
+
+  defineLook('project-key', {
+    from: 'lit',
+    finishes: { key: caps.carbon.face },
+    materials: { key: { day: caps.carbon.key, night: caps.carbon.key, jitter: .008 } },
+    parts: {
+      kbd: {
+        pad: 12,
+        build(live, model) {
+          const { W, H } = live;
+          model.part('mount').slab(2, 2, 0, W - 4, H - 4, 2, 'gasket', 2);
+
+          const cap = model.part('cap');
+          cap.grounded = false;
+          cap.mouldRadius = 3;
+          // A broad skirt tapers to a smaller crown. Keep the two cheeks
+          // one cell higher than the legend bed, as on a cylindrical keytop.
+          for (let z = 0; z < 6; z++) {
+            const side = Math.round(z * .6);
+            const back = Math.round(z * .25);
+            const apron = Math.round(z * .85);
+            cap.slab(side, back, 2 + z, W - 2 * side, H - back - apron, 1, 'key', 2);
+          }
+          for (const x of [3, W - 6])
+            cap.slab(x, 2, 8, 3, H - 7, 1, 'key', 1);
+
+          live.faceZ = 8;
+          live.label(live.el.querySelector('.vx-label'), () => live.faceZ);
+        },
+      },
+    },
+  });
   show(kbd);
 </script>
 </body>
