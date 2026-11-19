@@ -33,6 +33,14 @@ const read = (id) => p.evaluate(async (id) => {
   const act = document.getElementById(input.getAttribute('aria-activedescendant') || '-');
   const words = (o) => o.firstChild.textContent.trim();
   const l = window.vx?.live(list), walls = l?.model.byName.walls;
+  const windows = l?.model.byName.windows;
+  const litY = [];
+  let darkCells = 0;
+  for (let i = 0; i < (windows?.count ?? 0); i++) {
+    const material = name(windows.mats[i]);
+    if (material === 'light') litY.push(windows.rest[3 * i + 1] * l.vx);
+    else if (material === 'lens') darkCells++;
+  }
   const r = act?.getBoundingClientRect(), b = list.getBoundingClientRect();
   const empty = dialog.querySelector('.vx-command-empty');
   return {
@@ -40,11 +48,14 @@ const read = (id) => p.evaluate(async (id) => {
     role: input.getAttribute('role'), listRole: list.getAttribute('role'), shown: seen.map(words), active: act ? words(act) : null,
     groups: [...list.querySelectorAll('[role="group"]')].filter((g) => !g.hidden).length,
     walls: walls ? [...new Set(walls.mats)].map(name).join('+') : '', well: l?.well?.map((v) => v * l.vx) ?? null,
+    litY, darkCells,
     row: r ? [r.top - b.top, r.bottom - b.top] : null, empty: empty && !empty.hidden ? empty.textContent : null,
     done: document.getElementById('done').textContent, inView: r ? (() => { const s = list.parentElement.getBoundingClientRect(); return r.top >= s.top - 1 && r.bottom <= s.bottom + 1; })() : null,
   };
 }, id);
 const groove = (m) => m.well && m.row && m.well[2] - m.well[0] === 4 && m.well[1] >= m.row[0] && m.well[3] <= m.row[1];
+const fitted = m => m.row && m.litY.length === 2 && m.darkCells === 2 * (m.shown.length - 1)
+  && m.litY.every(y => y >= m.row[0] && y < m.row[1]);
 const key = async (k, n = 1) => { for (let i = 0; i < n; i++) await p.keyboard.press(k); await p.waitForTimeout(220); };
 
 let m = await read('cmds');
@@ -57,20 +68,20 @@ await p.mouse.click(1100, 860);
 await p.keyboard.press(CHORD); await p.waitForTimeout(700);
 m = await read('cmds');
 say(m.open && m.modal && m.focus && m.value === '' && m.shown.length === 11, `${CHORD} opens it, modal, with the focus in its well and every row (${m.shown.length})`);
-say(m.active === 'harbor-api' && groove(m) && m.walls === 'light', `the first row is marked, and the accent groove is cut at its start (${m.well?.join(', ')} px)`);
+say(m.active === 'harbor-api' && fitted(m), `the first row is marked, and its two lens cells light within the row (${m.litY.join(', ')} px)`);
 await p.screenshot({ path: 'shots/parts/command-palette/hand-open.png' });
 
 // typing
 await p.keyboard.type('roll', { delay: 40 }); await p.waitForTimeout(350);
 m = await read('cmds');
-say(m.shown.length === 1 && m.shown[0] === 'Roll back to 4f2c9a1' && m.active === m.shown[0] && m.groups === 1 && groove(m), `typing "roll" keeps what matches (${m.shown.join(', ')}), hides the groups with nothing left, and marks it`);
+say(m.shown.length === 1 && m.shown[0] === 'Roll back to 4f2c9a1' && m.active === m.shown[0] && m.groups === 1 && fitted(m), `typing "roll" keeps what matches (${m.shown.join(', ')}), hides the groups with nothing left, and marks it`);
 await key('Backspace', 4);
 await p.keyboard.type('deploy', { delay: 30 }); await p.waitForTimeout(350);
 m = await read('cmds');
 say(m.shown.length === 2 && m.shown.includes('Розгорнути на сервері'), `a row is found by its keywords too ("deploy": ${m.shown.join(', ')})`);
 await key('ArrowDown');
 m = await read('cmds');
-say(m.active === 'Розгорнути на сервері' && m.focus && groove(m), 'Down moves the mark; the focus stays in the well and the groove goes with it');
+say(m.active === 'Розгорнути на сервері' && m.focus && fitted(m), 'Down moves the mark; the focus stays in the well and its fitted lens lights');
 await key('ArrowDown');
 m = await read('cmds');
 say(m.active === 'Deploy harbor-api', 'and goes round from the last to the first');
@@ -87,7 +98,7 @@ say(m.open && m.value === '' && m.shown.length === 11 && m.active === 'harbor-ap
 // the long list scrolls, and the mark stays in sight
 await key('ArrowUp');
 m = await read('cmds');
-say(m.active === 'Sign out of fogline' && m.inView && groove(m), 'Up from the first goes to the last, which is scrolled into sight with its groove');
+say(m.active === 'Sign out of fogline' && m.inView && fitted(m), 'Up from the first goes to the last, which is scrolled into sight with its lit lens');
 await key('Escape'); await p.waitForTimeout(600);
 m = await read('cmds');
 say(!m.open, 'Escape closes it');
@@ -99,7 +110,7 @@ say(!(await read('cmds')).open, 'the chord again closes it');
 await key(CHORD); await p.waitForTimeout(500);
 await p.keyboard.type('lighthouse', { delay: 20 }); await p.waitForTimeout(300);
 m = await read('cmds');
-say(m.shown.length === 0 && m.empty === 'Nothing is called “lighthouse”.' && m.active === null && m.well === null, `nothing matches: no rows, no groove, and it says so in words ("${m.empty}")`);
+say(m.shown.length === 0 && m.empty === 'Nothing is called “lighthouse”.' && m.active === null && !m.litY.length && !m.darkCells, `nothing matches: no rows, no groove, and it says so in words ("${m.empty}")`);
 await key('Enter');
 say((await read('cmds')).open, 'and Enter does nothing');
 await key('Escape'); await p.waitForTimeout(600);
@@ -112,7 +123,7 @@ const row = p.locator('#cmds [role="option"]').nth(6);
 const rb = await row.boundingBox();
 await p.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2, { steps: 6 }); await p.waitForTimeout(250);
 m = await read('cmds');
-say(m.active === 'Invite Mina to fog-site' && groove(m) && m.focus, 'the pointer over a row marks it; the focus stays in the well');
+say(m.active === 'Invite Mina to fog-site' && fitted(m) && m.focus, 'the pointer over a row marks it; the focus stays in the well');
 const off = await p.locator('#cmds [role="option"][aria-disabled="true"]').boundingBox();
 await p.mouse.click(off.x + off.width / 2, off.y + off.height / 2); await p.waitForTimeout(300);
 say((await read('cmds')).open, 'a press on a row that is off does nothing');

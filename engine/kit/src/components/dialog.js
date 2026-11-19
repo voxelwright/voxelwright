@@ -58,14 +58,15 @@ export const dialog = {
   bind(live) {
     const on = listeners();
     const el = live.el;
-    const palette = el.classList.contains('vx-command-dialog');
+    const deck = el.hasAttribute('data-vx-command-deck');
+    const palette = el.classList.contains('vx-command-dialog') && !deck;
     const surface = palette ? 'rim' : 'courses';
     nativeRelease(live, on, null, palette ? 0.1 : 0.23, surface);
     const opened = () => {
       live.visible = true;
       const resume = live.rebuild();
-      cue('build');
-      live.play('assemble', null, { duration: palette ? 0.16 : 0.32, surface, resume });
+      cue(deck ? 'press' : 'build');
+      live.play('assemble', null, { duration: palette ? 0.16 : deck ? 0.26 : 0.32, surface, resume });
     };
     live.state.leave = value => el.close(value);
     wireDialog(el, on);

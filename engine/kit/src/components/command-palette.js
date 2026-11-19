@@ -36,7 +36,7 @@
 import { halo, byTheme } from '../core/light.js';
 import { listeners } from './util.js';
 import { optionsOf, shownOf, valueOf, sift, nameOptions, sayEmpty } from './combobox.js';
-import { mark as markOf } from './navs.js';
+import { boxOf, mark as markOf } from './navs.js';
 
 const mac = () => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 /** Does a key event match a chord such as "mod+k" or "shift+mod+p"? */
@@ -74,6 +74,8 @@ function wire(el, on, live) {
   const filter = () => {
     const n = sift(el, input.value);
     sayEmpty(empty, input.value, n);
+    // Filtering can rearrange the fitted windows while keeping the same active option.
+    if (live && dialog?.hasAttribute('data-vx-command-deck')) live.state.at = undefined;
     mark(shownOf(el)[0] ?? null);
     const scroller = el.parentElement;
     if (scroller && !active()) scroller.scrollTop = 0;
@@ -159,6 +161,20 @@ export const commandPalette = {
   // the mark of the marked row: an accent groove at its start
   build(live, m) {
     const a = live.state.at;
+    if (live.el.closest('[data-vx-command-deck]')) {
+      const sockets = m.part('sockets');
+      const x = getComputedStyle(live.el).direction === 'rtl' ? live.W - 4 : 1;
+      const glass = m.part('windows');
+      for (const option of optionsOf(live.el)) {
+        const box = boxOf(live, option);
+        if (!box) continue;
+        // The frosted face sits in the same stepped collar on every row.
+        const y = box[1] + Math.floor((box[3] - 4) / 2);
+        sockets.slab(x, y, 0, 3, 4, 1, 'slate', 1).carve(x + 1, y + 1, 0, 1, 2, 1);
+        glass.box(x + 1, y + 1, 0, 1, 2, 1, option === a ? 'light' : 'lens');
+      }
+      return;
+    }
     if (a && !a.closest('[hidden]')) markOf(live, m, a, { way: 'beside' });
   },
 
