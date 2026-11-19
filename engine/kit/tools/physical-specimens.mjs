@@ -33,7 +33,7 @@ async function specimens(plain) {
     await page.getByRole('slider', { name: 'Contour' }).press('End');
     assert.equal(await page.locator('#contour-out').textContent(), '09');
     await page.getByRole('slider', { name: 'Lamp brightness' }).press('Home');
-    assert.equal(await page.locator('#gain-out').textContent(), '00');
+    assert.equal(await page.locator('#gain-out').textContent(), '0%');
     await page.getByRole('button', { name: 'Scan field' }).press('Enter');
     assert.equal(await page.locator('#sweep').textContent(), 'FIELD SCOPE / 02');
 
