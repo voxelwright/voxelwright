@@ -234,6 +234,19 @@ try {
   }
   ok("390 px: no sideways scroll or overflow with a long address, 44 px plates, a tap parts the fog");
 
+  // ---- other screens: a middle width keeps its edges; a tall one has nothing to scroll ----
+  for (const [width, height] of [[768, 1024], [1280, 1800], [1920, 1080]]) {
+    const { context, page } = await open({ viewport: { width, height }, colorScheme: "light" }, LONG);
+    const fit = await page.evaluate(() => {
+      const r = document.querySelector(".lost-sign").getBoundingClientRect();
+      return { left: r.left, right: r.right, scrollWidth: document.documentElement.scrollWidth, scrollHeight: document.documentElement.scrollHeight };
+    });
+    assert.ok(fit.left >= 0 && fit.right <= width && fit.scrollWidth <= width, `${width}×${height}: the sign fits (${Math.round(fit.left)}..${Math.round(fit.right)})`);
+    assert.ok(fit.scrollHeight <= height, `${width}×${height}: nothing to scroll (${fit.scrollHeight})`);
+    await context.close();
+  }
+  ok("768, 1280×1800 and 1920: the sign fits and a tall screen does not scroll");
+
   assert.deepEqual(errors, [], "no page errors");
   console.log(`\n${passed.length} checks passed. Screenshots in ${out}`);
 } finally {
