@@ -32,6 +32,9 @@ kit (Village branch `feature/site-dogfood`), not worked around here.
 9. **A plain card had a pale band on top.** The lit look's case shoulder is a transparent top
    border, and the plain version filled it with the plate's colour; the showcase covered it with
    page CSS. The kit paints it in the case's material now.
+10. **Small gaps a site would otherwise patch:** a navbar's end key may be a toggle button (the
+    site's Night key), an item has a large size for reading lists, an item's trail goes onto its
+    own line in a narrow row, and a picture alone in a paragraph is a block.
 
 ## Open (worth doing in the kit next)
 
@@ -62,3 +65,17 @@ kit (Village branch `feature/site-dogfood`), not worked around here.
 - **The vendored stylesheet is 140 KB** (the site's 21 sheets). `existing.css` and
   `instrument-library.css` carry rules for parts the site does not use; per-part files would let a
   site take only what it needs.
+
+## Where the site still styles a kit part
+
+Each line is a place `static/*.css` reaches into a `vx-` class. Most are the site's own type
+choices; the ones marked *gap* are things the kit could offer instead.
+
+- `site.css`: the navbar's brand and post titles in the serif. Site choice.
+- `site.css`: a model note's callout is a step smaller, its title quiet. Site choice.
+- `site.css`: an instrument's quotes upright, because the site ships no italic serif. Site choice.
+- `landing/park.css`: the name's lettering at 3 px voxels on a phone. *Gap:* a bare heading's
+  plain version is always Vox Block at one size; with voxels it falls back to the narrower Vox
+  Sign, but plain it simply overflows.
+- `landing/park.css`: the page column goes full-bleed while the city draws. Site layout.
+- `voxelmorphism/desk.css`: the keycap select fills its column, as `select.css` invites.

@@ -69,6 +69,7 @@ export function layout(page, site, { dev }) {
 ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
 <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${KIT}/voxelmorphism.css">
 <link rel="stylesheet" href="/site.css">
 ${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
@@ -267,7 +268,7 @@ export function postListHtml(posts) {
   return `<ul class="vx-list-group post-list">\n${posts
     .map(
       (p) =>
-        `<li><a class="vx-item" href="${postPath(p.slug)}"><span class="vx-item-text"><span class="vx-item-title">${e(p.title)}</span>${p.summary ? `<span class="vx-item-line">${e(p.summary)}</span>` : ""}</span><span class="vx-item-trail">${p.draft ? `<span class="vx-badge">Draft</span>` : ""}<time datetime="${p.date}">${shortDate(p.date)}</time></span></a></li>`,
+        `<li><a class="vx-item" data-vx-size="large" href="${postPath(p.slug)}"><span class="vx-item-text"><span class="vx-item-title">${e(p.title)}</span>${p.summary ? `<span class="vx-item-line">${e(p.summary)}</span>` : ""}</span><span class="vx-item-trail">${p.draft ? `<span class="vx-badge">Draft</span>` : ""}<time datetime="${p.date}">${shortDate(p.date)}</time></span></a></li>`,
     )
     .join("\n")}\n</ul>`;
 }
