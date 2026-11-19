@@ -192,7 +192,11 @@
   });
   const links = [...document.querySelectorAll('#side nav a')];
   function showLocation() {
-    const current = links.find(link => link.hash === location.hash) ?? links[0];
+    const remembered = history.state?.workspace;
+    const current = links.find(link => link.hash === location.hash)
+      ?? links.find(link => link.hash === remembered)
+      ?? links.find(link => link.getAttribute('aria-current') === 'page') ?? links[0];
+    if (remembered !== current.hash) history.replaceState({ ...history.state, workspace: current.hash }, '');
     for (const link of links) {
       if (link === current) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
