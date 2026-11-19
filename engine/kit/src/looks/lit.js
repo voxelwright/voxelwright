@@ -323,7 +323,7 @@ export const recess = {
 // Markup: <span class="vx-lamp" data-vx-light="go"></span>
 export const lamp = {
   name: 'lamp',
-  selector: '.vx-lamp',
+  selector: '.vx-lamp:not([data-vx-rail="pilot-strip"] > li > .vx-lamp)',
   pad: 6,
   glowRadius: 3.4,
   glowStrength: halo(0.16),
