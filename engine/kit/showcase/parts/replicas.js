@@ -102,7 +102,12 @@ export const replicaPlate = {
           const width = measureText(FONTS.block, limit);
           plate.text(limit, x + Math.floor((w - width) / 2), H - 15, 3, 1, 'steel', 1, 'block');
         }
-      } else plate.carve(x + 6, y + 8, 0, w - 12, h - 16, 4);
+      } else {
+        // The insert includes the bezel and its recessed glass. Cut the full footprint
+        // projected from the child canvas onto the parent plane (two plate cells).
+        const dx = live.faceZ / 2;
+        plate.carve(x + dx + 2, y + dx + 4, 0, w - 4, h - 8, 4);
+      }
     }
   },
 };

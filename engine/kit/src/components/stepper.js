@@ -55,7 +55,7 @@ function wire(el, on) {
     return true;
   };
 
-  let timer = 0, stepped = false;
+  let timer = 0, steppedKey = null;
   const stop = () => { clearTimeout(timer); clearInterval(timer); timer = 0; };
   const hold = (dir) => {
     stop();
@@ -67,18 +67,22 @@ function wire(el, on) {
     on(key, 'mousedown', (e) => e.preventDefault());
     on(key, 'pointerdown', (e) => {
       if (e.button !== 0) return;
-      stepped = true; // this press has stepped: the click that follows it must not step again
+      steppedKey = key; // this press has stepped: the click that follows it must not step again
       if (step(dir)) hold(dir);
     });
     on(key, 'pointerleave', stop);
     on(key, 'pointercancel', stop);
     on(key, 'blur', stop);
     // a click with no press before it is a key from the keyboard, or a screen reader
-    on(key, 'click', () => { if (stepped) { stepped = false; return; } step(dir); });
+    on(key, 'click', e => {
+      const handled = e.detail > 0 && steppedKey === key;
+      steppedKey = null;
+      if (!handled) step(dir);
+    });
   }
   // wherever the pointer comes up, the holding ends; a press that got no click is forgotten
-  on(document, 'pointerup', () => { stop(); if (stepped) setTimeout(() => { stepped = false; }, 0); });
-  on(document, 'pointercancel', () => { stop(); stepped = false; });
+  on(document, 'pointerup', stop);
+  on(document, 'pointercancel', () => { stop(); steppedKey = null; });
   // and when these listeners are dropped (the part is released), so is a holding that is under way
   on({ addEventListener() {}, removeEventListener: stop }, 'drop', stop);
 
@@ -88,7 +92,7 @@ function wire(el, on) {
   on.watch(input, { attributes: true, attributeFilter: ['min', 'max', 'step', 'disabled', 'readonly'] }, sync);
   if (input.form) on(input.form, 'reset', () => setTimeout(sync));
   watchFieldsets(input, on, sync);
-  on(window, 'blur', () => { stop(); stepped = false; });
+  on(window, 'blur', stop);
   sync();
 }
 
