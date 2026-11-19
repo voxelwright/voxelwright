@@ -237,7 +237,13 @@ try {
 
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
   await page.setViewportSize({ width: 390, height: 844 });
+  // Reduced motion keeps the full-screen city as its still; the plain page is only ?view=2d.
   await page.goto(base);
+  await page.locator(".overlook[data-scene] .park-still").waitFor();
+  assert.equal(await page.evaluate(() => "city" in document.documentElement.dataset), true);
+  assert.equal(await canvas.isVisible(), false);
+  await shot("reduced-still");
+  await page.goto(new URL("?view=2d", base).href);
   assert.equal(await canvas.isVisible(), false);
   await support.waitFor();
   await link.press("Space");
@@ -257,7 +263,7 @@ try {
   assert.match(await status.innerText(), /cleared/);
   await context.setOffline(false);
   await page.locator(".offline-car").waitFor({ state: "hidden" });
-  assert.equal(greetings.length, 3);
+  assert.equal(greetings.length, 4); // one per landing load, the reduced-motion still included
   await context.close();
 
   const touchContext = await browser.newContext({
@@ -316,7 +322,7 @@ try {
   await stillPage.close();
 
   assert.deepEqual(errors, []);
-  console.log("Landing smoke passed: live WebGPU, graphics and pause, Support shadow controls, desktop navigation and eggs, reduced motion, offline, touch, and GPU-free phone navigation.");
+  console.log("Landing smoke passed: live WebGPU, graphics and pause, Support shadow controls, desktop navigation and eggs, reduced-motion still and plain page, offline, touch, and GPU-free phone navigation.");
 } finally {
   server?.close();
   await browser.close();

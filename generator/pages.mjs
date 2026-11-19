@@ -105,12 +105,17 @@ const EARLY = `<script>
   if (t === "dark" || t === "light") r.dataset.theme = t;
   // the Signal Desk's enclosure and caps, chosen this visit, fit every page
   try { const b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k]; } catch {}
-  // plain or voxels: the saved choice, then the address, then reduced motion, forced colours or
-  // Save-Data (static/site.js; the city reads the same answer)
-  const calm = ["(prefers-reduced-motion: reduce)", "(forced-colors: active)"].some((m) => matchMedia(m).matches) || navigator.connection?.saveData;
-  if (p === "1" || q === "2d" || (q !== "3d" && calm)) r.setAttribute("data-vx-plain", "");
-  // the home page that will try the city takes the whole window from its first paint
-  else if (location.pathname === "/") r.dataset.city = "";
+  // The home page is always the full-screen city; only its plain address (?view=2d) is plain.
+  // Reduced motion, forced colours and Save-Data get the city's still (static/landing/home.js).
+  if (location.pathname === "/") {
+    if (q === "2d") r.setAttribute("data-vx-plain", "");
+    else r.dataset.city = "";
+  } else {
+    // every other page: the saved choice, then the address, then reduced motion, forced colours
+    // or Save-Data (static/site.js)
+    const calm = ["(prefers-reduced-motion: reduce)", "(forced-colors: active)"].some((m) => matchMedia(m).matches) || navigator.connection?.saveData;
+    if (p === "1" || q === "2d" || (q !== "3d" && calm)) r.setAttribute("data-vx-plain", "");
+  }
 }
 </script>
 `;

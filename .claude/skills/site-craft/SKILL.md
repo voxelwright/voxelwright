@@ -185,6 +185,9 @@ state change.
   3. `prefers-reduced-motion: reduce` means 2D.
   4. No WebGPU adapter (`navigator.gpu?.requestAdapter()` returns null) means 2D.
   5. A short frame-time probe; if frames are too slow, 2D.
+- Exception: the home page is always the full-screen city. Only `?view=2d` makes it plain; a
+  saved choice is ignored there, and reduced motion, forced colours, Save-Data or no WebGPU
+  get the city's GPU-free still instead of the plain layout.
 - Never sniff the user agent.
 - The 3D world loads only after the 2D page is readable; the 2D page never waits on it.
 

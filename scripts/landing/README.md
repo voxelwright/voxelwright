@@ -41,7 +41,7 @@ npm run build
 PLAYWRIGHT=/path/to/node_modules/playwright node scripts/landing/check-eggs.mjs
 ```
 
-If Playwright already resolves from the site checkout, omit `PLAYWRIGHT`. The test serves `dist/` on a loopback port and closes the server at the end. Set `BASE` to use an already running site or `OUT` to override the screenshot directory (`.shots/eggs`). The test opens Chrome with WebGPU and a light saved graphics setup, then exercises the graphics controls, paused rendering, and the docked Support button. It also checks the plain page with reduced motion and at a touch viewport.
+If Playwright already resolves from the site checkout, omit `PLAYWRIGHT`. The test serves `dist/` on a loopback port and closes the server at the end. Set `BASE` to use an already running site or `OUT` to override the screenshot directory (`.shots/eggs`). The test opens Chrome with WebGPU and a light saved graphics setup, then exercises the graphics controls, paused rendering, and the docked Support button. It also checks that reduced motion keeps the city as its still, then the plain page (`?view=2d`) with reduced motion and at a touch viewport.
 
 ## Full-screen city and signs
 
@@ -49,7 +49,7 @@ The home view keeps the exported Ina geometry in the Village Bay frame. New fixt
 
 The BLOG marquee stands on building 3174 and the Voxelmorphism lightbox on building 1374. Their supports were placed against the Ina lidar surface. The park directory and folding graphics panel stand on the slope in front of the survey camera. Letters, cabinets, posts and lamps share the buildings' depth buffer. Browser links and form controls follow the projected faces for keyboard, touch and modified clicks. Narrow views repeat the destinations on the directory.
 
-The shipped model covers the surveyed, visibility-culled view from Ina Coolbrith Park. Additional city blocks can use the same survey frame. A GPU-free still draws the fixtures over the model capture and keeps navigation available. Reduced motion, forced colours, data saver and `?view=2d` use the plain document.
+The shipped model covers the surveyed, visibility-culled view from Ina Coolbrith Park. Additional city blocks can use the same survey frame. A GPU-free still draws the fixtures over the model capture and keeps navigation available. The home page is always the full-screen city: reduced motion, forced colours and data saver get that GPU-free still, and a saved "Plain page" choice from the reading pages does not apply here. Only `?view=2d` (the city's Plain page sign and first Tab stop) uses the plain document.
 
 ## Atmosphere, arrival and sound
 
