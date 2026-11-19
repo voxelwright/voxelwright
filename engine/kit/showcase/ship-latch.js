@@ -1,0 +1,190 @@
+// A panel-mount slide switch. The metal flange carries the pilot independently of the carriage.
+import { define, defineLook } from '../src/index.js';
+import { hole, halo } from '../src/core/light.js';
+import { MATERIALS } from '../src/core/materials.js';
+import { PRESS, RELEASE, SLIDE, reducedMotion } from '../src/core/motion.js';
+import { cue } from '../src/core/sound.js';
+import { inlineX, watchDirection } from '../src/plain.js';
+import { clamp, listeners } from '../src/components/util.js';
+
+defineLook('ship-latch', {
+  from: 'lit',
+  materials: {
+    steel: { day: '#a8abb0', night: '#646e78', jitter: 0.008 },
+    floor: { day: '#24292e', night: '#20262b' },
+    gasket: { day: '#393636', night: '#313238' },
+    key: { day: '#3d4147', night: '#434953' },
+    lens: { day: '#324940', night: '#283b33' },
+  },
+});
+
+const thumbWidth = 9;
+const travel = 12;
+const seated = (position, target) => Math.abs(position - target) < 0.05;
+const contact = checked => cue(checked ? 'press' : 'release');
+
+define({
+  name: 'ship-latch',
+  selector: '.ship-latch',
+  glowRadius: 2,
+  glowStrength: halo(0.11),
+
+  build(live, model) {
+    const x = live.state.x = inlineX(live);
+    const slot = x(2, 23);
+    const flange = model.part('flange');
+    flange.slab(0, 0, 0, 32, 16, 1, 'gasket', 2);
+    flange.slab(0, 0, 1, 32, 16, 1, 'steel', 2);
+    flange.carve(slot, 3, 0, 23, 10, 2);
+    hole(live, model, { x: slot, y: 3, w: 23, h: 10, depth: 2, wall: 'gasket' });
+    // The shoe rides between two fixed guides on the floor of the slot.
+    const guides = model.part('runners');
+    guides.sunk = true;
+    for (const y of [4, 11]) guides.box(slot, y, -2, 23, 1, 3, 'gasket');
+    live.faceZ = 2;
+
+    const shoe = model.part('shoe');
+    shoe.grounded = false;
+    shoe.sunk = true;
+    shoe.box(1, 5, -2, 7, 6, 1, 'gasket');
+    shoe.box(3, 6, -1, 3, 4, 3, 'steel');
+    const thumb = model.part('thumb');
+    thumb.grounded = false;
+    thumb.sunk = true;
+    // The cap telescopes one course over the shoe's stem under finger pressure.
+    thumb.slab(1, 5, 0, thumbWidth - 2, 6, 2, 'gasket', 1);
+    thumb.slab(0, 4, 2, thumbWidth, 8, 2, 'key', 1);
+    thumb.carve(3, 6, 0, 3, 4, 3);
+    // The transverse index and two raised grip ribs are set into the same moulding.
+    for (const rib of [1, 4, 7]) thumb.box(rib, 5, 4, 1, 6, 1, rib === 4 ? 'ivory' : 'key');
+
+    const pilot = x(27, 3);
+    model.part('ferrule').slab(pilot - 1, 5, 2, 5, 6, 1, 'gasket', 1)
+      .carve(pilot, 6, 2, 3, 4, 1);
+    model.part('lens').slab(pilot, 6, 2, 3, 4, 1, 'light-go', 1);
+    live.state.lit = undefined;
+    live.spring('at').snap(Number(live.state.input.checked));
+  },
+
+  pose(live) {
+    const { thumb, shoe, lens, ferrule } = live.model.byName;
+    const at = live.spring('at'), position = clamp(at.x, 0, 1);
+    thumb.tx = live.state.x(3 + travel * position, thumbWidth);
+    shoe.tx = thumb.tx;
+    thumb.tz = clamp(live.spring('press').x, -1, 0);
+
+    const { input } = live.state;
+    const lit = (seated(position, Number(input.checked)) ? input.checked : live.state.lit) && !input.matches(':disabled');
+    if (lit !== live.state.lit || live.state.tint !== live.tintRevision) {
+      lens.mats.fill(MATERIALS[lit ? 'light-go' : 'lens'].id);
+      lens.tint(live.theme, live.look);
+      ferrule.tint(live.theme, live.look);
+      live.glows = lit;
+      if (lit) {
+        // The frosted centre is brightest above the die. The inside of the ferrule catches green.
+        for (let i = 0; i < lens.count; i++) {
+          const distance = Math.hypot(lens.rest[i * 3] - live.state.x(28, 1) - 0.5, lens.rest[i * 3 + 1] - 8);
+          const core = clamp(1 - distance / 2, 0, 1);
+          lens.col[4 * i] += 0.5 * core;
+          lens.col[4 * i + 2] += 0.2 * core;
+        }
+        for (let i = 0; i < ferrule.count; i++) ferrule.col[4 * i + 1] += 0.09;
+      }
+      live.state.lit = lit;
+      live.state.tint = live.tintRevision;
+    }
+  },
+
+  // Trip the contact when the spring reaches its stop, including a keyboard snap.
+  // Consume the stroke on the clock so a hidden control cannot replay it when redrawn.
+  step(live) {
+    const at = live.spring('at');
+    if (live.state.impact && seated(at.x, at.target)) {
+      live.state.impact = false;
+      if (live.visible) contact(at.target === 1);
+    }
+  },
+
+  bind(live) {
+    const on = listeners(), label = live.el.parentElement;
+    const input = live.state.input = label.querySelector('input');
+    const at = live.spring('at', Number(input.checked), SLIDE.k, SLIDE.c);
+    const press = live.spring('press');
+    let pointer = null, drag = null, drop = null;
+    function pressure(value, spring) {
+      if (reducedMotion()) press.snap(value);
+      else press.to(value, spring.k, spring.c);
+      live.invalidate();
+    }
+    function release(commit = false) {
+      if (pointer === null) return;
+      if (drag?.moving) {
+        if (commit) drop = at.x >= 0.5;
+        if (reducedMotion()) at.snap(Number(input.checked));
+        else at.to(Number(input.checked));
+      }
+      pointer = null;
+      drag = null;
+      pressure(0, RELEASE);
+    }
+    on(label, 'pointerdown', e => {
+      if (!e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
+      drop = null;
+      pointer = e.pointerId;
+      const box = live.el.getBoundingClientRect();
+      if (e.clientX >= box.left && e.clientX <= box.right && e.clientY >= box.top && e.clientY <= box.bottom) {
+        drag = { x: e.clientX, y: e.clientY, start: at.x, moving: false };
+      }
+      pressure(-1, PRESS);
+    });
+    on(window, 'pointermove', e => {
+      if (pointer !== e.pointerId || !drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if (!drag.moving) {
+        if (Math.abs(dx) < 4 || Math.abs(dx) <= Math.abs(dy)) return;
+        drag.moving = true;
+        input.setPointerCapture(pointer);
+        live.state.impact = false;
+      }
+      const direction = live.state.x(1) - live.state.x(0);
+      at.snap(clamp(drag.start + direction * dx / (travel * live.vx), 0, 1));
+      live.invalidate();
+    });
+    for (const type of ['pointerup', 'pointercancel']) {
+      on(window, type, e => { if (pointer === e.pointerId) release(type === 'pointerup'); });
+    }
+    on(window, 'blur', () => release());
+    on(document, 'visibilitychange', () => {
+      if (document.hidden) {
+        live.state.impact = false;
+        release();
+      }
+    });
+    // Native keyboard and assistive clicks commit immediately. Pointer clicks seat on the spring.
+    let slide = false;
+    on(input, 'click', e => {
+      slide = e.detail > 0;
+      // A checkbox has already toggled during click dispatch. Cancel that default
+      // if the hand returned to the starting detent. No change event is synthesized.
+      if (slide && drop !== null && input.checked !== drop) e.preventDefault();
+      drop = null;
+    });
+    function sync(user) {
+      live.state.impact = user;
+      if (user && slide && !reducedMotion()) at.to(Number(input.checked));
+      else at.snap(Number(input.checked));
+      live.invalidate();
+    }
+    on(input, 'change', () => sync(true));
+    on.heed(input, 'checked', () => sync(false));
+    on.watch(input, { attributes: true, attributeFilter: ['checked', 'disabled'] }, () => sync(false));
+    if (input.form) on(input.form, 'reset', () => queueMicrotask(() => sync(false)));
+    watchDirection(live, on);
+    return on.done;
+  },
+
+  plain(el, on) {
+    const input = el.parentElement.querySelector('input');
+    on(input, 'change', () => contact(input.checked));
+  },
+});

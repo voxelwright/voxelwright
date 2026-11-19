@@ -4,6 +4,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Voxelmorphism lab</title>
 <link rel="stylesheet" href="../voxelmorphism.css">
+<link rel="stylesheet" href="./ship-latch.css">
 <style>
   html { background: var(--vx-ground); color: var(--vx-ink); font-family: var(--vx-font); }
   body { margin: 0; padding: 40px 48px 120px; max-width: 1180px; }
@@ -118,7 +119,7 @@
   <div class="grid">
     <div class="col">
       <h2>Toggle, slider, tabs</h2>
-      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch ship-latch"></span>Ship when the tests pass</label>
       <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
       <label class="vx-toggle"><input type="checkbox" role="switch" disabled><span class="vx-switch"></span>Let visitors water</label>
       <span class="vx-slider" style="max-width: 320px"><input type="range" min="0" max="10" value="6" aria-label="Waterings before a bud"></span>
@@ -168,6 +169,7 @@
     import './seed-readout.js';
     import './garden-modes.js';
     import './lab-meter.js';
+    import './ship-latch.js';
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
