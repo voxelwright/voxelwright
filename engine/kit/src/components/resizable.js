@@ -27,7 +27,8 @@
 //   Enter     the pane before it to its least; again, back to where it was
 
 import { hole, halo, byTheme, warmth } from '../core/light.js';
-import { CALM, reducedMotion } from '../core/motion.js';
+import { cue } from '../core/sound.js';
+import { CALM, PRESS, RELEASE, reducedMotion } from '../core/motion.js';
 import { listeners, clamp } from './util.js';
 
 const LEAST = 12;          // voxels: a pane's least size where it names none
@@ -165,7 +166,13 @@ function wire(el, on, changed = () => {}) {
   stop();
   split.use();
 
-  const hold = (held) => { if (el.hasAttribute('data-vx-held') !== held) { el.toggleAttribute('data-vx-held', held); changed(); } };
+  const guide = el.hasAttribute('data-vx-cross-slide');
+  const hold = (held) => {
+    if (el.hasAttribute('data-vx-held') === held) return;
+    el.toggleAttribute('data-vx-held', held);
+    changed();
+    if (guide) cue(held ? 'press' : 'release');
+  };
   const tell = (i) => el.dispatchEvent(new CustomEvent('vx-resize', { bubbles: true, detail: { value: Number(el.getAttribute('aria-valuenow')), size: split.sizes[i] } }));
   const go = (i, to) => { if (split.move(i, to)) tell(i); };
 
@@ -174,15 +181,22 @@ function wire(el, on, changed = () => {}) {
   const along = (e) => (split.down() ? e.clientY : e.clientX);
   on(el, 'pointerdown', (e) => {
     const i = split.at(el);
-    if (e.button !== 0 || off() || i < 0) return;
+    if (e.button !== 0 || off() || i < 0 || (guide && grab)) return;
     e.preventDefault(); // it starts no selection
     el.focus({ preventScroll: true, focusVisible: false }); // the arrow keys go on from where the hand left it; no ring for a hand
-    grab = { i, at: along(e), size: split.sizes[i] };
+    grab = { id: e.pointerId, i, at: along(e), size: split.sizes[i] };
     try { el.setPointerCapture(e.pointerId); } catch { /* a pointer that cannot be captured still drags while it is over the groove */ }
     hold(true);
   });
-  on(el, 'pointermove', (e) => { if (grab) go(grab.i, grab.size + (along(e) - grab.at) * (split.flip() ? -1 : 1)); });
-  const drop = () => { if (grab) { grab = null; hold(false); } };
+  const ownsGrab = (e) => grab && (!guide || grab.id === e.pointerId);
+  on(el, 'pointermove', (e) => {
+    if (ownsGrab(e)) go(grab.i, grab.size + (along(e) - grab.at) * (split.flip() ? -1 : 1));
+  });
+  const drop = (e) => {
+    if (e && !ownsGrab(e)) return;
+    grab = null;
+    hold(false);
+  };
   on(el, 'pointerup', drop);
   on(el, 'pointercancel', drop);
   on(el, 'lostpointercapture', drop);
@@ -229,6 +243,23 @@ export const resizable = {
 
   build(live, m) {
     const { W, H, el } = live, D = live.look.groove;
+    if (el.hasAttribute('data-vx-cross-slide')) {
+      const mid = Math.floor(W / 2);
+      // A runner bears on the transverse race. Its thin blade marks the split below.
+      m.part('blade').box(mid, 8, 0, 1, H - 8, 1, 'steel');
+      m.part('runner').slab(mid - 3, 3, 1, 7, 7, 2, 'steel');
+      const grip = m.part('grip');
+      grip.slab(mid - 3, 1, 3, 6, 10, 2, 'gasket');
+      grip.slab(mid - 2, 2, 5, 4, 8, 1, 'gasket');
+      grip.box(mid - 2, 3, 6, 1, 6, 1, 'warm-metal');
+      live.state.held = el.hasAttribute('data-vx-held');
+      const pressure = live.spring('pressure');
+      const stop = live.state.held ? -1 : 0;
+      const spring = live.state.held ? PRESS : RELEASE;
+      if (reducedMotion()) pressure.snap(stop); else pressure.to(stop, spring.k, spring.c);
+      m.part('window').box(mid + 3, 5, 3, 1, 3, 1, live.state.held ? 'light' : 'lens');
+      return;
+    }
     const lying = el.closest('.vx-resizable')?.dataset.vxWay === 'down';
     // the channel is the middle voxel of the groove's box; the rest of the box is clear surface
     // to take hold of. Held, its light is the accent's; at rest, the room's own.
@@ -240,8 +271,29 @@ export const resizable = {
   },
 
   pose(live) {
-    // brighter while it is aimed at or has the focus; held, it is the accent at its full strength
-    const lit = live.spring('lit').x, held = live.state.held;
+    const held = live.state.held;
+    const { runner, grip, window: lens } = live.model.byName;
+    if (grip) {
+      grip.tz = live.spring('pressure').x;
+      // The three-cell window reflects in its steel shoulder. The opaque grip stays matte.
+      if (held && runner.tintRevision !== live.tintRevision) {
+        runner.tint(live.theme, live.look);
+        for (let i = 0; i < runner.count; i++) {
+          const [x, y, z] = runner.rest.subarray(3 * i, 3 * i + 3);
+          const distance = Math.hypot(x - lens.rest[0], Math.max(0, Math.abs(y - 6.5) - 1), z - 3.5);
+          const reflected = 0.30 * Math.max(0, 1 - distance / 3);
+          for (let c = 0; c < 3; c++) {
+            const at = i * 4 + c;
+            runner.col[at] += (lens.col[c] - runner.col[at]) * reflected;
+          }
+        }
+        runner.tintRevision = live.tintRevision;
+      }
+      live.glowStrength = held ? halo(0.06) * byTheme(live) : 0;
+      live.glowRadius = 1.5;
+      return;
+    }
+    const lit = live.spring('lit').x;
     live.glowStrength = halo(GLOW) * (held ? byTheme(live) * 1.8 : warmth(live) * (1 + lit * 1.1));
     live.glowRadius = REACH + (held ? 1.2 : lit * 0.8);
   },
