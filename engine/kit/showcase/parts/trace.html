@@ -12,9 +12,12 @@
   .talk .vx-button { margin-block-start: calc(var(--vx) * 3); }
   #ship { justify-self: stretch; container-type: inline-size; }
   #ship:not([data-vx-live]) > li:not(:last-child)::before {
-    inset-inline-start: calc(var(--vx) * 2);
+    inset-inline-start: calc(var(--vx) * 2.75);
+    inline-size: calc(var(--vx) * .5);
     background: var(--vx-steel);
   }
+  #ship:not([data-vx-live]) > li > .vx-lamp { outline: 1px solid var(--vx-steel); }
+  #ship:not([data-vx-live]) > li[data-vx-state="waiting"] > .vx-lamp { background: #363b39; }
   #ship[data-vx-live] > li > .vx-lamp { visibility: hidden; }
   #ship > li { grid-template-columns: calc(var(--vx) * 6) minmax(0, 1fr); }
   #ship > li > .vx-lamp {

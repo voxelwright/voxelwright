@@ -21,18 +21,22 @@
   #when .vx-toggle-group[data-vx-live] > label { color: var(--lit-legend); }
   #when .vx-toggle-group:not([data-vx-live]) label { background: var(--vx-key); color: var(--lit-legend); }
   #when .vx-toggle-group:not([data-vx-live]) label:has(input:checked) { text-decoration: underline; }
+  #when .vx-toggle-group:not([data-vx-live]) label:has(input:disabled) { background: var(--vx-steel); color: #202822; }
   #when .vx-toggle-group[data-vx-live] label:has(input:disabled) { color: #202822; }
   #when .dispatch-footer {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
     gap: calc(var(--vx) * 3);
     min-block-size: calc(var(--vx) * 11);
     margin-block-start: calc(var(--vx) * 8);
   }
   #when .vx-questionnaire-send { margin-inline-start: calc(var(--vx) * 4); }
-  #when .vx-questionnaire-note { flex: 1 1 calc(var(--vx) * 22); color: #fff6df; margin: 0; }
-  #when .vx-questionnaire-note:empty { flex: 0 0 0; min-block-size: 0; }
+  #when .vx-questionnaire-note { color: #fff6df; margin: 0; }
+  #when[data-vx-answered] .vx-questionnaire-note { grid-column: 1 / -1; }
+  @media (max-width: 30rem) {
+    #when .dispatch-footer { min-block-size: max(44px, 3lh); }
+  }
   #when .vx-questionnaire-note:focus-visible { outline-color: #f2d698; }
   .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
   .said { color: var(--vx-ink-quiet); font-size: 0.875rem; min-block-size: 1.55em; }
