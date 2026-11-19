@@ -7,60 +7,67 @@ import { cue } from '../../src/core/sound.js';
 import { listeners } from '../../src/components/util.js';
 import { watchDirection } from '../../src/plain.js';
 
-function strokes(el, on, live) {
-  for (const [i, link] of [...el.querySelectorAll('a')].entries()) {
-    let owner = null;
-    const travel = live?.spring('stroke' + i);
-    function move(down, instant) {
-      if (!travel) return;
-      const target = down ? -live.state.travel : 0;
-      const spring = down ? PRESS : RELEASE;
-      if (instant || reducedMotion()) travel.snap(target);
-      else {
-        if (down) travel.x = Math.min(travel.x, target * .36);
-        travel.to(target, spring.k, spring.c);
-      }
-      live.invalidate();
+function bindStroke(link, on, live) {
+  let owner = null;
+
+  function move(down, instant) {
+    const travel = live?.state.rows?.find(row => row.link === link)?.spring;
+    if (!travel) return;
+    const target = down ? -live.state.travel : 0;
+    const spring = down ? PRESS : RELEASE;
+    if (instant || reducedMotion()) travel.snap(target);
+    else {
+      if (down) travel.x = Math.min(travel.x, target * .36);
+      travel.to(target, spring.k, spring.c);
     }
-    function press(id) {
-      if (owner !== null) return;
-      owner = id;
-      move(true, id === 'Enter');
-      cue('press');
-    }
-    function release(id, audible) {
-      if (owner === null || owner !== id) return;
-      owner = null;
-      move(false, id === 'Enter');
-      if (audible) cue('release');
-    }
-    on(link, 'pointerdown', e => { if (e.button === 0) press(e.pointerId); });
-    on(link, 'pointerup', e => release(e.pointerId, true));
-    on(link, 'pointercancel', e => release(e.pointerId, false));
-    on(link, 'pointerleave', e => release(e.pointerId, false));
-    on(link, 'keydown', e => { if (e.key === 'Enter' && !e.repeat) press(e.key); });
-    on(link, 'keyup', e => release(e.key, true));
-    on(link, 'blur', () => release(owner, false));
+    live.invalidate();
   }
+  function press(id) {
+    if (owner !== null) return;
+    owner = id;
+    move(true, id === 'Enter');
+    cue('press');
+  }
+  function release(id, audible) {
+    if (owner === null || owner !== id) return;
+    owner = null;
+    move(false, id === 'Enter');
+    if (audible) cue('release');
+  }
+  on(link, 'pointerdown', e => { if (e.button === 0) press(e.pointerId); });
+  on(link, 'pointerup', e => release(e.pointerId, true));
+  on(link, 'pointercancel', e => release(e.pointerId, false));
+  on(link, 'pointerleave', e => release(e.pointerId, false));
+  on(link, 'keydown', e => { if (e.key === 'Enter' && !e.repeat) press(e.key); });
+  on(link, 'keyup', e => release(e.key, true));
+  on(link, 'blur', () => release(owner, false));
 }
 
 function bindRows(el, on, live) {
-  let bindings = listeners();
-  strokes(el, bindings, live);
+  const bound = new Map();
+  function sync() {
+    const links = new Set(el.querySelectorAll('li > a'));
+    for (const [link, binding] of bound) {
+      if (!links.has(link)) { binding.done(); bound.delete(link); }
+    }
+    for (const link of links) {
+      if (bound.has(link)) continue;
+      const binding = listeners();
+      bindStroke(link, binding, live);
+      bound.set(link, binding);
+    }
+  }
+  sync();
   on.watch(el, { childList: true, subtree: true }, changes => {
-    const rowsChanged = changes.some(change => [...change.addedNodes, ...change.removedNodes]
-      .some(node => node.matches?.('a, li') || node.querySelector?.('a, li')));
-    if (!rowsChanged) return;
-    bindings.done();
+    if (!changes.some(change => [...change.addedNodes, ...change.removedNodes]
+      .some(node => node.matches?.('a, li') || node.querySelector?.('a, li')))) return;
     if (live) {
-      for (const row of live.state.rows ?? []) row.spring.snap(0);
       if (live.canvas.parentNode !== el) el.prepend(live.canvas);
       live.rebuild();
     }
-    bindings = listeners();
-    strokes(el, bindings, live);
+    sync();
   });
-  return () => bindings.done();
+  return () => { for (const binding of bound.values()) binding.done(); };
 }
 
 export const sectionBank = {
@@ -86,6 +93,11 @@ export const sectionBank = {
         plate.box(x, y, 2, 3, 2, 1, 'steel').plot(x + 1, y, 2, 'gasket');
       }
     }
+    const retained = new Map(live.state.rows?.map(row => [row.link, row]));
+    for (const row of retained.values()) {
+      if (!el.contains(row.link)) delete live.springs[row.springName];
+    }
+    live.state.nextStroke ??= 0;
     live.state.rows = [...el.querySelectorAll('li')].filter(li => li.querySelector('a')).map((li, i) => {
       const y = Math.round(li.offsetTop / vx);
       const h = Math.round(li.offsetHeight / vx);
@@ -107,12 +119,14 @@ export const sectionBank = {
       const gripX = rtl ? capX + 5 : capX + capW - 11;
       paddle.box(gripX, y + h - 7, rise + 1, 6, 1, 1, 'key');
       paddle.grounded = false;
-      const spring = live.spring('stroke' + i);
+      const link = li.querySelector('a');
+      const springName = retained.get(link)?.springName ?? 'stroke' + live.state.nextStroke++;
+      const spring = live.spring(springName);
       live.label(li.querySelector('span'), () => rise + 1 + paddle.tz);
       collars.slab(lampX - 1, lampY - 1, 3, 5, 8, 1, 'steel', 1)
         .carve(lampX, lampY, 3, 3, 6, 1);
       lens.box(lampX, lampY, 3, 3, 6, 1, 'pilot-glass');
-      return { link: li.querySelector('a'), paddle, spring, lampY };
+      return { link, paddle, spring, springName, lampY };
     });
     live.state.lampX = lampX;
     live.state.current = undefined;
