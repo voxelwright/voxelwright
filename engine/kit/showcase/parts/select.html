@@ -24,19 +24,21 @@
   }
   .vx-select.region-program:not([data-vx-live])::before { content: none; }
   .region-program:not([data-vx-live]) #region {
-    background: linear-gradient(#b3caa5, #b3caa5) left calc(var(--vx) * 2) center /
+    background: linear-gradient(var(--picker-screen, #b3caa5), var(--picker-screen, #b3caa5)) left calc(var(--vx) * 2) center /
       calc(100% - var(--vx) * 14) calc(100% - var(--vx) * 4) no-repeat;
   }
+  .region-program:not([data-vx-live]):has(#region:disabled) { --picker-key: #afb5b2; --picker-screen: #abb1af; }
+  .region-program:has(#region:disabled) #region { color: #393e3c; cursor: default; }
   .region-program:not([data-vx-live]):dir(rtl) #region { background-position: right calc(var(--vx) * 2) center; }
   .vx-select.region-program:not([data-vx-live])::after {
     content: "▾" / ""; display: grid; place-items: center;
     inset-inline-end: calc(var(--vx) * 2); inset-block-start: calc(var(--vx) * 2);
     inline-size: calc(var(--vx) * 8); block-size: calc(100% - var(--vx) * 4);
-    clip-path: none; background: #cab58e; color: #262e2c;
+    clip-path: none; background: var(--picker-key, #cab58e); color: #262e2c;
     box-shadow: 0 2px #766951;
   }
-  .region-program:not([data-vx-live]):has(#region:active)::after,
-  .region-program:not([data-vx-live]):has(#region:open)::after { translate: 0 1px; }
+  .region-program:not([data-vx-live]):has(#region:enabled:active)::after { translate: 0 1px; }
+  .region-program:not([data-vx-live]):has(#region:enabled:open)::after { translate: 0 1px; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds

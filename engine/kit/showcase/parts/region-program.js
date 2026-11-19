@@ -27,6 +27,7 @@ defineLook('region-program', {
       build(live, model) {
         const { W, H, el } = live;
         const rtl = getComputedStyle(el).direction === 'rtl';
+        const off = live.state.off = live.state.control.matches(':disabled');
         const keyWidth = 8;
         const keyX = rtl ? 2 : W - keyWidth - 2;
         const windowX = rtl ? keyWidth + 4 : 2;
@@ -34,7 +35,7 @@ defineLook('region-program', {
         const body = model.part('housing');
         body.slab(0, 0, 0, W, H, 3, 'slate', 1);
         body.carve(windowX, 2, 2, windowWidth, H - 4, 1);
-        body.box(windowX, 2, 1, windowWidth, H - 4, 1, 'floor');
+        body.box(windowX, 2, 1, windowWidth, H - 4, 1, off ? 'steel' : 'floor');
         body.carve(keyX - 1, 1, 1, keyWidth + 2, H - 2, 2);
         body.box(keyX - 1, 1, 0, keyWidth + 2, H - 2, 1, 'gasket');
 
@@ -44,7 +45,7 @@ defineLook('region-program', {
         key.grounded = false;
         body.carve(keyX + 2, 4, 0, keyWidth - 4, H - 7, 1);
         key.box(keyX + 2, 4, 0, keyWidth - 4, H - 7, 4, 'gasket');
-        key.slab(keyX, 3, 4, keyWidth, H - 5, 2, 'warm-metal', 1);
+        key.slab(keyX, 3, 4, keyWidth, H - 5, 2, off ? 'steel' : 'warm-metal', 1);
         for (let i = 0; i < 5; i++) {
           key.plot(keyX + 1 + i, Math.floor(H / 2) - 1 + Math.min(i, 4 - i), 5, 'gasket');
         }
@@ -55,8 +56,7 @@ defineLook('region-program', {
         model.part('pilot').box(lensX, 1, 2, 4, 1, 1, 'light-warm');
         model.keyTravel = 3;
         live.faceZ = 2;
-        live.state.off = live.state.control.matches(':disabled');
-        if (live.state.off) {
+        if (off) {
           live.state.held = false;
           live.spring('press').snap(0);
         }
@@ -65,8 +65,8 @@ defineLook('region-program', {
       pose(live) {
         const { lens, pilot, 'picker-key': key } = live.model.byName;
         const stroke = Math.max(-live.model.keyTravel, Math.min(0, live.spring('press').x));
-        key.tz = stroke;
-        pilot.hidden = stroke > -1.5;
+        key.tz = live.state.off ? -live.model.keyTravel : stroke;
+        pilot.hidden = live.state.off || stroke > -1.5;
         lens.hidden = !pilot.hidden;
       },
     },
