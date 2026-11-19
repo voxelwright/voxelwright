@@ -40,7 +40,7 @@ const read = (id) => p.evaluate(async (id) => {
     shown: seen.map((o) => o.textContent.trim().split(/\s{2,}| (?=Frankfurt|Amsterdam|Warsaw|Київ|archived)/)[0]), active: act ? act.firstChild.textContent.trim() : null,
     selected: opts.filter((o) => o.getAttribute('aria-selected') === 'true').length, focus: document.activeElement === input,
     under: Math.round(f.top - w.bottom), sameW: Math.abs(f.width - w.width) <= 4, left: Math.round(f.left - w.left),
-    body: made(parts?.body), light: made(parts?.light), pick: made(parts?.pick), pickShown: parts ? !parts.pick.hidden : null,
+    body: made(parts?.body), slides: made(parts?.panel), pick: made(parts?.pick), pickShown: parts ? !parts.pick.hidden : null,
     pickY: parts ? parts.pick.ty * l.vx : null, actY: act ? Math.round(act.getBoundingClientRect().top - f.top) : null,
     empty: empty && !empty.hidden ? empty.textContent : null,
   };
@@ -56,7 +56,7 @@ await press('#use-q');
 m = await read('use');
 say(m.open && m.expanded === 'true' && m.focus && m.shown.length === 9 && m.active === null, `a press in the field opens the rows (${m.shown.length}), marks none, and the focus stays in the field`);
 say(m.under >= 4 && m.under <= 24 && m.sameW && m.left === 0, `the float lies under the well, as wide as it (${m.under} px under)`);
-say(m.body === 'panel' && m.light === 'light' && m.pick === 'light', `it is a float: a plate of ${m.body} on a ring of ${m.light}, and a mark of ${m.pick}`);
+say(m.body === 'lens+panel+slate' && m.slides === 'steel' && m.pick === 'light', 'the primary tray carries its reading face and smoked channel on steel slides, with a lit cursor');
 
 // typing: what matches, and the first marked
 await p.keyboard.type('fe', { delay: 40 }); await p.waitForTimeout(400);
