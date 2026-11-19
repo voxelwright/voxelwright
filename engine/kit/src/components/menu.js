@@ -46,7 +46,8 @@ export const menu = {
       live.invalidate();
     };
     const { invoker, put } = menuAnchor(el, on, () => live.vx * 3);
-    nativeRelease(live, on, ['panel']);
+    const motion = () => live.model.menuMotion ?? { parts: ['panel'], surface: 'rim' };
+    nativeRelease(live, on, motion);
     let initialFocus;
     on(el, 'beforetoggle', e => {
       initialFocus?.removeAttribute('autofocus');
@@ -68,7 +69,8 @@ export const menu = {
       live.visible = true;
       live.state.scrollY = (el.querySelector(':scope > .vx-menu-rows')?.scrollTop ?? 0) / live.vx;
       const resume = live.rebuild();
-      live.play('assemble', ['panel'], { resume, duration: 0.17, surface: 'rim', from: origin });
+      const { parts, surface, openDuration = 0.17 } = motion();
+      live.play('assemble', parts, { resume, duration: openDuration, surface, from: origin });
       if (invoker()?.matches(':focus-visible')) live.state.items.find(menuEnabled)?.focus();
       live.draw();
       el.removeAttribute('data-vx-cover-legends');

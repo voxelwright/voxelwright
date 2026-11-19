@@ -146,7 +146,9 @@ export function nativeRelease(live, on, parts, duration = 0.12, surface = 'rim',
       }
     }
     el.dataset.vxNativeExit = '';
-    live.play('crumble', parts, { duration, surface, from: origin?.() }).then(() => {
+    // A reused menu can acquire a different model and opening point on each invocation.
+    const motion = typeof parts === 'function' ? parts() : { parts, surface, from: origin?.() };
+    live.play('crumble', motion.parts, { duration: motion.closeDuration ?? duration, surface: motion.surface, from: motion.from }).then(() => {
       if (current !== request) return;
       clear();
       live.clearSurface();

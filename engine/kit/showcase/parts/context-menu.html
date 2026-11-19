@@ -20,6 +20,11 @@
   .board { inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
   .board:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
   .board .vx-recess { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); }
+  #log-menu[data-log-actions] { min-inline-size: min(13rem, calc(100vw - 36px)); }
+  #log-menu[data-log-actions] [role="menuitem"] { padding-inline-start: calc(var(--vx) * 10); }
+  #log-menu[data-log-keys][data-vx-live] [role="menuitem"] { color: var(--lit-legend); }
+  #log-menu[data-log-keys][data-vx-live] [data-vx-kind="danger"] { color: var(--vx-danger-legend); }
+  #log-menu[data-log-actions][data-vx-native-exit] { transition-duration: 210ms; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -38,7 +43,7 @@
     <div class="logs" id="logs" data-vx-contextmenu="log-menu" aria-describedby="logs-hint">
       <label class="vx-field"><span class="vx-field-label">Find a log</span><span class="vx-well"><input type="text" id="find" value="deploy" autocomplete="off"></span></label>
       <ul class="files">
-        <li><a href="#deploy-213" id="log-213"><span>deploy-213.log</span><span>Mina, four minutes ago</span></a></li>
+        <li><a href="#deploy-213" id="log-213" aria-haspopup="menu" aria-controls="log-menu"><span>deploy-213.log</span><span>Mina, four minutes ago</span></a></li>
         <li><a href="#deploy-212" id="log-212"><span>deploy-212.log</span><span>Ada, yesterday</span></a></li>
         <li><a href="#deploy-211" id="log-211"><span>deploy-211.log</span><span>Mina, two days ago</span></a></li>
       </ul>
@@ -80,18 +85,21 @@
   import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
   import { contextMenu } from '../../src/components/context-menu.js';
-  Object.assign(LOOKS.lit.parts, parts);
+  import { logMenu, connectLogActions } from './log-actions.js';
+  Object.assign(LOOKS.lit.parts, parts, { menu: logMenu });
   const $ = (id) => document.getElementById(id);
   // the menu is for the log it was opened on
   let what = 'the logs';
   $('logs').addEventListener('vx-contextmenu', (e) => {
     const a = e.target.closest?.('.files a');
+    e.detail.menu.toggleAttribute('data-log-actions', a === $('log-213'));
     what = a ? a.querySelector('span').textContent : 'the logs';
     e.detail.menu.setAttribute('aria-label', what);
   });
   $('board').addEventListener('vx-contextmenu', () => { what = 'the board'; });
   $('board-uk').addEventListener('vx-contextmenu', () => { what = 'дошку'; });
   for (const m of document.querySelectorAll('.vx-menu')) m.addEventListener('click', (e) => { const it = e.target.closest('[role="menuitem"]'); if (it) $('chosen').textContent = `${it.dataset.do} ${what}`; });
+  connectLogActions($('log-menu'), $('log-213'));
   show(contextMenu);
 </script>
 </body>
