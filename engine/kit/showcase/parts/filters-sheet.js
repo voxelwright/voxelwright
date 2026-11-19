@@ -61,6 +61,7 @@ function headerPull(el) {
     const id = grip.id;
     grip = null;
     if (head.hasPointerCapture(id)) head.releasePointerCapture(id);
+    el.removeAttribute('data-dragging');
     el.style.removeProperty('transition');
     el.style.removeProperty('translate');
     el.style.removeProperty('--_drag');
@@ -75,6 +76,7 @@ function headerPull(el) {
     const box = el.getBoundingClientRect();
     const offset = sign > 0 ? box.right - document.documentElement.clientWidth : -box.left;
     grip = { id: e.pointerId, sign, start: e.clientX, offset, distance: offset, x: e.clientX, time: e.timeStamp, speed: 0 };
+    el.setAttribute('data-dragging', '');
     head.setPointerCapture(e.pointerId);
     el.style.translate = sign * offset + 'px 0';
     el.style.transition = 'none';
@@ -91,7 +93,8 @@ function headerPull(el) {
   head.addEventListener('pointerup', e => {
     if (grip?.id !== e.pointerId) return;
     const flick = e.timeStamp - grip.time < 80 && grip.speed > 0.55 && grip.distance > 20;
-    release(grip.distance > el.offsetWidth * 0.4 || flick);
+    const pulled = (e.clientX - grip.start) * grip.sign > 3;
+    release(pulled && (grip.distance > el.offsetWidth * 0.4 || flick));
   });
   head.addEventListener('lostpointercapture', e => { if (grip?.id === e.pointerId) release(false); });
   el.addEventListener('close', () => release(false));

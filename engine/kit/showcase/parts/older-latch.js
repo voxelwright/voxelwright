@@ -27,8 +27,12 @@ export const olderLatch = {
     cap.grounded = false;
     cap.slab(3, 3, -1, width - 2, H - 6, 4, 'gasket', 2);
     cap.slab(4, 4, 3, width - 4, H - 8, 1, 'key', 1);
-    // Two transverse ridges keep the thumb on the paddle.
-    for (const y of [5, 8]) cap.box(6, y, 4, width - 8, 1, 1, 'key');
+    const cx = Math.floor(width / 2) + 1, cy = Math.floor(H / 2);
+    for (const [name, direction] of [['closed-mark', 1], ['open-mark', -1]]) {
+      const mark = model.part(name);
+      mark.grounded = false;
+      for (let x = -3; x <= 3; x++) mark.plot(cx + x, cy - direction * (Math.abs(x) - 1), 4, 'ink');
+    }
     model.part('socket').slab(W - 7, H / 2 - 2, 0, 5, 4, 1, 'gasket', 1);
     model.part('lens').box(W - 6, H / 2 - 1, 1, 3, 2, 1, 'ivory');
     live.glowStrength = 0;
@@ -39,6 +43,10 @@ export const olderLatch = {
     const { cap, stem, lens, bezel } = live.model.byName;
     stem.tz = cap.tz = Math.max(-4, Math.min(0, live.spring('stroke').x));
     const open = live.el.closest('details').open;
+    const closedMark = live.model.byName['closed-mark'], openMark = live.model.byName['open-mark'];
+    closedMark.tz = openMark.tz = cap.tz;
+    closedMark.hidden = open;
+    openMark.hidden = !open;
     if (open === live.state.lit && live.tintRevision === live.state.tint) return;
     live.state.lit = open;
     live.state.tint = live.tintRevision;

@@ -63,29 +63,36 @@ export const faqLatch = {
     const move = () => {
       const stem = live.spring('stem'), target = depth(live);
       const spring = target < stem.x ? PRESS : RELEASE;
-      if (reducedMotion()) stem.snap(target);
+      if (reducedMotion() || summary.matches(':focus-visible')) stem.snap(target);
       else stem.to(target, spring.k, spring.c);
       live.invalidate();
     };
-    const down = () => {
-      if (live.state.held) return;
+    let owner = null;
+    const down = source => {
+      if (owner !== null) return;
+      owner = source;
       live.state.held = true;
       move();
       cue('press');
     };
-    const up = () => {
-      if (!live.state.held) return;
+    const up = source => {
+      if (owner !== source || owner === null) return;
+      owner = null;
       live.state.held = false;
       move();
       cue('release');
     };
-    on(summary, 'pointerdown', e => { if (e.isPrimary && e.button === 0) down(); });
-    on(window, 'pointerup', e => { if (e.isPrimary && e.button === 0) up(); });
-    on(window, 'pointercancel', e => { if (e.isPrimary) up(); });
-    on(summary, 'keydown', e => { if (!e.repeat && ['Enter', ' '].includes(e.key)) down(); });
-    on(summary, 'keyup', e => { if (['Enter', ' '].includes(e.key)) up(); });
-    on(summary, 'blur', up);
-    on(window, 'blur', up);
+    on(summary, 'pointerdown', e => { if (e.isPrimary && e.button === 0) down(e.pointerId); });
+    on(window, 'pointerup', e => up(e.pointerId));
+    on(window, 'pointercancel', e => up(e.pointerId));
+    on(summary, 'keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (e.repeat) e.preventDefault();
+      else down(e.key);
+    });
+    on(summary, 'keyup', e => up(e.key));
+    on(summary, 'blur', () => up(owner));
+    on(window, 'blur', () => up(owner));
     on(row, 'toggle', move);
     return on.done;
   },

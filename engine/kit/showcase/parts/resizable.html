@@ -181,8 +181,12 @@
   use.addEventListener('vx-resize', (e) => { said.textContent = `The list has ${e.detail.value}% of the room.`; });
   window.resized = [];
   document.addEventListener('vx-resize', (e) => window.resized.push([e.target.closest('.vx-resizable').id, e.detail.value, e.detail.size]));
-  use.style.setProperty('--list-stop', `calc(${document.getElementById('services').dataset.vxMin} * var(--vx))`);
-  use.style.setProperty('--detail-stop', `calc(${document.getElementById('detail').dataset.vxMin} * var(--vx))`);
+  for (const [id, stop] of [['services', '--list-stop'], ['detail', '--detail-stop']]) {
+    const pane = document.getElementById(id);
+    const fit = () => use.style.setProperty(stop, 'calc(' + (Number(pane.dataset.vxMin) || 0) + ' * var(--vx))');
+    fit();
+    new MutationObserver(fit).observe(pane, { attributes: true, attributeFilter: ['data-vx-min'] });
+  }
   show(resizable, {
     name: 'service-split-guide', selector: '#use-guide', pad: 2,
     build(live, model) {

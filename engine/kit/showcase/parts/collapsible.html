@@ -13,6 +13,7 @@
   .deploys span { color: var(--vx-ink-quiet); }
   #older summary { min-block-size: 52px; gap: .75rem; }
   #older .older-latch { --vx: 2px; position: relative; isolation: isolate; flex: 0 0 56px; height: 32px; }
+  #older > summary:has(.older-latch[data-vx-live])::after { content: none; }
   #older .older-latch:not([data-vx-live]) { display: none; }
   #older:has(summary:focus-visible)::details-content, #older summary:focus-visible::after { transition: none; }
 

@@ -53,6 +53,7 @@
   .frame::after { content: ""; position: absolute; inset: 0; background: rgb(8 9 15 / 0.5); }
   .frame dialog[open] { position: absolute; z-index: 1; --_w: calc(var(--vx) * 44); transition: none; }
   @media (max-width: 600px) { .frames { grid-template-columns: minmax(0, 1fr); } }
+  #filters[data-dragging]::backdrop { transition: none; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
