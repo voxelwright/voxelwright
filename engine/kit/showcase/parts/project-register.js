@@ -74,7 +74,7 @@ defineLook('project-register', {
         const at = live.state.at;
         pick.hidden = at == null;
         // The five-cell lens starts three cells into a standard eleven-cell row.
-        if (at != null) pick.ty = at + Math.round((live.state.rowHeight - 11) / 2);
+        if (at != null) pick.ty = Math.round(live.state.rowCenter - 5.5);
         panel.ty = live.state.above ? live.H + 2 : 0;
         live.glowStrength = halo(.055);
       },
