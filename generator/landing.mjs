@@ -28,7 +28,14 @@ ${links}
 <div class="park-tools" hidden>
 <button type="button" data-time aria-pressed="false">Night</button>
 <button type="button" data-pause aria-pressed="false">Pause flight</button>
-<details class="display-settings"><summary>View</summary><div><label>Resolution <select><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option><option value="low">Low</option></select></label><a href="/?view=2d">Plain page</a></div></details>
+<details class="display-settings"><summary>View</summary>
+<div class="view-panel"><fieldset><legend>Graphics</legend>
+<label>Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
+<label for="park-scale">Resolution limit <span data-scale-value aria-hidden="true"></span>
+<input id="park-scale" name="scale" type="range" min="30" max="100" step="5"></label>
+<label>Dynamic resolution <input name="dynamic" type="checkbox"></label>
+<label>Frame target <select name="target"><option value="30">30 fps</option><option value="60" selected>60 fps</option><option value="120">120 fps</option></select></label>
+</fieldset><a data-view="2d" href="/?view=2d">Plain page</a><a data-view="3d" href="/?view=3d" hidden>Live view</a></div></details>
 </div></figcaption>
 </figure>
 ${latest.length ? `<section class="park-writing"><h2>Recent writing</h2><ul>${latest.map((p) => `<li><a href="${e(postPath(p.slug))}">${e(p.title)}</a><time datetime="${e(p.date)}">${e(p.date)}</time></li>`).join("")}</ul></section>` : ""}

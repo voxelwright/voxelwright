@@ -82,6 +82,8 @@ city = clean(
     .replace(/@vertex fn vsFirst[\s\S]*?(?=@vertex fn vs\()/, "")
     .replace(/if \(in\.own > textureLoad[\s\S]*?(?=let dist)/, "")
     .replace(/if \(in\.style == 14u\)[^\n]+/, "")
+    .replace("let lit = step(in.shade, in.high + 0.5);", "let lit = select(1.0, step(in.shade, in.high + 0.5), v.light.z > 0.5);")
+    .replace("if (in.style == 15u)", "if (v.light.w > 0.5 && in.style == 15u)")
     .replace("const NEAR = 1.0;", "const NEAR = 80.0;")
     .replace(
       "return vec4f(tone(air",
@@ -131,3 +133,10 @@ let glow = source(ina, "page/glow.ts")
   .replace(/    if \(rain > 0\) \{[\s\S]*?\n    \}/, "");
 glow = glow.replace(/const CODE = [^\x60]*\x60([\s\S]*?)\x60/, (_, code) => "const CODE = `" + clean(code) + "`");
 write("glow.js", transformSync(glow, { loader: "ts", format: "esm", legalComments: "none" }).code);
+
+// The pinned player FXAA pass smooths the cached city before its final grade.
+const smooth = source(sky, "player/smooth.ts")
+  .replace(/^import .*$/gm, "")
+  .replace("await shader(device, 'smooth', CODE)", "device.createShaderModule({code: CODE})")
+  .replace(/const CODE = [^\x60]*\x60([\s\S]*?)\x60/, (_, code) => "const CODE = `" + clean(code) + "`");
+write("smooth.js", transformSync(smooth, { loader: "ts", format: "esm", legalComments: "none" }).code);
