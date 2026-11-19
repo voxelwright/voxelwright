@@ -101,7 +101,8 @@
           if (letters.has(x, y, 2)) board.carve(x, y, 1, 1, 1, 1);
         }
       }
-      letters.tz = -1;
+      letters.inlayDepth = 1;
+      letters.tz = -letters.inlayDepth;
       for (const x of [2, W - 4]) board.box(x, Math.floor(H / 2) - 1, 1, 2, 2, 1, 'warm-metal');
       board.box(Math.floor(W / 2) - 3, H - 2, 1, 7, 1, 1, 'backlight');
     },
