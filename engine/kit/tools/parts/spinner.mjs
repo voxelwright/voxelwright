@@ -20,16 +20,14 @@ const open = async (opts = {}, plain = false) => {
   await p.waitForTimeout(500);
   return p;
 };
-// every spinner: can it be seen (as the stage sees it), is it kept awake, what its cubes are
-const rings = (p) => p.evaluate(() => [...document.querySelectorAll('.vx-spinner')].map((el) => {
+// every spinner: can it be seen (as the stage sees it), is it kept awake
+const rings = (p) => p.evaluate(() => [...document.querySelectorAll('#spin, .vx-spinner')].map((el) => {
   const l = window.vx.live(el), r = el.getBoundingClientRect();
   return {
     shown: r.width > 0,
     seen: r.width > 0 && r.bottom > -200 && r.top < innerHeight + 200,
     far: r.width > 0 && (r.bottom < -260 || r.top > innerHeight + 260),
     awake: !!l && window.vx.stage.awake.has(l),
-    cubes: l ? [...l.model.byName.cubes.scales].map((s) => s.toFixed(2)).join(' ') : '',
-    count: l ? l.model.byName.cubes.count : 0,
   };
 }));
 
@@ -37,10 +35,19 @@ const rings = (p) => p.evaluate(() => [...document.querySelectorAll('.vx-spinner
 const p = await open();
 let all = await rings(p);
 say(all.some((r) => r.seen) && all.filter((r) => r.seen).every((r) => r.awake), `in sight: every spinner is kept awake (${all.filter((r) => r.seen && r.awake).length} of ${all.filter((r) => r.seen).length})`);
-say(all[0].count === 8, `the ring is eight cubes (${all[0].count})`);
-const pictures = new Set(), full = new Set();
-for (let i = 0; i < 14; i++) { const c = (await rings(p))[0].cubes; pictures.add(c); full.add(c.split(' ').indexOf(c.split(' ').slice().sort().pop())); await p.waitForTimeout(70); }
-say(pictures.size > 6 && full.size > 4, `the cubes take turns: the fullest one was at ${full.size} different seats in a second`);
+const signal = (page) => page.locator('#spin').evaluate(el => {
+  const live = window.vx.live(el);
+  const lenses = live.model.byName.lenses;
+  // First voxel of each two-by-two lens.
+  return Array.from({ length: 5 }, (_, i) => lenses.col[i * 16 + 3]);
+});
+const seats = new Set();
+for (let i = 0; i < 26; i++) {
+  const lamps = await signal(p);
+  seats.add(lamps.indexOf(Math.max(...lamps)));
+  await p.waitForTimeout(80);
+}
+say(seats.size === 5, `the light traverses all five fixed lenses (${seats.size})`);
 say(await p.evaluate(() => { const line = document.getElementById('line'), log = document.getElementById('log'); return line.getAttribute('role') === 'status' && line.textContent.trim() === 'Building harbor-api' && document.getElementById('spin').getAttribute('aria-hidden') === 'true' && log.getAttribute('aria-busy') === 'true' && !log.contains(line); }), 'a screen reader is told: a status says "Building harbor-api", the log is aria-busy, and the status is outside it');
 say(await p.evaluate(() => { const s = document.querySelector('.states .vx-spinner[role="status"]'), w = s.querySelector('.vx-spinner-word'); return w.textContent === 'Loading the deploys' && w.getBoundingClientRect().width <= 1; }), 'alone, it is itself the status, and its words are in the page but not shown');
 say(all.filter((r) => !r.shown).length === 1 && all.filter((r) => !r.shown).every((r) => !r.awake), 'a spinner with the hidden attribute is asleep');
@@ -51,6 +58,12 @@ await p.mouse.wheel(0, 3000);
 await p.waitForTimeout(700);
 all = await rings(p);
 say(all.some((r) => r.far) && all.filter((r) => r.far).every((r) => !r.awake), `scrolled away with the wheel: the spinners out of sight are asleep (${all.filter((r) => r.far && !r.awake).length} of ${all.filter((r) => r.far).length})`);
+const sibling = p.locator('.states .vx-spinner').first();
+await sibling.scrollIntoViewIfNeeded();
+const ringPhase = () => sibling.evaluate(el => [...window.vx.live(el).model.byName.cubes.scales]);
+const firstPhase = await ringPhase();
+await p.waitForTimeout(140);
+say(firstPhase.length === 8 && firstPhase.join() !== (await ringPhase()).join(), 'the standalone ring still cycles its eight studs');
 await p.mouse.wheel(0, -3000);
 await p.waitForTimeout(700);
 all = await rings(p);
@@ -70,7 +83,7 @@ const b = await p.locator('#flip').boundingBox();
 await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
 await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up();
 await p.waitForTimeout(500);
-say(await p.evaluate(() => document.getElementById('spin').hidden && !window.vx.stage.awake.has(window.vx.live(document.getElementById('spin'))) && document.getElementById('line').textContent.trim() === 'Built harbor-api in 45 s' && document.getElementById('log').getAttribute('aria-busy') === 'false'), 'pressing "Finish the build": the spinner is gone and asleep, the status says "Built harbor-api in 45 s", the log is no longer busy');
+say((await signal(p)).every(light => light === 0) && await p.evaluate(() => document.getElementById('spin').offsetWidth > 0 && !window.vx.stage.awake.has(window.vx.live(document.getElementById('spin'))) && document.getElementById('line').textContent.trim() === 'Built harbor-api in 45 s' && document.getElementById('log').getAttribute('aria-busy') === 'false'), 'pressing "Finish the build": the fitting is visible, dark and asleep, the status says "Built harbor-api in 45 s", the log is no longer busy');
 await p.keyboard.press('Tab');
 await p.keyboard.press('Shift+Tab');
 say(await p.evaluate(() => document.activeElement?.id === 'flip'), 'Tab reaches the key');
@@ -86,14 +99,20 @@ await p.context().close();
 
 // ---- prefers-reduced-motion
 const q = await open({ reducedMotion: 'reduce' });
+const held = await signal(q);
+await q.waitForTimeout(250);
+say(Math.max(...held) > 0 && held.join() === (await signal(q)).join(), 'reduced motion holds a lit lens steady');
 say(await q.evaluate(() => [...document.querySelectorAll('.vx-spinner')].every((el) => { const l = window.vx.live(el); return l && !window.vx.stage.awake.has(l) && (el.hidden || new Set([...l.model.byName.cubes.scales].map((s) => s.toFixed(2))).size === 1); }) && window.vx.stage.raf === 0), 'prefers-reduced-motion: a still ring of equal cubes, and no frame is asked for');
 await q.context().close();
 
 // ---- plain (no voxels)
 const r = await open({}, true);
-say(await r.evaluate(() => { const a = document.getElementById('spin'); return !a.hasAttribute('data-vx-live') && getComputedStyle(a, '::after').animationName === 'vx-spinner'; }), 'plain: one painted cube steps round the ring');
+say(await r.evaluate(() => { const a = document.getElementById('spin'); return !a.hasAttribute('data-vx-live') && getComputedStyle(a, '::before').animationName === 'build-sweep'; }), 'plain: the light sweeps across the fitting');
+await r.locator('#flip').click();
+say(await r.locator('#spin').evaluate(el => el.offsetWidth > 0 && getComputedStyle(el, '::before').animationName === 'none' && getComputedStyle(el, '::before').backgroundImage === 'none'), 'plain: completion darkens the same fitting');
 await r.context().close();
 const s = await open({ reducedMotion: 'reduce' }, true);
+say(await s.locator('#spin').evaluate(el => getComputedStyle(el, '::before').animationName === 'none'), 'plain reduced-motion activity is steady');
 say(await s.evaluate(() => [...document.querySelectorAll('.vx-spinner')].every((el) => getComputedStyle(el, '::after').animationName === 'none')), 'plain, prefers-reduced-motion: nothing is animated');
 await s.context().close();
 
