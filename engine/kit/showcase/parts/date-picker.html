@@ -11,6 +11,22 @@
   .form .vx-field { display: grid; gap: calc(var(--vx) * 2); }
   .form .vx-field-label, .state > label, .state > p { font-size: 0.9375rem; }
   .form .vx-field-label, .state > label { font-weight: 600; }
+  #ship-date { justify-self: start; gap: 0; flex-wrap: nowrap; }
+  #ship-date > :is(.vx-well, button) { --vx: 2px; --vx-look: deploy-date; block-size: 48px; }
+  #ship-date > .vx-well { inline-size: 166px; }
+  #ship-date > button { inline-size: 50px; }
+  #ship-date input { block-size: 100%; }
+  #ship-date .vx-well[data-vx-live] input {
+    padding-inline: 15px; color: #e8f4e2; color-scheme: dark;
+    font-variant-numeric: tabular-nums; letter-spacing: .04em;
+  }
+  #ship-date .vx-date-glyph { inline-size: 16px; block-size: 16px; }
+  #ship-date > button[data-vx-live] .vx-date-glyph { visibility: hidden; }
+  #ship-pick {
+    --vx-look: deploy-month; --vx-ink: #24322d; --vx-ink-quiet: #485349;
+    --vx-reading-plate: #e5e3cf; --vx-focus: #a64217;
+  }
+  #ship-pick .vx-calendar-head .vx-button { --lit-legend: #24322d; }
   .form .note, .state > p { color: var(--vx-ink-quiet); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; gap: calc(var(--vx) * 2); align-content: start; justify-items: start; min-inline-size: 0; }
@@ -91,6 +107,7 @@
   </section>
 </main>
 <script type="module">
+  import './deploy-date.js';
   import { show } from './parts.js';
   import { calendar } from '../../src/components/calendar.js';
   import { datePicker } from '../../src/components/date-picker.js';
