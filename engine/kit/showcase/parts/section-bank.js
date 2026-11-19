@@ -5,6 +5,7 @@ import { MATERIALS } from '../../src/core/materials.js';
 import { PRESS, RELEASE, reducedMotion } from '../../src/core/motion.js';
 import { cue } from '../../src/core/sound.js';
 import { listeners } from '../../src/components/util.js';
+import { watchDirection } from '../../src/plain.js';
 
 function strokes(el, on, live) {
   for (const [i, link] of [...el.querySelectorAll('a')].entries()) {
@@ -43,10 +44,25 @@ function strokes(el, on, live) {
   }
 }
 
+function bindRows(el, on, live) {
+  let bindings = listeners();
+  strokes(el, bindings, live);
+  on.watch(el, { childList: true, subtree: true }, changes => {
+    const rowsChanged = changes.some(change => [...change.addedNodes, ...change.removedNodes]
+      .some(node => node.matches?.('a, li') || node.querySelector?.('a, li')));
+    if (!rowsChanged) return;
+    bindings.done();
+    live?.rebuild();
+    bindings = listeners();
+    strokes(el, bindings, live);
+  });
+  return () => bindings.done();
+}
+
 export const sectionBank = {
   name: 'settings-selector',
   selector: '#sections',
-  plain: strokes,
+  plain: bindRows,
 
   build(live, model) {
     const { el, W, H, vx } = live;
@@ -81,13 +97,14 @@ export const sectionBank = {
         .carve(stemX, stemY, 1, 4, 4, 2);
       paddle.slab(capX, y + 1, rise - 2, capW, h - 3, 2, 'key', 2)
         .carve(capX + 2, y + 4, rise - 2, capW - 4, h - 8, 2);
-      paddle.box(stemX, stemY, rise - 2, 4, 4, 2, 'gasket');
+      plate.carve(stemX, stemY, 0, 4, 4, 1);
+      paddle.box(stemX, stemY, rise - 3, 4, 4, 3, 'gasket');
       paddle.slab(capX + 1, y + 2, rise, capW - 2, h - 5, 1, 'key', 1);
       const gripX = rtl ? capX + 5 : capX + capW - 11;
       paddle.box(gripX, y + h - 7, rise + 1, 6, 1, 1, 'key');
       paddle.grounded = false;
       const spring = live.spring('stroke' + i);
-      live.label(li.querySelector('span'), () => rise + 1 + spring.x);
+      live.label(li.querySelector('span'), () => rise + 1 + paddle.tz);
       collars.slab(lampX - 1, lampY - 1, 3, 5, 8, 1, 'steel', 1)
         .carve(lampX, lampY, 3, 3, 6, 1);
       lens.box(lampX, lampY, 3, 3, 6, 1, 'pilot-glass');
@@ -99,7 +116,7 @@ export const sectionBank = {
 
   pose(live) {
     const { rows, lampX } = live.state;
-    for (const { paddle, spring } of rows) paddle.tz = spring.x;
+    for (const { paddle, spring } of rows) paddle.tz = Math.max(-live.state.travel, Math.min(0, spring.x));
     const selected = rows.find(row => row.link.getAttribute('aria-current') === 'page');
     if (selected === live.state.current && live.state.tint === live.tintRevision) return;
     live.state.current = selected;
@@ -129,11 +146,9 @@ export const sectionBank = {
 
   bind(live) {
     const on = listeners();
-    strokes(live.el, on, live);
-    on.watch(live.el, { subtree: true, attributes: true, attributeFilter: ['aria-current', 'dir'] }, changes => {
-      if (changes.some(change => change.attributeName === 'dir')) live.rebuild();
-      else live.invalidate();
-    });
-    return on.done;
+    const releaseRows = bindRows(live.el, on, live);
+    watchDirection(live, on);
+    on.watch(live.el, { subtree: true, attributes: true, attributeFilter: ['aria-current'] }, () => live.invalidate());
+    return () => { releaseRows(); on.done(); };
   },
 };
