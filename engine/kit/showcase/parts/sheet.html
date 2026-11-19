@@ -7,6 +7,35 @@
 <link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
+  #filters { --vx-look: filter-sheet; flex-direction: column; }
+  #filters:not([open]) > :is(header, .vx-sheet-body, footer) { opacity: 0; }
+  #filters[data-vx-surface="still"][open] { opacity: var(--vx-surface-alpha); }
+  #filters > :is(header, .vx-sheet-body, footer) { --vx-look: instrument; padding-inline: calc(var(--vx) * 8) calc(var(--vx) * 6); }
+  #filters > header:has(.vx-close) { min-block-size: calc(var(--vx) * 20); padding-inline-start: calc(var(--vx) * 16); touch-action: pan-y; user-select: none; }
+  #filters > header h2 { color: #fff5de; font-size: 1.5rem; }
+  #filters .vx-sheet-body { padding-block-start: calc(var(--vx) * 6); }
+  #filters-form { justify-items: stretch; }
+  #filters .vx-field { min-inline-size: 0; margin-block-start: var(--vx); }
+  #filters .vx-well { inline-size: 100%; box-sizing: border-box; }
+  #filters footer { padding-block: calc(var(--vx) * 4); }
+  #filters:not([data-vx-live]) { background: var(--panel); border-inline-start: calc(var(--vx) * 2) solid var(--vx-steel); }
+  #filters:not([data-vx-live]) > :is(header, footer) { background: #48504c; }
+  #filters:not([data-vx-live]) > header { position: relative; }
+  #filters:not([data-vx-live]) > header::after {
+    content: ""; position: absolute; inset-inline-start: calc(var(--vx) * 2); inset-block-end: var(--vx);
+    inline-size: calc(var(--vx) * 12); block-size: var(--vx);
+    background: color-mix(in srgb, var(--case-lamp) calc(var(--lamp-level) * 100%), #393d39);
+  }
+  @media (pointer: fine) {
+    #filters > header { cursor: grab; }
+    #filters > header:active { cursor: grabbing; }
+  }
+  .deploys > [hidden] { display: none; }
+  @media (prefers-reduced-motion: no-preference) {
+    #filters > :is(header, .vx-sheet-body, footer) { transition: opacity 65ms ease-out; }
+    #filters { transition-timing-function: cubic-bezier(.4,0,.8,.45), linear, linear; }
+    #filters[open] { transition-timing-function: cubic-bezier(.25,.76,.15,1), linear, linear; }
+  }
   .chosen { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
   .deploys { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
   .stack { display: grid; gap: calc(var(--vx) * 3); justify-items: start; }
@@ -44,9 +73,9 @@
       <span class="chosen" id="result" role="status">Showing every deploy</span>
     </div>
     <div class="deploys">
-      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 213</span><span class="vx-item-line">main at 4f2c9a1, by Mina, four minutes ago</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></span></div>
-      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 212</span><span class="vx-item-line">fogline-cache at 9be01d7, by Ada, yesterday</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></span></div>
-      <div class="vx-item"><span class="vx-item-text"><span class="vx-item-title">Deploy 211</span><span class="vx-item-line">main at 77c2e40, by Mina, two days ago</span></span><span class="vx-item-trail">Replaced</span></div>
+      <div class="vx-item" data-status="live" data-branch="main" data-mine><span class="vx-item-text"><span class="vx-item-title">Deploy 213</span><span class="vx-item-line">main at 4f2c9a1, by Mina, four minutes ago</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></span></div>
+      <div class="vx-item" data-status="failed" data-branch="fogline-cache"><span class="vx-item-text"><span class="vx-item-title">Deploy 212</span><span class="vx-item-line">fogline-cache at 9be01d7, by Ada, yesterday</span></span><span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></span></div>
+      <div class="vx-item" data-status="replaced" data-branch="main" data-mine><span class="vx-item-text"><span class="vx-item-title">Deploy 211</span><span class="vx-item-line">main at 77c2e40, by Mina, two days ago</span></span><span class="vx-item-trail">Replaced</span></div>
     </div>
   </section>
   <section>
@@ -107,10 +136,10 @@
   <header><h2 id="filters-h">Filters</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close filters">×</button></header>
   <div class="vx-sheet-body">
     <form method="dialog" id="filters-form" class="stack">
-      <label class="vx-check"><input type="checkbox" name="failed"><span class="vx-box"></span>Only what failed</label>
+      <label class="vx-check"><input type="checkbox" name="failed" autofocus><span class="vx-box"></span>Only what failed</label>
       <label class="vx-check"><input type="checkbox" name="mine"><span class="vx-box"></span>Only mine</label>
       <label class="vx-check"><input type="checkbox" name="live" checked><span class="vx-box"></span>Keep the live one in sight</label>
-      <label class="vx-field"><span class="vx-field-label">Branch</span><span class="vx-well"><input type="text" name="branch" id="branch" value="main" autocomplete="off"></span></label>
+      <label class="vx-field"><span class="vx-field-label">Branch</span><span class="vx-well"><input type="text" name="branch" id="branch" placeholder="All branches" autocomplete="off"></span></label>
     </form>
   </div>
   <footer>
@@ -149,9 +178,9 @@
 <script type="module">
   import { show } from './parts.js';
   import { sheet } from '../../src/components/sheet.js';
+  import { mountFilters } from './filters-sheet.js';
   const $ = (id) => document.getElementById(id);
-  const said = { apply: 'Filters applied', reset: 'Showing every deploy', cancel: 'Filters left as they were' };
-  $('filters').addEventListener('close', () => { $('result').textContent = said[$('filters').returnValue] ?? 'Filters left as they were'; });
+  mountFilters($('filters'), document.querySelectorAll('.deploys > .vx-item'), $('result'));
   show(sheet);
 </script>
 </body>

@@ -66,7 +66,7 @@ await press(p, '#open-filters');
 await p.waitForTimeout(70);
 let s = await read(p, '#filters');
 say(s.open && s.modal && s.moved !== '0', `a press on Filters opens it as a modal dialog, and it is on its way in (${s.moved} to go)`);
-say(s.made.seen && s.made.cubes > 5000 && s.made.panel === 'panel', `its voxels are there from the start (${s.made.cubes} cubes of ${s.made.panel})`);
+say(s.made.seen && s.made.cubes > 5000 && s.made.panel === 'gasket+panel+slate+steel' && s.made.groove === 'backlight+steel', `its mounted plate and light pipe are there from the start (${s.made.cubes} cubes of ${s.made.panel})`);
 await settle(p);
 s = await read(p, '#filters');
 say(s.moved === '0' && Math.abs(s.right - s.vw) < 0.5 && s.top === 0 && Math.abs(s.bottom - s.vh) < 0.5 && s.made.drawn, `then it rests against the end of the window, from top to bottom (${s.left} to ${s.right} of ${s.vw})`);
@@ -90,16 +90,16 @@ await p.locator('#filters').evaluate(el => {
     const slide = el.getAnimations().find(a => a.transitionProperty === 'translate');
     if (slide) slide.currentTime = slide.effect.getTiming().duration / 2;
     const rect = el.getBoundingClientRect();
-    window.sheetExit = { open: el.open, shown: getComputedStyle(el).display !== 'none',
+    window.sheetExit = { column: getComputedStyle(el).flexDirection === 'column', open: el.open, shown: getComputedStyle(el).display !== 'none',
       width: rect.width, outside: rect.right - document.documentElement.clientWidth };
   }, { once: true });
 });
 await p.keyboard.press('Escape');
 const exitSample = await p.waitForFunction(() => window.sheetExit);
 const exit = await exitSample.jsonValue();
-say(!exit.open && exit.shown && exit.outside > 0 && exit.outside < exit.width,
+say(!exit.open && exit.column && exit.shown && exit.outside > 0 && exit.outside < exit.width,
   `Escape closes the sheet and it slides out (${exit.outside.toFixed(1)} of ${exit.width} px outside at mid-travel)`);
-await settle(p);
+await p.locator('#filters').waitFor({ state: 'hidden', timeout: 1500 });
 s = await read(p, '#filters');
 say(!s.shown && s.value === 'cancel' && s.focus === 'open-filters', `then it is gone, with "cancel", and the focus is back on the key that opened it (${s.focus})`);
 say(await p.evaluate(() => document.getElementById('result').textContent) === 'Filters left as they were', 'the page heard it close');
@@ -129,6 +129,23 @@ await press(p, '#open-filters'); await settle(p);
 await p.locator('#branch').fill('fogline-cache'); await p.locator('#branch').press('Enter'); await settle(p);
 s = await read(p, '#filters');
 say(!s.open && s.value === 'apply' && s.focus === 'open-filters', 'Enter in its field sends the form: it closes with the main key\'s value');
+
+const visibleDeploys = () => p.locator('.deploys .vx-item:visible .vx-item-title').allTextContents();
+say((await visibleDeploys()).join(',') === 'Deploy 213,Deploy 212', 'the branch match and the pinned live deploy are visible');
+await press(p, '#open-filters'); await settle(p);
+await p.locator('#filters [name="live"]').uncheck();
+await p.locator('#branch').fill('missing');
+await p.keyboard.press('Escape'); await settle(p);
+await press(p, '#open-filters'); await settle(p);
+say(await p.locator('#branch').inputValue() === 'fogline-cache' && await p.locator('#filters [name="live"]').isChecked(),
+  'cancelling discards both draft changes');
+await p.locator('#filters [name="live"]').uncheck();
+await p.locator('#filters [name="failed"]').check();
+await p.locator('#branch').press('Enter'); await settle(p);
+say((await visibleDeploys()).join(',') === 'Deploy 212', 'Apply shows the failed deploy alone');
+await press(p, '#open-filters'); await settle(p);
+await press(p, '#filters [data-vx-close="reset"]'); await settle(p);
+say((await visibleDeploys()).length === 3, 'Reset restores all three deploys');
 
 // the other three edges
 for (const [id, key, edge] of [['s-top', 'open-top', 'top'], ['s-bottom', 'open-bottom', 'bottom'], ['s-start', 'open-start', 'left']]) {
