@@ -25,6 +25,15 @@ This keeps the reference useful across the kit while leaving room for a better m
 
 ## Loop
 
+For every new physical control family, finish one working specimen before applying its design
+to siblings. Pair a close-up of the stationary specimen with the physical reference. Magnify
+the silhouette until the cells are visible, and verify the specimen uses the kit's shared
+voxel stage. Then operate it at normal size beside its siblings. For a recessed control,
+compare rest and full travel from the same view. Check which parts stay fixed, what clears
+the lip, and which surfaces catch light from the fitting. A detail can look convincing up
+close while the whole control still appears to float above its mount.
+<!-- 2026-11-18: “one specimen for every new physical control family” -->
+
 1. Capture the real thing. Drive the app with Playwright and take screenshots at
    desktop and narrow widths, light and dark where they exist, and the
    low-quality mode. Theo had agents use computer use "or whatever other

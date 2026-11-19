@@ -77,10 +77,16 @@ the construction rules in the numbered sections.
 
 ## 3. Projection
 
-- Axes: x right, y down, z toward the viewer. `z = 0` is the page. The page is solid: anything
-  pushed below `z = 0` is hidden by it. The one exception is a **well**, a hole cut in the page
-  for a text field: its floor is two voxels down, and you see it, and the inner faces of its far
-  walls, only through the hole. A well casts no shadow on the page, because nothing stands on it.
+- Axes: x right, y down, z toward the viewer. `z = 0` is the page. A solid surface hides
+  what passes behind it. An opening reveals the interior. In a text field the floor sits two
+  voxels down and its far walls are visible through the opening. The recessed field casts no
+  shadow on the surrounding page.
+- **Seat a recessed control in a fixed opening.** Build the lip and inner walls from plate
+  voxels. At rest and at full travel the moving part must clear them, and the lip must hide
+  the portion behind it. If the mount carries a lamp, keep its emitter fixed and check which
+  surfaces receive its light as the control moves. This fit makes the travel legible. An
+  exposed low-profile key can instead stand above a solid plate on a visible mount.
+  <!-- 2026-11-18: “they look floating on top” -->
 - Cabinet projection: a point at height `z` is drawn `z / 2` voxels to the right and `z / 2` down.
   The viewer stands up and to the left, so you see the top and the left side of everything.
 - The face that carries a label lands exactly on the element's box when the control is at rest.
