@@ -11,6 +11,20 @@
   .deploys li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 9); padding-block: calc(var(--vx) * 1.5); line-height: calc(var(--vx) * 6); }
   .deploys b { font-variant-numeric: tabular-nums; font-weight: 600; }
   .deploys span { color: var(--vx-ink-quiet); }
+  #older summary { min-block-size: 52px; gap: .75rem; }
+  #older .older-latch { --vx: 2px; position: relative; isolation: isolate; flex: 0 0 56px; height: 32px; }
+  #older .older-latch:not([data-vx-live]) { display: none; }
+  #older:has(summary:focus-visible)::details-content, #older summary:focus-visible::after { transition: none; }
+
+  #older .deploys li {
+    display: grid; grid-template-columns: 4ch minmax(10ch, 15ch) 1fr;
+    column-gap: .75rem; align-items: baseline;
+  }
+  #older .deploys li + li { border-block-start: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+  @media (max-width: 35rem) {
+    #older .deploys li { grid-template-columns: 4ch minmax(0, 1fr); }
+    #older .deploys li span { grid-column: 2; }
+  }
   .states { display: grid; inline-size: 100%; }
 </style>
 <script>
@@ -34,7 +48,7 @@
       </ul>
       <div class="vx-groove"></div>
       <details class="vx-collapsible" id="older">
-        <summary><span data-vx-when="closed">Show 3 older deploys</span><span data-vx-when="open">Hide older deploys</span></summary>
+        <summary><i class="older-latch" aria-hidden="true"></i><span data-vx-when="closed">Show 3 older deploys</span><span data-vx-when="open">Hide older deploys</span></summary>
         <ul class="deploys">
           <li><b>212</b>Mina Okafor <span>Monday, 09:40</span></li>
           <li><b>211</b>Ada Lindqvist <span>Friday, 16:12 · rolled back</span></li>
@@ -67,7 +81,8 @@
 <script type="module">
   import { show } from './parts.js';
   import { collapsible } from '../../src/components/collapsible.js';
-  show(collapsible);
+  import { olderLatch } from './older-latch.js';
+  show(collapsible, olderLatch);
 </script>
 </body>
 </html>
