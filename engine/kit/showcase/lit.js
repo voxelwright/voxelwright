@@ -258,8 +258,19 @@ function direct(story) {
   const halt = () => { h.stop(); h.show(false); rest(); };
   new IntersectionObserver(([e]) => { const was = seen; seen = e.isIntersecting; if (seen && !was) start(); else if (!seen && was && !own) halt(); }, { threshold: 0.35 }).observe(stage);
   const log = stage.querySelector('.log-view');
-  log?.addEventListener('focusin', () => { clearTimeout(back); h.stop(); h.show(false); });
-  log?.addEventListener('focusout', () => { clearTimeout(back); back = setTimeout(() => start(), 2600); });
+  log?.addEventListener('focusin', () => {
+    clearTimeout(back);
+    h.stop();
+    h.show(false);
+    for (const line of log.querySelectorAll('[data-out]')) line.removeAttribute('data-out');
+  });
+  log?.addEventListener('focusout', () => {
+    clearTimeout(back);
+    back = setTimeout(() => {
+      if (!stage.matches(':hover')) { own = false; stage.removeAttribute('data-own'); }
+      start();
+    }, 2600);
+  });
   const real = (e) => e.isTrusted && e.pointerType === 'mouse';
   stage.addEventListener('pointermove', (e) => {
     if (!e.isTrusted) return;
