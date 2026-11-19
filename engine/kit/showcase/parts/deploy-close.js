@@ -29,7 +29,10 @@ const thumbPlate = {
 
   pose(key) {
     const cap = key.model.byName.cap;
-    if (cap) cap.tz = Math.max(-key.model.keyTravel, Math.min(0, key.spring('press').x));
+    if (!cap) return;
+    const press = key.spring('press');
+    const hover = press.target < 0 ? 0 : key.spring('hover').x;
+    cap.tz = Math.max(-key.model.keyTravel, press.x + hover);
   },
 };
 

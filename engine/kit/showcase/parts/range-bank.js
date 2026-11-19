@@ -1,22 +1,20 @@
 // Three interlocked mode keys in one oxblood faceplate. The existing radio
 // group owns input, selection and springs; this look supplies its moving solids.
 import '../../src/looks/lit.js';
-import { defineLook } from '../../src/core/look.js';
+import { defineInstrumentLook } from '../build-settings.js';
 import { clamp } from '../../src/components/util.js';
 
 const face = { chamfer: 38, specular: 16 };
-defineLook('range-bank', {
-  from: 'lit',
+defineInstrumentLook('range-bank', {
   travel: 3,
   step: 2,
   seam: .25,
   materials: {
     steel: { day: '#754147', night: '#784850', jitter: .008 },
-    key: { day: '#383a3b', night: '#3d4040', jitter: .01 },
     gasket: { day: '#201d20', night: '#241f21' },
     lens: { day: '#6a5f54', night: '#615953' },
   },
-  finishes: { steel: { chamfer: 75, specular: 76 }, key: face, gasket: face,
+  finishes: { steel: { chamfer: 75, specular: 76 }, gasket: face,
     lens: { chamfer: 105, specular: 106 } },
   parts: { 'toggle-group': { build, pose, recordedReturn: true, instantKeyboardChoice: true } },
 });
@@ -78,7 +76,7 @@ function pose(live) {
     const hold = live.spring('hold' + i).x;
     cap.tz = clamp(-look.travel * latch + hold, -look.travel - look.step, .35);
 
-    const lit = state.inputs[i].checked;
+    const lit = latch > 0.5 && !state.inputs[i].matches(':disabled');
     if (state.lamps[i] === lit && state.tint === live.tintRevision) return;
     state.lamps[i] = lit;
     // Two amber dies behind a fixed smoked bar. Its rubber seal picks up

@@ -1,6 +1,6 @@
 // The two command switches share an oxblood anodized plate. The exposed
 // housings sit on its face. Only the stem, cap and printed legend travel.
-import { defineLook } from '../../src/index.js';
+import { defineInstrumentLook } from '../build-settings.js';
 import { halo } from '../../src/core/light.js';
 
 const historyKey = {
@@ -48,18 +48,16 @@ const historyKey = {
   },
 };
 
-defineLook('history-bank', {
-  from: 'lit',
+defineInstrumentLook('history-bank', {
   materials: {
     chalk: { day: '#793f46', night: '#723d47', jitter: 0.005 },
-    key: { day: '#383b3d', night: '#414549', jitter: 0.009 },
     gasket: { day: '#262727', night: '#222425' },
     lens: { day: '#393035', night: '#332c30' },
     steel: { day: '#594a4a', night: '#534448' },
     'light-warm': { day: '#ffba61', night: '#ffb25b', glow: 0.75 },
     'warm-metal': { day: '#a26c46', night: '#895d42' },
   },
-  finishes: { chalk: { chamfer: 48, specular: 82 }, key: { chamfer: 50, specular: 18 },
+  finishes: { chalk: { chamfer: 48, specular: 82 },
     steel: { chamfer: 80, specular: 75 }, lens: { chamfer: 42, specular: 110 } },
   parts: { button: historyKey },
 });

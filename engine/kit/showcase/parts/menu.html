@@ -82,16 +82,14 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { recall } from '../build-settings.js';
+  import { defineInstrumentLook } from '../build-settings.js';
   import { projectMenu } from './project-menu.js';
-  import { LOOKS, defineLook } from '../../src/index.js';
+  import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
-  recall();
-  defineLook('project-display', {
-    from: 'instrument',
+  defineInstrumentLook('project-display', {
     materials: { floor: { day: '#222a28', night: '#1c2526', transmission: .08, jitter: .002 } },
-    finishes: { ...LOOKS.instrument.finishes, floor: { chamfer: 16, specular: 56 } },
+    finishes: { floor: { chamfer: 16, specular: 56 } },
     parts: { menu: projectMenu },
   });
   document.getElementById('project-menu').addEventListener('click', (e) => { const it = e.target.closest('[role="menuitem"]'); if (it) document.getElementById('chosen').textContent = 'Chosen: ' + it.textContent.trim(); });
