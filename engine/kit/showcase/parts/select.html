@@ -10,6 +10,33 @@
   .form { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 6) calc(var(--vx) * 9); margin: 0; max-inline-size: 100%; }
   .said { color: var(--vx-ink-quiet); font-size: 0.9375rem; overflow-wrap: anywhere; }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+  .region-program {
+    --vx-look: region-program;
+  }
+  .region-program #region {
+    color: #243027;
+    text-shadow: none;
+  }
+  .region-program:has(#region):not([data-vx-live]) {
+    background: #414b49;
+    box-shadow: 1px 2px 0 #29312e;
+    translate: none;
+  }
+  .vx-select.region-program:not([data-vx-live])::before { content: none; }
+  .region-program:not([data-vx-live]) #region {
+    background: linear-gradient(#b3caa5, #b3caa5) left calc(var(--vx) * 2) center /
+      calc(100% - var(--vx) * 14) calc(100% - var(--vx) * 4) no-repeat;
+  }
+  .region-program:not([data-vx-live]):dir(rtl) #region { background-position: right calc(var(--vx) * 2) center; }
+  .vx-select.region-program:not([data-vx-live])::after {
+    content: "▾" / ""; display: grid; place-items: center;
+    inset-inline-end: calc(var(--vx) * 2); inset-block-start: calc(var(--vx) * 2);
+    inline-size: calc(var(--vx) * 8); block-size: calc(100% - var(--vx) * 4);
+    clip-path: none; background: #cab58e; color: #262e2c;
+    box-shadow: 0 2px #766951;
+  }
+  .region-program:not([data-vx-live]):has(#region:active)::after,
+  .region-program:not([data-vx-live]):has(#region:open)::after { translate: 0 1px; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -28,7 +55,7 @@
     <form class="form" id="build">
       <div class="vx-field">
         <label class="vx-field-label" for="region">Region</label>
-        <span class="vx-select"><select id="region" name="region">
+        <span class="vx-select region-program"><select id="region" name="region">
           <option value="fra">Frankfurt</option>
           <option value="iad" selected>Virginia</option>
           <option value="sin">Singapore</option>
@@ -92,6 +119,7 @@
 <script type="module">
   import { show } from './parts.js';
   import { select } from '../../src/components/select.js';
+  import './region-program.js';
   show(select);
   const form = document.getElementById('build'), said = document.getElementById('said');
   const text = (el) => el.selectedOptions[0].textContent.trim();
