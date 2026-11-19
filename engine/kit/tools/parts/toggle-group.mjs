@@ -61,10 +61,12 @@ const words = await p.evaluate(() => {
   const top = (e) => { const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode()) && !n.textContent.trim()); const r = document.createRange(); r.selectNodeContents(n); const t = new DOMMatrix(getComputedStyle(n.parentElement).transform); return +(r.getBoundingClientRect().top - t.f - e.getBoundingClientRect().top).toFixed(2); };
   const moved = (e) => +new DOMMatrix(getComputedStyle(e.querySelector('.vx-label')).transform).f.toFixed(2);
   const [chosen, up] = document.querySelectorAll('#two label'), l = window.vx.live(document.getElementById('two'));
-  return [top(chosen), top(up), top(document.querySelector('#style button[aria-pressed="false"]')), moved(up) - moved(chosen), l.look.travel * 0.5 * l.vx];
+  const seatStyle = getComputedStyle(up);
+  const lensAllowance = (parseFloat(seatStyle.paddingBottom) - parseFloat(seatStyle.paddingTop)) / 2;
+  return [top(chosen), top(up), top(document.querySelector('#style button[aria-pressed="false"]')), moved(up) - moved(chosen), l.look.travel * 0.5 * l.vx, lensAllowance];
 });
 // (each is put on a whole pixel of the page by the stage, so they may differ by a part of one)
-say(Math.abs(words[0] - words[2]) < 1 && Math.abs(words[1] - words[2]) < 1, `a seat's words stand where a key's do (${words[0]} and ${words[1]} px down in a seat, ${words[2]} px down in the key)`);
+say(Math.abs(words[0] + words[5] - words[2]) < 1 && Math.abs(words[1] + words[5] - words[2]) < 1, `the seat legends center above their lower lens (${words[0]} and ${words[1]} px down in a seat, ${words[2]} px down in the key)`);
 say(Math.abs(words[3] - words[4]) < 1, `and lie on their own key's face: the words on a key that stands up are ${words[3]} px lower than on the latched one, as its face is (${words[4]})`);
 
 // ---- one of many: a radio group

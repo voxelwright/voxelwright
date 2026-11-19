@@ -17,14 +17,15 @@ const controls = [
 function geometry(el, name) {
   const live = window.vx.live(el);
   const selected = { tabs: live.state.index, follow: '', bank: live.state.index }[name];
-  const partsFor = key => ['lens', 'guide', 'tongue'].map(prefix => live.model.byName[prefix + key]);
+  const above = el.id === 'range';
+  const partsFor = key => (above ? ['lens', 'collar'] : ['lens', 'guide', 'tongue']).map(prefix => live.model.byName[prefix + key]);
   const seatEnd = key => name === 'bank' ? live.state.at[key][1] + live.state.at[key][3] : live.H;
   const canvas = live.canvas.getBoundingClientRect();
   const originX = canvas.x + live.ox / devicePixelRatio;
   const originY = canvas.y + live.oy / devicePixelRatio;
   const pager = name === 'pager';
   const pageKey = pager && el.querySelector('[aria-current="page"]').getBoundingClientRect();
-  const lowerEdge = pager ? pageKey.bottom : originY + seatEnd(selected) * live.vx;
+  const lowerEdge = above ? originY - 2 * live.vx : pager ? pageKey.bottom : originY + seatEnd(selected) * live.vx;
   const assembly = pager ? [live.model.byName.windows, live.model.byName['lit-clips']] : partsFor(selected);
   const lens = assembly[0];
   const centres = [];
@@ -61,7 +62,8 @@ function geometry(el, name) {
         const at = 3 * i;
         const z = part.rest[at + 2] + part.tz + 0.5;
         const bottom = part.rest[at + 1] + part.ty + 0.5 + z / 2;
-        solidClear = Math.min(solidClear, (seatEnd(key) - bottom) * live.vx);
+        const clear = above ? (part.rest[at + 1] + part.ty - .5 + (z - 1) / 2 + 2) * live.vx : (seatEnd(key) - bottom) * live.vx;
+        solidClear = Math.min(solidClear, clear);
       }
     }
   }
@@ -76,7 +78,7 @@ function removeParts(el, names) {
   live.draw();
 }
 
-async function comparePixels({ frames, centres, clip, edge }) {
+async function comparePixels({ frames, centres, clip, edge, above }) {
   async function decode(png) {
     const image = new Image();
     image.src = 'data:image/png;base64,' + png;
@@ -115,7 +117,8 @@ async function comparePixels({ frames, centres, clip, edge }) {
   if (images.length === 2) return { visible };
   const [full, noInk, noLens, bare] = images;
   const ink = rows(full, noInk, 12), lamp = rows(noInk, noLens, 32), assembly = rows(noInk, bare, 32);
-  return { visible, inkClear: lamp.first - ink.last - 1, paintedClear: edge - clip.y - assembly.last - 1 };
+  return { visible, inkClear: above ? ink.first - lamp.last - 1 : lamp.first - ink.last - 1,
+    paintedClear: above ? clip.y + assembly.first - edge : edge - clip.y - assembly.last - 1 };
 }
 
 let failures = 0;
@@ -154,7 +157,8 @@ async function check(page, { name, path, selector, legend, value, profile = 'hig
   await settle();
   const label = control.locator(legend);
   const box = await label.boundingBox();
-  const clip = { x: Math.max(0, Math.floor(box.x - 16)), y: Math.floor(box.y - 16),
+  const above = selector === '#range';
+  const clip = { x: Math.max(0, Math.floor(box.x - 16)), y: Math.floor(box.y - (above ? 36 : 16)),
     width: Math.ceil(box.width + 32), height: Math.ceil(box.height + 62) };
   const { lowerEdge, solidClear, names, centres, inactiveCells, inactiveLit } = await control.evaluate(geometry, name);
   const full = await capture(clip);
@@ -165,11 +169,11 @@ async function check(page, { name, path, selector, legend, value, profile = 'hig
   await control.evaluate(removeParts, names);
   const bare = await capture(clip);
   const { visible, inkClear, paintedClear } = await page.evaluate(comparePixels, {
-    frames: [full, noInk, noLens, bare], centres, clip, edge: lowerEdge,
+    frames: [full, noInk, noLens, bare], centres, clip, edge: lowerEdge, above,
   });
   const ok = inactiveLit === 0 && visible > 0 && visible === centres.length &&
     inkClear >= 4 && paintedClear >= 0 && solidClear >= 0;
-  report(ok, `${prefix}: ${inkClear} px under lettering, ${paintedClear} px inside painted bezel, ` +
+  report(ok, `${prefix}: ${inkClear} px clear of lettering, ${paintedClear} px inside painted bezel, ` +
     `${solidClear} px inside in geometry, ${visible}/${centres.length} lens cells visible, ${inactiveLit}/${inactiveCells} inactive cells emit`);
 }
 
