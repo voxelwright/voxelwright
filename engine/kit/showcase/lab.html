@@ -11,6 +11,7 @@
   .row { display: flex; flex-wrap: wrap; gap: 40px; align-items: center; margin-bottom: 48px; }
   .col { display: grid; gap: 24px; align-content: start; }
   h2 { font-size: 1rem; margin: 0 0 20px; font-weight: 600; color: var(--vx-ink-quiet); }
+  [data-specimen="leaf-note"][data-vx-edge="leaf"] { --vx-look: leaf-note; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
   .seed-field { max-inline-size: clamp(96px, calc(100vw - 96px), 420px); }
   .seed-field .vx-well { --vx-look: seed-readout; --vx-focus: #397e83; --lens: #52696d; }
@@ -152,7 +153,7 @@
     </div>
     <div class="col">
       <h2>Note card, list, growth meter</h2>
-      <article class="vx-card" data-vx-edge="leaf" style="max-width: 420px">
+      <article class="vx-card" data-vx-edge="leaf" data-specimen="leaf-note" style="max-width: 420px">
         <p><strong>Watered on 14 November</strong></p>
         <p>The egg should hide in the footer. Typing the old cheat code turns every heading into voxels for a minute.</p>
       </article>
@@ -180,13 +181,49 @@
   </dialog>
 
   <script type="module">
-    import { adopt, live, toast } from '../src/index.js';
+    import { adopt, defineLook, live, toast } from '../src/index.js';
     import './seed-readout.js';
     import './garden-modes.js';
     import './lab-meter.js';
     import './ship-latch.js';
     import { connectSound } from './switch-sound.js';
+
+    import { inlineX } from '../src/plain.js';
+
     connectSound();
+    defineLook('leaf-note', {
+      quiet: true,
+      seam: 0.32,
+      materials: {
+        chalk: { day: '#f3ede0', night: '#303c42' },
+        leaf: { day: '#38705a', night: '#427762', jitter: 0.012 },
+      },
+      finishes: {
+        chalk: { chamfer: 28 },
+        leaf: { chamfer: 100, specular: 36 },
+        'warm-metal': { chamfer: 160, specular: 112 },
+      },
+      parts: {
+        card: {
+          build(live, model) {
+            const { W, H } = live;
+            const x = inlineX(live);
+            const panel = model.part('panel');
+            panel.slab(0, 0, 0, W, H, 1, 'walnut', 2);
+            // The insert rests in a rebate. A green keeper grips its leading edge.
+            panel.slab(x(3, W - 4), 1, 1, W - 4, H - 2, 1, 'chalk', 1);
+            panel.slab(x(0, 5), 1, 1, 5, H - 2, 2, 'leaf', 1);
+            for (const y of [4, H - 5]) {
+              panel.slab(x(1, 3), y - 1, 3, 3, 3, 1, 'warm-metal', 1);
+              panel.carve(x(2), y, 3, 1, 1, 1);
+              panel.plot(x(2), y, 2, 'gasket');
+            }
+            live.faceZ = 2;
+          },
+        },
+      },
+    });
+
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
