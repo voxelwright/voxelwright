@@ -42,8 +42,9 @@ export const scanKey = {
     guide.carve(shaftX, shaftY, 2, 10, 6, 2);
     for (const x of [3, W - 5]) guide.box(x, shaftY, 2, 2, 6, 1, 'warm-metal');
 
+    const off = live.state.off = live.el.matches(':disabled, [aria-disabled="true"]');
     // A fixed switch LED under the shell shows through the opal finish.
-    guide.box(shaftX + 2, shaftY - 3, 3, 6, 2, 1, 'backlight');
+    guide.box(shaftX + 2, shaftY - 3, 3, 6, 2, 1, off ? 'lens' : 'backlight');
 
     const stem = model.part('stem');
     stem.grounded = false;
@@ -54,7 +55,7 @@ export const scanKey = {
     // A broad finger bed with a shallow cylindrical dish. Only the shoulders
     // turn up. The middle stays level under the printed legend.
     const finish = document.documentElement.dataset.caps;
-    const resin = finish === 'field' ? 'scan-carbon' : 'key';
+    const resin = off ? 'steel' : finish === 'field' ? 'scan-carbon' : 'key';
     for (let z = 0; z < courses; z++) {
       const inset = Math.floor(z / 2);
       cap.slab(2 + inset, 1 + inset, bottom + z, W - 4 - 2 * inset, H - 3 - 2 * inset, 1, resin, 3);
@@ -69,13 +70,40 @@ export const scanKey = {
       const lip = Math.round((high ? 3 : 2) * u ** 3);
       if (lip) cap.box(x, edge + 1, bottom + courses, 1, H - 2 * edge - 3, lip, resin);
     }
-    live.glowStrength = 0; // The emitter lives under the keytop.
+    const transmission = off ? 0 : look.materials[resin]?.transmission ?? 0;
+    live.state.emitter = transmission ? { x: shaftX + 2, y: shaftY - 3, z: 4, transmission } : null;
+    live.glowStrength = 0;
     live.faceZ = bottom + courses;
     live.label(live.el.querySelector('.vx-label'), () => live.faceZ + cap.tz);
   },
 
   pose(live) {
     const { cap, stem } = live.model.byName;
-    if (cap) cap.tz = stem.tz = Math.max(-live.model.keyTravel, live.spring('press').x);
+    if (!cap) return;
+    cap.tz = stem.tz = live.state.off ? -live.model.keyTravel :
+      Math.max(-live.model.keyTravel, Math.min(0, live.spring('press').x));
+    const lamp = live.state.emitter;
+    if (!lamp) return;
+    const depth = Math.round(cap.tz * 2) / 2;
+    if (lamp.revision !== live.tintRevision) {
+      lamp.revision = live.tintRevision;
+      lamp.depth = undefined;
+      lamp.rgb = [1, 3, 5].map(start => parseInt(live.look.illuminant.slice(start, start + 2), 16) / 255);
+      lamp.receivers = [];
+      for (let i = 0; i < cap.count; i++) {
+        const x = cap.rest[3 * i], y = cap.rest[3 * i + 1];
+        const dx = x - Math.max(lamp.x, Math.min(lamp.x + 6, x));
+        const dy = y - Math.max(lamp.y, Math.min(lamp.y + 2, y));
+        const radius2 = dx * dx + dy * dy;
+        if (radius2 < 225) lamp.receivers.push({ i, radius2, base: cap.col.slice(4 * i, 4 * i + 3) });
+      }
+    }
+    if (lamp.depth === depth) return;
+    lamp.depth = depth;
+    for (const { i, radius2, base } of lamp.receivers) {
+      const height = cap.rest[3 * i + 2] + depth - lamp.z;
+      const scatter = live.look.dimmer * lamp.transmission * 2 / (1 + (radius2 + height * height) / 45);
+      for (let c = 0; c < 3; c++) cap.col[4 * i + c] = base[c] + (lamp.rgb[c] - base[c]) * scatter;
+    }
   },
 };

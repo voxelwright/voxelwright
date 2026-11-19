@@ -202,5 +202,8 @@ select { padding: .35rem .6rem; font: 400 .85rem "IBM Plex Sans",sans-serif; col
   background: var(--scan-face); border-bottom: 2px solid #151a18;
   transform: translate(1px, 1px);
 }
-#scan:not([data-vx-live]):is(:active, [data-held]) .vx-label { transform: translate(-2px, -2px); }
+#scan:not([data-vx-live],:disabled,[aria-disabled="true"]):is(:active, [data-held]) .vx-label { transform: translate(-2px, -2px); }
 @media(max-width:360px) { .readout { font-size: 8px; letter-spacing: .035em; } }
+
+#scan:is(:disabled,[aria-disabled="true"]) { --scan-face: #a0a6a2; color: #26312c; cursor: default; }
+#scan:not([data-vx-live]):is(:disabled,[aria-disabled="true"]) .vx-label { transform: translate(-2px,-2px); border-color: #656e68; }
