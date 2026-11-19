@@ -77,20 +77,33 @@ try {
   await openLive();
   assert.equal(await support.count(), 1);
   assert.equal(await page.locator("support-button").getAttribute("dock"), "support-dock");
-  await support.focus();
+  assert.equal(await support.isVisible(), false);
+  assert.deepEqual(await canvas.boundingBox(), { x:0, y:0, width:1280, height:860 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollHeight),860);
+  // City sound is silent until the visitor asks, then toggles from the directory.
+  const sound = page.locator('[data-sign="sound"]');
+  assert.equal(await sound.getAttribute("aria-pressed"), "false");
+  await sound.click();
+  assert.equal(await sound.getAttribute("aria-pressed"), "true");
+  await sound.click();
+  assert.equal(await sound.getAttribute("aria-pressed"), "false");
+  await summary.click();
+  await page.locator('[data-sign="support"]').click();
   assert.equal(await support.evaluate((button) => button.getRootNode().activeElement === button), true);
   await page.keyboard.type("iddqd");
   assert.equal(await status.innerText(), "");
-  await support.press("Space");
+
   await page.locator("support-button .live:not(:empty)").waitFor({ state: "attached" });
   assert.equal(await link.getAttribute("href"), "/blog/");
+
+  await support.press("Escape");
+  assert.equal(await support.isVisible(), false);
 
   const expectScale = (factor) => page.waitForFunction((factor) => {
     const canvas = document.querySelector(".park-canvas");
     return canvas.width === Math.round(canvas.clientWidth * Math.min(devicePixelRatio, 2) * factor);
   }, factor);
   await expectScale(0.5);
-  await summary.click();
   await preset.selectOption("ultra");
   await expectScale(0.7);
   await scale.press("ArrowRight");
@@ -115,7 +128,7 @@ try {
   // pixel also verifies that the live renderer updates while flight is paused.
   async function moonPixel() {
     const png = await page.screenshot({ clip: {
-      x: Math.round(view.x + view.width * 0.7 + view.height * 0.033),
+      x: Math.round(view.x + view.width * 0.7 - view.height * 0.033),
       y: Math.round(view.y + view.height * 0.14),
       width: 1, height: 1,
     } });
@@ -149,17 +162,11 @@ try {
   const still = await sky();
   await page.waitForTimeout(250);
   assert.ok((await sky()).equals(still), "the paused sky holds still");
-  await shoot(0.26, 0.175);
+  await shoot(0.10, 0.175);
   assert.match(await status.innerText(), /Never gonna/);
   await page.locator(".sign-dancer").waitFor();
 
   await summary.click();
-  await support.focus();
-  const dismissed = page.waitForFunction(() =>
-    document.querySelector("support-button").shadowRoot.querySelector(".mover").hasAttribute("data-gone")
-  );
-  await support.press("Escape");
-  await dismissed;
   assert.notEqual(await settings.getAttribute("open"), null);
   await summary.press("Escape");
 
@@ -223,7 +230,9 @@ try {
   assert.equal(await scale.inputValue(), "55");
   assert.equal(await dynamic.isChecked(), true);
   assert.equal(await target.inputValue(), "60");
-  await link.press("Enter");
+  const localBlog = page.locator('[data-sign="local-blog"][data-hit]');
+  await localBlog.waitFor();
+  await localBlog.press("Enter");
   await page.waitForURL("**/blog/");
 
   await page.emulateMedia({ reducedMotion: "reduce", colorScheme: "light" });
@@ -293,8 +302,21 @@ try {
   await mobilePark.shot("touch-log");
   await touchContext.close();
 
+  // The city and both destinations also fill a phone when there is no GPU.
+  const stillPage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const fetched = [];
+  stillPage.on("request", r => fetched.push(new URL(r.url()).pathname));
+  await stillPage.addInitScript(() => Object.defineProperty(navigator, "gpu", { value: undefined }));
+  await stillPage.goto(base);
+  await stillPage.locator('.overlook[data-scene] [data-sign="local-voxel"][data-hit]').waitFor();
+  assert.deepEqual(await stillPage.locator(".park-still").boundingBox(), { x: 0, y: 0, width: 390, height: 844 });
+  assert.ok(!fetched.includes("/landing/ina.faces.gz"));
+  await stillPage.locator('[data-sign="local-voxel"]').click();
+  await stillPage.waitForURL("**/voxelmorphism/");
+  await stillPage.close();
+
   assert.deepEqual(errors, []);
-  console.log("Landing smoke passed: live WebGPU, graphics and pause, Support shadow controls, desktop navigation and eggs, reduced motion, offline, and touch.");
+  console.log("Landing smoke passed: live WebGPU, graphics and pause, Support shadow controls, desktop navigation and eggs, reduced motion, offline, touch, and GPU-free phone navigation.");
 } finally {
   server?.close();
   await browser.close();

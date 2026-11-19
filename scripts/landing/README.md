@@ -1,6 +1,6 @@
 # Ina Coolbrith Park
 
-The ordinary site build copies the files in `static/landing/`. It needs neither a Village checkout nor a running Village server. The live view imports the PR 443 device owner at `/vendor/village/blocks/renderer.js`, supplied by the Signal Desk distribution. Its sign and tow banner use the kit’s own Vox Text lettering.
+The ordinary site build copies the files in `static/landing/`. It needs neither a Village checkout nor a running Village server. The live view imports the PR 443 device owner at `/vendor/village/blocks/renderer.js`, supplied by the Signal Desk distribution. The tow banner uses the kit’s Vox Text lettering. The marquee is built from solid letters and the park signs use the site’s self-hosted fonts.
 
 ## Source
 
@@ -30,7 +30,7 @@ The cache must contain `home/.village/engine/place/ina/index.json`, its named bi
 
 The short tap and held press follow the interaction in Village `feature/421-landing` at `ef68e752dc98135994e8f6ffaaaa9fc987a4e481`. On this directory, hold the B for at least 540 ms and release, or focus Blog and press Space. LOG opens a fragment on the same home page. Mend restores the Blog link. IDDQD mends the sign and protects it until the code is entered again. The log describes site commits `311b936`, `9606bb8` and `cf84767`.
 
-The moon uses the sky pass and cycles through three disc radii on a night tap. The banner hit test projects the tow cloth endpoints from the Village plane. Tapping the cloth changes its message and a dancer appears on the directory. The Konami sequence changes that same cloth to +30 lives. Type “do a barrel roll” for a plane and compass roll, or “neo” / “wake up” for a brief fall of window glyphs. Going offline while the home page is loaded uncovers a two-stop cable car in the caption.
+The moon uses the sky pass and cycles through three disc radii on a night tap. The banner hit test projects the tow cloth endpoints from the Village plane. Tapping the cloth changes its message and a dancer appears on the directory. The Konami sequence changes that same cloth to +30 lives. Type “do a barrel roll” for a plane and compass roll, or “neo” / “wake up” for a brief fall of window glyphs. Going offline uncovers the cable car on the View sign, on the still directory, or in the plain-page caption.
 
 About this view → Park secrets carries native button equivalents, including a moon-size sample and banner text on the plain page. The B bitmap, cable car, dancer, glyph arrangement, console skyline and procedural lunar marks are original to this adapter. The roll is a small addition to the pinned plane shader in the refresh script. There are no downloaded sprites, audio, or new runtime dependencies.
 
@@ -42,3 +42,21 @@ PLAYWRIGHT=/path/to/node_modules/playwright node scripts/landing/check-eggs.mjs
 ```
 
 If Playwright already resolves from the site checkout, omit `PLAYWRIGHT`. The test serves `dist/` on a loopback port and closes the server at the end. Set `BASE` to use an already running site or `OUT` to override the screenshot directory (`.shots/eggs`). The test opens Chrome with WebGPU and a light saved graphics setup, then exercises the graphics controls, paused rendering, and the docked Support button. It also checks the plain page with reduced motion and at a touch viewport.
+
+## Full-screen city and signs
+
+The home view keeps the exported Ina geometry in the Village Bay frame. New fixtures in `static/landing/signs.js` take an easting and northing in NAD83 / UTM zone 10N (EPSG:26910) and an elevation in NAVD88 metres. `surveyPoint` maps these to the pack's decimetres, with X east of 500,000 m, Z south of 4,250,000 m, and Y above the 1 m datum. A 1 m move along any axis spans ten engine units. The display crop changes the lens framing while preserving the world scale.
+
+The BLOG marquee stands on building 3174 and the Voxelmorphism lightbox on building 1374. Their supports were placed against the Ina lidar surface. The park directory and folding graphics panel stand on the slope in front of the survey camera. Letters, cabinets, posts and lamps share the buildings' depth buffer. Browser links and form controls follow the projected faces for keyboard, touch and modified clicks. Narrow views repeat the destinations on the directory.
+
+The shipped model covers the surveyed, visibility-culled view from Ina Coolbrith Park. Additional city blocks can use the same survey frame. A GPU-free still draws the fixtures over the model capture and keeps navigation available. Reduced motion, forced colours, data saver and `?view=2d` use the plain document.
+
+## Atmosphere, arrival and sound
+
+Everything below composites after the cached city copy unless noted, so a still scene costs one copy and a few small passes.
+
+- **Marine layer** (`static/landing/fog.js`). A depth-aware march through a drifting fog slab that tops out between 70 and 125 m, beginning 420 m from the eye, so the signs stay clear and the downtown footings sink into it. It uses the paused clock, takes 6, 9 or 12 steps on Medium, High or Ultra, and is off on Low.
+- **Tower beacons** (`static/landing/beacons.js`). Red flashers on the 14 tallest roofs above 140 m within 6 km, found in the decoded face buffer at load. They pulse together about thirty times a minute.
+- **Lean** (`lean` in `static/landing/survey.js`). With a fine pointer the eye shifts up to 25 cm sideways and 10 cm up, and the camera turns so the park directory stays on the same view ray. The city rebakes only while the spring moves. The rest pose is the exact survey camera; Low, touch, the open graphics panel and Pause keep the eye still.
+- **Arrival**. On the first visit of a session the directory strikes, the BLOG bulbs light one by one and the Voxelmorphism tubes catch twice before they hold. This rebakes for 2.4 s after dusk only. Fog rolls in over 3.5 s and the beacons start at 2 s on every visit.
+- **Sound** (`static/landing/sound.js`). Synthesised wind and street hum, a distant foghorn, a cable car bell, the panned tow plane and a clack under directory presses. It stays silent until the visitor presses Sound. A saved choice waits for their first key or press, and hiding the tab stops it.

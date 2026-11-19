@@ -8,10 +8,11 @@ const destinations = [
 
 export function homePage(site, posts, tagsWithPosts) {
   const latest = posts.filter((p) => !p.draft).slice(0, 3);
-  const links = destinations
+  const links = (local = false) => destinations
     .map(({ href, label }) => {
       const lettering = href === "/blog/" ? '<i class="breakable-b">B</i><i class="log-tail">log</i>' : label;
-      return `<a href="${href}" aria-label="${label}"><span>${lettering}</span><b aria-hidden="true">↗</b></a>`;
+      const sign = href === "/blog/" ? "blog" : "voxel";
+      return `<a href="${href}" data-sign="${local ? "local-" : ""}${sign}"${local ? ' class="scene-only"' : ""} aria-label="${label}"><span>${lettering}</span></a>`;
     })
     .join("");
   const html = `<link rel="stylesheet" href="/landing/park.css"><link rel="stylesheet" href="/landing/eggs.css">
@@ -22,25 +23,34 @@ export function homePage(site, posts, tagsWithPosts) {
 <div class="park-view">
 <img class="park-skyline" src="/landing/ina.webp" width="2018" height="864" fetchpriority="high" alt="From Ina Coolbrith Park, the Bay Bridge, Transamerica Pyramid and Salesforce Tower rise above the roofs of North Beach.">
 <canvas class="park-canvas" aria-hidden="true" hidden></canvas>
-<div class="sign-mount"><nav class="park-sign" aria-label="Park directory">
-<span class="park-name">Ina Coolbrith Park</span>
-${links}
-</nav></div>
-</div>
-<figcaption><div class="park-caption"><strong>Ina Coolbrith Park</strong><span>North Beach skyline, built in Village.</span>
-<button type="button" class="offline-car" hidden><i aria-hidden="true"></i>Hop the offline cable car</button></div>
+<canvas class="park-still" aria-hidden="true" hidden></canvas>
+<nav class="park-sign" aria-label="Park directory">
+${links()}
+${links(true)}
+</nav>
 <div class="park-tools" hidden>
-<button type="button" data-time aria-pressed="false">Night</button>
-<button type="button" data-pause aria-pressed="false">Pause flight</button>
-<details class="display-settings"><summary>View</summary>
+<span data-sign="station-face" class="fixture-face" aria-hidden="true"></span>
+<span data-sign="settings-face" class="fixture-face" aria-hidden="true"></span>
+<button type="button" data-sign="time" data-time aria-label="Night lighting" aria-pressed="false">Night</button>
+<button type="button" data-sign="pause" data-pause aria-label="Pause flight" aria-pressed="false">Pause flight</button>
+<button type="button" data-sign="sound" data-sound aria-label="City sound" aria-pressed="false">Sound</button>
+<a data-sign="about-still" href="/?view=2d#about-view">About this view</a>
+<button type="button" data-sign="support-still">Support</button>
+<a data-sign="plain-still" data-view="2d" href="/?view=2d">Plain page</a>
+<details class="display-settings"><summary data-sign="view">View</summary>
 <div class="view-panel"><fieldset><legend>Graphics</legend>
-<label>Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
-<label for="park-scale">Resolution limit <span data-scale-value aria-hidden="true"></span>
+<label data-sign="preset">Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
+<label data-sign="scale" for="park-scale">Resolution limit <span data-scale-value aria-hidden="true"></span>
 <input id="park-scale" name="scale" type="range" min="30" max="100" step="5"></label>
-<label>Dynamic resolution <input name="dynamic" type="checkbox"></label>
-<label>Frame target <select name="target"><option value="30">30 fps</option><option value="60" selected>60 fps</option><option value="120">120 fps</option></select></label>
-</fieldset><a data-view="2d" href="/?view=2d">Plain page</a><a data-view="3d" href="/?view=3d" hidden>Live view</a></div></details>
-</div></figcaption>
+<label data-sign="dynamic">Dynamic resolution <input name="dynamic" type="checkbox"></label>
+<label data-sign="target">Frame target <select name="target"><option value="30">30 fps</option><option value="60" selected>60 fps</option><option value="120">120 fps</option></select></label>
+</fieldset><a data-sign="about" href="/?view=2d#about-view">About this view</a>
+<button type="button" data-sign="support">Support</button>
+<a data-sign="plain" data-view="2d" href="/?view=2d">Plain page</a></div></details>
+</div></div>
+<figcaption><div class="park-caption"><strong>Ina Coolbrith Park</strong><span>North Beach skyline, built in Village.</span>
+<a data-view="3d" href="/?view=3d" hidden>City view</a>
+<button type="button" class="offline-car" data-sign="car" hidden><i aria-hidden="true"></i>Hop the offline cable car</button></div></figcaption>
 </figure>
 ${latest.length ? `<section class="park-writing"><h2>Recent writing</h2><ul>${latest.map((p) => `<li><a href="${e(postPath(p.slug))}">${e(p.title)}</a><time datetime="${e(p.date)}">${e(p.date)}</time></li>`).join("")}</ul></section>` : ""}
 <section class="park-log" id="site-log" tabindex="-1" aria-labelledby="log-title" hidden>
@@ -49,7 +59,7 @@ ${latest.length ? `<section class="park-writing"><h2>Recent writing</h2><ul>${la
 <ul><li>Rebuilt the North Beach skyline from the Village city model.</li><li>Mounted the Blog and Voxelmorphism links on the park directory.</li><li>Added the Signal Desk to Voxelmorphism.</li></ul>
 <button type="button" data-mend>Mend the B</button> · <a href="/blog/">Read the blog</a>
 </section>
-<details class="park-credit"><summary>About this view</summary><p>A Village reconstruction from USGS 3DEP lidar, DataSF buildings and Mapterhorn terrain, with landmark outlines from OpenStreetMap contributors and Overture Maps Foundation. Camera and colour reference from <a href="https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg">Frank Schulenburg’s view of the park</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
+<details class="park-credit" id="about-view"><summary>About this view</summary><p>A Village reconstruction from USGS 3DEP lidar, DataSF buildings and Mapterhorn terrain, with landmark outlines from OpenStreetMap contributors and Overture Maps Foundation. Camera and colour reference from <a href="https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg">Frank Schulenburg’s view of the park</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
 <details class="park-secrets" hidden><summary>Park secrets</summary>
 <p>Hold the B on the park sign, or focus Blog and press Space.</p>
 <div class="egg-actions">
