@@ -9,6 +9,41 @@
 <style>
   /* the page's own: a settings screen, its sections down the side */
   .settings { display: grid; grid-template-columns: calc(var(--vx) * 50) minmax(0, 1fr); gap: calc(var(--vx) * 8); inline-size: 100%; }
+  #sections {
+    --vx: 2px;
+    position: relative;
+    isolation: isolate;
+    margin: 0;
+    padding: 10px 4px 10px;
+    list-style: none;
+    color: var(--lit-legend, var(--vx-ink));
+  }
+  #sections li { position: relative; }
+  #sections a {
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 44px;
+    padding: 8px 18px;
+    padding-inline-start: 38px;
+    font: 500 1rem/1.375 var(--vx-font);
+    color: inherit;
+    text-decoration: none;
+    -webkit-tap-highlight-color: transparent;
+    overflow-wrap: anywhere;
+  }
+  #sections a[aria-current="page"] { font-weight: 750; }
+  #sections a:focus-visible { outline: none; }
+  #sections li:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: -2px; }
+  #sections:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: inset 0 0 0 1px var(--vx-steel); }
+  #sections:not([data-vx-live]) a { background: var(--vx-key); border: 1px solid var(--vx-steel); }
+  #sections:not([data-vx-live]) li::before {
+    content: ""; position: absolute; pointer-events: none;
+    inset-inline-start: 10px; inset-block-start: calc(50% - 6px);
+    width: 6px; height: 12px; background: #454c49; box-shadow: 0 0 0 2px var(--vx-steel);
+  }
+  #sections:not([data-vx-live]) li:has([aria-current="page"])::before { background: var(--lit-accent, var(--vx-enamel)); }
+  #sections:not([data-vx-live]) a:active span { transform: translate(-1px, -1px); }
   .settings .pane { display: grid; gap: calc(var(--vx) * 2); align-content: start; padding-block-start: calc(var(--vx) * 2); min-inline-size: 0; }
   .settings .pane .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
   .settings .pane p { color: var(--vx-ink-quiet); max-inline-size: 48ch; }
@@ -33,12 +68,12 @@
     <h2>In use: the sections of a project's settings</h2>
     <div class="settings">
       <nav aria-label="Settings">
-        <ul class="vx-list-group" id="sections">
-          <li><a href="#general">General</a></li>
-          <li><a href="#domains" aria-current="page">Domains</a></li>
-          <li><a href="#secrets">Secrets</a></li>
-          <li><a href="#people">People</a></li>
-          <li><a href="#billing">Billing</a></li>
+        <ul id="sections">
+          <li><a href="#general"><span>General</span></a></li>
+          <li><a href="#domains" aria-current="page"><span>Domains</span></a></li>
+          <li><a href="#secrets"><span>Secrets</span></a></li>
+          <li><a href="#people"><span>People</span></a></li>
+          <li><a href="#billing"><span>Billing</span></a></li>
         </ul>
       </nav>
       <div class="pane" aria-live="polite">
@@ -110,8 +145,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { listGroup } from '../../src/components/list-group.js';
-  show(listGroup);
+  import { sectionBank } from './section-bank.js';
+  show(sectionBank);
   // the page's own router: a press on a section makes it the current one
   const WORDS = { general: 'The name, the branch that is built, and where it runs.', domains: 'Addresses that answer for harbor-api.', secrets: 'Values the build can read and nobody can see.', people: 'Who can deploy, and who can only look.', billing: 'This month so far, and the card on file.' };
   const sections = document.getElementById('sections');
