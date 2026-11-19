@@ -60,7 +60,7 @@ function serve(file) {
   return new Response(fs.readFileSync(file), { headers: { "Content-Type": type, "Cache-Control": "no-store" } });
 }
 
-export function startServer({ root, port }) {
+export function startServer({ root, port, host }) {
   const ASSETS = directoryAssets(path.resolve(root));
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
@@ -69,5 +69,5 @@ export function startServer({ root, port }) {
     res.writeHead(response.status, Object.fromEntries(response.headers));
     res.end(req.method === "HEAD" ? undefined : Buffer.from(await response.arrayBuffer()));
   });
-  return new Promise((resolve) => server.listen(port, () => resolve(server)));
+  return new Promise((resolve) => server.listen(port, host, () => resolve(server)));
 }
