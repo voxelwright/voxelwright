@@ -1,5 +1,6 @@
 // A four-key command pad for the first log. The popover and its menu navigation
 // stay native to the kit; the other invocations borrow the ordinary menu plate.
+import { inlineX } from '../../src/plain.js';
 import { parts } from '../../src/looks/lit-existing.js';
 import { live as liveOf, halo, cue, wrapLabel, PRESS, RELEASE } from '../../src/index.js';
 
@@ -31,6 +32,7 @@ export const logMenu = {
     base.box(x, y, 3, 6, 1, 2, 'spun-brass');
     base.box(right ? x + 5 : x, bottom ? y - 2 : y, 3, 1, 3, 2, 'spun-brass');
 
+    const fromStart = inlineX(live);
     const items = live.state.items = [...el.querySelectorAll('[role="menuitem"]')];
     live.faceZ = 6;
     items.forEach((item, i) => {
@@ -38,15 +40,15 @@ export const logMenu = {
       const height = Math.round(item.offsetHeight / vx);
       const center = top + Math.floor(height / 2);
       // A fixed smoked window sits beside each switch, in a metal ferrule.
-      base.box(2, center - 1, 3, 4, 2, 1, 'steel');
-      base.box(3, center - 1, 3, 2, 2, 1, 'lens');
+      base.box(fromStart(2, 4), center - 1, 3, 4, 2, 1, 'steel');
+      base.box(fromStart(3, 2), center - 1, 3, 2, 2, 1, 'lens');
       const lamp = model.part('lamp' + i);
-      lamp.box(3, center - 1, 3, 2, 2, 1, item.dataset.vxKind === 'danger' ? 'light-stop' : 'light');
+      lamp.box(fromStart(3, 2), center - 1, 3, 2, 2, 1, item.dataset.vxKind === 'danger' ? 'light-stop' : 'light');
       lamp.tz = .03;
-      base.slab(7, top + 1, 3, W - 9, height - 1, 1, 'slate', 1);
+      base.slab(fromStart(7, W - 9), top + 1, 3, W - 9, height - 1, 1, 'slate', 1);
       const key = model.part('key' + i);
       key.grounded = false;
-      key.slab(8, top + 1, 4, W - 11, height - 2, 2, 'key', 1);
+      key.slab(fromStart(8, W - 11), top + 1, 4, W - 11, height - 2, 2, 'key', 1);
       live.label(wrapLabel(item), () => live.faceZ + key.tz);
     });
   },
@@ -66,7 +68,11 @@ export function connectLogActions(menu, row) {
   let held;
   function move(index, pressed) {
     const live = liveOf(menu);
-    if (!live?.model.menuMotion) return;
+    if (!live) return;
+    if (!live.model.menuMotion) {
+      if (!pressed) live.springs['stroke' + index]?.snap(0);
+      return;
+    }
     const spring = live.spring('stroke' + index);
     const { k, c } = pressed ? PRESS : RELEASE;
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) spring.snap(pressed ? -1 : 0);
