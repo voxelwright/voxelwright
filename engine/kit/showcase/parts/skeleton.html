@@ -17,15 +17,16 @@
   .rows .name { font-weight: 600; line-height: calc(var(--vx) * 6); }
   .rows .when { color: var(--vx-ink-quiet); line-height: calc(var(--vx) * 6); }
   .other-deploys { display: contents; }
+  .other-deploys[hidden], .deploys-head [hidden] { display: none; }
   #deploy-reading { inline-size: 100%; }
   #deploy-reading .mark, .deploy-slug { position: relative; isolation: isolate; }
-  #deploy-reading .mark { color: #f7edd7; padding-left: calc(2 * var(--vx)); font-size: .9375rem; }
+  #deploy-reading .mark { color: #f7edd7; min-inline-size: calc(2ch + 4 * var(--vx)); padding-inline-start: calc(2 * var(--vx)); font-size: .9375rem; }
   #deploy-reading .mark:not([data-vx-live]) { background: #343936; border: 1px solid var(--vx-steel); }
   #deploy-reading .mark:not([data-vx-live])::after {
     content: ""; position: absolute; left: var(--vx); top: 50%; translate: 0 -50%; inline-size: var(--vx);
-    block-size: calc(3 * var(--vx)); background: #555d56;
+    block-size: calc(5 * var(--vx)); background: #555d56;
   }
-  [aria-busy="true"] #deploy-reading .mark:not([data-vx-live])::after { background: #e8bc81; }
+  [aria-busy="true"] #deploy-reading .mark:not([data-vx-live])::after { background: linear-gradient(#555d56 20%, #e8bc81 20% 80%, #555d56 80%); }
   [aria-busy="true"] #deploy-reading .mark:not([data-vx-live])::before {
     content: ""; inline-size: calc(5 * var(--vx)); block-size: var(--vx);
     position: absolute; left: calc(3 * var(--vx)); top: 50%; translate: 0 -50%;
@@ -42,6 +43,11 @@
   [aria-busy="true"] #deploy-reading .ink { visibility: hidden; opacity: 0; }
   .deploy-slug > canvas, .deploy-slug::before { transition: opacity 65ms ease-out; }
   [aria-busy="false"] .deploy-slug > canvas, [aria-busy="false"] .deploy-slug::before { opacity: 0; }
+  @media (forced-colors: active) {
+    [aria-busy="true"] .deploy-slug:not([data-vx-live])::before {
+      forced-color-adjust: none; background: GrayText;
+    }
+  }
   @media (prefers-reduced-motion: reduce) {
     #deploy-reading .ink, .deploy-slug > canvas, .deploy-slug::before { transition: none; }
   }
@@ -60,7 +66,7 @@
 <main class="vx-card sheet">
   <header>
     <h1>Skeleton</h1>
-    <p class="what">Shallow slots the size of what is coming, with one soft light passing along them. It stops when it is out of sight, and stands still for anyone who asks for less motion.</p>
+    <p class="what">The first deploy reserves space for its ID, title and byline. Its status light goes dark when the words arrive.</p>
   </header>
   <div class="vx-groove" role="separator"></div>
   <section>
@@ -68,11 +74,11 @@
     <div class="deploys">
       <div class="deploys-head">
         <h3 id="deploys-title">Deploys</h3>
-        <button class="vx-button" id="flip">Finish loading</button>
+        <button class="vx-button" id="flip" hidden>Finish loading</button>
       </div>
       <!-- the words stand outside the busy region; they are changed when the loading ends -->
-      <p class="vx-skeleton-word" role="status" id="word">Loading the deploys</p>
-      <div class="vx-skeleton rows" id="list" aria-busy="true" aria-labelledby="deploys-title">
+      <p class="vx-skeleton-word" role="status" id="word">Deploys loaded</p>
+      <div class="vx-skeleton rows" id="list" aria-busy="false" aria-labelledby="deploys-title">
         <div class="one" id="deploy-reading">
           <span class="mark"><span class="ink">4f</span></span>
           <div class="text">
@@ -80,7 +86,7 @@
             <span class="when"><span class="deploy-slug"><span class="ink">Mina,</span></span> <span class="deploy-slug"><span class="ink">10:43</span></span></span>
           </div>
         </div>
-        <div class="other-deploys">
+        <div class="other-deploys" hidden>
           <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 36"></span><span class="vx-bone" style="--vx-bone-w: 60"></span></div></div>
           <div class="one"><span class="vx-bone" data-vx-bone="box"></span><div class="text"><span class="vx-bone" style="--vx-bone-w: 52"></span><span class="vx-bone" style="--vx-bone-w: 56"></span></div></div>
         </div>
@@ -136,6 +142,10 @@
   const list = document.getElementById('list'), word = document.getElementById('word'), flip = document.getElementById('flip');
   const others = list.querySelector('.other-deploys');
   const bones = others.innerHTML;
+  flip.hidden = false;
+  others.hidden = false;
+  list.setAttribute('aria-busy', 'true');
+  word.textContent = 'Loading the deploys';
   // Word-sized blocks use the actual font metrics, including after a line wraps.
   const slug = {
     name: 'deploy-slug', selector: '#deploy-reading .deploy-slug', pad: 1,
