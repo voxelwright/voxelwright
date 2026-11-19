@@ -316,6 +316,30 @@ const surface = {
 // Notice. A small slab that floats above the surface on a light that says what kind of news it is.
 const NEWS = { done: 'light-go', failed: 'light-stop', note: 'light' };
 
+// A deployment receipt has one mounted pilot and a dark reading window. Keeping
+// the fittings in the casting's model lets every moving brick carry its inlay.
+function deployReceipt(live, m) {
+  const { W, H } = live;
+  const x = inlineX(live);
+  const body = m.part('body');
+  body.slab(1, 1, 0, W - 2, H - 2, 2, 'gasket', 2);
+  body.slab(0, 0, 2, W, H, 2, 'steel', 2);
+  body.slab(1, 1, 4, W - 2, H - 2, 1, 'warm-metal', 1);
+
+  // The glass sits one course below the face of the brass surround.
+  body.carve(x(11, W - 14), 2, 4, W - 14, H - 4, 1);
+  body.box(x(11, W - 14), 2, 3, W - 14, H - 4, 1, 'gasket');
+
+  const y = Math.floor((H - 5) / 2);
+  // The smoked insert sits below the collar. Its emitter finishes flush
+  // with the metal, so it cannot rise above the forming brick.
+  body.box(x(2, 7), y, 4, 7, 5, 1, 'steel');
+  body.carve(x(3, 5), y + 1, 4, 5, 3, 1);
+  body.box(x(3, 5), y + 1, 3, 5, 3, 1, 'lens');
+  body.box(x(4, 3), y + 2, 4, 3, 1, 1, 'light-go');
+  live.faceZ = 4;
+}
+
 const notice = {
   pad: 11,
   glowRadius: 2.2,
@@ -323,6 +347,7 @@ const notice = {
 
   build(live, m) {
     const { W, H, el } = live, d = live.look.float;
+    if (el.dataset.vxSpecimen === 'deploy') return deployReceipt(live, m);
     ring(m.part('light'), 0, 0, 0, W, H, NEWS[el.dataset.vxKind] || 'light', 1);
     const body = m.part('body');
     body.grounded = false;

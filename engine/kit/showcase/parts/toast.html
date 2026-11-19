@@ -8,6 +8,12 @@
 <link rel="stylesheet" href="parts.css">
 <style>
   .notes { gap: calc(var(--vx) * 5); padding-block: calc(var(--vx) * 2); }
+  .vx-toast[data-vx-specimen="deploy"] {
+    padding-inline: calc(15 * var(--vx)) calc(7 * var(--vx));
+    padding-block: calc(4 * var(--vx));
+    font: 600 1rem/1.5 var(--vx-mono);
+  }
+  .vx-toast[data-vx-specimen="deploy"][data-vx-live] { color: #fff5df; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -45,7 +51,7 @@
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const $ = (id) => document.getElementById(id);
-  $('deploy').addEventListener('click', () => toast('Deployed harbor-api', { kind: 'done' }));
+  $('deploy').addEventListener('click', () => toast('Deployed harbor-api', { kind: 'done', specimen: 'deploy' }));
   $('fail').addEventListener('click', () => toast('The build of fog-site failed: 2 tests did not pass.', { kind: 'failed' }));
   $('stay').addEventListener('click', () => toast('Press this notice to dismiss it.', { kind: 'note', duration: 600000 }));
   // a notice the page wrote is the page's to put back: the kit says vx-dismiss when it has shattered
