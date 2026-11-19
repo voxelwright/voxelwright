@@ -175,6 +175,7 @@
       live.state.lens = on;
       // The stamped rim and smoked shoulders stay in place around the lit window.
       const fitting = model.part('fitting');
+      live.well = [0, 0, 8, 5];
       fitting.grounded = false;
       fitting.sunk = true;
       fitting.slab(0, 0, -2, 8, 5, 1, 'gasket', 1);
