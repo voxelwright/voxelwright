@@ -11,6 +11,32 @@
   .col { display: grid; gap: 24px; align-content: start; }
   h2 { font-size: 1rem; margin: 0 0 20px; font-weight: 600; color: var(--vx-ink-quiet); }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 56px; }
+  .seed-field { max-inline-size: clamp(96px, calc(100vw - 96px), 420px); }
+  .seed-field .vx-well { --vx-look: seed-readout; --vx-focus: #397e83; --lens: #52696d; }
+  .seed-field .vx-well:focus-within { --lens: #a1e6df; }
+  .seed-field .vx-well:has([aria-invalid="true"]:enabled) { --lens: #ff705b; }
+  .seed-field input {
+    padding-inline: 18px 40px;
+    color: #edf4f2;
+    caret-color: #b5fff0;
+  }
+  .seed-field input::selection { color: #172b30; background: #ade4df; }
+  .seed-field .vx-well:not([data-vx-live]) {
+    background: #26343a;
+    box-shadow: inset 0 0 0 3px #73818a, inset 5px 6px #192326;
+  }
+  .seed-field .vx-well:not([data-vx-live])::before {
+    content: ""; position: absolute; inset-block: 0; inset-inline-end: 0;
+    width: 28px; background: #73818a; pointer-events: none;
+  }
+  .seed-field .vx-well:not([data-vx-live])::after {
+    content: ""; position: absolute; inset-inline-end: 8px; top: calc(50% - 2px);
+    width: 12px; height: 4px; background: var(--lens);
+    box-shadow: 0 0 0 3px #242c30; pointer-events: none;
+  }
+  @media (forced-colors: active) {
+    .seed-field .vx-well input { background: Field; color: FieldText; caret-color: auto; border: 1px solid FieldText; }
+  }
 </style>
 <body>
   <div class="row"><h1 class="vx-sign" data-vx-max="3">Voxelmorphism</h1></div>
@@ -47,7 +73,7 @@
         <button role="tab" aria-selected="false" aria-controls="p3">Wilted</button>
       </div></div>
       <span class="vx-meter" style="max-width: 320px"><progress value="3" max="5">3 of 5</progress></span>
-      <label class="vx-field" style="max-width: 420px"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+      <label class="vx-field seed-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
       <label class="vx-field" style="max-width: 420px"><span class="vx-field-label">Water it</span><span class="vx-well"><textarea placeholder="What did you learn about this idea today?"></textarea></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
     </div>
     <div class="col">
@@ -81,6 +107,7 @@
 
   <script type="module">
     import { adopt, live, toast } from '../src/index.js';
+    import './seed-readout.js';
     adopt();
     document.getElementById('open-dialog').onclick = () => document.getElementById('dlg').showModal();
     document.getElementById('toast-btn').onclick = () => toast('Watered. Two more and it buds.', { kind: 'done' });
