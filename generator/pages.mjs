@@ -217,13 +217,20 @@ const BETWEEN = `<script>
     settle();
     vt.finished.finally(forget);
   });
-  addEventListener("pageshow", forget);
-  document.addEventListener("prerenderingchange", () => {
+  // a page prepared ahead, or kept in the back/forward cache, catches up with the night and the
+  // instrument chosen on other pages since; a change of night is told as the Night key tells it
+  const dark = matchMedia("(prefers-color-scheme: dark)");
+  const night = () => r.dataset.theme === "dark" || (r.dataset.theme !== "light" && dark.matches);
+  const catchUp = () => {
+    const was = night();
     let t = null, b = null;
     try { t = localStorage.getItem("vx-theme"); b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); } catch {}
     if (t === "dark" || t === "light") r.dataset.theme = t; else delete r.dataset.theme;
     for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k];
-  }, { once: true });
+    if (night() !== was) document.dispatchEvent(new CustomEvent("vx-night", { detail: { night: night() } }));
+  };
+  addEventListener("pageshow", (e) => { forget(); if (e.persisted) catchUp(); });
+  document.addEventListener("prerenderingchange", catchUp, { once: true });
 }
 </script>
 `;

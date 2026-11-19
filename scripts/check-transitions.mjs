@@ -42,6 +42,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const isCity = (u) => { try { return new URL(u).pathname === "/"; } catch { return false; } };
 // Light graphics, so the city starts quickly beside other work on the machine.
 const GRAPHICS = JSON.stringify({ preset: "low", scale: 0.5, dynamic: false, target: 30 });
+// The quality check starts above the lowest preset, so a lowering would show.
+const MEDIUM = JSON.stringify({ preset: "medium", scale: 0.5, dynamic: false, target: 30 });
 
 // Runs in every document before its own scripts: how it was reached, every transition it takes
 // part in, and any GPU adapter asked for while it is still prerendering.
@@ -158,12 +160,14 @@ async function chromeOverTab() {
     const s = await shown();
     return evaluate(s, `(() => { const r = document.querySelector(${JSON.stringify(selector)})?.getBoundingClientRect(); return r && r.width ? [r.x + r.width / 2, r.y + r.height / 2] : null; })()`);
   };
-  const mouse = async (type, [x, y]) => send("Input.dispatchMouseEvent", { type, x, y, button: type === "mouseMoved" ? "none" : "left", clickCount: type === "mouseMoved" ? 0 : 1 }, await shown());
+  const mouse = async (type, [x, y]) => send("Input.dispatchMouseEvent", {
+    type, x, y, button: type === "mouseMoved" ? "none" : "left", buttons: type === "mousePressed" ? 1 : 0, clickCount: type === "mouseMoved" ? 0 : 1,
+  }, await shown());
   return {
     events, evaluate, shown, until, at,
     async go(href) { await send("Page.navigate", { url: href }, await shown()); },
     async hover(selector, ms) { const p = await at(selector); assert.ok(p, `${selector} is on screen`); await mouse("mouseMoved", p); await wait(ms); return p; },
-    async click(p) { await mouse("mousePressed", p); await mouse("mouseReleased", p); },
+    async click(p) { await mouse("mouseMoved", p); await mouse("mousePressed", p); await mouse("mouseReleased", p); },
     async moves() { return evaluate(await shown(), "window.__moves"); },
     async setup(script) { for (const s of pages.keys()) await evaluate(s, script); },
     async close() { proc.kill(); await wait(200); fs.rmSync(profile, { recursive: true, force: true }); },
@@ -190,17 +194,23 @@ async function prerendering() {
     for (let t = 0; t < 50 && !ruleSets().length; t++) await wait(100);
     assert.ok(ruleSets().length && ruleSets().every((e) => !e.params.ruleSet.errorType), "Chrome accepts the rules");
 
-    // the city, then a rest on its BLOG sign: the Blog is prerendered, the city keeps its quality
+    // the city at medium quality: first a rest away from the signs (the control), then a rest on
+    // the BLOG sign; the Blog is prerendered and the city keeps its quality
+    await tab.setup(`localStorage.setItem("village.graphics", ${JSON.stringify(MEDIUM)})`);
     await tab.go(base + "/");
     await tab.until("!!document.querySelector('.overlook[data-live]')", 30000, "the live city");
     const preset = "document.querySelector('.display-settings [name=preset]').value";
-    const before = await tab.evaluate(await tab.shown(), preset);
+    await tab.hover(".park-view", 100);
+    await wait(2500);
+    const control = await tab.evaluate(await tab.shown(), preset);
     await tab.until("!!document.querySelector('.park-sign a[data-sign=blog][data-hit]')", 5000, "the BLOG sign");
     const sign = await tab.hover(".park-sign a[data-sign=blog][data-hit]", 300);
     const ready = (u) => attempts("prerender").some((a) => a.url === u && a.status === "Ready");
     for (let t = 0; t < 100 && !ready(base + "/blog/"); t++) await wait(100);
     assert.ok(ready(base + "/blog/"), `the Blog is prerendered from the city sign: ${JSON.stringify(attempts("prerender"))}`);
-    assert.equal(await tab.evaluate(await tab.shown(), preset), before, "a prerender started from the city does not lower its quality");
+    await wait(1000);
+    const after = await tab.evaluate(await tab.shown(), preset);
+    assert.equal(after, control, "a prerender started from the city does not lower its quality");
     await tab.click(sign);
     await tab.until(`location.pathname === '/blog/' && ${settled}`, 5000, "the Blog after the flight");
     let log = await tab.moves();
@@ -217,21 +227,42 @@ async function prerendering() {
     assert.ok(log.reveals.at(-1).ran !== true, "Back to the city plays no transition");
     await tab.until("!!document.querySelector('.overlook[data-live]')", 2000, "the city still live");
 
-    // the Blog's list: a rest on a post prerenders it, and its row's title grows into the post's
+    // the other sign: the Signal Desk, prerendered, its title from the sign, live once shown
+    await tab.until("!!document.querySelector('.park-sign a[data-sign=voxel][data-hit]')", 5000, "the Voxelmorphism sign");
+    const desk = await tab.hover(".park-sign a[data-sign=voxel][data-hit]", 300);
+    for (let t = 0; t < 100 && !ready(base + "/voxelmorphism/"); t++) await wait(100);
+    assert.ok(ready(base + "/voxelmorphism/"), "the Signal Desk is prerendered from its sign");
+    await tab.click(desk);
+    await tab.until(`location.pathname === '/voxelmorphism/' && ${settled}`, 5000, "the Signal Desk after the flight");
+    log = await tab.moves();
+    assert.ok(log.activationStart > 0, "the Signal Desk shown is the prerendered one");
+    assert.equal(log.gpuWhilePrerendering, 0, "the prerendered Signal Desk opened no GPU adapter before it was shown");
+    reveal = log.reveals.at(-1);
+    assert.ok(reveal.ran && has(reveal, ...TITLE), "a second sign after Back carries its title too (the first sign's name is gone)");
+    await tab.until("document.documentElement.dataset.vx === 'live' && document.querySelector('#desk-fallback').hidden", 15000, "the Signal Desk live, its fallback put away");
+
+    // the Blog's list: a rest on a post prerenders it; the Night key is pressed while it waits; the
+    // post arrives with the time of day chosen, its row's title grown into its title
     await tab.go(base + "/blog/");
-    await tab.until(`location.pathname === '/blog/' && !!document.documentElement.dataset.vx`, 15000, "the Blog");
+    await tab.until(`location.pathname === '/blog/' && document.documentElement.dataset.vx === 'live'`, 15000, "the Blog");
+    // (this Chrome follows the system's light or dark, so the press goes to whichever is not)
+    const wasNight = (await tab.evaluate(await tab.shown(), "document.querySelector('.site-lights').getAttribute('aria-pressed')")) === "true";
+    const chosen = wasNight ? "light" : "dark";
     const row = await tab.hover(`.post-list a[href="${POST}"]`, 300);
     for (let t = 0; t < 100 && !ready(base + POST); t++) await wait(100);
     assert.ok(ready(base + POST), "the post is prerendered from its row");
+    await tab.click(await tab.at(".site-lights"));
+    await tab.until(`document.documentElement.dataset.theme === '${chosen}'`, 2000, `${chosen} chosen on the Blog`);
     await tab.click(row);
     await tab.until(`location.pathname === '${POST}' && ${settled}`, 5000, "the post");
     log = await tab.moves();
-    assert.ok(log.activationStart > 0, "the post shown is the prerendered one");
+    assert.ok(log.activationStart > 0, "the post shown is the prerendered one, prepared before the press");
+    assert.equal(await tab.evaluate(await tab.shown(), "document.documentElement.dataset.theme"), chosen, "and it arrives with the time of day chosen meanwhile");
     assert.equal(log.gpuWhilePrerendering, 0, "the prerendered post opened no GPU adapter before it was shown");
     reveal = log.reveals.at(-1);
     assert.equal(reveal.ran, true, "blog → prerendered post runs a view transition");
     assert.ok(has(reveal, ...TITLE, ...BAR), "the row's title travels into the post title and the bar is held");
-    await tab.until("document.documentElement.dataset.vx === 'live'", 15000, "the post's kit, live once shown");
+    await tab.until(`document.documentElement.dataset.vx === 'live' && document.querySelector('.site-lights').getAttribute('aria-pressed') === '${!wasNight}'`, 15000, "the post's kit, live once shown, its Night key as chosen");
 
     // a rest on the bar's name, then the city: prefetched, never prerendered
     await tab.hover(".site-bar .vx-navbar-brand", 1200);
@@ -243,7 +274,7 @@ async function prerendering() {
     assert.equal(log.deliveryType, "navigational-prefetch", "the city's page arrives from the prefetch");
     assert.ok(!attempts("prerender").some((a) => isCity(a.url)), "no prerender of the city was ever attempted");
     assert.ok(attempts("prefetch").some((a) => isCity(a.url)), "the city is prefetched instead");
-    console.log(`chrome, prerendering: Blog and post prerendered and shown with transitions, no GPU before shown; city prefetched only (${attempts("prerender").length} prerender, ${attempts("prefetch").length} prefetch updates)`);
+    console.log(`chrome, prerendering: Blog, Signal Desk and post prerendered and shown with transitions, no GPU before shown, a night chosen meanwhile taken up, the city's quality held (${control}); city prefetched only (${attempts("prerender").length} prerender, ${attempts("prefetch").length} prefetch updates)`);
   } finally {
     await tab.close();
   }
@@ -324,12 +355,20 @@ async function ordinaryLoads() {
     await page.locator(".overlook[data-live]").waitFor({ timeout: 2000 });
     await page.waitForTimeout(300);
     await page.screenshot({ path: path.join(out, "city-after-back.png") });
+    // the other sign next: if the BLOG sign still held its name, two names would skip the move
+    const other = page.locator('.park-sign a[data-sign="voxel"][data-hit]');
+    await other.waitFor({ timeout: 5000 });
+    await other.click();
+    await page.waitForURL(base + "/voxelmorphism/");
+    reveal = await lastReveal(page);
+    assert.ok(reveal.ran && reveal.types.includes("from-city") && has(reveal, ...TITLE), "a second departure, by the other sign, carries its title");
+    await page.goBack({ waitUntil: "commit" });
+    await page.waitForFunction(() => window.__moves?.shows.at(-1)?.persisted === true, null, { timeout: 5000 });
     await sign.waitFor({ timeout: 5000 });
     await sign.click();
     await page.waitForURL(base + "/blog/");
     reveal = await lastReveal(page);
-    assert.equal(reveal.ran, true, "a second departure from the restored city runs");
-    assert.ok(has(reveal, ...TITLE), "and carries the title again");
+    assert.ok(reveal.ran && has(reveal, ...TITLE), "and a third, by the first sign again");
 
     // blog → post: the row's title grows into the post's, the bar is held
     await page.locator(":root[data-vx]").waitFor({ timeout: 15000 });
@@ -350,6 +389,29 @@ async function ordinaryLoads() {
     assert.equal(reveal.ran, true, "Back to the blog runs a view transition");
     assert.ok(has(reveal, ...TITLE), "the title goes back to its row");
 
+    // the other post: the first row's name from the way back is gone, so this one runs too
+    const other2 = await page.locator(".post-list a.vx-item").evaluateAll((as, post) => as.map((a) => a.getAttribute("href")).find((h) => h !== post), POST);
+    await page.locator(`.post-list a[href="${other2}"]`).click();
+    await page.waitForURL(base + other2);
+    reveal = await lastReveal(page);
+    assert.ok(reveal.ran && has(reveal, ...TITLE, ...BAR), "a second post after Back carries its title");
+    await page.goBack({ waitUntil: "commit" });
+    await page.waitForURL(base + "/blog/", { waitUntil: "commit" });
+    await lastReveal(page);
+
+    // from a post read past its bar and title: they fade with the page instead of flying in from above
+    await page.locator(`.post-list a[href="${POST}"]`).click();
+    await page.waitForURL(base + POST);
+    await lastReveal(page);
+    await page.evaluate(() => window.scrollTo(0, 320));
+    const scrolledFrames = await film(page, "scrolled-post-to-blog", async () => {
+      await page.locator('.post-body a[href="/blog/"]').click();
+      await page.waitForURL(base + "/blog/");
+    }, [0, 40, 80, 120, 160, 200, 260, 340]);
+    reveal = await lastReveal(page);
+    assert.ok(reveal.ran && has(reveal, "::view-transition-new(site-bar)") && !has(reveal, "::view-transition-old(site-bar)"), "the bar scrolled out of sight is not carried");
+    assert.ok(!has(reveal, "::view-transition-old(page-title)"), "nor is the title scrolled out of sight");
+
     // blog → tags: one lettering into the next
     await page.locator(".page-tools a[href='/tags/']").click();
     await page.waitForURL(base + "/tags/");
@@ -361,7 +423,23 @@ async function ordinaryLoads() {
     await page.waitForURL(base + "/");
     reveal = await lastReveal(page);
     assert.ok(reveal.ran && reveal.types.includes("to-city"), "into the city by a link fades");
-    console.log(`chrome, ordinary loads: transitions run, bar held, title carried, Back restores the city from the back/forward cache (films: ${cityFrames} and ${postFrames} stills)`);
+
+    // Night pressed on the Blog, then Back: the city kept in the cache by day comes back at night
+    await page.locator(".overlook[data-live]").waitFor({ timeout: 30000 });
+    assert.equal(await page.locator("[data-time]").getAttribute("aria-pressed"), "false", "the city starts by day");
+    await sign.waitFor({ timeout: 5000 });
+    await sign.click();
+    await page.waitForURL(base + "/blog/");
+    await lastReveal(page);
+    await page.locator(".site-lights").click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    await page.goBack({ waitUntil: "commit" });
+    await page.waitForFunction(() => window.__moves?.shows.at(-1)?.persisted === true, null, { timeout: 5000 });
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), "dark", "the restored city takes up the night");
+    await page.waitForFunction(() => document.querySelector("[data-time]").getAttribute("aria-pressed") === "true", null, { timeout: 3000 });
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: path.join(out, "city-night-after-back.png") });
+    console.log(`chrome, ordinary loads: transitions run, bar held, title carried by either sign and either post, nothing carried from out of sight, Back restores the city from the back/forward cache and takes up a night chosen meanwhile (films: ${cityFrames}, ${postFrames} and ${scrolledFrames} stills)`);
     await context.close();
 
     // reduced motion: one short cross-fade, nothing named, nothing moving
