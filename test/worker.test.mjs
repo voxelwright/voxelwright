@@ -102,7 +102,10 @@ test("runWorkerFirst matches every page route and no asset", async () => {
     const files = walk(out).map((f) => "/" + path.relative(out, f).split(path.sep).join("/"));
     const pages = files.filter((f) => f.endsWith("/index.html")).map((f) => f.slice(0, -"index.html".length));
     const assetsOnly = files.filter((f) => !f.endsWith("/index.html"));
-    assert.ok(pages.length >= 3 && assetsOnly.length >= 5);
+    for (const route of ["/", "/blog/", "/voxelmorphism/", "/tags/"]) {
+      assert.ok(pages.includes(route), `missing page ${route}`);
+      assert.ok(assetsOnly.includes(markdownTwin(route)), `missing Markdown twin for ${route}`);
+    }
     for (const p of pages) assert.ok(matchesRunWorkerFirst(p), `page ${p} must reach the Worker`);
     for (const f of assetsOnly) assert.ok(!matchesRunWorkerFirst(f), `asset ${f} must not reach the Worker`);
   } finally {

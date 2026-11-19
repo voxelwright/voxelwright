@@ -74,14 +74,14 @@ serves the demo post in the fresh and blend looks on port 5976.
 
 ## What the build writes
 
-- `/`, `/blog/`, `/blog/<slug>/`, `/tags/`, `/tags/<tag>/`, `/404.html`
-- A Markdown twin for every page: `/index.md`, `/blog.md`, `/blog/<slug>.md`, `/tags/<tag>.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
+- `/`, `/voxelmorphism/`, `/blog/`, `/blog/<slug>/`, `/tags/`, `/tags/<tag>/`, `/404.html`
+- A Markdown twin for every page: `/index.md`, `/voxelmorphism.md`, `/blog.md`, `/blog/<slug>.md`, `/tags/<tag>.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
 - `/llms.txt` ([llmstxt.org](https://llmstxt.org)), `/feed.xml` (Atom), `/sitemap.xml`, `/robots.txt` (AI crawlers allowed)
 
 ## Settings
 
-`site.config.mjs` holds the title, description, origin (still `https://example.com`), the look,
-home page text, projects, links, and `negotiateMarkdown`.
+`site.config.mjs` holds the title, description, canonical origin (`https://zahynailo.dev`), Ink blog look,
+social links, and `negotiateMarkdown`.
 
 ### Looks
 

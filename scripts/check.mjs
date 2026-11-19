@@ -36,6 +36,9 @@ function checkOutput(label, out, { posts, site }) {
   const rel = (f) => "/" + path.relative(out, f).split(path.sep).join("/");
   const pageFiles = files.filter((f) => f.endsWith("index.html"));
   const pageRoutes = pageFiles.map((f) => rel(f).replace(/index\.html$/, ""));
+  for (const route of ["/", "/blog/", "/voxelmorphism/"]) {
+    if (!pageRoutes.includes(route)) fail(label, `missing destination ${route}`);
+  }
   let embeds = 0;
   let links = 0;
 

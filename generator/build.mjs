@@ -3,6 +3,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { loadPosts } from "./posts.mjs";
 import { renderPost, ContentError } from "./markdown.mjs";
+import { homePage } from "./landing.mjs";
+import { voxelmorphismPage } from "./voxelmorphism.mjs";
 import * as basePages from "./pages.mjs";
 import { llmsTxt, atomFeed, sitemap, robotsTxt } from "./feeds.mjs";
 import { markdownTwin, postPath, slugify } from "../lib/paths.mjs";
@@ -28,7 +30,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   lookStylesheet(site.look); // fails early on an unknown look
   const design = DESIGNS[site.look];
   const pagesModule = design?.pagesFile ? await import(design.pagesFile) : basePages;
-  const { layout, homePage, blogPage, tagsPage, tagPage, postPage, notFoundPage } = pagesModule;
+  const { layout, blogPage, tagsPage, tagPage, postPage, notFoundPage } = pagesModule;
 
   const { posts, errors } = loadPosts(postsDir, { includeDrafts: drafts });
   const loaded = await loadFeatures(site, { featuresDir, dev });
@@ -62,6 +64,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
 
   const pages = [
     homePage(site, posts, new Set(tags.keys())),
+    voxelmorphismPage(site),
     blogPage(site, posts),
     tagsPage(site, tags),
     ...[...tags.values()].map((t) => tagPage(site, t)),
@@ -86,7 +89,8 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   if (design && fs.existsSync(path.join(design.dir, "static"))) fs.cpSync(path.join(design.dir, "static"), outDir, { recursive: true });
 
   for (const page of pages) {
-    write(outDir, path.join(page.path, "index.html"), inject(layout(page, site, { dev }), page, site, features));
+    const pageLayout = page.kind === "home" || page.kind === "voxelmorphism" ? basePages.layout : layout;
+    write(outDir, path.join(page.path, "index.html"), inject(pageLayout(page, site, { dev }), page, site, features));
     write(outDir, markdownTwin(page.path), page.markdown);
   }
   const notFound = notFoundPage(site);

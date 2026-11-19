@@ -74,7 +74,7 @@ test("a feature whose flag is on adds its page, its files and its tags on every 
     assert.match(fs.readFileSync(path.join(out, "hello/index.html"), "utf8"), /<h1>Hello<\/h1>/);
     assert.equal(fs.readFileSync(path.join(out, "hello.md"), "utf8"), "# Hello\n");
     assert.equal(fs.readFileSync(path.join(out, "hello/hello.js"), "utf8"), "console.log('hello there');");
-    for (const file of ["index.html", "blog/index.html", "hello/index.html", "404.html"]) {
+    for (const file of ["index.html", "blog/index.html", "voxelmorphism/index.html", "hello/index.html", "404.html"]) {
       const html = fs.readFileSync(path.join(out, file), "utf8");
       assert.match(html, /<meta name="hello" content="1"><\/head>/, file);
       assert.match(html, /<script src="\/hello\/hello\.js" data-on="[a-z-]+"><\/script><\/body>/, file);

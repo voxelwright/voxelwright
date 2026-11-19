@@ -6,13 +6,24 @@ import { lookStylesheet } from "./looks.mjs";
 
 const NAV = [
   { href: "/blog/", label: "Blog" },
-  { href: "/tags/", label: "Tags" },
-  { href: "/feed.xml", label: "Feed" },
+  { href: "/voxelmorphism/", label: "Voxelmorphism" },
 ];
+
+function masthead(page, site) {
+  const links = NAV.map(({ href, label }) => {
+    let current;
+    if (page.path === href) current = "page";
+    else if (href === "/blog/" && ["post", "tag", "tags"].includes(page.kind)) current = "true";
+    return `<li><a href="${href}"${current ? ` aria-current="${current}"` : ""}>${label}</a></li>`;
+  });
+  return `<a class="site-title" href="/">${e(site.title)}</a>
+<nav aria-label="Site"><ul>${links.join("")}</ul></nav>`;
+}
 
 export function layout(page, site, { dev }) {
   const twin = markdownTwin(page.path);
   const canonical = site.origin + page.path;
+  const home = page.kind === "home";
   return `<!doctype html>
 <html lang="${e(site.language)}">
 <head>
@@ -24,19 +35,19 @@ export function layout(page, site, { dev }) {
 ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
 <link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
-<link rel="stylesheet" href="${lookStylesheet(site.look)}">
-${dev ? DEV_LOOK : ""}</head>
+<link rel="stylesheet" href="${home ? "/world-shell.css" : lookStylesheet(site.look)}">
+${dev && !home ? DEV_LOOK : ""}</head>
 <body data-page="${page.kind}">
-<a class="skip" href="#main">Skip to content</a>
-<header class="site-header">
-<a class="site-title" href="/">${e(site.title)}</a>
-<nav aria-label="Site"><ul>${NAV.map((n) => `<li><a href="${n.href}"${page.path.startsWith(n.href) ? ` aria-current="${page.path === n.href ? "page" : "true"}"` : ""}>${n.label}</a></li>`).join("")}</ul></nav>
-</header>
-<main id="main">
+${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
+${home ? "" : `<header class="site-header">${masthead(page, site)}</header>`}
+<main id="main" tabindex="-1">
 ${page.html}
 </main>
 <footer class="site-footer">
-<ul class="footer-links">${twin ? `<li><a href="${e(twin)}">This page as Markdown</a></li>` : ""}<li><a href="/llms.txt">llms.txt</a></li><li><a href="/feed.xml">Atom feed</a></li></ul>
+<ul class="footer-links">${twin ? `<li><a href="${e(twin)}">Markdown</a></li>` : ""}<li><a href="/llms.txt">llms.txt</a></li><li><a href="/feed.xml">Atom feed</a></li></ul>
+${site.links?.length ? `<ul class="footer-links social-links" aria-label="Elsewhere">${site.links.map((l) => `<li><a href="${e(l.url)}" rel="me">${e(l.name)}</a></li>`).join("")}</ul>` : ""}
+${home ? `<details id="support-desk" hidden><summary>Contact support</summary><template><iframe title="Support button" src="/support/desk.html"></iframe></template></details>
+<script type="module" src="/support/desk.js"></script>` : ""}
 </footer>
 ${dev ? DEV_RELOAD : ""}</body>
 </html>

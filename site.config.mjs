@@ -1,12 +1,9 @@
-// One place for the site's settings. The build, the Worker config and the checks read it.
+// The generator, feed, and Worker share this configuration.
 export default {
-  title: "TODO: site title",
-  // Used in <meta name="description">, llms.txt and the feed.
-  description: "TODO: one sentence about the site. Notes on AI, music, games, what I learned, and a dev diary for Village.",
-  author: "TODO: author name",
+  title: "Pavlo Zahynailo",
+  author: "Pavlo Zahynailo",
+  description: "Pavlo Zahynailo’s writing and interactive Voxelmorphism experiments.",
   language: "en",
-  // TODO: the real origin once the domain is chosen. Feed, sitemap, canonical links and
-  // the Markdown twins use it for absolute URLs.
   origin: "https://zahynailo.dev",
 
   // Answer `Accept: text/markdown` on page routes from the Worker.
@@ -26,16 +23,12 @@ export default {
   // here. Off is the default. Turning one on is the owner's step. See features/README.md.
   flags: {},
 
-  // Home page sections.
-  intro: "TODO: a short intro, written by the owner.",
-  projects: [
-    {
-      name: "Village",
-      description: "TODO: one line about Village, the engine and home project. Its dev diary lives under the village tag.",
-      tag: "village",
-    },
-  ],
+  // The archived design previews also read intro and projects.
+  intro: "Writing and experiments in voxels.",
+  projects: [{ name: "Village", description: "The engine behind the landing.", tag: "village" }],
   links: [
-    // TODO: real links, e.g. { name: "GitHub", url: "https://github.com/…" }
+    { name: "X", url: "https://x.com/pasha_knz" },
+    { name: "LinkedIn", url: "https://www.linkedin.com/in/pavlo-zahynailo/" },
+    { name: "Twitch", url: "https://www.twitch.tv/p_bender" },
   ],
 };
