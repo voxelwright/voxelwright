@@ -11,6 +11,8 @@
   .review { display: grid; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 140); }
   .review .name { font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; overflow-wrap: anywhere; }
   .who { display: flex; align-items: center; gap: calc(var(--vx) * 3); min-inline-size: 0; }
+  .vx-avatar[data-vx-mount="portrait"] { --vx: 2px; --_size: calc(20 * var(--vx)); --vx-avatar-deep: 4; }
+  .vx-avatar[data-vx-mount="portrait"] > img { image-rendering: pixelated; }
   .who .by { display: grid; min-inline-size: 0; }
   .who .by b { font-weight: 600; }
   .who .by span { color: var(--vx-ink-quiet); font-size: 0.875rem; overflow-wrap: anywhere; }
@@ -35,7 +37,10 @@
     <div class="review">
       <div class="name">Keep the last three builds</div>
       <div class="who">
-        <span class="vx-avatar"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E%3Crect width='12' height='12' fill='%23bcd0ee'/%3E%3Crect x='3' y='2' width='6' height='7' fill='%232a2030'/%3E%3Crect x='4' y='3' width='4' height='5' fill='%23c58a66'/%3E%3Crect x='5' y='8' width='2' height='1' fill='%23c58a66'/%3E%3Crect x='2' y='9' width='8' height='3' fill='%232f4fb8'/%3E%3C/svg%3E" alt="Mina Okafor"></span>
+        <span class="vx-avatar" data-vx-mount="portrait">
+          <img alt="Mina Okafor" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 18 18' shape-rendering='crispEdges'%3E%3Cpath fill='%23bcd0ee' d='M0 0h18v18H0z'/%3E%3Cpath fill='%232a2030' d='M5 3h2V2h5v1h2v2h1v8h-3v1H5v-2H4V5h1z'/%3E%3Cpath fill='%23935d49' d='M6 6h7v4h-1v2h-1v2H8v-2H7v-2H6z'/%3E%3Cpath fill='%23c58a66' d='M6 6h3V5h3v4h-1v2h-1v1H8v-1H7V9H6z'/%3E%3Cpath fill='%23553f47' d='M6 4h2V3h3v1H8v1H6z'/%3E%3Cpath fill='%23e2b580' d='M12 9h1v2h-1z'/%3E%3Cpath fill='%232e4793' d='M2 18v-3h2v-1h3v-1h5v1h3v1h1v3z'/%3E%3Cpath fill='%233f60be' d='M2 18v-3h2v-1h3v1h2v3z'/%3E%3Cpath fill='%23aa7458' d='M8 12h3v2h-1v1H9v-1H8z'/%3E%3C/svg%3E">
+          <span class="vx-avatar-initials" aria-hidden="true">MO</span>
+        </span>
         <span class="by"><b>Mina Okafor</b><span>opened this four minutes ago</span></span>
       </div>
       <div class="reviewers">
