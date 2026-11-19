@@ -100,7 +100,7 @@ function deploy() {
   const stage = $('#deploy'), h = hand(stage);
   const go = $('#go'), meter = $('.vx-meter', stage), prog = $('progress', stage), num = $('.build-num', stage);
   const lamp = $('.vx-lamp', stage), word = $('.state-word', stage), note = $('.vx-toast', stage), log = $('.log', stage);
-  const park = h.el.hasAttribute('data-demo-pointer') ? [go, 1.06, 1.18] : [$('.actions', stage), 0.5, 0.66];
+  const park = h.el.hasAttribute('data-demo-pointer') ? [go, 1.12, .42] : [$('.actions', stage), 0.5, 0.66];
   const BUILDS = [
     ['10:42:17', 'Cloned main at 4f2c9a1', '10:42:31', 'Installed 212 packages', '10:43:02', 'Built in 45 s'],
     ['10:51:40', 'Cloned main at 9be01d3', '10:51:52', 'Installed 212 packages', '10:52:21', 'Built in 41 s'],
@@ -303,7 +303,7 @@ function direct(story) {
     stage.addEventListener('pointerdown', enter);
     stage.addEventListener('pointerleave', leave);
     stage.addEventListener('pointercancel', leave);
-    stage.addEventListener('focusin', take);
+    stage.addEventListener('focusin', e => { if (e.target.matches(':focus-visible') || reading()) take(); });
     stage.addEventListener('focusout', resume);
     inside = stage.matches(':hover');
     if (inside || stage.querySelector(':focus-visible')) take();

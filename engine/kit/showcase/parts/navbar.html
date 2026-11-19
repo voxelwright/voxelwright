@@ -211,11 +211,18 @@
   }
   const siteNav = document.querySelector('#site .vx-nav');
   const locationText = document.querySelector('#site .workspace-location');
-  // Use the followed URL so history and a direct destination link agree.
+  let siblingDestination;
   function followLocation() {
-    const hash = location.hash || '#deploys';
+    const fragment = location.hash || '#deploys';
+    const current = siteNav.querySelector('[aria-current="page"]');
+    const hash = siblingDestination === location.href ? current?.hash :
+      history.state?.workspaceRoute ?? fragment;
+    siblingDestination = undefined;
     const link = [...siteNav.querySelectorAll('a')].find(a => a.hash === hash);
     if (link) selectRoute(link);
+    const selected = link ?? current;
+    if (selected && selected.hash !== history.state?.workspaceRoute)
+      history.replaceState({ ...history.state, workspaceRoute: selected.hash }, '');
   }
   function readLocation() {
     const label = siteNav.querySelector('[aria-current="page"]')?.textContent.trim() || '';
@@ -227,7 +234,14 @@
   followLocation();
   document.addEventListener('click', (event) => {
     const link = event.target.closest?.('.vx-nav a[href]');
-    if (link && !siteNav.contains(link)) selectRoute(link);
+    if (link && siteNav.contains(link) && link.href === location.href) {
+      selectRoute(link);
+      history.replaceState({ ...history.state, workspaceRoute: link.hash }, '');
+    } else if (link && !siteNav.contains(link) && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && event.button === 0) {
+      // The independent example keeps its own current route on this history entry.
+      siblingDestination = link.href === location.href ? undefined : link.href;
+      selectRoute(link);
+    }
   });
   show(navs, navbar, windowMount, routeSocket);
 </script>

@@ -87,8 +87,10 @@ function wire(el, on, live) {
     const d = live?.stage.lives.get(dialog);
     if (d?.state.leave) d.state.leave(value); else dialog.close(value);
   };
+  let executed = false;
   const choose = (o) => {
     if ((deck && !dialog.open) || !o || o.getAttribute('aria-disabled') === 'true') return;
+    executed = true;
     const value = valueOf(o);
     el.dispatchEvent(new CustomEvent('vx-choose', { bubbles: true, detail: { option: o, value } }));
     close(value);
@@ -101,11 +103,12 @@ function wire(el, on, live) {
   };
   let reversing = false;
   const begin = () => {
-    if (!reversing) {
+    if (!reversing || executed) {
       input.value = '';
       filter();
     }
     reversing = false;
+    executed = false;
     input.focus({ preventScroll: true });
   };
 
