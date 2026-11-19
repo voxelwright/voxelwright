@@ -12,6 +12,18 @@
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
 </script>
 <style>
+  /* Fifteen pairs of segments per day, one segment per deployment in this week's scale. */
+  #deploys > .vx-chart-window {
+    --vx: 3px;
+    --vx-look: deploy-display;
+    --vx-chart-rows: 48;
+  }
+  #deploys > .vx-chart-window:not([data-vx-live]) {
+    background: #182225;
+    box-shadow: inset 0 0 0 var(--vx) #515b59;
+  }
+  #deploys .vx-chart-marks [data-vx-light="stud"] { --_light: #303b3e; }
+
   /* the page's own */
   .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; min-inline-size: 0; }
   .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 5); }
@@ -134,6 +146,35 @@
 <script type="module">
   import { show } from './parts.js';
   import { chart } from '../../src/components/chart.js';
+
+  import { defineLook } from '../../src/index.js';
+  import { ring, halo } from '../../src/core/light.js';
+
+  // A shallow signal module. The seal and retaining lip sit outside the calibrated
+  // aperture. Its black mask absorbs stray light between neighbouring segments.
+  defineLook('deploy-display', {
+    from: 'lit', well: 2,
+    materials: {
+      floor: { day: '#182225', night: '#121b1d' },
+      slate: { day: '#596467', night: '#4a565a' },
+      steel: { day: '#303b3e', night: '#293638', jitter: .003 },
+      'light-go': { day: '#59d89a', night: '#60dca1', glow: .65 },
+      'light-stop': { day: '#ff765f', night: '#ff806c', glow: .66 },
+    },
+    parts: { chart: {
+      glowRadius: 1.25,
+      build(live, model) {
+        chart.build(live, model);
+        const { W, H } = live;
+        ring(model.part('seal'), -1, -1, 0, W + 2, H + 2, 'gasket', 1);
+        ring(model.part('retainer'), -1, -1, 1, W + 2, H + 2, 'slate', 1);
+      },
+      pose(live) {
+        chart.pose(live);
+        live.glowStrength = halo(.011);
+      },
+    } },
+  });
 
   // the page's own: the week before, and back. The chart hears its table change.
   const buildCells = [...document.querySelectorAll('#build tbody td')];
