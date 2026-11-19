@@ -31,7 +31,7 @@ async function open({ width = 1180, plain = false, reduced = false, wait = 700 }
 const read = (p, id) => p.evaluate(async (id) => {
   const { MATERIALS } = await import('/kit/src/index.js');
   const fig = document.getElementById(id), win = fig.querySelector('.vx-chart-window'), table = fig.querySelector('table');
-  const vx = 4, wr = win.getBoundingClientRect();
+  const vx = parseFloat(getComputedStyle(win).getPropertyValue('--vx')), wr = win.getBoundingClientRect();
   const value = (c) => { const t = (c.dataset.vxValue ?? c.textContent).trim(); return t === '' ? null : Number(t); };
   const rows = [...table.tBodies[0].rows].map((r) => [...r.cells].slice(1).map(value));
   const ticks = [...fig.querySelectorAll('.vx-chart-y > span')].map((s) => { const r = s.getBoundingClientRect(); return { text: s.textContent, y: (r.top + r.height / 2 - wr.top) / vx }; });
