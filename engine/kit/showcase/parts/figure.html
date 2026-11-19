@@ -17,6 +17,29 @@
   .pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--vx) * 6); inline-size: 100%; align-items: start; }
   .small { inline-size: calc(var(--vx) * 60); }
   .mid { inline-size: 100%; max-inline-size: calc(var(--vx) * 100); }
+  #use {
+    position: relative;
+    isolation: isolate;
+    inline-size: min(100%, calc(var(--vx) * 166));
+    padding: calc(var(--vx) * 3);
+    gap: var(--vx);
+  }
+  #use > .pixels { display: block; inline-size: 100%; block-size: auto; }
+  #use > figcaption {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--vx) 1rem;
+    max-inline-size: none;
+    border: 0;
+    padding: calc(var(--vx) * 3) calc(var(--vx) * 5);
+    color: var(--vx-ink);
+  }
+  #use small { font-family: var(--vx-mono); color: var(--vx-ink-quiet); }
+  #use:not([data-vx-live]) { background: var(--vx-chalk); }
+  #use:not([data-vx-live]) > .pixels { outline: var(--vx) solid var(--vx-slate); }
+  #use:not([data-vx-live]) > figcaption { background: var(--panel, var(--vx-ground)); }
   .diagram { color: var(--vx-ink); font-family: var(--vx-font); }
   svg.pixels { shape-rendering: crispEdges; }
   @media (max-width: 600px) { .pair { grid-template-columns: minmax(0, 1fr); } }
@@ -52,7 +75,7 @@
     <h2>In use: a post on the fogline blog</h2>
     <p class="words">The office looks out over the harbour. Most mornings the fog lifts at about the time the first deploy goes out, which is how the company got its name.</p>
     <figure class="vx-figure wide" id="use">
-      <div class="vx-recess"><svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="A harbour at first light: a low sun over the water, a lighthouse on a rock, a small boat by the quay."><use href="#harbour"/></svg></div>
+      <svg class="pixels" viewBox="0 0 80 45" role="img" aria-label="A harbour at first light: a low sun over the water, a lighthouse on a rock, a small boat by the quay."><use href="#harbour"/></svg>
       <figcaption>The harbour at ten to six, from the meeting room. <small>Drawn by Ada</small></figcaption>
     </figure>
   </section>
@@ -100,7 +123,30 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show();
+  show({
+    name: 'harbour-mount',
+    selector: 'figure#use',
+    pad: 3,
+    build(live, model) {
+      const { el, W, H, vx } = live;
+      const captionTop = Math.round(el.querySelector('figcaption').offsetTop / vx);
+      const mount = model.part('frame');
+      // The shallow case carries the label below the open picture aperture.
+      mount.slab(0, 0, 0, W, H, 2, 'chalk', 2);
+      mount.carve(2, 2, 0, W - 4, captionTop - 2, 2);
+      const lip = model.part('gasket');
+      // Extend one cell behind the drawing to cover the projection of the lower lip.
+      lip.box(2, 2, 0, W - 4, 2, 1, 'gasket');
+      lip.box(2, 4, 0, 2, captionTop - 5, 1, 'gasket');
+      lip.box(W - 4, 4, 0, 2, captionTop - 5, 1, 'gasket');
+      lip.box(2, captionTop - 2, 0, W - 4, 2, 1, 'gasket');
+      const plate = model.part('caption-plate');
+      plate.slab(2, captionTop, 2, W - 4, H - captionTop - 2, 1, 'panel', 1);
+      const mid = Math.floor((captionTop + H - 2) / 2);
+      for (const x of [4, W - 5]) plate.plot(x, mid, 2, 'warm-metal');
+      live.faceZ = 2;
+    },
+  });
 </script>
 </body>
 </html>
