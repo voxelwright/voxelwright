@@ -40,6 +40,39 @@
   .each h3:first-child { margin-block-start: 0; }
   .each > * { max-inline-size: 100%; }
   .each .vx-code { inline-size: 100%; }
+  #picker > [data-vx-pick="theme"] { --vx-look: finish-samples; --vx: 3px; }
+  #picker > [data-vx-pick="theme"] > label {
+    display: grid; grid-template-columns: auto; grid-template-rows: 1fr;
+    justify-items: center; min-block-size: calc(var(--vx) * 18); column-gap: 0;
+    padding: 0 calc(var(--vx) * 2) calc(var(--vx) * 4);
+    color: var(--legend, var(--vx-ink));
+  }
+  #picker > [data-vx-pick="theme"] .vx-label {
+    font: 650 .9375rem/1.1 var(--vx-font); letter-spacing: -.01em; pointer-events: none;
+  }
+  #picker > [data-vx-pick="theme"] small {
+    display: block; font: 500 .6875rem/1.15 var(--vx-mono); letter-spacing: .025em;
+  }
+  #picker > [data-vx-pick="theme"] .vx-theme-lamp {
+    position: absolute; bottom: calc(.5 * var(--vx)); left: calc(50% - 3.5 * var(--vx));
+    inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 2);
+  }
+  #picker > [data-vx-pick="theme"]:not([data-vx-live]) > label {
+    background: var(--sample, var(--vx-key)); border: 2px solid #393e39;
+    box-shadow: none;
+  }
+  #picker > [data-vx-pick="theme"]:not([data-vx-live]) .vx-theme-lamp {
+    background: #393e39; box-shadow: none;
+  }
+  #picker > [data-vx-pick="theme"]:not([data-vx-live]) label:has(:checked) {
+    box-shadow: inset 0 0 0 2px var(--legend);
+  }
+  #picker > [data-vx-pick="theme"]:not([data-vx-live]) label:has(:checked) .vx-theme-lamp {
+    background: var(--_day);
+  }
+  #picker > [data-vx-pick="theme"] > label:has(input:focus-visible) {
+    outline: 2px solid var(--vx-focus); outline-offset: 3px; z-index: 1;
+  }
 </style>
 </head>
 <body>
@@ -133,6 +166,7 @@ adopt();</code></pre></div>
   </section>
 </main>
 <script type="module">
+  import { fitFinishSamples, sampleReturn } from './finish-samples.js';
   import { show } from './parts.js';
   import { THEMES } from '../../src/index.js';
   import { themePicker, EARLY } from '../../src/components/theme-picker.js';
@@ -152,7 +186,8 @@ adopt();</code></pre></div>
     window.heard.push(e.detail);
     heard.textContent = `The page heard vx-theme: theme ${e.detail.theme ?? 'none'}, time ${e.detail.time}, ${e.detail.night ? 'night' : 'day'}.`;
   });
-  show(themePicker);
+  fitFinishSamples(document.querySelector('.site > .bar > #picker > [data-vx-pick="theme"]'));
+  show(themePicker, sampleReturn);
 </script>
 </body>
 </html>
