@@ -41,14 +41,17 @@ const read = (p, id) => p.evaluate(async (id) => {
     room: inner - gs.reduce((a, g) => a + len(g), 0),
     grooves: gs.map((g) => {
       const l = window.vx?.live?.(g), r = g.getBoundingClientRect(), walls = l?.model.byName.walls;
+      const parts = l?.model.byName;
       return {
+        lens: parts?.window && MATERIAL_IDS[parts.window.mats[0]].name,
+        gripZ: parts?.grip?.tz, gripCells: parts?.grip?.count,
         role: g.getAttribute('role'), tab: g.getAttribute('tabindex'), controls: g.getAttribute('aria-controls'), way: g.getAttribute('aria-orientation'),
         now: Number(g.getAttribute('aria-valuenow')), min: Number(g.getAttribute('aria-valuemin')), max: Number(g.getAttribute('aria-valuemax')),
         has: ['aria-valuenow', 'aria-valuemin', 'aria-valuemax'].every((a) => g.hasAttribute(a)),
         held: g.hasAttribute('data-vx-held'), live: g.hasAttribute('data-vx-live'), focus: document.activeElement === g,
-        ring: getComputedStyle(g).outlineStyle, cursor: getComputedStyle(g).cursor, touch: getComputedStyle(g).touchAction,
-        mat: walls ? MATERIAL_IDS[walls.mats[0]].name : null, deep: walls ? Math.round(-Math.min(...walls.rest.filter((_, i) => i % 3 === 2)) + 0.5) : null, look: l?.look.groove ?? null,
-        glow: l?.glowStrength ?? null, lit: l?.spring('lit').target ?? null,
+        ring: getComputedStyle(g, parts?.grip && g.matches(':focus-visible') ? '::before' : null).outlineStyle, cursor: getComputedStyle(g).cursor, touch: getComputedStyle(g).touchAction,
+        mat: walls ? MATERIAL_IDS[walls.mats[0]].name : null,
+        glow: l?.glowStrength ?? null,
         x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height,
       };
     }),
@@ -78,19 +81,19 @@ async function hand(p, how) {
   say(g.w === 20 && g.cursor === 'col-resize' && g.touch === 'none', `${how}: it is five voxels of surface (${g.w} px) with a resize cursor, and a finger on it does not scroll (touch-action ${g.touch})`);
   const target = await p.evaluate(() => { const g = document.getElementById('use-groove'), r = g.getBoundingClientRect(); return [-21, -23, 21, 23].map((d) => document.elementFromPoint(r.x + r.width / 2 + d, r.y + r.height / 2) === g).join(); });
   say(target === 'true,false,true,false', `${how}: its target is eleven voxels wide: a press 21 px either side of its middle lands on it, 23 px does not (${target})`);
-  if (live) say(g.mat === 'light-warm' && g.deep === g.look && g.look >= 1, `voxels: at rest the channel holds the room's own warm light (${g.mat}), cut as deep as the look's groove (${g.deep})`);
+  if (live) say(g.lens === 'lens' && g.gripZ === 0 && g.gripCells > 0, 'voxels: the raised grip and unlit lens are populated at rest');
 
   // ---- a real mouse
-  const was = s.panes[0], rest = g;
+  const was = s.panes[0];
   await p.mouse.move(g.x, g.y, { steps: 6 });
   await p.waitForTimeout(250);
   const aimed = (await read(p, 'use')).grooves[0];
-  if (live) say(aimed.lit === 1 && aimed.glow > rest.glow && aimed.mat === 'light-warm', `voxels: under the pointer its light is brighter, and still warm (${rest.glow.toFixed(4)} to ${aimed.glow.toFixed(4)})`);
+  if (live) say(aimed.lens === 'lens' && aimed.gripZ === 0, 'voxels: hovering leaves the grip raised and the contact lamp off');
   await p.mouse.down();
   await p.waitForTimeout(140);
   let h = (await read(p, 'use')).grooves[0];
   say(h.held && h.focus && h.ring === 'none', `${how}: pressed, it is held (data-vx-held), and has the focus with no ring for a mouse`);
-  if (live) say(h.mat === 'light' && h.glow > aimed.glow, `voxels: held, the channel is the accent's light (${h.mat}), and brighter (${h.glow.toFixed(4)})`);
+  if (live) say(h.lens === 'light' && h.glow > aimed.glow && h.gripZ < 0, 'voxels: contact lights the runner window and lowers the grip');
   await p.mouse.move(g.x + 60, g.y + 30, { steps: 10 });
   await p.waitForTimeout(150);
   await p.screenshot({ path: `${dir}/hand-held-${how}.png`, clip: { x: 240, y: 200, width: 700, height: 280 } });
@@ -104,7 +107,7 @@ async function hand(p, how) {
   await p.waitForTimeout(350);
   t = await read(p, 'use');
   say(!t.grooves[0].held && t.panes[0] === was + 68, `${how}: let go, it stays where it was put and is no longer held`);
-  if (live) say(t.grooves[0].mat === 'light-warm', `voxels: and its light is warm again (${t.grooves[0].mat})`);
+  if (live) say(t.grooves[0].lens === 'lens', 'voxels: the window is unlit after release');
   let ev = await sent(p);
   say(ev.length >= 2 && ev.every((e) => e[0] === 'use') && ev.at(-1)[1] === t.grooves[0].now && ev.at(-1)[2] === t.panes[0] && await p.evaluate(() => document.getElementById('said').textContent) === `The list has ${t.grooves[0].now}% of the room.`, `${how}: each change sent vx-resize (${ev.length} of them; the last says ${ev.at(-1)?.[1]}%, ${ev.at(-1)?.[2]} px), and the page heard it`);
 
@@ -131,7 +134,6 @@ async function hand(p, how) {
   await p.waitForTimeout(250);
   s = await read(p, 'use');
   say(s.grooves[0].focus && s.grooves[0].ring === 'solid', `${how}: Tab reaches the groove, and the focus can be seen (outline ${s.grooves[0].ring})`);
-  if (live) say(s.grooves[0].lit === 1 && s.grooves[0].glow > rest.glow, 'voxels: and its own light is brighter with it');
   await p.screenshot({ path: `${dir}/hand-focus-${how}.png`, clip: { x: 240, y: 200, width: 700, height: 280 } });
   const step = async (key, by, what) => {
     const a = await read(p, 'use');
@@ -150,7 +152,7 @@ async function hand(p, how) {
   await p.keyboard.up('ArrowRight');
   await p.waitForTimeout(250);
   t = await read(p, 'use');
-  say(h.held && (!live || h.mat === 'light') && !t.grooves[0].held && (!live || t.grooves[0].mat === 'light-warm'), `${how}: while an arrow key is down it is held${live ? ` and drawn in the accent (${h.mat})` : ''}; let go, it is not${live ? ` (${t.grooves[0].mat})` : ''}`);
+  say(h.held && (!live || h.lens === 'light') && !t.grooves[0].held && (!live || t.grooves[0].lens === 'lens'), `${how}: while an arrow key is down it is held${live ? ` and drawn in the accent (${h.lens})` : ''}; let go, it is not${live ? ` (${t.grooves[0].lens})` : ''}`);
   await p.keyboard.press('ArrowLeft');
   await p.keyboard.press('Home');
   t = await read(p, 'use');
@@ -291,9 +293,20 @@ await p.context().close();
   await q.locator('#use').scrollIntoViewIfNeeded();
   const s = await read(q, 'use'), g = s.grooves[0], y0 = await q.evaluate(() => scrollY);
   const cdp = await q.context().newCDPSession(q);
-  const finger = (type, x, y) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: type === 'touchEnd' ? [] : [{ x, y }] });
-  await finger('touchStart', g.x, g.y);
-  for (let i = 1; i <= 8; i++) { await finger('touchMove', g.x + i * 4, g.y + i * 6); await q.waitForTimeout(16); }
+  const finger = (type, ...touchPoints) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints });
+  const first = { id: 1, x: g.x, y: g.y - g.h / 2 + 26 };
+  const second = { id: 2, x: first.x, y: first.y + 48 };
+  await finger('touchStart', first);
+  await finger('touchStart', first, second);
+  second.x += 40;
+  await finger('touchMove', first, second);
+  await finger('touchEnd', second);
+  const owner = await read(q, 'use');
+  say(owner.grooves[0].held && owner.panes[0] === s.panes[0], 'a second touch can move and lift without taking the splitter from the first');
+  for (let i = 1; i <= 8; i++) {
+    await finger('touchMove', { ...first, x: first.x + i * 4, y: first.y - i * 6 });
+    await q.waitForTimeout(16);
+  }
   const mid = await read(q, 'use');
   await finger('touchEnd');
   await q.waitForTimeout(250);
@@ -302,13 +315,16 @@ await p.context().close();
   await q.context().close();
 }
 
-// ---- reduced motion: its light changes at once
+// ---- reduced motion: the grip changes height at once
 {
   const q = await open({ reduced: true });
   const g = (await read(q, 'use')).grooves[0];
   await q.mouse.move(g.x, g.y, { steps: 4 });
-  const at = await q.evaluate(() => { const l = window.vx.live(document.getElementById('use-groove')); return [l.spring('lit').x, l.spring('lit').target]; });
-  say(at[0] === 1 && at[1] === 1, `reduced motion: under the pointer its light is brighter at once, with no easing (${at})`);
+  const height = () => q.evaluate(() => window.vx.live(document.getElementById('use-groove')).model.byName.grip.tz);
+  await q.mouse.down();
+  const at = await height();
+  await q.mouse.up();
+  say(at === -1 && await height() === 0, 'reduced motion: pressure and return land directly at their stops');
   await q.context().close();
 }
 

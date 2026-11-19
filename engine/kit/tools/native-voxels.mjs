@@ -5,10 +5,25 @@ import assert from 'node:assert/strict';
 export function inspectNativeVoxels(hosts, { plain = false, families = [] } = {}) {
   return hosts.evaluateAll(async (elements, { plain, families }) => {
     const { getStage, live, Model, Part } = await import('/kit/src/index.js');
-    function problem(el) {
+    const owners = new Map();
+    for (const instance of getStage()?.lives.values() ?? []) owners.set(instance.canvas, instance);
+    async function clippedAway(el, canvas) {
+      for (let node = canvas; node && node !== el.parentElement; node = node.parentElement) {
+        if (getComputedStyle(node).clipPath === 'none') continue;
+        return new Promise(resolve => {
+          const observer = new IntersectionObserver(([entry]) => {
+            observer.disconnect();
+            resolve(entry.intersectionRect.width === 0 || entry.intersectionRect.height === 0);
+          }, { root: el.parentElement });
+          observer.observe(canvas);
+        });
+      }
+      return false;
+    }
+    async function problem(el) {
       const instance = live(el);
       if (plain) {
-        return instance || el.querySelector(':scope > canvas.vx-canvas')
+        return instance || [...el.querySelectorAll('canvas.vx-canvas')].some(canvas => !owners.has(canvas) || !el.contains(owners.get(canvas).el))
           ? 'expected plain DOM without a voxel model or canvas' : null;
       }
       if (!instance) return 'no live voxel instance';
@@ -19,20 +34,24 @@ export function inspectNativeVoxels(hosts, { plain = false, families = [] } = {}
       if (!instance.model.parts.some(part => part.cells.size > 0 && part.count > 0)) {
         return 'no populated voxel parts';
       }
+      if (!instance.model.parts.some(part => !part.hidden && part.count > 0)) return 'all populated parts are hidden';
+      if (!instance.canvas.checkVisibility({ opacityProperty: true, visibilityProperty: true }) ||
+          !instance.canvas.clientWidth || !instance.canvas.clientHeight) return 'voxel canvas is hidden';
       const canvases = [...el.querySelectorAll('canvas')].filter(canvas => {
-        const owner = live(canvas.parentElement);
-        return owner === instance || owner?.canvas !== canvas;
+        const owner = owners.get(canvas);
+        return !owner || owner === instance || !el.contains(owner.el);
       });
       if (canvases.length !== 1 || canvases[0] !== instance.canvas) {
         return 'expected one canvas owned by the live instance';
       }
+      if (await clippedAway(el, instance.canvas)) return 'voxel canvas is fully clipped';
       return null;
     }
-    return elements.map(el => ({
+    return Promise.all(elements.map(async el => ({
       id: el.id,
       family: families.find(selector => el.matches(selector)),
-      problem: problem(el),
-    }));
+      problem: await problem(el),
+    })));
   }, { plain, families });
 }
 

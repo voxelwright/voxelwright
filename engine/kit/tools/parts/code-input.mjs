@@ -60,7 +60,7 @@ for (const plain of [false, true]) {
   await p.mouse.click(x0, y0);
   s = await read(p, 'code');
   say(s.focus && s.active === 0, `${tag}a press on the first window: the input has the focus and the first window is marked`);
-  if (!plain) say(await p.evaluate(() => { const l = window.vx.live(document.querySelector('.vx-otp:has(#code) > .vx-otp-cell')); return l.model.byName.walls && l.spring('lit').x === 1; }), 'and that window\'s rim is the accent\'s light, at once');
+  if (!plain) say(await p.evaluate(() => { const l = window.vx.live(document.querySelector('.vx-otp:has(#code) > .vx-otp-cell')); const pilot = l.model.byName.pilot; return pilot.count === 3 && pilot.col[3] > 0; }), 'the first window lights its fixed three-voxel pilot at once');
   await p.keyboard.type('48a2');
   s = await read(p, 'code');
   say(s.value === '482' && s.active === 3 && s.full === 3, `${tag}typing 4, 8, a, 2: only the digits are kept, each in its window, and the fourth is marked (${s.value}, window ${s.active + 1})`);

@@ -12,6 +12,25 @@
   .stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 1); }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  #new .vx-marker-word { display: inline-flex; align-items: center; gap: .45em; }
+  #new .marker-pilot {
+    --vx: 1px;
+    position: relative; isolation: isolate; flex: none; inline-size: 13px; block-size: 9px;
+  }
+  #new .marker-pilot:not([data-vx-live]) {
+    border: 1px solid var(--vx-steel); border-radius: 0;
+    background: #4a5353;
+    clip-path: polygon(2px 0, calc(100% - 2px) 0, 100% 2px, 100% calc(100% - 2px),
+                       calc(100% - 2px) 100%, 2px 100%, 0 calc(100% - 2px), 0 2px);
+  }
+  #new[data-vx-kind="new"] .marker-pilot:not([data-vx-live]) {
+    background: var(--lit-accent, var(--vx-enamel)); box-shadow: inset 0 0 0 1px #424944;
+  }
+  @media (forced-colors: active) {
+    #new .marker-pilot:not([data-vx-live]) { forced-color-adjust: none; border-color: CanvasText; background: Canvas; }
+    #new[data-vx-kind="new"] .marker-pilot:not([data-vx-live]) { background: Highlight; border: 3px double CanvasText; }
+  }
+  #new > .vx-groove:not([data-vx-live]) { background: color-mix(in srgb, var(--vx-ink-quiet) 35%, transparent); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -22,7 +41,7 @@
 <main class="vx-card sheet">
   <header>
     <h1>Marker</h1>
-    <p class="what">A line across a thread with a word in it. A date is in the room's own light; where what is new begins, the line is the accent's.</p>
+    <p class="what">Dates divide the thread. A small light beside “New” marks the first unread message.</p>
   </header>
   <div class="vx-groove" role="separator"></div>
   <section>
@@ -44,7 +63,11 @@
           <div class="vx-message-text"><p>The cache is keyed on the lockfile now.</p></div>
         </div>
       </article>
-      <div class="vx-marker" data-vx-kind="new" id="new"><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span><span class="vx-marker-word">New<span class="vx-aloud"> messages</span></span><span class="vx-groove" data-vx-light="accent" aria-hidden="true"></span></div>
+      <div class="vx-marker" data-vx-kind="new" id="new">
+        <span class="vx-groove" aria-hidden="true"></span>
+        <span class="vx-marker-word"><span class="marker-pilot" aria-hidden="true"></span>New<span class="vx-aloud"> messages</span></span>
+        <span class="vx-groove" aria-hidden="true"></span>
+      </div>
       <article class="vx-message" aria-labelledby="a3-who a3-when">
         <span class="vx-avatar" data-vx-size="small" aria-hidden="true"><span class="vx-avatar-initials">MO</span></span>
         <div class="vx-message-body">
@@ -80,7 +103,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show();
+  import { markerPilot } from './marker-pilot.js';
+  show(markerPilot);
 </script>
 </body>
 </html>

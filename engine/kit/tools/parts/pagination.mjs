@@ -40,6 +40,23 @@ const key = (p, nav = '#pager') => p.evaluate((nav) => {
   if (light?.count) { lit = Infinity; for (let i = 0; i < light.count; i++) lit = Math.min(lit, light.rest[i * 3] - 0.5); }
   return { at: down.length === 1 ? down[0].x : null, target: going.length === 1 ? going[0].x : null, seat, lit, stand, caps: seats.length, up, well: l.well };
 }, nav);
+// The deploy rail also carries the arrow caps. Read the lit window's actual
+// cells so a lamp accidentally drawn under a different number fails this check.
+const deployState = p => p.locator('#pager').evaluate(el => {
+  const live = window.vx.live(el);
+  const pages = live.state.seats.filter(s => !s.a.rel);
+  const down = pages.filter(s => Math.abs(s.part.tz + s.travel) < .01);
+  const windows = live.model.byName.windows;
+  const lit = [];
+  const bounds = el.getBoundingClientRect();
+  for (let i = 0; i < windows.count; i++) {
+    if (windows.col[4 * i + 3] > 0) lit.push([bounds.left + windows.rest[3 * i] * live.vx, bounds.top + windows.rest[3 * i + 1] * live.vx]);
+  }
+  const r = el.querySelector('[aria-current]').getBoundingClientRect();
+  return down.length === 1 && down[0].a.hasAttribute('aria-current') &&
+    lit.length > 0 && lit.every(([x, y]) => x >= r.left && x < r.right && y >= r.top && y < r.bottom) &&
+    pages.every(s => s === down[0] || s.part.tz === 0);
+});
 // everything of the part that reaches past the sheet's inner edge
 const outside = (p, sel) => p.evaluate((sel) => {
   const sheet = document.querySelector('.sheet'), cs = getComputedStyle(sheet), r = sheet.getBoundingClientRect();
@@ -56,7 +73,7 @@ const outside = (p, sel) => p.evaluate((sel) => {
 for (const plain of [false, true]) {
   const tag = plain ? 'plain' : 'voxels';
   const p = await open({ plain });
-  say(await p.locator('.vx-pagination-pages[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no bank is drawn in voxels' : 'every bank is drawn in voxels'}`);
+  say(await p.locator('.vx-pagination-pages[data-vx-live], #pager[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no bank is drawn in voxels' : 'every bank is drawn in voxels'}`);
   say(await current(p) === '5' && await seats(p) === '1 … 4 5 6 … 20', `${tag}: it starts on page 5 of 20: ${await seats(p)}`);
 
   // a real press on a seat
@@ -64,16 +81,19 @@ for (const plain of [false, true]) {
   await p.waitForTimeout(700);
   say(await current(p) === '6' && await p.textContent('#count') === 'Page 6 of 20', `${tag}: a press on seat 6 makes page 6 current (${await p.textContent('#count')})`);
   say(await seats(p) === '1 … 5 6 7 … 20', `${tag}: and the seats are written round it: ${await seats(p)}`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat && k.at !== null && k.lit === k.seat, `${tag}: the button that is down, on the light, is the current one (down at ${k.at}, light at ${k.lit}, seat at ${k.seat})`); say(k.stand === k.caps - 1 && k.up > 0, `${tag}: and every other page is a cap standing ${k.up} voxels above the surface (${k.stand} of ${k.caps})`); }
+  if (!plain) say(await deployState(p), 'Only the current page is latched and its fixed window lights');
 
   if (!plain) {
     const off = await p.evaluate(() => {
       const out = [], range = document.createRange();
-      for (const a of document.querySelectorAll('.vx-pagination-pages a')) { if (!a.offsetParent) continue; range.selectNodeContents(a); const r = range.getBoundingClientRect(); if (Math.abs(r.left - Math.round(r.left)) > 0.02 || Math.abs(r.top + scrollY - Math.round(r.top + scrollY)) > 0.02) out.push(`${a.textContent} x ${r.left.toFixed(2)} y ${(r.top + scrollY).toFixed(2)}`); }
+      for (const a of document.querySelectorAll('.vx-pagination-pages a, #pager ol a')) { if (!a.offsetParent) continue; range.selectNodeContents(a); const r = range.getBoundingClientRect(); if (Math.abs(r.left - Math.round(r.left)) > 0.02 || Math.abs(r.top + scrollY - Math.round(r.top + scrollY)) > 0.02) out.push(`${a.textContent} x ${r.left.toFixed(2)} y ${(r.top + scrollY).toFixed(2)}`); }
       return out;
     });
     say(off.length === 0, `${tag}: every number starts on a whole pixel${off.length ? ': ' + off.slice(0, 4).join(', ') : ''}`);
   }
+
+  say(new URL(p.url()).hash === '#page-6' && await p.locator('#pager ol a[href="#page-5"][data-seen]').count() === 1,
+    `${tag}: the destination is addressable and the previous page has a visited mark`);
 
   // the small keys
   await press(p, '#pager [rel="next"]');
@@ -106,8 +126,8 @@ for (const plain of [false, true]) {
   await press(p, '#pager [rel="next"]');
   await p.waitForTimeout(300);
   say(await current(p) === '20', `${tag}: pressing it does nothing`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the last button is the one that is down (down at ${k.at}, seat at ${k.seat})`); }
-  if (!plain) say(await p.evaluate(() => { const ol = document.querySelector('#pager ol'); return ol.firstElementChild === window.vx.live(ol).canvas; }), `${tag}: the app wrote the list again, and the slot still has its canvas`);
+  if (!plain) say(await deployState(p), 'The last button is latched on its light');
+  if (!plain) say(await p.evaluate(() => { const nav = document.querySelector('#pager'); return nav.firstElementChild === window.vx.live(nav).canvas; }), `${tag}: the app wrote the list again, and the slot still has its canvas`);
 
   // a button answers the hand before the link is followed, and comes back if the press is taken away
   if (!plain) {
@@ -161,7 +181,7 @@ for (const plain of [false, true]) {
   const p = await open({ width: 390, plain });
   say(await seats(p) === '1 … 5 … 20', `${tag}: five seats: ${await seats(p)}`);
   const rows = await p.evaluate(() => [...document.querySelectorAll('.vx-pagination')].map((n) => n.offsetHeight));
-  say(rows.every((h) => h === 44), `${tag}: every pagination is one row (${rows.join(', ')} px high)`);
+  say(rows.every((h, i) => h === (i === 0 ? 52 : 44)), `${tag}: every pagination is one row (${rows.join(', ')} px high)`);
   say(await seats(p, '#many') === '1 … 1280 … 4096', `${tag}: seats marked for wide screens are left out: ${await seats(p, '#many')}`);
   const out = await outside(p, '.vx-pagination');
   say(out.length === 0, `${tag}: nothing reaches past the sheet${out.length ? ': ' + out.slice(0, 4).join('; ') : ''}`);
@@ -169,7 +189,12 @@ for (const plain of [false, true]) {
   await press(p, '#pager ol a[href="#page-20"]');
   await p.waitForTimeout(600);
   say(await current(p) === '20' && await seats(p) === '1 … 18 19 20', `${tag}: a press on 20: ${await seats(p)}`);
-  if (!plain) { const k = await key(p); say(k.at === k.seat, `${tag}: the button that is down is the current one (down at ${k.at}, seat at ${k.seat})`); }
+  await p.setViewportSize({width:320, height:720});
+  await p.waitForFunction(() => {
+    const pager = document.querySelector('#pager'), live = window.vx?.live(pager);
+    return pager.offsetHeight > 52 && (!live || live.cssH === pager.offsetHeight);
+  });
+  if (!plain) say(await deployState(p), 'Wrapped phone rail has the current latch and light on the same row');
   say(p.errors.length === 0, `${tag}: no errors` + (p.errors.length ? ': ' + [...new Set(p.errors)].join(' | ') : ''));
   await p.context().close();
 }

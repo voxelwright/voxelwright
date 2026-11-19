@@ -181,9 +181,9 @@ export function crumble(part, opts = {}) {
 
 // A transient is assembled on one grid shared by its body, light and inlays. Run the
 // same course backwards on dismissal so an interrupted build releases exactly where it is.
-export function surfaceCourses(part, { W, H, top, duration, from, rim, still, out, start, previousRelease }) {
+export function surfaceCourses(part, { W, H, top, duration, from, rim, still, out, start, previousRelease, contactPose }) {
   // A reversal retraces the same trajectory, including each block's tilt.
-  const release = start > 0 && start < 1 ? previousRelease ?? false : out && start === 1;
+  const release = !!contactPose || (start > 0 && start < 1 ? previousRelease ?? false : out && start === 1);
   const end = Math.max(0.001, (still ? 0.12 : duration) * Math.abs((out ? 0 : 1) - start));
   const size = rim ? 3 : brickSize(W, H);
   const grid = still ? null : bricks(part, size);
@@ -211,7 +211,7 @@ export function surfaceCourses(part, { W, H, top, duration, from, rim, still, ou
     kind: out ? 'crumble' : 'assemble', t: 0, end, from, still, rim, release,
     get progress() { return start + ((out ? 0 : 1) - start) * clamp01(this.t / end); },
     write(pos, o) {
-      const progress = this.progress;
+      const progress = contactPose ? 1 - clamp01(this.t / end) : this.progress;
       for (let b = 0; b < count; b++) {
         const t = clamp01(((release ? 1 - progress : progress) - delay[b]) / (1 - delay[b]));
         phase[b] = depth[b] ? (release ? t : (1 - t) ** 2) : 0;
@@ -239,6 +239,24 @@ export function surfaceCourses(part, { W, H, top, duration, from, rim, still, ou
           pos[o + 2] += s * dy + c * dz;
           pos[o + 4] = rotation[b * 4 + 2];
           pos[o + 7] = rotation[b * 4 + 3];
+        }
+        if (contactPose) {
+          // Each block waits at its interrupted pose until the wave from the tap reaches it.
+          const offset = i * 8, held = 1 - loose;
+          if (loose === 0) {
+            for (let j = 0; j < 8; j++) pos[o + j] = contactPose[offset + j];
+          } else {
+            pos[o] += held * (contactPose[offset] - part.rest[i * 3] - part.tx);
+            pos[o + 1] += held * (contactPose[offset + 1] - part.rest[i * 3 + 1] - part.ty);
+            pos[o + 2] += held * (contactPose[offset + 2] - part.rest[i * 3 + 2] - part.tz);
+            // Course rotations share the same hinge axis. Compose the remaining initial tilt.
+            const angle = Math.atan2(contactPose[offset + 4], contactPose[offset + 7]);
+            if (angle) {
+              const half = Math.atan2(pos[o + 4], pos[o + 7]) + held * angle;
+              pos[o + 4] = Math.sin(half);
+              pos[o + 7] = Math.cos(half);
+            }
+          }
         }
       }
       return this.t >= end;

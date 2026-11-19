@@ -1,8 +1,15 @@
-import { adopt, ready, getStage, live } from '../src/index.js';
+import './lamp-dial.js';
+import { define, adopt, ready, getStage, live } from '../src/index.js';
 import { cases, lamps } from '../src/looks/instrument.js';
 import { recall, change } from './build-settings.js';
 import { connectSound } from './switch-sound.js';
+import { contourFader } from './contour-fader.js';
+import { cue } from '../src/core/sound.js';
 
+import { scanKey } from './scan-key.js';
+
+define(contourFader);
+define(scanKey);
 const $ = selector => document.querySelector(selector);
 let build = recall();
 const hardware = $('.hardware');
@@ -66,7 +73,9 @@ function sync() {
   for (const input of document.querySelectorAll('[name="shell"],[name="profile"],[name="rail"]')) input.checked = build[input.name] === input.value;
   gain.value = build.level;
   hardware.toggleAttribute('data-unlit', build.level === 0);
-  $('#gain-out').value = String(build.level).padStart(2, '0');
+  const brightness = `${build.level * 10}%`;
+  gain.setAttribute('aria-valuetext', brightness);
+  $('#gain-out').value = brightness;
   $('#shell-name').value = cases[build.shell].name;
   $('#display-lamp').textContent = lamps[build.lamp].name.toUpperCase();
   for (const key of keys) {
@@ -87,9 +96,13 @@ for (const key of keys) key.addEventListener('click', () => {
   if (!key.matches(':disabled, [aria-disabled="true"]')) apply({ lamp: key.dataset.lamp });
 });
 gain.addEventListener('input', () => apply({ level: gain.valueAsNumber }));
-contour.addEventListener('input', () => drawScope());
+contour.addEventListener('input', event => {
+  drawScope();
+  if (event.isTrusted && (contour.value === contour.min || contour.value === contour.max)) cue('press');
+});
 reduceMotion.addEventListener('change', () => drawScope());
-$('#scan').addEventListener('click', () => {
+$('#scan').addEventListener('click', event => {
+  if (event.currentTarget.matches(':disabled, [aria-disabled="true"]')) return;
   scan++;
   $('#sweep').value = 'FIELD SCOPE / ' + String(scan).padStart(2,'0');
   drawScope(true);

@@ -38,7 +38,8 @@ async function bar(p, how) {
   let s = await read(p);
   const focus = await p.evaluate(() => document.activeElement.getAttribute('aria-label') || document.activeElement.tagName);
   say(s.shown && s.native === 'none' && s.live === (how === 'voxels'), `${how}: the kit's bar is shown and the browser's own steps aside`);
-  say(s.len >= 44 && s.bar.w === 16, `${how}: the key is ${s.len} px long in a trench ${s.bar.w} px wide`);
+  const expectedLength = Math.max(44, (s.bar.h - 8) * s.view.h / (s.view.h + s.far));
+  say(near(s.len, expectedLength, 2) && s.bar.w === 32, `${how}: the key is ${s.len} px long on a plate ${s.bar.w} px wide`);
   // the wheel, over the words
   await p.mouse.move(s.view.x + s.view.w / 2, s.view.y + s.view.h / 2);
   await p.mouse.wheel(0, 120);

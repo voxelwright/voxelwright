@@ -13,6 +13,51 @@
   .screen p { color: var(--vx-ink-quiet); max-inline-size: 56ch; margin-block-start: calc(var(--vx) * 2); }
   .trails { display: grid; inline-size: 100%; }
   .narrow { inline-size: 100%; max-inline-size: calc(var(--vx) * 60); }
+
+  #trail {
+    --vx: 2px;
+    position: relative; isolation: isolate; justify-self: start;
+    max-inline-size: 100%; margin-block-end: .5rem;
+    padding: 6px 16px; color: #f3eee1;
+  }
+  #trail .rail {
+    position: absolute; inset: 0; z-index: -1; isolation: isolate;
+    pointer-events: none; background: #414843;
+  }
+  #trail .rail[data-vx-live] { background: transparent; }
+  #trail ol { gap: 0 6px; }
+  #trail li { gap: 6px; min-height: 44px; max-inline-size: 100%; }
+  #trail li + li::before { width: 4px; height: 7px; color: #e5dfd0; }
+  #trail a {
+    isolation: isolate; min-height: 44px; padding-inline: 10px;
+    color: var(--lit-legend, #302b24); font-size: .875rem;
+    text-decoration: underline; text-underline-offset: 3px;
+    text-decoration-color: color-mix(in srgb, currentColor 45%, transparent);
+  }
+  #trail a:not([data-vx-live]) { background: var(--vx-key, #eee6d6); }
+  #trail a:hover { color: var(--lit-legend, #302b24); text-decoration-color: currentColor; }
+  #trail a:focus-visible { outline: 2px solid var(--lit-legend, #302b24); outline-offset: -3px; }
+  #trail .legend { position: relative; pointer-events: none; }
+  #trail [aria-current] {
+    gap: 6px; color: #fff7e5; font-weight: 700;
+    text-decoration: none; border: 0;
+  }
+  #trail .locator {
+    position: relative; isolation: isolate; flex: none;
+    width: 12px; height: 8px;
+  }
+  #trail .locator:not([data-vx-live]) {
+    border: 2px solid #9d998a; background: var(--lit-accent, #388de6);
+  }
+  @media (max-width: 27rem) {
+    #trail { padding-inline: 10px; }
+    #trail ol, #trail li { column-gap: 4px; }
+    #trail a { padding-inline: 7px; }
+  }
+  @media (max-width: 23rem) {
+    #trail ol { display: grid; grid-template-columns: repeat(2, minmax(0, auto)); }
+  }
+  #trail a:not([data-vx-live]):is(:active, [data-held]) .legend { transform: translate(-1px, -1px); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -31,11 +76,12 @@
     <div class="screen">
       <nav class="vx-breadcrumb" aria-label="Breadcrumb" id="trail">
         <ol>
-          <li><a href="#fogline">fogline</a></li>
-          <li><a href="#projects">Projects</a></li>
-          <li><a href="#harbor-api">harbor-api</a></li>
-          <li><a href="#domains" aria-current="page">Domains</a></li>
+          <li><a href="#fogline"><span class="legend">fogline</span></a></li>
+          <li><a href="#projects"><span class="legend">Projects</span></a></li>
+          <li><a href="#harbor-api"><span class="legend">harbor-api</span></a></li>
+          <li><span aria-current="page"><span class="locator" aria-hidden="true"></span>Domains</span></li>
         </ol>
+        <span class="rail" aria-hidden="true"></span>
       </nav>
       <div class="name">Domains</div>
       <p>Addresses that answer for harbor-api. The first one is where the others send people.</p>
@@ -92,7 +138,8 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show(); // words only: nothing to draw
+  import { rail, lens, returnKey } from './breadcrumb-trail.js';
+  show(rail, lens, returnKey);
 </script>
 </body>
 </html>

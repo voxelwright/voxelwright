@@ -10,6 +10,31 @@
   /* this page's own */
   .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
   .talk .vx-button { margin-block-start: calc(var(--vx) * 3); }
+  #ship { justify-self: stretch; container-type: inline-size; }
+  #ship:not([data-vx-live]) > li:not(:last-child)::before {
+    inset-inline-start: calc(var(--vx) * 2.75);
+    inline-size: calc(var(--vx) * .5);
+    background: var(--vx-steel);
+  }
+  #ship:not([data-vx-live]) > li > .vx-lamp { outline: 1px solid var(--vx-steel); }
+  #ship:not([data-vx-live]) > li[data-vx-state="waiting"] > .vx-lamp { background: #363b39; }
+  #ship[data-vx-live] > li > .vx-lamp { visibility: hidden; }
+  #ship > li { grid-template-columns: calc(var(--vx) * 6) minmax(0, 1fr); }
+  #ship > li > .vx-lamp {
+    inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 3);
+    margin-block-start: calc(var(--vx) * 4);
+    margin-inline-start: calc(var(--vx) * 2);
+  }
+  #ship summary, #ship .vx-trace-line {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto calc(var(--vx) * 4);
+    column-gap: calc(var(--vx) * 2); user-select: text;
+  }
+  #ship .vx-trace-what { line-height: 1.3; }
+  @container (max-width: 23rem) {
+    #ship summary, #ship .vx-trace-line { grid-template-columns: minmax(0, 1fr) auto; }
+    #ship .vx-trace-state { grid-column: 1; }
+    #ship summary::after { grid-column: 2; grid-row: 1 / 3; }
+  }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); align-content: start; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
@@ -34,7 +59,7 @@
         <div class="vx-message-body">
           <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Deploy agent</span><time class="vx-message-when" id="a1-when" datetime="2026-11-17T18:00">18:00</time></header>
           <div class="vx-message-text"><p>Shipping build 214 of harbor-api, as you asked.</p></div>
-          <ol class="vx-trace" id="ship" aria-label="What the agent did" aria-live="off">
+          <ol class="vx-trace" id="ship" data-vx-rail="pilot-strip" aria-label="What the agent did" aria-live="off">
             <li data-vx-state="done">
               <span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>
               <details class="vx-collapsible" id="read">

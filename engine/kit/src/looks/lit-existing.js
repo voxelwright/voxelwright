@@ -201,6 +201,28 @@ const dialog = {
   build(live, m) {
     const { W, H, el, vx } = live, d = live.look.dialog, r = live.look.round, GROOVE = live.look.groove;
     const panel = m.part('panel');
+    const display = el.querySelector(':scope[data-vx-command-deck] > .vx-command-scroll');
+    if (display) {
+      // A removable faceplate over the case, with the display behind its cutout.
+      const x = Math.round(display.offsetLeft / vx), y = Math.round(display.offsetTop / vx);
+      const w = Math.round(display.offsetWidth / vx), h = Math.round(display.offsetHeight / vx);
+      panel.slab(1, 1, 0, W - 2, H - 2, 1, 'gasket', r);
+      panel.slab(0, 0, 1, W, H, 3, 'chalk', r);
+      panel.slab(0, 0, 4, W, H, 1, 'gasket', r);
+      panel.slab(0, 0, 5, W, H, 1, live.look.readingPlate ?? 'chalk', r);
+      panel.carve(x, y, 4, w, h, 2).box(x, y, 3, w, h, 1, 'gasket');
+      // Two steel keepers seat the removable faceplate along its far edge.
+      // The readout and its fittings stay together on the solid carrier.
+      if (W >= 28) {
+        const keepers = m.part('keepers');
+        for (const start of [6, W - 12]) {
+          panel.carve(start, 0, 3, 6, 2, 3);
+          keepers.box(start, 0, 3, 6, 2, 2, 'steel').box(start + 1, 0, 5, 4, 2, 1, 'steel');
+        }
+      }
+      live.faceZ = 6;
+      return;
+    }
     ring(panel, 0, 0, 0, W, H, lightName(el, 'light'), r);
     panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'chalk', r);
     const head = el.querySelector(':scope > header');

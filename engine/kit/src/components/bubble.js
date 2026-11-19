@@ -25,8 +25,21 @@ export const bubble = {
     if (mine(el)) {
       // one voxel: the look's own step, the one depth it has for "a voxel"
       const up = look.step;
-      m.part('plate').slab(0, 0, 0, W, H, up, live.look.readingPlate ?? 'key', 1);
+      const plate = m.part('plate'), face = look.readingPlate ?? 'key';
+      plate.slab(0, 0, 0, W, H, up, face, 1);
       live.faceZ = up;
+      if (el.dataset.vxMount === 'clips') {
+        // Each folded steel end sits in a gasket at the edge of the insert.
+        // Its return overlaps the reading face by one cell, clear of the text.
+        const clips = m.part('retainers');
+        const y = Math.floor((H - 5) / 2);
+        for (const [edge, lip] of [[0, 0], [W - 1, W - 2]]) {
+          plate.box(edge, y - 1, 0, 1, 7, up, 'gasket');
+          plate.carve(edge, y, 0, 1, 5, up);
+          clips.box(edge, y, 0, 1, 5, up, 'steel');
+          clips.box(lip, y + 1, up, 2, 3, 1, 'steel');
+        }
+      }
     } else {
       const D = look.well;
       hole(live, m, { depth: D, wall: 'slate', floor: 'floor' });

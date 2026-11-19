@@ -121,6 +121,19 @@ await p.keyboard.press('Shift+F10'); await p.waitForTimeout(120);
 m = await read(p, 'log-menu');
 b = await box(p, '#log-213');
 say(m.open && m.focus === 'Open' && m.top >= b.y && m.top <= b.y + b.height && m.label === 'deploy-213.log', `Shift+F10 on deploy-213.log opens it on that row, with the first row in focus (${m.focus}, at ${Math.round(m.left)}, ${Math.round(m.top)})`);
+const pad = await p.locator('#log-menu').evaluate(el => {
+  const live = window.vx.live(el);
+  return {
+    keys: live.model.parts.filter(part => /^key[0-9]+$/.test(part.name) && part.count).length,
+    firstLit: live.model.byName.lamp0?.hidden === false,
+    origin: live.model.menuMotion?.from?.join(' '),
+  };
+});
+say(pad.keys === 4 && pad.firstLit && pad.origin === '0 0', 'the first log builds its four command keys from the focused corner and lights Open');
+await p.keyboard.press('Tab'); await p.waitForTimeout(150);
+m = await read(p, 'log-menu');
+say(!m.open && m.focus === 'log-212', 'Tab from Open continues to the next log');
+await p.locator('#log-213').focus(); await p.keyboard.press('Shift+F10');
 await p.keyboard.press('Escape'); await p.waitForTimeout(150);
 m = await read(p, 'log-menu');
 say(!m.open && m.focus === 'log-213', `Escape: closed, the focus back on the row (${m.focus})`);

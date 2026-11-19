@@ -55,10 +55,12 @@ function wire(el, on) {
     return true;
   };
 
-  let timer = 0, stepped = false;
-  const stop = () => { clearTimeout(timer); clearInterval(timer); timer = 0; };
-  const hold = (dir) => {
+  let timer = 0, repeating = null;
+  const presses = new Map();
+  const stop = () => { clearTimeout(timer); clearInterval(timer); timer = 0; repeating = null; };
+  const hold = (dir, id) => {
     stop();
+    repeating = id;
     timer = setTimeout(() => { timer = setInterval(() => { if (!step(dir)) stop(); }, EVERY); }, WAIT);
   };
   for (const key of keys) {
@@ -67,18 +69,35 @@ function wire(el, on) {
     on(key, 'mousedown', (e) => e.preventDefault());
     on(key, 'pointerdown', (e) => {
       if (e.button !== 0) return;
-      stepped = true; // this press has stepped: the click that follows it must not step again
-      if (step(dir)) hold(dir);
+      presses.set(e.pointerId, { key });
+      if (step(dir)) hold(dir, e.pointerId);
     });
-    on(key, 'pointerleave', stop);
-    on(key, 'pointercancel', stop);
+    on(key, 'pointerleave', e => { if (e.pointerId === repeating) stop(); });
     on(key, 'blur', stop);
     // a click with no press before it is a key from the keyboard, or a screen reader
-    on(key, 'click', () => { if (stepped) { stepped = false; return; } step(dir); });
+    on(key, 'click', e => {
+      if (e.detail > 0) {
+        const id = e.pointerId ?? [...presses].find(([, stroke]) => stroke.key === key)?.[0];
+        if (presses.get(id)?.key === key) {
+          presses.delete(id);
+          return;
+        }
+      }
+      step(dir);
+    });
   }
   // wherever the pointer comes up, the holding ends; a press that got no click is forgotten
-  on(document, 'pointerup', () => { stop(); if (stepped) setTimeout(() => { stepped = false; }, 0); });
-  on(document, 'pointercancel', () => { stop(); stepped = false; });
+  on(document, 'pointerup', e => {
+    if (repeating === e.pointerId) stop();
+    const stroke = presses.get(e.pointerId);
+    if (stroke) setTimeout(() => {
+      if (presses.get(e.pointerId) === stroke) presses.delete(e.pointerId);
+    }, 500);
+  });
+  on(document, 'pointercancel', e => {
+    if (repeating === e.pointerId) stop();
+    presses.delete(e.pointerId);
+  });
   // and when these listeners are dropped (the part is released), so is a holding that is under way
   on({ addEventListener() {}, removeEventListener: stop }, 'drop', stop);
 

@@ -13,6 +13,29 @@
   .stand { grid-template-columns: minmax(0, 1fr); }
   .stand dialog[open] { position: relative; inset: auto; margin: calc(var(--vx) * 2) 0 calc(var(--vx) * 8); inline-size: min(calc(var(--vx) * 140), 100%); }
   .stand > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  #palette .vx-command-scroll {
+    margin-inline: calc(3 * var(--vx));
+    max-block-size: min(calc(95 * var(--vx)), 52vh);
+    color: #eef3e6;
+    --vx-ink: #eef3e6;
+    --vx-ink-quiet: #bfcdc2;
+    background: #27322f;
+  }
+  #palette[data-vx-live] .vx-command-scroll { background: transparent; box-shadow: none; }
+  /* Keep the mounted reading surface at full contrast through a rim reversal. */
+  #palette[open][data-vx-surface="rim"] { opacity: 1; }
+  #palette:not([data-vx-live]) [role="option"] { position: relative; background-image: none; }
+  #palette:not([data-vx-live]) [role="option"]::before {
+    content: ""; position: absolute; inset-inline-start: calc(2 * var(--vx));
+    inline-size: var(--vx); block-size: calc(2 * var(--vx)); background: #677976;
+    box-shadow: 0 0 0 var(--vx) #465350;
+  }
+  #palette:not([data-vx-live]) [role="option"][data-vx-active]::before { background: var(--lit-accent, var(--vx-signal)); }
+  #palette .vx-command-title { letter-spacing: .045em; }
+  #palette [role="option"] { padding-inline-start: calc(6 * var(--vx)); }
+  #palette [role="option"][data-vx-active] { background-color: rgb(174 204 199 / .12); }
+  #palette .vx-command-empty { padding: calc(3 * var(--vx)); }
+  #palette .vx-command-head { padding-inline: calc(5 * var(--vx)); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -75,7 +98,7 @@
     </dialog>
   </section>
 </main>
-<dialog class="vx-dialog vx-command-dialog" id="palette" aria-label="Commands">
+<dialog class="vx-dialog vx-command-dialog" id="palette" data-vx-command-deck aria-label="Commands">
   <header class="vx-command-head">
     <label class="vx-aloud" for="q">Find a command or a project</label>
     <span class="vx-well"><input id="q" type="text" role="combobox" aria-expanded="true" aria-controls="cmds" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Find a command or a project"></span>
@@ -103,8 +126,8 @@
         <div role="option" data-vx-keywords="log out">Sign out of fogline</div>
       </div>
     </div>
+    <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
   </div>
-  <p class="vx-command-empty" role="status" hidden>Nothing is called “{q}”.</p>
   <div class="vx-command-foot" aria-hidden="true">
     <span><kbd class="vx-kbd">↑</kbd><kbd class="vx-kbd">↓</kbd> to move</span>
     <span><kbd class="vx-kbd">Enter</kbd> to do it</span>

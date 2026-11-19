@@ -90,6 +90,15 @@ const liveBoxes = await boxes(p);
   await settle(p);
   s = await read(p, '#week');
   say(s.near === 1 && s.gap < 1 && s.lit === '0 1 0 0' && s.inert === '1011', `and the second slide is in the window, its edge on the window's (${s.gap} px off), its lamp lit (lamps ${s.lit})`);
+  const strip = await p.locator('#week .vx-carousel-lamps').evaluate(el => {
+    const { lenses } = window.vx.live(el).state;
+    return lenses.map(lens => ({
+      cells: lens.count,
+      peak: Math.max(...lens.col.filter((_, channel) => channel % 4 === 3)),
+    }));
+  });
+  say(strip.length === 4 && strip.every((lens, i) => lens.cells === 10 && (i === 1 ? lens.peak > .9 : lens.peak === 0)),
+    'the four fitted lenses stay in place and only the second emits light');
   await p.screenshot({ path: `${dir}/hand-second.png`, clip: { x: 200, y: 220, width: 780, height: 330 } });
   await press(p, key('#week', 'next'));
   await press(p, key('#week', 'next'));
@@ -329,7 +338,7 @@ const liveBoxes = await boxes(p);
   await settle(q);
   let s = await read(q, '#week');
   const lamp = await q.evaluate(() => { const l = document.querySelector('#week .vx-carousel-lamps'), a = getComputedStyle(l, '::after'); return [parseFloat(a.insetInlineStart), a.backgroundColor]; });
-  say(s.near === 1 && s.at === 1 && s.gap < 1 && !s.prevOff && lamp[0] === 16, `plain: a press on next shows the second slide, and the painted lamp is on the second stud (${lamp[0]} px along)`);
+  say(s.near === 1 && s.at === 1 && s.gap < 1 && !s.prevOff && lamp[0] === 32, `plain: a press on next shows the second slide, and the painted lamp is on the second stud (${lamp[0]} px along)`);
   await q.locator('#week .vx-carousel-track').focus();
   await q.keyboard.press('End');
   await settle(q);

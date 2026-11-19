@@ -1,6 +1,5 @@
 // Mechanical press/release recordings; other cues are synthesized with Web Audio.
-// Nothing sounds, and no audio context exists, until the page turns sound on after the visitor
-// has interacted. Sounds are short, a little different each time, and quieter than speech.
+// The output context opens on user activation. Restored consent can warm the recordings silently. Sounds are short, a little different each time, and quieter than speech.
 
 let ctx = null, master = null, switchFilter = null, on = false;
 let treble = 0;
@@ -14,18 +13,31 @@ export function switchTreble(db) {
 }
 const samples = new Map();
 let loading = null;
-function loadSamples() {
+let resuming = null;
+let muteRevision = 0;
+function loadSamples(decoder) {
   if (loading) return loading;
   loading = Promise.all(['press', 'release'].map(async (name) => {
     const response = await fetch(new URL(`./audio/${name}.wav`, import.meta.url));
     if (!response.ok) throw new Error(`Switch audio: ${response.status}`);
-    samples.set(name, await ctx.decodeAudioData(await response.arrayBuffer()));
+    samples.set(name, await decoder.decodeAudioData(await response.arrayBuffer()));
   })).catch(() => { loading = null; });
   return loading;
 }
+// Decode before the first gesture in a new showcase document, without opening an output device.
+export function prepareSwitchSound() {
+  if (loading || samples.size === 2) return;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (Offline) void loadSamples(new Offline(1, 1, 44100));
+}
+
 function mechanical(name, at) {
   const buffer = samples.get(name);
-  if (!buffer) return; // Never replay a press after loading finishes.
+  if (!buffer) {
+    // Contact is immediate even during a cold load. Never replay it when the buffer arrives.
+    tock(at, name === 'press' ? 175 : 320, .03, .18);
+    return;
+  }
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   source.connect(switchFilter);
@@ -77,6 +89,7 @@ const CUES = {
   release: (t) => mechanical('release', t),
   slide: (t) => { tock(t, 240, 0.05, 0.35, 0.7); tock(t + 0.11, 330, 0.05, 0.3, 0.8); },
   tick: (t) => tock(t, 760, 0.025, 0.14, 0.9),
+  detent: (t) => samples.has('release') ? mechanical('release', t) : CUES.tick(t),
   build: (t) => { for (let i = 0; i < 9; i++) tock(t + 0.03 + i * 0.04 * (1 - i * 0.04), 420 + i * 55, 0.035, 0.16, 0.85); },
   break: (t) => { grit(t, 0.22, 0.3); for (let i = 0; i < 6; i++) tock(t + i * 0.03, 520 - i * 50, 0.04, 0.16, 0.7); },
   poke: (t) => { grit(t, 0.1, 0.22); tock(t, 150, 0.09, 0.5, 0.5); },
@@ -90,15 +103,25 @@ export function sound(enable) {
   on = !!enable;
   if (on && ensure()) {
     master.gain.setValueAtTime(0.32, ctx.currentTime);
-    if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
-    void loadSamples();
-  } else if (master) master.gain.setValueAtTime(0, ctx.currentTime);
+    if (ctx.state === 'suspended') resuming = ctx.resume().catch(() => {});
+    void loadSamples(ctx);
+  } else {
+    muteRevision++;
+    if (master) master.gain.setValueAtTime(0, ctx.currentTime);
+  }
   return on;
 }
 
 /** Play a cue: press, release, slide, tick, build, break, poke, done, failed. Silent unless on. */
 export function cue(name) {
-  if (!on || !ctx || ctx.state !== 'running' || document.hidden) return;
   const fn = CUES[name];
-  if (fn) fn(ctx.currentTime + 0.001);
+  if (!on || !ctx || !fn || document.hidden) return;
+  if (ctx.state === 'running') return fn(ctx.currentTime + 0.001);
+  if (ctx.state !== 'suspended' || !resuming) return;
+  // WebKit can unlock output just after dispatching the first tap.
+  const contact = performance.now(), revision = muteRevision;
+  resuming.then(() => {
+    if (ctx.state === 'running' && on && revision === muteRevision && !document.hidden && performance.now() - contact < 120)
+      fn(ctx.currentTime + 0.001);
+  });
 }

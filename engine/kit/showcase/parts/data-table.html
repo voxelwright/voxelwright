@@ -22,6 +22,60 @@
   .tools { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); min-block-size: calc(var(--vx) * 11); }
   .tools .heard { color: var(--vx-ink-quiet); font-size: 0.875rem; }
   .narrow { max-inline-size: calc(var(--vx) * 110); }
+  #deploys > .vx-table {
+    --display: #293330;
+    padding: 12px 14px 10px;
+    background: var(--display);
+    color: #eef1e8;
+  }
+  #deploys .display-rim { position: absolute; inset: 0; pointer-events: none; }
+  #deploys .vx-table-scroll { position: relative; }
+  #deploys table, #deploys caption { color: #eef1e8; }
+  #deploys table { table-layout: fixed; min-inline-size: 52rem; }
+  #deploys col:first-child { width: 3rem; }
+  #deploys col:nth-child(2) { width: 20%; }
+  #deploys col:nth-child(3) { width: 16%; }
+  #deploys col:nth-child(4) { width: 9%; }
+  #deploys col:nth-child(5) { width: 12%; }
+  #deploys col:nth-child(6) { width: 17%; }
+  #deploys caption { padding: 4px 0 12px 8px; }
+  #deploys caption small, #deploys thead th { color: #c4cfc6; }
+  #deploys tbody tr + tr > * { border-color: #48564f; }
+  #deploys tbody tr:has(input:checked) { background-color: #394940; }
+  #deploys tbody .vx-num, #deploys .state { font-family: var(--vx-mono); font-size: .8125rem; }
+  #deploys .state { gap: 12px; }
+  #deploys .state :is(.vx-lamp, .idle-pilot) {
+    --vx: 2px; position: relative; isolation: isolate; inline-size: 6px; block-size: 6px;
+  }
+  #deploys .idle-pilot:not([data-vx-live]) { background: #747c73; }
+  #deploys thead th:has(> button) { padding-inline: 5px; }
+  #deploys .vx-data-table-sort {
+    --vx: 2px;
+    position: relative; isolation: isolate; justify-content: center;
+    min-inline-size: 64px; inline-size: 100%; block-size: 44px;
+    padding-inline: 8px 24px; color: var(--lit-legend, #352c23);
+  }
+  #deploys .vx-data-table-sort[data-vx-live]::after { display: none; }
+  #deploys .vx-data-table-sort:focus-visible { outline-color: #f8c76a; outline-offset: 0; }
+  #deploys[data-vx-table] .vx-data-table-sort:not([data-vx-live]) {
+    background: var(--vx-key, #e9dfc5); border: 2px solid #46514b; padding-inline: 8px;
+  }
+  #deploys[data-vx-table] .vx-data-table-sort:not([data-vx-live])::after {
+    content: ''; position: relative; flex: none; width: 10px; height: 14px;
+    mask: none; transform: none; opacity: 1;
+    clip-path: polygon(50% 0, 100% 40%, 0 40%, 50% 0, 50% 100%, 0 60%, 100% 60%, 50% 100%);
+    background: linear-gradient(var(--up, #575c58) 50%, var(--down, #575c58) 50%);
+  }
+  @media (forced-colors: active) {
+    #deploys[data-vx-table] [aria-sort] .vx-data-table-sort:not([data-vx-live])::after {
+      background: ButtonText; forced-color-adjust: none; clip-path: polygon(50% 15%, 100% 75%, 0 75%);
+    }
+    #deploys[data-vx-table] [aria-sort="descending"] .vx-data-table-sort:not([data-vx-live])::after { transform: rotate(180deg); }
+  }
+  #deploys [aria-sort="ascending"] { --up: #b25b0c; }
+  #deploys [aria-sort="descending"] { --down: #b25b0c; }
+  #deploys:not([data-vx-table]) .vx-data-table-sort { color: inherit; }
+  #deploys tbody tr > :last-child { padding-inline-end: 8px; }
 </style>
 </head>
 <body>
@@ -35,9 +89,11 @@
     <h2>In use: the services of a project, five to a page</h2>
     <div class="vx-data-table" id="deploys" data-vx-rows="5">
       <div class="vx-table">
+        <span class="display-rim" aria-hidden="true"></span>
         <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="deploys-cap">
           <table>
             <caption id="deploys-cap">Services <small>fogline, the week to 24 May. Build time is the median.</small></caption>
+            <colgroup><col><col><col><col><col><col><col></colgroup>
             <thead>
               <tr>
                 <th scope="col" class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose every service on this page"><span class="vx-box"></span></label></th>
@@ -61,7 +117,7 @@
               <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose reef-billing"><span class="vx-box"></span></label></td><th scope="row">reef-billing</th><td data-vx-value="2026-05-22T15:31">Fri, 15:31</td><td>Mina</td><td class="vx-num">7</td><td class="vx-num" data-vx-value="83">1 min 23 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
               <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose salt-queue"><span class="vx-box"></span></label></td><th scope="row">salt-queue</th><td data-vx-value="2026-05-24T07:48">Sun, 07:48</td><td>Oren</td><td class="vx-num">12</td><td class="vx-num" data-vx-value="33">33 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="go"></span>Live</span></td></tr>
               <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose tide-worker"><span class="vx-box"></span></label></td><th scope="row">tide-worker</th><td data-vx-value="2026-05-22T09:30">Fri, 09:30</td><td>Mina</td><td class="vx-num">3</td><td class="vx-num" data-vx-value="38">38 s</td><td><span class="state"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></td></tr>
-              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose wharf-docs"><span class="vx-box"></span></label></td><th scope="row">wharf-docs</th><td data-vx-value="2026-05-17T12:00">Sun, 17 May</td><td>Ada</td><td class="vx-num">0</td><td class="vx-num"></td><td><span class="state">Never built</span></td></tr>            </tbody>
+              <tr><td class="vx-data-table-pick"><label class="vx-check"><input type="checkbox" aria-label="Choose wharf-docs"><span class="vx-box"></span></label></td><th scope="row">wharf-docs</th><td data-vx-value="2026-05-17T12:00">Sun, 17 May</td><td>Ada</td><td class="vx-num">0</td><td class="vx-num"></td><td><span class="state"><span class="idle-pilot" aria-hidden="true"></span>Never built</span></td></tr>            </tbody>
           </table>
         </div>
       </div>
@@ -164,6 +220,7 @@
   </section>
 </main>
 <script type="module">
+  import { displayRim, idlePilot, sortKey } from './deploys.js';
   import { show } from './parts.js';
   import { checkbox } from '../../src/components/checkbox.js';
   import { pagination } from '../../src/components/pagination.js';
@@ -190,7 +247,7 @@
     }, 600);
   });
 
-  show(checkbox, pagination, table, dataTable);
+  show(checkbox, pagination, table, dataTable, displayRim, idlePilot, sortKey);
 </script>
 </body>
 </html>

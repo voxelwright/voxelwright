@@ -141,16 +141,17 @@ export const toggleGroup = {
     const go = (spring, x, { k, c }) => { if (reducedMotion()) spring.snap(x); else spring.to(x, k, c); };
     // every key goes where its radio says: the chosen one down fast, as a press is; the one let go
     // up with one soft overshoot
-    const sync = (quiet) => {
+    const sync = (quiet, snap = false) => {
       let moved = false;
       (s.inputs ?? []).forEach((input, i) => {
         const want = input?.checked ? 1 : 0, spring = live.spring('on' + i);
         if (spring.target === want) return;
-        go(spring, want, want ? PRESS : RELEASE);
+        if (snap) spring.snap(want);
+        else go(spring, want, want ? PRESS : RELEASE);
         moved = true;
       });
       s.index = (s.inputs ?? []).findIndex((i) => i?.checked);
-      if (moved) { if (!quiet) cue('tick'); live.invalidate(); }
+      if (moved) { if (!quiet && !live.form.recordedReturn) cue('tick'); live.invalidate(); }
     };
     // A hand on a key: while the pointer or Space holds it, it goes a step further down than where
     // it rests, so the first frame answers. What holds it is remembered, as the checkbox's latch does.
@@ -165,6 +166,7 @@ export const toggleGroup = {
     const let_go = (by) => {
       if (!held || held.by !== by) return;
       go(live.spring('hold' + held.i), 0, RELEASE);
+      if (live.form.recordedReturn) cue('release');
       held = null;
       live.invalidate();
     };
@@ -172,8 +174,9 @@ export const toggleGroup = {
     on(el, 'pointerdown', (e) => { if (e.button === 0) hold(seatOf(e.target), 'pointer'); });
     for (const type of ['pointerup', 'pointercancel', 'pointerleave']) on(el, type, () => let_go('pointer'));
     on(el, 'keydown', (e) => { if (e.key === ' ' && !e.repeat) hold(seatOf(e.target), 'key'); });
-    for (const type of ['keyup', 'focusout']) on(el, type, () => let_go('key'));
-    on(el, 'change', () => sync(false));
+    on(el, 'keyup', e => { if (e.key === ' ') let_go('key'); });
+    on(el, 'focusout', () => let_go('key'));
+    on(el, 'change', e => sync(false, live.form.instantKeyboardChoice && e.target.matches(':focus-visible')));
     // chosen from code (input.checked = true): it follows, without a sound
     for (const input of el.querySelectorAll(':scope > label > input')) on.heed(input, 'checked', () => sync(true));
     // a form put back to how it began: the inputs change after the event, so look a moment later

@@ -3,7 +3,8 @@
 //           <footer><button class="vx-button" data-vx-close>Done</button></footer></dialog>
 
 import { cue } from '../core/sound.js';
-import { nativeRelease } from './popover.js';
+import { reducedMotion } from '../core/motion.js';
+import { nativeRelease, rouse } from './popover.js';
 import { listeners } from './util.js';
 
 // Let the browser decide whether cancel succeeds. beforetoggle runs only when
@@ -58,20 +59,38 @@ export const dialog = {
   bind(live) {
     const on = listeners();
     const el = live.el;
+    const deck = el.hasAttribute('data-vx-command-deck');
     const palette = el.classList.contains('vx-command-dialog');
     const surface = palette ? 'rim' : 'courses';
-    nativeRelease(live, on, null, palette ? 0.1 : 0.23, surface);
+    const parts = () => deck && live.model.byName.keepers ? ['keepers'] : null;
+    nativeRelease(live, on, () => ({ parts: parts(), surface }), palette ? 0.1 : 0.23);
+    const duration = palette ? 0.16 : 0.32;
+    const assemble = resume => live.play('assemble', parts(), { duration, surface, resume });
     const opened = () => {
+      if (!el.open) return;
       live.visible = true;
-      const resume = live.rebuild();
-      cue('build');
-      live.play('assemble', null, { duration: palette ? 0.16 : 0.32, surface, resume });
+      const resume = deck ? rouse(live) : live.rebuild();
+      cue(deck ? 'press' : 'build');
+      if (!deck || !reducedMotion()) assemble(resume);
     };
     live.state.leave = value => el.close(value);
     wireDialog(el, on);
     on(el, 'beforetoggle', e => { if (e.newState === 'closed') cue('release'); });
-    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => { if (el.open) opened(); });
+    // Filter and mark the rows before measuring their carrier and mounted fittings.
+    on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
+      if (!el.open) return;
+      if (deck) queueMicrotask(opened); else opened();
+    });
     if (el.open) queueMicrotask(opened);
+    if (deck) {
+      const size = new ResizeObserver(() => {
+        if (!el.open || (el.offsetWidth === live.cssW && el.offsetHeight === live.cssH)) return;
+        const resume = rouse(live);
+        if (resume?.kind === 'assemble' && !reducedMotion()) assemble(resume);
+      });
+      size.observe(el);
+      return () => { size.disconnect(); on.done(); };
+    }
     return on.done;
   },
 };

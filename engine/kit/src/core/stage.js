@@ -128,6 +128,7 @@ export class Live {
     const out = effect === 'crumble' || effect === 'lower', still = reducedMotion();
     const surface = opts.surface ?? this.form.surface;
     const prior = this.surface ?? opts.resume;
+    const contactInk = opts.contact && prior ? Number(this.el.style.getPropertyValue('--vx-surface-ink')) : undefined;
     this.clearSurface();
     // Resolve superseded runs now. Their callers can distinguish cancellation from landing.
     this.waiters = (this.waiters ?? []).filter(waiter => {
@@ -136,15 +137,22 @@ export class Live {
       return false;
     });
     for (const p of list) {
-      if (surface) p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still,
-        rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
-        from: prior?.from ?? opts.from ?? [0, this.H] });
-      else if (still) p.fx = settle(p, { out });
+      if (surface) {
+        let contactPose;
+        if (!still && opts.contact && out && prior?.kind === 'assemble' && p.fx) {
+          contactPose = new Float32Array(p.count * 8);
+          p.fx.write(contactPose, 0, p);
+        }
+        p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still, contactPose,
+          rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
+          from: contactPose ? opts.from : prior?.from ?? opts.from ?? [0, this.H] });
+      } else if (still) p.fx = settle(p, { out });
       else p.fx = (out ? crumble : assemble)(p, shared);
       p.hidden = false;
     }
     if (surface && list.length) {
       this.surface = list[0].fx;
+      if (contactInk !== undefined) this.surface.contactInk = contactInk;
       this.el.dataset.vxSurface = still ? 'still' : surface;
       this.paintSurface();
     }
@@ -157,7 +165,10 @@ export class Live {
     const { progress, still, rim, release } = this.surface;
     const alpha = still ? progress : rim && release ? Math.min(1, progress * 2) : 1;
     const reveal = release ? (progress - 0.9) / 0.1 : (progress - 0.78) / 0.18;
-    const ink = still || rim ? alpha : Math.max(0, Math.min(1, reveal));
+    let ink = still || rim ? alpha : Math.max(0, Math.min(1, reveal));
+    if (!still && this.surface.contactInk !== undefined) {
+      ink = this.surface.contactInk * Math.max(0, 1 - this.surface.t / Math.min(.10, this.surface.end));
+    }
     this.el.style.setProperty('--vx-surface-alpha', alpha);
     this.el.style.setProperty('--vx-surface-ink', ink);
   }

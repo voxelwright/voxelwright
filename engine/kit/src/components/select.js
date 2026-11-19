@@ -75,7 +75,7 @@ export const select = {
       s.t += dt;
       const open = isOpen(s.control);
       if (s.t >= SHOWN && (open === null ? s.heard : !open)) s.up();
-      else waiting = true;
+      waiting = true; // The release retargets the spring after this frame's spring pass.
     }
     const down = live.spring('press').x < -0.4;
     const was = s.flare ?? 0;

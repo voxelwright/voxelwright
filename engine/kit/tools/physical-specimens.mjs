@@ -33,7 +33,18 @@ async function specimens(plain) {
     await page.getByRole('slider', { name: 'Contour' }).press('End');
     assert.equal(await page.locator('#contour-out').textContent(), '09');
     await page.getByRole('slider', { name: 'Lamp brightness' }).press('Home');
-    assert.equal(await page.locator('#gain-out').textContent(), '00');
+    assert.equal(await page.locator('#gain-out').textContent(), '0%');
+    const dial = await page.locator('#gain').boundingBox();
+    const x = dial.x + dial.width / 2, y = dial.y + dial.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    const atContact = Number(await page.locator('#gain').inputValue());
+    assert.equal(atContact, 0, 'spindle contact holds its current setting');
+    await page.mouse.move(x, y - 38, { steps: 4 });
+    const dragged = Number(await page.locator('#gain').inputValue());
+    assert.ok(dragged > atContact, 'vertical movement while held must turn the spindle');
+    await page.mouse.up();
+    assert.equal(Number(await page.locator('#gain').inputValue()), dragged, 'release keeps the detent');
     await page.getByRole('button', { name: 'Scan field' }).press('Enter');
     assert.equal(await page.locator('#sweep').textContent(), 'FIELD SCOPE / 02');
 
@@ -45,6 +56,15 @@ async function specimens(plain) {
     await assertNativeVoxels(page.locator('label:has(#post) .vx-box'), { plain });
 
     if (!plain) {
+      const fitted = page.locator('label:has(#post) .vx-box');
+      for (const layer of [fitted, fitted.locator('canvas')]) {
+        await layer.evaluate(el => { el.style.clipPath = 'inset(50%)'; });
+        await assert.rejects(assertNativeVoxels(fitted), { code: 'ERR_ASSERTION', message: /fully clipped/ });
+        await layer.evaluate(el => { el.style.clipPath = 'inset(10%)'; });
+        await assertNativeVoxels(fitted);
+        await layer.evaluate(el => { el.style.removeProperty('clip-path'); });
+      }
+      await assertNativeVoxels(fitted);
       // A real kit instance and canvas still need geometry.
       await page.evaluate(async () => {
         const { adopt, define } = await import('/kit/src/index.js');
@@ -103,6 +123,11 @@ async function audit() {
         await ready();
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       });
+      if (file === 'parts/context-menu.html') {
+        await page.locator('#log-213').click({ button: 'right' });
+        await page.locator('#log-menu:popover-open').waitFor();
+        await assertNativeVoxels(page.locator('#log-menu'));
+      }
       const matches = await inspectNativeVoxels(hosts, { families });
       if (errors.length) throw new Error(errors.join(' | '));
       if (matches.length) pages++;
@@ -119,6 +144,11 @@ async function audit() {
     } finally {
       await page.close();
     }
+  }
+  for (const family of families) {
+    if (seenFamilies.has(family)) continue;
+    violations++;
+    console.log('FAIL missing physical family ' + family);
   }
   assert.ok(checked, 'no physical controls found in the showcase');
   console.log(`Audit: ${checked} hosts in ${seenFamilies.size} families on ${pages}/${files.length} pages, ${violations} violations, ${harnessErrors} harness errors`);

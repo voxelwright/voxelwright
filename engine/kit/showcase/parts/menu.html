@@ -11,6 +11,35 @@
   /* room under each key for its menu, so that the two menus on this page never lie over each other */
   .room { align-items: start; min-block-size: calc(var(--vx) * 66); }
   .room .chosen { align-self: start; padding-block-start: calc(var(--vx) * 2.5); }
+  #project-menu {
+    --vx-look: project-display;
+    min-inline-size: min(16rem, calc(100vw - 24px));
+    max-inline-size: calc(100vw - 24px);
+  }
+  #project-menu[data-vx-live] [role="menuitem"] {
+    position: relative;
+    isolation: isolate;
+    padding-inline: calc(var(--vx) * 10) calc(var(--vx) * 5);
+    color: #edece1;
+  }
+  #project-menu[data-vx-live] [data-vx-kind="danger"] { color: #ffac97; }
+  #project-menu[data-vx-live] [role="menuitem"]::before {
+    content: "";
+    position: absolute;
+    z-index: -1;
+    inset-block: 1px;
+    inset-inline: calc(var(--vx) * 8) calc(var(--vx) * 3);
+    border-block-end: 1px solid rgb(237 236 225 / .12);
+  }
+  #project-menu[data-vx-live] [data-vx-active]::before {
+    background: #354f60;
+    border-color: #7395a7;
+  }
+  #project-menu[data-vx-live] [data-vx-kind="danger"][data-vx-active]::before {
+    background: #553a35;
+    border-color: #a47365;
+  }
+  #project-menu code { font: .9em ui-monospace, monospace; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -28,9 +57,9 @@
     <h2>In use: what can be done with a project</h2>
     <div class="row room">
       <button class="vx-button" id="trigger" popovertarget="project-menu" aria-haspopup="menu" aria-expanded="false">harbor-api</button>
-      <div class="vx-menu" id="project-menu" popover role="menu">
+      <div class="vx-menu" id="project-menu" popover role="menu" aria-labelledby="trigger">
         <button role="menuitem">Redeploy</button>
-        <button role="menuitem">Roll back to 4f2c9a1</button>
+        <button role="menuitem"><span>Roll back to <code>4f2c9a1</code></span></button>
         <button role="menuitem" lang="uk">Розгорнути на сервері</button>
         <button role="menuitem" data-vx-kind="danger">Delete project</button>
       </div>
@@ -53,9 +82,16 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
+  import { defineInstrumentLook } from '../build-settings.js';
+  import { projectMenu } from './project-menu.js';
   import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
+  defineInstrumentLook('project-display', {
+    materials: { floor: { day: '#222a28', night: '#1c2526', transmission: .08, jitter: .002 } },
+    finishes: { floor: { chamfer: 16, specular: 56 } },
+    parts: { menu: projectMenu },
+  });
   document.getElementById('project-menu').addEventListener('click', (e) => { const it = e.target.closest('[role="menuitem"]'); if (it) document.getElementById('chosen').textContent = 'Chosen: ' + it.textContent.trim(); });
   await show();
   // the second menu is shown open, so that it can be looked at: its second row is made active

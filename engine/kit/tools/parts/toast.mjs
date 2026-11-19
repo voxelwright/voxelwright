@@ -98,6 +98,34 @@ say(mid && mid.leaving && mid.fx === 'crumble', 'a click on it: it breaks');
 await p.waitForTimeout(700);
 say(await count(p) === 0, 'and it is taken out of the page');
 
+// The receipt can be dismissed while its blocks are still arriving. At the
+// handoff every cube keeps its current position, scale and rotation.
+await p.locator('#deploy').focus();
+await p.evaluate(() => { window.vx.stage.manual = true; });
+await p.keyboard.press('Enter');
+const handoff = await p.evaluate(() => {
+  const el = document.querySelector('.vx-toasts [data-vx-specimen="deploy"]');
+  const { stage, live } = window.vx;
+  const receipt = live(el);
+  for (let i = 0; i < 22; i++) stage.advance(1 / 60);
+  const ink = () => Number(el.style.getPropertyValue('--vx-surface-ink'));
+  const visibleInk = ink();
+  const entry = receipt.pos.slice(), progress = receipt.surface.progress;
+  const box = el.getBoundingClientRect();
+  const tap = new MouseEvent('click', { bubbles: true, clientX: box.right - 16, clientY: box.top + 12 });
+  el.dispatchEvent(tap);
+  stage.advance(0);
+  const continuous = entry.every((value, i) => value === receipt.pos[i]);
+  const fromTap = receipt.surface.from[0] === (tap.clientX - box.left) / receipt.vx &&
+    receipt.surface.from[1] === (tap.clientY - box.top) / receipt.vx;
+  stage.manual = false;
+  stage.schedule();
+  return visibleInk > 0 && ink() === visibleInk && fromTap && continuous && receipt.surface.kind === 'crumble' && progress > 0 && progress < 1
+    && receipt.surface.progress === progress && document.activeElement.id === 'deploy';
+});
+say(handoff, 'dismissal during assembly retains every voxel transform and Deploy keeps focus');
+await p.waitForFunction(() => !document.querySelector('.vx-toasts [data-vx-specimen="deploy"]'));
+
 // left alone, a notice still goes by itself
 await press(p, '#deploy'); await p.waitForTimeout(400);
 await p.mouse.move(600, 300, { steps: 4 });

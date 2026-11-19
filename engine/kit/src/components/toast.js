@@ -21,7 +21,8 @@ async function shatter(el, live, e) {
   const r = el.getBoundingClientRect();
   const from = e && (e.clientX || e.clientY) ? [(e.clientX - r.left) / live.vx, (e.clientY - r.top) / live.vx] : undefined;
   if (from) cue('break');
-  await live.play('crumble', null, { duration: 0.19, from });
+  const duration = el.dataset.vxSpecimen === 'deploy' ? 0.29 : 0.19;
+  await live.play('crumble', null, { duration, from, contact: !!from });
 }
 
 export const toastDef = {
@@ -71,6 +72,7 @@ export function makeToast(adopt, liveOf) {
     el.className = 'vx-toast';
     el.setAttribute('role', opts.kind === 'failed' ? 'alert' : 'status');
     el.dataset.vxKind = opts.kind || 'note';
+    if (opts.specimen === 'deploy') el.dataset.vxSpecimen = 'deploy';
     const text = document.createElement('span');
     text.className = 'vx-toast-text';
     text.textContent = message;
@@ -79,7 +81,7 @@ export function makeToast(adopt, liveOf) {
     owned.add(el);
     adopt(el);
     const live = liveOf(el);
-    live?.play('assemble', null, { duration: 0.25 });
+    live?.play('assemble', null, { duration: opts.specimen === 'deploy' ? 0.40 : 0.25 });
     cue(opts.kind === 'failed' ? 'failed' : opts.kind === 'done' ? 'done' : 'tick');
 
     let left = opts.duration ?? 4200, since = performance.now(), timer = 0, gone = false;

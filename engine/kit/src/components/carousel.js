@@ -92,7 +92,7 @@ function wire(lamps, on, changed = () => {}) {
 
   // go to slide i: at once where less motion is asked for, or when told to
   let going = -1; // the slide it is on its way to: what is passed on the way is not the current one
-  const go = (i, at = 'smooth') => {
+  const go = (i, at = root.dataset.vxScroll) => {
     const all = slides();
     if (!all.length) return;
     i = Math.max(0, Math.min(all.length - 1, i));
@@ -108,7 +108,7 @@ function wire(lamps, on, changed = () => {}) {
     const to = loops ? (st.index + dir + n) % n : Math.max(0, Math.min(n - 1, st.index + dir));
     if (to === st.index) return;
     go(to);
-    cue('slide');
+    if (root.dataset.vxScroll !== 'instant') cue('slide');
   };
 
   // the track moved (a finger, the wheel, its own bar, or on its way where it was sent)

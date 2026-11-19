@@ -106,18 +106,47 @@ export const toggleButton = {
     // it went on with no hand on it long enough to be seen (the Enter key, or code): the light
     // still says so, with the flare of a press
     const flash = () => { if (isOn(el) && !s.off && !reducedMotion()) s.flare = Math.max(s.flare ?? 0, 1); };
-    const down = () => { if (s.off) return; s.held = true; go(press, -live.model.keyTravel - (isOn(el) ? live.look.step : 0), PRESS.k, PRESS.c); cue('press'); };
+    const down = () => {
+      if (s.off || s.held) return;
+      s.held = true;
+      const stop = live.model.keyStop ?? (live.model.keyTravel + (isOn(el) ? live.look.step : 0));
+      go(press, -stop, PRESS.k, PRESS.c);
+      cue('press');
+    };
     const drop = () => { if (s.held) settle(); };
-    on(el, 'pointerdown', (e) => { if (e.button === 0) down(); });
-    on(el, 'pointerup', drop);
-    on(el, 'pointercancel', drop);
-    on(el, 'pointerenter', (e) => { if (e.pointerType === 'mouse' && !s.off && !reducedMotion()) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
-    on(el, 'pointerleave', () => { go(hover, 0, CALM.k * 2, CALM.c * 1.4); drop(); });
-    on(el, 'keydown', (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); });
-    on(el, 'blur', drop);
+    let owner = null;
+    const hold = source => {
+      if (owner !== null || s.off) return;
+      owner = source;
+      down();
+    };
+    const up = (source, sound) => {
+      if (owner !== source || owner === null) return;
+      owner = null;
+      if (sound && s.held && live.model.keyStop != null) cue('release');
+      drop();
+    };
+    on(el, 'pointerdown', e => { if (e.button === 0) hold(e.pointerId); });
+    on(el, 'pointerup', e => up(e.pointerId, true));
+    on(el, 'pointercancel', e => up(e.pointerId, false));
+    on(el, 'pointerenter', e => { if (e.pointerType === 'mouse' && !s.off && !reducedMotion()) go(hover, 0.5, CALM.k * 2, CALM.c * 1.4); });
+    on(el, 'pointerleave', e => { go(hover, 0, CALM.k * 2, CALM.c * 1.4); up(e.pointerId, false); });
+    on(el, 'keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      if (!e.repeat) hold(e.key);
+      else if (e.key === 'Enter' && live.model.keyStop != null) e.preventDefault();
+    });
+    on(el, 'keyup', e => up(e.key, true));
+    on(el, 'blur', () => up(owner, false));
+    on(window, 'blur', () => up(owner, false));
     // the press that flips it is the click (wire, above, has already flipped it): the key then
     // goes where its new state rests
-    on(el, 'click', () => { if (s.off) return; if (!isOn(el)) cue('release'); flash(); settle(); });
+    on(el, 'click', () => {
+      if (s.off) return;
+      if (live.model.keyStop == null && !isOn(el)) cue('release');
+      if (live.model.keyStop == null || !s.held) settle();
+      flash();
+    });
     watchFieldsets(el, on, () => {
       if (isOff(el)) { s.held = false; hover.snap(0); press.snap(0); }
       live.rebuild();
