@@ -8,6 +8,7 @@ defineLook('region-program', {
   seam: 0.28,
   materials: {
     slate: { day: '#414b49', night: '#374240', jitter: 0.009 },
+    steel: { day: '#b6bdb5', night: '#abb3ad', jitter: .006 },
     gasket: { day: '#262e2c', night: '#202927' },
     floor: { day: '#b3caa5', night: '#a1bd94', jitter: 0.003 },
     'warm-metal': { day: '#cab58e', night: '#bcaa87', jitter: 0.005 },

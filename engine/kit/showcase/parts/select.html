@@ -37,6 +37,7 @@
     clip-path: none; background: var(--picker-key, #cab58e); color: #262e2c;
     box-shadow: 0 2px #766951;
   }
+  .region-program:not([data-vx-live]):has(#region:disabled)::after { translate: 0 2px; box-shadow: none; }
   .region-program:not([data-vx-live]):has(#region:enabled:active)::after { translate: 0 1px; }
   .region-program:not([data-vx-live]):has(#region:enabled:open)::after { translate: 0 1px; }
 </style>
