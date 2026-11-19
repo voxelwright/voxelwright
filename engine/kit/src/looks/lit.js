@@ -90,8 +90,33 @@ const well = {
       frame.box(rtl ? W - n - 1 : 1,
         -1, 0, n, 1, 1, focus ? 'light' : 'lens');
     }
-    // A field with a validation message keeps its lower window when clear.
-    if (bad || (lined && el.closest('.vx-field')?.querySelector('.vx-field-error'))) {
+    if (el.hasAttribute('data-vx-mail-pilot')) {
+      // An end fitting keyed into the liner, flush with the edge of the well.
+      const w = Math.min(7, W);
+      const x = rtl ? 0 : W - w;
+      const y = Math.floor((H - 2) / 2);
+      const center = x + Math.floor(w / 2);
+      const socket = m.part('socket');
+      socket.sunk = true;
+      socket.box(x, 0, -depth, w, H, depth, 'slate');
+      socket.box(x, 0, -1, w, H, 1, 'chalk');
+      if (w >= 5) {
+        socket.box(center - 2, y - 1, -1, 5, 4, 1, 'gasket');
+        socket.carve(center - 1, y, -depth, 3, 2, depth);
+        const tell = m.part('tell');
+        tell.sunk = true;
+        const on = bad && !off;
+        // Two bright cells in a red diffuser. The lower course stays non-emissive.
+        tell.box(center - 1, y, -1, 3, 2, 1, on ? 'brick' : 'lens');
+        if (on) {
+          tell.box(center - 1, y, -1, 2, 1, 1, 'light-stop');
+          tell.plot(center + 1, y, -1, 'stop-wash');
+        }
+        // Case material covers the back of the package at the upper shoulder.
+        socket.carve(center - 1, y - 2, -depth, 3, 3, 1);
+        tell.box(center - 1, y - 2, -depth, 3, 3, 1, on ? 'light-stop' : 'gasket');
+      }
+    } else if (bad || (lined && el.closest('.vx-field')?.querySelector('.vx-field-error'))) {
       const tell = m.part('tell');
       tell.sunk = true;
       const w = lined ? Math.min(9, W - 2) : W;
