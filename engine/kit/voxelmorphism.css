@@ -2162,6 +2162,8 @@ dialog.vx-drawer[data-vx-dragging]:not([data-vx-live]) > .vx-drawer-handle::befo
 
 .vx-figure { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); margin: 0; min-inline-size: 0; max-inline-size: 100%; }
 span.vx-figure { display: inline-grid; vertical-align: top; }
+/* a picture alone in its paragraph (Markdown's ![…](…)) is a block, as wide as its place */
+p > span.vx-figure:only-child { display: grid; }
 
 /* the recess: its rim is one voxel all round, and the picture lies on its floor inside the rim */
 .vx-figure > .vx-recess { display: block; box-sizing: border-box; min-inline-size: 0; padding: var(--vx); line-height: 0; }
@@ -3090,6 +3092,15 @@ span.vx-figure { display: inline-grid; vertical-align: top; }
 
 .vx-item[data-vx-clip] :is(.vx-item-title, .vx-item-line) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
+/* a row that is read (a list of articles): a larger title */
+.vx-item[data-vx-size="large"] .vx-item-title { font-size: 1.25rem; line-height: 1.3; }
+.vx-item[data-vx-size="large"] .vx-item-line { font-size: 0.9375rem; }
+.vx-item[data-vx-size="large"] > .vx-item-trail { align-self: start; padding-block-start: calc(var(--vx) * 1); }
+
+/* where the row is too narrow for both, what trails goes onto a line of its own under the words */
+.vx-item:not([data-vx-clip]) { flex-wrap: wrap; }
+.vx-item:not([data-vx-clip]) > .vx-item-text { flex: 1 1 calc(var(--vx) * 50); }
+
 /* a row you can press: still words. The title is underlined under the pointer, and the row
    takes the browser's focus ring, since there is no light in it to brighten. */
 :is(a, button).vx-item { cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -3479,8 +3490,8 @@ button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink
 a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
 .vx-navbar-fold { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 6); min-inline-size: 0; }
 .vx-navbar-fold > .vx-nav { flex: 0 1 auto; }
-/* the one key at the end */
-.vx-navbar-fold > .vx-button { margin-inline-start: auto; }
+/* the one key at the end: a key, or a key that latches (a theme's night, a mute) */
+.vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: auto; }
 /* the key that folds the links away: only where the bar is narrow, and only with the script */
 .vx-navbar-key { display: none; margin-inline-start: auto; }
 
@@ -3491,7 +3502,7 @@ a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-of
   .vx-navbar[data-vx-on] > .vx-navbar-fold { flex: 1 0 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; row-gap: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
-  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-button { margin-inline-start: 0; align-self: start; }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: 0; align-self: start; }
   /* plain: the groove stands at the start of the current link, as in any column */
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
     inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
