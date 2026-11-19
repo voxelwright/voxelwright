@@ -37,7 +37,17 @@ for (const mode of ['live', 'plain']) {
   say(s.chosen === 'fra' && agrees(s), 'as the page arrives, Frankfurt is chosen' + (mode === 'live' ? ' and is the one that is down' : ''));
 
   // what is drawn, at rest: which of the cap's states each button shows (cap: dark, lit: its lamp on), and how far down it is
-  const drawn = (name) => p.evaluate((name) => [...document.querySelectorAll(`input[name="${name}"]`)].map((i) => { const l = window.vx.live(i.parentElement.querySelector('.vx-dot')); const shown = ['cap', 'lit', 'some'].filter((n) => !l.model.byName[n].hidden); return `${i.value} ${shown.join()} ${+l.model.byName[shown[0]].tz.toFixed(2)} ${l.glowStrength > 0 ? 'light' : 'dark'}`; }).join('; '), name);
+  const drawn = (name) => p.evaluate((name) => [...document.querySelectorAll(`input[name="${name}"]`)].map((input) => {
+    const l = window.vx.live(input.parentElement.querySelector('.vx-dot'));
+    const { cap, lens } = l.model.byName;
+    if (lens) {
+      const emits = lens.col.some((channel, i) => i % 4 === 3 && channel > 0);
+      if (!lens.count || lens.hidden || lens.tz !== cap.tz || emits !== input.checked) return 'pilot disagrees';
+      return `${input.value} ${emits ? 'lit' : 'cap'} ${+cap.tz.toFixed(2)} ${emits ? 'light' : 'dark'}`;
+    }
+    const shown = ['cap', 'lit', 'some'].filter(n => !l.model.byName[n].hidden);
+    return `${input.value} ${shown.join()} ${+l.model.byName[shown[0]].tz.toFixed(2)} ${l.glowStrength > 0 ? 'light' : 'dark'}`;
+  }).join('; '), name);
   if (mode === 'live') {
     const d = await drawn('where'), travel = await p.evaluate(() => window.vx.live(document.querySelector('.vx-dot')).look.travel);
     say(d === `fra lit ${-travel} light; iad cap 0 dark; sin cap 0 dark`, `the chosen one is latched down by the look's travel with its lamp on; the others stand up, dark (${d})`);
@@ -92,13 +102,13 @@ for (const mode of ['live', 'plain']) {
     const b = await p.locator('#where .vx-dot').nth(0).boundingBox();
     await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
     await p.mouse.down();
-    await p.waitForTimeout(250);
-    const h = await p.evaluate(() => { const l = window.vx.live(document.querySelector('#where .vx-dot')); return [+l.model.byName.cap.tz.toFixed(2), -l.look.step]; });
+    await p.waitForFunction(() => !window.vx.live(document.querySelector('#where .vx-dot')).spring('press').moving);
+    const h = await p.evaluate(() => { const l = window.vx.live(document.querySelector('#where .vx-dot')); return [l.model.byName.cap.tz, -(l.look.travel + 1)]; });
     await p.mouse.move(b.x + b.width / 2, b.y - 60, { steps: 4 });
     await p.mouse.up();
     await p.waitForTimeout(300);
     s = await read('where');
-    say(h[0] === h[1] && s.chosen === 'sin', `held down, one that is up goes down a step under the hand (${h[0]}); dragged off before letting go, it chooses nothing`);
+    say(h[0] === h[1] && s.chosen === 'sin', `held down, Frankfurt reaches its mechanical stop (${h[0]}); dragged off before letting go, it chooses nothing`);
   }
 
   // a choice that is off is passed over; a group that is off does not answer

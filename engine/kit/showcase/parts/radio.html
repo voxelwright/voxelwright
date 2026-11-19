@@ -8,6 +8,8 @@
 <link rel="stylesheet" href="parts.css">
 <style>
   .form { display: grid; gap: calc(var(--vx) * 6); justify-items: start; margin: 0; max-inline-size: 100%; }
+  #where [data-vx-pilot-radio][data-vx-live] { --vx: 1px; inline-size: 28px; block-size: 28px; }
+  #where input + [data-vx-pilot-radio]:not([data-vx-live])::before { inset: 34%; }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
 </style>
 <script>
@@ -27,7 +29,7 @@
     <form class="form" id="run">
       <fieldset class="vx-radios" role="radiogroup" id="where">
         <legend>Deploy to</legend>
-        <label class="vx-radio"><input type="radio" name="where" value="fra" checked><span class="vx-dot"></span><span>Frankfurt<small>Nearest to Mina and Ada</small></span></label>
+        <label class="vx-radio"><input type="radio" name="where" value="fra" checked><span class="vx-dot" data-vx-pilot-radio></span><span>Frankfurt<small>Nearest to Mina and Ada</small></span></label>
         <label class="vx-radio"><input type="radio" name="where" value="iad"><span class="vx-dot"></span><span>Virginia<small>Nearest to most visitors</small></span></label>
         <label class="vx-radio"><input type="radio" name="where" value="sin"><span class="vx-dot"></span><span>Singapore<small>Opens in March</small></span></label>
       </fieldset>
