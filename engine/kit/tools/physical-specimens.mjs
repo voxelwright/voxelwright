@@ -34,6 +34,13 @@ async function specimens(plain) {
     assert.equal(await page.locator('#contour-out').textContent(), '09');
     await page.getByRole('slider', { name: 'Lamp brightness' }).press('Home');
     assert.equal(await page.locator('#gain-out').textContent(), '0%');
+    const dial = await page.locator('#gain').boundingBox();
+    const x = dial.x + dial.width / 2, y = dial.y + dial.height / 2;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y - 38, { steps: 4 });
+    await page.mouse.up();
+    assert.ok(Number(await page.locator('#gain').inputValue()) > 0, 'a spindle drag must advance brightness');
     await page.getByRole('button', { name: 'Scan field' }).press('Enter');
     assert.equal(await page.locator('#sweep').textContent(), 'FIELD SCOPE / 02');
 
@@ -103,6 +110,11 @@ async function audit() {
         await ready();
         await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       });
+      if (file === 'parts/context-menu.html') {
+        await page.locator('#log-213').click({ button: 'right' });
+        await page.locator('#log-menu:popover-open').waitFor();
+        await assertNativeVoxels(page.locator('#log-menu'));
+      }
       const matches = await inspectNativeVoxels(hosts, { families });
       if (errors.length) throw new Error(errors.join(' | '));
       if (matches.length) pages++;
@@ -119,6 +131,11 @@ async function audit() {
     } finally {
       await page.close();
     }
+  }
+  for (const family of families) {
+    if (seenFamilies.has(family)) continue;
+    violations++;
+    console.log('FAIL missing physical family ' + family);
   }
   assert.ok(checked, 'no physical controls found in the showcase');
   console.log(`Audit: ${checked} hosts in ${seenFamilies.size} families on ${pages}/${files.length} pages, ${violations} violations, ${harnessErrors} harness errors`);
