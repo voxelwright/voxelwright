@@ -161,12 +161,15 @@ export const groove = {
         core.sunk = true;
         core.box(1, 1, -2, W - 2, H - 2, 1, 'gasket');
         const lamp = on ? lightName(el) : 'lens';
-        core.box(1, 2, -2, W - 2, H - 4, 1, lamp);
+        const vertical = H >= W;
+        const x = vertical ? 1 : 2, y = vertical ? 2 : 1;
+        const width = Math.max(1, W - 2 * x), height = Math.max(1, H - 2 * y);
+        core.box(x, y, -2, width, height, 1, lamp);
         const lens = m.part('lens');
         lens.sunk = true;
         lens.box(1, 1, -1, W - 2, H - 2, 1, 'groove-resin');
         // The polished exit stripe carries the core's light up to the flush face.
-        lens.box(1, 2, -1, 1, H - 4, 1, lamp);
+        lens.box(x, y, -1, vertical ? 1 : width, vertical ? height : 1, 1, lamp);
         return;
       }
       const w = Math.min(W, H), h = Math.max(W, H);
@@ -197,8 +200,9 @@ export const groove = {
           for (let i = 0; i < lens.count; i++) {
             // Frost carries light to adjacent resin. Preserve its transmission channel.
             if (lens.col[4 * i + 3] >= 0) continue;
-            const y = lens.rest[3 * i + 1];
-            const endDistance = Math.max(0, 2.5 - y, y - (live.H - 2.5));
+            const axis = live.H >= live.W ? 1 : 0;
+            const along = lens.rest[3 * i + axis];
+            const endDistance = Math.max(0, 2.5 - along, along - (Math.max(live.W, live.H) - 2.5));
             const scatter = .45 / (1 + endDistance * endDistance);
             for (let c = 0; c < 3; c++) {
               const at = 4 * i + c;

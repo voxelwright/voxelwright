@@ -19,6 +19,7 @@
     align-self: center;
     margin: 0;
   }
+  #harbor-status .harbor-glass { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
   #harbor-status > .vx-lamp:not([data-vx-live]) {
     border: 2px solid #545850;
     box-shadow: inset 0 1px #ffffff55;
@@ -43,7 +44,7 @@
   <section>
     <h2>In use: the services of a team</h2>
     <div class="services">
-      <div><span class="name">harbor-api</span><span class="vx-badge" id="harbor-status"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>Live</span></div>
+      <div><span class="name">harbor-api</span><span class="vx-badge" id="harbor-status"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"><span class="harbor-glass"></span></span>Live</span></div>
       <div><span class="name">fog-site</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="accent"></span>Building</span></div>
       <div><span class="name">tide-worker</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></div>
       <div><span class="name">ferry-cron</span><span class="vx-badge">Paused</span></div>
@@ -94,7 +95,6 @@
         fitting.carve(3, 2, 1, 12, 6, 1);
         const die = model.part('die');
         die.box(6, 4, 1, 6, 2, 1, live.el.dataset.vxLight === 'off' ? 'slate' : lightName(live.el, 'light-go'));
-        model.part('window').slab(3, 2, 2, 12, 6, 1, 'lens', 2);
         live.faceZ = 2;
         live.state.litRevision = null;
       },
@@ -102,26 +102,44 @@
         live.glowStrength = .018 * (1 + 2 * live.spring('pulse').x);
         if (live.state.litRevision === live.tintRevision) return;
         live.state.litRevision = live.tintRevision;
-        const { die, window, ferrule } = live.model.byName;
+        const glass = live.stage.lives.get(live.el.querySelector('.harbor-glass'));
+        glass?.recolor();
+        const { die, ferrule } = live.model.byName;
         if (die.col[3] <= 0) return;
-        // Frost scatters more of the die's light than the surrounding metal.
-        for (const part of [window, ferrule]) {
-          const response = part === window ? 1 : .13;
-          for (let i = 0; i < part.count; i++) {
-            const x = part.rest[3 * i], y = part.rest[3 * i + 1];
-            const distance = Math.hypot(Math.max(0, Math.abs(x - 9) - 3), y - 5);
-            const scatter = response * Math.exp(-distance / 2.6);
-            // Scattering changes the colour that leaves the glass; its transmission stays fixed.
-            for (let c = 0; c < 3; c++) {
-              const at = 4 * i + c;
-              part.col[at] += (die.col[c] - part.col[at]) * scatter;
-            }
-          }
-        }
+        scatter(ferrule, die, .13);
       },
     } },
   });
-  show();
+  function scatter(part, die, response) {
+    for (let i = 0; i < part.count; i++) {
+      const x = part.rest[3 * i], y = part.rest[3 * i + 1];
+      const distance = Math.hypot(Math.max(0, Math.abs(x - 9) - 3), y - 5);
+      const strength = response * Math.exp(-distance / 2.6);
+      for (let c = 0; c < 3; c++) {
+        const at = 4 * i + c;
+        part.col[at] += (die.col[c] - part.col[at]) * strength;
+      }
+    }
+  }
+
+  // The lens transmits onto the socket below it. Each surface uses the same
+  // stage; separate canvases let the browser composite the glass over the die.
+  show({
+    name: 'harbor-glass', selector: '#harbor-status .harbor-glass', pad: 4,
+    build(live, model) {
+      model.part('window').slab(3, 2, 2, 12, 6, 1, 'lens', 2);
+      live.well = [3, 2, 15, 8];
+      live.faceZ = 2;
+      live.state.litRevision = null;
+    },
+    pose(live) {
+      if (live.state.litRevision === live.tintRevision) return;
+      live.state.litRevision = live.tintRevision;
+      const lamp = live.stage.lives.get(live.el.parentElement);
+      const die = lamp?.model.byName.die;
+      if (die?.col[3] > 0) scatter(live.model.byName.window, die, 1);
+    },
+  });
 </script>
 </body>
 </html>

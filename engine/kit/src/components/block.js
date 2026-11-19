@@ -36,7 +36,7 @@ export const block = {
 
   bind(live) {
     const on = listeners();
-    on.watch(live.el, { attributes: true, attributeFilter: ['data-vx-material', 'data-vx-depth', 'data-vx-round'] }, () => live.rebuild());
+    on.watch(live.el, { attributes: true, attributeFilter: ['data-vx-material', 'data-vx-depth', 'data-vx-round', 'data-vx-profile'] }, () => live.rebuild());
     return on.done;
   },
 };
