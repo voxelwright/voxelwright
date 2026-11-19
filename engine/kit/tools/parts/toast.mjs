@@ -107,7 +107,9 @@ const handoff = await p.evaluate(() => {
   const el = document.querySelector('.vx-toasts [data-vx-specimen="deploy"]');
   const { stage, live } = window.vx;
   const receipt = live(el);
-  for (let i = 0; i < 9; i++) stage.advance(1 / 60);
+  for (let i = 0; i < 22; i++) stage.advance(1 / 60);
+  const ink = () => Number(el.style.getPropertyValue('--vx-surface-ink'));
+  const visibleInk = ink();
   const entry = receipt.pos.slice(), progress = receipt.surface.progress;
   const box = el.getBoundingClientRect();
   const tap = new MouseEvent('click', { bubbles: true, clientX: box.right - 16, clientY: box.top + 12 });
@@ -118,7 +120,7 @@ const handoff = await p.evaluate(() => {
     receipt.surface.from[1] === (tap.clientY - box.top) / receipt.vx;
   stage.manual = false;
   stage.schedule();
-  return fromTap && continuous && receipt.surface.kind === 'crumble' && progress > 0 && progress < 1
+  return visibleInk > 0 && ink() === visibleInk && fromTap && continuous && receipt.surface.kind === 'crumble' && progress > 0 && progress < 1
     && receipt.surface.progress === progress && document.activeElement.id === 'deploy';
 });
 say(handoff, 'dismissal during assembly retains every voxel transform and Deploy keeps focus');
