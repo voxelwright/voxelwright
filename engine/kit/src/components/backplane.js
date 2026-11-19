@@ -3,12 +3,16 @@
 function buildCasting(live, model) {
   const { el, vx, cssW, cssH, W, H } = live;
   const cover = el.parentElement.querySelector('.faceplate');
+  if (!cover) return;
   const left = cover.offsetLeft - el.offsetLeft - (cssW - W * vx) / 2;
   const top = cover.offsetTop - el.offsetTop - (cssH - H * vx) / 2;
   const x0 = Math.round(left / vx) - 1, y0 = Math.round(top / vx) - 1;
   const x1 = Math.round((left + cover.offsetWidth) / vx);
   const y1 = Math.round((top + cover.offsetHeight) / vx);
   const bed = model.part('casting');
+  // The compact casing puts its fasteners closer to the cover. Chamfer the
+  // corners farther into the lip while retaining its gasket along the flats.
+  const corner = left < 3 * vx ? 6 : 3;
 
   // A two-course upstand and a lower, wider rubber ledge. Stepping the
   // diagonal joint through the corners keeps the seat continuous there.
@@ -16,7 +20,7 @@ function buildCasting(live, model) {
     const dy = Math.min(y - y0, y1 - y);
     for (let x = x0; x <= x1; x++) {
       const dx = Math.min(x - x0, x1 - x);
-      const edge = Math.min(dx, dy, Math.floor((dx + dy - 3) / 1.5));
+      const edge = Math.min(dx, dy, Math.floor((dx + dy - corner) / 1.5));
       if (edge === 0) bed.box(x, y, 0, 1, 1, 2, 'slate');
       if (edge === 1 || edge === 2) bed.plot(x, y, 0, 'gasket');
     }
