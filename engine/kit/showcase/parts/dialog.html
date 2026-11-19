@@ -11,6 +11,38 @@
   /* the dialog that is shown open stands in the page's own flow, so the page has room for it */
   .stand { grid-template-columns: minmax(0, 1fr); }
   .stand dialog[open] { position: relative; margin: calc(var(--vx) * 4) 0 calc(var(--vx) * 6); inline-size: min(calc(var(--vx) * 112), 100%); }
+
+  #rename { --vx-look: rename-display; }
+  #rename[open], #rename[data-vx-native-exit] { display: flex; flex-direction: column; }
+  #rename > :is(header, footer) { flex: none; }
+  #rename > header {
+    margin: calc(var(--vx) * 4) calc(var(--vx) * 4) 0;
+    padding: calc(var(--vx) * 4) calc(var(--vx) * 4) 0;
+    color: #f0f6ed;
+    font: 550 1.375rem/1.25 var(--vx-font);
+    letter-spacing: -.025em;
+  }
+  #rename .vx-dialog-body {
+    margin-inline: calc(var(--vx) * 4);
+    padding: calc(var(--vx) * 3) calc(var(--vx) * 4) calc(var(--vx) * 5);
+    --vx-ink: #efebe0;
+    --vx-ink-quiet: #c6d9d3;
+    --vx-floor: #bbdcd5;
+    --vx-focus: #86e2d3;
+  }
+  #rename .vx-field-hint { text-wrap: balance; }
+  #rename .vx-field-label {
+    color: #a7dbd0;
+    font: 600 .8125rem/1.5 var(--vx-mono);
+  }
+  #rename .vx-well:not([data-vx-live]) { background: var(--vx-floor); }
+  #rename input { color: #142d2e; font-family: var(--vx-mono); }
+  #rename footer {
+    --vx-look: instrument;
+    padding: calc(var(--vx) * 6) calc(var(--vx) * 7) calc(var(--vx) * 5);
+  }
+  #rename:not([data-vx-live]) { background: #393e40; box-shadow: 0 2px #989d99, 4px 7px var(--vx-shadow); }
+  #rename:not([data-vx-live]) > :is(header, .vx-dialog-body) { background: #19363a; }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -27,7 +59,7 @@
   <section>
     <h2>In use: renaming a project</h2>
     <div class="row">
-      <button class="vx-button" id="open-rename">Rename</button>
+      <button class="vx-button" id="open-rename" aria-haspopup="dialog" aria-controls="rename" aria-expanded="false">Rename</button>
       <button class="vx-button" data-vx-kind="danger" id="open-delete">Delete project</button>
       <span class="chosen" id="result" role="status"></span>
     </div>
@@ -51,7 +83,14 @@
   <div class="vx-dialog-body">
     <!-- the form is in the body; the key that sends it is in the footer and names it -->
     <form method="dialog" id="rename-form">
-      <label class="vx-field"><span class="vx-field-label">New name</span><span class="vx-well"><input type="text" id="new-name" name="name" value="harbor-api" autocomplete="off"></span><span class="vx-field-hint">Its address changes with it. The old one keeps working for 30 days.</span></label>
+      <label class="vx-field">
+        <span class="vx-field-label" id="new-name-label">New name</span>
+        <span class="vx-well">
+          <input type="text" id="new-name" name="name" aria-labelledby="new-name-label"
+                 aria-describedby="new-name-hint" value="harbor-api" autocomplete="off">
+        </span>
+        <span class="vx-field-hint" id="new-name-hint">Its address changes with it. The old one keeps working for 30 days.</span>
+      </label>
     </form>
   </div>
   <footer>
@@ -68,12 +107,14 @@
   </footer>
 </dialog>
 <script type="module">
+  import './rename-panel.js';
   import { show } from './parts.js';
   import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const $ = (id) => document.getElementById(id);
   $('open-rename').addEventListener('click', () => $('rename').showModal());
+  $('rename').addEventListener('toggle', () => $('open-rename').setAttribute('aria-expanded', String($('rename').open)));
   $('open-delete').addEventListener('click', () => $('delete').showModal());
   $('open-still').addEventListener('click', () => $('still').show());
   for (const id of ['rename', 'delete', 'still']) $(id).addEventListener('close', () => { $('result').textContent = id + ': ' + ($(id).returnValue || 'closed'); });
