@@ -62,9 +62,9 @@ export function panel(live, m) {
  * What a sheet does, with voxels or without: its keys close it, a press on the scrim closes it,
  * the page keeps still behind it, and its voxels are there on the first frame.
  */
-export function wire(el, on, live) {
+export function wire(el, on, live, { parts = ['panel', 'groove'], surface = 'rim' } = {}) {
   const root = document.documentElement;
-  nativeRelease(live, on, ['panel', 'groove'], 0.16);
+  nativeRelease(live, on, parts, 0.16, surface);
   let opener = null, bar = 0;
   // A key that names it opens it: <button commandfor="id" command="show-modal">. Where the
   // browser does not know these yet, the part does what they say.
@@ -89,7 +89,7 @@ export function wire(el, on, live) {
       const resume = rouse(live);
       const edge = live.state.edge;
       const from = [edge === 'right' ? live.W : 0, edge === 'bottom' ? live.H : 0];
-      live.play('assemble', ['panel', 'groove'], { duration: 0.24, surface: 'rim', from, resume });
+      live.play('assemble', parts, { duration: 0.24, surface, from, resume });
     }
     // the page behind does not scroll (CSS), and does not shift for want of its scrollbar
     if (el.matches(':modal') && bar > 0) root.style.scrollbarGutter = 'stable';

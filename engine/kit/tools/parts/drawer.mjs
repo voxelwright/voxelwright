@@ -63,11 +63,15 @@ let s = await read(p, '#deploy');
 say(s.open && s.modal && s.moved !== '0', `wide: a press on its key opens it as a modal dialog, on its way in (${s.moved})`);
 await settle(p);
 s = await read(p, '#deploy');
-say(s.made.edge === 'right' && Math.abs(s.right - s.vw) < 0.5 && s.top === 0 && Math.abs(s.bottom - s.vh) < 0.5, `wide: it rests against the end of the window, top to bottom (${s.left} to ${s.right})`);
+say(s.made.edge === 'right' && Math.abs(s.right - s.vw) < 0.5 && s.top > 0 && Math.abs(s.top - (s.vh - s.bottom)) < 1, `wide: the carriage rests centered against the end of the window (${s.left} to ${s.right})`);
 say(!s.handle && s.made.pull === 'none', 'wide: no handle and no pull: at the side it is not needed');
 say(s.made.panel === 'panel' && s.made.top === s.made.slab, `wide: it is the sheet's reading plate, ${s.made.top} voxels thick`);
 say(s.inside && s.focus === 'Close deploy 213', `wide: the focus is inside it, on its close key (${s.focus})`);
-await p.keyboard.press('Escape'); await settle(p);
+const openHeight = s.h;
+await p.keyboard.press('Escape');
+const releasing = await read(p, '#deploy');
+say(!releasing.open && releasing.shown && Math.abs(releasing.h - openHeight) < 1, 'wide: the released carriage keeps its size as it rolls out');
+await settle(p);
 s = await read(p, '#deploy');
 say(!s.shown && s.value === 'cancel' && s.focus === 'open-deploy', `wide: Escape closes it and the focus is back on its key (${s.focus})`);
 

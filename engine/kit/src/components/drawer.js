@@ -24,6 +24,7 @@
 //         It needs css/sheet.css and css/drawer.css.
 
 import { halo, warmth } from '../core/light.js';
+import { cue } from '../core/sound.js';
 import { listeners, clamp } from './util.js';
 import { panel, edgeOf, wire as sheetWire } from './sheet.js';
 
@@ -95,9 +96,49 @@ function drag(el, on, live) {
   on(el, 'close', () => { if (id !== null) { id = null; hold(false); free(); } });
 }
 
+// A metal runner captures the stepped edge of the cartridge. The readout sits
+// two courses below the cover, inside the actual scroll viewport of the facts.
+function carriage(live, m) {
+  const { el, W, H, vx } = live;
+  live.state.edge = edgeOf(el);
+  const d = live.faceZ = live.look.slab;
+  if (!el.offsetWidth) return;
+  const body = el.querySelector('.vx-drawer-body');
+  const x = Math.round(body.offsetLeft / vx), y = Math.round(body.offsetTop / vx);
+  const w = Math.round(body.offsetWidth / vx), h = Math.round(body.offsetHeight / vx);
+  const metal = m.part('chassis');
+  const bottom = live.state.edge === 'bottom';
+  const left = live.state.edge === 'left' ? 3 : 0;
+  const width = W - (bottom ? 0 : 3), height = H - (bottom ? 2 : 0);
+  // Two runners stay attached to the sled and extend through the window edge.
+  if (bottom) {
+    for (const cx of [6, W - 12]) metal.box(cx, height - 2, 0, 6, 8, 2, 'steel');
+  } else {
+    for (const cy of [6, H - 12]) metal.box(left ? -4 : width - 2, cy, 0, 9, 6, 2, 'steel');
+  }
+  metal.slab(left, 0, 0, width, height, d - 2, 'steel', 2);
+  metal.slab(left + 1, 1, d - 2, width - 2, height - 2, 1, 'gasket', 1);
+  const cover = m.part('panel');
+  cover.slab(left + 2, 2, d - 1, width - 4, height - 4, 1, live.look.readingPlate ?? 'chalk', 1);
+  cover.carve(x, y, d - 1, w, h, 1);
+  metal.slab(x, y, d - 2, w, h, 1, 'slate', 1);
+  metal.carve(x + 1, y + 1, d - 2, w - 2, h - 2, 1);
+  metal.box(x + 1, y + 1, d - 3, w - 2, h - 2, 1, 'gasket');
+  for (const cx of [left + 4, left + width - 5]) for (const cy of [4, height - 5]) {
+    cover.carve(cx - 1, cy - 1, d - 1, 3, 3, 1);
+    metal.slab(cx - 1, cy - 1, d - 1, 3, 3, 1, 'steel', 1);
+    metal.plot(cx, cy, d - 1, 'slate');
+  }
+}
+
 function wire(el, on, live) {
   drag(el, on, live);
-  sheetWire(el, on, live);
+  if (el.hasAttribute('data-vx-carriage')) {
+    sheetWire(el, on, live, { surface: 'courses', parts: ['panel', 'chassis', 'pull'] });
+    on(el, 'transitionend', e => {
+      if (e.target === el && !e.pseudoElement && e.propertyName === 'translate') cue(el.open ? 'press' : 'release');
+    });
+  } else sheetWire(el, on, live);
 }
 
 export const drawer = {
@@ -108,7 +149,9 @@ export const drawer = {
   glowStrength: halo(0.05),
 
   build(live, m) {
-    panel(live, m);
+    const mounted = live.el.hasAttribute('data-vx-carriage');
+    if (mounted) carriage(live, m);
+    else panel(live, m);
     // the pull: a bar of steel on the face, at the middle of the handle, a voxel proud. Held, it
     // is the same bar in the accent's light.
     const h = live.el.querySelector(':scope > .vx-drawer-handle');
@@ -116,10 +159,16 @@ export const drawer = {
     if (!h || !h.offsetWidth) return;
     const { vx } = live, top = live.look.slab;
     const x = Math.round((h.offsetLeft + h.offsetWidth / 2) / vx - PULL / 2), y = Math.round((h.offsetTop + h.offsetHeight / 2) / vx - 1);
+    if (mounted) {
+      const metal = m.part('chassis');
+      metal.slab(x - 2, y - 1, top, PULL + 4, 4, 1, 'gasket', 1);
+      metal.box(x - 1, y, top, PULL + 2, 2, 1, 'steel');
+    }
     for (const [name, mat] of [['pull', 'steel'], ['pull-held', 'light']]) {
       const p = m.part(name);
       p.grounded = false;
-      p.slab(x, y, top, PULL, 2, 1, mat, 1);
+      p.slab(x, y, top + (mounted ? 1 : 0), PULL, 2, 1, mounted ? 'steel' : mat, 1);
+      if (mounted && name === 'pull-held') p.tz = -0.75;
     }
     live.state.pull = true;
   },
