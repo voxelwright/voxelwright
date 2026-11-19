@@ -52,7 +52,11 @@ function bindRows(el, on, live) {
       .some(node => node.matches?.('a, li') || node.querySelector?.('a, li')));
     if (!rowsChanged) return;
     bindings.done();
-    live?.rebuild();
+    if (live) {
+      for (const row of live.state.rows ?? []) row.spring.snap(0);
+      if (live.canvas.parentNode !== el) el.prepend(live.canvas);
+      live.rebuild();
+    }
     bindings = listeners();
     strokes(el, bindings, live);
   });
@@ -82,7 +86,7 @@ export const sectionBank = {
         plate.box(x, y, 2, 3, 2, 1, 'steel').plot(x + 1, y, 2, 'gasket');
       }
     }
-    live.state.rows = [...el.querySelectorAll('li')].map((li, i) => {
+    live.state.rows = [...el.querySelectorAll('li')].filter(li => li.querySelector('a')).map((li, i) => {
       const y = Math.round(li.offsetTop / vx);
       const h = Math.round(li.offsetHeight / vx);
       const lampY = y + Math.floor((h - 6) / 2);
