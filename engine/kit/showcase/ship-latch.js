@@ -130,17 +130,26 @@ function wireSlide(el, on, live) {
     live.invalidate();
   }
 
-  function release(commit = false) {
+  function horizontalStroke(dx, dy) {
+    return Math.abs(dx) >= 4 && Math.abs(dx) > Math.abs(dy);
+  }
+
+  function release(event) {
     if (pointer === null) return;
+    if (event?.type === 'pointerup' && drag && horizontalStroke(event.clientX - drag.x, event.clientY - drag.y)) drag.moving = true;
     if (drag?.moving) {
       consumed = pointer;
-      if (commit && !input.matches(':disabled') && input.checked !== (drag.position >= 0.5)) {
+      if (event?.type === 'pointerup') {
+        drag.position = clamp(drag.start + (event.clientX - drag.x) / drag.distance, 0, 1);
+      }
+      if (event?.type === 'pointerup' && !input.matches(':disabled') && input.checked !== (drag.position >= 0.5)) {
         // Native checkbox activation sends input/change once even on a touch drag without click.
         // A later compatibility click from this pointer is consumed below.
         input.click();
       }
       at?.to(Number(input.checked));
       if (reducedMotion()) at?.snap(Number(input.checked));
+      el.removeAttribute('data-dragging');
       el.style.removeProperty('--ship-offset');
     }
     pointer = null;
@@ -149,7 +158,7 @@ function wireSlide(el, on, live) {
   }
 
   on(label, 'pointerdown', e => {
-    if (!e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
+    if (pointer !== null || !e.isPrimary || e.button !== 0 || input.matches(':disabled')) return;
     consumed = null;
     pointer = e.pointerId;
     const box = el.getBoundingClientRect();
@@ -165,9 +174,10 @@ function wireSlide(el, on, live) {
     if (pointer !== e.pointerId || !drag) return;
     const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.moving) {
-      if (Math.abs(dx) < 4 || Math.abs(dx) <= Math.abs(dy)) return;
+      if (!horizontalStroke(dx, dy)) return;
       drag.moving = true;
       input.setPointerCapture(pointer);
+      if (!live) el.setAttribute('data-dragging', '');
       if (live) live.state.impact = false;
     }
     drag.position = clamp(drag.start + dx / drag.distance, 0, 1);
@@ -179,7 +189,7 @@ function wireSlide(el, on, live) {
     }
   });
   for (const type of ['pointerup', 'pointercancel']) {
-    on(window, type, e => { if (pointer === e.pointerId) release(type === 'pointerup'); });
+    on(window, type, e => { if (pointer === e.pointerId) release(e); });
   }
   on(window, 'blur', () => release());
   on(document, 'visibilitychange', () => {

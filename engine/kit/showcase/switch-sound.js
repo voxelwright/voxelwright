@@ -1,4 +1,4 @@
-import { sound } from '../src/core/sound.js';
+import { prepareSwitchSound, sound } from '../src/core/sound.js';
 
 // Consent follows the visitor through the showcase in this tab. Audio in a new
 // document is armed on user activation, including the click following a touch.
@@ -8,7 +8,8 @@ export function connectSound(input) {
   function restoreChoice() {
     try { enabled = sessionStorage.getItem(key) === 'on'; } catch {}
     if (input) input.checked = enabled;
-    if (!enabled) sound(false);
+    if (enabled) prepareSwitchSound();
+    else sound(false);
   }
   restoreChoice();
   addEventListener('pageshow', event => {
@@ -17,6 +18,7 @@ export function connectSound(input) {
   function arm(event) {
     if (!event.repeat && enabled && !sound()) sound(true);
   }
+  document.addEventListener('pointerdown', arm, true);
   document.addEventListener('pointerup', arm, true);
   document.addEventListener('click', arm, true);
   document.addEventListener('keydown', arm, true);

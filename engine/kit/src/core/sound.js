@@ -1,6 +1,5 @@
 // Mechanical press/release recordings; other cues are synthesized with Web Audio.
-// Nothing sounds, and no audio context exists, until the page turns sound on after the visitor
-// has interacted. Sounds are short, a little different each time, and quieter than speech.
+// The output context opens on user activation. Restored consent can warm the recordings silently. Sounds are short, a little different each time, and quieter than speech.
 
 let ctx = null, master = null, switchFilter = null, on = false;
 let treble = 0;
@@ -14,18 +13,29 @@ export function switchTreble(db) {
 }
 const samples = new Map();
 let loading = null;
-function loadSamples() {
+function loadSamples(decoder) {
   if (loading) return loading;
   loading = Promise.all(['press', 'release'].map(async (name) => {
     const response = await fetch(new URL(`./audio/${name}.wav`, import.meta.url));
     if (!response.ok) throw new Error(`Switch audio: ${response.status}`);
-    samples.set(name, await ctx.decodeAudioData(await response.arrayBuffer()));
+    samples.set(name, await decoder.decodeAudioData(await response.arrayBuffer()));
   })).catch(() => { loading = null; });
   return loading;
 }
+// Decode before the first gesture in a new showcase document, without opening an output device.
+export function prepareSwitchSound() {
+  if (loading || samples.size === 2) return;
+  const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (Offline) void loadSamples(new Offline(1, 1, 44100));
+}
+
 function mechanical(name, at) {
   const buffer = samples.get(name);
-  if (!buffer) return; // Never replay a press after loading finishes.
+  if (!buffer) {
+    // Contact is immediate even during a cold load. Never replay it when the buffer arrives.
+    tock(at, name === 'press' ? 175 : 320, .03, .18);
+    return;
+  }
   const source = ctx.createBufferSource();
   source.buffer = buffer;
   source.connect(switchFilter);
@@ -92,7 +102,7 @@ export function sound(enable) {
   if (on && ensure()) {
     master.gain.setValueAtTime(0.32, ctx.currentTime);
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
-    void loadSamples();
+    void loadSamples(ctx);
   } else if (master) master.gain.setValueAtTime(0, ctx.currentTime);
   return on;
 }

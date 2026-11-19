@@ -46,3 +46,5 @@
     forced-color-adjust: none;
   }
 }
+
+.vx-toggle input + .ship-latch[data-dragging]::after { transition: none; }
