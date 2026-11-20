@@ -83,6 +83,8 @@ struct Pack {
     top: Vec<i16>,
     class: Vec<u8>,
     tint: Vec<u8>,
+    /// Local asphalt greys for columns whose tint byte belongs to a measured crown.
+    under_leaf_road: Vec<u8>,
     /// In a coarse pack: the wall's kind (its material and colour) of what stands over each sample.
     walls: Vec<u16>,
     buildings: Vec<Building>,
@@ -220,7 +222,8 @@ fn read(b: &[u8]) -> Option<Pack> {
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
     }
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let under_leaf_road = road_greys(&class, &tint, tw);
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -627,12 +630,19 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
     let (class, tint) = p.surface(x, z);
-    let road_top4 = (size == 1 && class & 135 == 128).then(|| ((ground_height+1.0)*4.0).round() as i32);
+    let asphalt = if class & 159 == 128 && (1..=15).contains(&tint) {
+        Some(tint)
+    } else if class & 31 == CANOPY && measured_foliage(tint) && !p.under_leaf_road.is_empty() {
+        p.cell(x,z).map(|i| {
+            let w = p.tw as usize;
+            p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16]
+        })
+    } else { None };
+    let road_top4 = (size == 1 && asphalt.is_some()).then(|| ((ground_height+1.0)*4.0).round() as i32);
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
-        ROAD if class & 128 != 0 && (1..=15).contains(&tint) => (kind(ASPHALT, tint), 0),
-        ROAD => (kind(ASPHALT, OWN), 0),
+        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
@@ -699,6 +709,42 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
 
 fn measured_foliage(tint: u8) -> bool {
     tint >= 16 && (3..=10).contains(&((tint-16)/10)) && matches!((tint-16)%10, 2 | 5 | 6 | 8 | 9)
+}
+
+/// A crown and the asphalt underneath share one column. Carry nearby open-road
+/// reflectance under the leaves once at load time. An old pack has no survey greys.
+fn road_greys(class: &[u8], tint: &[u8], width: usize) -> Vec<u8> {
+    let n = width.div_ceil(16);
+    let mut bins = vec![(0u32, 0u32); n*n];
+    let (mut sum, mut count) = (0u32, 0u32);
+    for (i, (&c, &t)) in class.iter().zip(tint).enumerate() {
+        if c == 128 && (1..=15).contains(&t) {
+            let bin = &mut bins[(i / width / 16) * n + i % width / 16];
+            bin.0 += t as u32;
+            bin.1 += 1;
+            sum += t as u32;
+            count += 1;
+        }
+    }
+    if count == 0 { return Vec::new(); }
+    let average = |s: u32, k: u32| ((s+k/2)/k) as u8;
+    let mut greys = Vec::with_capacity(n*n);
+    for j in 0..n {
+        for i in 0..n {
+            let (mut s, mut k) = bins[j*n+i];
+            if k == 0 {
+                for z in j.saturating_sub(1)..=(j+1).min(n-1) {
+                    for x in i.saturating_sub(1)..=(i+1).min(n-1) {
+                        let bin = bins[z*n+x];
+                        s += bin.0;
+                        k += bin.1;
+                    }
+                }
+            }
+            greys.push(if k == 0 { average(sum, count) } else { average(s,k) });
+        }
+    }
+    greys
 }
 
 /// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
@@ -958,6 +1004,18 @@ mod tests {
         }
         b.extend(std::iter::repeat_n(300i16.to_le_bytes(), 25).flatten());
         b
+    }
+
+    #[test]
+    fn a_road_below_foliage_uses_nearby_measured_asphalt() {
+        let mut class = vec![CANOPY; 32*32];
+        let mut tint = vec![colour(6,5); 32*32];
+        assert!(road_greys(&class,&tint,32).is_empty());
+        for (i,grey) in [(0,5),(1,7),(31,10)] {
+            class[i] = 128;
+            tint[i] = grey;
+        }
+        assert_eq!(road_greys(&class,&tint,32), [6,10,7,7]);
     }
 
     #[test]
