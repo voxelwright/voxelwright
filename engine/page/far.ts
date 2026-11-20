@@ -179,17 +179,26 @@ export interface Far {
   readonly whole: boolean
   /** The objects held now, by their paths in the listing: for counting what a view costs to send. */
   held(): string[]
+  /**
+   * The world changed in this box (finest cells, high corner exclusive): the far tiles it reaches are no longer
+   * drawn or handed over, so that the cells there, which hold the change, are seen. `forget` (a reset) takes them back.
+   */
+  edited(box: readonly [number, number, number, number, number, number]): void
+  forget(): void
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
 
-/** The far model whose listing is at `base`far.json (a folder beside the page), or one that draws nothing. */
+/** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null, held: () => [] }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null, held: () => [], edited() {}, forget() {} }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
-  const listing = await fetch(`${base}far.json`).then((r) => (r.ok ? (r.json() as Promise<Listing>) : null)).catch(() => null)
+  // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
+  const file = base.endsWith('.json') ? base : `${base}far.json`
+  base = file.slice(0, file.lastIndexOf('/') + 1)
+  const listing = await fetch(file).then((r) => (r.ok ? (r.json() as Promise<Listing & { far?: Listing }>) : null)).then((l) => l?.far ?? l).catch(() => null)
   if (!listing || !Object.keys(listing.tiles).length) return none
 
   const module = await shader(device, 'far', CODE)
@@ -212,10 +221,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   // ── Tiles ──
   const size = listing.size, bands = listing.bands, lods = listing.lods
   interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; bind: GPUBindGroup; mid: number[] }[]; used: number }
-  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; held: (Held | null | 'coming')[] }
+  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[] }
   const tiles: Tile[] = Object.entries(listing.tiles).map(([key, recs]) => {
     const [x, z] = key.split('_').map(Number)
-    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), held: recs.map(() => null) }
+    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), held: recs.map(() => null), retry: recs.map(() => 0), fails: recs.map(() => 0) }
   })
   const keys = tiles.map((t) => [t.x, t.z])
   const corner: [number, number] = [Math.min(...keys.map((k) => k[0])), Math.min(...keys.map((k) => k[1]))]
@@ -268,6 +277,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       stats.failed++
       stats.error = String((e as Error)?.message ?? e).slice(0, 200)
       t.held[band] = null
+      // Tried again, but not before a while: twice as long after each failure, to a minute.
+      t.retry[band] = performance.now() + Math.min(60_000, 1000 * 2 ** Math.min(6, (t.fails[band] = (t.fails[band] ?? 0) + 1)))
     }
     stats.coming--
   }
@@ -300,10 +311,16 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const FURTHEST = Number(query.get('farthest') ?? 16_000)
   let frame = 0
   let whole = true
+  /** Tiles the world was changed in since the last reset: the cells' (edited). */
+  const changed = new Set<string>()
 
   const self: Far = {
     listing, reach: reachAsked, detail: Number(query.get('fardetail') ?? 0.75), stats,
     get whole() { return whole },
+    edited(box) {
+      for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
+    },
+    forget() { changed.clear() },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [listing.tiles[t.key][k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) { pass(encoder, to.color, to.depth, to.size, view, picture, false) },
@@ -337,11 +354,12 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       let all = true
       for (const [k, h] of t.held.entries()) {
         if (!t.listed[k]) continue
-        if (need[k] && (h === null || h === 'coming')) { all = false; if (h === null) want.push({ t, band: k, d }) }
+        if (need[k] && (h === null || h === 'coming')) { all = false; if (h === null && performance.now() >= t.retry[k]) want.push({ t, band: k, d }) }
         if (h && h !== 'coming') { held += h.bytes / 20; heldBytes += h.bytes; if (need[k]) h.used = frame }
       }
-      // The march hands a tile over only once all it needs is here: until then its cells stand in.
-      if (all && d < FURTHEST * 10) {
+      // The march hands a tile over only once all it needs is here: until then its cells stand in. Nor one the world
+      // was changed in.
+      if (all && d < FURTHEST * 10 && !changed.has(t.key)) {
         const bx = t.x - corner[0], bz = t.z - corner[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       } else if (!all && inView(view, aspect, t.lo, t.hi)) whole = false
@@ -369,7 +387,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     out.setBindGroup(0, bind)
     let faces = 0, sections = 0, drawn = 0
     for (const t of tiles) {
-      if (!t.held.some((h) => h && h !== 'coming')) continue
+      if (!t.held.some((h) => h && h !== 'coming') || changed.has(t.key)) continue
       const d = away(eye, t.lo, t.hi)
       if (d > FURTHEST * 10 || !inView(view, aspect, t.lo, t.hi)) continue
       // A tile wholly within the reach is the cells'.

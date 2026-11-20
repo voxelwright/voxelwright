@@ -32,7 +32,7 @@ INPUTS = os.path.expanduser('~/.village/engine/bay/450-inputs')
 OUT = os.path.expanduser('~/.village/engine/sf/far/squares')
 E0, N0, SEA = 500_000.0, 4_250_000.0, 1.0
 TILE = 500.0  # metres: the far model's tiles (pack.mjs SIZE)
-VERSION = 1
+VERSION = 2
 NAMES = os.path.join(HERE, '..', '..', 'landing', 'ina', 'names.json')
 
 
@@ -117,7 +117,9 @@ def bake(square, force=False, cell=0.5, out=OUT):
     if most:
         mean = ndimage.mean(bright[ids > 0] * scale, ids[ids > 0], index=np.arange(most + 1))
         grey = np.where(ids > 0, np.nan_to_num(mean)[ids], grey).astype(np.float32)
-    water = ~seen & (ground < 1.6)
+    # The Bay: ground at its level where nothing stands a metre over it. (Where the lidar had a return off the water
+    # it is not unseen, and ground faces at sea level drew grey bands across the Bay past the piers.)
+    water = (ground < 1.6) & (~seen | (over < 1.0))
     # ── Each building: its number in the city (the same in both squares of a seam), how tall it stands, its name.
     tall = ndimage.median(over, ids, index=np.arange(most + 1)) if most else np.zeros(1)
     names = named(frame, ids, cell)
@@ -144,24 +146,30 @@ def bake(square, force=False, cell=0.5, out=OUT):
     blocks = []
     zeros = np.zeros(top.shape, np.int64)
 
-    def write(layer, h, inside, roof, walls, style, bid, floor, hq, step):
-        """One layer's faces, a block for each 500 m tile of the frame's grid: what the tile holds of this square."""
+    def write(layer, h, inside, ours, roof, walls, style, bid, floor, hq, step):
+        """One layer's faces, a block for each 500 m tile of the frame's grid: what the tile holds of this square. `inside`
+        is what stands, the margin's too (so that a wall at the square's edge stops at its neighbour); `ours` is the square."""
         ce = west + (np.arange(h.shape[1]) + 0.5) * cell * step
         cn = north - (np.arange(h.shape[0]) + 0.5) * cell * step
         tx = np.floor((ce - E0) / TILE).astype(int)
         tz = np.floor((N0 - cn) / TILE).astype(int)
-        for x in np.unique(tx[inside.any(0)]):
-            for z in np.unique(tz[inside.any(1)]):
+        held = inside & ours
+        for x in np.unique(tx[held.any(0)]):
+            for z in np.unique(tz[held.any(1)]):
                 cs, rs = np.flatnonzero(tx == x), np.flatnonzero(tz == z)
                 c0, c1, r0, r1 = cs[0], cs[-1] + 1, rs[0], rs[-1] + 1
-                if not inside[r0:r1, c0:c1].any():
+                if not held[r0:r1, c0:c1].any():
                     continue
                 # A cell of margin each side, so that a wall at the block's edge knows its neighbour.
                 ra, rb, ca, cb = max(0, r0 - 1), min(h.shape[0], r1 + 1), max(0, c0 - 1), min(h.shape[1], c1 + 1)
                 sl = (slice(ra, rb), slice(ca, cb))
                 mine = np.zeros((rb - ra, cb - ca), bool)
                 mine[r0 - ra:r1 - ra, c0 - ca:c1 - ca] = True
-                f = faces(h[sl], inside[sl] & mine, roof[sl], walls[sl], style[sl], bid[sl], zeros[sl] if step == 1 else np.zeros(h[sl].shape, np.int64), floor[sl], hq)
+                mine &= ours[sl]
+                f = faces(h[sl], inside[sl], roof[sl], walls[sl], style[sl], bid[sl], zeros[sl] if step == 1 else np.zeros(h[sl].shape, np.int64), floor[sl], hq)
+                # Faces that begin in the margin are the neighbouring block's (matte.py `write`).
+                fx, fz = (f[:, 0] & 0x7ff).astype(np.int64), ((f[:, 0] >> 11) & 0x7ff).astype(np.int64)
+                f = f[mine[np.clip(fz, 0, rb - ra - 1), np.clip(fx, 0, cb - ca - 1)]]
                 if not len(f):
                     continue
                 name = f'{layer}-{x}_{z}.bin'
@@ -174,13 +182,13 @@ def bake(square, force=False, cell=0.5, out=OUT):
     hq = int(round(cell * 10))
     h = np.maximum(np.round((top - SEA) * 10 / hq).astype(np.int64), 0)
     floor = np.maximum(np.round((ground - SEA) * 10 / hq).astype(np.int64), 0)
-    write('far', h, own & stands & ~water, roof, walls, style, bid, floor, hq, 1)
+    write('far', h, stands & ~water, own, roof, walls, style, bid, floor, hq, 1)
     # The bare ground, every 4th cell (2 m), at its own height in metres; grey, a little green where it is leaf.
     step, hq = max(1, int(round(2.0 / cell))), 10
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))
     gh = np.maximum(np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64), 0)
     gc = np.where(leafy[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
-    write('ground', gh, own[sub] & ~water[sub], gc, gc, np.zeros(gh.shape, np.int64), np.zeros(gh.shape, np.int64), gh, hq, step)
+    write('ground', gh, ~water[sub], own[sub], gc, gc, np.zeros(gh.shape, np.int64), np.zeros(gh.shape, np.int64), gh, hq, step)
     index = {'village': 'far', 'version': VERSION, 'square': square, 'inputs': sig, 'turn': 0, 'faces': sum(b['faces'] for b in blocks), 'blocks': blocks,
              'sun': None, 'styles': looks.STYLES, 'credit': 'U.S. Geological Survey 3DEP; City and County of San Francisco (DataSF)'}
     json.dump(index, open(f'{dest}/index.json.part', 'w'))

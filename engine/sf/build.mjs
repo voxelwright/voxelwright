@@ -94,6 +94,7 @@ for (const k of realm.kept ?? []) {
 put('sf/CREDITS.txt', [
   'Ground, buildings and trees in the baked squares: U.S. Geological Survey 3DEP; USDA NAIP; City and County of San Francisco (DataSF). Public domain (DataSF: PDDL).',
   'Everywhere else: © OpenStreetMap contributors, Overture Maps Foundation (ODbL 1.0; these tiles are a derived database under the same licence); terrain: Mapterhorn (https://mapterhorn.com/attribution).',
+  ...(realm.far && existsSync(join(farFrom, 'far.json')) ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
   '',
 ].join('\n'))
 

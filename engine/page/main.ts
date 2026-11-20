@@ -161,7 +161,7 @@ async function main() {
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)])
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [])
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -494,7 +494,7 @@ async function main() {
   // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -1110,16 +1110,18 @@ async function main() {
    * march's time on this GPU, not the pass's: #423).
    */
   const farPasses = async (rounds = 5) => {
-    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = []
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = [], fogged: number[] = []
     paused = true
     for (let i = 0; i < rounds; i++) {
       alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0) }, 100)).ms)
       both.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
+      // And the marine layer over both, where it is on (fog.ts).
+      if (marine.strength > 0) fogged.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v); marine.draw(encoder, target, farModel.depth, v, 0) }, 100)).ms)
     }
     paused = false
     to.destroy()
     const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
-    return { march: middle(alone), withFar: middle(both), size: [canvas.width, canvas.height], ...farModel.stats }
+    return { march: middle(alone), withFar: middle(both), withFog: fogged.length ? middle(fogged) : null, size: [canvas.width, canvas.height], ...farModel.stats }
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, far: farModel, farIds, farPasses, pause: (on: boolean) => { paused = on } })
   // How thick the marine layer is, 0 to 1 (fog.ts): a property, as the hour and the rain are.
@@ -1164,6 +1166,7 @@ async function main() {
     moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
+    farModel.forget()
     core.world_forget()
     Object.assign(pose, began)
     if (afoot) me.walk(true)

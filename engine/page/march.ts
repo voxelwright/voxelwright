@@ -852,7 +852,9 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   ${MARCHED(world.options.bricks && !INLOOP)}
   // Past the far model's reach, where it holds the tile, what the cells met there is its to draw (far.ts): the coarse
   // boxes stand far wider than the buildings they hold. The look goes on to meet the sea, as though it had left the boxes.
-  if (eyed && looks.far.w > 0.0 && hit.t > looks.far.w && farHeld(ro + rd * hit.t)) { hit.t = -1.0; hit.left = true; }
+  // Only a look from the eye (through a pane too): the water's look at what it mirrors starts at the water, and the far
+  // model is not drawn into what is mirrored.
+  if (eyed && looks.far.w > 0.0 && hit.t > looks.far.w && all(ro == g.eye) && farHeld(ro + rd * hit.t)) { hit.t = -1.0; hit.left = true; }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }

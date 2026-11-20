@@ -10,7 +10,7 @@
 // Writes <out>/far.json and <out>/far/<band>/<x>_<z>.far:
 //   - far.json is the manifest's `far` object as asked of the data lane on #450: `size` (a tile's side in 10 cm cells,
 //     on the frame's grid), `bands` (the least size of a face in each band, metres), `tiles` (key `x_z`, a record or
-//     null per band: {path, bytes, sha256} over the bytes as written); and `sources`, what each tile was made from.
+//     null per band: {path, bytes, sha256} over the bytes as written); far.state.json says what each tile was made from.
 //   - A tile's band holds the faces whose low corner is in the tile and whose size (metres, the geometric mean of
 //     its sides) is in the band. A far tile is fetched only for band 0, nearer ones add the rest.
 //   - A `.far` file: 'FAR1', a u32 length, that many bytes of JSON (spaces to a multiple of 4), then the faces with
@@ -82,16 +82,20 @@ for (const [key, list] of by) {
 }
 /** What a tile is made from: its owner's blocks that may hold its faces. */
 const sourcesOf = (key) => by.get(key).filter((i) => blocks[i].owner === owner.get(key))
-const sign = (key) => createHash('sha256').update(`${listingVersion}\n${owner.get(key)}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
+const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
 
 // ── What changed since the last packing ──
-const before = existsSync(join(out, 'far.json')) ? JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')) : null
-const listingVersion = 2
-const listing = { version: listingVersion, size: SIZE, bands: BANDS, lods: LODS, tiles: {}, sources: {} }
+const before = existsSync(join(out, 'far.json')) && existsSync(join(out, 'far.state.json')) ? { ...JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')), sources: JSON.parse(readFileSync(join(out, 'far.state.json'), 'utf8')) } : null
+/** How this packs a tile (the FAR1 object's own layout): raised when it changes, so every tile is packed again. */
+const PACKED = 3
+// The listing is the release manifest's `far` (engine/sf/release.md, version 1); what each tile was made from is
+// kept beside it in far.state.json, for packing again only what changed.
+const listing = { version: 1, size: SIZE, bands: BANDS, lods: LODS, tiles: {} }
+const sources = {}
 const todo = []
 for (const key of [...by.keys()].sort()) {
   const s = sign(key)
-  listing.sources[key] = s
+  sources[key] = s
   // As it was: its records, or none where its sources held no face of it.
   if (before?.sources?.[key] === s) {
     const was = before.tiles[key]
@@ -136,6 +140,9 @@ for (let at = 0; at < todo.length; at += BATCH) {
       const wx = pos[0] + (c0[0] * e.x0 + c2[0] * e.z0) * cell, wz = pos[2] + (c0[2] * e.x0 + c2[2] * e.z0) * cell
       const key = `${Math.floor(wx / SIZE)}_${Math.floor(wz / SIZE)}`
       if (!batch.has(key) || owner.get(key) !== b.owner) continue
+      // The sea is the march's to draw: bare ground no higher than a metre over it is where the lidar had a return off
+      // the water (matte.py and bake.py take that for land), and it drew grey bands across the Bay.
+      if (b.layer.startsWith('ground') && pos[1] + e.y1 <= 10) continue
       const size = sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
       const t = sorted.get(key)[band]
       let l = t.get(i)
@@ -198,8 +205,9 @@ for (let at = 0; at < todo.length; at += BATCH) {
     if (record.some(Boolean)) listing.tiles[key] = record
   }
 }
-listing.credit = meta.credits.join('; ')
+listing.credit = [...new Set(meta.credits.flatMap((c) => c.split('; ')))].join('; ')
 mkdirSync(out, { recursive: true })
+writeFileSync(join(out, 'far.state.json'), JSON.stringify(sources))
 writeFileSync(join(out, 'far.json.part'), JSON.stringify(listing))
 writeFileSync(join(out, 'far.json'), readFileSync(join(out, 'far.json.part')))
 rmSync(join(out, 'far.json.part'))

@@ -75,7 +75,7 @@ for (const key of only) {
   writeFileSync(join(out, 'shots', `${name}-${key}-ids.rgba`), Buffer.from(said.ids, 'base64'))
   // What the far model held here as a host would send it: Brotli 5, as the release counts it (release.md).
   const br = said.held.reduce((n, path) => n + brotli(path), 0)
-  const r = { whole, heldBrotliMB: +(br / 1048576).toFixed(1), readyMs: ready, url, pose: said.pose, fov: said.fov, size: view.size, march: said.cost.march, withFar: said.cost.withFar, farMs: +(said.cost.withFar - said.cost.march).toFixed(2), faces: said.cost.faces, sections: said.cost.sections, tilesDrawn: said.cost.tiles, heldFaces: said.cost.held, heldMB: +(said.cost.heldBytes / 1048576).toFixed(1), fetched: said.cost.fetched, fetchedMB: +(said.cost.fetchedBytes / 1048576).toFixed(1), covered: said.cost.covered, errors }
+  const r = { whole, heldBrotliMB: +(br / 1048576).toFixed(1), readyMs: ready, url, pose: said.pose, fov: said.fov, size: view.size, march: said.cost.march, withFar: said.cost.withFar, farMs: +(said.cost.withFar - said.cost.march).toFixed(2), fogMs: said.cost.withFog === null ? null : +(said.cost.withFog - said.cost.withFar).toFixed(2), faces: said.cost.faces, sections: said.cost.sections, tilesDrawn: said.cost.tiles, heldFaces: said.cost.held, heldMB: +(said.cost.heldBytes / 1048576).toFixed(1), fetched: said.cost.fetched, fetchedMB: +(said.cost.fetchedBytes / 1048576).toFixed(1), covered: said.cost.covered, errors }
   if (key === 'park') {
     // The skyline against the photograph (measure.py, #423's measures), leaving out the park's own tree beside the
     // eye: the lidar of 2023 has it and the photograph of 2021 has not, and it is the cells', not the far model's.
