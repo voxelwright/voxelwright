@@ -104,6 +104,9 @@ def survey(root, once=False):
                 shutil.copyfile(src, objects / src.name)
     save(cache / "seeded.json", list(SEEDS))
     while True:
+        if (root / "hold-at-boundary").exists():
+            print("holding at completed window boundary", flush=True)
+            return
         if shutil.disk_usage(root).free < 17 * 2**30:
             print("waiting for 17 GiB free", flush=True)
             if once:

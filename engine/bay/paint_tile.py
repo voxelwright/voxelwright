@@ -91,6 +91,7 @@ def prototype(root):
     """Restore the graded T Third platforms and downtown tower bases when cutting from old city packs."""
     from frontage_tiles import ground_floors
     from transit_platforms import segments
+    from compact_store import packed
     from tiles import read
     import json
     from pathlib import Path
@@ -110,7 +111,7 @@ def prototype(root):
                 + (".zip" if row["place"] == "Financial District" else ".json.gz")
             )
         )
-        if not (pack.is_file() and source.is_file()):
+        if not ((pack.is_file() or packed(pack).is_file()) and source.is_file()):
             continue
         data = read(pack)
         if row["place"] == "Dogpatch":

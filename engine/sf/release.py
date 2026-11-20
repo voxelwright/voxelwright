@@ -1,5 +1,7 @@
 """Assemble and pin a local static release from full_run.py's verified outputs."""
 
+from contextlib import closing, nullcontext
+import os
 import argparse
 import fcntl
 import hashlib
@@ -9,6 +11,9 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
+from compact_store import TileStore, read as read_base
 
 CREDITS = [
     "U.S. Geological Survey 3DEP",
@@ -38,6 +43,7 @@ def generate(
     life=None,
     cars=None,
     paint=None,
+    compact_store=None,
 ):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
@@ -47,13 +53,18 @@ def generate(
     verified_files = {}
 
     def record(path, name, checkpoint=True):
-        with path.open("rb") as stream:
-            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        if path.suffix == ".bay" and not path.exists():
+            body = read_base(path)
+            digest, length = hashlib.sha256(body).hexdigest(), len(body)
+        else:
+            with path.open("rb") as stream:
+                digest = hashlib.file_digest(stream, "sha256").hexdigest()
+                length = path.stat().st_size
         if checkpoint and verified.get(str(path.relative_to(root))) != digest:
             raise ValueError(f"{path} absent or changed since verification")
         files[name] = path
         verified_files[name] = digest
-        return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
+        return {"path": name, "sha256": digest, "bytes": length}
 
     out.mkdir(parents=True, exist_ok=True)
     wall_faces = None
@@ -65,39 +76,58 @@ def generate(
         wall_faces = accepted_faces(paint)
         structures = prototype(root)
     levels = []
-    for level, spec in enumerate(index["levels"]):
-        tiles = {}
-        for x, z in sorted(index["tiles"][level]):
-            key = f"{x}_{z}"
-            path = f"tiles/{level}/{key}.bay"
-            if key in tiles:
-                raise ValueError("duplicate tile")
-            source = packs / path
-            tiles[key] = record(source, path)
-            if wall_faces is not None:
-                if shutil.disk_usage(out.parent).free < 17 * 2**30:
-                    raise ValueError("disk reserve reached; staging can resume")
-                blob = apply(source.read_bytes(), wall_faces, structures)
-                sha = hashlib.sha256(blob).hexdigest()
-                if sha != tiles[key]["sha256"]:
-                    cache = out / ".paint-objects" / sha
-                    cache.parent.mkdir(parents=True, exist_ok=True)
-                    if not cache.exists():
-                        import tempfile
+    with (
+        closing(TileStore(compact_store)) if compact_store else nullcontext(None)
+    ) as store:
+        for level, spec in enumerate(index["levels"]):
+            tiles = {}
+            for x, z in sorted(index["tiles"][level]):
+                key = f"{x}_{z}"
+                path = f"tiles/{level}/{key}.bay"
+                if key in tiles:
+                    raise ValueError("duplicate tile")
+                source = packs / path
+                if store is not None:
+                    data = read_base(source)
+                    if hashlib.sha256(data).hexdigest() != verified.get(
+                        str(source.relative_to(root))
+                    ):
+                        raise ValueError(f"tile changed since checkpoint: {source}")
+                    if wall_faces is not None:
+                        data = apply(data, wall_faces, structures)
+                    if shutil.disk_usage(out).free < 17 * 2**30:
+                        raise ValueError(
+                            "disk reserve reached before compact release tile"
+                        )
+                    tiles[key] = dict(
+                        path=path, bytes=len(data), sha256=store.put(data)
+                    )
+                else:
+                    tiles[key] = record(source, path)
+                    if wall_faces is not None:
+                        if shutil.disk_usage(out.parent).free < 17 * 2**30:
+                            raise ValueError("disk reserve reached; staging can resume")
+                        blob = apply(read_base(source), wall_faces, structures)
+                        sha = hashlib.sha256(blob).hexdigest()
+                        if sha != tiles[key]["sha256"]:
+                            cache = out / ".paint-objects" / sha
+                            cache.parent.mkdir(parents=True, exist_ok=True)
+                            if not cache.exists():
+                                import tempfile
 
-                        with tempfile.NamedTemporaryFile(
-                            dir=cache.parent, delete=False
-                        ) as f:
-                            f.write(blob)
-                            tmp = Path(f.name)
-                        tmp.replace(cache)
-                    tiles[key] = record(cache, path, False)
-                    if tiles[key]["sha256"] != sha:
-                        raise ValueError("paint tile cache changed")
-        sea = sorted(f"{x}_{z}" for x, z in index["sea"][level])
-        if len(set(sea)) != len(sea) or set(sea) & tiles.keys():
-            raise ValueError("overlapping inventory")
-        levels.append({**spec, "level": level, "tiles": tiles, "sea": sea})
+                                with tempfile.NamedTemporaryFile(
+                                    dir=cache.parent, delete=False
+                                ) as f:
+                                    f.write(blob)
+                                    tmp = Path(f.name)
+                                tmp.replace(cache)
+                            tiles[key] = record(cache, path, False)
+                            if tiles[key]["sha256"] != sha:
+                                raise ValueError("paint tile cache changed")
+            sea = sorted(f"{x}_{z}" for x, z in index["sea"][level])
+            if len(set(sea)) != len(sea) or set(sea) & tiles.keys():
+                raise ValueError("overlapping inventory")
+            levels.append({**spec, "level": level, "tiles": tiles, "sea": sea})
     names = {
         s: record(packs / (s + ".json"), f"names/{s}.json")
         for s in sorted(index["squares"])
@@ -178,12 +208,25 @@ def generate(
     dest.mkdir(parents=True, exist_ok=True)
     with (out / f".stage-{digest}.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        if compact_store:
+            locator = dest / ".bay-store"
+            if locator.is_symlink():
+                if locator.resolve() != Path(compact_store).resolve():
+                    raise ValueError(
+                        "release already references a different local store"
+                    )
+            else:
+                locator.symlink_to(
+                    os.path.relpath(Path(compact_store).resolve(), dest.resolve())
+                )
         if not inventory_only:
             for name, source in files.items():
                 path = dest / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 tmp = path.with_suffix(".part")
-                if sys.platform == "darwin":
+                if source.suffix == ".bay" and not source.exists():
+                    tmp.write_bytes(read_base(source))
+                elif sys.platform == "darwin":
                     # On the bake volume this produces an independent APFS clone.
                     subprocess.run(["/bin/cp", "-c", source, tmp], check=True)
                 else:
@@ -201,7 +244,11 @@ def generate(
     # The manifest is available for a fixed-camera candidate run before promotion.
     # Recheck the preceding pin under the same lock that moves current.json.
     if panel is None or inventory_only:
-        print(digest, len(files), "objects staged; panel required to promote")
+        print(
+            digest,
+            len(files) + (sum(len(l["tiles"]) for l in levels) if compact_store else 0),
+            "objects staged; panel required to promote",
+        )
         return digest
     sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
     from panel_gate import check
@@ -264,7 +311,11 @@ def generate(
             )
         )
         tmp.replace(pointer)
-    print(digest, len(files), "objects pinned; 32 views passed")
+    print(
+        digest,
+        len(files) + (sum(len(l["tiles"]) for l in levels) if compact_store else 0),
+        "objects pinned; 32 views passed",
+    )
     return digest
 
 
@@ -272,6 +323,11 @@ if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("root", type=Path)
     cli.add_argument("out", type=Path)
+    cli.add_argument(
+        "--compact-store",
+        type=Path,
+        help="retain local tiles as shared zstd bases and SFPT rows",
+    )
     cli.add_argument("--inventory-only", action="store_true")
     cli.add_argument(
         "--graphs",
@@ -300,4 +356,5 @@ if __name__ == "__main__":
         args.life,
         args.cars,
         args.paint,
+        args.compact_store,
     )

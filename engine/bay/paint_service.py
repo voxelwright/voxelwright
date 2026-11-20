@@ -36,7 +36,7 @@ def service():
                     del running[name]
                     next_run[name] = time.time() + intervals[name]
                     print(name, "exited", code, flush=True)
-                if time.time() < next_run[name]:
+                if (ROOT / "hold-at-boundary").exists() or time.time() < next_run[name]:
                     continue
                 with (ROOT / (name + ".log")).open("ab") as log:
                     running[name] = subprocess.Popen(

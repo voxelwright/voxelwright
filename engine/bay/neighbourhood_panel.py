@@ -10,6 +10,7 @@ import zipfile
 import numpy as np
 from PIL import Image, ImageDraw
 
+from compact_store import read as read_base
 import earth
 import tiles
 from frontage import fetch
@@ -36,7 +37,7 @@ def stage(source, dest, names):
             if digest(src) != state[square]["packs/" + name]:
                 raise ValueError(f"unverified source {src}")
             dst = packs / name
-            shutil.copyfile(src, dst)
+            dst.write_bytes(read_base(src))
     cut(dest, ordered)
 
 

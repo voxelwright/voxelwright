@@ -90,6 +90,7 @@ def stage():
             far_index=far if far.is_file() else None,
             life=tmp / "life",
             cars=tmp / "cars",
+            compact_store=CITY / "objects",
             paint=ROOT / "accepted" / (batch + ".json"),
         )
         save(record, dict(inputs=stamp, release=pin))
