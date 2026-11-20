@@ -65,17 +65,32 @@ def library(kind, source, inventory, record):
     return {"index": index_record, "objects": objects}
 
 
-def restock(out, life, cars):
-    """Stage the pinned release again with new street life and vehicles; every other object stays as it is.
+def cut(source, far, record):
+    """The `far.landing` section: sf/far/landing.mjs's listing, each tile's cut checked and recorded like a band's."""
+    listing = json.loads((source / "landing.json").read_text())
+    eye = listing.get("eye")
+    if listing.get("version") != 1 or not (
+        isinstance(eye, list) and len(eye) == 3 and all(isinstance(v, (int, float)) for v in eye)
+    ):
+        raise ValueError("unknown landing cut")
+    for key, row in listing["tiles"].items():
+        path = f"far/landing/{key}.far"
+        if key not in far["tiles"] or row["path"] != path or record(source / path, path) != row:
+            raise ValueError(f"invalid landing object: {path}")
+    return listing
 
-    The candidate's tiles, names, graphs and far model are the pinned release's own, so its panel scores carry over
-    unchanged; it is staged beside it (APFS clones, the old release untouched) and its digest printed, for
-    sf/pilot/current.json to name."""
-    pointer = json.loads((out / "current.json").read_text())
-    old = out / Path(pointer["manifest"]).parent
+
+def restock(out, life=None, cars=None, landing=None, base=None):
+    """Stage a pinned release again with new street life, vehicles or landing cut; every other object stays as it is.
+
+    The candidate's tiles, names, graphs and far bands are the base release's own (OUT's pin unless --base names
+    another), so its panel scores carry over unchanged; it is staged beside it (APFS clones, the old release untouched)
+    and its digest printed, for sf/pilot/current.json to name."""
+    release = base or json.loads((out / "current.json").read_text())["release"]
+    old = out / "releases" / release
     body = (old / "manifest.json").read_bytes()
-    if hashlib.sha256(body).hexdigest() != pointer["release"] or encode(json.loads(body)) != body:
-        raise ValueError("pinned manifest differs from its digest")
+    if hashlib.sha256(body).hexdigest() != release or encode(json.loads(body)) != body:
+        raise ValueError("base manifest differs from its digest")
     inventory = json.loads(body)
     files = {}
 
@@ -85,8 +100,15 @@ def restock(out, life, cars):
             digest = hashlib.file_digest(stream, "sha256").hexdigest()
         return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
 
-    for kind, source in (("life", life), ("cars", cars)):
-        inventory[kind] = library(kind, source, inventory, record)
+    replaced = [kind for kind, source in (("life", life), ("cars", cars)) if source]
+    for kind in replaced:
+        inventory[kind] = library(kind, life if kind == "life" else cars, inventory, record)
+    if landing:
+        if "far" not in inventory:
+            raise ValueError("a landing cut needs a release with a far model")
+        inventory["far"]["landing"] = cut(landing, inventory["far"], record)
+    if not files:
+        raise ValueError("nothing to restock: pass --life, --cars or --landing")
     manifest = encode(inventory)
     digest = hashlib.sha256(manifest).hexdigest()
     dest = out / "releases" / digest
@@ -96,9 +118,11 @@ def restock(out, life, cars):
     shutil.rmtree(tmp, ignore_errors=True)
     tmp.mkdir()
     for entry in old.iterdir():
-        if entry.name in ("life", "cars", "manifest.json") or entry.name.startswith(("panel-", ".")):
+        if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
             continue
         subprocess.run(["/bin/cp", "-cR", entry, tmp / entry.name], check=True)
+    if landing:
+        shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
     if (old / ".bay-store").is_symlink():
         (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
     for name, source in files.items():
@@ -106,7 +130,7 @@ def restock(out, life, cars):
         shutil.copyfile(source, tmp / name)
     (tmp / "manifest.json").write_bytes(manifest)
     tmp.rename(dest)
-    print(digest, "staged with", len(files), "new life and vehicle objects; tiles, names, graphs and far as", pointer["release"])
+    print(digest, "staged with", len(files), "new objects; everything else as", release)
     return digest
 
 
@@ -406,11 +430,13 @@ if __name__ == "__main__":
     cli.add_argument(
         "--restock",
         action="store_true",
-        help="stage OUT's pinned release again with --life and --cars only (ROOT unused)",
+        help="stage OUT's pinned release again with only --life, --cars or --landing new (ROOT unused)",
     )
+    cli.add_argument("--landing", type=Path, help="sf/far/landing.mjs directory with its landing.json")
+    cli.add_argument("--base", help="with --restock, the staged release to start from instead of OUT's pin")
     args = cli.parse_args()
     if args.restock:
-        restock(args.out, args.life, args.cars)
+        restock(args.out, args.life, args.cars, args.landing, args.base)
         sys.exit()
     generate(
         args.root,

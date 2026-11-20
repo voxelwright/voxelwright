@@ -30,7 +30,13 @@ The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in me
 ~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --life <life dir> --cars <cars dir> - ~/.village/engine/bay/450-city-paint/sf
 ```
 
-It checks the pinned manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
+A new landing cut is restocked the same way, with `--landing <dir>` (the folder `sf/far/landing.mjs` wrote, `landing.json` and `far/landing/`). It becomes `far.landing`; every far band stays as it was. `--base <digest>` starts from another release staged in the same folder instead of its `current.json`:
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --landing ~/.village/engine/sf/far/landing --base <digest> - ~/.village/engine/bay/450-city-paint/sf
+```
+
+It checks the base manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
 
 ## Promotion after a visual pass
 
