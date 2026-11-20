@@ -357,7 +357,9 @@ fn read(b: &[u8]) -> Option<Pack> {
 /// are: the colour most of their light cells agree on. Drawn cell by cell they were a mosaic (#450), each cell keeping
 /// whatever stood before the wall that day (leaves, shade, a sign, a passer-by) and the dark of windows the rules did
 /// not draw. Dark cells (windows, shade) are not counted; where under three in ten of the rest agree, or there are
-/// too few to say, the photographs say nothing and the building keeps the colour its bake gave it.
+/// too few to say, the photographs say nothing and the building keeps the colour its bake gave it. Nor do they where
+/// they agree on white: most painted walls are white by that count, cream and ochre fronts among them, a wall
+/// blown out by the sun as often as a white one (North Beach), and the bake's colour (appearance.py) stands.
 fn painted_colour<'a>(walls: impl Iterator<Item = &'a [u8]>) -> Option<u8> {
     // Greys from the ninth down, and each hue's deep, dark and dusty dark tones (kinds.rs `colour`).
     let dark = |v: u8| if v < 16 { v >= 9 } else { matches!((v - 16) % 10, 5 | 6 | 9) };
@@ -369,7 +371,7 @@ fn painted_colour<'a>(walls: impl Iterator<Item = &'a [u8]>) -> Option<u8> {
     }
     let total: u32 = count.iter().sum();
     let (best, &n) = count.iter().enumerate().max_by_key(|&(i, &n)| (n, std::cmp::Reverse(i)))?;
-    (total >= 24 && n * 10 >= total * 3).then_some(best as u8)
+    (total >= 24 && n * 10 >= total * 3 && best > 2).then_some(best as u8)
 }
 
 /// A street front surveyed as a chain of bays is many short edges, and the bake (street_detail.py `facades`) gives
@@ -1351,7 +1353,11 @@ mod tests {
         // Cells that do not agree (under three in ten of the light ones on any colour) say nothing.
         let mosaic: [u8; 30] = std::array::from_fn(|i| colour(i as u8 % 24, [0, 1, 2, 3, 7][i / 6]));
         assert_eq!(read(&painted(&mosaic)).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
-        // Dark cells alone (windows, shade) say nothing either.
+        // White, or dark cells alone (windows, shade), say nothing either.
+        let mut white = [WHITE; 30];
+        white[..6].copy_from_slice(&[cream; 6]);
+        assert_eq!(painted_colour([&white[..]].into_iter()), None);
+        assert_eq!(painted_colour([&cells[..]].into_iter()), Some(cream));
         assert_eq!(read(&painted(&[window; 30])).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
         let bytes = painted(&cells);
         assert!(read(&bytes[..bytes.len() - 1]).is_none());
