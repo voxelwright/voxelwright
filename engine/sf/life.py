@@ -286,15 +286,34 @@ def street_of(p):
     return name
 
 
+tracks = {}
 for g in graphs.values():
     for t in g["tracks"]:
-        if t["id"] in seen or len(t["line"]) < 2:
-            continue
-        seen.add(t["id"])
-        where = owner(t["line"][0])
-        if where:
-            mid, _ = at_along(t["line"], length(t["line"]) / 2)
-            out[where]["rail"].append([t["nodes"][0], t["nodes"][-1], 1 if street_of(mid) in CABLE else 0, *flat(t["line"])])
+        if t["id"] not in tracks and len(t["line"]) >= 2:
+            tracks[t["id"]] = t
+# A whole track is a cable car's or not, by the streets most of its length runs in: a piece at a junction lies
+# nearest the street it crosses.
+parent = {}
+
+
+def root(n):
+    parent.setdefault(n, n)
+    while parent[n] != n:
+        parent[n] = parent[parent[n]]
+        n = parent[n]
+    return n
+
+
+for t in tracks.values():
+    parent[root(t["nodes"][0])] = root(t["nodes"][-1])
+vote = defaultdict(float)
+for t in tracks.values():
+    mid, _ = at_along(t["line"], length(t["line"]) / 2)
+    vote[root(t["nodes"][0])] += length(t["line"]) * (1 if street_of(mid) in CABLE else -1)
+for t in tracks.values():
+    where = owner(t["line"][0])
+    if where:
+        out[where]["rail"].append([t["nodes"][0], t["nodes"][-1], 1 if vote[root(t["nodes"][0])] > 0 else 0, *flat(t["line"])])
 
 dest = Path(args.out)
 dest.mkdir(parents=True, exist_ok=True)

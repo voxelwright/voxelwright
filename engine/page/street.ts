@@ -29,7 +29,7 @@ export interface Ground { feet_at(x: number, z: number): number; ground_at(x: nu
 
 type Ring = Float64Array
 interface Walk { a: number; b: number; kind: number; busy: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
-interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number }
+interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number }
 interface Look { size: [number, number, number]; per: number; low: [number, number, number]; kinds: number[]; runs: string }
@@ -99,6 +99,12 @@ export interface Street {
   count(view: View, r?: number): { people: number; peopleSeen: number; parked: number; traffic: number; cable: number; vehiclesSeen: number; living: number }
   /** The roads near a place, for a driver to follow (the checks). */
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
+  /** Vehicles near a place: where each stands, which way it heads, and what it is. */
+  cars(x: number, z: number, r: number): { kind: Car['kind']; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean }[]
+  /** Seconds from now on the clock people walk by until a cable car is nearest a place, and how near it comes (cells); null with no line. */
+  cable(x: number, z: number): { in: number; near: number } | null
+  /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
+  enabled: boolean
   readonly ms: number
   readonly ready: boolean
 }
@@ -154,7 +160,9 @@ export function street(o: {
       for (let i = 0; i < next.length; i += 2) nexts.push(`${next[i]}/${b}/${next[i + 1]}`)
       // How many cars it carries, per cell of its length: a small street few, a wide one more.
       const weight = (flags & 4 ? 0.25 : 1) * Math.min(3, lanes) / 1000
-      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, p, cum, len, open: null, weight }
+      const mid = { x: 0, z: 0, tx: 0, tz: 0 }
+      along(p, cum, len / 2, mid)
+      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, p, cum, len, open: null, weight, mx: mid.x, mz: mid.z }
       roads.set(key, road)
       let from = roadsFrom.get(a); if (!from) roadsFrom.set(a, from = []); from.push(road)
       for (const n of [a, b]) { let w = ways.get(n); if (!w) ways.set(n, w = new Set()); w.add(way) }
@@ -333,6 +341,7 @@ export function street(o: {
   const crossing: [number, number][] = []
   let peopleMs = 0
   const folk = (view: View, seconds: number): readonly Person[] => {
+    if (!on) { shown.length = 0; return shown }
     const t0 = performance.now(), t = o.clock(), hour = o.hour(), wet = o.rain() > 0.3, eye = view.eye, bodies = o.bodies()
     const dt = Math.max(0, Math.min(0.1, seconds - lastSeconds))
     lastSeconds = seconds
@@ -417,7 +426,9 @@ export function street(o: {
     return m
   }
   /** The looks a vehicle is drawn in from far to near: its outside only (a car's inside is a look of its own, finer). */
-  const lods = (m: Model) => m.looks.map((l, i) => ({ l, i })).filter(({ l }) => l.low.every((v) => Math.abs(v) < 0.5) && Math.abs(l.size[0] / l.per - m.size[0]) < 2.5 && Math.abs(l.size[2] / l.per - m.size[2]) < 2.5).sort((a, b) => a.l.per - b.l.per)
+  // (A body is cut to the cells it fills, so its look may start a cell under it: only its width and length say it is the whole outside.)
+  const lodsKept = new Map<Model, { l: Look; i: number }[]>()
+  const lods = (m: Model) => { let l = lodsKept.get(m); if (!l) lodsKept.set(m, l = m.looks.map((l, i) => ({ l, i })).filter(({ l }) => Math.abs(l.low[0]) < 0.5 && Math.abs(l.low[2]) < 0.5 && Math.abs(l.size[0] / l.per - m.size[0]) < 2.5 && Math.abs(l.size[2] / l.per - m.size[2]) < 2.5).sort((a, b) => a.l.per - b.l.per)); return l }
   // Faces, made off the page's thread (streetfaces.ts) and kept: one for each model, colour and look.
   const faces = new Map<string, Born | 'asked'>()
   const maker = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
@@ -572,8 +583,12 @@ export function street(o: {
   /** A lane's middle at a distance along a road. */
   const lanePoint = (r: Road, lane: number, s: number, into: { x: number; z: number; tx: number; tz: number }) => { along(r.p, r.cum, s, into); const off = laneOff(r, Math.min(lane, r.lanes - 1)); into.x -= into.tz * off; into.z += into.tx * off }
   /** Whether cars may go along a road: not where its line runs under a roof (a tunnel, or a building over it: the footing there is the roof's). */
+  /** How many roads may be looked over in a frame: each costs a few dozen questions of the land. Unknown, a road is not taken this frame. */
+  let probes = 0
   const open = (r: Road) => {
     if (r.open !== null) return r.open
+    if (probes <= 0) return false
+    probes--
     let ok = true
     for (let s = 0; s <= r.len && ok; s += 30) { along(r.p, r.cum, s, P); const f = o.land.feet_at(Math.round(P.x), Math.round(P.z)), g = o.land.ground_at(Math.round(P.x), Math.round(P.z)); if (f - g > 30) ok = false }
     r.open = ok
@@ -630,7 +645,7 @@ export function street(o: {
     // How many cars the roads round here carry: each road's share by its length and how busy it is.
     let want = 0
     const shares: number[] = []
-    for (const r of near) { along(r.p, r.cum, r.len / 2, P); const w = Math.hypot(P.x - eye[0], P.z - eye[2]) < DRIVEN ? r.len * r.weight : 0; want += w; shares.push(want) }
+    for (const r of near) { const w = Math.hypot(r.mx - eye[0], r.mz - eye[2]) < DRIVEN ? r.len * r.weight : 0; want += w; shares.push(want) }
     const total = want
     want = Math.min(70, Math.round(want * hourly(TRAFFIC, o.hour())))
     const cars = carModels()
@@ -684,7 +699,7 @@ export function street(o: {
         if (!holder || !traffic.includes(holder)) holds.set(r.b, c)
         if (holds.get(r.b) !== c) { gap = Math.min(gap, left - 30); lead = 0 }
       }
-      if (!c.next && left < 200) { gap = Math.min(gap, left - 10); lead = 0 }
+      if (!c.next && left < 200) { c.next = choose(r); if (!c.next) { gap = Math.min(gap, left - 10); lead = 0 } }
       // A turn is taken slowly.
       let v0 = limit(r)
       if (c.next && left < 200) { along(r.p, r.cum, r.len, P); along(c.next.p, c.next.cum, 0, Q); if (P.tx * Q.tx + P.tz * Q.tz < 0.8) v0 = Math.min(v0, 45) }
@@ -753,12 +768,14 @@ export function street(o: {
     beside = o.input.push({ name: 'take', key: (code) => { if (code !== 'KeyE') return false; takeIt(); return true } })
   }
 
-  let ms = 0
+  let ms = 0, on = true
   const self: Street = {
     folk,
     frame(dt, view) {
+      if (!on) { for (const c of [...parked.values(), ...traffic, ...cables]) hide(c); return }
       const t0 = performance.now(), eye = view.eye
       wanted(eye)
+      probes = filled ? 8 : 400
       // Moved far at once (a jump, a portal, the checks): the traffic round the new place is there already.
       if (lastEye && Math.hypot(eye[0] - lastEye[0], eye[2] - lastEye[2]) > 1500) { for (const c of traffic) hide(c); traffic.length = 0; holds.clear(); filled = false }
       lastEye = [eye[0], eye[1], eye[2]]
@@ -799,12 +816,33 @@ export function street(o: {
     roads(x, z, r) {
       const out: ReturnType<Street['roads']> = []
       for (const road of roads.values()) {
-        along(road.p, road.cum, road.len / 2, P)
-        if (Math.hypot(P.x - x, P.z - z) > r + road.len / 2) continue
+        if (Math.hypot(road.mx - x, road.mz - z) > r + road.len / 2) continue
+        probes = Math.max(probes, 1)
         out.push({ key: road.key, name: road.way, lanes: road.lanes, flags: road.flags, next: road.next, line: Array.from(road.p), open: open(road) })
       }
       return out
     },
+    cars(x, z, r) {
+      return [...parked.values(), ...traffic, ...cables].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ kind: c.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing }))
+    },
+    cable(x, z) {
+      let best: { in: number; near: number } | null = null
+      const t = o.clock()
+      for (const l of lines) {
+        // The nearest point of the line, then when each of its cars is there.
+        let at = 0, near = Infinity
+        for (let s = 0; s <= l.len; s += 20) { along(l.p, l.cum, s, P); const d = Math.hypot(P.x - x, P.z - z); if (d < near) { near = d; at = s } }
+        const count = Math.max(1, Math.floor(l.len / CABLE_APART))
+        for (let k = 0; k < count; k++) {
+          const start = k * (l.len / count) + chance(l.seed, 1) * l.len, now = (((t * CABLE_SPEED + start) % l.len) + l.len) % l.len
+          const wait = (((at - now) % l.len) + l.len) % l.len / CABLE_SPEED
+          if (!best || near < best.near - 50 || (Math.abs(near - best.near) <= 50 && wait < best.in)) best = { in: wait, near }
+        }
+      }
+      return best
+    },
+    get enabled() { return on },
+    set enabled(v: boolean) { on = v },
     get ms() { return ms + peopleMs },
     get ready() { return roads.size > 0 && ready.size > 0 },
   }
