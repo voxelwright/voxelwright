@@ -76,11 +76,26 @@ for (const key of only) {
   // What the far model held here as a host would send it: Brotli 5, as the release counts it (release.md).
   const br = said.held.reduce((n, path) => n + brotli(path), 0)
   const r = { whole, heldBrotliMB: +(br / 1048576).toFixed(1), readyMs: ready, url, pose: said.pose, fov: said.fov, size: view.size, march: said.cost.march, withFar: said.cost.withFar, farMs: +(said.cost.withFar - said.cost.march).toFixed(2), faces: said.cost.faces, sections: said.cost.sections, tilesDrawn: said.cost.tiles, heldFaces: said.cost.held, heldMB: +(said.cost.heldBytes / 1048576).toFixed(1), fetched: said.cost.fetched, fetchedMB: +(said.cost.fetchedBytes / 1048576).toFixed(1), covered: said.cost.covered, errors }
+  if (key === 'park') {
+    // The skyline against the photograph (measure.py, #423's measures), leaving out the park's own tree beside the
+    // eye: the lidar of 2023 has it and the photograph of 2021 has not, and it is the cells', not the far model's.
+    const py = process.env.PY ?? join(homedir(), '.village', 'engine', 'landing', 'ina', 'venv', 'bin', 'python')
+    const measured = spawnSync(py, ['-B', '-W', 'ignore', join(here, 'sf/far/measure.py'), join(out, 'shots', `${name}-park-ids.rgba`), `${view.size[0]}x${view.size[1]}`, '--leave', '1400,0,2000,130', '--json', join(out, 'shots', `${name}-park-measure.json`), '--picture', join(out, 'shots', `${name}-park.png`), '--out', join(out, 'shots', `${name}-park-overlay.jpg`)], { encoding: 'utf8' })
+    const line = measured.stdout.split('\n').find((l) => l.startsWith('{'))
+    r.overlay = line ? JSON.parse(line) : { failed: measured.stderr.slice(-300) }
+  }
   results[key] = r
   console.log(key, JSON.stringify(r))
   await context.close()
 }
 writeFileSync(join(out, 'shots', `${name}.json`), JSON.stringify(results, null, 1))
+// The park must still lie on the photograph as #423's landing does (PR 433: 1.0 px median, 3.0 at the 90th), when the
+// far model is drawn; and no view may have said a WebGPU error.
+const failures = []
+const park = results.park?.overlay?.skyline
+if (park && !/farreach=0/.test(arg('query', '')) && !(park.median <= 2 && park.p90 <= 4)) failures.push(`park skyline ${park.median} / ${park.p90} px, over 2 / 4`)
+for (const [key, r] of Object.entries(results)) if (r.errors.length) failures.push(`${key}: ${r.errors[0]}`)
+for (const f of failures) console.log('FAIL', f)
 await browser.close()
 back?.()
-process.exit(0)
+process.exit(failures.length ? 1 : 0)

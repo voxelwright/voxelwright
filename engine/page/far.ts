@@ -94,15 +94,16 @@ fn hashf(p: vec2f, k: u32) -> f32 {
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
-// Whether this point is the far model's to draw: not behind what the march met, and past the reach, or anywhere
-// along a look on which the march met nothing before the reach (the cells' coarse boxes and the faces do not agree
-// to the metre where they meet, and a look the march hands over must find the far model's faces, however near).
+// Whether this point is the far model's to draw: not behind what the march met, and past the reach; or nearer,
+// on a look where the march met the ground or the sea only past the reach (the cells' coarse boxes and the faces do
+// not agree to the metre where they meet, and a look the march hands over must find the far model's faces). Never
+// nearer than the reach against the sky: what stands near the eye is the cells' to say.
 fn ours(in: Out) -> bool {
   let dist = length(in.seen);
   let z = textureLoad(marched, vec2i(in.pos.xy), 0);
+  if (z >= 1.0) { return dist >= v.reach; }
   let along = dot(in.seen, v.forward);
-  var met = 1e30;
-  if (z < 1.0) { met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9); }
+  let met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9);
   if (dist < v.reach && met * dist / max(along, 1e-3) < v.reach) { return false; }
   return along < met;
 }
