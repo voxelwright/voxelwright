@@ -77,10 +77,11 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 <button class="vx-button" type="button" data-egg="god" aria-pressed="false">IDDQD</button>
 <button class="vx-button" type="button" data-egg="moon">Resize the moon <i aria-hidden="true"></i></button>
 <button class="vx-button" type="button" data-egg="roll">Do a barrel roll</button>
-<button class="vx-button" type="button" data-egg="rain">Wake up</button>
+<button class="vx-button" type="button" data-egg="rain" aria-pressed="false">Wake up</button>
 <button class="vx-button" type="button" data-egg="rick">Tune the tow banner</button>
 <button class="vx-button" type="button" data-egg="lives">Konami code</button>
 </div></details></details><p class="egg-status" role="status" aria-live="polite"></p>
+<button class="vx-button matrix-exit" data-vx-material="chalk" type="button" hidden>Leave the Matrix</button>
 </div>`;
   const markdown =
     [
