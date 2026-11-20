@@ -76,10 +76,12 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
         raise ValueError(f"truncated BAY1: {path}")
     with path.open("rb") as f:
         if path.stat().st_size > length:
-            from street_furniture import decode
+            from street_furniture import decode, verify_tile_tail
 
             f.seek(length)
-            if gstep != 10 or not decode(f.read()):
+            if gstep == 10 and size == 2500:
+                verify_tile_tail(f.read(), h[13])
+            elif gstep != 10 or not decode(f.read()):
                 raise ValueError(f"invalid street fixtures: {path}")
         f.seek(64 + 2 * h[5] ** 2 + (4 + 2 * walls) * h[9] ** 2)
         for first, count, *_ in struct.iter_unpack("<6i", f.read(24 * h[12])):

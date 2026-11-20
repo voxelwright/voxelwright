@@ -311,3 +311,30 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
         rod((ax, ay - 4, az), mid, 3, dark)
         rod(mid, (bx, by - 4, bz), 3, dark)
     return sorted(segments)
+
+
+def verify_tile_tail(tail, vertex_count):
+    """A level-zero release tile may follow its fixtures with indexed 30 cm wall texels."""
+    if tail.startswith(b"SFST"):
+        if len(tail) < 8:
+            raise ValueError("short fixture header")
+        end = 8 + 32 * struct.unpack_from("<I", tail, 4)[0]
+        decode(tail[:end])
+        tail = tail[end:]
+    if not tail:
+        return
+    if len(tail) < 8 or tail[:4] != b"SFPT":
+        raise ValueError("invalid wall paint header")
+    count = struct.unpack_from("<I", tail, 4)[0]
+    seen = set()
+    pos = 8
+    for _ in range(count):
+        if len(tail) - pos < 12:
+            raise ValueError("short wall paint record")
+        edge, _, width, height = struct.unpack_from("<IiHH", tail, pos)
+        if edge >= vertex_count or edge in seen or not width or not height:
+            raise ValueError("invalid painted edge")
+        seen.add(edge)
+        pos += 12 + width * height
+    if len(tail) != pos:
+        raise ValueError("wrong wall paint length")

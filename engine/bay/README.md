@@ -7,7 +7,7 @@ engine/bay/run-city.sh start
 engine/bay/run-city.sh status
 ```
 
-The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` and writes its verified `sf/current.json` pointer last. On APFS the decoded objects are independent copy-on-write files.
+The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` for panel scoring. After all 32 views pass, promote its pointer with the receipt described in `engine/sf/release.md`. On APFS the decoded objects are independent copy-on-write files.
 
 ### Retained observations
 

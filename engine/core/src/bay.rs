@@ -58,7 +58,7 @@ struct Building {
     storey: i32,
     module: i32,
     home: bool,
-    /// 1: a round tower of concrete, fluted, with an arcade under its top.
+    /// Coit Tower (1), Transamerica Pyramid (2), or a tall office lobby/arcade (3).
     special: u32,
     ground_floor: u32,
     seed: u32,
@@ -68,7 +68,22 @@ struct Building {
     high: [i32; 2],
 }
 
+struct WallPaint {
+    base: i32,
+    width: usize,
+    cells: Vec<u8>,
+}
+
+impl WallPaint {
+    fn colour(&self, along: f32, altitude: i32) -> Option<u8> {
+        let y = usize::try_from(altitude.checked_sub(self.base)?).ok()? / 3;
+        let x = (along / 3.0) as usize;
+        self.cells.get(y.checked_mul(self.width)?.checked_add(x.min(self.width - 1))?).copied().filter(|&v| v != 0)
+    }
+}
+
 struct Pack {
+    paint: std::collections::BTreeMap<u32, WallPaint>,
     /// The ground: a sample every `gstep` cells, `gw` a side, the first at (`gx0`, `gz0`).
     gstep: i32,
     gw: i32,
@@ -186,17 +201,38 @@ fn read(b: &[u8]) -> Option<Pack> {
     let verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
     let mut fixtures = Vec::new();
-    if from < b.len() {
+    if b.get(from..).is_some_and(|tail| tail.starts_with(b"SFST")) {
         let extra = b.get(from..)?;
         if extra.get(..4)? != b"SFST" { return None; }
         let n = u32::from_le_bytes(extra.get(4..8)?.try_into().ok()?) as usize;
-        if n.checked_mul(32)? != extra.len().checked_sub(8)? { return None; }
-        for chunk in extra[8..].chunks_exact(32) {
+        let end = 8usize.checked_add(n.checked_mul(32)?)?;
+        from = from.checked_add(end)?;
+        for chunk in extra.get(8..end)?.chunks_exact(32) {
             let r: [i32; 8] = ints(chunk).try_into().ok()?;
             if !(1..=100).contains(&r[6]) || !(1..=65535).contains(&r[7])
                 || r[..6].iter().any(|v| v.unsigned_abs() > 10_000_000) { return None; }
             fixtures.push(r);
         }
+    }
+    let mut paint = std::collections::BTreeMap::new();
+    if from < b.len() {
+        let mut tail = b.get(from..)?;
+        if head[4] != 10 || tail.get(..4)? != b"SFPT" { return None; }
+        let n = u32::from_le_bytes(tail.get(4..8)?.try_into().ok()?) as usize;
+        if n > nv { return None; }
+        tail = tail.get(8..)?;
+        for _ in 0..n {
+            let edge = u32::from_le_bytes(tail.get(..4)?.try_into().ok()?);
+            let base = i32::from_le_bytes(tail.get(4..8)?.try_into().ok()?);
+            let width = u16::from_le_bytes(tail.get(8..10)?.try_into().ok()?) as usize;
+            let height = u16::from_le_bytes(tail.get(10..12)?.try_into().ok()?) as usize;
+            if edge as usize >= nv || width == 0 || height == 0 { return None; }
+            let end = 12 + width.checked_mul(height)?;
+            let cells = tail.get(12..end)?.to_vec();
+            if paint.insert(edge, WallPaint { base, width, cells }).is_some() { return None; }
+            tail = tail.get(end..)?;
+        }
+        if !tail.is_empty() { return None; }
     }
     let mut buildings = Vec::with_capacity(nb);
     for r in rows.chunks_exact(6) {
@@ -223,7 +259,7 @@ fn read(b: &[u8]) -> Option<Pack> {
         });
     }
     let under_leaf_road = road_greys(&class, &tint, tw);
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut p = Pack { paint, gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -602,6 +638,7 @@ impl FixtureSpan {
 }
 
 struct Column<'a> {
+    paint: Option<&'a WallPaint>,
     g: i32,
     road_top4: Option<i32>,
     /// The ground's top cell's kind, and how many cells of it stand over the ground (a pavement's kerb).
@@ -625,7 +662,7 @@ enum What<'a> {
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
+        return Column { paint: None, g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
     };
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
@@ -704,7 +741,11 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         },
         _ => What::Open,
     };
-    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
+    let paint = match &what {
+        What::In(_, probe, _, _) | What::By(_, probe, _) => p.paint.get(&probe.side),
+        _ => None,
+    };
+    Column { paint, g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
 }
 
 fn measured_foliage(tint: u8) -> bool {
@@ -747,6 +788,31 @@ fn road_greys(class: &[u8], tint: &[u8], width: usize) -> Vec<u8> {
     greys
 }
 
+/// Open loggias have depth. Keep glass and doors on their inner plane. The
+/// Pyramid's perimeter truss sits between its second and fifth floors (USGS).
+fn tower_base(b: &Building, p: &Probe, rise: i32, size: i32) -> Option<Kind> {
+    if size > 8 || !(2..=3).contains(&b.special) { return None; }
+    let pyramid = b.special == 2;
+    let (height, recess, spacing) = if pyramid { (163, 42.0, 109.0) } else { (55, 22.0, 56.0) };
+    if rise < 0 || rise > height || p.far >= recess + 6.0 || (!pyramid && p.looks & 2 == 0) {
+        return None;
+    }
+    let along = p.round.rem_euclid(spacing);
+    let edge = along.min(spacing - along);
+    let stone = if pyramid { kind(CONCRETE, grey(2)) } else { b.trim };
+    if p.far < 8.0 {
+        let diagonal = ((rise - 32) as f32 / 125.0 * spacing * 0.5).clamp(0.0, spacing*0.5);
+        if rise > height-5 || (pyramid && ((rise - 36).abs() < 4 || (edge-diagonal).abs() < 4.0))
+            || (!pyramid && edge < 2.8) {
+            return Some(stone);
+        }
+    }
+    if p.far < recess { return Some(0); }
+    let jamb = along.rem_euclid(18.0);
+    Some(if jamb < 1.6 || (rise-24).abs() < 2 { kind(STEEL, grey(10)) }
+        else { kind(GLASS, colour(13,9)) })
+}
+
 /// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
 fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     // A coarse cell is what its middle is.
@@ -764,7 +830,12 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 0
             } else if mid > *roof - size {
                 kind(ROOFING, *tint)
+            } else if let Some(form) = tower_base(b, p, mid - c.g, size) {
+                form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
+                if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
+                    return kind(PLASTER, tint);
+                }
                 front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
             } else {
                 b.wall
@@ -820,6 +891,9 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
             if p.far >= out {
                 return 0;
             }
+            if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
+                return kind(PLASTER, tint);
+            }
             let fy = up.rem_euclid(b.storey);
             if up >= top - 6 {
                 b.trim
@@ -865,6 +939,8 @@ pub fn footing(x: i32, z: i32) -> (i32, bool, i32) {
     PACKS.with_borrow(|packs| {
         let c = column(packs, x, z, 1);
         match c.what {
+            What::In(b, ref probe, _, _) if tower_base(b, probe, 16, 1) == Some(0) =>
+                (c.g + 1, true, 0),
             What::In(_, _, roof, _) => (roof + 1, false, 0),
             _ => (c.g + 1 + c.kerb, material(c.ground) == CONCRETE || material(c.ground) == ASPHALT, 0),
         }
@@ -1021,7 +1097,7 @@ mod tests {
     #[test]
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
-        let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
+        let mut c = Column { paint: None, g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
             what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new() };
         let mut gaps = 0;
         let mut leaves = 0;
@@ -1042,7 +1118,7 @@ mod tests {
     #[test]
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
-        let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
+        let mut c = Column { paint: None, g: 3, road_top4: Some(17), ground, kerb: 0,
             what: What::Open, fixtures: Vec::new() };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
@@ -1089,6 +1165,26 @@ mod tests {
         let rows = 64 + 65 * 65 * 2 + 128 * 128 * 4;
         wrong[rows + 4..rows + 8].copy_from_slice(&900i32.to_le_bytes());
         assert!(read(&wrong).is_none());
+    }
+
+    #[test]
+    fn projected_wall_reads_only_its_measured_cells() {
+        let mut bytes = pack();
+        bytes.extend(b"SFPT");
+        bytes.extend(1u32.to_le_bytes());
+        bytes.extend(0u32.to_le_bytes());
+        bytes.extend(40i32.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend(2u16.to_le_bytes());
+        bytes.extend([8, 0, 111, 26]);
+        let p = read(&bytes).unwrap();
+        let face = &p.paint[&0];
+        assert_eq!(face.colour(0.0, 40), Some(8));
+        assert_eq!(face.colour(4.0, 40), None);
+        assert_eq!(face.colour(4.0, 43), Some(26));
+        assert_eq!(face.colour(4.0, 47), None);
+        assert_eq!(face.colour(1.0, 39), None);
+        assert!(read(&bytes[..bytes.len()-1]).is_none());
     }
 
     #[test]

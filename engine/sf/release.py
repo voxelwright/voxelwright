@@ -1,6 +1,7 @@
 """Assemble and pin a local static release from full_run.py's verified outputs."""
 
 import argparse
+import fcntl
 import hashlib
 import json
 import re
@@ -26,7 +27,7 @@ def encode(data):
     ).encode()
 
 
-def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
+def generate(root, out, inventory_only=False, graph_dir=None, far_index=None, panel=None):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
     state = json.loads((root / "state.json").read_text())
@@ -114,18 +115,37 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
                     raise ValueError(f"{name} changed while staging")
             tmp.replace(path)
     (dest / "manifest.json").write_bytes(manifest)
+    # The manifest is available for a fixed-camera candidate run before promotion.
+    # Recheck the preceding pin under the same lock that moves current.json.
+    if panel is None or inventory_only:
+        print(digest, len(files), "objects staged; panel required to promote")
+        return digest
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
+    from panel_gate import check
+
+    receipt = json.loads(panel.read_text())
     pointer = out / "current.json"
-    pointer.with_suffix(".part").write_bytes(
-        encode(
-            {
-                "version": 1,
-                "release": digest,
-                "manifest": f"releases/{digest}/manifest.json",
-            }
-        )
-    )
-    pointer.with_suffix(".part").replace(pointer)
-    print(digest, len(files), "objects")
+    with (out / ".promote.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        prior = json.loads(pointer.read_text())["release"] if pointer.exists() else None
+        if receipt["release"] != digest or receipt["previousRelease"] != prior:
+            raise ValueError("panel must describe this candidate and the current predecessor")
+        if prior is not None and not re.fullmatch("[a-f0-9]{64}", prior):
+            raise ValueError("invalid predecessor digest")
+        old = out / "releases" / prior / "panel.json" if prior else None
+        floors = Path(__file__).resolve().parents[1] / "bay/panel-floors.json"
+        previous = json.loads(old.read_text())["scores"] if old and old.exists() else json.loads(floors.read_text())
+        check(receipt["scores"], previous)
+        # Save judge evidence outside the hashed runtime manifest.
+        tmp = dest / "panel.part"
+        tmp.write_bytes(encode(receipt))
+        tmp.replace(dest / "panel.json")
+        tmp = pointer.with_suffix(".part")
+        tmp.write_bytes(encode({"version": 1, "release": digest,
+                                "manifest": f"releases/{digest}/manifest.json"}))
+        tmp.replace(pointer)
+    print(digest, len(files), "objects pinned; 32 views passed")
+    return digest
 
 
 if __name__ == "__main__":
@@ -141,5 +161,6 @@ if __name__ == "__main__":
     cli.add_argument(
         "--far", type=Path, help="far/far.json listing and its sibling band directories"
     )
+    cli.add_argument("--panel", type=Path, help="scored release receipt for promotion")
     args = cli.parse_args()
-    generate(args.root, args.out, args.inventory_only, args.graphs, args.far)
+    generate(args.root, args.out, args.inventory_only, args.graphs, args.far, args.panel)
