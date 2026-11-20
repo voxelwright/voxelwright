@@ -1,0 +1,21 @@
+{
+ "note": "What the lidar holds (flown 2023) that the photograph (15 July 2021) does not: each cut down to the roof it stands on. Places are metres in the frame turned with the streets (place.py), heights metres over NAVD88's zero. Found by the measure: each stood 14 to 56 m clear of a roof on a few square metres, where the photograph has sky or the tower behind. A fix with `over` in place of `r` and `cap` is a thing of any shape: the patch of cells standing over that height at that place is cut down to the surface round it. A fix with `box` (u, w, u, w) is a place where returns hang in the air beside a glass tower: there, what stands over 40 m with no building outlined under it and covers less than 100 m2 is cut to the ground.",
+ "fixes": [
+  {"u": 699.3, "w": 419.3, "r": 6, "cap": 77.0, "what": "a mast or crane 56 m over a roof of 76 m, 830 m off at x 717"},
+  {"u": 305.7, "w": 605.8, "r": 5, "cap": 135.5, "what": "a mast 25 m over the white tower's roof on Nob Hill, at x 1880"},
+  {"u": 1275.8, "w": 553.3, "r": 5, "cap": 130.5, "what": "a mast 24 m over Embarcadero Center 2"},
+  {"u": 1579.7, "w": 826.1, "r": 7, "cap": 123.5, "what": "a mast or crane 55 m over a roof of 120 m, 1.8 km off at x 517"},
+  {"u": 1565.0, "w": 836.6, "r": 4, "cap": 123.5, "what": "the same, its second part"},
+  {"u": 640.0, "w": 685.3, "r": 5.5, "cap": 164.5, "what": "8 m by 2.5 m and 23 m over the Hartford Building's roof (162.6 m), at x 1262 to 1282 where the photograph has none"},
+  {"u": 613.8, "w": 685.1, "r": 4.0, "cap": 164.5, "what": "5 m by 2 m and 14 m over the Hartford Building's roof, at x 1305 to 1310; the photograph's mast is thinner than a cell and 7 m from it"},
+  {"u": 832.75, "w": 1481.25, "over": 143.0, "what": "49 m2 standing 110 m tall beside a tower of 139 m, 1.7 km off at x 1752 to 1760, where the photograph has sky: a hoist, or returns off its glass"},
+  {"u": 843.25, "w": 1494.25, "over": 143.0, "what": "the same tower, 4 m2 more of it"},
+  {"u": 600.75, "w": 879.25, "over": 123.0, "what": "8 m2 that stands 14 m over the black slab's roof (117 m), at x 1576; the photograph's roof things there are 4 m high"},
+  {"u": 597.25, "w": 878.75, "over": 123.0, "what": "beside it at x 1581, 7 m2 to 8 m over the same roof"},
+  {"u": 608.75, "w": 882.75, "over": 123.0, "what": "1 m2 at the same slab's corner, 11 m over its roof, at x 1566"},
+  {"u": 301.12, "w": 598.62, "over": 136.5, "what": "a mast beside the white tower on Nob Hill, 9 m over its roof (130 m), at x 1890; the photograph has none"},
+  {"u": 310.38, "w": 601.88, "over": 136.5, "what": "a mast 8 m over the same roof, at x 1864"},
+  {"u": 312.12, "w": 610.62, "over": 136.5, "what": "a mast 8 m over the same tower's upper roof (133 m), at x 1872"},
+  {"box": [746.0, 1104.0, 802.0, 1182.0], "what": "beside the brown towers 1.3 km off: 62 cells 145 to 167 m high with no outline, at x 1562 to 1580 where the photograph has sky"}
+ ]
+}

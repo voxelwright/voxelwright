@@ -25,6 +25,10 @@ export interface Local extends Realm {
   kept?: { file: string; at: [number, number, number]; yaw?: number }[]
   /** The eye's angle from top to bottom, degrees, where the address does not say. */
   fov?: number
+  /** How far the picture is turned about the look, degrees clockwise: a photograph's camera has it (#423). */
+  roll?: number
+  /** The far model (far.ts): the folder beside the page its far.json is in. */
+  far?: string
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */
