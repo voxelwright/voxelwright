@@ -36,8 +36,10 @@ mkdirSync(shots, { recursive: true })
 
 // ── The bytes of what street life brings ──
 const bytes = (dir) => readdirSync(dir).filter((f) => f.endsWith('.json')).reduce((n, f) => { const b = readFileSync(join(dir, f)); return { raw: n.raw + b.length, br: n.br + brotliCompressSync(b, { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length, files: n.files + 1 } }, { raw: 0, br: 0, files: 0 })
-const results = { hour, libraries: { life: bytes(join(dist, 'sf/life')), cars: bytes(join(dist, 'sf/cars')) } }
-for (const f of readdirSync(join(dist, 'sf/cars'))) if (f !== 'index.json') results.libraries[`cars/${f}`] = statSync(join(dist, 'sf/cars', f)).size
+const realm = JSON.parse(readFileSync(join(dist, 'sf/index.html'), 'utf8').match(/<script type="application\/json" id="realm">([^<]+)<\/script>/)[1])
+const lifeDir = join(dist, 'sf', realm.street.life), carsDir = join(dist, 'sf', realm.street.cars)
+const results = { hour, libraries: { life: bytes(lifeDir), cars: bytes(carsDir) } }
+for (const f of readdirSync(carsDir)) if (f !== 'index.json') results.libraries[`cars/${f}`] = statSync(join(carsDir, f)).size
 console.log('libraries', JSON.stringify(results.libraries))
 
 // ── Where to look: from the graph, a point on each street near the place, looking along it ──
@@ -142,7 +144,7 @@ try {
     check(r.peopleSeen <= BUDGET.peopleSeen && r.vehiclesSeen <= BUDGET.vehiclesSeen && r.frames.on.streetCpuMs <= BUDGET.streetCpuMs && r.frames.on.figuresMs <= BUDGET.figuresCpuMs && added <= BUDGET.cpuAddedMs, `${name} within budget: ${r.peopleSeen}/${BUDGET.peopleSeen} people and ${r.vehiclesSeen}/${BUDGET.vehiclesSeen} vehicles in view, street ${r.frames.on.streetCpuMs}/${BUDGET.streetCpuMs} ms and figures ${r.frames.on.figuresMs}/${BUDGET.figuresCpuMs} ms a frame on the CPU, ${round(added, 2)}/${BUDGET.cpuAddedMs} ms added to the page's CPU`)
   }
   check(results.libraries.life.br / 1024 / (results.libraries.life.files - 1) <= BUDGET.lifeBrotliPerSquareKB, `life ${round(results.libraries.life.br / 1024 / (results.libraries.life.files - 1))} KB brotli a square (budget ${BUDGET.lifeBrotliPerSquareKB})`)
-  for (const f of readdirSync(join(dist, 'sf/cars')).filter((f) => f !== 'index.json')) { const br = brotliCompressSync(readFileSync(join(dist, 'sf/cars', f)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length / 1024; check(br <= BUDGET.carBrotliKB, `${f} ${round(br)} KB brotli (budget ${BUDGET.carBrotliKB})`) }
+  for (const f of readdirSync(carsDir).filter((f) => f !== 'index.json')) { const br = brotliCompressSync(readFileSync(join(carsDir, f)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length / 1024; check(br <= BUDGET.carBrotliKB, `${f} ${round(br)} KB brotli (budget ${BUDGET.carBrotliKB})`) }
 
   // ── The same places as a street photograph saw them: the eye where the nearest kept panorama was taken ──
   if (!has('no-pairs')) for (const spot of SPOTS) {

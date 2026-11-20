@@ -152,6 +152,17 @@ def build(name, archive, sources, dest):
                         "id": edge,
                         "nodes": [start, end],
                         "line": [coord[start], coord[end]],
+                        "highway": typ,
+                        **{
+                            k: tags.get(
+                                k, default if obs.get("roadTagVersion") else None
+                            )
+                            for k, default in (
+                                ("tunnel", "no"),
+                                ("bridge", "no"),
+                                ("layer", "0"),
+                            )
+                        },
                         "lanes": lanes,
                         "lanesInferred": inferred,
                         "cnn": p.get("cnn"),

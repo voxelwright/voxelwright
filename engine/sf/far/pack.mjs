@@ -32,6 +32,7 @@ const FAR = join(homedir(), '.village', 'engine', 'sf', 'far')
 const out = arg('out', join(FAR, 'release'))
 const placeDir = arg('place', join(homedir(), '.village', 'engine', 'landing', 'ina', 'home', '.village', 'engine', 'place', 'ina-all'))
 const squaresDir = arg('squares', join(FAR, 'squares'))
+const heroesDir = arg('heroes', join(FAR, 'heroes'))
 // The wedge (landing/ina/place.py): its apex in UTM, the bearings it lies between, how far it reaches (metres).
 const [we, wn, wfrom, wto, wfar] = arg('wedge', '551634.8,4183590.6,87,152,3300').split(',').map(Number)
 const E0 = 500_000, N0 = 4_250_000
@@ -65,6 +66,20 @@ const read = (dir, owner) => {
 if (existsSync(join(placeDir, 'index.json'))) read(placeDir, 'place')
 const squares = existsSync(squaresDir) ? readdirSync(squaresDir).filter((d) => existsSync(join(squaresDir, d, 'index.json'))).sort() : []
 for (const d of squares) read(join(squaresDir, d), 'squares')
+// Landmarks by rule (sf/far/heroes.mjs): drawn whoever owns the tile; where a rule owns its place (heroes.rs `owns`),
+// the lidar's faces there are left out, so the two are never drawn together.
+const heroes = existsSync(join(heroesDir, 'index.json')) ? JSON.parse(readFileSync(join(heroesDir, 'index.json'), 'utf8')) : null
+if (heroes) read(heroesDir, 'hero')
+const core = heroes ? (await WebAssembly.instantiate(readFileSync(new URL('../../page/core.wasm', import.meta.url)), {})).instance.exports : null
+const stands = (heroes?.stands ?? []).map((h) => {
+  const [u0, , w0, u1, , w1] = h.reach, c = Math.cos(h.turn), sn = Math.sin(h.turn), xs = [], zs = []
+  for (const u of [u0, u1]) for (const w of [w0, w1]) { xs.push(h.at[0] + (u * c - w * sn) * 10); zs.push(h.at[1] + (u * sn + w * c) * 10) }
+  return { ...h, cos: c, sin: sn, lo: [Math.min(...xs), Math.min(...zs)], hi: [Math.max(...xs), Math.max(...zs)] }
+})
+/** Whether a landmark's rule owns the place at (x, z), in cells. */
+const ruled = (x, z) => stands.some((h) => x >= h.lo[0] && x <= h.hi[0] && z >= h.lo[1] && z <= h.hi[1] && (() => { const dx = x - h.at[0], dz = z - h.at[1]; return core.hero_owns(h.sort, (dx * h.cos + dz * h.sin) * 0.1, (dz * h.cos - dx * h.sin) * 0.1) === 1 })())
+/** The tiles a landmark's box reaches: packed again when the rules change. */
+const ruledTiles = new Set(stands.flatMap((h) => { const t = []; for (let x = Math.floor(h.lo[0] / SIZE); x <= Math.floor(h.hi[0] / SIZE); x++) for (let z = Math.floor(h.lo[1] / SIZE); z <= Math.floor(h.hi[1] / SIZE); z++) t.push(`${x}_${z}`); return t }))
 
 // ── One owner a tile ──
 const inWedge = (x, z) => {
@@ -75,19 +90,19 @@ const by = new Map()
 for (const [i, b] of blocks.entries()) for (const t of b.tiles) { let l = by.get(t); if (!l) by.set(t, (l = [])); l.push(i) }
 const owner = new Map()
 for (const [key, list] of by) {
-  const kinds = new Set(list.map((i) => blocks[i].owner))
+  const kinds = new Set(list.map((i) => blocks[i].owner).filter((o) => o !== 'hero'))
   const [x, z] = key.split('_').map(Number)
   const whole = [[0, 0], [1, 0], [0, 1], [1, 1]].every(([a, c]) => inWedge((x + a) * SIZE, (z + c) * SIZE))
-  owner.set(key, kinds.has('place') && (whole || !kinds.has('squares')) ? 'place' : 'squares')
+  owner.set(key, !kinds.size ? 'hero' : kinds.has('place') && (whole || !kinds.has('squares')) ? 'place' : 'squares')
 }
 /** What a tile is made from: its owner's blocks that may hold its faces. */
-const sourcesOf = (key) => by.get(key).filter((i) => blocks[i].owner === owner.get(key))
-const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
+const sourcesOf = (key) => by.get(key).filter((i) => blocks[i].owner === owner.get(key) || blocks[i].owner === 'hero')
+const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\n${ruledTiles.has(key) ? heroes.rules : ''}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
 
 // ── What changed since the last packing ──
 const before = existsSync(join(out, 'far.json')) && existsSync(join(out, 'far.state.json')) ? { ...JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')), sources: JSON.parse(readFileSync(join(out, 'far.state.json'), 'utf8')) } : null
 /** How this packs a tile (the FAR1 object's own layout): raised when it changes, so every tile is packed again. */
-const PACKED = 3
+const PACKED = 5
 // The listing is the release manifest's `far` (engine/sf/release.md, version 1); what each tile was made from is
 // kept beside it in far.state.json, for packing again only what changed.
 const listing = { version: 1, size: SIZE, bands: BANDS, lods: LODS, tiles: {} }
@@ -139,11 +154,16 @@ for (let at = 0; at < todo.length; at += BATCH) {
       const e = extent(w[f * 5], w[f * 5 + 1], w[f * 5 + 2])
       const wx = pos[0] + (c0[0] * e.x0 + c2[0] * e.z0) * cell, wz = pos[2] + (c0[2] * e.x0 + c2[2] * e.z0) * cell
       const key = `${Math.floor(wx / SIZE)}_${Math.floor(wz / SIZE)}`
-      if (!batch.has(key) || owner.get(key) !== b.owner) continue
+      if (!batch.has(key) || (b.owner !== 'hero' && owner.get(key) !== b.owner)) continue
+      // Under a landmark whose rule owns its place, the lidar's columns of it are not drawn (its ground is), nor is
+      // anything else but a rule's own faces (the wedge's landmarks are layer 'hero' too).
+      if (b.owner !== 'hero' && b.layer !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key) && ruled(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
       // The sea is the march's to draw: bare ground no higher than a metre over it is where the lidar had a return off
       // the water (matte.py and bake.py take that for land), and it drew grey bands across the Bay.
       if (b.layer.startsWith('ground') && pos[1] + e.y1 <= 10) continue
-      const size = sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
+      // A landmark's faces are drawn as far as its tile is: a lattice tower 300 m tall is made of thin bars, each one
+      // under a pixel from across the city, that together are what one sees of it.
+      const size = b.owner === 'hero' ? LODS[0] : sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
       const t = sorted.get(key)[band]
       let l = t.get(i)
       if (!l) t.set(i, (l = []))

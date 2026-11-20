@@ -9,6 +9,7 @@
 //! y is up from the bay's water. Sources and licences: .agents/skills/bay-sources.
 
 use crate::hash::{hash, hash3};
+use crate::heroes;
 use crate::kinds::*;
 use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
@@ -18,6 +19,43 @@ thread_local! {
     static ON: Cell<bool> = const { Cell::new(false) };
     static PACKS: RefCell<Vec<Pack>> = const { RefCell::new(Vec::new()) };
     static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
+    static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
+    static LANDMARKS: Cell<bool> = const { Cell::new(true) };
+}
+
+/// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
+/// which way its `u` runs in the world's x and z, and the square of the world's cells it keeps within. The page says
+/// where each stands (#450, `hero`), every core alike, so that no tile is cut again for one.
+#[derive(Clone, Copy)]
+struct Hero {
+    sort: u32,
+    at: [i32; 3],
+    along: [f32; 2],
+    low: [i32; 2],
+    high: [i32; 2],
+}
+
+/// A landmark stands at (x, z) in cells, its foot at height `foot`, its `u` turned `turn` millionths of a radian from
+/// the world's x towards z. 0 where no rule has that sort.
+pub fn hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
+    let Some(r) = heroes::reach(sort) else { return 0 };
+    let t = turn as f32 * 1e-6;
+    let along = [t.cos(), t.sin()];
+    let (mut low, mut high) = ([i32::MAX; 2], [i32::MIN; 2]);
+    for (u, w) in [(r[0], r[2]), (r[3], r[2]), (r[0], r[5]), (r[3], r[5])] {
+        let corner = [x + ((u * along[0] - w * along[1]) * 10.0) as i32, z + ((u * along[1] + w * along[0]) * 10.0) as i32];
+        for a in 0..2 {
+            low[a] = low[a].min(corner[a] - 1);
+            high[a] = high[a].max(corner[a] + 1);
+        }
+    }
+    HEROES.with_borrow_mut(|h| h.push(Hero { sort, at: [x, foot, z], along, low, high }));
+    1
+}
+
+/// Whether landmarks are made as the world's cells: off, the place is as the tiles have it (for what they cost).
+pub fn landmarks(on: bool) {
+    LANDMARKS.set(on);
 }
 
 /// Whether the world is the Bay's: a pack has been loaded.
@@ -646,6 +684,8 @@ struct Column<'a> {
     kerb: i32,
     what: What<'a>,
     fixtures: Vec<FixtureSpan>,
+    /// A landmark this column is in, and where in its frame the column's middle is (u, w, in metres).
+    hero: Option<(Hero, f32, f32)>,
 }
 
 enum What<'a> {
@@ -660,9 +700,27 @@ enum What<'a> {
     Mass(i32, u8, Kind),
 }
 
+/// The landmark a column is in, where the world's cells are fine enough to show it (heroes.rs `REALM_MOST`).
+fn hero_at(x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
+    if size > heroes::REALM_MOST || !LANDMARKS.get() {
+        return None;
+    }
+    HEROES.with_borrow(|all| {
+        all.iter().filter(|h| x >= h.low[0] && z >= h.low[1] && x <= h.high[0] && z <= h.high[1]).find_map(|h| {
+            // A column of the finest cells is named by its cell; a coarser one by its middle.
+            let half = if size == 1 { 0.5 } else { size as f32 * 0.5 };
+            let (dx, dz) = ((x - h.at[0]) as f32 + half, (z - h.at[2]) as f32 + half);
+            let (u, w) = ((dx * h.along[0] + dz * h.along[1]) * 0.1, (dz * h.along[0] - dx * h.along[1]) * 0.1);
+            let r = heroes::reach(h.sort)?;
+            (u >= r[0] && u < r[3] && w >= r[2] && w < r[5]).then_some((*h, u, w))
+        })
+    })
+}
+
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
+    let hero = hero_at(x, z, size);
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { paint: None, g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
+        return Column { paint: None, g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
     };
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
@@ -745,7 +803,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         What::In(_, probe, _, _) | What::By(_, probe, _) => p.paint.get(&probe.side),
         _ => None,
     };
-    Column { paint, g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
+    Column { paint, g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
 }
 
 fn measured_foliage(tint: u8) -> bool {
@@ -819,6 +877,17 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     let mid = y + size / 2;
     if mid <= c.g {
         return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
+    }
+    // A landmark (#423, #450): what its rule says, and where the rule owns its place, its air too.
+    if let Some((h, u, w)) = c.hero {
+        let up = (y - h.at[1]) as f32 * 0.1 + size as f32 * 0.05;
+        let made = heroes::kind_at(h.sort, u, up, w, size as f32 * 0.1);
+        if made != 0 {
+            return made;
+        }
+        if heroes::owns(h.sort, u, up, w) && up >= 0.0 {
+            return 0;
+        }
     }
     for fixture in &c.fixtures {
         if mid >= fixture.low && mid <= fixture.high { return fixture.rod[7] as Kind; }
@@ -971,6 +1040,15 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
                 }
             }
         }
+        // A landmark stands higher than what the map has under it: its sectors are worth making too.
+        HEROES.with_borrow(|all| {
+            for h in all.iter().filter(|h| x1 > h.low[0] && z1 > h.low[1] && x0 <= h.high[0] && z0 <= h.high[1]) {
+                if let Some(r) = heroes::reach(h.sort) {
+                    lo = lo.min(h.at[1] + (r[1] * 10.0) as i32);
+                    hi = hi.max(h.at[1] + (r[4] * 10.0) as i32);
+                }
+            }
+        });
         (lo, hi)
     });
     ((lo - DEEP).div_euclid(size), (hi + 4).div_euclid(size))
@@ -1098,7 +1176,7 @@ mod tests {
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
         let mut c = Column { paint: None, g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
-            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new() };
+            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), hero: None };
         let mut gaps = 0;
         let mut leaves = 0;
         for x in 0..90 {
@@ -1119,7 +1197,7 @@ mod tests {
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
         let mut c = Column { paint: None, g: 3, road_top4: Some(17), ground, kerb: 0,
-            what: What::Open, fixtures: Vec::new() };
+            what: What::Open, fixtures: Vec::new(), hero: None };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
         assert_eq!(rows.len(), 4);

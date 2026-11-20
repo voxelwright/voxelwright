@@ -11,7 +11,7 @@ from pyproj import Transformer
 
 UTM = Transformer.from_crs(26910, 4326, always_xy=True)
 KEEP = set(
-    "name ref highway footway cycleway crossing crossing:markings railway gauge operator electrified route type restriction oneway junction lanes lanes:forward lanes:backward access motor_vehicle service surface sidewalk parking:both parking:left parking:right parking:lane:both parking:lane:left parking:lane:right".split()
+    "name ref tunnel bridge layer highway footway cycleway crossing crossing:markings railway gauge operator electrified route type restriction oneway junction lanes lanes:forward lanes:backward access motor_vehicle service surface sidewalk parking:both parking:left parking:right parking:lane:both parking:lane:left parking:lane:right".split()
 )
 
 
@@ -92,6 +92,7 @@ def acquire(name, path):
     with gzip.open(tmp, "wt") as stream:
         json.dump(
             {
+                "roadTagVersion": 1,
                 "ways": ways,
                 "nodes": coords,
                 "relations": relations,

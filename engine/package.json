@@ -10,7 +10,8 @@
     "player": "npm run -s core && node player/build.mjs",
     "landing": "npm run -s player && node player/serve.mjs --port 5950",
     "check": "node test/all.mjs",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sf": "node test/sf.mjs && node test/sf-look.mjs --no-build --only look,controls"
   },
   "devDependencies": {
     "@types/node": "25.0.3",

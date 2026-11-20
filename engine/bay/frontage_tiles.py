@@ -12,7 +12,7 @@ from pathlib import Path
 
 from full_run import digest, save, verify
 from shapely.geometry import Point
-from facade_paint import chunk, load_faces
+from facade_paint import load_faces
 from street_furniture import decode, encode, verify_tile_tail
 from street_graph import cells
 from tiles import read, outline
@@ -48,8 +48,8 @@ def ground_floors(pack, archive):
     return result
 
 
-def decorate(source, out, faces, rods, styles):
-    data = bytearray(source.read_bytes())
+def details(blob, rods, styles):
+    data = bytearray(blob)
     h = struct.unpack_from("<16i", data)
     at = 64 + 2 * h[5] ** 2 + (4 + 2 * (h[15] & 1)) * h[9] ** 2
     rows = list(struct.iter_unpack("<6i", data[at : at + 24 * h[12]]))
@@ -57,7 +57,12 @@ def decorate(source, out, faces, rods, styles):
         struct.iter_unpack("<3i", data[at + 24 * h[12] : at + 24 * h[12] + 12 * h[13]])
     )
     end = at + 24 * h[12] + 12 * h[13] + 16 * h[14]
-    original = decode(data[end:])
+    tail = bytes(data[end:])
+    split = (
+        8 + 32 * struct.unpack_from("<I", tail, 4)[0] if tail.startswith(b"SFST") else 0
+    )
+    verify_tile_tail(tail, h[13])
+    original = decode(tail[:split])
     for idx, (first, n, wall, trim, style, base) in enumerate(rows):
         special = styles.get(tuple(v[:2] for v in vertices[first : first + n]))
         if special:
@@ -74,15 +79,33 @@ def decorate(source, out, faces, rods, styles):
         and max(r[2], r[5]) + 10 >= z0
         and min(r[2], r[5]) - 10 < z1
     ]
-    paint = chunk(rows, vertices, faces)
-    fixtures = encode(sorted(set(original + extra))) if extra else bytes(data[end:])
-    blob = data[:end] + fixtures + paint
-    verify_tile_tail(blob[end:], h[13])
+    fixtures = encode(sorted(set(original + extra))) if extra else tail[:split]
+    return bytes(data[:end]) + fixtures + tail[split:], len(extra)
+
+
+def decorate(source, out, faces, rods, styles):
+    from paint_tile import apply
+
+    styled, extra = details(source.read_bytes(), rods, styles)
+    blob = apply(styled, faces)
+    # The production decorator starts from an undecorated tile and reports paint bytes separately.
+    h = struct.unpack_from("<16i", blob)
+    end = (
+        64
+        + 2 * h[5] ** 2
+        + (4 + 2 * (h[15] & 1)) * h[9] ** 2
+        + 24 * h[12]
+        + 12 * h[13]
+        + 16 * h[14]
+    )
+    if blob[end : end + 4] == b"SFST":
+        end += 8 + 32 * struct.unpack_from("<I", blob, end + 4)[0]
+    paint = blob[end:]
     if blob != out.read_bytes():
         tmp = out.with_suffix(".part")
         tmp.write_bytes(blob)
         tmp.replace(out)
-    return len(paint), len(gzip.compress(paint, mtime=0)) if paint else 0, len(extra)
+    return len(paint), len(gzip.compress(paint, mtime=0)) if paint else 0, extra
 
 
 def stage_manifest(manifest, candidate, changed):
@@ -99,7 +122,13 @@ def stage_manifest(manifest, candidate, changed):
         if far
         else {}
     )
-    for group in [*tiles, data["names"], data.get("graph", {}), far_objects]:
+    libs = {
+        r["path"]: r
+        for k in ("life", "cars")
+        if k in data
+        for r in [data[k]["index"], *data[k]["objects"].values()]
+    }
+    for group in [*tiles, data["names"], data.get("graph", {}), far_objects, libs]:
         for row in group.values():
             rel = Path(row["path"])
             if rel.is_absolute() or ".." in rel.parts:
@@ -108,7 +137,7 @@ def stage_manifest(manifest, candidate, changed):
             if digest(source) != row["sha256"]:
                 raise ValueError(f"base materialization differs from pin: {rel}")
             dest = candidate / "packs" / (rel.name if rel.parts[0] == "names" else rel)
-            if rel.parts[0] == "far":
+            if rel.parts[0] in ("far", "life", "cars"):
                 dest = candidate / rel
             if rel in changed:
                 if changed[rel][0] != row["sha256"] or digest(dest) != changed[rel][1]:
@@ -187,8 +216,9 @@ def main():
         if args.manifest:
             x, z = map(int, path.stem.split("_"))
             verify(output, x * 2500, z * 2500, 2500, 10, 5, 80, 0)
-            changed[path.relative_to(args.source / "packs")] = digest(path), digest(
-                output
+            changed[path.relative_to(args.source / "packs")] = (
+                digest(path),
+                digest(output),
             )
         totals = [a + b for a, b in zip(totals, counts)]
     if args.manifest:

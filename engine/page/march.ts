@@ -101,9 +101,70 @@ struct Globals {
   // Where a look begins (#264, a window into another world): a plane, its normal and how far along it, measured as
   // the eye is. Nothing nearer the eye than that plane is met. All zero: a look begins at the eye.
   starts: vec4f,
+  // The air (#450): how thick its haze is and how much cloud there is, against the town's own (1, 1). A realm says
+  // its own: the SF realm's is the clear afternoon of the landing's photograph (#423: haze 0.12, cloud 0.1).
+  air: vec4f,
+  // The fog (#450, after the air): a low bank in from the sea, what is lost in it worked out after the march (fogged), never in sky().
+  // x how thick it is a cell (0: no fog, and nothing of it is worked out); y the height of its top over the sea; z where
+  // its front is, measured east as the eye is (west of it is fog); w and fogTint's a, the corner everything is measured
+  // from (x, z), so that the lumps of its top stay where they are as the eye goes.
+  fog: vec4f,
+  // The colour of the fog as the hour lights it.
+  fogTint: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
+`
+
+/** How fast the fog thins over its top, a finest cell: to a third in 30 m. */
+const THIN = (1 / 280).toFixed(6)
+/**
+ * How much of what is `dist` along a look is lost in the fog (#450), 0 to 1, and how high its top stands where the look
+ * crosses it (0 to 1, a half is its middle): needs `g` (the globals) and `noise2`.
+ * The bank is even below its top and thins above it, a cell in THIN at a time; only what is west of its front is in it.
+ * Its top is lumpy where the look crosses it, and its front wavy, by a slow noise that drifts with the time.
+ */
+export const FOG = /* wgsl */ `
+fn fogged(rd: vec3f, dist: f32) -> vec2f {
+  // The part of the look west of the front: from t0 to t1.
+  var t0 = 0.0;
+  var t1 = dist;
+  let ax = vec2f(g.fog.w, g.fogTint.a);
+  if (abs(rd.x) > 1e-5) {
+    var meet = (g.fog.z - g.eye.x) / rd.x;
+    // The front is wavy: where the look crosses it, it stands a little east or west.
+    let z = (g.eye.z + rd.z * meet + ax.y) * 0.00035;
+    meet = (g.fog.z + (noise2(vec2f(z, g.time * 0.01)) - 0.5) * 2400.0 - g.eye.x) / rd.x;
+    if (rd.x > 0.0) { t1 = min(t1, meet); } else { t0 = max(t0, meet); }
+  } else if (g.eye.x > g.fog.z) { return vec2f(0.0); }
+  if (t1 <= t0) { return vec2f(0.0); }
+  // The top, lumpy where the look crosses it.
+  var top = g.sea + g.fog.y;
+  var lump = 0.5;
+  if (abs(rd.y) > 1e-4) {
+    let at = (g.eye.xz + rd.xz * clamp((top - g.eye.y) / rd.y, 0.0, 2e5) + ax) * 0.0006 + vec2f(g.time * 0.006, g.time * 0.002);
+    lump = noise2(at) * 0.7 + noise2(at * 3.1) * 0.3;
+    top += (lump - 0.5) * 700.0;
+  }
+  let ya = g.eye.y + rd.y * t0;
+  let yb = g.eye.y + rd.y * t1;
+  let span = t1 - t0;
+  // How much of it is under the top, and what the rest above it comes to as it thins.
+  var under = 0.0;
+  if (abs(yb - ya) < 0.01) { under = select(0.0, span, ya < top); }
+  else {
+    let c = clamp((top - ya) / (yb - ya), 0.0, 1.0);
+    under = span * select(1.0 - c, c, yb > ya);
+    if (ya < top && yb < top) { under = span; }
+    if (ya >= top && yb >= top) { under = 0.0; }
+  }
+  let y1 = max(ya, top) - top;
+  let y2 = max(yb, top) - top;
+  let e1 = exp(-y1 * ${THIN});
+  var over = (span - under) * e1;
+  if (abs(y2 - y1) > 0.5) { over = (span - under) * (e1 - exp(-y2 * ${THIN})) / ((y2 - y1) * ${THIN}); }
+  return vec2f(1.0 - exp(-min(g.fog.x * (under + over), 30.0)), lump);
+}
 `
 
 /** The sun's shadow at a point, from its maps: needs `g` (the globals) and `sunMap`. */
@@ -199,7 +260,7 @@ fn haze(rd: vec3f, dist: f32) -> f32 {
   let rise = rd.y * dist / 12000.0;
   var thick = exp(-max(low, 0.0));
   if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
-  return 1.0 - exp(-dist * 0.00003 * thick);
+  return 1.0 - exp(-dist * 0.00003 * g.air.x * thick);
 }
 // The colour of that air.
 fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
@@ -921,7 +982,7 @@ fn sky(rd: vec3f) -> vec3f {
     let far = (15000.0 - g.eye.y) / rd.y;
     let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
     let thick = cloud(at);
-    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y);
+    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
     if (cover > 0.0) {
       // Bright where it is thin, at its edges; grey in its thick middle.
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
@@ -1183,13 +1244,30 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
     // brighter low in the room than at the ceiling. Glass out in the street is a car's and stays dark.
-    let lot = block.x >= 140.0 && block.y >= 140.0;
+    // (The real city's blocks are not the town's: any window there may have someone home, #450.)
+    let lot = (block.x >= 140.0 && block.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'};
     if (stuff == 11u && lot) {
       // A shop's window (its own pale glass) is always lit.
       let w = max(litWindow(fine), select(0.0, 0.8, ci == 146u));
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
       col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
-    }
+    }${world.options.surveyedWalls ? `
+    // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
+    // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
+    // 1.6 m of each storey of 3.1 m, half the bay wide and half the storey tall, about a third of them with someone
+    // home, the same warm light; where a pane is under two pixels, the wall glows by the share of them lit.
+    if (faced && abs(n.y) < 0.5 && !slope && hit.level >= 2u && (stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u)) {
+      let s = f32(1u << hit.level);
+      let q = (vec3f(fine) + qc * s) * 0.1;
+      let fx = select(q.x, q.z, abs(n.x) > abs(n.z)) / 1.6;
+      let fy = q.y / 3.1;
+      let wide = max(hit.t, 1.0) * g.pixel * 0.1 / 1.6;
+      let inPane = smoothstep(0.24, 0.26, fract(fx)) * (1.0 - smoothstep(0.74, 0.76, fract(fx))) * smoothstep(0.24, 0.26, fract(fy)) * (1.0 - smoothstep(0.76, 0.78, fract(fy)));
+      let one = smoothstep(0.62, 0.66, hash2i(vec2i(floor(vec2f(fx, fy))) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))));
+      let blur = smoothstep(0.3, 0.8, wide);
+      let lampWall = mix(one * inPane, 0.26 * 0.2, blur) * clamp(dark * 3.0, 0.0, 1.0);
+      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur);
+    }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
     // the sea or under it, nor in open country: a block whose middle is more than 3.5 km from where the page starts
@@ -1301,6 +1379,7 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
   return col;
 }
 
+${FOG}
 
 // One texel of a sun map: along the line to the sun through it, how far towards the sun the last solid thing is.
 @fragment fn fs_sun(@builtin(position) at: vec4f) -> @location(0) vec4f {
@@ -1343,6 +1422,10 @@ struct Drawn { @location(0) colour: vec4f, @location(1) panes: vec4f, @builtin(f
 // false: none of what looks past what is met (a mirror, a pane) is in it, and with mirrors off it costs what it did
 // before glass was seen through (the same text with only a test of a flag made those pictures 5 to 17% dearer).
 override MIRRORS: bool = true;
+// Fog in the air (#450). The march without fog is the pipeline it always was, with this false and none of the fog's
+// text: a dry clear day costs what it did (the same text behind a test of the fog's thickness read 8 to 12% dearer).
+// The pipelines with fog are made the first time there is any.
+override FOGGY: bool = false;
 
 @fragment fn fs(@builtin(position) at: vec4f) -> Drawn {
   let uv = (at.xy / g.res) * 2.0 - 1.0;
@@ -1435,7 +1518,7 @@ override MIRRORS: bool = true;
       // A window with someone home at night is lit from within: its blind is drawn and its light shows, not the room.
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
-      if (g.weather.z > 0.0 && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -1544,6 +1627,13 @@ override MIRRORS: bool = true;
     skyLit = mix(INDOORS, 1.0, g.weather.w);
   }
   if ((g.flags & 128u) == 0u && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
+  // The fog, over everything as far as the first thing met, and over the sky (a look that met nothing goes on for ever).
+  if (FOGGY && (g.flags & 128u) == 0u) {
+    // Seen from over it, its sunlit top is brighter than the fog one is in, and its billows are lit on their tops.
+    let fog = fogged(rd, select(1e7, first, first >= 0.0));
+    let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
+    col = mix(col, g.fogTint.rgb * (1.0 + over * (0.08 + 0.36 * (fog.y - 0.35))), fog.x);
+  }
   if ((g.flags & 4u) != 0u) {
     // How hard each pixel was: steps as heat.
     let h = f32(work) / 128.0;
@@ -1570,6 +1660,8 @@ export interface View {
 /** UNDER: the eye is under the sea. The marcher sets it itself, from `under`. */
 export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64, UNDER = 128
 /** What the march leaves for what is drawn after it (Marcher.panes). */
+/** The fog bank (#450) when it is all in: how thick a finest cell (a third left in 260 m), and its top over the sea, 140 m. */
+const FOG_THICK = 1 / 2400, FOG_TOP = 1400
 export const PANES_FORMAT: GPUTextureFormat = 'rgba16float'
 /** Tiles of the sun's maps drawn each frame. */
 const SUN_TILES_A_FRAME = 8
@@ -1616,6 +1708,12 @@ export interface Marcher {
   detail: number
   /** How hard it rains, 0 to 1: the sky greys, the ground is wet and mirrors, lights come on. */
   rain: number
+  /** How overcast the sky is, 0 to 1: grey as rain greys it, with the ground dry. */
+  cloud: number
+  /** How far the sea's fog has come in (#450), 0 to 1: how thick the bank is west of its front (`front`). */
+  fog: number
+  /** Where the fog's front stands (finest cells east, as the world counts them): west of it is fog. */
+  front: number
   /** Whether the eye is under the sea: what is in it is then lit as under water. */
   under: boolean
   /** How far the eye is in a room, 0 to 1 (main.ts says): what is shaded is lit by the daylight a room lets in (shade). */
@@ -1623,7 +1721,12 @@ export interface Marcher {
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
+  /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day (linear colours). */
+  air: Air
 }
+
+/** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
+export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
 
 /** `behind`: a marcher for a world seen through a window, whose looks may begin at a plane (`draw`'s `starts`). */
 export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false): Promise<Marcher> {
@@ -1636,10 +1739,19 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // One layout for both, so that one binding serves either.
   const F = GPUShaderStage.FRAGMENT
   const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] })] })
-  const marchingAs = (module: GPUShaderModule, mirrors: boolean) => device.createRenderPipelineAsync({ label: mirrors ? 'march' : 'march without mirrors', layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
+  const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
   const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
   let [pipeline, plainPipeline] = await marching(module)
+  // The same in fog (FOGGY), made the first time there is fog, and made again with the shader: until they are made a
+  // look is drawn as without it, which is the fog's first moment as it comes in (it comes in over seconds).
+  let shaderNow = module, foggy: GPURenderPipeline[] | null = null, makingFoggy: Promise<unknown> | null = null
+  const fogPipelines = () => {
+    if (foggy || makingFoggy) return foggy
+    const of = shaderNow
+    makingFoggy = Promise.all([marchingAs(of, true, true), marchingAs(of, false, true)]).then((made) => { if (of === shaderNow) foggy = made }).finally(() => { makingFoggy = null })
+    return null
+  }
   // The panes beside each size of picture the march draws (a few: the page's, a measure's, the one pixel a pick asks).
   const panesKept = new Map<string, GPUTexture>()
   const panesFor = (size: readonly [number, number]) => {
@@ -1656,7 +1768,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1674,7 +1786,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 144), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -1686,19 +1798,29 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const times = (c: Colour, k: number): Colour => [c[0] * k, c[1] * k, c[2] * k]
     const hour = (night: Colour, noon: Colour, dusk: Colour) => mix(night, mix(noon, dusk, low), day)
     const [sx, , sz] = sunMaps.s, flat = Math.hypot(sx, sz) || 1, white: Colour = [1, 1, 1], dark: Colour = [0.03, 0.045, 0.085], cloudy: Colour = [0.035, 0.045, 0.075]
-    // Rain: the sun is behind cloud, the sky and its fill go grey, the clouds darken.
-    const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, rain * by)
+    // Rain and an overcast sky: the sun is behind cloud, the sky and its fill go grey, the clouds darken. A sky of fog
+    // is a little of that: over the bank the sky stays blue, as over the Golden Gate it does. (Rain was the only grey: it still is
+    // where the others are clear, so a dry clear day is told exactly what it was told before.)
+    const overcast = Math.max(rain, cloud, 0.2 * fog)
+    const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
     f.set([
-      ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * rain), day * (1 - 0.5 * low) * (1 - 0.6 * rain),
+      ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
       ...wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
-      ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - rain),
+      ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - overcast),
       ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,
-      ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * rain), sz / flat,
-      ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * rain), (30 - 18 * low) * (1 - rain),
-      // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
-      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), roofed,
+      ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * overcast), sz / flat,
+      ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * overcast), (30 - 18 * low) * (1 - overcast),
+      // Lights come on as the day goes (the same ease as a shader's smoothstep), in rain, and a little in fog and under cloud.
+      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain, 0.45 * fog, 0.25 * cloud), roofed,
     ], 36 + MAX_LEVELS * 32)
+    // The fog's colour: by day white lit through, grey under cloud, warm under a low sun; at night the city's lamps
+    // light it from under, a dull amber over a dark blue.
+    const s = (144 + MAX_LEVELS * 128 + 128) / 4
+    const lit = mix(mix([0.8, 0.82, 0.85], [0.95, 0.72, 0.6], low), [0.6, 0.62, 0.66], Math.max(rain, cloud) * 0.8)
+    f.set(mix([0.07, 0.065, 0.075], times(lit, 0.9), Math.min(1, day * 1.15)), s + 12)
+    // A sky of the realm's own by day (#450, #423's photograph's: overhead and at the horizon), in place of the hour's.
+    if (air.sky && day > 0.5 && !rain) { f.set(air.sky.zenith, 44 + MAX_LEVELS * 32); f.set(air.sky.horizon, 48 + MAX_LEVELS * 32); f.set(air.sky.horizon, 52 + MAX_LEVELS * 32) }
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
@@ -1745,10 +1867,16 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       // Where looks begin: the plane's normal, and how far along it the plane is from the corner everything is measured from.
       const s = (144 + MAX_LEVELS * 128 + 128) / 4
       if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
+      // The air (#450, the realm's own or the town's), then the fog: how thick, its top, its front and the corner,
+      // measured as the eye is; its colour is the hour's (colours).
+      f.set([air.haze, air.clouds, 0, 0], s + 4)
+      f.set([fog * FOG_THICK, FOG_TOP, front - anchor[0], anchor[0]], s + 8)
+      f[s + 15] = anchor[2]
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
-  let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0
+  let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0, cloud = 0, fog = 0, front = 0
+  let air: Air = { haze: 1, clouds: 1 }
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -1771,6 +1899,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const self: Marcher = {
     get rain() { return rain },
     set rain(v: number) { rain = Math.max(0, Math.min(1, v)); colours() },
+    get cloud() { return cloud },
+    set cloud(v: number) { cloud = Math.max(0, Math.min(1, v)); colours() },
+    get fog() { return fog },
+    set fog(v: number) { fog = Math.max(0, Math.min(1, v)); colours() },
+    get front() { return front },
+    set front(v: number) { front = v },
     get under() { return under },
     set under(v: boolean) { under = v },
     get roofed() { return roofed },
@@ -1779,6 +1913,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     set detail(v: number) { detail = v },
     get day() { return day },
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
+    get air() { return air },
+    set air(a: Air) { air = a; colours() },
     pick(view, plain = false) {
       // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
       const next = picking.then(() => once(view, plain))
@@ -1818,6 +1954,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       const compiled = performance.now() - began, [[a, plain], b] = await Promise.all([marching(next), sunning(next)])
       // Between two frames: the pipelines, and everything bound by their layouts.
       pipeline = a; plainPipeline = plain; sunPipeline = b; bind = binding(); sunBind = sunBinding()
+      shaderNow = next; foggy = null
       for (const t of sunTiles) t.bind = device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer: t.buffer } }] })
       return { compiled, ms: performance.now() - began }
     },
@@ -1833,7 +1970,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         ...(timing ? { timestampWrites: timing } : {}),
       })
       // With mirrors off, the pipeline that has none of their text (MIRRORS): its bindings are the same.
-      pass.setPipeline(mirrors ? pipeline : plainPipeline)
+      const inFog = fog > 0 ? fogPipelines() : null
+      pass.setPipeline(inFog ? inFog[mirrors ? 0 : 1] : mirrors ? pipeline : plainPipeline)
       pass.setBindGroup(0, bind)
       if (only) pass.setScissorRect(only[0], only[1], only[2], only[3])
       pass.draw(3)

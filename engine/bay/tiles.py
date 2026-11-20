@@ -20,6 +20,7 @@ from PIL import Image, ImageChops, ImageDraw
 from shapely import make_valid, union_all
 from shapely.geometry import LineString, Point, Polygon, box as survey_box
 import earth
+import compact_store
 from street_furniture import decode, encode
 
 PACKS = os.path.join(os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay')), 'packs')
@@ -27,7 +28,7 @@ NONE, BED, WATER = -32768, -30, 5
 FRAME = '10n4250'  # the frame the squares are baked in (bake.py: zone 10 north, z south from 4,250 km)
 
 def read(path):
-    b = open(path, 'rb').read()
+    b = compact_store.read(path)
     h = struct.unpack('<16i', b[:64])
     assert h[0] == 0x31594142 and h[4] == 10 and h[8] == 5, 'tiles are cut from squares baked at 1 m and 0.5 m'
     gw, tw, nb, nv, nt = h[5], h[9], h[12], h[13], h[14]
@@ -223,6 +224,8 @@ def cut(paths, wanted=None):
                     near = [r for r in sorted(fixtures) if max(r[0],r[3])+3 >= x0-margin and min(r[0],r[3])-3 < x0+size+margin
                             and max(r[2],r[5])+3 >= z0-margin and min(r[2],r[5])-3 < z0+size+margin]
                     blob += encode(near)
+                from paint_tile import without_eye_trees
+                blob = without_eye_trees(blob)
                 path = f'{PACKS}/tiles/{level}/{tx}_{tz}.bay'
                 with open(path + '.part', 'wb') as f:
                     f.write(blob)
