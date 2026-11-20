@@ -5,9 +5,9 @@
 import { near, open } from './bay.ts'
 
 /** What the page asks: a blast (where, how big, and how many of the mover's own edits the page had applied when it made it), or time to move on by. */
-export interface Ask { /** Forgets everything done to the world and everything that moves (#264): the page is leaving this world for another, whose edits are told next. */ forget?: true; blast?: [number, number, number]; radius?: number; after?: number; /** Whether the blast sets alight what can burn round it. */ spark?: boolean; tick?: number; /** Sets alight what can burn within `radius` of a point. */ ignite?: [number, number, number]; /** Edits made by the page (a cut, a thing placed), as edits.ts streams them; `release` is where to ask what they left unheld. */ edit?: Int32Array; release?: [number, number, number]; /** A ball thrown: from where, how fast (cells a second), its radius and kind. */ ball?: { from: [number, number, number]; speed: [number, number, number]; radius: number; kind: number }; /** A living thing to make (#245): its cells (one kind each, laid out x, then z, then y), its size, where its low corner is, whether those cells are taken out of the world as it is born, and its motor's numbers (living.ts `numbers`). The answer says its id. */ spawn?: { cells: Int32Array; size: [number, number, number]; low: [number, number, number]; take?: boolean; motor: Float32Array }; /** What a living thing is told to do until it is told again, or for a second. Alone, it gets no answer. */ drive?: { id: number; go: number; turn: number; rise: number; roll?: boolean; jump?: boolean }; /** A living thing that lives no more: a loose body from now on. Alone, it gets no answer. */ end?: number; /** Someone's body to make (#264, person.ts): where its low corner is, its size, its motor's numbers. The answer says its id. */ figure?: { low: [number, number, number]; size: [number, number, number]; motor: Float32Array }; /** How someone's body is to go: the way it faces (its front at cos, 0, sin), forward and to its right from -1 to 1, up and down, a jump. Alone, it gets no answer. */ walk?: { id: number; heading: number; go: number; side: number; rise: number; jump: boolean }; /** New numbers for a living thing's motor. Alone, it gets no answer. */ motor?: { id: number; numbers: Float32Array }; /** A living thing taken out of the world, leaving nothing. Alone, it gets no answer. */ vanish?: number; /** How a living thing falls (1 as everything does) and how high a wall it climbs (cells). Alone, it gets no answer. */ ways?: { id: number; fall: number; climb: number }; /** A push on a living thing: so much speed at once (cells a second). Alone, it gets no answer. */ kick?: { id: number; speed: [number, number, number] }; /** Which way is down for a living thing (all zero for the world's own), and whether it clings to whatever face it walks onto. Alone, it gets no answer. */ down?: { id: number; way: [number, number, number]; cling: boolean } }
+export interface Ask { /** Which world the page had when it asked (#450, main.ts `reset`): the answer says it again, and one of a world since put back is let by. */ age?: number; /** Forgets everything done to the world and everything that moves (#264): the page is leaving this world for another, whose edits are told next. */ forget?: true; blast?: [number, number, number]; radius?: number; after?: number; /** Whether the blast sets alight what can burn round it. */ spark?: boolean; tick?: number; /** Sets alight what can burn within `radius` of a point. */ ignite?: [number, number, number]; /** Edits made by the page (a cut, a thing placed), as edits.ts streams them; `release` is where to ask what they left unheld. */ edit?: Int32Array; release?: [number, number, number]; /** A ball thrown: from where, how fast (cells a second), its radius and kind. */ ball?: { from: [number, number, number]; speed: [number, number, number]; radius: number; kind: number }; /** A living thing to make (#245): its cells (one kind each, laid out x, then z, then y), its size, where its low corner is, whether those cells are taken out of the world as it is born, and its motor's numbers (living.ts `numbers`). The answer says its id. */ spawn?: { cells: Int32Array; size: [number, number, number]; low: [number, number, number]; take?: boolean; motor: Float32Array }; /** What a living thing is told to do until it is told again, or for a second. Alone, it gets no answer. */ drive?: { id: number; go: number; turn: number; rise: number; roll?: boolean; jump?: boolean }; /** A living thing that lives no more: a loose body from now on. Alone, it gets no answer. */ end?: number; /** Someone's body to make (#264, person.ts): where its low corner is, its size, its motor's numbers. The answer says its id. */ figure?: { low: [number, number, number]; size: [number, number, number]; motor: Float32Array }; /** How someone's body is to go: the way it faces (its front at cos, 0, sin), forward and to its right from -1 to 1, up and down, a jump. Alone, it gets no answer. */ walk?: { id: number; heading: number; go: number; side: number; rise: number; jump: boolean }; /** New numbers for a living thing's motor. Alone, it gets no answer. */ motor?: { id: number; numbers: Float32Array }; /** A living thing taken out of the world, leaving nothing. Alone, it gets no answer. */ vanish?: number; /** How a living thing falls (1 as everything does) and how high a wall it climbs (cells). Alone, it gets no answer. */ ways?: { id: number; fall: number; climb: number }; /** A push on a living thing: so much speed at once (cells a second). Alone, it gets no answer. */ kick?: { id: number; speed: [number, number, number] }; /** Which way is down for a living thing (all zero for the world's own), and whether it clings to whatever face it walks onto. Alone, it gets no answer. */ down?: { id: number; way: [number, number, number]; cling: boolean } }
 /** What comes back: the core's words, how long it took, how many bodies still move and how many points it tried against the world. */
-export interface Answer { words: Uint32Array<ArrayBuffer>; ms: number; bodies: number; tried: number; released: boolean; /** How many cells are alight. */ burning: number; /** Whether water is flowing, or may. */ flowing: boolean; failed?: string; /** The id of the living thing a `spawn` made, 0 if it could not be. */ spawned?: number }
+export interface Answer { /** The asking world's age, as the ask said it. */ age?: number; words: Uint32Array<ArrayBuffer>; ms: number; bodies: number; tried: number; released: boolean; /** How many cells are alight. */ burning: number; /** Whether water is flowing, or may. */ flowing: boolean; failed?: string; /** The id of the living thing a `spawn` made, 0 if it could not be. */ spawned?: number }
 
 interface Core {
   memory: WebAssembly.Memory
@@ -39,7 +39,7 @@ interface Core {
 let ready: Promise<Core> = open<Core>(new URL('./core.wasm', import.meta.url).href)
 /** In the Bay that comes in tiles (#373): the tiles round where the page says its person is, before anything else is done. */
 let here: Promise<void> = Promise.resolve()
-const post = (answer: Answer) => (self as unknown as Worker).postMessage(answer, [answer.words.buffer])
+const post = (answer: Answer, age?: number) => (self as unknown as Worker).postMessage(age === undefined ? answer : { ...answer, age }, [answer.words.buffer])
 
 self.onmessage = async (e: MessageEvent<Ask>) => {
   // The core built again (#264, main.ts `recore`): what is asked from here on is done by the new one, which knows
@@ -47,7 +47,7 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
   const anew = (e.data as unknown as { core?: string }).core
   if (anew) { ready = open<Core>(anew); return }
   const bay = (e.data as unknown as { bay?: [number, number] }).bay
-  if (bay) { here = ready.then((core) => near(core, bay[0], bay[1])).catch(() => {}); return }
+  if (bay) { here = ready.then((core) => near(core, bay[0], bay[1])).then(() => {}, () => {}); return }
   const ask = e.data, t0 = performance.now(), released = !!ask.blast || !!ask.release
   try {
     const core = await ready
@@ -69,7 +69,7 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
       const n = core.living_figure(low[0], low[1], low[2], size[0], size[1], size[2]), at = core.bodies_words()
       const words = new Uint32Array(core.memory.buffer, at, n).slice(), spawned = core.living_last()
       if (spawned) motor(spawned, ask.figure.motor)
-      post({ words, ms: performance.now() - t0, bodies: core.bodies_count(), tried: 0, released: false, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0, spawned })
+      post({ words, ms: performance.now() - t0, bodies: core.bodies_count(), tried: 0, released: false, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0, spawned }, ask.age)
       return
     }
     if (ask.spawn) {
@@ -82,7 +82,7 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
       room = core.edits_room(motor.length)
       new Float32Array(core.memory.buffer, room, motor.length).set(motor)
       if (spawned) core.living_motor(spawned, motor.length)
-      post({ words, ms: performance.now() - t0, bodies: core.bodies_count(), tried: 0, released: false, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0, spawned })
+      post({ words, ms: performance.now() - t0, bodies: core.bodies_count(), tried: 0, released: false, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0, spawned }, ask.age)
       return
     }
     if (ask.ignite) core.bodies_ignite(ask.ignite[0], ask.ignite[1], ask.ignite[2], ask.radius ?? 3)
@@ -94,9 +94,9 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
     const n = ask.ball ? core.bodies_throw(...ask.ball.from, ...ask.ball.speed, ask.ball.radius, ask.ball.kind) : ask.release ? core.bodies_release(ask.release[0], ask.release[1], ask.release[2], 0) : ask.blast ? core.bodies_blast(ask.blast[0], ask.blast[1], ask.blast[2], ask.radius ?? 0, ask.after ?? -1, ask.spark ? 1 : 0) : core.bodies_advance(ask.tick ?? 0)
     // The call first, then the memory: making bodies may have grown it.
     const at = core.bodies_words()
-    post({ words: new Uint32Array(core.memory.buffer, at, n).slice(), ms: performance.now() - t0, bodies: core.bodies_count(), tried: core.bodies_tried(), released, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0 })
+    post({ words: new Uint32Array(core.memory.buffer, at, n).slice(), ms: performance.now() - t0, bodies: core.bodies_count(), tried: core.bodies_tried(), released, burning: core.bodies_burning(), flowing: core.bodies_flowing() !== 0 }, ask.age)
   } catch (failed) {
     // Out of memory, most likely: the page is told, so that a device can report it.
-    post({ words: new Uint32Array(0), ms: performance.now() - t0, bodies: 0, tried: 0, released, burning: 0, flowing: false, failed: String(failed) })
+    post({ words: new Uint32Array(0), ms: performance.now() - t0, bodies: 0, tried: 0, released, burning: 0, flowing: false, failed: String(failed) }, ask.age)
   }
 }

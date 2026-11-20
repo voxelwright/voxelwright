@@ -6,7 +6,7 @@
 // words, and tells the shader which part of each box is whole enough to march.
 import { stream, type Edit } from './edits.ts'
 import type { Answer, Ask } from './worker.ts'
-import { BAY } from './bay.ts'
+import { BAY, share } from './bay.ts'
 
 export const SIDE = 64
 const UNIFORM = 0x80000000
@@ -145,6 +145,10 @@ export interface WorldStats {
   full: number
   /** How many times a sector made here refused an edit of finer cells whole (#259): the switch is off, or the sector's limits (the core's scratch.rs). The edit is still in the list, and other sectors may show it. */
   refused: number
+  /** Makers of sectors that failed and were hired again (#450). */
+  crashed: number
+  /** Columns made while a tile they need had not come: each is made again later. */
+  lacking: number
   wholeLevels: number
   /** For each box: sectors made, the workers' time making them (ms), and the words of trees it now keeps. */
   boxes: { made: number; ms: number; words: number }[]
@@ -161,6 +165,9 @@ function holdsFiner(words: Int32Array): boolean {
   return false
 }
 
+/** A maker of sectors as the world keeps it: how many asks it has in hand, which, when it was last heard, and how to let it go. */
+interface Maker { worker: Worker; busy: number; asked: Set<number>; heard: number; lose: () => void }
+
 export class World {
   levels: Level[]
   pool: Pool
@@ -168,7 +175,7 @@ export class World {
   topBuffer: GPUBuffer
   /** Words a level takes in the top buffer. */
   readonly stride: number
-  private workers: { worker: Worker; busy: number }[] = []
+  private workers: Maker[] = []
   private asks: { level: number; sx: number; sz: number; y0: number; y1: number; rank: number }[] = []
   private nextId = 1
   private edits: Edit[] = []
@@ -191,14 +198,39 @@ export class World {
     this.pool = new Pool(poolWords)
     this.poolBuffer = device.createBuffer({ label: 'trees', size: poolWords * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
     this.topBuffer = device.createBuffer({ label: 'boxes', size: this.stride * levels * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
-    this.stats = { ready: 0, wanted: 0, stale: 0, flying: 0, poolUsed: 0, poolWords, made: 0, makeMs: 0, full: 0, refused: 0, wholeLevels: 0, boxes: Array.from({ length: levels }, () => ({ made: 0, ms: 0, words: 0 })) }
-    for (let i = 0; i < options.workers; i++) {
-      const worker = new Worker(new URL(`./worker.ts${BAY}`, import.meta.url), { type: 'module' })
-      const slot = { worker, busy: 0 }
-      worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; this.take(e.data) }
-      this.workers.push(slot)
-    }
+    this.stats = { ready: 0, wanted: 0, stale: 0, flying: 0, poolUsed: 0, poolWords, made: 0, makeMs: 0, full: 0, refused: 0, wholeLevels: 0, crashed: 0, lacking: 0, boxes: Array.from({ length: levels }, () => ({ made: 0, ms: 0, words: 0 })) }
+    for (let i = 0; i < options.workers; i++) this.workers.push(this.hire())
   }
+
+  /** A maker of sectors (worker.ts). One that fails is let go and another hired: what it was making is asked again. */
+  private hire(): Maker {
+    const worker = share(new Worker(new URL(`./worker.ts${BAY}`, import.meta.url), { type: 'module' }))
+    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), heard: performance.now(), lose: () => {} }
+    if (this.core) worker.postMessage({ core: this.core })
+    worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; slot.heard = performance.now(); slot.asked.delete(e.data.id); this.take(e.data) }
+    worker.onerror = (e) => { e.preventDefault(); lose() }
+    const lose = (slot.lose = () => {
+      if (!this.workers.includes(slot)) return
+      worker.terminate()
+      this.stats.crashed++
+      const lost = slot.asked
+      this.workers[this.workers.indexOf(slot)] = this.hire()
+      for (const level of this.levels) for (let i = 0; i < level.state.length; i++) {
+        if (!lost.has(level.asked[i])) continue
+        if (level.state[i] === FLYING) level.state[i] = MISSING
+        else if (level.state[i] === STALE_FLYING) level.state[i] = STALE
+      }
+      this.plan = true
+    })
+    return slot
+  }
+  /** How long a maker with work in hand may say nothing before it is taken for gone, ms. */
+  patience = 45_000
+  /** The core the workers were last told to use (`recore`), for one hired after. */
+  private core: string | null = null
+  /** Columns made while a tile they need had not come (#450): made again when due, a little later each time. */
+  private again: { level: number; sx: number; sz: number; y0: number; y1: number; id: number; due: number }[] = []
+  private tries = new Map<string, number>()
 
   /** Something was done to the world. Every sector it reaches is made again; the old one is shown until then. */
   edit(e: Edit) {
@@ -260,6 +292,7 @@ export class World {
    * made again by it. What was made before is shown until its like comes back, so the picture is never empty.
    */
   recore(url: string) {
+    this.core = url
     for (const w of this.workers) w.worker.postMessage({ core: url })
     for (const level of this.levels) for (let slot = 0; slot < level.state.length; slot++) {
       if (level.state[slot] === READY) level.state[slot] = STALE
@@ -326,9 +359,28 @@ export class World {
         level.key.set([sx, sy, sz], slot * 3)
       }
     }
+    if (this.again.length) this.retry()
+    // A worker that has gone quiet with work in hand is gone too (a tab out of memory ends a worker without a word).
+    const now = performance.now()
+    for (const w of this.workers) if (w.busy > 0 && now - w.heard > this.patience) w.lose()
     if (this.plan) this.replan(eye)
     this.send()
     this.flush()
+  }
+
+  /** The columns made without a tile they need, whose time has come: made again, unless something else has been. */
+  private retry() {
+    const now = performance.now(), due = this.again.filter((a) => a.due <= now)
+    if (!due.length) return
+    this.again = this.again.filter((a) => a.due > now)
+    for (const a of due) {
+      const level = this.levels[a.level]
+      for (let sy = a.y0; sy <= a.y1; sy++) {
+        if (!level.holds(a.sx, sy, a.sz)) continue
+        const slot = level.slot(a.sx, sy, a.sz)
+        if (level.state[slot] === READY && level.asked[slot] === a.id) { level.state[slot] = STALE; this.plan = true }
+      }
+    }
   }
 
   /** Lists what to ask for, nearest first within each box, the changed before the new. */
@@ -378,7 +430,9 @@ export class World {
         if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
+        if (!w.busy) w.heard = performance.now()
         w.busy++
+        w.asked.add(this.nextId)
         w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)
       }
     }
@@ -439,6 +493,12 @@ export class World {
       level.show(slot, room, (((answer.words[from + 2] >>> 24) & 15) + 1) * 4)
     }
     level.dirty = true
+    if (answer.lacking) {
+      this.stats.lacking++
+      const key = `${answer.level}:${answer.sx}:${answer.sz}`, n = (this.tries.get(key) ?? 0) + 1
+      this.tries.set(key, n)
+      this.again.push({ level: answer.level, sx: answer.sx, sz: answer.sz, y0: answer.y0, y1: answer.y0 + answer.sizes.length - 1, id: answer.id, due: performance.now() + Math.min(30_000, 2000 * 2 ** Math.min(n - 1, 4)) })
+    } else if (this.tries.size) this.tries.delete(`${answer.level}:${answer.sx}:${answer.sz}`)
     // A sector changed while it was being made is wanted again.
     this.plan ||= level.state.includes(STALE) || level.state.includes(MISSING)
   }
