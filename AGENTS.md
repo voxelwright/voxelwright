@@ -84,6 +84,7 @@ The owner had been first to spot six visible faults in 14 days.
   for ordinary building, and xhigh for diagnosis, design and retrospectives.
 - Start each unit of work in a fresh thread with a self-contained brief. Do not
   hand new work to a long, finished lane thread.
+- A lead coordinating other agents follows `.agents/skills/lead-orchestration`.
 - Give each unit a clear stop condition and a time box. For UI and 3D, use the
   UI Craft screenshot and review loop with its cross-model target of 9/10 or better.
 - Keep subagents short-lived. Give each one unit of work, end it when the work
