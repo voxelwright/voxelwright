@@ -1,6 +1,7 @@
 """Add surveyed road levels and traffic controls to city graphs without rewriting a verified bake."""
 
 import argparse
+import fcntl
 import gzip
 import json
 from pathlib import Path
@@ -116,6 +117,14 @@ def enrich(data, obs, photos, city):
 
 
 def build(root, dest, names):
+    cache = dest.parent / "transport"
+    cache.mkdir(parents=True, exist_ok=True)
+    with (cache / "build.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        build_locked(root, dest, names)
+
+
+def build_locked(root, dest, names):
     snap = snapshot(dest.parent / "transport")
     city = json.loads(gzip.decompress(snap.read_bytes()))
     dest.mkdir(parents=True, exist_ok=True)
