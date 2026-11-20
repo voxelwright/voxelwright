@@ -103,8 +103,11 @@ try {
   results.places = {}
   for (const spot of SPOTS) {
     const s = onStreet(spot.street, ...spot.at)
-    // 25 m back along the street from the place and 3.5 m to its right, a person's eye by the kerb, looking along it.
-    let x = s.x - s.dx * 250 - s.dz * 35, z = s.z - s.dz * 250 + s.dx * 35
+    // 25 m back along the street from the place, a person's eye on its right-hand pavement: the first spot out from
+    // the middle that is past the lanes (7 m) and clear of anything solid round the eye (a tree, an awning, a wall).
+    const bx = s.x - s.dx * 250, bz = s.z - s.dz * 250
+    const side = await page.evaluate(([bx, bz, dx, dz]) => { const e = globalThis.engine; for (const o of [70, 80, 60, 90, 50, 100]) { const x = bx - dz * o, z = bz + dx * o, f = e.feet(Math.round(x), Math.round(z)); let clear = true; for (let y = f + 8; y <= f + 25 && clear; y += 3) for (const [ox, oz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) if (e.kind(x + ox, y, z + oz)) clear = false; if (clear) return o } return 35 }, [bx, bz, s.dx, s.dz])
+    const x = bx - s.dz * side, z = bz + s.dx * side
     const pose = { x: x / 10, z: z / 10, h: 1.7, yaw: Math.atan2(s.dx, -s.dz), pitch: -0.03 }
     if (spot.cable) {
       // The clock people and cars go by, moved on to when a cable car is coming up the line here.
