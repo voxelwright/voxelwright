@@ -7,51 +7,102 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from paint_cameras import Requests
+from email.message import Message
+import io
+from urllib.error import HTTPError
+
+from paint_cameras import GAP, TILES_A_DAY, Requests
 from paint_tile import EYE, without_eye_trees
 
 
+def requests_at(root, clock):
+    req = Requests.__new__(Requests)
+    req.root, req.maximum, req.token = root, 160, "t"
+    req.count = req.api = req.bytes = 0
+    return req
+
+
 class Reserve(unittest.TestCase):
-    def test_crash_cannot_reset_the_hour_or_retry_deadline(self):
-        with tempfile.TemporaryDirectory() as temp:
-            root = Path(temp)
-            path = root / "allowance.json"
-            path.write_text(
-                json.dumps(
-                    dict(
-                        requests=[100.0 + i for i in range(160)],
-                        next=8000,
-                        total=200,
-                        api=91,
-                    )
-                )
-            )
-            req = Requests.__new__(Requests)
-            req.root = root
-            clock = [500.0]
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.clock = [5000.0]
 
-            def wait(secs):
-                clock[0] += secs
+        def wait(secs):
+            self.clock[0] += secs
 
-            with (
-                patch("paint_cameras.time.time", side_effect=lambda: clock[0]),
-                patch("paint_cameras.time.sleep", side_effect=wait),
-                patch("paint_cameras.shutil.disk_usage") as disk,
-            ):
-                disk.return_value.free = 30 * 2**30
-                req.reserve(False)
-                first = json.loads(path.read_text())
-                req.reserve(True)
-                last = json.loads(path.read_text())
-                self.assertEqual(first["requests"][-1], 8000.0)
-                self.assertGreaterEqual(
-                    last["requests"][-1] - first["requests"][-1], 1.1
-                )
-                self.assertEqual((last["total"], last["api"]), (202, 92))
-                # A restart with a full rolling-hour allowance debits only after its oldest request expires.
-                path.write_text(json.dumps(dict(requests=[8000.0] * 160, next=8001.12)))
-                req.reserve(True)
-                self.assertEqual(json.loads(path.read_text())["requests"][-1], 11600.0)
+        self.patches = [
+            patch("paint_cameras.time.time", side_effect=lambda: self.clock[0]),
+            patch("paint_cameras.time.sleep", side_effect=wait),
+            patch("paint_cameras.shutil.disk_usage"),
+        ]
+        for p in self.patches:
+            p.start().return_value.free = 30 * 2**30
+
+    def tearDown(self):
+        for p in self.patches:
+            p.stop()
+        self.temp.cleanup()
+
+    def state(self):
+        return json.loads((self.root / "allowance.json").read_text())
+
+    def test_one_clock_paces_every_worker_and_keeps_old_debits(self):
+        # The hourly pacer's history and retry deadline survive the switch.
+        (self.root / "allowance.json").write_text(
+            json.dumps(dict(requests=[4000.0] * 3, next=5100, total=200, api=91))
+        )
+        a, b = requests_at(self.root, self.clock), requests_at(self.root, self.clock)
+        a.reserve(False)
+        first = self.clock[0]
+        b.reserve(True, tile=True)
+        self.assertEqual(first, 5100)
+        self.assertGreaterEqual(self.clock[0] - first, GAP)
+        state = self.state()
+        self.assertEqual((state["total"], state["api"]), (202, 92))
+        self.assertEqual(len(state["tiles"]), 4)
+        self.assertNotIn("requests", state)
+
+    def test_tiles_stop_at_their_daily_share(self):
+        (self.root / "allowance.json").write_text(
+            json.dumps(dict(tiles=[4000.0 + i for i in range(TILES_A_DAY)]))
+        )
+        req = requests_at(self.root, self.clock)
+        req.reserve(True)
+        self.assertEqual(self.clock[0], 5000)
+        req.reserve(True, tile=True)
+        self.assertGreaterEqual(self.clock[0], 4000 + 86400)
+
+    def reply(self, code, body=b"", headers=None):
+        return HTTPError("u", code, "m", Message() if headers is None else headers, io.BytesIO(body))
+
+    def test_limit_cooldown_persists_for_a_new_worker(self):
+        req = requests_at(self.root, self.clock)
+        limit = json.dumps(
+            {"error": {"message": "Application request limit reached", "code": 4}}
+        ).encode()
+        with patch("paint_cameras.urlopen", side_effect=self.reply(400, limit)):
+            with self.assertRaises(RuntimeError):
+                req.get("https://graph.mapillary.com/1")
+        self.assertGreaterEqual(self.state()["next"], 5000 + 600)
+        requests_at(self.root, self.clock).reserve(True)
+        self.assertGreaterEqual(self.clock[0], 5600)
+
+    def test_isolated_errors_back_off_briefly_then_escalate(self):
+        req = requests_at(self.root, self.clock)
+        with patch("paint_cameras.urlopen", side_effect=self.reply(403)):
+            with self.assertRaises(RuntimeError):
+                req.get("https://scontent.example/x.jpg", False)
+            self.assertEqual(self.state()["next"] - self.clock[0], 15)
+            with self.assertRaises(RuntimeError):
+                req.get("https://scontent.example/x.jpg", False)
+        self.assertEqual(self.state()["next"] - self.clock[0], 30)
+
+    def test_missing_image_is_recorded_without_a_cooldown(self):
+        req = requests_at(self.root, self.clock)
+        with patch("paint_cameras.urlopen", side_effect=self.reply(404)):
+            self.assertEqual(req.get("https://graph.mapillary.com/1"), b"{}")
+        self.assertLess(self.state()["next"] - self.clock[0], 1)
 
 
 class Park(unittest.TestCase):

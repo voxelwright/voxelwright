@@ -1,9 +1,13 @@
 """Cache solved Mapillary panoramas around a single frontage survey, with a hard request budget."""
 
 import argparse
+from contextlib import contextmanager
+from functools import lru_cache
+import tempfile
 import fcntl
 import json
 import math
+import os
 import shutil
 import time
 import zipfile
@@ -19,6 +23,22 @@ from full_run import BAY, save
 RADIUS = 90
 
 
+# Mapillary documents per-app limits of 60,000 entity requests a minute and 50,000
+# vector tiles a day. All workers share one clock: at most 1,000 requests a minute
+# (one every 60 ms), and tiles stop at 80% of the daily cap.
+GAP = 0.06
+TILES_A_DAY = 40_000
+RESERVE = 18 * 2**30
+LIMIT_COOLDOWN = 600
+
+
+def limited(error):
+    return (
+        error.get("code") == 4
+        or "application request limit reached" in str(error.get("message", "")).lower()
+    )
+
+
 class Requests:
     def __init__(self, root, maximum):
         self.root = root
@@ -26,39 +46,69 @@ class Requests:
         self.count = self.api = self.bytes = 0
         self.token = (BAY / "keys/mapillary.token").read_text().strip()
 
-    def reserve(self, api):
-        # The caller holds the single acquisition lock. Debit before I/O, including failures.
+    @contextmanager
+    def allowance(self):
         path = self.root / "allowance.json"
-        state = json.loads(path.read_text()) if path.exists() else {}
-        now = time.time()
-        history = [t for t in state.get("requests", []) if now - t < 86400]
-        deadline = max(
-            state.get("next", 0),
-            history[-160] + 3600 if len(history) >= 160 else 0,
-            history[-2400] + 86400 if len(history) >= 2400 else 0,
-        )
-        if deadline > now:
-            state["next"] = deadline
-            save(path, state)
-            time.sleep(deadline - now)
-        if shutil.disk_usage(self.root).free < 17 * (1 << 30):
-            raise RuntimeError("disk reserve reached; progress saved")
-        now = time.time()
-        state.update(
-            requests=[t for t in history if now - t < 86400] + [now],
-            next=now + 1.12,
-            total=state.get("total", 0) + 1,
-            api=state.get("api", 0) + int(api),
-        )
-        save(path, state)
-        return path, state
+        with (self.root / "allowance.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            state = json.loads(path.read_text()) if path.exists() else {}
+            yield state
+            atomic_bytes(path, json.dumps(state, separators=(",", ":")).encode())
+
+    def reserve(self, api, tile=False):
+        # Debit before I/O, including failures. A cooldown in "next" holds every worker.
+        while True:
+            with self.allowance() as state:
+                now = time.time()
+                # The hourly pacer's history held every kind of request. Count it as tiles.
+                tiles = [
+                    t
+                    for t in state.pop("requests", []) + state.get("tiles", [])
+                    if t > now - 86400
+                ]
+                state["tiles"] = tiles
+                deadline = state.get("next", 0)
+                if tile and len(tiles) >= TILES_A_DAY:
+                    deadline = max(deadline, tiles[-TILES_A_DAY] + 86400)
+                if now >= deadline:
+                    if shutil.disk_usage(self.root).free < RESERVE:
+                        raise RuntimeError("disk reserve reached")
+                    minute = int(now // 60)
+                    minutes = {
+                        k: v
+                        for k, v in state.get("minutes", {}).items()
+                        if int(k) > minute - 1440
+                    }
+                    minutes[str(minute)] = minutes.get(str(minute), 0) + 1
+                    state.update(
+                        tiles=tiles + [now] if tile else tiles,
+                        minutes=minutes,
+                        next=now + GAP,
+                        total=state.get("total", 0) + 1,
+                        api=state.get("api", 0) + int(api),
+                    )
+                    return
+            time.sleep(min(60, max(0.005, deadline - now)))
+
+    def cooldown(self, seconds, reason):
+        with self.allowance() as state:
+            now = time.time()
+            state["next"] = max(state.get("next", 0), now + seconds)
+            state["lastCooldown"] = dict(reason=reason, at=now, until=state["next"])
+
+    def strike(self, reason):
+        # An isolated failure backs off briefly. Repeats within ten minutes escalate to the limit cooldown.
+        with self.allowance() as state:
+            now = time.time()
+            strikes = [t for t in state.get("strikes", []) if t > now - 600] + [now]
+            seconds = min(LIMIT_COOLDOWN, 15 * 2 ** (len(strikes) - 1))
+            state.update(strikes=strikes, next=max(state.get("next", 0), now + seconds))
+            state["lastCooldown"] = dict(reason=reason, at=now, until=state["next"])
 
     def get(self, url, api=True):
         if self.count >= self.maximum:
-            raise RuntimeError(
-                "request budget exhausted; resume with the saved cameras"
-            )
-        path, state = self.reserve(api)
+            raise RuntimeError("window request budget exhausted")
+        self.reserve(api, url.startswith("https://tiles.mapillary.com/"))
         self.count += 1
         self.api += int(api)
         headers = {"User-Agent": "Village-photo-bake"}
@@ -68,55 +118,83 @@ class Requests:
             with urlopen(Request(url, headers=headers), timeout=40) as reply:
                 data = reply.read()
                 usage = json.loads(reply.headers.get("X-App-Usage", "{}"))
-                if usage:
-                    state["lastAppUsage"] = {
-                        k: usage[k]
-                        for k in ("call_count", "total_time", "total_cputime")
-                        if k in usage
-                    }
-                    save(path, state)
-                if (
-                    max(
-                        (v for v in usage.values() if isinstance(v, (int, float))),
-                        default=0,
-                    )
-                    >= 75
-                ):
-                    state["next"] = time.time() + 3600
-                    save(path, state)
         except HTTPError as e:
-            if (
-                api
-                and url.startswith("https://graph.mapillary.com/")
-                and e.code in (400, 404, 410)
-            ):
-                try:
-                    error = json.loads(e.read(16384)).get("error", {})
-                except (ValueError, OSError):
-                    error = {}
-                if e.code in (404, 410) or (
-                    error.get("code") == 100 and error.get("error_subcode") == 33
-                ):
-                    return b"{}"
+            try:
+                error = json.loads(e.read(16384)).get("error", {})
+            except (ValueError, OSError):
+                error = {}
             wait = e.headers.get("Retry-After", "")
-            if e.code in (400, 403, 429, 503) or wait:
+            if e.code == 429 or limited(error) or wait:
+                delay = LIMIT_COOLDOWN
                 try:
-                    delay = (
+                    delay = max(
+                        delay,
                         float(wait)
                         if wait.isdigit()
-                        else parsedate_to_datetime(wait).timestamp() - time.time()
+                        else parsedate_to_datetime(wait).timestamp() - time.time(),
                     )
                 except (TypeError, ValueError, OverflowError):
-                    delay = 600
-                state["next"] = max(state["next"], time.time() + max(60, delay))
-                save(path, state)
-            raise RuntimeError(
-                f"image request returned HTTP {e.code}; progress saved"
-            ) from None
-        except (URLError, TimeoutError):
-            raise RuntimeError("image request failed; progress saved") from None
+                    pass
+                self.cooldown(delay, f"HTTP {e.code} limit")
+            elif url.startswith("https://graph.mapillary.com/") and (
+                e.code in (404, 410)
+                or (error.get("code") == 100 and error.get("error_subcode") == 33)
+            ):
+                # The image no longer exists. Record it as unusable.
+                return b"{}"
+            else:
+                self.strike(f"HTTP {e.code}")
+            raise RuntimeError(f"image request returned HTTP {e.code}") from None
+        except (URLError, TimeoutError, ConnectionError):
+            self.strike("network")
+            raise RuntimeError("image request failed") from None
+        if usage:
+            with self.allowance() as state:
+                state["lastAppUsage"] = {
+                    k: usage[k]
+                    for k in ("call_count", "total_time", "total_cputime")
+                    if k in usage
+                }
+                if max(state["lastAppUsage"].values(), default=0) >= 75:
+                    state["next"] = max(state.get("next", 0), time.time() + 3600)
+                    state["lastCooldown"] = dict(reason="app usage", until=state["next"])
+        if api and data.lstrip().startswith(b"{"):
+            try:
+                error = json.loads(data).get("error", {})
+            except ValueError:
+                error = {}
+            if limited(error):
+                self.cooldown(LIMIT_COOLDOWN, "app limit")
+                raise RuntimeError("Mapillary application request limit reached")
         self.bytes += len(data)
         return data
+
+
+@lru_cache(maxsize=4)
+def panoramas(tile, tx, ty):
+    layer = mapbox_vector_tile.decode(tile.read_bytes()).get("image", {})
+    points = []
+    for f in layer.get("features", []):
+        p = f["properties"]
+        if not p.get("is_pano"):
+            continue
+        a, b = f["geometry"]["coordinates"]
+        lng = (tx + a / layer["extent"]) / 16384 * 360 - 180
+        lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (ty + 1 - b / layer["extent"]) / 16384))))
+        e, n = TO_UTM.transform(lng, lat)
+        points.append((str(p["id"]), e - 500000, 4250000 - n, p["captured_at"]))
+    return points
+
+
+def atomic_bytes(path, data):
+    with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as f:
+        temp = Path(f.name)
+        try:
+            f.write(data)
+            f.flush()
+            temp.replace(path)
+        finally:
+            temp.unlink(missing_ok=True)
 
 
 def xy(photo):
@@ -163,28 +241,10 @@ def select(
                     f"https://tiles.mapillary.com/maps/vtp/mly1_public/2/14/{tx}/{ty}?access_token="
                     + requests.token
                 )
-                tmp = tile.with_suffix(".part")
-                tmp.write_bytes(blob)
-                tmp.replace(tile)
-            layer = mapbox_vector_tile.decode(tile.read_bytes()).get("image", {})
-            for f in layer.get("features", []):
-                p = f["properties"]
-                if not p.get("is_pano") or str(p["id"]) in holdouts:
-                    continue
-                a, b = f["geometry"]["coordinates"]
-                lng = (tx + a / layer["extent"]) / 16384 * 360 - 180
-                lat = math.degrees(
-                    math.atan(
-                        math.sinh(
-                            math.pi * (1 - 2 * (ty + 1 - b / layer["extent"]) / 16384)
-                        )
-                    )
-                )
-                e, n = TO_UTM.transform(lng, lat)
-                x, z = e - 500000, 4250000 - n
-                d = math.hypot(x - cx, z - cz)
-                if 5 < d < radius:
-                    candidates[str(p["id"])] = (x, z, p["captured_at"])
+                atomic_bytes(tile, blob)
+            for ident, x, z, stamp in panoramas(tile, tx, ty):
+                if ident not in holdouts and 5 < math.hypot(x - cx, z - cz) < radius:
+                    candidates[ident] = (x, z, stamp)
     # Reuse archived solves where available. Spread positions both along and across the street.
     keep = []
     with zipfile.ZipFile(BAY / "sf-450-city/inputs" / (square + ".zip")) as src:
@@ -222,12 +282,11 @@ def select(
                         and p.get("computed_rotation")
                         and p.get("camera_type") == "spherical"
                     ):
-                        save(meta, {})
+                        atomic_bytes(meta, b"{}")
                         continue
                     data = requests.get(url, False)
-                jpg.with_suffix(".part").write_bytes(data)
-                jpg.with_suffix(".part").replace(jpg)
-                save(meta, p)
+                atomic_bytes(jpg, data)
+                atomic_bytes(meta, json.dumps(p).encode())
             p = json.loads(meta.read_text())
             if not p:
                 continue
@@ -236,7 +295,8 @@ def select(
                 math.hypot(sx - u, sz - v) < 7 for u, v in keep
             ):
                 continue
-            jpg.touch()
+            # Refresh the cache clock. A pruned image fails the window instead of becoming empty.
+            os.utime(jpg)
             keep.append((sx, sz))
             yield p
             if len(keep) >= limit:
