@@ -1574,6 +1574,34 @@ node test/sf-life.mjs [--no-build] [--hour 12.5] [--no-pairs]
 
 The check counts people and vehicles at Columbus and Broadway, Powell St, the Embarcadero and Russian Hill. It times frames with street life on and off and checks the budgets. It drives a car 60 s through a turn and up a hill, sets off charges among people and cars, and saves a contact sheet to `~/.village/engine/sf/life`. Where a kept Mapillary panorama is near, the sheet sets the engine's view beside the photograph (`sf/pairs.py`).
 
+## San Francisco billboards and the banner plane (#450)
+
+The site's navigation stands in the SF realm as billboards on rooftops seen from the park, and a small plane tows a banner round the view. Where each board stands and what it is are data: `sf/boards.json` (`page/boards.ts` `SignsFile`), which `node sf/build.mjs` puts in the page's own record, so nothing more is fetched. A board names its building by a point on its roof, its type, its size, which way it faces, what it shows and where it leads.
+
+- A `lettering` board is cells of the world: one panel and one post a letter, lamp letters that the march lights at night. Every tool breaks it and reset lays it again.
+- A `digital` board is a housing of cells with a screen on its face (`page/screens.ts`) that shows words, an image or a video. The part of the screen whose housing is gone goes dark.
+- The banner is cloth behind the plane, with words or a picture.
+
+What a sign shows is set through one API, `page/signs.ts`, also at `realm.signs` for scripts outside the page's modules:
+
+```js
+realm.signs.set('banner', { text: 'NEW POST' })   // or { image: url }, { video: HTMLVideoElement }, null for its own
+realm.signs.list()                                 // every sign: id, kind, name, accepts, content, own
+```
+
+Lettering boards take `{ text }` only and throw a TypeError for anything else. A click or tap on a board while the pointer is free flies the eye to it, then tells the host page where to go; flying free, O opens the board ahead; each board is also a link in the page for a keyboard and a screen reader. `page/host.ts` lists the messages a host page in a frame gets (`ready`, `error`, `navigate`) and may send (`fly`, `open`, `signs.set`). `?boards=0` leaves the boards out.
+
+To add, move, size, turn or reword a board:
+
+```
+node sf/boards.mjs edit        # serves the realm with the editor: open the address it prints (…?boards=edit)
+node sf/boards.mjs propose     # roofs the rule proposes from the park (level, at the roof's edge, seen whole, facing the eye)
+node sf/boards.mjs check       # what is wrong with sf/boards.json, if anything
+node test/sf-boards.mjs [--no-build]
+```
+
+In the editor, fly to a roof and press `new here`, or `propose` for the next roof the rule offers; every change is laid at once, and `save` writes `sf/boards.json`. The check covers the boards from the park (in the picture, read from its pixels), every way of opening one, the signs API, breaking and reset, the plane, and the bytes and frames they cost; it keeps pictures in `~/.village/engine/sf/boards/`.
+
 ## Checks and tools
 
 ```sh

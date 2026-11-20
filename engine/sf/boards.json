@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "banner": {
+    "content": {
+      "text": "YOUR AD HERE"
+    },
+    "around": [
+      520354,
+      666286
+    ],
+    "radius": 220,
+    "height": 116,
+    "speed": 22,
+    "size": [
+      36,
+      6
+    ]
+  },
+  "boards": [
+    {
+      "id": "blog",
+      "name": "Blog",
+      "type": "lettering",
+      "building": [
+        517952,
+        665272
+      ],
+      "at": [
+        517952,
+        619,
+        665272
+      ],
+      "facing": 0,
+      "size": 4,
+      "content": {
+        "text": "BLOG"
+      },
+      "to": "/blog/"
+    },
+    {
+      "id": "tags",
+      "name": "Tags",
+      "type": "lettering",
+      "building": [
+        517384,
+        664944
+      ],
+      "at": [
+        517384,
+        646,
+        664944
+      ],
+      "facing": 0,
+      "size": 4,
+      "content": {
+        "text": "TAGS"
+      },
+      "to": "/tags/"
+    },
+    {
+      "id": "social",
+      "name": "Social links",
+      "type": "digital",
+      "building": [
+        519320,
+        665128
+      ],
+      "at": [
+        519320,
+        477,
+        665128
+      ],
+      "facing": 0,
+      "size": [
+        14.4,
+        5.6
+      ],
+      "content": {
+        "text": "SOCIAL"
+      },
+      "to": "/social/"
+    },
+    {
+      "id": "support",
+      "name": "Support",
+      "type": "digital",
+      "building": [
+        519000,
+        665744
+      ],
+      "at": [
+        519000,
+        534,
+        665744
+      ],
+      "facing": 0,
+      "size": [
+        14.4,
+        5.6
+      ],
+      "content": {
+        "text": "SUPPORT"
+      },
+      "to": "/support/"
+    }
+  ]
+}

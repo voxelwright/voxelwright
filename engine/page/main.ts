@@ -51,6 +51,8 @@ import { LOCAL, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
+import { boards } from './boards.ts'
+import { tell } from './host.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
@@ -1249,6 +1251,18 @@ async function main() {
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
+  // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
+  // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
+  const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
+    file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
+    lay: (edit) => { put(); change(edit); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    done: () => world.done().length,
+    kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
+    pose, began, view, canvas, input: controls, hud: over, day: () => march.day, pick: () => march.pick(view()),
+    aloft: () => { if (me.on) me.walk(false) }, shown: () => seen.near > 0, edit: query.get('boards') === 'edit',
+  }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards })
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
@@ -1273,6 +1287,7 @@ async function main() {
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
+    signboards?.relay()
     over.notice('The world is as it was', 3000)
   }
   /**
@@ -1388,6 +1403,7 @@ main().catch(async (e: unknown) => {
   over.status(`This did not work here: ${text.split('\n')[0]}`)
   // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
   if (LOCAL) {
+    tell('error', { message: text.split('\n')[0] })
     document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
     const told = document.createElement('p')
     told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'

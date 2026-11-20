@@ -245,10 +245,12 @@ try {
     // Reset from its key: a blast, then the key, and the world is as it was.
     await page.evaluate(async () => { await globalThis.engine.blast(12) })
     await page.waitForTimeout(1500)
-    const edits = await page.evaluate(() => globalThis.engine.world.done().length)
+    // The billboards are edits that reset lays again (boards.ts): what is counted is beyond them.
+    const beyond = () => page.evaluate(() => globalThis.engine.world.done().length - (globalThis.engine.boards?.edits ?? 0))
+    const edits = await beyond()
     await roles.reset.click()
     await page.waitForTimeout(1500)
-    const after = await page.evaluate(() => globalThis.engine.world.done().length)
+    const after = await beyond()
     check(edits > 0 && after === 0, `reset from its key: ${edits} edits, then ${after}`)
     if (page.errors.length) check(false, `page errors: ${page.errors.slice(0, 3).join(' | ')}`)
     await desk.close()
@@ -290,7 +292,7 @@ try {
     await tp.waitForTimeout(1500)
     const e0 = await tp.evaluate(() => globalThis.engine.world.done().length)
     await tp.locator('#realm .use').tap()
-    const used = await until(tp, (n) => globalThis.engine.world.done().length > 0, 8000)
+    const used = await until(tp, () => globalThis.engine.world.done().length > (globalThis.engine.boards?.edits ?? 0), 8000)
     check(used, `Use, tapped: the world has ${await tp.evaluate(() => globalThis.engine.world.done().length)} edits (${e0} before)`)
     // The sky's panel, opened by its key; a weather by a tap.
     await tp.locator('#realm .fold').tap()
