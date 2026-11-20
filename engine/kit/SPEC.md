@@ -171,6 +171,13 @@ The base palette gives each material a day and night color, grain and emission.
 - Sliders: while the pointer is down the thumb follows the value exactly. No easing, no spring.
 - Switches and tabs slide on a spring with a little carry (`k = 420, c = 30`, about 220 ms).
 - Hover lift is half a voxel and only for a mouse. Touch never hovers.
+- **The plain version moves by the same springs.** The stylesheet carries PRESS and RELEASE as
+  `linear()` curves sampled from `src/core/motion.js` (`--vx-press-*`, `--vx-release-*`,
+  `--vx-slide-*`, `springCurve`), so a plain key goes down in about 170 ms at contact and comes back in about
+  270 ms with the same 14% carry past rest. Its side is a registered length (`--_lift`), so the
+  body follows the face. A mouse resting on a plain key raises it half a voxel: the body grows up
+  and to the left and the face stays under the pointer, so the hit box never moves. A plain switch
+  slides on SLIDE the same way. With less motion a plain key or switch changes state at once. `PORT=5989 node tools/feel.mjs` checks all of it.
 
 ## 7. Motion: building and breaking
 
@@ -223,6 +230,12 @@ Decide by how often it happens (from the site-craft rules):
 - A key plays two short local recordings of a Cherry MX Brown switch under a PBT cap. The downstroke
   lands on press and the lighter return lands on release. The enclosure voices both through a
   high shelf. Walnut softens the treble and alloy lifts it. Other cues use Web Audio synthesis.
+- **No two strokes sound alike.** Each press and release gets its own voice (`voice()` in
+  `src/core/sound.js`): up to 2.5% of pitch and 12% of level at random, never within a hair of
+  the stroke before. The cap the hand touched sets the register: a 44 px key is the recording
+  as made, a small cap rings up to 7% higher and a wide one up to 10% lower and a little louder.
+  A dial's detent is always a small, light stop. `cue('press', { mass })` names the mass (square
+  voxels) where no hand touched anything.
 - Cues: `press`, `release`, `slide`, `tick` (a slider step), `build`, `break`, `poke`, `done`,
   `failed`. The picture changes first; the sound follows in the same frame.
 - A hidden tab is silent.
@@ -243,6 +256,10 @@ Decide by how often it happens (from the site-craft rules):
 - The canvas is `aria-hidden`, takes no pointer events and is never focusable.
 - Focus is a 2 px outline with an offset, in enamel by day and signal by night, on every focusable
   part, using `:focus-visible`. A focused field also changes its walls to enamel.
+- A live key's ring frames its whole solid, not its face alone: it reaches half the key's height
+  (`--vx-face-z`, set as the part is built) up and to the left of the face, where the projection
+  draws the body, and a voxel and a half past the face on the other sides. In forced colours the
+  key's own outline returns. A plain key's ring frames its side band the same way.
 - Keyboard-driven changes do not animate: arrow keys in tabs and menus move at once.
 - Hit targets are at least 11 voxels (44 px) tall.
 - Lettering in voxels (the sign, and headings set with `data-vx-board="none"`) keeps its text in
@@ -281,6 +298,15 @@ Decide by how often it happens (from the site-craft rules):
 
 - If the renderer loses its device and can get no other, it says so (`onfail`) and every part
   goes back to plain CSS at once, with its behaviour. Nothing is ever left live without a face.
+- **A plain key looks like its voxel one.** The Ridgeline print is drawn plain from the same
+  horizon the voxels sample (`ridgeline` in `src/looks/fittings.js`), as a low range along the
+  foot inside the cap's lip, clear of the legend. A link made a key keeps the key's legend colour
+  whatever the page says about links.
+- **A plain slide switch in the lit look is the voxel one.** A steel-edged slate bezel round a dark slot whose far
+  walls catch the light, and a seven-voxel ivory paddle with a raised crest and a grip line. It
+  travels seven voxels on the SLIDE spring (`--vx-slide-*`), and when it is on the trench behind
+  it is full of light. An instrument's hardware colours (`hardware` in `src/looks/fittings.js`)
+  are the voxels' and the plain version's alike (`--vx-hw-*`).
 - **Behaviour without voxels.** Tabs, a dialog's `data-vx-close` buttons and a menu need script
   to behave. `adopt()` wires that behaviour when the page is plain too (it draws nothing), so a
   plain page needs no handlers of its own. With no script at all, tabs are buttons that do

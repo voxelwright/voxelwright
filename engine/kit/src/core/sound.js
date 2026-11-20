@@ -1,7 +1,7 @@
 // Mechanical press/release recordings; other cues are synthesized with Web Audio.
 // The output context opens on user activation. Restored consent can warm the recordings silently. Sounds are short, a little different each time, and quieter than speech.
 
-let ctx = null, master = null, switchFilter = null, on = false;
+let ctx = null, master = null, switchFilter = null, on = false, listening = false;
 let treble = 0;
 
 // Voice the recorded impact for the enclosure. Keep the attack time and the
@@ -31,17 +31,52 @@ export function prepareSwitchSound() {
   if (Offline) void loadSamples(new Offline(1, 1, 44100));
 }
 
-function mechanical(name, at) {
+// A real switch never clicks twice the same, and a big cap sounds lower and fuller than a
+// small one. Each stroke gets its own voice: the cap's mass (the face it was pressed on, in
+// square voxels at 4 px; a 44 px key about 300) sets its pitch and weight, and a little jitter
+// in both keeps a run of presses from ringing like a machine gun. Pure, so it can be checked.
+const MASS = 300;
+let lastJitter = 0;
+export function voice(mass = MASS, random = Math.random) {
+  const weight = Math.log2(Math.max(16, mass) / MASS);
+  const pitch = Math.min(1.07, Math.max(0.9, 1 - 0.035 * weight));
+  const level = Math.min(1.12, Math.max(0.88, 1 + 0.05 * weight));
+  // the jitter steps away from the last stroke's, so two strokes in a row always differ
+  let jitter = (random() - 0.5) * 0.05;
+  if (Math.abs(jitter - lastJitter) < 0.008) jitter = lastJitter + (lastJitter > 0 ? -0.012 : 0.012);
+  lastJitter = jitter;
+  return { rate: pitch * (1 + jitter), gain: level * (0.88 + random() * 0.12) };
+}
+
+// What the hand last touched, so a cue knows how heavy a cap it is sounding. Any control
+// that cues press or release is covered without passing anything: the contact is read here.
+let contact = null;
+const CONTROL = 'button, [role="button"], [role="tab"], [role="switch"], [role="option"], [role^="menuitem"], label, a, input, select, summary';
+function touched(e) {
+  const el = e.target instanceof Element ? e.target.closest(CONTROL) ?? e.target : null;
+  contact = el && { el, at: performance.now() };
+}
+function massOf(opts) {
+  if (opts && typeof opts.mass === 'number') return opts.mass;
+  const el = contact && performance.now() - contact.at < 1500 ? contact.el : document.activeElement;
+  if (!el || el === document.body || !el.isConnected) return MASS;
+  return (el.offsetWidth * el.offsetHeight) / 16 || MASS;
+}
+
+function mechanical(name, at, mass) {
   const buffer = samples.get(name);
+  const { rate, gain } = voice(mass);
   if (!buffer) {
     // Contact is immediate even during a cold load. Never replay it when the buffer arrives.
-    tock(at, name === 'press' ? 175 : 320, .03, .18);
+    tock(at, (name === 'press' ? 175 : 320) * rate, .03, .18 * gain);
     return;
   }
-  const source = ctx.createBufferSource();
+  const source = ctx.createBufferSource(), level = ctx.createGain();
   source.buffer = buffer;
-  source.connect(switchFilter);
-  source.onended = () => source.disconnect();
+  source.playbackRate.value = rate;
+  level.gain.value = gain;
+  source.connect(level).connect(switchFilter);
+  source.onended = () => { source.disconnect(); level.disconnect(); };
   source.start(at);
 }
 
@@ -85,11 +120,12 @@ function grit(at, dur = 0.12, gain = 0.2) {
 }
 
 const CUES = {
-  press: (t) => mechanical('press', t),
-  release: (t) => mechanical('release', t),
+  press: (t, mass) => mechanical('press', t, mass),
+  release: (t, mass) => mechanical('release', t, mass),
   slide: (t) => { tock(t, 240, 0.05, 0.35, 0.7); tock(t + 0.11, 330, 0.05, 0.3, 0.8); },
   tick: (t) => tock(t, 760, 0.025, 0.14, 0.9),
-  detent: (t) => samples.has('release') ? mechanical('release', t) : CUES.tick(t),
+  // a detent is a small, light stop: always the same light mass, still never twice the same
+  detent: (t) => samples.has('release') ? mechanical('release', t, MASS / 4) : CUES.tick(t),
   build: (t) => { for (let i = 0; i < 9; i++) tock(t + 0.03 + i * 0.04 * (1 - i * 0.04), 420 + i * 55, 0.035, 0.16, 0.85); },
   break: (t) => { grit(t, 0.22, 0.3); for (let i = 0; i < 6; i++) tock(t + i * 0.03, 520 - i * 50, 0.04, 0.16, 0.7); },
   poke: (t) => { grit(t, 0.1, 0.22); tock(t, 150, 0.09, 0.5, 0.5); },
@@ -101,6 +137,11 @@ const CUES = {
 export function sound(enable) {
   if (enable === undefined) return on;
   on = !!enable;
+  if (on && !listening) {
+    listening = true;
+    addEventListener('pointerdown', touched, { capture: true, passive: true });
+    addEventListener('keydown', touched, { capture: true, passive: true });
+  }
   if (on && ensure()) {
     master.gain.setValueAtTime(0.32, ctx.currentTime);
     if (ctx.state === 'suspended') resuming = ctx.resume().catch(() => {});
@@ -112,16 +153,20 @@ export function sound(enable) {
   return on;
 }
 
-/** Play a cue: press, release, slide, tick, build, break, poke, done, failed. Silent unless on. */
-export function cue(name) {
+/**
+ * Play a cue: press, release, slide, tick, build, break, poke, done, failed. Silent unless on.
+ * A press or release is voiced for the cap the hand touched; { mass } (square voxels) says it.
+ */
+export function cue(name, opts) {
   const fn = CUES[name];
   if (!on || !ctx || !fn || document.hidden) return;
-  if (ctx.state === 'running') return fn(ctx.currentTime + 0.001);
+  const mass = name === 'press' || name === 'release' ? massOf(opts) : undefined;
+  if (ctx.state === 'running') return fn(ctx.currentTime + 0.001, mass);
   if (ctx.state !== 'suspended' || !resuming) return;
   // WebKit can unlock output just after dispatching the first tap.
   const contact = performance.now(), revision = muteRevision;
   resuming.then(() => {
     if (ctx.state === 'running' && on && revision === muteRevision && !document.hidden && performance.now() - contact < 120)
-      fn(ctx.currentTime + 0.001);
+      fn(ctx.currentTime + 0.001, mass);
   });
 }

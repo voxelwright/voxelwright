@@ -24,7 +24,8 @@ await p.keyboard.press('Home');
 
 // a focus ring you can see
 await p.focus('#kit .vx-button'); await p.keyboard.press('Shift+Tab'); await p.keyboard.press('Tab');
-const ring = await p.evaluate(() => { const s = getComputedStyle(document.activeElement); return s.outlineStyle + ' ' + s.outlineWidth + ' ' + s.outlineColor; });
+// live, a key's ring is drawn round its whole solid by ::after; the element's own outline is clear
+const ring = await p.evaluate(() => { const el = document.activeElement, own = getComputedStyle(el), s = own.outlineColor === 'rgba(0, 0, 0, 0)' ? getComputedStyle(el, '::after') : own; return s.outlineStyle + ' ' + s.outlineWidth + ' ' + s.outlineColor; });
 check('a focused button has a ring', /solid 2px/.test(ring), ring);
 await p.locator('#kit .vx-button').first().scrollIntoViewIfNeeded();
 await p.screenshot({ path: 'shots/keys-focus.png', clip: await p.evaluate(() => { const r = document.activeElement.getBoundingClientRect(); return { x: Math.max(0, r.x - 40), y: Math.max(0, r.y - 30), width: r.width + 260, height: r.height + 60 }; }) });

@@ -370,12 +370,13 @@ const surface = {
     body.slab(0, 0, 2, W, H, top - 4, 'chalk', r);
     ring(body, 0, 0, top - 3, W, H, 'gasket', r);
     body.slab(1, 1, top - 2, W - 2, H - 2, 2, 'chalk', r);
-    if (live.look.tooling && large) {
-      // Removable reading plate inside the case. The light pipe is let into the
-      // case edge, outside the plate, leaving a clear view of its four walls.
+    if (live.look.tooling && W >= 16 && H >= 12) {
+      // Removable reading plate inside the case: words on an instrument's card lie on the plate,
+      // whatever the card's size (the plain version paints the same plate), so they keep their
+      // contrast by day and at night. The light pipe is let into a large case's edge, outside
+      // the plate, leaving a clear view of its four walls.
       body.slab(4, 4, top - 1, W - 8, H - 8, 1, 'panel', 1);
-      const rail = m.part('pipe');
-      rail.box(8, H - 1, top - 3, W - 16, 1, 1, 'backlight');
+      if (large) m.part('pipe').box(8, H - 1, top - 3, W - 16, 1, 1, 'backlight');
     }
     if (el.dataset.vxLight) ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el), r);
     if (wide && el.dataset.vxBolts !== 'none') {

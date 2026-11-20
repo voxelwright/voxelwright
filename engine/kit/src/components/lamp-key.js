@@ -4,6 +4,7 @@
 import { wrapLabel } from './util.js';
 import { button } from './button.js';
 import { hole } from '../core/light.js';
+import { ridgeline } from '../looks/fittings.js';
 import { defineMaterial } from '../core/materials.js';
 
 for (const [name, day] of Object.entries({
@@ -40,7 +41,7 @@ function mould(live, cap, x, y, w, h, rise) {
       if (z !== rise - 1) continue;
       const pilotColumn = xx === left + Math.round((right - left) * 0.2);
       const pilotRow = Math.min(bottom, Math.max(top, rear + Math.round((front - rear) * 0.14)));
-      const horizon = 0.82 + 0.09 * Math.sin((origin + xx) * 0.13) + 0.05 * Math.sin((origin + xx) * 0.31);
+      const horizon = ridgeline.lamp(origin + xx);
       for (let yy = top; yy <= bottom; yy++) {
         const v = (yy - rear) / Math.max(1, front - rear);
         const dish = Math.round(edge ** 3 + 0.09 * v);
