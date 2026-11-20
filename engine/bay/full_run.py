@@ -132,6 +132,7 @@ def build(args, lock_fd):
             "street_detail.py",
             "street_detail_sources.py",
             "street_furniture.py",
+            "surface_detail.py",
         )
     ]
     recipe += [args.pilot]
@@ -188,7 +189,7 @@ def build(args, lock_fd):
     import street_graph, street_sources
 
     from appearance import enhance
-    import street_detail, street_detail_sources
+    import street_detail, street_detail_sources, surface_detail
 
     def keep(log, name):
         dest = root / "inputs" / (name + ".zip")
@@ -272,6 +273,7 @@ def build(args, lock_fd):
             root / "inputs" / (name + ".detail.json.gz"),
             packs / "graph" / (name + ".json"),
         )
+        stats.update(surface_detail.apply(pack, root / "inputs" / (name + ".zip")))
         report = root / "audits" / (name + ".json")
         report.parent.mkdir(exist_ok=True)
         save(report, {"square": name, "counts": stats, **audit})

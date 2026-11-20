@@ -297,6 +297,10 @@ impl Pack {
 
     /// The ground's top cell at a column: between the four samples round it.
     fn ground(&self, x: i32, z: i32) -> i32 {
+        (self.ground_height(x, z) + 0.5).floor() as i32
+    }
+
+    fn ground_height(&self, x: i32, z: i32) -> f32 {
         let (fx, fz) = ((x - self.gx0) as f32 / self.gstep as f32, (z - self.gz0) as f32 / self.gstep as f32);
         let (i, j) = ((fx as i32).clamp(0, self.gw - 2), (fz as i32).clamp(0, self.gw - 2));
         let (u, v) = ((fx - i as f32).clamp(0.0, 1.0), (fz - j as f32).clamp(0.0, 1.0));
@@ -304,9 +308,9 @@ impl Pack {
         let (a, b, c, d) = (s(i, j), s(i + 1, j), s(i, j + 1), s(i + 1, j + 1));
         // Water is level: beside the shore the bed does not climb the bank a sample early.
         if a.min(b).min(c).min(d) <= BED as f32 {
-            return s(i + (u > 0.5) as i32, j + (v > 0.5) as i32) as i32;
+            return s(i + (u > 0.5) as i32, j + (v > 0.5) as i32);
         }
-        (a + (b - a) * u + (c + (d - c) * u - (a + (b - a) * u)) * v + 0.5).floor() as i32
+        a + (b - a) * u + (c + (d - c) * u - (a + (b - a) * u)) * v
     }
 
     /// The sample of what stands that a column is in.
@@ -353,7 +357,9 @@ impl Pack {
         let (u, v) = ((fx - i as f32).clamp(0.0, 1.0), (fz - j as f32).clamp(0.0, 1.0));
         let s = |i: i32, j: i32| (self.class[(j * self.tw + i) as usize] & 7 == ROAD) as i32 as f32;
         let road = s(i, j) + (s(i + 1, j) - s(i, j)) * u + (s(i, j + 1) + (s(i + 1, j + 1) - s(i, j + 1)) * u - (s(i, j) + (s(i + 1, j) - s(i, j)) * u)) * v;
-        (c & !7 | if road > 0.5 { ROAD } else { PAVEMENT }, tint)
+        let surface = if road > 0.5 { ROAD } else { PAVEMENT };
+        let flags = if surface == sort { c & !7 } else { c & !135 };
+        (flags | surface, tint)
     }
 
     /// The building a column is in, or the nearest one it is just outside of, with where on its outline.
@@ -594,6 +600,7 @@ impl FixtureSpan {
 
 struct Column<'a> {
     g: i32,
+    road_top4: Option<i32>,
     /// The ground's top cell's kind, and how many cells of it stand over the ground (a pavement's kerb).
     ground: Kind,
     kerb: i32,
@@ -615,13 +622,16 @@ enum What<'a> {
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { g: BED, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
+        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
     };
-    let g = p.ground(x, z);
+    let ground_height = p.ground_height(x, z);
+    let g = (ground_height + 0.5).floor() as i32;
     let (class, tint) = p.surface(x, z);
+    let road_top4 = (size == 1 && class & 135 == 128).then(|| ((ground_height+1.0)*4.0).round() as i32);
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
+        ROAD if class & 128 != 0 && (1..=15).contains(&tint) => (kind(ASPHALT, tint), 0),
         ROAD => (kind(ASPHALT, OWN), 0),
         PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
@@ -682,7 +692,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         },
         _ => What::Open,
     };
-    Column { g, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
+    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
 }
 
 /// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
@@ -829,17 +839,34 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
     ((lo - DEEP).div_euclid(size), (hi + 4).div_euclid(size))
 }
 
+/// At eye level, carry the interpolated road grade into the top 10 cm cell.
+fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
+    let Some(top4) = c.road_top4 else { return };
+    let y = top4.div_euclid(4);
+    let fill = top4.rem_euclid(4);
+    if fill == 0 || y < low_y || y >= low_y + SIDE as i32 ||
+        c.fixtures.iter().any(|s| s.low <= y && y <= s.high) { return; }
+    let (lo, hi, kind) = if y <= c.g { (fill, 4, 0) } else { (0, fill, c.ground) };
+    for sy in lo..hi {
+        for sz in 0..4 {
+            rows.push(Run { x0:x*4, x1:x*4+4, y:y*4+sy, z:z*4+sz, kind });
+        }
+    }
+}
+
 /// Makes one sector of the Bay in `s`, at the coarseness `s` was started with.
 pub fn make(s: &mut Scratch) {
     let (k, size) = (s.lod, 1i32 << s.lod);
     let side = SIDE as i32;
     let mut cables = Vec::new();
+    let mut road = Vec::new();
     PACKS.with_borrow(|packs| {
         for cz in 0..side {
             for cx in 0..side {
                 let (x, z) = (((s.low[0] + cx) << k) + size / 2, ((s.low[2] + cz) << k) + size / 2);
                 let mut c = column(packs, x, z, size);
                 if s.finer && k == 0 {
+                    grade_rows(&c, x, z, s.low[1], &mut road);
                     c.fixtures.retain(|fixture| {
                         if fixture.rod[6] > 3 { return true; }
                         fixture.cable_rows(x,z,s.low[1],&mut cables);
@@ -855,6 +882,7 @@ pub fn make(s: &mut Scratch) {
             }
         }
     });
+    if !road.is_empty() { s.fine_runs(&road,2); }
     if !cables.is_empty() { s.fine_runs(&cables,2); }
 }
 
@@ -915,6 +943,23 @@ mod tests {
         }
         b.extend(std::iter::repeat_n(300i16.to_le_bytes(), 25).flatten());
         b
+    }
+
+    #[test]
+    fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
+        let ground = kind(ASPHALT, grey(5));
+        let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
+            what: What::Open, fixtures: Vec::new() };
+        let mut rows = Vec::new();
+        grade_rows(&c, 4, 2, 0, &mut rows);
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|r| r.y == 16 && r.kind == ground && r.x0 == 16 && r.x1 == 20));
+        c.g = -2;
+        c.road_top4 = Some(-5);
+        rows.clear();
+        grade_rows(&c, 4, 2, -64, &mut rows);
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|r| r.y == -5 && r.kind == 0));
     }
 
     #[test]
