@@ -5,6 +5,7 @@ import json
 import math
 import struct
 import time
+from functools import lru_cache
 from pathlib import Path
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -68,7 +69,7 @@ def exposure(pack, x, z, eye, rot, img):
     return float(np.clip(np.median(daylight / observed), 0.92, 2.0))
 
 
-def project(pack, catalog, center):
+def project(pack, catalog, center, photos=None, radius=RADIUS):
     began = time.monotonic()
     p = read(pack)
     table = (palette()[1:] * 255).astype("f4")
@@ -97,7 +98,7 @@ def project(pack, catalog, center):
         i, j = np.rint([(x - p["gx0"]) / 10, (z - p["gz0"]) / 10]).astype(int)
         if not (0 <= i < p["gw"] and 0 <= j < p["gw"]):
             continue
-        with Image.open(catalog.parent / (str(meta["id"]) + ".jpg")) as img:
+        with Image.open((photos or catalog.parent) / (str(meta["id"]) + ".jpg")) as img:
             rgb = np.array(img.convert("RGB"))
         eye = int(p["ground"][j, i]) + 25
         rot = rotation(np.array(meta["computed_rotation"]))
@@ -121,7 +122,7 @@ def project(pack, catalog, center):
             if length < 18 or length > 1500:
                 continue
             nearest = np.clip(((cx - ax) * dx + (cz - az) * dz) / length**2, 0, 1)
-            if math.hypot(ax + nearest * dx - cx, az + nearest * dz - cz) > RADIUS * 10:
+            if math.hypot(ax + nearest * dx - cx, az + nearest * dz - cz) > radius * 10:
                 continue
             cols = math.ceil(length / STEP)
             u = np.minimum(np.arange(cols) * STEP + STEP / 2, length - 0.1) / length
@@ -161,8 +162,8 @@ def project(pack, catalog, center):
                     (incidence > 0.47)
                     & (dist > 32)
                     & (dist < 720)
-                    & (np.abs(x - cx) <= RADIUS * 10)
-                    & (np.abs(z - cz) <= RADIUS * 10)
+                    & (np.abs(x - cx) <= radius * 10)
+                    & (np.abs(z - cz) <= radius * 10)
                 )
                 if not allowed.any():
                     continue
@@ -258,6 +259,31 @@ def load_faces(paths):
                     )
                 faces[key] = record
     return faces
+
+
+class FaceLibrary:
+    """Index compact wall IDs once. Only decompress records needed by the current tile."""
+
+    def __init__(self, paths):
+        self.owners = {}
+        for path in paths:
+            with ZipFile(path) as bundle:
+                for name in bundle.namelist():
+                    key = tuple(map(int, name.split(",")))
+                    if key in self.owners:
+                        raise ValueError(f"multiple owners for wall {key}")
+                    self.owners[key] = path, name
+        self.open_zip = lru_cache(maxsize=8)(ZipFile)
+
+    def __bool__(self):
+        return bool(self.owners)
+
+    def __contains__(self, key):
+        return key in self.owners
+
+    def __getitem__(self, key):
+        path, name = self.owners[key]
+        return self.open_zip(path).read(name)
 
 
 def chunk(rows, vertices, faces):
