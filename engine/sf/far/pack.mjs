@@ -36,8 +36,10 @@ const out = arg('out', join(FAR, 'release'))
 const placeDir = arg('place', join(homedir(), '.village', 'engine', 'landing', 'ina', 'home', '.village', 'engine', 'place', 'ina-all'))
 const squaresDir = arg('squares', join(FAR, 'squares'))
 const heroesDir = arg('heroes', join(FAR, 'heroes'))
-// The wedge (landing/ina/place.py): its apex in UTM, the bearings it lies between, how far it reaches (metres).
-const [we, wn, wfrom, wto, wfar] = arg('wedge', '551634.8,4183590.6,87,152,3300').split(',').map(Number)
+// The wedge (landing/ina/place.py): its apex in UTM, the bearings it lies between, how far it reaches (metres). The
+// apex is the place's own: matte.py measures its wedge from the solved camera (its index's `camera`), not the
+// photograph's geotag, and between the two a sliver along the edge had neither the place's faces nor the squares'.
+let [we, wn, wfrom, wto, wfar] = arg('wedge', '551634.8,4183590.6,87,152,3300').split(',').map(Number)
 const E0 = 500_000, N0 = 4_250_000
 
 /** A tile's side, in 10 cm cells: 500 m. */
@@ -66,7 +68,11 @@ const read = (dir, owner) => {
   if (owner === 'place') meta.sun = index.sun
   if (index.credit && !meta.credits.includes(index.credit)) meta.credits.push(index.credit)
 }
-if (existsSync(join(placeDir, 'index.json'))) read(placeDir, 'place')
+if (existsSync(join(placeDir, 'index.json'))) {
+  read(placeDir, 'place')
+  const at = JSON.parse(readFileSync(join(placeDir, 'index.json'), 'utf8')).camera?.at
+  if (at && !arg('wedge', null)) { we = E0 + at[0]; wn = N0 - at[2] }
+}
 const squares = existsSync(squaresDir) ? readdirSync(squaresDir).filter((d) => existsSync(join(squaresDir, d, 'index.json'))).sort() : []
 for (const d of squares) read(join(squaresDir, d), 'squares')
 // Landmarks by rule (sf/far/heroes.mjs): drawn whoever owns the tile; where a rule owns its place (heroes.rs `owns`),
@@ -102,7 +108,7 @@ for (const [key, list] of by) {
 const takes = (key, from) => from === 'hero' || owner.get(key) === from || (owner.get(key) === 'both' && from !== 'hero')
 /** What a tile is made from: its owner's blocks that may hold its faces. */
 const sourcesOf = (key) => by.get(key).filter((i) => takes(key, blocks[i].owner))
-const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\n${ruledTiles.has(key) ? heroes.rules : ''}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
+const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}${owner.get(key) === 'both' ? ` ${we} ${wn} ${wfrom} ${wto} ${wfar}` : ''}\n${ruledTiles.has(key) ? heroes.rules : ''}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
 
 // ── What changed since the last packing ──
 const before = existsSync(join(out, 'far.json')) && existsSync(join(out, 'far.state.json')) ? { ...JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')), sources: JSON.parse(readFileSync(join(out, 'far.state.json'), 'utf8')) } : null
