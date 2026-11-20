@@ -19,7 +19,7 @@ import numpy as np
 from PIL import Image, ImageChops, ImageDraw
 import earth
 
-PACKS = os.path.expanduser('~/.village/engine/bay/packs')
+PACKS = os.path.join(os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay')), 'packs')
 NONE, BED, WATER = -32768, -30, 5
 FRAME = '10n4250'  # the frame the squares are baked in (bake.py: zone 10 north, z south from 4,250 km)
 
@@ -56,8 +56,8 @@ def window(a, origin, step, x0, z0, n, fill):
     return out
 
 
-def main():
-    squares = [read(p) for p in sorted(glob.glob(f'{PACKS}/*.bay'))]
+def cut(paths, wanted=None):
+    squares = [read(p) for p in sorted(paths)]
     # One picture of everything baked, at half a metre and at a metre, from the frame's cell (X0, Z0).
     X0, Z0 = min(p['gx0'] for p in squares), min(p['gz0'] for p in squares)
     X1, Z1 = max(p['gx0'] + (p['gw'] - 1) * 10 for p in squares), max(p['gz0'] + (p['gw'] - 1) * 10 for p in squares)
@@ -79,7 +79,7 @@ def main():
     # Where a building stands and its wall's colour, at half a metre: for the tiles that hold no outlines.
     mass = Image.new('I', (W, H), 0)
     for verts, row in buildings:
-        one, ring = Image.new('1', (W, H), 0), []
+        ring = []
         lo = [min(v[0] for v in verts), min(v[1] for v in verts)]
         box = [(lo[0] - X0) // 5 - 1, (lo[1] - Z0) // 5 - 1, (max(v[0] for v in verts) - X0) // 5 + 2, (max(v[1] for v in verts) - Z0) // 5 + 2]
         box = [max(box[0], 0), max(box[1], 0), min(box[2], W), min(box[3], H)]
@@ -99,15 +99,14 @@ def main():
     mass = np.asarray(mass)
 
     index = {'levels': [{'size': l[0], 'gstep': l[1]} for l in earth.LEVELS], 'tiles': [[], [], []], 'squares': [os.path.basename(p)[:-4] for p in sorted(glob.glob(f'{PACKS}/*.bay'))]}
-    total = [0, 0, 0]
     frame = earth.Frame(FRAME)
     for level, (size, gstep, tstep, margin, _) in enumerate(earth.LEVELS):
         os.makedirs(f'{PACKS}/tiles/{level}', exist_ok=True)
-        for old in glob.glob(f'{PACKS}/tiles/{level}/*.bay'):
-            os.remove(old)
         k = tstep // 5
         for tz in range(Z0 // size, (Z1 - 1) // size + 1):
             for tx in range(X0 // size, (X1 - 1) // size + 1):
+                if wanted is not None and (level, tx, tz) not in wanted:
+                    continue
                 x0, z0 = tx * size, tz * size
                 gw, tw = size // gstep + 1, (size + 2 * margin) // tstep
                 fine = lambda a, fill: window(a, (X0, Z0), 5, x0 - margin, z0 - margin, tw * k, fill).reshape(tw, k, tw, k).swapaxes(1, 2).reshape(tw, tw, k * k)
@@ -138,12 +137,20 @@ def main():
                     rows.append((len(verts), len(v), *r))
                     verts += v
                 blob = earth.pack(x0, z0, size, gstep, g, tstep, x0 - margin, z0 - margin, t, c, n, walls, rows, verts, stems)
-                open(f'{PACKS}/tiles/{level}/{tx}_{tz}.bay', 'wb').write(blob)
+                path = f'{PACKS}/tiles/{level}/{tx}_{tz}.bay'
+                with open(path + '.part', 'wb') as f:
+                    f.write(blob)
+                os.replace(path + '.part', path)
                 index['tiles'][level].append([tx, tz])
-                total[level] += len(blob)
-    json.dump(index, open(f'{PACKS}/tiles/index.json', 'w'))
-    for level in range(3):
-        print(f'level {level}: {len(index["tiles"][level])} tiles, {total[level] / 1e6:.1f} MB')
+    return index
 
 
-main()
+if __name__ == '__main__':
+    index = cut(glob.glob(f'{PACKS}/*.bay'))
+    path = f'{PACKS}/tiles/index.json'
+    with open(path + '.part', 'w') as f:
+        json.dump(index, f)
+    os.replace(path + '.part', path)
+    for level, keys in enumerate(index['tiles']):
+        size = sum(os.path.getsize(f'{PACKS}/tiles/{level}/{x}_{z}.bay') for x, z in keys)
+        print(f'level {level}: {len(keys)} tiles, {size / 1e6:.1f} MB')
