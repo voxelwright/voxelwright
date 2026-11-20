@@ -1214,15 +1214,19 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   if (ground && faced && hit.level <= 1u && (hit.kind & 64u) == 0u) {
     let c = hit.cell - lvh.cells;
     let up = vec3i(0, 1, 0);
-    // A riser is on a slope where the ground behind it rises higher (a kerb's has the pavement level behind it); a
-    // tread is where ground beside it stands a step or three higher (a pavement's wall beside it stands higher yet).
+    // Only where the ground rises a cell a cell or more for two cells: a riser with the ground behind it rising so (a
+    // kerb has the pavement level behind it), a tread with ground beside it rising so (a wall beside a pavement stands
+    // higher yet). A gentler slope is lit flat, its risers as its treads (above): lit on the slope, the tread under
+    // each step of a lawn or a street stood out from the rest, a line at every step from 100 m.
     var step = false;
     if (abs(hit.n.y) < 0.5) {
-      step = solidAt(c - vec3i(hit.n) + up, hit.level);
+      let back = -vec3i(hit.n);
+      step = solidAt(c + back + up, hit.level) && solidAt(c + back * 2 + up * 2, hit.level);
     } else if (!solidAt(c + up, hit.level)) {
       let beside = array<vec3i, 4>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
       for (var i = 0u; i < 4u && !step; i++) {
-        step = solidAt(c + beside[i] + up, hit.level) && !solidAt(c + beside[i] + up * 4, hit.level);
+        step = solidAt(c + beside[i] + up, hit.level) && solidAt(c + beside[i] * 2 + up * 2, hit.level)
+          && !solidAt(c + beside[i] + up * 4, hit.level);
       }
     }
     if (step) {

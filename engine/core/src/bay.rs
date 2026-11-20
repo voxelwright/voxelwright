@@ -575,8 +575,8 @@ impl Pack {
 
     /// How high a front's wall stands near where a column meets it (`on`, with `inward` a unit step into the
     /// building), where no eave was surveyed: the middle of five readings of the roof 0.4 m in from the outline,
-    /// 0.6 m apart along it. Read once a column, a corniced front's cornice stood in teeth along the lidar's
-    /// returns, battlements down every street of the Outer Sunset (#450).
+    /// 0.6 m apart along it. Read once a column, a corniced front's cornice followed the lidar's returns up and
+    /// down in teeth (#450); 17% of the corniced street edges in the panel's tiles have no surveyed eave.
     fn eave_near(&self, on: [f32; 2], inward: [f32; 2]) -> Option<i32> {
         let mut seen: Vec<i32> = [-12.0f32, -6.0, 0.0, 6.0, 12.0].iter().filter_map(|&k| {
             self.top((on[0] + inward[0] * 4.0 - inward[1] * k) as i32, (on[1] + inward[1] * 4.0 + inward[0] * k) as i32)
