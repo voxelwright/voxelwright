@@ -132,7 +132,10 @@ fn ours(in: Out) -> bool {
   if (z >= 1.0) { return dist >= reach; }
   let along = dot(in.seen, v.forward);
   let met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9);
-  if (dist < reach && met * dist / max(along, 1e-3) < reach) { return false; }
+  // Where the march met something on this look, and the reach there: a look that leaves the wedge for the cells, which
+  // are kept to 500 m, had drawn a wall beside the eye over the street they drew 300 m up it.
+  let metAt = in.seen * (met / max(along, 1e-3));
+  if (dist < reach && length(metAt) < reachAt(metAt, v.reach, v.wedge, v.bear)) { return false; }
   return along < met;
 }
 struct Drawn { @location(0) colour: vec4f }
