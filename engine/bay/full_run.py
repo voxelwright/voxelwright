@@ -19,7 +19,7 @@ from pathlib import Path
 
 from coverage import bounds, tile_keys
 import compact_store
-from street_furniture import verify_tile_tail
+from street_furniture import decode, encode, standing, verify_tile_tail
 
 HERE = Path(__file__).resolve().parent
 BAY = Path.home() / ".village/engine/bay"
@@ -47,6 +47,41 @@ def save(path, data):
     tmp.replace(path)
 
 
+# The fixture rule tiles are cut under. A state cut under another rule cuts its square tiles again.
+CUT_RULE = "sensed poles stand only at measured span ends (#450)"
+
+
+def body_length(h):
+    return (
+        64
+        + 2 * h[5] ** 2
+        + (4 + 2 * h[15]) * h[9] ** 2
+        + 24 * h[12]
+        + 12 * h[13]
+        + 16 * h[14]
+    )
+
+
+def standing_square(data):
+    """A baked square as the current fixture rule would draw it. Only its fixture tail can change."""
+    end = body_length(struct.unpack_from("<16i", data))
+    return data[:end] + encode(standing(decode(data[end:])))
+
+
+def tile_groups(keys):
+    groups = defaultdict(list)
+    for key, inputs in keys.items():
+        level, x, z = key
+        # Amortise rasterisation over locally adjacent tiles with identical input lists.
+        groups[
+            level,
+            x // 4 if level == 0 else x,
+            z // 4 if level == 0 else z,
+            tuple(inputs),
+        ].append(key)
+    return groups
+
+
 def verify(path, x, z, size, gstep, tstep, margin, walls):
     with path.open("rb") as f:
         h = struct.unpack("<16i", f.read(64))
@@ -68,20 +103,11 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
     )
     if h[:12] != expected or h[15] != walls or min(h[12:15]) < 0:
         raise ValueError(f"incorrect BAY1 header: {path}")
-    length = (
-        64
-        + 2 * h[5] ** 2
-        + (4 + 2 * walls) * h[9] ** 2
-        + 24 * h[12]
-        + 12 * h[13]
-        + 16 * h[14]
-    )
+    length = body_length(h)
     if path.stat().st_size < length:
         raise ValueError(f"truncated BAY1: {path}")
     with path.open("rb") as f:
         if path.stat().st_size > length:
-            from street_furniture import decode
-
             f.seek(length)
             if gstep == 10 and size == 2500:
                 verify_tile_tail(f.read(), h[13])
@@ -151,10 +177,27 @@ def build(args, lock_fd):
     state = (
         json.loads(statefile.read_text())
         if statefile.exists()
-        else {"recipe": recipe, "done": {}}
+        else {"recipe": recipe, "done": {}, "cutRule": CUT_RULE}
     )
     if state["recipe"] != recipe:
         raise SystemExit("recipe changed: use a fresh release directory")
+    groups = tile_groups(keys)
+    if state.get("cutRule") != CUT_RULE:
+        # Verified squares stay. Their fixtures reach the city only through level-0 tiles cut from them.
+        stale = {
+            f"tiles-{n}"
+            for n, (level, _, __, inputs) in enumerate(groups)
+            if level == 0 and inputs
+        }
+        state.setdefault("recuts", []).append(
+            dict(
+                at=time.time(),
+                previousRule=state.get("cutRule"),
+                groups=len(stale & set(state["done"])),
+            )
+        )
+        state["done"] = {k: v for k, v in state["done"].items() if k not in stale}
+        state["cutRule"] = CUT_RULE
     if not statefile.exists() and any(p.name != "build.lock" for p in root.iterdir()):
         raise SystemExit("choose an empty output directory for a new release")
     save(statefile, state)
@@ -410,39 +453,26 @@ def build(args, lock_fd):
         "tiles": [[], [], []],
         "sea": [[], [], []],
     }
-    groups = defaultdict(list)
-    for key, inputs in keys.items():
-        level, x, z = key
-        # Amortise rasterisation over locally adjacent tiles with identical input lists.
-        groups[
-            level,
-            x // 4 if level == 0 else x,
-            z // 4 if level == 0 else z,
-            tuple(inputs),
-        ].append(key)
-
     def group_output(log, level, inputs, group):
         size, gstep, tstep, margin, _ = earth.LEVELS[level]
         if inputs:
             paths = [packs / f"{name}.bay" for name in inputs]
-            if args.compact:
-                # The frozen cutter gets ordinary files for just this group. The build lock owns its scratch.
-                scratch = root / ".cut-work"
-                if scratch.exists():
-                    shutil.rmtree(scratch)
-                scratch.mkdir()
-                try:
-                    for path in paths:
-                        data = compact_store.read(path)
-                        expected = state["done"][path.stem][str(path.relative_to(root))]
-                        if hashlib.sha256(data).hexdigest() != expected:
-                            raise ValueError(f"cut contributor changed: {path.name}")
-                        (scratch / path.name).write_bytes(data)
-                    result = tiles.cut([scratch / p.name for p in paths], set(group))
-                finally:
-                    shutil.rmtree(scratch)
-            else:
-                result = tiles.cut(paths, set(group))
+            # The frozen cutter gets ordinary files for just this group, drawn under the current
+            # fixture rule. The build lock owns its scratch.
+            scratch = root / ".cut-work"
+            if scratch.exists():
+                shutil.rmtree(scratch)
+            scratch.mkdir()
+            try:
+                for path in paths:
+                    data = compact_store.read(path)
+                    expected = state["done"][path.stem][str(path.relative_to(root))]
+                    if hashlib.sha256(data).hexdigest() != expected:
+                        raise ValueError(f"cut contributor changed: {path.name}")
+                    (scratch / path.name).write_bytes(standing_square(data))
+                result = tiles.cut([scratch / p.name for p in paths], set(group))
+            finally:
+                shutil.rmtree(scratch)
             if {(level, x, z) for x, z in result["tiles"][level]} != set(group):
                 raise ValueError(f"incomplete tile group {group}")
         paths = []

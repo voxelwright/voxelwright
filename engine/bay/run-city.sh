@@ -25,7 +25,9 @@ start)
         /usr/bin/caffeinate -dimsu /bin/sh -ec '
             "$1" -u "$2/engine/bay/full_run.py" --compact --bake-source "$3/engine/bay" --output "$4"
             "$1" "$2/engine/sf/release.py" "$4" "$4/sf" --compact-store "$4/objects"
-        ' sf-bake "$bay/venv/bin/python" "$manager" "$runner" "$output"
+            # A submitted job is kept alive. Once the release is staged, leave instead of baking it again.
+            launchctl remove "$5"
+        ' sf-bake "$bay/venv/bin/python" "$manager" "$runner" "$output" "$label"
     ;;
 status)
     launchctl list "$label" || true
