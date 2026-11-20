@@ -119,7 +119,8 @@ if (staged) {
   if (!existsSync(join(staged, 'current.json'))) fail(`${staged} holds no current.json`)
   const named = JSON.parse(readFileSync(join(staged, 'current.json'), 'utf8'))
   cpSync(join(staged, 'current.json'), join(out, 'sf', 'current.json'))
-  cpSync(join(staged, dirname(named.manifest)), join(out, 'sf', dirname(named.manifest)), { recursive: true })
+  // Not what a run keeps beside it for itself (`.bay-store`, a link to its store of objects): only the release's files.
+  cpSync(join(staged, dirname(named.manifest)), join(out, 'sf', dirname(named.manifest)), { recursive: true, filter: (path) => !basename(path).startsWith('.') })
 } else {
   if (!existsSync(PYTHON)) fail(`${PYTHON} is missing: the Bay's Python environment (bay/README.md)`)
   const made = spawnSync(PYTHON, [join(root, 'sf', 'release.py'), from, join(out, 'sf'), ...(far ? ['--far', far] : [])], { encoding: 'utf8' })
