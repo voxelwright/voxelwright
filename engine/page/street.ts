@@ -1222,18 +1222,20 @@ export function street(o: {
     let tt = kept.get(left)
     if (tt) return tt
     const lights = cableLights ? lightsOf(l as (typeof tramLines)[number]) : [], out: number[] = []
-    let s = 0, v = CABLE_SPEED, tau = 0
+    let s = 0, v = CABLE_SPEED, tau = 0, braking: (typeof lights)[number] | null = null
     while (s < l.len && out.length < 40000) {
       out.push(s)
       // The nearest light ahead that holds the car at its line (red, or amber where it can stop): every one within
-      // reach, since two junctions may stand a few metres apart.
+      // reach, since two junctions may stand a few metres apart. Once it brakes for an amber it stops: asked again as
+      // it slows, the step it goes in a quarter second would have it run the light.
       let stop = Infinity
       for (const L of lights) {
         const d = L.s - s
         if (d < 0) continue
         if (d > 400) break
         const light = lightFor(junctionOf(L.node), L.dx, L.dz, left + tau)
-        if (light === 'red' || (light === 'amber' && d > (v * v) / (2 * CABLE_BRAKE))) { stop = d; break }
+        if (light === 'red' || (light === 'amber' && (braking === L || d > (v * v) / (2 * CABLE_BRAKE)))) { stop = d; braking = L; break }
+        if (braking === L) braking = null
       }
       // Gathers to the cable's speed, and brakes to stand at the line.
       const most = stop === Infinity ? CABLE_SPEED : Math.sqrt(2 * CABLE_BRAKE * Math.max(0, stop - 2))

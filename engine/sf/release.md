@@ -22,7 +22,7 @@ The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in me
 
 ## New street life or vehicles
 
-`--life` and `--cars` add the `life.py` and `cars.mjs` outputs as the `life` and `cars` objects, each with its producer's `index.json`. The life objects are one per square plus `transit`, the streetcar and cable car routes. When only these change, restage the pinned release with them and keep every other object:
+`--life` and `--cars` add the `life.py` and `cars.mjs` outputs as the `life` and `cars` objects, each with its producer's `index.json`. The life objects are one per square (with its signal heads) plus `transit`, the streetcar and cable car routes and the bus and trolleybus routes with their stops. When only these change, restage the pinned release with them and keep every other object:
 
 ```sh
 ~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --life <life dir> --cars <cars dir> - ~/.village/engine/bay/450-city-paint/sf
