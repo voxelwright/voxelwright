@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -23,7 +24,7 @@ def encode(data):
     ).encode()
 
 
-def generate(root, out, inventory_only=False, graph_dir=None):
+def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
     state = json.loads((root / "state.json").read_text())
@@ -68,6 +69,28 @@ def generate(root, out, inventory_only=False, graph_dir=None):
             s: record(source / (s + ".json"), f"graph/{s}.json", graph_dir is None)
             for s in names
         }
+    if far_index:
+        far = json.loads(far_index.read_text())
+        if far.get("version") != 1 or far["size"] != 5000 or far["bands"] != [4, 1, 0]:
+            raise ValueError("unsupported far inventory")
+        for key, bands in far["tiles"].items():
+            if (
+                not re.fullmatch(r"-?(?:0|[1-9][0-9]*)_-?(?:0|[1-9][0-9]*)", key)
+                or len(bands) != 3
+            ):
+                raise ValueError("invalid far tile key or bands")
+            for band, row in enumerate(bands):
+                if row is None:
+                    continue
+                path = f"far/{band}/{key}.far"
+                if (
+                    row["path"] != path
+                    or record(far_index.parent / path, path, False) != row
+                ):
+                    raise ValueError(f"invalid far object: {path}")
+        if far.get("credit"):
+            inventory["credits"] = [*CREDITS, far["credit"]]
+        inventory["far"] = far
     manifest = encode(inventory)
     digest = hashlib.sha256(manifest).hexdigest()
     dest = out / "releases" / digest
@@ -104,5 +127,8 @@ if __name__ == "__main__":
         type=Path,
         help="standalone graph output for the original pilot checkpoint",
     )
+    cli.add_argument(
+        "--far", type=Path, help="far/far.json listing and its sibling band directories"
+    )
     args = cli.parse_args()
-    generate(args.root, args.out, args.inventory_only, args.graphs)
+    generate(args.root, args.out, args.inventory_only, args.graphs, args.far)

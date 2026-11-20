@@ -54,6 +54,23 @@ def enhance(pack, archive, observations, graph):
         stats["roofCells"] = int(np.sum(use & (roof_cells != top)))
         top[use] = roof_cells[use].astype("<i2")
         del fine, heights, roof_cells
+        # A mapped sidewalk running at least six metres under one roof is evidence
+        # for a covered public frontage. Require sampled points inside its outline.
+        covered = Counter()
+        for pavement in network["pavements"]:
+            if pavement["kind"] != "sidewalk":
+                continue
+            a, b = np.array(pavement["line"], dtype=float)
+            length = np.linalg.norm(b - a)
+            if length < 10:
+                continue
+            for t in np.arange(5, length, 10):
+                x, z = a + (b - a) * t / length
+                i, j = int((x - h[10]) // 5), int((z - h[11]) // 5)
+                if 1 <= i < tw - 1 and 1 <= j < tw - 1:
+                    fid = ids[j, i]
+                    if fid and (ids[j - 1 : j + 2, i - 1 : i + 2] == fid).all():
+                        covered[int(fid)] += 1
 
         # Survey and imagery define the crown outline. Median of radial distances
         # limits contamination from neighbouring overhanging crowns.
@@ -138,8 +155,12 @@ def enhance(pack, archive, observations, graph):
                 )
         footprints = json.loads(src.read("footprints.geojson"))["features"]
         centers = []
-        for f in footprints:
+        footprint_ids = []
+        for fid, f in enumerate(footprints, 1):
             g = shape(f["geometry"])
+            footprint_ids.extend(
+                fid for part in getattr(g, "geoms", [g]) if not part.is_empty
+            )
             centers.extend(
                 part.representative_point()
                 for part in getattr(g, "geoms", [g])
@@ -195,6 +216,8 @@ def enhance(pack, archive, observations, graph):
                     stats[["", "shopfront", "garage", "loading", "lobby"][kind]] += 1
             vs = verts[row[0] : row[0] + row[1]]
             samples = []
+            paint_panels = []
+            recess = []
             start = 0
             for k, (x, z, flags) in enumerate(vs.tolist()):
                 end = vs[start if flags & 4 else k + 1]
@@ -250,11 +273,49 @@ def enhance(pack, archive, observations, graph):
                         & (pixels.mean(1) < 230)
                         & (pixels[:, 1] < 1.12 * np.maximum(pixels[:, 0], pixels[:, 2]))
                     )
+                    if (
+                        ok.sum() >= 10
+                        and np.max(np.std(pixels[ok], axis=0)) < 18
+                        and flags & 2
+                        and dist < 300
+                    ):
+                        paint_panels.append(np.median(pixels[ok], axis=0))
+                    # Compare the opening to the wall above it in this same exposure.
+                    if flags & 2 and covered[footprint_ids[building]] >= 6:
+                        low = pts.copy()
+                        low[:, 2] -= 25
+                        lv = low @ R.T
+                        lx = (
+                            (np.arctan2(lv[:, 0], lv[:, 2]) / (2 * np.pi) + 0.5)
+                            % 1
+                            * img.shape[1]
+                        ).astype(int)
+                        ly = (
+                            (
+                                0.5
+                                + np.arctan2(lv[:, 1], np.hypot(lv[:, 0], lv[:, 2]))
+                                / np.pi
+                            )
+                            * img.shape[0]
+                        ).astype(int)
+                        recess.append(
+                            float(np.median(img[ly.clip(0, img.shape[0] - 1), lx]))
+                            < 0.7 * float(np.median(pixels))
+                        )
                     if ok.sum() >= 6:
                         samples.append((id_, np.median(pixels[ok], axis=0)))
+            if recess and np.mean(recess) >= 0.65:
+                row[4] = (int(row[4]) & ~(7 << 20)) | 5 << 20
+                stats["arcade"] += 1
             if samples:
                 rgb = np.median([c for _, c in samples], axis=0)
-                if len({i for i, c in samples if np.linalg.norm(c - rgb) < 40}) >= 2:
+                agrees = (
+                    len({i for i, c in samples if np.linalg.norm(c - rgb) < 40}) >= 2
+                )
+                if not agrees and paint_panels:
+                    rgb = np.median(paint_panels, axis=0)
+                    agrees = all(np.linalg.norm(c - rgb) < 30 for c in paint_panels)
+                if agrees:
                     mat = (
                         8
                         if rgb[0] > rgb[1] * 1.35 and rgb[0] < 180

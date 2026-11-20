@@ -13,3 +13,9 @@ Run the following from the repository root, with the Bay Python environment. The
 ```sh
 ~/.village/engine/bay/venv/bin/python engine/sf/release.py ~/.village/engine/bay/pilot450/final-release /tmp/village-sf/sf --graphs engine/sf/pilot-graph
 ```
+
+## Optional far model
+
+Supply `--far /local/build/far.json` to include face objects in the pin. The far producer writes this v1 inventory beside its `far/<band>/<key>.far` objects. The generator checks each path, length and SHA-256, then includes the producer's inventory, LODs and credit in the same release digest.
+
+The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in metres. Each `far.tiles[x_z]` is a three-element array of object records or null. Each FAR1 object contains its section headers and face payload. Fetch coarse band 0 first and add finer bands toward the eye. Unlisted keys have no far coverage.

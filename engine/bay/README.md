@@ -1,18 +1,30 @@
 # Baking the San Francisco realm
 
-From the repository root on the bake Mac, start or resume the city and its horizon with
+On the bake Mac, start or resume the detached city job from this branch.
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/bay/full_run.py
+engine/bay/run-city.sh start
+engine/bay/run-city.sh status
 ```
 
-The run writes to `~/.village/engine/bay/sf-450-release/`. Allow roughly 12–16 hours and 20 GB free for a serial run. The pilot measurements and camera comparisons are on issue 450. The script has no deployment step.
+The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry.
 
-- `state.json` records the recipe and SHA-256 of each completed pack, names file and tile. Unbuilt work resumes after an interruption. A resumed run rechecks recorded hashes. Restore a changed file from a known copy, or start a fresh release with `--output NEW_DIRECTORY`. Use a new directory for a changed recipe.
-- `logs/<square>.log` records fetch and bake attempts. Raw inputs for a square are removed from this release's staging area after the pack and names pass verification. DEM sheets and the planet producer's existing source cache are reusable. The default `--free-gib 6` checks available space before each square, tile group and retry.
-- `--seed DIRECTORY` can point at existing packs. Only the six pack/name pairs matching `pilot-hashes.json` are adopted. The default points at the pilot on this Mac. Fresh bakes match lidar crowns to DataSF tree positions and apply recorded frontage observations by footprint vertex. The pilot's two original packs are preserved as measured.
-- `--pilot` limits the build to six squares and their blended tiles. To repeat the pilot in a fresh directory, use `--pilot --output ~/.village/engine/bay/sf-six`.
-- Once all tasks verify, `packs/tiles/index.json` lists the three tile levels, names files and known sea keys. Files in `packs/tiles/{0,1,2}/` are uncompressed BAY1. For static serving, publish that inventory with its release and have the player resolve sea locally. The current development page still asks its server for missing tiles.
+### Retained observations
+
+Each `inputs/<square>.zip` holds the six DataSF GeoJSON layers, NAIP RGB and NIR-first PNGs and Mapillary JPEGs with solved camera metadata. Frame coordinates are EPSG:26910. The north-west edge is in `frame.json`; columns run east and rows south. Each raster includes 16 m padding. Ground is a 1 m vertex grid in metres NAVD88. The quarter-metre pixel grids give absolute `top_mm` (int32, minimum for empty), `count`, `multi` (number of returns from multiple-return pulses), `intensity` (mean), and `footprint` (one-based source feature index, zero outside). Max-pool 2×2 tops for the cell bake. Keep fractional footprint coverage and missing returns when resampling for the face bake. The companion `<square>.json.gz` holds street and business observations. After verification, only the disposable raw staging square is removed.
+
+The six pilots total 0.781 GB. At their mean, 155 squares need 20.18 GB before packs, caches and tiles. Allow about 14 GB for those and additional room for the free-space reserve. The detailed measurements and initial time estimate are on #450.
+
+For a later square bake, supply the previous run's inputs to both seed options. The following rebuilds the six pilots and cuts their tiles. `--offline-inputs` requires retained square sources; planet tile generation uses its existing source cache.
+
+```sh
+bay="$HOME/.village/engine/bay"
+"$bay/venv/bin/python" engine/bay/full_run.py --pilot --offline-inputs \
+  --input-seed "$bay/sf-450-city/inputs" --street-seed "$bay/sf-450-city/inputs" \
+  --output "$bay/sf-six-rebake"
+```
+
+The six original pack and name pairs qualify as seeds only when they match the pilot checksums. The appearance pass runs on both seeded and newly built squares. For an offline rebuild from the archives alone, also pass `--seed /dev/null`. The full run writes a blended tile inventory, known sea keys, names and street graphs. See the [static release contract](../sf/release.md) and [street graph contract](../sf/streets.md).
 
 ## Coverage
 
@@ -22,7 +34,7 @@ The run writes to `~/.village/engine/bay/sf-450-release/`. Allow roughly 12–16
 
 ## Frontages and pictures
 
-The four pilot locations used individual Mapillary panoramas. To sample another selected frontage, supply one square pack, the place in frame metres and a local observations file. For example, the Financial District sample is at x=52580 and z=66743. `frontage.py` gets the Mapillary image-point tile for that place, selects nearby panoramas and samples a low band of visible walls. The output keeps colour indices and source image IDs. Photos stay beside the local observations. Inspect the result against a matched view before incorporating new observations into a release. The full run reuses the reviewed values in `pilot-frontages.json` and makes no citywide photo requests.
+The four pilot locations used individual Mapillary panoramas. To sample another selected frontage, supply one square pack, the place in frame metres and a local observations file. For example, the Financial District sample is at x=52580 and z=66743. `frontage.py` gets the Mapillary image-point tile for that place, selects nearby panoramas and samples a low band of visible walls. The output keeps colour indices and source image IDs. Photos stay beside the local observations. Inspect the result against a matched view before incorporating new observations into a release. The full run samples geographically distributed panoramas, takes visible wall colours where two cameras agree, estimates material and ground-floor use, filters roof returns and draws surveyed crowns and mapped street detail.
 
 To open the measured six-square build on this Mac, from `engine/` run
 

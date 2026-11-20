@@ -418,12 +418,14 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         return b.trim;
     }
     // A side that looks on nothing (a neighbour's wall, a light well) or is too short for a window is plain.
-    if p.looks & 1 == 0 || p.long < module {
+    if p.looks & 1 == 0 || (p.long < module && p.looks & 2 == 0) {
         return b.wall;
     }
     let (floor, fy) = (up.div_euclid(storey), up.rem_euclid(storey));
     let count = (p.long / module).floor().max(1.0);
-    let within = p.along - (p.long - count * module) / 2.0;
+    // A surveyed bay or curved street wall can comprise many edges shorter
+    // than a window module. Continue its spacing around the ring.
+    let within = if p.long < module { p.round.rem_euclid(module) } else { p.along - (p.long - count * module) / 2.0 };
     if within < 0.0 || within >= count * module {
         return b.wall;
     }
