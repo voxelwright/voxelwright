@@ -31,7 +31,7 @@ async function open({ width = 1180, plain = false, reduced = false, wait = 700 }
 const read = (p, id) => p.evaluate(async (id) => {
   const { MATERIALS } = await import('/kit/src/index.js');
   const fig = document.getElementById(id), win = fig.querySelector('.vx-chart-window'), table = fig.querySelector('table');
-  const vx = 4, wr = win.getBoundingClientRect();
+  const vx = parseFloat(getComputedStyle(win).getPropertyValue('--vx')), wr = win.getBoundingClientRect();
   const value = (c) => { const t = (c.dataset.vxValue ?? c.textContent).trim(); return t === '' ? null : Number(t); };
   const rows = [...table.tBodies[0].rows].map((r) => [...r.cells].slice(1).map(value));
   const ticks = [...fig.querySelectorAll('.vx-chart-y > span')].map((s) => { const r = s.getBoundingClientRect(); return { text: s.textContent, y: (r.top + r.height / 2 - wr.top) / vx }; });
@@ -96,9 +96,9 @@ for (const plain of [false, true]) {
     say(d.cols.every((c) => c.light === null || c.light === (c.series ? 'light-stop' : 'light-go')), `${tag}: went out is on the green light, failed on the red`);
     const sun = d.cols.filter((c) => c.place === 6);
     say(sun.every((c) => c.litRows === 0 && c.studs > 0), `${tag}: Sunday, nought: no light, and its studs still show where its columns stand (${sun.map((c) => c.studs).join(', ')} studs)`);
-    const allowed = ['floor', 'light', 'light-go', 'light-stop', 'light-warm', 'slate', 'steel'];
+    const allowed = ['floor', 'gasket', 'light', 'light-go', 'light-stop', 'light-warm', 'slate', 'steel'];
     const mats = [...new Set([...(await read(p, 'build')).mats, ...d.mats, ...(await read(p, 'hours')).mats])];
-    say(mats.every((m) => allowed.includes(m)), `${tag}: its colours are only the look's lights, and steel, slate and floor: ${mats.join(' ')}`);
+    say(mats.every((m) => allowed.includes(m)), `${tag}: its colours are only the look's lights, and the socket and window materials: ${mats.join(' ')}`);
     say(d.scales[0] === 1 && d.g === 1, `${tag}: once grown, all its light is in`);
     say(await p.evaluate(() => window.vx.stage.awake.size) === 0, `${tag}: at rest nothing runs`);
   } else {
@@ -115,6 +115,8 @@ for (const plain of [false, true]) {
 
   // the line
   const b = await read(p, 'build');
+  const readout = p.locator('#build .vx-chart-reading strong');
+  say(await readout.textContent() === '38 s', `${tag}: the readout carries the final point with its unit`);
   say(b.ticks.map((t) => t.text).join() === '0,20,40,60,80', `${tag}: the line's scale: ${b.ticks.map((t) => t.text).join(' ')}`);
   const sixty = b.ticks.find((t) => t.text === '60');
   const wedP = plain ? b.points[2] : b.points.find((q) => q.place === 2);
@@ -141,6 +143,9 @@ for (const plain of [false, true]) {
   await p.mouse.move(kb.x + kb.width / 2, kb.y + kb.height / 2, { steps: 5 });
   await p.mouse.down(); await p.waitForTimeout(70); await p.mouse.up();
   await p.waitForTimeout(60);
+  const key = p.locator('#week');
+  say(await key.locator('.vx-label').textContent() === 'The week after' && (plain || await key.locator('canvas').count() === 1),
+    `${tag}: changing the week keeps the physical key and updates its legend`);
   const mid = await read(p, 'deploys');
   if (!plain) say(mid.scales[0] === 0 && mid.g < 1, `${tag}: the numbers change: the light grows again from the bottom (g ${mid.g.toFixed(2)})`);
   await p.waitForTimeout(1100);
@@ -152,6 +157,8 @@ for (const plain of [false, true]) {
     say(await p.evaluate(() => window.vx.stage.awake.size) === 0, `${tag}: then nothing runs`);
   } else say(d.rows[0][0] === 8 && d.cols[0].litRows === want(8, Math.round(d.ticks[0].y - d.ticks.at(-1).y), 15), `${tag}: the numbers change: the painted columns follow (Mon ${d.rows[0][0]})`);
   say(d.ticks.map((t) => t.text).join() === '0,5,10,15', `${tag}: the scale is written again (${d.ticks.map((t) => t.text).join(' ')})`);
+
+  say(await readout.textContent() === '42 s', `${tag}: turning back one week also changes the build-time readout`);
 
   await p.locator('#deploys').screenshot({ path: `shots/parts/chart/hand-${tag}.png` });
   say(p.errors.length === 0, `${tag}: no errors` + (p.errors.length ? ': ' + [...new Set(p.errors)].join(' | ') : ''));

@@ -9,6 +9,21 @@
 <style>
   .form { display: grid; gap: calc(var(--vx) * 4); inline-size: 100%; max-inline-size: calc(var(--vx) * 90); justify-items: stretch; }
   .form .send { margin-block-start: calc(var(--vx) * 3); }
+  /* A captive legend moves straight up its guide, clearing the typing line. */
+  .mail-guide { display: none; }
+  .mail-guide[data-vx-live] {
+    display: block; position: absolute; z-index: 1; pointer-events: none;
+    inset-inline-start: 0; inset-block-start: 0;
+    inline-size: calc(3 * var(--vx)); block-size: calc(100% - 5 * var(--vx));
+  }
+  #signin label[for="mail"][data-vx-live] {
+    z-index: 2; margin-inline-start: var(--vx); padding-inline: calc(3 * var(--vx)) calc(2 * var(--vx));
+    color: #fff4de; font: 600 .875rem/calc(5 * var(--vx)) var(--vx-mono);
+    cursor: text;
+  }
+  #signin .vx-floating:has(#mail:placeholder-shown:not(:focus):not(:is(:autofill, :-webkit-autofill))) > label[data-vx-live] {
+    translate: 0 calc(var(--vx) * 7.5 + 50%);
+  }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 6) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
 </style>
 <script>
@@ -27,6 +42,7 @@
     <h2>In use: sign in to fogline</h2>
     <form class="form" id="signin">
       <div class="vx-field vx-floating">
+        <span class="mail-guide" aria-hidden="true"></span>
         <label class="vx-field-label" for="mail">Email</label>
         <span class="vx-well"><input id="mail" name="email" type="email" placeholder=" " autocomplete="username"></span>
       </div>
@@ -85,7 +101,28 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show();
+  show({
+    selector: '#signin .mail-guide',
+    build({ W, H, el }, model) {
+      const guide = model.part('guide');
+      const shaft = getComputedStyle(el).direction === 'rtl' ? 0 : W - 1;
+      guide.box(shaft, 0, 0, 1, H, 1, 'steel');
+      guide.box(0, 0, 0, W, 1, 1, 'slate');
+      guide.box(0, H - 1, 0, W, 1, 1, 'slate');
+    },
+    pad: 1,
+  }, {
+    selector: '#signin > .vx-field:first-child > label[for="mail"]',
+    build(live, model) {
+      const { W, H, el } = live;
+      const plate = model.part('legend');
+      plate.slab(0, 0, 0, W, H, 1, 'gasket', 1);
+      const pin = getComputedStyle(el).direction === 'rtl' ? W - 2 : 1;
+      plate.plot(pin, Math.floor(H / 2), 0, 'spun-brass');
+      live.faceZ = 1;
+    },
+    pad: 0,
+  });
   document.getElementById('signin').addEventListener('submit', (e) => e.preventDefault());
 </script>
 </body>

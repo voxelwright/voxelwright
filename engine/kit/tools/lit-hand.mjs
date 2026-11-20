@@ -47,10 +47,9 @@ say(await p.evaluate(() => document.documentElement.dataset.vxTheme) === 'bay', 
 const [ax, ay] = await mid('#deploy .actions', 0.5, 0.5);
 await p.mouse.move(ax, ay, { steps: 10 });
 await p.waitForTimeout(300);
-say(await p.locator('#deploy[data-own]').count() === 1, 'a real pointer takes the stage');
+say(await p.locator('#deploy .vx-cursor').evaluate(el => getComputedStyle(el).opacity === '0'), 'the demonstration pointer withdraws');
 say(await p.evaluate(() => document.querySelector('#deploy .state-word').textContent) === 'Live' && await p.evaluate(() => document.querySelector('#deploy .build-num').textContent) === '100%', 'and the story is put back to rest');
-const tip = await p.evaluate(() => { const s = document.querySelector('#deploy').getBoundingClientRect(), c = document.querySelector('#deploy .vx-cursor').getBoundingClientRect(); return [c.left, c.top, s.left, s.top]; });
-say(Math.abs(tip[0] - ax) < 2 && Math.abs(tip[1] - ay) < 2, `the voxel pointer's tip is under the real one (${tip[0].toFixed(1)}, ${tip[1].toFixed(1)} for ${ax.toFixed(1)}, ${ay.toFixed(1)})`);
+say(await p.locator('#go').evaluate(el => getComputedStyle(el).cursor === 'pointer'), 'Deploy keeps its native pointing hand');
 await press('#go');
 await p.waitForFunction(() => document.querySelector('#deploy .state-word').textContent === 'Building');
 say(true, 'pressing Deploy by hand starts a build');

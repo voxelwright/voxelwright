@@ -28,11 +28,14 @@ const read = (id) => p.evaluate((id) => {
   const nav = el.querySelector('.vx-nav'), links = [...nav.querySelectorAll('a')], seen = (n) => !!n && n.getClientRects().length > 0 && getComputedStyle(n).visibility !== 'hidden';
   const live = window.vx?.live(nav), cur = links.find((a) => a.hasAttribute('aria-current'));
   const r = el.getBoundingClientRect(), g = el.querySelector(':scope > .vx-groove');
+  const pilots = links.map(a => window.vx?.live(a.querySelector('.row-pilot')));
   return {
     nav: nav.tagName, label: nav.getAttribute('aria-label'), real: links.every((a) => a.matches('a[href]')), links: links.length,
+    fitted: pilots.filter(p => p?.model.byName.fitting?.count > 0).length,
+    lit: links.filter((_, i) => pilots[i]?.state.lens).map(a => a.hash),
     current: cur?.textContent.trim() ?? null, shown: seen(el) && r.width > 0, hidden: el.hidden, popover: el.getAttribute('popover'), open: el.matches(':popover-open'),
     expanded: key.getAttribute('aria-expanded'), keyTag: key.tagName, groove: !!g && seen(g) && g.getBoundingClientRect().height > r.height * 0.8,
-    well: live?.well?.map((v) => v * live.vx) ?? null, curTop: cur ? cur.getBoundingClientRect().top - nav.getBoundingClientRect().top : null,
+    well: live?.well?.map((v) => v * live.vx) ?? null,
     left: r.left, right: r.right, width: r.width, focus: document.activeElement === key ? 'key' : links.includes(document.activeElement) ? 'link ' + document.activeElement.textContent.trim() : document.activeElement?.tagName,
   };
 }, id);
@@ -42,10 +45,10 @@ const press = async (sel) => { const b = await p.locator(sel).first().boundingBo
 let m = await read('side');
 say(m.nav === 'NAV' && !!m.label && m.real && m.links === 7, `its rows are a <nav> with a name ("${m.label}") and ${m.links} real links`);
 say(m.shown && !m.popover && m.expanded === 'true' && m.groove, 'wide: it stands beside the content, its key says it is out, and a standing groove parts it from the rest');
-say(m.well && m.well[2] - m.well[0] === 4 && m.well[1] >= m.curTop && m.current === 'harbor-api', `the current link has the accent groove at its start (${m.well?.join(', ')} px)`);
+say(m.fitted === 7 && m.lit.join() === '#harbor-api' && m.current === 'harbor-api', 'all seven links have fixed fittings and only the current lens lights');
 await press('#side a[href="#tide-worker"]');
 m = await read('side');
-say(m.current === 'tide-worker' && m.well && m.well[1] >= m.curTop && (await p.evaluate(() => document.getElementById('name').textContent)) === 'tide-worker', 'a press on a row follows it, and the groove goes with it');
+say(m.current === 'tide-worker' && m.fitted === 7 && m.lit.join() === '#tide-worker' && new URL(p.url()).hash === '#tide-worker' && (await p.evaluate(() => document.getElementById('name').textContent)) === 'tide-worker', 'a press on a row follows it, and only the destination lens lights');
 m = await read('away');
 say(!m.shown && m.hidden && m.expanded === 'false', 'one whose key says aria-expanded="false" is folded away as the page arrives');
 

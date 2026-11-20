@@ -66,10 +66,11 @@ async function behaves(p, tag, live) {
   if (live) {
     const m = await p.evaluate(() => {
       const of = (sel) => { const l = window.vx.live(document.querySelector(sel)); return { parts: Object.keys(l.model.byName).join(), face: l.faceZ, glow: l.glowStrength ?? 0, sunk: !!l.model.byName.walls?.sunk }; };
-      return { theirs: of('#theirs'), mine: of('#mine'), quoted: of('#quoted'), step: window.vx.live(document.querySelector('#mine')).look.step };
+      return { theirs: of('#theirs'), mine: of('#mine'), reply: of('#reply'), quoted: of('#quoted'), step: window.vx.live(document.querySelector('#mine')).look.step };
     });
     say(m.theirs.parts === 'walls,floor' && m.theirs.sunk && !m.theirs.glow, `theirs is a hole cut into the panel, with no light (${m.theirs.parts})`);
     say(m.mine.parts === 'plate' && m.mine.face === m.step && !m.mine.glow, `yours is a plate standing the look's step above the panel (${m.mine.face} of ${m.step}), with no light`);
+    say(m.reply.parts === 'plate,retainers' && m.reply.face === m.step && !m.reply.glow, 'the in-use reply has fixed retainers and a one-step, unlit reading face');
     say(m.quoted.parts === 'walls,floor', 'theirs quoted in yours keeps its own side (data-vx-from wins over the message\'s)');
     // its side changed from code: drawn again
     await p.evaluate(() => { document.getElementById('theirs').dataset.vxFrom = 'me'; });

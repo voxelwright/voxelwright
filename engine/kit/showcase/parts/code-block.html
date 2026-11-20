@@ -14,6 +14,26 @@
   /* the page's own: a few words round the blocks */
   .note { max-inline-size: 60ch; }
   .sheet h3 { font-size: 0.875rem; line-height: 1.4; font-weight: 500; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 2); }
+  #use {
+    --vx-look: terminal-display;
+    display: grid;
+    inline-size: min(100%, 36rem);
+    padding: calc(2 * var(--vx));
+    gap: var(--vx);
+  }
+  #use figcaption {
+    padding-inline: calc(7 * var(--vx));
+    border: 0;
+    color: #e7e2d6;
+    font: 600 .75rem/1.5 var(--vx-font);
+    letter-spacing: .12em;
+    text-transform: uppercase;
+  }
+  #use pre { color: #edf3e8; background: #1d2b2c; box-shadow: none; }
+  #use code { padding-block: calc(4 * var(--vx)); line-height: 1.65; }
+  #use code b { color: #acdacf; font-weight: 600; }
+  #use:not([data-vx-live]) { background: #424948; }
+  #use[data-vx-live] pre { background: transparent; }
 </style>
 </head>
 <body>
@@ -26,11 +46,11 @@
   <section>
     <h2>In use: setting up harbor-api</h2>
     <p class="note">Install the command line tool, sign in, and deploy from the folder that holds your service.</p>
-    <figure class="vx-code wide" id="use">
+    <figure class="vx-code vx-recess wide" id="use">
       <figcaption>Terminal</figcaption>
-      <div class="vx-recess"><pre tabindex="0" role="region" aria-label="Terminal: install and deploy"><code>npm install --global fogline
-fogline login
-fogline deploy harbor-api --env production</code></pre></div>
+      <pre tabindex="0" role="region" aria-label="Terminal: install and deploy"><code><b>npm</b> install --global fogline
+<b>fogline</b> login
+<b>fogline</b> deploy harbor-api --env production</code></pre>
     </figure>
   </section>
   <section>
@@ -75,6 +95,35 @@ export default {
 </main>
 <script type="module">
   import { show } from './parts.js';
+  import { defineLook, hole } from '../../src/index.js';
+
+  defineLook('terminal-display', {
+    from: 'lit',
+    materials: {
+      slate: { day: '#454c4b', night: '#384041', jitter: .008 },
+      floor: { day: '#203031', night: '#192728', jitter: .002 },
+    },
+    parts: {
+      recess: {
+        build(live, model) {
+          const { W, H, vx, el } = live;
+          const top = Math.round(el.querySelector('pre').offsetTop / vx);
+          const opening = { x: 2, y: top, w: W - 4, h: H - top - 2 };
+          hole(live, model, { ...opening, depth: 2, wall: 'gasket' });
+
+          const frame = model.part('faceplate');
+          frame.slab(0, 0, 0, W, H, 1, 'slate', 1);
+          frame.carve(opening.x, opening.y, 0, opening.w, opening.h, 1);
+          // Flush slotted retainers share the plate's top course.
+          for (const x of [2, W - 6]) {
+            frame.box(x + 1, 2, 0, 2, 3, 1, 'steel');
+            frame.box(x, 3, 0, 4, 1, 1, 'steel');
+            frame.box(x + 1, 3, 0, 2, 1, 1, 'gasket');
+          }
+        },
+      },
+    },
+  });
   show();
 </script>
 </body>

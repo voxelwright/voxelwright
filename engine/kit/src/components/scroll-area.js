@@ -16,7 +16,8 @@
 // there is nothing to scroll.
 
 import { hole, ring, bezel, halo, byTheme, cap as capOf } from '../core/light.js';
-import { PRESS, RELEASE } from '../core/motion.js';
+import { PRESS, RELEASE, reducedMotion } from '../core/motion.js';
+import { cue } from '../core/sound.js';
 import { listeners } from './util.js';
 
 const LEAST = 11; // the key's least length in voxels: enough to take hold of
@@ -31,7 +32,7 @@ function wire(bar, on, changed = () => {}) {
   const st = { len: 0, at: 0, travel: 0, far: 0, idle: true, held: false };
   if (!view) return st;
   const measure = () => {
-    const k = parseFloat(getComputedStyle(bar).getPropertyValue('--vx')) || 4;
+    const k = parseFloat(getComputedStyle(bar.hasAttribute('data-vx-fader') ? root : bar).getPropertyValue('--vx')) || 4;
     const track = bar.clientHeight - k * 2, seen = view.clientHeight, all = view.scrollHeight; // the key keeps a voxel clear of each end
     const idle = all <= seen + 1 || track < LEAST * k;
     const len = idle ? 0 : Math.min(track, Math.max(LEAST * k, Math.round(track * seen / all / k) * k));
@@ -52,7 +53,12 @@ function wire(bar, on, changed = () => {}) {
 
   // a mouse on the bar: the key is dragged; the trench above or below it goes a page that way
   let grab = null;
-  const hold = (held) => { st.held = held; bar.toggleAttribute('data-vx-held', held); changed(false); };
+  const hold = (held) => {
+    st.held = held;
+    bar.toggleAttribute('data-vx-held', held);
+    changed(false);
+    if (bar.hasAttribute('data-vx-fader')) cue(held ? 'press' : 'release');
+  };
   on(bar, 'pointerdown', (e) => {
     if (e.button !== 0 || st.idle) return;
     e.preventDefault(); // it takes no focus and starts no selection
@@ -76,6 +82,35 @@ function wire(bar, on, changed = () => {}) {
   return st;
 }
 
+// Build log carriage. The plate stays level with the reading well. Only the
+// narrow runner enters its slot; the wider saddle rides just above the lip.
+function buildFader(live, model) {
+  const { W, H, vx } = live;
+  const cx = Math.floor(W / 2);
+  const slot = cx - 2;
+  const plate = model.part('plate');
+  plate.slab(0, 0, 0, W, H, 1, 'panel')
+    .carve(slot, 2, 0, 4, H - 4, 1);
+  hole(live, model, { x: slot, y: 2, w: 4, h: H - 4, depth: 2, wall: 'steel', floor: 'gasket' });
+  const st = live.state.bar;
+  if (!st || st.idle) return;
+
+  const length = Math.round(st.len / vx);
+  const key = model.part('key');
+  key.grounded = false;
+  key.box(slot + 1, 1, -2, 2, length - 2, 4, 'slate');
+  key.slab(2, -1, 2, W - 4, length, 1, 'steel', 2);
+  key.slab(2, -1, 3, W - 4, length - 1, 1, 'gasket', 2);
+  key.slab(3, 0, 4, W - 6, length - 3, 1, 'gasket', 2);
+  const mid = Math.floor(length / 2);
+  for (const offset of [-4, 0, 4]) {
+    key.slab(3, mid + offset, 5, W - 6, 2, 1, 'slate');
+  }
+  // A flush diffuser in the middle rib stays visible with the lamp off.
+  key.box(cx - 2, mid, 5, 4, 1, 1, 'backlight');
+  live.state.down = 1;
+}
+
 export const scrollArea = {
   name: 'scroll-area',
   selector: '.vx-scroll-bar',
@@ -84,6 +119,7 @@ export const scrollArea = {
   glowStrength: halo(0.05),
 
   build(live, m) {
+    if (live.el.hasAttribute('data-vx-fader')) return buildFader(live, m);
     const { W, H, vx } = live, look = live.look, D = look.well, st = live.state.bar;
     // The bezel is a voxel wide, not two: the bar is thin, and it stands two voxels from the recess.
     bezel(m, 0, 0, W, H, { by: 1 });
@@ -117,7 +153,12 @@ export const scrollArea = {
     live.state.bar = wire(live.el, on, (reshape) => {
       if (!live.model) return; // the first measure comes before the first model
       const st = live.state.bar;
-      if (st) live.spring('press').to(st.held ? -live.state.down : 0, st.held ? PRESS.k : RELEASE.k, st.held ? PRESS.c : RELEASE.c);
+      if (st) {
+        const depth = st.held ? -live.state.down : 0;
+        const spring = live.spring('press');
+        if (live.el.hasAttribute('data-vx-fader') && reducedMotion()) spring.snap(depth);
+        else spring.to(depth, st.held ? PRESS.k : RELEASE.k, st.held ? PRESS.c : RELEASE.c);
+      }
       if (reshape) live.rebuild(); else live.invalidate();
     });
     return on.done;

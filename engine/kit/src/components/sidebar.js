@@ -95,7 +95,11 @@ function wire(el, on, live) {
     const open = e.newState === 'open';
     tell(open);
     // the focus goes into it: to the current link, or the first thing in it
-    if (open) (el.querySelector('a[aria-current]:not([aria-current="false"])') ?? el.querySelector('a[href], button:not(:disabled)'))?.focus({ preventScroll: true });
+    if (open) {
+      const current = el.querySelector('a[aria-current]:not([aria-current="false"])') ?? el.querySelector('a[href], button:not(:disabled)');
+      current?.focus({ preventScroll: true });
+      current?.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+    }
   });
   // it has come to rest: its voxels are put on whole pixels where it now lies
   on(el, 'transitionend', (e) => { if (e.target === el) live?.stage.resnapSoon(); });

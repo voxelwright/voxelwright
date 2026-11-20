@@ -1,6 +1,7 @@
 // A person at the accordion's page: a real mouse and real keys. Says ok or FAIL for each thing
 // that must hold.
 //   PORT=5989 node tools/parts/accordion.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
@@ -81,8 +82,8 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await p.screenshot({ path: `${dir}/hand-third.png`, clip: { x: 180, y: 200, width: 820, height: 420 } });
 
   // keys: Tab reaches the rows, Enter and Space open and close, arrows, Home and End move between rows
-  await p.mouse.move(16, 16); await p.mouse.down(); await p.mouse.up(); // a press on the bare ground: Tab starts from the top
-  await p.keyboard.press('Tab');
+  await p.locator('main').evaluate(el => { el.tabIndex = -1; el.focus(); });
+  await reachByTab(p, 'summary');
   say(await focus() === 'faq-1', 'Tab reaches the first row');
   const ring = await p.evaluate(() => { const s = getComputedStyle(document.activeElement); return s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2; });
   say(ring, 'the row that has the focus shows a focus ring');
@@ -93,6 +94,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await p.keyboard.press('Space');
   await p.waitForTimeout(500);
   say(!(await isOpen('#faq-1')), 'Space closes it');
+  const beforeArrows = await p.evaluate(() => scrollY);
   await p.keyboard.press('ArrowDown');
   say(await focus() === 'faq-2', 'Down moves to the next row');
   await p.keyboard.press('ArrowDown');
@@ -104,7 +106,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   const home = await focus();
   await p.keyboard.press('End');
   say(home === 'faq-1' && await focus() === 'faq-3', 'Home and End go to the first and the last row');
-  say(await p.evaluate(() => scrollY) === y0, 'the arrows did not scroll the page');
+  say(await p.evaluate(() => scrollY) === beforeArrows, 'the arrows did not scroll the page');
   await p.keyboard.press('Tab');
   say(await focus() === 'many-1', 'Tab leaves the accordion for the next one');
 

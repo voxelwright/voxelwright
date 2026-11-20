@@ -45,17 +45,17 @@
     <div class="cols">
       <nav class="side" aria-label="Projects">
         <ul class="projects">
-          <li aria-current="true"><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent"></span>harbor-api</li>
-          <li>fog-site</li>
-          <li>tide-worker</li>
-          <li>ferry-cron</li>
+          <li aria-current="true"><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent" data-vx-lens="flush" aria-hidden="true"></span>harbor-api</li>
+          <li><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent" data-vx-lens></span>fog-site</li>
+          <li><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent" data-vx-lens></span>tide-worker</li>
+          <li><span class="vx-groove mark" data-vx-way="down" data-vx-light="accent" data-vx-lens></span>ferry-cron</li>
         </ul>
       </nav>
       <div class="vx-groove" data-vx-way="down" role="separator"></div>
       <div class="main">
         <div class="head">
           <div class="name">harbor-api</div>
-          <div class="state"><span class="vx-lamp" data-vx-light="go"></span><span class="state-word">Live</span></div>
+          <div class="state"><span id="deploy-pilot" class="vx-lamp" aria-hidden="true" data-vx-light="go"></span><span class="state-word">Live</span></div>
         </div>
         <div class="actions">
           <button class="vx-button" data-vx-kind="main" id="go">Deploy</button>
@@ -66,16 +66,18 @@
           <div class="build-top"><span class="build-word">Build</span><span class="build-num">100%</span></div>
           <span class="vx-meter"><progress value="1" max="1">100%</progress></span>
         </div>
-        <div class="vx-recess log" aria-label="Build log">
-          <div class="line"><span class="at">10:42:17</span>Cloned main at 4f2c9a1</div>
-          <div class="line"><span class="at">10:42:31</span>Installed 212 packages</div>
-          <div class="line"><span class="at">10:43:02</span>Built in 45 s</div>
+        <div class="vx-recess log" data-vx-tray="build-log">
+          <div class="log-view" tabindex="0" role="region" aria-label="Build log">
+            <div class="line"><span class="at">10:42:17</span>Cloned main at 4f2c9a1</div>
+            <div class="line"><span class="at">10:42:31</span>Installed 212 packages</div>
+            <div class="line"><span class="at">10:43:02</span>Built in 45 s</div>
+          </div>
         </div>
       </div>
     </div>
     <div class="vx-toast" data-vx-kind="done" role="status"><span class="vx-toast-text">Deployed harbor-api</span></div>
   </div>
-  <span class="vx-cursor" aria-hidden="true"></span>
+  <span class="vx-cursor" data-demo-pointer aria-hidden="true"></span>
 </section>
 
 <!-- ============================ a personal blog ============================ -->

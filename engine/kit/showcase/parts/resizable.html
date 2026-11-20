@@ -11,6 +11,35 @@
   .vx-resizable-pane { display: grid; align-content: start; gap: calc(var(--vx) * 2); line-height: calc(var(--vx) * 6); }
   .vx-resizable-pane h3 { font-size: 1rem; line-height: calc(var(--vx) * 6); }
   .vx-resizable-pane p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  /* The cross-slide runs in the clear strip above the two reading surfaces. */
+  #use[data-vx-on] { padding-block-start: calc(12 * var(--vx)); }
+  #use-guide {
+    position: absolute;
+    inset-inline-start: calc(var(--list-stop) + var(--vx));
+    inset-inline-end: calc(var(--detail-stop) + var(--vx));
+    inset-block-start: calc(5 * var(--vx));
+    block-size: calc(3 * var(--vx));
+    pointer-events: none;
+  }
+  #use[data-vx-on] > #use-guide:not([data-vx-live]) {
+    background: var(--vx-steel);
+    border-block: var(--vx) solid var(--vx-slate);
+  }
+  #use[data-vx-on] > #use-groove:not([data-vx-live])::before { inset-block-start: calc(6 * var(--vx)); }
+  #use[data-vx-on] > #use-groove { margin-block-start: calc(-12 * var(--vx)); }
+  #use-groove[data-vx-live]::before { content: none; }
+  #use-groove[data-vx-live]:focus-visible { outline: 0; }
+  #use-groove[data-vx-live]:focus-visible::before {
+    all: unset;
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    top: var(--vx);
+    left: calc(-1.5 * var(--vx));
+    width: calc(10 * var(--vx));
+    height: calc(12 * var(--vx));
+    outline: 2px solid var(--vx-focus);
+  }
   .names { list-style: none; margin: 0; padding: 0; display: grid; }
   .names li { min-block-size: calc(var(--vx) * 8); display: flex; align-items: center; gap: calc(var(--vx) * 2); }
   .names li[aria-current] { font-weight: 650; }
@@ -40,6 +69,7 @@
   <section>
     <h2>In use: the services of a project, and the one that is open</h2>
     <div class="vx-resizable" id="use" style="--vx-split: 32%">
+      <span id="use-guide" aria-hidden="true"></span>
       <div class="vx-resizable-pane" id="services" data-vx-min="24">
         <h3>Services</h3>
         <ul class="names">
@@ -49,7 +79,7 @@
           <li>ferry-cron</li>
         </ul>
       </div>
-      <div class="vx-resizable-groove" id="use-groove" role="separator" aria-controls="services" aria-label="Width of the list of services" aria-valuenow="32"></div>
+      <div class="vx-resizable-groove" id="use-groove" data-vx-cross-slide role="separator" aria-controls="services" aria-label="Width of the list of services" aria-valuenow="32"></div>
       <div class="vx-resizable-pane" id="detail" data-vx-min="40">
         <div class="state"><h3>harbor-api</h3><span class="vx-lamp"></span><span>Live</span></div>
         <p>Mina deployed it from main four minutes ago. Ada asked for a review of the next build.</p>
@@ -147,10 +177,27 @@
   import { resizable } from '../../src/components/resizable.js';
   // the page hears each change, as an app would to remember the split
   const said = document.getElementById('said');
-  document.getElementById('use').addEventListener('vx-resize', (e) => { said.textContent = `The list has ${e.detail.value}% of the room.`; });
+  const use = document.getElementById('use');
+  use.addEventListener('vx-resize', (e) => { said.textContent = `The list has ${e.detail.value}% of the room.`; });
   window.resized = [];
   document.addEventListener('vx-resize', (e) => window.resized.push([e.target.closest('.vx-resizable').id, e.detail.value, e.detail.size]));
-  show(resizable);
+  for (const [id, stop] of [['services', '--list-stop'], ['detail', '--detail-stop']]) {
+    const pane = document.getElementById(id);
+    const fit = () => use.style.setProperty(stop, 'calc(' + (Number(pane.dataset.vxMin) || 0) + ' * var(--vx))');
+    fit();
+    new MutationObserver(fit).observe(pane, { attributes: true, attributeFilter: ['data-vx-min'] });
+  }
+  show(resizable, {
+    name: 'service-split-guide', selector: '#use-guide', pad: 2,
+    build(live, model) {
+      const { W } = live;
+      const bed = model.part('bed');
+      bed.slab(0, 0, 0, W, 3, 2, 'steel').carve(1, 1, 1, W - 2, 1, 1);
+      bed.box(1, 1, 0, W - 2, 1, 1, 'gasket');
+      bed.box(0, 0, 1, 1, 3, 1, 'warm-metal');
+      bed.box(W - 1, 0, 1, 1, 3, 1, 'warm-metal');
+    },
+  });
 </script>
 </body>
 </html>

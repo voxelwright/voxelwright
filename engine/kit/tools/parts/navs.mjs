@@ -29,17 +29,30 @@ const read = (id) => p.evaluate(async (id) => {
   const links = [...el.querySelectorAll('a')], cur = links.find((a) => a.hasAttribute('aria-current'));
   const made = (q) => (q ? [...new Set(q.mats)].map(name).sort().join('+') : '');
   const n = el.getBoundingClientRect(), r = cur?.getBoundingClientRect(), cs = cur && getComputedStyle(cur);
-  const { walls, block } = l.model.byName;
+  const { walls, block, rail } = l.model.byName;
+  const windows = [], lit = [];
+  for (let i = 0; i < (rail?.count ?? 0); i++) {
+    const mat = rail.mats[i];
+    if (mat !== MATERIALS.lens.id && mat !== MATERIALS.light.id) continue;
+    const x = rail.rest[i * 3] * l.vx + (l.cssW - l.W * l.vx) / 2;
+    const y = rail.rest[i * 3 + 1] * l.vx + (l.cssH - l.H * l.vx) / 2;
+    windows.push([x, y]);
+    if (mat === MATERIALS.light.id) lit.push([x, y]);
+  }
   return {
-    tag: el.tagName, label: el.getAttribute('aria-label'), hrefs: links.filter((a) => a.matches('a[href]')).length, links: links.length,
+    windows, lit, tag: el.tagName, label: el.getAttribute('aria-label'), hrefs: links.filter((a) => a.matches('a[href]')).length, links: links.length,
     current: cur?.textContent.trim() ?? null, word: cur?.getAttribute('aria-current') ?? null, count: links.filter((a) => a.hasAttribute('aria-current')).length,
-    walls: made(walls), block: made(block), well: l.well?.map((v) => v * l.vx) ?? null,
+    walls: made(walls), block: made(block), well: l.well?.map((v, i) => v * l.vx + (i % 2 ? l.cssH - l.H * l.vx : l.cssW - l.W * l.vx) / 2) ?? null,
     blockAt: block ? [l.spring('x').x * l.vx, l.spring('y').x * l.vx] : null, moving: l.spring('x').moving || l.spring('y').moving,
     link: r ? { left: r.left - n.left, right: r.right - n.left, top: r.top - n.top, bottom: r.bottom - n.top, padL: parseFloat(cs.paddingLeft), padR: parseFloat(cs.paddingRight) } : null,
     focus: links.indexOf(document.activeElement), width: n.width,
   };
 }, id);
-const linkBox = (id, i) => p.locator(`#${id} a`).nth(i).boundingBox();
+const linkBox = async (id, i) => {
+  const link = p.locator(`#${id} a`).nth(i);
+  await link.scrollIntoViewIfNeeded();
+  return link.boundingBox();
+};
 const click = async (id, i) => { const b = await linkBox(id, i); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 }); await p.mouse.down(); await p.waitForTimeout(50); await p.mouse.up(); await p.waitForTimeout(350); };
 const under = (m) => m.well && Math.abs(m.well[0] - (m.link.left + m.link.padL)) <= 2 && Math.abs(m.well[2] - (m.link.right - m.link.padR)) <= 2 && m.well[3] <= m.link.bottom && m.well[1] >= m.link.bottom - 12;
 const beside = (m) => m.well && m.well[0] <= 8 && m.well[2] - m.well[0] === 4 && m.well[1] >= m.link.top && m.well[3] <= m.link.bottom;
@@ -48,10 +61,14 @@ const beside = (m) => m.well && m.well[0] <= 8 && m.well[2] - m.well[0] === 4 &&
 let m = await read('pages');
 say(m.tag === 'NAV' && !!m.label && m.hrefs === m.links && m.links === 5, `it is a <nav> with a name ("${m.label}") and ${m.links} real links`);
 say(m.current === 'Deploys' && m.word === 'page' && m.count === 1, 'one link is current, and says so with aria-current="page"');
-say(m.walls === 'light' && under(m), `the mark is a groove of the accent's light under the current link's words (${m.well?.join(', ')} px for a link from ${m.link.left} to ${m.link.right})`);
+const fittings = JSON.stringify(m.windows);
+const indexed = (m) => m.windows.length === 25 && m.lit.length === 3 && m.lit.every(([x, y]) =>
+  Math.abs(x - (m.link.left + m.link.right) / 2) <= 8 && y >= m.link.bottom - 10 && y < m.link.bottom);
+say(indexed(m), 'the rail has five fitted windows, with three emitting cells centered under Deploys');
+say(under(await read('under')), 'the ordinary row still cuts a groove under the current link');
 await click('pages', 2);
 m = await read('pages');
-say(m.current === 'Logs' && under(m), 'a press on another link follows it; the page makes it current and the groove is cut under it');
+say(m.current === 'Logs' && indexed(m) && JSON.stringify(m.windows) === fittings, 'a press on another link follows it; only its fixed window lights');
 say((await p.evaluate(() => location.hash)) === '#logs' && (await p.evaluate(() => document.getElementById('where').textContent)).includes('Logs'), 'and the link was really followed (the address and the page changed)');
 
 // keys: links are tab stops, Enter follows
@@ -63,18 +80,18 @@ await p.keyboard.press('Tab');
 say(await p.evaluate(() => { const a = document.activeElement; const o = getComputedStyle(a); return a.matches('#pages a:focus-visible') && o.outlineStyle !== 'none' && parseFloat(o.outlineWidth) >= 2; }), 'the link in focus shows the focus ring');
 await p.keyboard.press('Enter'); await p.waitForTimeout(350);
 m = await read('pages');
-say(m.current === 'Settings' && under(m) && (await p.evaluate(() => location.hash)) === '#settings', 'Enter follows the link in focus, and the groove goes with it');
+say(m.current === 'Settings' && indexed(m) && (await p.evaluate(() => location.hash)) === '#settings', 'Enter follows the link in focus, and its window lights');
 await p.screenshot({ path: 'shots/parts/navs/hand-row.png' });
 
 // set from code
 await p.evaluate(() => { const links = document.querySelectorAll('#pages a'); links[3].removeAttribute('aria-current'); links[0].setAttribute('aria-current', 'page'); });
 await p.waitForTimeout(250);
 m = await read('pages');
-say(m.current === 'Overview' && under(m), 'aria-current set from code: the groove is drawn again under that link');
+say(m.current === 'Overview' && indexed(m), 'aria-current set from code: its window lights');
 await p.evaluate(() => document.querySelector('#pages a[aria-current]').removeAttribute('aria-current'));
 await p.waitForTimeout(250);
 m = await read('pages');
-say(m.well === null && m.walls === '', 'no current link: no groove');
+say(m.lit.length === 0 && JSON.stringify(m.windows) === fittings, 'no current link: all five windows stay fitted and dark');
 
 // one that leads nowhere
 await p.locator('#under a').nth(1).focus(); await p.keyboard.press('Tab');
@@ -135,7 +152,7 @@ await p.evaluate(() => { const links = document.querySelectorAll('#pages a'); li
 await p.waitForTimeout(300);
 m = await read('pages');
 const fits = await p.evaluate(() => [...document.querySelectorAll('.vx-nav a')].every((a) => { const r = a.getBoundingClientRect(); return r.left >= 0 && r.right <= innerWidth; }) && document.documentElement.scrollWidth <= innerWidth);
-say(fits && m.link.top > 20 && under(m), 'at 390 px the links wrap onto a second line, none is cut, and the groove is under the Ukrainian link on that line');
+say(fits && m.link.top > 20 && indexed(m), 'at 390 px the links wrap onto a second line, none is cut, and the lit window is under the Ukrainian link on that line');
 await p.screenshot({ path: 'shots/parts/navs/hand-phone.png' });
 
 // plain: the same marks, painted
@@ -146,7 +163,7 @@ const plain = await p.evaluate(() => {
   const paint = (sel) => { const a = document.querySelector(sel), s = getComputedStyle(a, '::before'); return { w: parseFloat(s.width), h: parseFloat(s.height), bg: s.backgroundColor }; };
   return { live: document.querySelectorAll('[data-vx-live]').length, row: paint('#pages a[aria-current]'), col: paint('#column a[aria-current]'), seat: getComputedStyle(document.querySelector('#seats a[aria-current]')).backgroundColor, trench: getComputedStyle(document.querySelector('#seats')).backgroundColor };
 });
-say(plain.live === 0 && plain.row.h === 4 && plain.row.w > 20 && plain.col.w === 4 && plain.col.h > 20 && plain.row.bg !== 'rgba(0, 0, 0, 0)', `with no voxels the groove is painted in the same place (a line ${plain.row.w} by ${plain.row.h} px under, ${plain.col.w} by ${plain.col.h} beside)`);
+say(plain.live === 0 && plain.row.h === 4 && plain.row.w === 20 && plain.col.w === 4 && plain.col.h > 20 && plain.row.bg !== 'rgba(0, 0, 0, 0)', `plain keeps the index window and the column groove (a line ${plain.row.w} by ${plain.row.h} px under, ${plain.col.w} by ${plain.col.h} beside)`);
 say(plain.seat !== plain.trench && plain.trench !== 'rgba(0, 0, 0, 0)', 'and the trench and its key are painted');
 await click('pages', 0);
 say(await p.evaluate(() => document.querySelector('#pages a[aria-current]').textContent.trim()) === 'Overview', 'plain, a press still follows a link');

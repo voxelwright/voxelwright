@@ -123,6 +123,56 @@ export const codeCell = {
   },
 };
 
+// Six adjacent pockets in a shallow metal receiver. Each pitch includes one
+// course of the common rail on either side of the window.
+const readoutCell = {
+  name: 'code-readout-cell',
+  bind: codeCell.bind,
+  pad: 3,
+  glowRadius: 1.5,
+  glowStrength: halo(0.021),
+
+  build(live, m) {
+    const { W, H, el } = live;
+    const input = el.parentElement.querySelector('input');
+    const on = !input.disabled && (input.getAttribute('aria-invalid') === 'true' || el.hasAttribute('data-vx-active'));
+    const lens = on ? (input.getAttribute('aria-invalid') === 'true' ? 'light-stop' : 'light') : 'lens';
+    const { floor } = hole(live, m, { y: 1, h: H - 2, depth: 1, wall: 'slate', floor: 'gasket' });
+
+    const rail = m.part('carrier');
+    rail.box(-1, 0, 0, W + 2, H, 1, 'slate').carve(0, 1, 0, W, H - 2, 1);
+    const pilot = m.part('pilot');
+    pilot.sunk = true;
+    const x = Math.floor((W - 3) / 2), y = H - 3;
+    floor.carve(x, y, -2, 3, 1, 1);
+    pilot.box(x, y, -2, 3, 1, 1, lens);
+    live.state.tint = undefined;
+  },
+
+  pose(live) {
+    if (live.state.tint === live.tintRevision) return;
+    live.state.tint = live.tintRevision;
+    const { pilot, floor } = live.model.byName;
+    if (pilot.col[3] <= 0) return;
+    // The centre diode feeds two smoked end facets. The matte pocket
+    // picks up a short reflection below the glass, inside this window.
+    const x = Math.floor((live.W - 3) / 2) + 1.5, y = live.H - 2.5;
+    const rgb = pilot.col.slice(0, 3);
+    for (let i = 0; i < pilot.count; i++) {
+      if (pilot.rest[i * 3] === x) continue;
+      for (let c = 0; c < 4; c++) pilot.col[i * 4 + c] *= 0.65;
+    }
+    for (let i = 0; i < floor.count; i++) {
+      const dx = floor.rest[i * 3] - x, dy = floor.rest[i * 3 + 1] - y;
+      const amount = 0.28 * Math.max(0, 1 - (dx * dx + dy * dy) / 10);
+      for (let c = 0; c < 3; c++) {
+        const k = i * 4 + c;
+        floor.col[k] += (rgb[c] - floor.col[k]) * amount;
+      }
+    }
+  },
+};
+
 export const codeInput = {
   name: 'code-input',
   selector: '.vx-otp',
@@ -131,7 +181,8 @@ export const codeInput = {
   bind(live) {
     const on = listeners(), st = wire(live.el, on), added = [];
     // the windows were made just now, after the page was adopted: they are added here
-    for (const c of st.cells) if (!live.stage.lives.has(c)) { live.stage.add(c, codeCell); added.push(c); }
+    const cell = live.el.hasAttribute('data-vx-readout') ? readoutCell : codeCell;
+    for (const c of st.cells) if (!live.stage.lives.has(c)) { live.stage.add(c, cell); added.push(c); }
     return () => { for (const c of added) live.stage.remove(c); on.done(); };
   },
 

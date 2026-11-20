@@ -12,8 +12,62 @@
   .plan .said p:first-child { font-weight: 600; }
   .plan .said p + p { color: var(--vx-ink-quiet); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 9); inline-size: 100%; }
-  .state { display: grid; gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
+  .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
   .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  #deploy:has(.vx-calendar-head) {
+    --vx-look: deploy-calendar;
+    position: relative; isolation: isolate; gap: 0; padding: var(--vx);
+    grid-template-columns: minmax(0, calc(var(--vx) * 79));
+    background: #ded7c4; color: #242d29;
+  }
+  #deploy[data-vx-live] { background: transparent; }
+  #deploy .vx-calendar-head { padding: var(--vx); color: #fff5dc; }
+  #deploy:not([data-vx-live]) .vx-calendar-head { background: #303833; }
+  #deploy .vx-calendar-month { font-size: 1.125rem; letter-spacing: -.025em; }
+  #deploy .vx-button .vx-label { color: #fff5dc; text-shadow: none; }
+  #deploy .vx-button:focus-visible { outline: 2px solid #f9d698; outline-offset: -2px; }
+  #deploy .vx-button[aria-disabled="true"] .vx-label { opacity: .55; }
+  #deploy .vx-button:not([data-vx-live]) {
+    color: #fff5dc; background: #343d39; box-shadow: inset 0 -3px #202723;
+    border: 4px solid #303833; transform: none;
+  }
+  #deploy .vx-button:not([data-vx-live], [aria-disabled="true"]):active {
+    box-shadow: inset 0 2px #202723;
+  }
+  #deploy .vx-button:not([data-vx-live], [aria-disabled="true"]):active .vx-calendar-chevron {
+    translate: 0 2px;
+  }
+  #deploy .vx-button:not([data-vx-live])::before { content: none; }
+  #deploy .vx-button[aria-disabled="true"]:not([data-vx-live]) { color: #9c9f94; transform: none; }
+  #deploy .vx-calendar-week:not([data-vx-live]) { background: #f1ead8; }
+  #deploy .vx-calendar-grid { padding: 0 var(--vx) var(--vx); }
+  #deploy .vx-calendar-names { border: 0; border-block-end: 1px solid #817d6b; }
+  #deploy .vx-calendar-name { color: #41463d; font-weight: 650; }
+  #deploy .vx-calendar-day { font-weight: 600; }
+  #deploy [data-vx-out] .vx-calendar-day { font-style: italic; color: #555a4e; }
+  #deploy .vx-calendar-day[aria-disabled="true"] {
+    color: #656657; font-weight: 400; text-decoration-color: #888674;
+  }
+  #deploy [aria-selected="true"] .vx-calendar-day { color: #fff5dc; }
+  #deploy .vx-calendar-week:not([data-vx-live]) [aria-selected="true"] .vx-calendar-day {
+    background: linear-gradient(#343d39 0 0) center / calc(100% - 8px) calc(100% - 8px) no-repeat;
+  }
+  #deploy .vx-calendar-week:not([data-vx-live]) .vx-calendar-day::after {
+    content: ''; position: absolute; pointer-events: none; inset: auto auto 2px calc(50% - 4px);
+    width: 8px; height: 3px; background: #5a5d53;
+  }
+  #deploy .vx-calendar-week:not([data-vx-live]) [aria-current="date"]::after {
+    inset-block-start: auto; inset-block-end: 2px; inset-inline-start: calc(50% - 4px);
+    inline-size: 8px; background: #cf8223;
+  }
+  #deploy .vx-calendar-day:focus-visible {
+    outline: 2px solid #90351b; outline-offset: -2px;
+  }
+  #deploy .vx-calendar-day[aria-current="date"] { padding-block-end: 12px; }
+  #deploy .vx-calendar-day[aria-current="date"]::before {
+    content: "Today"; position: absolute; top: 54%; inset-inline: 0;
+    font: 650 .58rem/1 var(--vx-font); letter-spacing: .04em; text-transform: uppercase;
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -92,6 +146,7 @@
 <script type="module">
   import { show } from './parts.js';
   import { calendar } from '../../src/components/calendar.js';
+  import { deployPlate } from './deploy-calendar.js';
   // the words under the first calendar say what it holds
   const input = document.getElementById('deploy-day'), said = document.getElementById('deploy-said');
   const tell = () => {
@@ -99,7 +154,7 @@
     said.textContent = v ? `harbor-api goes out on ${new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(Date.parse(v))}.` : 'No day is set for harbor-api.';
   };
   input.addEventListener('change', tell);
-  show(calendar);
+  show(calendar, deployPlate);
 </script>
 </body>
 </html>

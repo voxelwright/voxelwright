@@ -81,7 +81,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await p.waitForTimeout(350);
 
   // by keyboard: focus opens it after the wait, Tab goes into it, Tab out closes it
-  await p.mouse.down(); await p.mouse.up(); // a press on the bare ground: Tab starts from the top of the page
+  await p.locator('.part-nav a').last().focus(); // Tab into the specimen from the catalog navigation
   await p.keyboard.press('Tab');
   await p.waitForTimeout(150);
   const early = await open('#c-mina');

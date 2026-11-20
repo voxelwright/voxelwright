@@ -81,6 +81,23 @@ async function behaves(p, tag, live) {
   say(r.ticks >= 6 && r.said.length >= 2 && r.said.length <= 4 && one, `${tag}the seconds changed ${r.ticks} times; the status said ${r.said.length} things, each once: ${r.said.map((s) => `"${s}"`).join(' / ')}`);
   say(r.said.some((s) => s.includes('Watch the health check for five minutes: Done, 5 min')), `${tag}the last change is said in the step's own words`);
   say(await lamps(p, 'ship') === 'done:go done:go done:go done:go', `${tag}at the end every lamp is green (${await lamps(p, 'ship')})`);
+  if (live) {
+    const litRows = await p.locator('#ship').evaluate(el => {
+      const strip = window.vx.live(el);
+      const windows = strip.model.byName.windows;
+      const green = window.vx.MATERIALS['light-go'].id;
+      const bounds = el.getBoundingClientRect();
+      const slack = (strip.cssH - strip.H * strip.vx) / 2;
+      return [...el.querySelectorAll(':scope > li > .vx-lamp')].map(lamp => {
+        const r = lamp.getBoundingClientRect();
+        return windows && !windows.hidden && windows.mats.some((mat, i) => {
+          const y = bounds.top + slack + (windows.rest[i * 3 + 1] + windows.ty) * strip.vx;
+          return y >= r.top && y < r.bottom && mat === green && windows.col[i * 4 + 3] > 0;
+        });
+      });
+    });
+    say(litRows.length === 4 && litRows.every(Boolean), 'the live rail has a powered green window in each finished row');
+  }
   // from code: a step that fails
   await p.evaluate(() => { const li = document.querySelector('#four > li:nth-of-type(2)'); li.querySelector('.vx-trace-state').textContent = 'Failed: no network'; li.dataset.vxState = 'failed'; });
   await p.waitForTimeout(200);

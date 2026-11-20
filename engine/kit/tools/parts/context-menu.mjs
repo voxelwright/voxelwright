@@ -54,9 +54,10 @@ let b = await box(p, '#log-212');
 let [x, y] = [b.x + 120, b.y + b.height / 2];
 await right(p, x, y);
 let m = await read(p, 'log-menu');
-say(m.open && Math.abs(m.left - x) <= 1 && Math.abs(m.top - y) <= 1, `a right press on deploy-212.log opens the menu with its corner at the pointer (${m.left}, ${m.top} for ${x}, ${y})`);
+const anchoredY = y + (m.bottom - m.top) + m.made.lift > m.vh - 12 ? m.bottom : m.top;
+say(m.open && Math.abs(m.left - x) <= 1 && Math.abs(anchoredY - y) <= 1, `a right press on deploy-212.log opens the menu with its corner at the pointer (${m.left}, ${m.top} for ${x}, ${y})`);
 say(m.said === 'kept', 'and the browser\'s own menu does not open over it');
-say(m.made.panel === 'key+light' && m.made.top === m.made.float && m.made.fx === 'assemble', `it is the kit's menu: a float ${m.made.top} voxels high on the accent's light, being built (${m.made.cubes} cubes)`);
+say(m.made.panel === 'light+panel' && m.made.top === m.made.float && m.made.fx === 'assemble', `it is the kit's menu: a float ${m.made.top} voxels high on the accent's light, being built (${m.made.cubes} cubes)`);
 say(m.label === 'deploy-212.log', `the page heard which log it is for (${m.label})`);
 say(m.focus === 'MENU', `the focus is in the menu (${m.focus})`);
 await p.waitForTimeout(400);
@@ -120,6 +121,19 @@ await p.keyboard.press('Shift+F10'); await p.waitForTimeout(120);
 m = await read(p, 'log-menu');
 b = await box(p, '#log-213');
 say(m.open && m.focus === 'Open' && m.top >= b.y && m.top <= b.y + b.height && m.label === 'deploy-213.log', `Shift+F10 on deploy-213.log opens it on that row, with the first row in focus (${m.focus}, at ${Math.round(m.left)}, ${Math.round(m.top)})`);
+const pad = await p.locator('#log-menu').evaluate(el => {
+  const live = window.vx.live(el);
+  return {
+    keys: live.model.parts.filter(part => /^key[0-9]+$/.test(part.name) && part.count).length,
+    firstLit: live.model.byName.lamp0?.hidden === false,
+    origin: live.model.menuMotion?.from?.join(' '),
+  };
+});
+say(pad.keys === 4 && pad.firstLit && pad.origin === '0 0', 'the first log builds its four command keys from the focused corner and lights Open');
+await p.keyboard.press('Tab'); await p.waitForTimeout(150);
+m = await read(p, 'log-menu');
+say(!m.open && m.focus === 'log-212', 'Tab from Open continues to the next log');
+await p.locator('#log-213').focus(); await p.keyboard.press('Shift+F10');
 await p.keyboard.press('Escape'); await p.waitForTimeout(150);
 m = await read(p, 'log-menu');
 say(!m.open && m.focus === 'log-213', `Escape: closed, the focus back on the row (${m.focus})`);
@@ -183,7 +197,9 @@ m = await read(p, 'log-menu');
 say(m.open && m.hash === '', 'let go, the menu stays, and the link under the finger is not followed');
 say(m.left >= 12 && m.right + m.made.lift <= 390 - 12 + 0.5 && m.label === 'deploy-213.log', `at 390 px it is inside the window (${Math.round(m.left)} to ${Math.round(m.right)})`);
 await p.screenshot({ path: 'shots/parts/context-menu/hand-long-390.png' });
-await touch('touchStart', 20, 20); await touch('touchEnd'); await p.waitForTimeout(200);
+const heading = await box(p, 'h1');
+await touch('touchStart', heading.x + heading.width / 2, heading.y + heading.height / 2);
+await touch('touchEnd'); await p.waitForTimeout(200);
 say(!(await read(p, 'log-menu')).open, 'a tap outside it closes it');
 // a finger that moves is scrolling, not asking for the menu
 await touch('touchStart', x, y);

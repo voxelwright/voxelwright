@@ -12,6 +12,18 @@
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
 </script>
 <style>
+  /* Fifteen pairs of segments per day, one segment per deployment in this week's scale. */
+  #deploys > .vx-chart-window {
+    --vx: 3px;
+    --vx-look: deploy-display;
+    --vx-chart-rows: 48;
+  }
+  #deploys > .vx-chart-window:not([data-vx-live]) {
+    background: #182225;
+    box-shadow: inset 0 0 0 var(--vx) #515b59;
+  }
+  #deploys .vx-chart-marks [data-vx-light="stud"] { --_light: #303b3e; }
+
   /* the page's own */
   .each { display: grid; gap: calc(var(--vx) * 2); justify-items: start; inline-size: 100%; min-inline-size: 0; }
   .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 5); }
@@ -33,7 +45,7 @@
     <h2>In use: a project's week</h2>
     <div class="top">
       <div class="name">harbor-api</div>
-      <button class="vx-button" type="button" id="week">The week before</button>
+      <button class="vx-button" type="button" id="week"><span class="vx-label">The week before</span></button>
     </div>
     <div class="two">
       <figure class="vx-chart" data-vx-kind="bar" id="deploys">
@@ -55,6 +67,7 @@
       <figure class="vx-chart" data-vx-kind="line" id="build">
         <figcaption>Build time, in seconds <small>The median of each day's builds.</small></figcaption>
         <div class="vx-chart-window"></div>
+        <p class="vx-chart-reading" aria-hidden="true" hidden></p>
         <table>
           <thead><tr><th scope="col">Day</th><th scope="col">Median build</th></tr></thead>
           <tbody>
@@ -134,10 +147,40 @@
   import { show } from './parts.js';
   import { chart } from '../../src/components/chart.js';
 
+  import { defineLook } from '../../src/index.js';
+  import { ring, halo } from '../../src/core/light.js';
+
+  // A shallow signal module. The seal and retaining lip sit outside the calibrated
+  // aperture. Its black mask absorbs stray light between neighbouring segments.
+  defineLook('deploy-display', {
+    from: 'lit', well: 2,
+    materials: {
+      floor: { day: '#182225', night: '#121b1d' },
+      slate: { day: '#596467', night: '#4a565a' },
+      steel: { day: '#303b3e', night: '#293638', jitter: .003 },
+      'light-go': { day: '#59d89a', night: '#60dca1', glow: .65 },
+      'light-stop': { day: '#ff765f', night: '#ff806c', glow: .66 },
+    },
+    parts: { chart: {
+      glowRadius: 1.25,
+      build(live, model) {
+        chart.build(live, model);
+        const { W, H } = live;
+        ring(model.part('seal'), -1, -1, 0, W + 2, H + 2, 'gasket', 1);
+        ring(model.part('retainer'), -1, -1, 1, W + 2, H + 2, 'slate', 1);
+      },
+      pose(live) {
+        chart.pose(live);
+        live.glowStrength = halo(.011);
+      },
+    } },
+  });
+
   // the page's own: the week before, and back. The chart hears its table change.
+  const buildCells = [...document.querySelectorAll('#build tbody td')];
   const weeks = [
-    { when: '18 to 24 May. Sunday nothing went out.', went: [12, 9, 15, 10, 7, 3, 0], failed: [1, 0, 2, 4, 1, 0, 0] },
-    { when: '11 to 17 May.', went: [8, 11, 6, 13, 9, 2, 1], failed: [0, 1, 0, 1, 3, 0, 0] },
+    { when: '18 to 24 May. Sunday nothing went out.', went: [12, 9, 15, 10, 7, 3, 0], failed: [1, 0, 2, 4, 1, 0, 0], build: buildCells.map(cell => Number(cell.dataset.vxValue)) },
+    { when: '11 to 17 May.', went: [8, 11, 6, 13, 9, 2, 1], failed: [0, 1, 0, 1, 3, 0, 0], build: [53, 56, 49, 67, 46, 48, 42] },
   ];
   let w = 0;
   const key = document.getElementById('week');
@@ -145,8 +188,13 @@
     w = 1 - w;
     const rows = document.querySelectorAll('#deploys tbody tr');
     rows.forEach((r, i) => { r.cells[1].textContent = weeks[w].went[i]; r.cells[2].textContent = weeks[w].failed[i]; });
+    buildCells.forEach((cell, i) => {
+      const seconds = weeks[w].build[i];
+      cell.dataset.vxValue = seconds;
+      cell.textContent = seconds < 60 ? seconds + ' s' : Math.floor(seconds / 60) + ' min ' + seconds % 60 + ' s';
+    });
     document.getElementById('deploys-when').textContent = weeks[w].when;
-    key.textContent = w ? 'The week after' : 'The week before';
+    key.querySelector('.vx-label').textContent = w ? 'The week after' : 'The week before';
   });
   show(chart);
 </script>

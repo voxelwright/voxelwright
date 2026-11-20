@@ -1,0 +1,50 @@
+/* Half-pitch cells resolve the mounting flange and thumb within the original 64 × 32 box. */
+.vx-switch.ship-latch {
+  --vx: 2px;
+  --vx-look: ship-latch;
+  inline-size: calc(32 * var(--vx));
+  block-size: calc(16 * var(--vx));
+}
+.vx-toggle input + .vx-switch.ship-latch:not([data-vx-live]) {
+  background: #34383c;
+  border: 4px solid #989ea6;
+  border-inline-end-width: 14px;
+  box-sizing: border-box;
+  box-shadow: inset 0 2px 0 #23272c, 0 2px 0 #58616b;
+}
+.vx-toggle input + .ship-latch:not([data-vx-live])::after {
+  transform: translateX(var(--ship-offset, 0px));
+  inset-block: 3px;
+  inset-inline-start: 2px;
+  inline-size: 18px;
+  background: linear-gradient(to right, #42474e 43%, #e0dfd5 43% 57%, #42474e 57%);
+  box-shadow: inset 0 2px 0 #ffffff30, 1px 2px 0 #181d22;
+}
+.vx-toggle input:checked + .ship-latch:not([data-vx-live])::after {
+  transform: translateX(var(--ship-offset, calc(24px * var(--_inline-sign))));
+}
+.ship-latch:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset-inline-end: -10px;
+  inset-block-start: 9px;
+  inline-size: 6px;
+  block-size: 6px;
+  background: #34483e;
+  outline: 2px solid #41474a;
+}
+.vx-toggle input:checked:enabled + .ship-latch:not([data-vx-live])::before { background: #64d695; }
+
+.vx-toggle input:focus-visible + .ship-latch:not([data-vx-live])::after { transition: none; }
+
+.vx-toggle:has(> .ship-latch) { touch-action: pan-y pinch-zoom; }
+
+@media (forced-colors: active) {
+  .vx-toggle input + .ship-latch:not([data-vx-live])::after {
+    background: ButtonText;
+    border: 2px solid ButtonText;
+    forced-color-adjust: none;
+  }
+}
+
+.vx-toggle input + .ship-latch[data-dragging]::after { transition: none; }

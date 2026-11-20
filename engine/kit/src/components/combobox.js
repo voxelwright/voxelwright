@@ -96,6 +96,7 @@ function wire(el, on, live) {
     if (!a || !isOpen() || a.closest('[hidden]')) { live.state.at = null; live.invalidate(); return; }
     const r = a.getBoundingClientRect(), b = el.getBoundingClientRect(), box = list.getBoundingClientRect();
     // a row scrolled half out of sight is not marked: the mark would hang over the edge
+    live.state.rowCenter = (r.top + r.height / 2 - b.top) / live.vx;
     live.state.at = r.top >= box.top - 1 && r.bottom <= box.bottom + 1 ? Math.round((r.top - b.top) / live.vx) : null;
     live.invalidate();
   };
@@ -144,12 +145,12 @@ function wire(el, on, live) {
   };
 
   // as wide as its field: set before it is measured and placed
-  on(el, 'beforetoggle', (e) => {
-    if (e.newState !== 'open') return;
+  const sizeToField = () => {
     const vx = live?.vx ?? (parseFloat(getComputedStyle(el).getPropertyValue('--vx')) || 4);
-    el.style.inlineSize = `${Math.max(Math.round(well.offsetWidth / vx), 40) * vx}px`;
-  });
-  put = anchored(el, on, live, { trigger: () => well, gap: 2, build: [0.16, 0.12] });
+    el.style.inlineSize = Math.max(1, Math.round(well.offsetWidth / vx)) * vx + 'px';
+  };
+  on(el, 'beforetoggle', e => { if (e.newState === 'open') sizeToField(); });
+  put = anchored(el, on, live, { trigger: () => well, gap: 2, duration: 0.16 });
   on(el, 'toggle', (e) => {
     const yes = e.newState === 'open';
     if ((input.getAttribute('aria-expanded') === 'true') !== yes) input.setAttribute('aria-expanded', String(yes));
@@ -157,6 +158,8 @@ function wire(el, on, live) {
     sync();
   });
 
+  const fit = () => { if (isOpen()) { sizeToField(); put(); measure(); } };
+  on(window, 'resize', fit);
   on(input, 'input', () => {
     const n = filter();
     open();
@@ -199,6 +202,13 @@ function wire(el, on, live) {
   on.watch(list, { childList: true, subtree: true }, () => { nameOptions(list); if (isOpen()) { filter(); sync(); } });
   sift(list, input.value);
   sync();
+  const resize = new ResizeObserver(entries => {
+    if (entries.some(entry => entry.target === well)) fit();
+    else measure();
+  });
+  resize.observe(well);
+  if (live) resize.observe(list);
+  return () => resize.disconnect();
 }
 
 export const combobox = {
@@ -222,25 +232,17 @@ export const combobox = {
   },
 
   pose(live) {
-    const { pick, body } = live.model.byName, at = live.state.at;
-    // not while the plate is still being built: the mark would hang in the air
-    pick.hidden = at == null || !!body.fx;
+    const { pick } = live.model.byName, at = live.state.at;
+    pick.hidden = at == null;
     if (at != null) pick.ty = at;
     live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025);
   },
 
-  // one more drawing after the build ends, so the mark appears on the finished plate
-  step(live) {
-    const building = !!live.model.byName.body?.fx, was = live.state.building;
-    live.state.building = building;
-    return !!was && !building;
-  },
-
   bind(live) {
     const on = listeners();
-    wire(live.el, on, live);
-    return on.done;
+    const stopResize = wire(live.el, on, live);
+    return () => { stopResize?.(); on.done(); };
   },
 
-  plain(el, on) { wire(el, on, null); },
+  plain(el, on) { return wire(el, on, null); },
 };

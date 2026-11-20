@@ -15,6 +15,23 @@
   .bad { display: flex; align-items: center; gap: calc(var(--vx) * 2); font-size: 0.9375rem; }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 80)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; gap: calc(var(--vx) * 2); align-content: start; justify-items: start; }
+  /* The digits remain selectable browser text over the smoked receiver. */
+  #sign [data-vx-readout] { margin-block-end: calc(2 * var(--vx)); }
+  #sign .vx-otp-cell[data-vx-live]::after { content: none; }
+  #sign .vx-otp:has(> [data-vx-live]) > input {
+    color: #faf0dc;
+    caret-color: var(--lit-accent, var(--vx-enamel));
+  }
+  #sign .vx-otp:has(> [data-vx-live]) > input::selection {
+    color: #172522; background: #bedbce;
+  }
+  #sign .vx-otp-cell:not([data-vx-live])::after {
+    content: ''; position: absolute; pointer-events: none; bottom: var(--vx); left: 50%;
+    width: calc(3 * var(--vx)); height: var(--vx); translate: -50% 0; background: var(--cell-light, #535651);
+  }
+  #sign .vx-otp-cell[data-vx-active] { --cell-light: var(--lit-accent); }
+  #sign .vx-otp:has(input[aria-invalid="true"]:enabled) { --cell-light: var(--lit-stop, var(--vx-brick)); }
+  #sign .vx-otp:has(input[aria-invalid="true"]:enabled) .vx-otp-cell { --cell-light: var(--lit-stop, var(--vx-brick)); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -35,7 +52,7 @@
       <p>We sent a code to mina@fogline.example. It works for ten minutes.</p>
       <div class="field">
         <label for="code">Code from the email</label>
-        <span class="vx-otp" style="--vx-otp-n: 6"><input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required></span>
+        <span class="vx-otp" data-vx-readout style="--vx-otp-n: 6"><input id="code" name="code" autocomplete="one-time-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" required></span>
       </div>
       <button class="vx-button" type="submit" data-vx-kind="main">Sign in</button>
     </form>

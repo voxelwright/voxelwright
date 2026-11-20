@@ -73,7 +73,10 @@ for (const theme of ['light', 'dark']) {
   const a = await where(p, '#s-off'), b = await where(p, '#s-key');
   say(a.join() === b.join(), `plain: off, its box and its legend lie as the kit's key's do (${a.join(' ')} and ${b.join(' ')})`);
   const n = await differ(p, await alone(p, '#s-off'), await alone(p, '#s-key'));
-  say(n === 0, `plain: off and at rest, no pixel of it differs from the kit's key (${n} differ)`);
+  const shutter = await p.locator('#s-off').evaluate(el => getComputedStyle(el, '::after').backgroundImage);
+  const lit = await p.locator('#s-on').evaluate(el => getComputedStyle(el, '::after').backgroundImage);
+  say(n > 0 && shutter !== 'none' && lit !== 'none' && lit !== shutter,
+    `plain: the closed shutter is fitted and its lens changes when latched (${n} pixels differ from a momentary key)`);
   await p.context().close();
 }
 
@@ -174,7 +177,7 @@ await p.context().close();
   await q.mouse.move(4, 4);
   await q.waitForTimeout(80);
   const b = await voxels(q, '#wrap');
-  say(a.tz === 0.5 - a.travel && b.tz === -b.travel && b.reach === off.reach, `reduced motion: down at once and no flare (${a.tz} under the pointer, then ${b.tz}; reach ${b.reach})`);
+  say(a.tz === -a.travel && b.tz === -b.travel && b.reach === off.reach, `reduced motion: down at once and no flare (${a.tz} under the pointer, then ${b.tz}; reach ${b.reach})`);
   await q.context().close();
 }
 

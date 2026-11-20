@@ -1,13 +1,46 @@
-// Dialog. An engraved plate rises carrying its controls and lowers intact to release the page.
+// Dialog. The face assembles in courses and breaks back into them when dismissed.
 // Markup: <dialog class="vx-dialog"><header>Title</header><div class="vx-dialog-body">…</div>
 //           <footer><button class="vx-button" data-vx-close>Done</button></footer></dialog>
 
 import { cue } from '../core/sound.js';
+import { reducedMotion } from '../core/motion.js';
+import { nativeRelease, rouse } from './popover.js';
 import { listeners } from './util.js';
+
+// Let the browser decide whether cancel succeeds. beforetoggle runs only when
+// closing proceeds, before requestClose(value) writes an explicit value.
+export function wireDialog(el, on) {
+  let cancel, escape, normalizeEscape = false;
+  on(el, 'keydown', e => { escape = e.key === 'Escape' ? e : null; });
+  on(el, 'keyup', () => { escape = null; });
+  on(el, 'cancel', e => {
+    cancel = e;
+    setTimeout(() => { if (cancel === e) { cancel = null; escape = null; } }, 0);
+  });
+  on(el, 'beforetoggle', e => {
+    const accepted = e.newState === 'closed' && cancel?.eventPhase === Event.NONE && !cancel.defaultPrevented;
+    // The key's native default runs after dispatch. requestClose() inside a
+    // key listener is an explicit application request, even when its value is ''.
+    normalizeEscape = accepted && escape?.eventPhase === Event.NONE && !escape.defaultPrevented;
+    // Some browsers keep the previous result if no new value is supplied.
+    if (accepted) el.returnValue = 'cancel';
+    cancel = escape = null;
+  });
+  on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
+    // Other browsers explicitly write an empty result for the Escape key.
+    if (!el.open && normalizeEscape && !el.returnValue) el.returnValue = 'cancel';
+    normalizeEscape = false;
+  });
+  on(el, 'click', e => {
+    if (e.defaultPrevented) return;
+    const b = e.target.closest('[data-vx-close]');
+    if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
+    else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
+  });
+}
 
 export const dialog = {
   name: 'dialog',
-  carryPlate: true,
   selector: 'dialog.vx-dialog',
   pad: 16,
 
@@ -26,46 +59,38 @@ export const dialog = {
   bind(live) {
     const on = listeners();
     const el = live.el;
-    let closing = null;
+    const deck = el.hasAttribute('data-vx-command-deck');
+    const palette = el.classList.contains('vx-command-dialog');
+    const surface = palette ? 'rim' : 'courses';
+    const parts = () => deck && live.model.byName.keepers ? ['keepers'] : null;
+    nativeRelease(live, on, () => ({ parts: parts(), surface }), palette ? 0.1 : 0.23);
+    const duration = palette ? 0.16 : 0.32;
+    const assemble = resume => live.play('assemble', parts(), { duration, surface, resume });
     const opened = () => {
-      closing = null;
-      el.removeAttribute('data-vx-leaving');
-      live.rebuild();
-      cue('build');
-      live.play('assemble', null, { duration: 0.46 });
+      if (!el.open) return;
+      live.visible = true;
+      const resume = deck ? rouse(live) : live.rebuild();
+      cue(deck ? 'press' : 'build');
+      if (!deck || !reducedMotion()) assemble(resume);
     };
-    const leave = async (value) => {
-      if (closing || !el.open) return;
-      const request = closing = Symbol();
-      el.setAttribute('data-vx-leaving', '');
-      cue('release');
-      await live.play('lower', null, { duration: 0.27 });
-      if (request !== closing || !el.open || live.destroyed) return;
-      el.close(value);
-      el.removeAttribute('data-vx-leaving');
-      closing = null;
-    };
-    live.state.leave = leave;
+    live.state.leave = value => el.close(value);
+    wireDialog(el, on);
+    on(el, 'beforetoggle', e => { if (e.newState === 'closed') cue('release'); });
+    // Filter and mark the rows before measuring their carrier and mounted fittings.
     on.watch(el, { attributes: true, attributeFilter: ['open'] }, () => {
-      if (el.open) opened();
-      else {
-        closing = null;
-        live.stopMotion();
-        el.removeAttribute('data-vx-leaving');
-      }
-    });
-    on(el, 'cancel', (e) => { e.preventDefault(); leave('cancel'); });
-    on(el, 'click', (e) => {
-      const b = e.target.closest('[data-vx-close]');
-      if (b) { e.preventDefault(); leave(b.value || b.dataset.vxClose || ''); }
-      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) leave('cancel');
-    });
-    on(el, 'submit', (e) => {
-      if (e.target.method !== 'dialog') return;
-      e.preventDefault();
-      leave(e.submitter?.value || '');
+      if (!el.open) return;
+      if (deck) queueMicrotask(opened); else opened();
     });
     if (el.open) queueMicrotask(opened);
+    if (deck) {
+      const size = new ResizeObserver(() => {
+        if (!el.open || (el.offsetWidth === live.cssW && el.offsetHeight === live.cssH)) return;
+        const resume = rouse(live);
+        if (resume?.kind === 'assemble' && !reducedMotion()) assemble(resume);
+      });
+      size.observe(el);
+      return () => { size.disconnect(); on.done(); };
+    }
     return on.done;
   },
 };

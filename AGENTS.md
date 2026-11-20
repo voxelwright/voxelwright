@@ -56,24 +56,13 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   `gcloud` and related tools. Never work around it (for example with an
   app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
   until the owner authorizes a specific use.
-- Choose each subagent's model by task. Use Haiku or Sonnet for lookups,
-  summaries and routine code, and Opus at medium effort for architecture, hard
-  debugging and high-stakes calls. Use GPT-6.1 Sol through T3 delegation when it
-  fits, and GPT-6 Astra in Codex sessions for decisions that are expensive to get wrong.
-- Routing table. Units are bounded by a clear stop condition and a time box,
-  not a token cap:
-
-  | Work | Model |
-  | --- | --- |
-  | Lookup, fetch, summarize a page | Haiku or Sonnet |
-  | Research with sources | Sonnet |
-  | Reviewer (adversarial review) | Sonnet |
-  | Critic | GPT-6.1 Sol via T3, medium |
-  | Security review (Sentinel) | Opus, medium |
-  | Build one unit (logic, infrastructure) | Opus, medium |
-  | UI, 3D and visual work | Opus, high or extra-high, with the ui-craft hill climb until a cross-model consensus of 9/10 or better |
-  | Merge or small fix | Sonnet |
-
+- Use Claude Opus for every dispatch (owner, November 20, 2026), with effort
+  set by the task: low or medium for lookups, merges and mechanical fixes, high
+  for ordinary building, and xhigh for diagnosis, design and retrospectives.
+- Start each unit of work in a fresh thread with a self-contained brief. Do not
+  hand new work to a long, finished lane thread.
+- Give each unit a clear stop condition and a time box. For UI and 3D, use the
+  UI Craft screenshot and review loop with its cross-model target of 9/10 or better.
 - Keep subagents short-lived. Give each one unit of work, end it when the work
   is done, and never leave one idle.
 - Record every dispatch in `.agents/dispatch-log.jsonl` on `feature/village`
@@ -85,6 +74,8 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   Adding a vendor or dependency requires one.
 
 ## Engineering
+
+Before building or changing UI, read [DESIGN.md](DESIGN.md).
 
 - Prefer maintained tools and their standard interfaces to custom substitutes.
 - Add only the code required for an observed need. Keep one owner for each rule.

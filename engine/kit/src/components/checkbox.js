@@ -9,7 +9,7 @@
 import { halo, byTheme, cap as capOf } from '../core/light.js';
 import { PRESS, RELEASE, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
-import { listeners } from './util.js';
+import { watchFieldsets, listeners } from './util.js';
 
 const GLOW = 0.06, REACH = 3;
 
@@ -17,7 +17,7 @@ const level = (input) => (input?.indeterminate ? 0.5 : input?.checked ? 1 : 0);
 
 /**
  * The button and its collar. `r` is the corner step of the cap: 0 for a square one (a checkbox),
- * 1 for a stepped one (a radio). `off`: it cannot be changed, so it is steel and has no light.
+ * 2 for a stepped one (a radio). `off`: it cannot be changed, so it is steel and has no light.
  * Three parts hold the same cap in its three states (`cap` dark, `lit` with its lamp on, `some`
  * with a bar of light); latchPose shows one of them and sets how far down it is.
  */
@@ -26,9 +26,9 @@ export function latch(live, m, { r = 0, off = false } = {}) {
   // the collar: a voxel wide, a voxel high, round the element's box (it reaches into the pad).
   // Round a stepped cap it is stepped too, and keeps the corners the cap leaves.
   const collar = m.part('collar');
-  collar.slab(-1, -1, 0, W + 2, H + 2, 1, 'steel', r > 0 ? 2 : 1);
+  collar.slab(-1, -1, 0, W + 2, H + 2, 1, 'steel', r + 1);
   for (let i = 0; i < W; i++) for (let j = 0; j < H; j++) {
-    const corner = r > 0 && (i === 0 || i === W - 1) && (j === 0 || j === H - 1);
+    const corner = Math.min(i, W - 1 - i) + Math.min(j, H - 1 - j) < r;
     if (!corner) collar.carve(i, j, 0, 1, 1, 1);
   }
   // the cap: up, its top stands the look's travel above the collar; latched, it is level with it
@@ -42,11 +42,21 @@ export function latch(live, m, { r = 0, off = false } = {}) {
     for (let i = 1; i < W - 1; i++) for (let j = 1; j < H - 1; j++) p.plot(i, j, d - 1, lens?.(i, j) ?? body);
     return p;
   };
-  const mid = (H - 1) / 2;
-  lamp('cap');
-  lamp('lit', () => (off ? 'slate' : 'light'));                       // switched off while on: the lens shows, with no light in it
-  lamp('some', (i, j) => (Math.abs(j - mid) < 1 ? (off ? 'slate' : 'light') : null)); // some of them: a bar of light across it
+  const midX = Math.floor(W / 2), midY = Math.floor(H / 2);
+  const emitter = off ? 'slate' : 'light';
+  // A horizontal window on the square paddle, a bullseye
+  // in the circular collar. Both retain their smoked insert when released.
+  const windowAt = (x, y) => r
+    ? Math.hypot(x - midX, y - midY) <= 2.3
+    : x >= 1 && x < W - 1 && Math.abs(y - midY) <= 1;
+  lamp('cap', (x, y) => windowAt(x, y) ? 'lens' : null);
+  lamp('lit', (x, y) => windowAt(x, y) ? emitter : null);
+  lamp('some', (x, y) => windowAt(x, y) ? (y === midY ? emitter : 'lens') : null);
   live.state.off = off;
+  if (off) {
+    live.state.held = null;
+    live.spring('press').snap(0);
+  }
   live.faceZ = 1; // the collar's face, and the face of a cap that is latched, lie on the element's box
 }
 
@@ -122,8 +132,7 @@ export const checkbox = {
     // a form put back to how it began: the inputs change after the event, so look a moment later
     if (input.form) on(input.form, 'reset', () => setTimeout(() => set(true)));
     on.watch(input, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
-    const set_ = input.closest('fieldset');
-    if (set_) on.watch(set_, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
+    watchFieldsets(input, on, () => live.rebuild());
     return on.done;
   },
 };

@@ -13,6 +13,24 @@
   /* room under the bar for a menu that is shown open, so that it lies over nothing */
   .room { min-block-size: calc(var(--vx) * 70); align-content: start; }
   .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  .program-bank {
+    position: relative; isolation: isolate; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+    inline-size: min(100%, 22rem); padding: 4px 12px 4px; list-style: none;
+  }
+  .program-bank > li { display: contents; }
+  .program-bank [popovertarget] {
+    position: relative; display: grid; place-items: center; min-height: 56px; min-width: 0;
+    border: 0; padding: 0 8px 12px; background: transparent; color: var(--lit-legend);
+    font: 600 1rem/1.2 var(--vx-font); cursor: pointer;
+  }
+  .program-bank [aria-expanded="true"] span { text-decoration: underline; text-underline-offset: .18em; }
+  .program-bank [popovertarget]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: -3px; }
+  .program-bank:not([data-vx-live]) { background: var(--vx-steel); border-radius: 4px; }
+  .program-bank:not([data-vx-live]) [popovertarget] { background: var(--vx-key); border: 2px solid var(--vx-steel); }
+  .program-bank:not([data-vx-live]) [popovertarget]::before {
+    content: ""; position: absolute; inset-inline: 22%; bottom: 3px; height: 4px; background: #514e49;
+  }
+  .program-bank:not([data-vx-live]) [aria-expanded="true"]::before { background: var(--lit-accent); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -29,9 +47,9 @@
   <section>
     <h2>In use: the top of the harbor-api window</h2>
     <div class="app">
-      <ul class="vx-menubar" id="bar" role="menubar" aria-label="harbor-api">
+      <ul class="program-bank" id="bar" role="menubar" aria-label="harbor-api">
         <li role="none">
-          <button type="button" role="menuitem" id="bar-file-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-file">File</button>
+          <button type="button" role="menuitem" id="bar-file-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-file"><span>File</span></button>
           <div class="vx-menu" id="bar-file" popover role="menu" aria-labelledby="bar-file-k">
             <button role="menuitem">New project</button>
             <button role="menuitem">Duplicate harbor-api</button>
@@ -40,7 +58,7 @@
           </div>
         </li>
         <li role="none">
-          <button type="button" role="menuitem" id="bar-edit-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-edit">Edit</button>
+          <button type="button" role="menuitem" id="bar-edit-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-edit"><span>Edit</span></button>
           <div class="vx-menu" id="bar-edit" popover role="menu" aria-labelledby="bar-edit-k">
             <button role="menuitem">Undo the rename</button>
             <button role="menuitem">Copy the address</button>
@@ -48,7 +66,7 @@
           </div>
         </li>
         <li role="none">
-          <button type="button" role="menuitem" id="bar-deploy-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-deploy">Deploy</button>
+          <button type="button" role="menuitem" id="bar-deploy-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-deploy"><span>Deploy</span></button>
           <div class="vx-menu" id="bar-deploy" popover role="menu" aria-labelledby="bar-deploy-k">
             <button role="menuitem">Deploy main</button>
             <button role="menuitem">Roll back to 4f2c9a1</button>
@@ -57,7 +75,7 @@
           </div>
         </li>
         <li role="none">
-          <button type="button" role="menuitem" id="bar-help-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-help">Help</button>
+          <button type="button" role="menuitem" id="bar-help-k" aria-haspopup="menu" aria-expanded="false" popovertarget="bar-help"><span>Help</span></button>
           <div class="vx-menu" id="bar-help" popover role="menu" aria-labelledby="bar-help-k">
             <button role="menuitem">Keys and chords</button>
             <button role="menuitem">Ask Ada on the team</button>
@@ -92,9 +110,10 @@
 <script type="module">
   import { show } from './parts.js';
   import { menubar } from '../../src/components/menubar.js';
+  import { programBank } from './menubar-bank.js';
   const $ = (id) => document.getElementById(id);
   $('bar').addEventListener('click', (e) => { const it = e.target.closest('[role="menu"] [role="menuitem"]'); if (it) $('done').textContent = `Done: ${it.textContent.trim()}.`; });
-  await show(menubar);
+  await show(menubar, programBank);
   // one menu is shown open, so that it can be looked at; ?closed leaves it shut. It is placed
   // when it opens, so it is opened again when the window changes size.
   const still = $('still-view');

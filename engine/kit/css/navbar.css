@@ -34,8 +34,8 @@
 a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
 .vx-navbar-fold { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 6); min-inline-size: 0; }
 .vx-navbar-fold > .vx-nav { flex: 0 1 auto; }
-/* the one key at the end */
-.vx-navbar-fold > .vx-button { margin-inline-start: auto; }
+/* the one key at the end: a key, or a key that latches (a theme's night, a mute) */
+.vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: auto; }
 /* the key that folds the links away: only where the bar is narrow, and only with the script */
 .vx-navbar-key { display: none; margin-inline-start: auto; }
 
@@ -46,7 +46,7 @@ a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-of
   .vx-navbar[data-vx-on] > .vx-navbar-fold { flex: 1 0 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; row-gap: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
-  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-button { margin-inline-start: 0; align-self: start; }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: 0; align-self: start; }
   /* plain: the groove stands at the start of the current link, as in any column */
   .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
     inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;

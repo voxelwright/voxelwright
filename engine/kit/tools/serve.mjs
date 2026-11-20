@@ -24,7 +24,7 @@ const world = process.env.ENGINE_DIST ? resolve(process.env.ENGINE_DIST) : null;
 // It also tells this server what ended up drawing the page, so a phone's answer can be read here.
 const HAND = `<script type="module">import { use, ready } from '/kit/src/index.js'; import { renderer } from '/kit/src/engine.js'; use(renderer()); addEventListener('load', () => ready().then((st) => fetch('/__seen?by=' + (st ? (st.renderer.ownsCanvas ? 'engine' : 'webgl2') : 'plain') + '&page=' + encodeURIComponent(location.pathname), { method: 'POST' }).catch(() => {})));</script>\n`;
 const seen = join(kit, 'milestones', 'seen.log');
-const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4', '.ts': 'text/javascript; charset=utf-8' };
+const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.woff2': 'font/woff2', '.wav': 'audio/wav', '.png': 'image/png', '.svg': 'image/svg+xml', '.txt': 'text/plain; charset=utf-8', '.md': 'text/markdown; charset=utf-8', '.wasm': 'application/wasm', '.jpg': 'image/jpeg', '.xml': 'application/xml', '.mp4': 'video/mp4', '.ts': 'text/javascript; charset=utf-8' };
 
 createServer(async (req, res) => {
   try {
