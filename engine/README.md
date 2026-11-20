@@ -22,7 +22,7 @@ what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 ```sh
 rustup target add wasm32-unknown-unknown   # once
 cd engine && npm ci
-npm run core        # builds core/ as wasm into page/core.wasm (a fresh checkout needs this)
+npm run core        # builds core/ as wasm into page/core.wasm (a fresh checkout needs this; a committed core/ built before is copied from ~/.village/engine/core-cache)
 npm run serve       # http://127.0.0.1:5740/city to fly; / runs the measuring flight first; /probe is the probe
 ```
 

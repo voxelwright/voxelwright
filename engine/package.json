@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Issue #140: Village's own engine. A world of cells drawn with raw WebGPU. Synthetic data, localhost or tailnet only.",
   "scripts": {
-    "core": "cd core && cargo build --release --target wasm32-unknown-unknown && cp target/wasm32-unknown-unknown/release/village_core.wasm ../page/core.wasm",
+    "core": "node core/build.mjs",
     "serve": "node serve.mjs",
     "player": "npm run -s core && node player/build.mjs",
     "landing": "npm run -s player && node player/serve.mjs --port 5950",
