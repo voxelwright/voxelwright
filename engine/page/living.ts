@@ -154,6 +154,8 @@ export interface Living {
   look(thing: Thing): { body: number | null; parts: { pos: [number, number, number]; rot: [number, number, number, number]; cell: number; size: [number, number, number]; per: number }[] }
   /** Where whoever rides from this page sits now and which way they face (cells; 0 is north), as the world's process places every rider (rules/things.mjs `carry`): in the thing's first seat, or its middle. Null when nobody rides. */
   readonly rider: { at: [number, number, number]; yaw: number } | null
+  /** Lets go of every living thing, as the solver does when it forgets the world (mover.ts `forget`): whoever rides is set down, looks are put away, and a spawn still waiting is answered as not made. */
+  forget(): void
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
   drive(thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
   readonly things: Thing[]
@@ -421,6 +423,12 @@ export function living(o: {
       o.send({ spawn: { cells: making.cells, size: making.size, low: making.low, take: making.take, motor: numbers(making.motor) } })
     }),
     drive: tell,
+    forget() {
+      if (riding) mount(null)
+      for (const thing of things) { thing.alive = false; unwear(thing) }
+      things.length = 0; struck.length = 0; near = null; cue?.remove(); cue = null
+      for (const w of waiting.splice(0)) w.done({ ...w.making, id: 0, alive: false })
+    },
     heard(answer, told) {
       if (answer.spawned !== undefined) {
         const next = waiting.shift()

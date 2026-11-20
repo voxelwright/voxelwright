@@ -2,12 +2,19 @@
 // page server holds (`/bay/<square>.bay`, baked by engine/bay/bake.py; the core's bay.rs reads them). Every core
 // that makes or asks about the world (this page's, each maker of sectors, the mover) must hold the same packs
 // before it is asked anything, so each opens its core through `open`.
+import { LOCAL } from './local.ts'
 
 /** The squares baked first, whole: what `?bay=551.7_4183.5,550.7_4183.5` names, as the first slice was measured. */
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 // A shared world or a realm is kept by the world's process (world.mjs), which holds no packs yet: there the page
-// stays with the town, or it would draw one world and walk in another.
-const asked = query.has('shared') || query.has('realm') ? null : query.get('bay')
+// stays with the town, or it would draw one world and walk in another. A realm this page runs alone (local.ts)
+// says which world it is in itself, where the address does not.
+const asked = query.has('shared') || query.has('realm') ? null : query.get('bay') ?? LOCAL?.world?.bay ?? null
+/**
+ * Where the packs are: beside the page's own folder (`/bay/` under the page server, `<site>/bay/` in a static
+ * folder, #450), the same for the page and its workers, whose modules are all in page/.
+ */
+const BASE = new URL('../bay/', import.meta.url).href
 /**
  * `?bay=1`: the world comes in tiles as the eye moves (bay/tiles.py), so that it has no edge the page must hold:
  * each core holds the few tiles round what it is asked about and lets the rest go.
@@ -51,24 +58,27 @@ interface Index { levels: { size: number; gstep: number }[]; tiles: [number, num
 let index: Promise<{ levels: Index['levels']; has: Set<string>[]; squares: string[] }> | null = null
 // Nothing baked on this machine: every tile is the planet's.
 const LEVELS = [{ size: 2500, gstep: 10 }, { size: 10000, gstep: 20 }, { size: 40000, gstep: 160 }]
-const tiles = () => (index ??= fetch('/bay/tiles/index.json').then(async (r) => { const i = (r.ok ? await r.json() : { levels: LEVELS, tiles: [[], [], []], squares: [] }) as Index; return { levels: i.levels, has: i.tiles.map((l) => new Set(BAKED ? l.map(([x, z]) => `${x}_${z}`) : [])), squares: BAKED ? i.squares : [] } }))
+const tiles = () => (index ??= fetch(`${BASE}tiles/index.json`).then(async (r) => { const i = (r.ok ? await r.json() : { levels: LEVELS, tiles: [[], [], []], squares: [] }) as Index; return { levels: i.levels, has: i.tiles.map((l) => new Set(BAKED ? l.map(([x, z]) => `${x}_${z}`) : [])), squares: BAKED ? i.squares : [] } }))
 
 /** A core from its address, holding the Bay's packs where the page asked for the Bay. */
 export async function open<T>(url: string): Promise<T> {
   const core = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
   if (STREAM) core.bay_begin()
-  for (const name of SQUARES) await take(core, `/bay/${name}.bay`)
+  for (const name of SQUARES) await take(core, `${BASE}${name}.bay`)
   return core as unknown as T
 }
 
 /** Has a core take the pack at an address. False where there is none to take: a tile that is all sea. */
 async function take(core: Core, url: string): Promise<boolean> {
   // A tile being made can fail (the map's host did not answer): asked again a few times before giving up.
+  // None at all (404): a static folder holds only the tiles it was given, and a place it lacks is sea, asked once.
   let answer = await fetch(url)
-  for (let again = 0; again < 3 && !answer.ok; again++) { await new Promise((r) => setTimeout(r, 1500 * (again + 1))); answer = await fetch(url) }
-  if (answer.status === 204) return false
+  for (let again = 0; again < 3 && !answer.ok && answer.status !== 404; again++) { await new Promise((r) => setTimeout(r, 1500 * (again + 1))); answer = await fetch(url) }
+  if (answer.status === 204 || answer.status === 404) return false
   if (!answer.ok) throw new Error(`${url}: ${answer.status}`)
   const bytes = new Uint8Array(await answer.arrayBuffer())
+  // An empty file is a tile that is all sea, as the page server's 204 is.
+  if (!bytes.length) return false
   // The core's memory moves when it grows: ask for the room first, then look at the memory.
   const at = core.bay_room(bytes.length)
   new Uint8Array(core.memory.buffer, at, bytes.length).set(bytes)
@@ -97,7 +107,7 @@ export async function need(core: object, x0: number, z0: number, x1: number, z1:
   const coming: Promise<boolean>[] = [], stamp = ++clock
   for (let tz = Math.floor((z0 - reach) / size); tz <= Math.floor((z1 - 1 + reach) / size); tz++) for (let tx = Math.floor((x0 - reach) / size); tx <= Math.floor((x1 - 1 + reach) / size); tx++) {
     // What is baked from lidar where there is any; else the tile made from the planet's data, the first time on asking.
-    const key = `${level}/${tx}_${tz}`, url = has[level].has(`${tx}_${tz}`) ? `/bay/tiles/${key}.bay` : `/bay/earth/${FRAME}/${key}.bay`
+    const key = `${level}/${tx}_${tz}`, url = has[level].has(`${tx}_${tz}`) ? `${BASE}tiles/${key}.bay` : `${BASE}earth/${FRAME}/${key}.bay`
     let tile = mine.get(key)
     if (!tile) mine.set(key, (tile = { level, x0: tx * size, z0: tz * size, used: stamp, came: take(core as Core, url).catch(() => { mine!.delete(key); return false }) }))
     tile.used = stamp
@@ -118,7 +128,7 @@ export const near = (core: object, x: number, z: number): Promise<void> => Promi
 
 /** What the page says of a square: its streets by name and its addresses, in cells. */
 export interface Names { square: string; at: [number, number, number]; names: string[]; ways: { name: number; line: [number, number][] }[]; addresses: [number, number, number, string][]; credit: string }
-export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await tiles()).squares : SQUARES).map(async (name) => (await fetch(`/bay/${name}.json`)).json() as Promise<Names>))
+export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await tiles()).squares : SQUARES).map(async (name) => (await fetch(`${BASE}${name}.json`)).json() as Promise<Names>))
 
 /**
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the

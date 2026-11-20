@@ -5,6 +5,7 @@
 // The helper (engine/helper.mjs) runs on the asker's own machine and starts their own model. The page is told
 // where it is and its secret once, in the part of the address after # (`#helper=http://127.0.0.1:5762&secret=…`),
 // which is taken out of the address at once and kept by this page (localStorage). The world's server never sees it.
+import { RULES } from './local.ts'
 
 /** What an ask is aimed at: a place, a box of cells (low corner, high corner not included), or a made thing and, if one is meant, which part of it. */
 export type Target = { point: [number, number, number] } | { box: [number, number, number, number, number, number] } | { thing: string; part?: string }
@@ -110,10 +111,11 @@ const ours = (address: string) => { const u = URL.parse(address); return !!u && 
 /** `eye` says where this page's eye is and looks (the world's finest cells), `by` the name it goes by. */
 export function asker(eye: () => { eye: [number, number, number]; toward: [number, number, number] }, by: () => string): Asker {
   let helper: { url: string; secret: string } | null = null
-  try { helper = JSON.parse(localStorage.getItem(KEPT) ?? 'null') } catch { /* a page that may keep nothing */ }
+  // In a realm whose rules allow no models (local.ts), there is no helper: none kept, none given, none asked.
+  if (RULES.models) try { helper = JSON.parse(localStorage.getItem(KEPT) ?? 'null') } catch { /* a page that may keep nothing */ }
   // Given in the address: kept, and taken out of the address so it is not left in the bar or passed on.
   const given = new URLSearchParams(location.hash.slice(1))
-  if (given.get('helper') && given.get('secret')) {
+  if (RULES.models && given.get('helper') && given.get('secret')) {
     // A helper is on this machine, or on the machine this page came from: an address that says otherwise (a link
     // someone made, to have wishes and pictures sent to them) is not taken.
     if (ours(given.get('helper')!)) {

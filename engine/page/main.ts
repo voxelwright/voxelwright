@@ -17,7 +17,7 @@ import { link } from './link.ts'
 import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { wheel } from './wheel.ts'
-import { car, fineCar, living } from './living.ts'
+import { car, fineCar, living, type Making } from './living.ts'
 import { person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
@@ -44,6 +44,7 @@ import { input } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker } from './ask.ts'
+import { LOCAL, RULES } from './local.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { gather } from './gather.ts'
@@ -63,9 +64,11 @@ const over = hud(controls)
 const M = 10
 /** `?fine=1` or `2` (#259, an experiment): the world's finest cells are 5 or 2.5 cm, in one or two more boxes round the eye that hold the core's cells written out finer. Only the march knows: nothing else drawn or done is scaled. */
 const FINE = 1 << Number(query.get('fine') ?? 0)
-const { report, post } = reporter('city-4')
+const { report, post: send } = reporter('city-4')
+/** A realm this page runs alone (local.ts) has no page server to send what was measured to. */
+const post: typeof send = LOCAL ? async () => false : send
 if (query.get('status') === '1') document.body.classList.add('status')
-const flying = (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
+const flying = !LOCAL && (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
 
 async function main() {
   report.env = environment()
@@ -79,7 +82,7 @@ async function main() {
   type Core = { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
-  let inner = await open<Core>('/page/core.wasm')
+  let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
   const core = Object.defineProperties({}, Object.fromEntries(Object.keys(inner).map((k) => [k, typeof (inner as never)[k] === 'function' ? { value: (...a: number[]) => (inner as unknown as Record<string, (...a: number[]) => number>)[k](...a) } : { get: () => (inner as never)[k] }]))) as Core
   const room = Math.min(device.limits.maxStorageBufferBindingSize, device.limits.maxBufferSize)
   const poolMb = Math.min(Number(query.get('pool') ?? (phone ? 128 : 256)), Math.floor(room / (1 << 20)))
@@ -140,8 +143,13 @@ async function main() {
   if (STREAM) { const there = query.get('at')?.split(',').map(Number); await near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
   while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
-  const at = numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
-  const look = numbers('look', BAY_ON ? [64, 4] : [20, -8])
+  // A realm run alone (local.ts) says where one arrives: the eye there, in the world's cells, and how it faces in degrees.
+  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? LOCAL.arrive : null
+  if (STREAM && arrive) await near(inner, arrive.at[0], arrive.at[2]!)
+  const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
+  const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', BAY_ON ? [64, 4] : [20, -8])
+  /** The eye's angle from top to bottom, degrees. */
+  let fov = Number(query.get('fov') ?? LOCAL?.fov ?? 70)
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
@@ -158,10 +166,10 @@ async function main() {
     const right = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]] as const
     // Someone whose down is not the world's (person.ts): the eye's whole frame is turned with them.
-    if (pose.tilt) { const q = pose.tilt, t = (v: readonly number[]) => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] as const }; return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward: t(forward), right: t(right), up: t(up), tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) } }
+    if (pose.tilt) { const q = pose.tilt, t = (v: readonly number[]) => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] as const }; return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward: t(forward), right: t(right), up: t(up), tanHalf: Math.tan((fov * Math.PI) / 360) } }
     // Under the sea: under its top, where the ground by itself lies under it too (not in a pit dug on land).
     march.under = pose.y < 0 && core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) < -1
-    return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward, right, up, tanHalf: Math.tan((Number(query.get('fov') ?? 70) * Math.PI) / 360) }
+    return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward, right, up, tanHalf: Math.tan((fov * Math.PI) / 360) }
   }
   /** Where a place in the world is on the screen (CSS pixels), or null behind the eye: for what the hud keeps beside a thing. */
   const project = (at: readonly [number, number, number]): [number, number] | null => {
@@ -274,8 +282,9 @@ async function main() {
     water.light(sun, day)
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
+  else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
   // `?rain=1` or the R key: rain.
-  march.rain = Number(query.get('rain') ?? 0)
+  march.rain = Number(query.get('rain') ?? LOCAL?.look?.rain ?? 0)
   // A realm's own look (#264, realms.ts): its hour and rain are set as the keys would set them; its grade stands in
   // place of the hour's and its tint multiplies the finished picture (glow.ts), until the page is in another realm.
   const ownLook = { hour, rain: march.rain }
@@ -426,9 +435,14 @@ async function main() {
       const s = world.stats
       over.status(`${saying ? `${saying} · ` : ''}${(1000 / frameMs).toFixed(0)} fps · march ${gpuMs.toFixed(1)} ms at ${to.size[0]} x ${to.size[1]} · ${s.wanted ? `making ${s.wanted} sectors` : 'world made'} · ${(s.poolUsed / 262144).toFixed(0)} of ${(s.poolWords / 262144).toFixed(0)} MB${s.full ? ` · ${s.full} did not fit` : ''} · ${pose.x.toFixed(0)}, ${pose.y.toFixed(0)}, ${pose.z.toFixed(0)} m · ${speed.toFixed(0)} m/s`)
     }
+    // For whoever measures (test/sf.mjs): the first picture handed to the GPU, and the first with every box of the world made.
+    if (!seen.first) seen.first = performance.now()
+    if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
   }
+  /** When the first picture was drawn and when the world round the eye was first whole: ms since the page was asked for. */
+  const seen = { first: 0, whole: 0 }
   requestAnimationFrame(frame)
 
   // ── Breaking ────────────────────────────────────────────────────────────
@@ -449,7 +463,7 @@ async function main() {
   // what everyone else asked.
   // `?realm=id`: another realm that the server keeps (#264), in place of home.
   const far = query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
-  const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker(`/page/mover.ts${BAY}`, { type: 'module' })
+  const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' })
   /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
   const asked: boolean[] = []
   // The Bay in tiles (#373): this page's core and the one that moves things hold what is round the eye, asked again as it moves.
@@ -623,7 +637,7 @@ async function main() {
   // A person's own body (#264, person.ts): B gets down onto the feet and back up to fly; `?walk=1` starts on foot.
   // This page moves it: in the core that moves everything else here, or in a shared world in a core of its own that
   // is told every edit, so that the body walks on the world as it is.
-  const shadow = far ? new Worker(`/page/mover.ts${BAY}`, { type: 'module' }) : null
+  const shadow = far ? new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' }) : null
   const me = person({ kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => (shadow ?? mover).postMessage(ask), wake: () => { if (!far) bodies = Math.max(bodies, 1) }, own: !!shadow, input: controls, hud: over, pose, folk, seed: seedOf(others?.name ?? 'me'), name: others?.name })
   // The residents go round this person's own body when it is on its feet, and round everyone else who is here.
   const waysFull: (readonly [number, number, number])[] = []
@@ -671,7 +685,10 @@ async function main() {
   over.line.starters = ['a market stall with a striped awning', 'a red telephone box', 'a park bench under a lamp', 'a fountain']
   // What the bar says Enter will do is what making will do with the words (making.ts `says`).
   over.line.means = (text) => wish.says(text)
+  // A realm whose rules allow no models has no bar to type a wish on (local.ts): spells from the kept library are cast with the wand.
+  if (!RULES.models) document.querySelector<HTMLElement>('#ask')?.style.setProperty('display', 'none')
   over.line.onask = (ask) => {
+    if (!RULES.models) return over.notice('Nothing is made from words in this realm', 5000)
     // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
     if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
     if (!wishes.known) return over.notice('To make things, run node helper.mjs on your machine and open the address it prints', 9000)
@@ -966,7 +983,7 @@ async function main() {
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { recore })
   // The workshop (#264, workshop.ts): what the engine could not do yet, and sending it to a development session.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { workshop: workshop(over, wishes) })
+  if (RULES.models) Object.assign((globalThis as unknown as { engine: object }).engine, { workshop: workshop(over, wishes) })
   // The engine's plugins (#264, plugins.ts): page sides the world says to have, imported as it says so; and what they draw with.
   Object.assign((globalThis as unknown as { engine: object }).engine, { draws: pluginDraws })
   if (far) Object.assign((globalThis as unknown as { engine: object }).engine, { plugins: plugins(far) })
@@ -1058,6 +1075,51 @@ async function main() {
     const x = Math.round(pose.x * M) + 60, z = Math.round(pose.z * M) + 4
     await alive.spawn((query.get('living') === 'finecar' ? fineCar : car)([x, core.ground_at(x, z) + 5, z]))
   })()
+  // ── A realm run alone (#450, local.ts) ─────────────────────────────────
+  // Its living things come from a kept library: each a plain file beside the page (sf/kept.mjs), set down where the
+  // realm says. Nothing is made: a visitor drives what was kept.
+  const keptFiles = new Map<string, Promise<Omit<Making, 'low'> | null>>()
+  const setDown = () => Promise.all((LOCAL?.kept ?? []).map(async (k) => {
+    if (!keptFiles.has(k.file)) keptFiles.set(k.file, fetch(new URL(k.file, location.href)).then((r) => (r.ok ? r.json() : null)).then((m) => m && { ...m, cells: new Int32Array(Uint8Array.from(atob(m.cells), (c) => c.charCodeAt(0)).buffer) }, () => null))
+    const making = await keptFiles.get(k.file)
+    if (!making) return null
+    // Over the ground where it stands (bay.ts has the tiles there by now: the realm begins beside it).
+    const [x, , z] = k.at, low: [number, number, number] = [Math.round(x - making.size[0] / 2), Math.max(k.at[1], core.ground_at(x, z) + 2), Math.round(z - making.size[2] / 2)]
+    return alive.spawn({ ...making, low })
+  }))
+  if (LOCAL?.kept?.length && !far) void setDown()
+  /**
+   * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
+   * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
+   * core): letting go of the edits is the whole of it, and nothing is sent anywhere. The eye goes back to where the
+   * realm begins, on foot if it was, and the kept things are set down again.
+   */
+  const reset = async () => {
+    if (far) return over.notice('A shared world is put back by its keeper, not by one page', 5000)
+    const afoot = me.on
+    alive.forget()
+    if (afoot) me.walk(false)
+    mover.postMessage({ forget: true } satisfies Ask)
+    for (const piece of moving.values()) piece.destroy()
+    for (const l of lying) l.piece.destroy()
+    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+    heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
+    spoiled.push(...world.swap([]))
+    core.world_forget()
+    Object.assign(pose, began)
+    if (afoot) me.walk(true)
+    await setDown()
+    over.notice('The world is as it was', 3000)
+  }
+  if (LOCAL) {
+    own.keys.set('Backspace', () => void reset())
+    const button = document.createElement('button')
+    button.type = 'button'; button.textContent = 'Reset'; button.title = 'Put the world back as it was (Backspace)'
+    button.style.cssText = 'position:fixed;right:16px;top:16px;font:600 14px system-ui;padding:10px 14px;border-radius:999px;border:0;background:rgba(20,22,28,.72);color:#fff;z-index:6'
+    button.onclick = () => void reset()
+    document.body.append(button)
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } })
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
