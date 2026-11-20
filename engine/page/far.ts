@@ -9,8 +9,15 @@
 // each frame draws a prefix of them: those at least `detail` pixels across at that distance. A face that looks away
 // from the eye is dropped in the vertex shader. Faces are #423's (page/matte.ts on PR 433): 20 bytes each.
 //
+// A listing may also have the landing's own cut (`landing`, sf/far/landing.mjs): of every band, only the faces seen
+// from the landing's eye, one object a tile, about a hundredth of them. From that eye they draw the same skyline as
+// every band together. While the eye is there and until the place is first shown, only they are fetched for the
+// tiles in the view, the biggest on the screen first; a tile draws them until every band it needs is here, and then
+// lets them go. Away from that eye they are not used.
+//
 //   ?farreach=500        metres from the eye where faces begin (0: no far model)
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
+//   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { shader, type Target } from '../probe/gpu.ts'
 import { AIR, GLOBALS, LIGHT, type Marcher, type View } from './march.ts'
 
@@ -157,9 +164,13 @@ export interface Listing {
   size: number
   bands: number[]
   lods: number[]
-  tiles: Record<string, ({ path: string; bytes: number; sha256: string } | null)[]>
+  tiles: Record<string, (Rec | null)[]>
   credit?: string
+  /** The landing's cut: where its eye is (cells), and one object a tile, its paths from the manifest as the bands' are. */
+  landing?: Landing
 }
+type Rec = { path: string; bytes: number; sha256: string }
+interface Landing { eye: [number, number, number]; tiles: Record<string, Rec> }
 interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
 
@@ -177,7 +188,11 @@ export interface Far {
   readonly stats: { faces: number; sections: number; tiles: number; held: number; heldBytes: number; fetched: number; fetchedBytes: number; coming: number; covered: number; failed: number; error: string }
   /** Whether every band the view needs is here. */
   readonly whole: boolean
-  /** The objects held now, by their paths in the listing: for counting what a view costs to send. */
+  /** Whether the first picture's share is here: at the landing, its cut of every tile in the view (each held, or asked and failed). */
+  readonly ready: boolean
+  /** The place was shown: from now the rest is fetched (finer bands, the tiles out of the view). */
+  shown(): void
+  /** The objects held now, by their addresses (the listing's paths from where it is): for counting what a view costs to send. */
   held(): string[]
   /**
    * The world changed in this box (finest cells, high corner exclusive): the far tiles it reaches are no longer
@@ -192,7 +207,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null, held: () => [], edited() {}, forget() {} }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {} }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -200,6 +215,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   base = file.slice(0, file.lastIndexOf('/') + 1)
   const listing = await fetch(file).then((r) => (r.ok ? (r.json() as Promise<Listing & { far?: Listing }>) : null)).then((l) => l?.far ?? l).catch(() => null)
   if (!listing || !Object.keys(listing.tiles).length) return none
+  // The landing's cut: the release's, or one asked for by address (its own landing.json, its paths from there).
+  const landingAt = query.get('farlanding')
+  const landing: (Landing & { base: string }) | null = landingAt
+    ? await fetch(landingAt).then((r) => (r.ok ? (r.json() as Promise<Landing>) : null)).then((l) => (l ? { ...l, base: new URL('.', new URL(landingAt, location.href)).href } : null)).catch(() => null)
+    : listing.landing ? { ...listing.landing, base } : null
 
   const module = await shader(device, 'far', CODE)
   const vertex: GPUVertexState = { module, entryPoint: 'vs', buffers: [{ arrayStride: 20, stepMode: 'instance', attributes: [0, 1, 2, 3, 4].map((n) => ({ shaderLocation: n, offset: n * 4, format: 'uint32' as const })) }] }
@@ -221,10 +241,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   // ── Tiles ──
   const size = listing.size, bands = listing.bands, lods = listing.lods
   interface Held { band: number; buffer: GPUBuffer; bytes: number; sections: { s: Section; bind: GPUBindGroup; mid: number[] }[]; used: number }
-  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[] }
-  const tiles: Tile[] = Object.entries(listing.tiles).map(([key, recs]) => {
+  // A tile's slots: its bands, then (last) the landing's cut of it.
+  interface Tile { key: string; x: number; z: number; lo: number[]; hi: number[]; bounded: boolean; listed: boolean[]; recs: (Rec | null)[]; held: (Held | null | 'coming')[]; retry: number[]; fails: number[]; full: boolean }
+  const C = bands.length
+  const tiles: Tile[] = Object.entries(listing.tiles).map(([key, listed]) => {
     const [x, z] = key.split('_').map(Number)
-    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), held: recs.map(() => null), retry: recs.map(() => 0), fails: recs.map(() => 0) }
+    const cut = landing?.tiles[key]
+    const recs = [...listed, cut ? { ...cut, path: new URL(cut.path, new URL(landing!.base, location.href)).href } : null]
+    return { key, x, z, lo: [x * size, -2000, z * size], hi: [(x + 1) * size, 6000, (z + 1) * size], bounded: false, listed: recs.map(Boolean), recs, held: recs.map(() => null), retry: recs.map(() => 0), fails: recs.map(() => 0), full: false }
   })
   const keys = tiles.map((t) => [t.x, t.z])
   const corner: [number, number] = [Math.min(...keys.map((k) => k[0])), Math.min(...keys.map((k) => k[1]))]
@@ -233,11 +257,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let covered = ''
 
   const load = async (t: Tile, band: number) => {
-    const rec = listing.tiles[t.key][band]!
+    const rec = t.recs[band]!
     t.held[band] = 'coming'
     stats.coming++
     try {
-      const answer = await fetch(base + rec.path)
+      const answer = await fetch(new URL(rec.path, new URL(base, location.href)))
       if (!answer.ok) throw new Error(`${answer.status}`)
       const bytes = new Uint8Array(await answer.arrayBuffer())
       const length = new DataView(bytes.buffer).getUint32(4, true)
@@ -249,6 +273,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
         for (let j = 0; j < 20; j++) { const from = j * n; for (let i = 0; i < n; i++) flat[i * 20 + j] = faces[from + i] }
         faces = flat
       }
+      // The windows' styles from the first object that has them (a cut's are its bands').
       if (!styled && head.styles?.length) {
         const s = new Float32Array(16 * 8)
         for (const [k, st] of head.styles.slice(0, 16).entries()) s.set([st.storey, st.bay, st.wide, st.tall, ...st.glass.map((c) => (c / 255) ** 2.2), 0], k * 8)
@@ -295,6 +320,22 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     }
     return true
   }
+  /**
+   * How much of the screen a box covers, 0 to 1: the rectangle round its corners as the eye sees them, cut to the
+   * screen. A box the eye is in or beside counts as the whole screen.
+   */
+  const coverage = (view: View, aspect: number, lo: readonly number[], hi: readonly number[]) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity
+    for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) {
+      const d = [x - view.eye[0], y - view.eye[1], z - view.eye[2]]
+      const along = d[0] * view.forward[0] + d[1] * view.forward[1] + d[2] * view.forward[2]
+      if (along < 10) return 1
+      const sx = (d[0] * view.right[0] + d[1] * view.right[1] + d[2] * view.right[2]) / (along * view.tanHalf * aspect)
+      const sy = (d[0] * view.up[0] + d[1] * view.up[1] + d[2] * view.up[2]) / (along * view.tanHalf)
+      x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy)
+    }
+    return (Math.max(0, Math.min(1, x1) - Math.max(-1, x0)) * Math.max(0, Math.min(1, y1) - Math.max(-1, y0))) / 4
+  }
   /** Whether any face of a run that looks `way` (1 up, 2 to 5 the walls) could face the eye: its plane is in front of the eye at some corner of the section's box. */
   const facing = (way: number, s: Section, eye: readonly number[]) => {
     if (way === 1) return eye[1] > s.lo[1]
@@ -307,21 +348,28 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
   /** Faces held at most: past this the furthest tiles' finer bands are let go. */
   const BUDGET = Number(query.get('farfaces') ?? 12_000_000)
+  /** How near the landing's eye the eye must be for its cut to be used, cells. */
+  const LANDED = 200
   /** How far past the reach a tile is still drawn, metres. */
   const FURTHEST = Number(query.get('farthest') ?? 16_000)
   let frame = 0
   let whole = true
+  /** Until the place is first shown only the landing's cut of the view is fetched (`ready` says when it is here); then the rest. */
+  let first = true
+  let ready = false
   /** Tiles the world was changed in since the last reset: the cells' (edited). */
   const changed = new Set<string>()
 
   const self: Far = {
     listing, reach: reachAsked, detail: Number(query.get('fardetail') ?? 0.75), stats,
     get whole() { return whole },
+    get ready() { return ready },
+    shown() { first = false },
     edited(box) {
       for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
     },
     forget() { changed.clear() },
-    held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [listing.tiles[t.key][k]!.path] : []))),
+    held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) { pass(encoder, to.color, to.depth, to.size, view, picture, false) },
     drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
@@ -343,35 +391,62 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const map: [number, number] = [Math.floor(eye[0] / size) - 32, Math.floor(eye[2] / size) - 32]
     const shaded = sunBaked && march.sun.s ? sunBaked[0] * march.sun.s[0] + sunBaked[1] * march.sun.s[1] + sunBaked[2] * march.sun.s[2] > 0.999 : false
     device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, 0]))
-    // What is fetched: every band a tile within sight needs, nearest first; and which tiles are whole, for the march.
-    const want: { t: Tile; band: number; d: number }[] = []
+    // What is fetched: for each tile in the view, the landing's cut of it while the eye is there, then every band it
+    // needs, the tiles that cover most of the screen first; then what the tiles out of the view need, nearest first.
+    // Which tiles are whole, for the march. Until the place is first shown, only the landing's cut of the view (or,
+    // away from it or where the listing has none, the first band of the view): on an ordinary link the finer bands
+    // near the eye had taken the wire for seconds while the skyline was still the cells' boxes.
+    const there = !!landing && Math.hypot(eye[0] - landing.eye[0], eye[1] - landing.eye[1], eye[2] - landing.eye[2]) < LANDED
+    const want: { t: Tile; band: number; d: number; seen: number }[] = []
     cover.fill(0)
     whole = true
+    let short = false
     let held = 0, heldBytes = 0
     for (const t of tiles) {
       const d = away(eye, t.lo, t.hi)
+      const seen = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
       // Out of sight and over a kilometre off, a tile holds only its biggest faces, until the eye turns to it (the
       // march's cells stand in meanwhile): the park's narrow lens had fetched the whole circle round it.
-      const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !inView(view, aspect, t.lo, t.hi) ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
+      const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !seen ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
       let all = true
       for (const [k, h] of t.held.entries()) {
-        if (!t.listed[k]) continue
-        if (need[k] && (h === null || h === 'coming')) { all = false; if (h === null && performance.now() >= t.retry[k]) want.push({ t, band: k, d }) }
+        if (k === C || !t.listed[k]) continue
+        if (need[k] && (h === null || h === 'coming')) all = false
         if (h && h !== 'coming') { held += h.bytes / 20; heldBytes += h.bytes; if (need[k]) h.used = frame }
       }
-      // The march hands a tile over only once all it needs is here: until then its cells stand in. Nor one the world
-      // was changed in.
-      if (all && d < FURTHEST * 10 && !changed.has(t.key)) {
+      t.full = all
+      // The landing's cut is let go once every band the tile needs is here, or the eye has left the landing.
+      const cut = t.held[C]
+      if ((all || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
+      const cutHeld = !all && there && !!cut && cut !== 'coming'
+      if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes }
+      const cutting = there && t.listed[C]
+      // What it is fetched for now: before the first show, the cut if the tile is in the view (or else its first
+      // band); after, the cut while the tile is in the view and not whole, and every band it needs.
+      const fetch = [...(first ? bands.map((_, k) => k === 0 && !!seen && !cutting) : need), !all && !!seen && cutting]
+      for (const [k, h] of t.held.entries()) {
+        if (!fetch[k] || !t.listed[k] || (h !== null && h !== 'coming')) continue
+        if (h === null && performance.now() >= t.retry[k]) want.push({ t, band: k === C ? -1 : k, d, seen })
+        // What the first picture waits on: the cut of the view, each held or asked once and failed.
+        if (k === C && first && (h === 'coming' || !t.fails[k])) short = true
+      }
+      if (!all && seen) whole = false
+      // The march hands a tile over once what it needs is here, or the landing's cut of it while the eye is there:
+      // until then its cells stand in. Nor one the world was changed in.
+      if ((all || cutHeld) && d < FURTHEST * 10 && !changed.has(t.key)) {
         const bx = t.x - map[0], bz = t.z - map[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
-      } else if (!all && inView(view, aspect, t.lo, t.hi)) whole = false
+      }
     }
+    // Ready once every object of the cut the first picture asks is held, or was asked and failed (a load error is said, not waited on).
+    ready = !first || !short
     stats.held = held; stats.heldBytes = heldBytes
-    want.sort((a, b) => a.d - b.d || a.band - b.band)
-    for (const w of want) { if (stats.coming >= 6) break; void load(w.t, w.band) }
+    // What the view holds before what it does not; in it the cut, then the coarse band before the finer, the biggest on the screen first.
+    want.sort((a, b) => Number(!a.seen) - Number(!b.seen) || (a.seen && b.seen ? a.band - b.band || b.seen - a.seen : 0) || a.d - b.d || a.band - b.band)
+    for (const w of want) { if (stats.coming >= 6) break; void load(w.t, w.band < 0 ? C : w.band) }
     // Over the budget: the least lately needed bands go, finest first.
     if (held > BUDGET) {
-      const loose = tiles.flatMap((t) => t.held.map((h, k) => ({ t, h, k }))).filter((e) => e.h && e.h !== 'coming' && e.h.used < frame - 120) as { t: Tile; h: Held; k: number }[]
+      const loose = tiles.flatMap((t) => t.held.map((h, k) => ({ t, h, k }))).filter((e) => e.k < C && e.h && e.h !== 'coming' && e.h.used < frame - 120) as { t: Tile; h: Held; k: number }[]
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
       for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
     }
@@ -396,7 +471,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const furthest = Math.hypot(...[0, 1, 2].map((a) => Math.max(Math.abs(t.lo[a] - eye[a]), Math.abs(t.hi[a] - eye[a]))))
       if (furthest < reach) continue
       drawn++
-      for (const h of t.held) {
+      // A tile not yet whole draws the landing's cut where it has it, else what bands it has.
+      const cut = t.held[C]
+      for (const h of !t.full && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
         if (!h || h === 'coming') continue
         out.setVertexBuffer(0, h.buffer)
         for (const { s, bind: b } of h.sections) {

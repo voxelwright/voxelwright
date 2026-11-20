@@ -471,7 +471,9 @@ async function main() {
     // For whoever measures (test/sf.mjs): the first picture handed to the GPU, and the first with every box of the world made.
     if (!seen.first) seen.first = performance.now()
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
-    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) seen.near = performance.now()
+    // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
+    // view, so that the skyline is in the first picture; only then does the far model fetch the rest.
+    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
