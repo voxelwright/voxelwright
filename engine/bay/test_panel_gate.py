@@ -116,6 +116,18 @@ class PixelGate(unittest.TestCase):
             self.assertFalse(record["passed"])
             self.assertIn("banding", record["defects"][0])
 
+    def test_a_defect_named_once_and_not_again_does_not_fail_the_view(self):
+        from types import SimpleNamespace
+
+        said = [dict(defects=[dict(name="pillars", clear=True, where="left")], notes=""), dict(defects=[], notes="")]
+        answers = iter(json.dumps(dict(result=json.dumps(x), is_error=False)) for x in said)
+        with TemporaryDirectory() as folder:
+            photo = self.street(folder, "photo.png")
+            record = self.inspect(folder, self.street(folder, "clean.png"), photo,
+                                  reply=lambda *a, **k: SimpleNamespace(stdout=next(answers), stderr="", returncode=0))
+            self.assertTrue(record["passed"], record["defects"])
+            self.assertEqual(len(record["judge"]), 2)
+
     def test_a_view_from_100_m_says_its_street_checks_do_not_apply(self):
         with TemporaryDirectory() as folder:
             photo = self.street(folder, "photo.png")

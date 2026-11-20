@@ -23,7 +23,7 @@ VIEWS = ("street", "100 m")
 # at most three more than the photograph shows (Embarcadero, Fishermans Wharf, SoMa). Nob Hill's pillars made seven.
 PILLAR_EXCESS = 4
 # Bump when a check or its threshold changes: cached inspections are keyed by it.
-VERSION = 1
+VERSION = 2
 
 
 def places():
@@ -36,6 +36,46 @@ def digest(path):
 
 def reference(place, view):
     return REFERENCES / (place + ("" if view == 0 else " 100 m") + ".jpg")
+
+
+def ask(render, ref, view, cache, attempt):
+    """One judge reading, kept by both pictures' bytes, the prompt and the attempt; a failed call is not kept."""
+    import render_checks as rc
+
+    key = sha256(json.dumps([digest(render), digest(ref), rc.JUDGE_MODEL, rc.PROMPT, attempt]).encode()).hexdigest()
+    stored = Path(cache) / "replies" / (key + ".json")
+    if stored.is_file():
+        return json.loads(stored.read_text())
+    where = VIEWS[view] + (" level" if view == 0 else " above, looking down")
+    reply = rc.judge(render, ref, where, Path(cache) / "judge" / key)
+    if "error" not in reply:
+        stored.parent.mkdir(parents=True, exist_ok=True)
+        stored.write_text(json.dumps(reply, indent=1) + "\n")
+    return reply
+
+
+def verdict(render, ref, view, cache):
+    """A second independent reading whenever the first fails a view: a defect fails it only when both name it
+    clearly, and the judge is unavailable only when neither answers."""
+    import render_checks as rc
+
+    def named(reply):
+        return {d["name"] for d in reply.get("defects", []) if d["clear"] and d["name"] in rc.DEFECTS}
+
+    replies = [ask(render, ref, view, cache, 1)]
+    if "error" in replies[0] or named(replies[0]):
+        replies.append(ask(render, ref, view, cache, 2))
+    answered = [r for r in replies if "error" not in r]
+    if not answered:
+        return replies, ["judge: " + replies[-1]["error"]]
+    if len(replies) == 1:
+        confirmed = set()  # the first reading answered and named nothing clearly
+    elif len(answered) == 2:
+        confirmed = named(replies[0]) & named(replies[1])
+    else:
+        confirmed = named(answered[0])  # the only reading that came holds, whichever call failed
+    wheres = {d["name"]: d["where"] for r in answered for d in r["defects"] if d["clear"]}
+    return replies, [f"judge: {name} ({wheres[name]})" for name in sorted(confirmed)]
 
 
 def inspect(place, view, render, cache, judge=True):
@@ -62,18 +102,13 @@ def inspect(place, view, render, cache, judge=True):
     else:
         for name in ("pillars", "banding", "windows"):
             checks[name] = "not applicable to a view from 100 m"
-    verdict = None
+    replies = None
     if judge:
-        verdict = rc.judge(render, ref, VIEWS[view] + (" level" if view == 0 else " above, looking down"),
-                           Path(cache) / "judge" / key)
-        if "error" in verdict:
-            defects.append("judge: " + verdict["error"])
-        else:
-            defects += [f"judge: {d['name']} ({d['where']})" for d in verdict["defects"]
-                        if d["clear"] and d["name"] in rc.DEFECTS]
+        replies, named = verdict(render, ref, view, cache)
+        defects += named
     record = dict(place=place, view=VIEWS[view], render=digest(render), reference=digest(ref), version=VERSION,
-                  checks=checks, judge=verdict, defects=defects, passed=not defects)
-    if verdict is None or "error" not in verdict:
+                  checks=checks, judge=replies, defects=defects, passed=not defects)
+    if replies is None or any("error" not in r for r in replies):
         stored.parent.mkdir(parents=True, exist_ok=True)
         stored.write_text(json.dumps(record, indent=1) + "\n")
     return record
@@ -132,9 +167,10 @@ def summary(report):
             band = r["checks"].get("banding")
             ribs = (f"ribs {band['render']['ribs']} vs {band['reference']['ribs']}"
                     if isinstance(band, dict) and band["render"] and band["reference"] else "ribs n/a")
-            judged = r["judge"]
-            named = ("judge " + (", ".join(f"{d['name']}{'' if d['clear'] else '?'}" for d in judged["defects"]) or "clean")
-                     if judged and "defects" in judged else "judge " + ("error" if judged else "off"))
+            readings = r["judge"] or []
+            named = "judge " + (" / ".join(
+                ",".join(f"{d['name']}{'' if d['clear'] else '?'}" for d in x["defects"] if d["name"] != "other") or "clean"
+                if "defects" in x else "error" for x in readings) or "off")
             lines.append(f"{'PASS' if r['passed'] else 'FAIL'}  {place:19s} {r['view']:7s} {pillars:18s} {ribs:18s} {named}")
     return "\n".join(lines)
 
