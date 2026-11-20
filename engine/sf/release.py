@@ -35,6 +35,9 @@ def generate(
     far_index=None,
     panel=None,
     core=None,
+    life=None,
+    cars=None,
+    paint=None,
 ):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
@@ -52,6 +55,14 @@ def generate(
         verified_files[name] = digest
         return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
 
+    out.mkdir(parents=True, exist_ok=True)
+    wall_faces = None
+    if paint:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
+        from city_panel import accepted_faces
+        from paint_tile import apply
+
+        wall_faces = accepted_faces(paint)
     levels = []
     for level, spec in enumerate(index["levels"]):
         tiles = {}
@@ -60,7 +71,28 @@ def generate(
             path = f"tiles/{level}/{key}.bay"
             if key in tiles:
                 raise ValueError("duplicate tile")
-            tiles[key] = record(packs / path, path)
+            source = packs / path
+            tiles[key] = record(source, path)
+            if wall_faces is not None:
+                if shutil.disk_usage(out.parent).free < 17 * 2**30:
+                    raise ValueError("disk reserve reached; staging can resume")
+                blob = apply(source.read_bytes(), wall_faces)
+                sha = hashlib.sha256(blob).hexdigest()
+                if sha != tiles[key]["sha256"]:
+                    cache = out / ".paint-objects" / sha
+                    cache.parent.mkdir(parents=True, exist_ok=True)
+                    if not cache.exists():
+                        import tempfile
+
+                        with tempfile.NamedTemporaryFile(
+                            dir=cache.parent, delete=False
+                        ) as f:
+                            f.write(blob)
+                            tmp = Path(f.name)
+                        tmp.replace(cache)
+                    tiles[key] = record(cache, path, False)
+                    if tiles[key]["sha256"] != sha:
+                        raise ValueError("paint tile cache changed")
         sea = sorted(f"{x}_{z}" for x, z in index["sea"][level])
         if len(set(sea)) != len(sea) or set(sea) & tiles.keys():
             raise ValueError("overlapping inventory")
@@ -82,6 +114,39 @@ def generate(
             s: record(source / (s + ".json"), f"graph/{s}.json", graph_dir is None)
             for s in names
         }
+    for kind, source in (
+        ("life", life or root / "life"),
+        ("cars", cars or root / "cars"),
+    ):
+        if not source.exists() and not (life if kind == "life" else cars):
+            continue
+        idx = source / "index.json"
+        index_record = record(idx, f"{kind}/index.json", False)
+        listing = json.loads(idx.read_text())
+        if listing.get("version") != 1:
+            raise ValueError(f"unknown {kind} index")
+        if kind == "life":
+            entries = listing["life"].items()
+            if listing.get("frame") != inventory["frame"] or set(
+                listing["life"]
+            ) != set(names):
+                raise ValueError("life index does not cover exactly this release")
+        else:
+            entries = [(r["id"], r) for r in listing["cars"]]
+        objects = {}
+        for key, row in entries:
+            if (
+                not re.fullmatch(r"[a-zA-Z0-9_.-]+", key)
+                or key in (".", "..", "index")
+                or key in objects
+                or row["path"] != key + ".json"
+            ):
+                raise ValueError(f"invalid {kind} object")
+            rec = record(source / row["path"], kind + "/" + row["path"], False)
+            if rec["sha256"] != row["sha256"] or rec["bytes"] != row["bytes"]:
+                raise ValueError(f"{kind}/{key} differs from its index")
+            objects[key] = rec
+        inventory[kind] = {"index": index_record, "objects": objects}
     if far_index is None and state.get("farIndex") == "far.json":
         far_index = root / "far.json"
     if far_index:
@@ -219,6 +284,9 @@ if __name__ == "__main__":
     cli.add_argument(
         "--core", type=Path, help="tested core.wasm for this panel receipt"
     )
+    cli.add_argument("--life", type=Path, help="life.py directory with its index")
+    cli.add_argument("--cars", type=Path, help="cars.mjs directory with its index")
+    cli.add_argument("--paint", type=Path, help="accepted city-paint batch receipt")
     args = cli.parse_args()
     generate(
         args.root,
@@ -228,4 +296,7 @@ if __name__ == "__main__":
         args.far,
         args.panel,
         args.core,
+        args.life,
+        args.cars,
+        args.paint,
     )

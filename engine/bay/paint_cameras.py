@@ -32,21 +32,32 @@ class Requests:
         state = json.loads(path.read_text()) if path.exists() else {}
         now = time.time()
         history = [t for t in state.get("requests", []) if now - t < 86400]
-        deadline = max(state.get("next", 0), history[-160] + 3600 if len(history) >= 160 else 0,
-                       history[-2400] + 86400 if len(history) >= 2400 else 0)
-        time.sleep(max(0, deadline - now))
+        deadline = max(
+            state.get("next", 0),
+            history[-160] + 3600 if len(history) >= 160 else 0,
+            history[-2400] + 86400 if len(history) >= 2400 else 0,
+        )
+        if deadline > now:
+            state["next"] = deadline
+            save(path, state)
+            time.sleep(deadline - now)
         if shutil.disk_usage(self.root).free < 17 * (1 << 30):
             raise RuntimeError("disk reserve reached; progress saved")
         now = time.time()
-        state.update(requests=[t for t in history if now - t < 86400] + [now],
-                     next=now + 1.12, total=state.get("total", 0) + 1,
-                     api=state.get("api", 0) + int(api))
+        state.update(
+            requests=[t for t in history if now - t < 86400] + [now],
+            next=now + 1.12,
+            total=state.get("total", 0) + 1,
+            api=state.get("api", 0) + int(api),
+        )
         save(path, state)
         return path, state
 
     def get(self, url, api=True):
         if self.count >= self.maximum:
-            raise RuntimeError("request budget exhausted; resume with the saved cameras")
+            raise RuntimeError(
+                "request budget exhausted; resume with the saved cameras"
+            )
         path, state = self.reserve(api)
         self.count += 1
         self.api += int(api)
@@ -57,14 +68,44 @@ class Requests:
             with urlopen(Request(url, headers=headers), timeout=40) as reply:
                 data = reply.read()
                 usage = json.loads(reply.headers.get("X-App-Usage", "{}"))
-                if max(usage.values(), default=0) >= 75:
+                if usage:
+                    state["lastAppUsage"] = {
+                        k: usage[k]
+                        for k in ("call_count", "total_time", "total_cputime")
+                        if k in usage
+                    }
+                    save(path, state)
+                if (
+                    max(
+                        (v for v in usage.values() if isinstance(v, (int, float))),
+                        default=0,
+                    )
+                    >= 75
+                ):
                     state["next"] = time.time() + 3600
                     save(path, state)
         except HTTPError as e:
+            if (
+                api
+                and url.startswith("https://graph.mapillary.com/")
+                and e.code in (400, 404, 410)
+            ):
+                try:
+                    error = json.loads(e.read(16384)).get("error", {})
+                except (ValueError, OSError):
+                    error = {}
+                if e.code in (404, 410) or (
+                    error.get("code") == 100 and error.get("error_subcode") == 33
+                ):
+                    return b"{}"
             wait = e.headers.get("Retry-After", "")
             if e.code in (400, 403, 429, 503) or wait:
                 try:
-                    delay = float(wait) if wait.isdigit() else parsedate_to_datetime(wait).timestamp() - time.time()
+                    delay = (
+                        float(wait)
+                        if wait.isdigit()
+                        else parsedate_to_datetime(wait).timestamp() - time.time()
+                    )
                 except (TypeError, ValueError, OverflowError):
                     delay = 600
                 state["next"] = max(state["next"], time.time() + max(60, delay))
@@ -83,19 +124,32 @@ def xy(photo):
     return e - 500000, 4250000 - n
 
 
-def select(place, center, yaw, square, holdouts, root, requests, limit, shared=None):
+def select(
+    place,
+    center,
+    yaw,
+    square,
+    holdouts,
+    root,
+    requests,
+    limit,
+    shared=None,
+    radius=RADIUS,
+):
     dest = root / place
     dest.mkdir(exist_ok=True)
     objects = shared or dest
     objects.mkdir(exist_ok=True)
     cx, cz = center
     lon, lat = TO_LL.transform(500000 + cx, 4250000 - cz)
+    # The tile spans about 1.93 km at this latitude. Visit both sides of every survey edge.
+    tile_margin = radius / (2446 * math.cos(math.radians(lat))) + 0.001
     fx = (lon + 180) / 360 * 16384
     fy = (1 - math.asinh(math.tan(math.radians(lat))) / math.pi) * 8192
     candidates = {}
     # Fetch every image-point tile intersecting the local 90 m search.
-    for tx in range(math.floor(fx - 0.05), math.floor(fx + 0.05) + 1):
-        for ty in range(math.floor(fy - 0.05), math.floor(fy + 0.05) + 1):
+    for tx in range(math.floor(fx - tile_margin), math.floor(fx + tile_margin) + 1):
+        for ty in range(math.floor(fy - tile_margin), math.floor(fy + tile_margin) + 1):
             name = f"images-{tx}-{ty}.mvt"
             caches = (
                 root / name,
@@ -129,7 +183,7 @@ def select(place, center, yaw, square, holdouts, root, requests, limit, shared=N
                 e, n = TO_UTM.transform(lng, lat)
                 x, z = e - 500000, 4250000 - n
                 d = math.hypot(x - cx, z - cz)
-                if 5 < d < 90:
+                if 5 < d < radius:
                     candidates[str(p["id"])] = (x, z, p["captured_at"])
     # Reuse archived solves where available. Spread positions both along and across the street.
     keep = []
@@ -178,7 +232,7 @@ def select(place, center, yaw, square, holdouts, root, requests, limit, shared=N
             if not p:
                 continue
             sx, sz = xy(p)
-            if not 5 <= math.hypot(sx - cx, sz - cz) <= RADIUS or any(
+            if not 5 <= math.hypot(sx - cx, sz - cz) <= radius or any(
                 math.hypot(sx - u, sz - v) < 7 for u, v in keep
             ):
                 continue

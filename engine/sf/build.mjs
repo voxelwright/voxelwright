@@ -12,8 +12,9 @@
 // `.ts` addresses written `.js`, nothing bundled.
 import { stripTypeScriptTypes } from 'node:module'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
-import { dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
@@ -31,6 +32,26 @@ const js = (text) => text.replace(NAMED, '$1$2$3.js')
 const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 const put = (path, body) => { mkdirSync(dirname(join(out, path)), { recursive: true }); writeFileSync(join(out, path), body) }
 rmSync(out, { recursive: true, force: true })
+
+// The release pins both the producer indexes and every file they name. Keep their relative URLs.
+const streetManifest = arg('street-manifest', '')
+if (streetManifest) {
+  const source = resolve(streetManifest), bytes = readFileSync(source)
+  const hash = (b) => createHash('sha256').update(b).digest('hex')
+  const pin = hash(bytes), manifest = JSON.parse(bytes)
+  if (basename(dirname(source)) !== pin) throw new Error('street manifest differs from its pin')
+  for (const kind of ['life', 'cars']) {
+    const lib = manifest[kind]
+    if (!lib || lib.index.path !== kind + '/index.json') throw new Error('missing ' + kind + ' index')
+    for (const obj of [lib.index, ...Object.values(lib.objects)]) {
+      if (!new RegExp('^' + kind + '/[a-zA-Z0-9_.-]+\\.json$').test(obj.path)) throw new Error('invalid library path')
+      const body = readFileSync(join(dirname(source), obj.path))
+      if (body.length !== obj.bytes || hash(body) !== obj.sha256) throw new Error('changed object ' + obj.path)
+      put('sf/releases/' + pin + '/' + obj.path, body)
+    }
+    realm.street[kind] = 'releases/' + pin + '/' + kind + '/'
+  }
+}
 
 // ── The page and every module it reaches ──
 const modules = new Set(), todo = []
@@ -91,7 +112,7 @@ for (const k of realm.kept ?? []) {
 }
 
 // ── Street life (#450, page/street.ts): each square's graph to walk and drive (sf/life.py), and the kept vehicles (sf/cars.mjs) ──
-if (realm.street) {
+if (realm.street && !streetManifest) {
   cpSync(join(root, 'sf/pilot-life'), join(out, 'sf', realm.street.life), { recursive: true })
   const cars = spawnSync(process.execPath, [join(root, 'sf/cars.mjs'), join(out, 'sf', realm.street.cars)], { encoding: 'utf8' })
   if (cars.status !== 0) { console.error(cars.stderr); process.exit(1) }

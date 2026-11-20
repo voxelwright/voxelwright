@@ -128,6 +128,7 @@ def build(args, lock_fd):
             "earth.py",
             "fetch.py",
             "tiles.py",
+            "paint_tile.py",
             "frontage.py",
             "street_trees.py",
             "pilot-hashes.json",

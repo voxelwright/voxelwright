@@ -99,7 +99,13 @@ def stage_manifest(manifest, candidate, changed):
         if far
         else {}
     )
-    for group in [*tiles, data["names"], data.get("graph", {}), far_objects]:
+    libs = {
+        r["path"]: r
+        for k in ("life", "cars")
+        if k in data
+        for r in [data[k]["index"], *data[k]["objects"].values()]
+    }
+    for group in [*tiles, data["names"], data.get("graph", {}), far_objects, libs]:
         for row in group.values():
             rel = Path(row["path"])
             if rel.is_absolute() or ".." in rel.parts:
@@ -108,7 +114,7 @@ def stage_manifest(manifest, candidate, changed):
             if digest(source) != row["sha256"]:
                 raise ValueError(f"base materialization differs from pin: {rel}")
             dest = candidate / "packs" / (rel.name if rel.parts[0] == "names" else rel)
-            if rel.parts[0] == "far":
+            if rel.parts[0] in ("far", "life", "cars"):
                 dest = candidate / rel
             if rel in changed:
                 if changed[rel][0] != row["sha256"] or digest(dest) != changed[rel][1]:
@@ -187,8 +193,9 @@ def main():
         if args.manifest:
             x, z = map(int, path.stem.split("_"))
             verify(output, x * 2500, z * 2500, 2500, 10, 5, 80, 0)
-            changed[path.relative_to(args.source / "packs")] = digest(path), digest(
-                output
+            changed[path.relative_to(args.source / "packs")] = (
+                digest(path),
+                digest(output),
             )
         totals = [a + b for a, b in zip(totals, counts)]
     if args.manifest:

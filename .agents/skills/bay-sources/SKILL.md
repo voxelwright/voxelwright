@@ -188,3 +188,9 @@ Photographs used to judge the slice, from Wikimedia Commons, kept outside the re
   `the_geom`; the tree list's latitude and longitude are text (`latitude::number`). `data.sfgov.org` answers
   `/resource/` asks; `/api/views/` now redirects to `data.sf.gov`.
 - Socrata `within_box` wants a geometry column; a text point column fails.
+
+### Street imagery when a Mapillary square is sparse (#450)
+
+On macOS 27.2.1, `swift engine/bay/lookaround.swift <latitude> <longitude> <local.jpg>` requests a native Look Around scene and snapshots it. At the Dogpatch control the output was 960 × 540, 136,360 bytes, 1.22 s across the scene and snapshot operations. MapKit's public scene and snapshot headers provide the image without its exposure position, heading or intrinsics. Eight perspective crops from each of four independent solved panoramas gave nine shared feature candidates and zero reliable triangulated control points (positive depth 2–100 m, ray residual below 0.75 m). This sample contributed zero registered walls. [Apple Look Around snapshotter](https://developer.apple.com/documentation/mapkit/mklookaroundsnapshotter)
+
+Google Street View Static metadata is free to request and requires an enabled API key. A Dogpatch metadata lookup here returned `REQUEST_DENIED`; no image was fetched. Distinguish a denied request from a street without coverage. [Google Street View metadata](https://developers.google.com/maps/documentation/streetview/metadata)

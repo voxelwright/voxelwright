@@ -53,13 +53,14 @@ def bounds(square):
     return x0, z0, x1, z1
 
 
-def owns(square, p):
-    x0, z0, x1, z1 = bounds(square)
-    return x0 <= p[0] < x1 and z0 <= p[1] < z1
+corners = {(round(bounds(s)[0]), round(bounds(s)[1])):s for s in graphs}
+grid_x, grid_z = next(iter(corners), (0, 0))
 
 
 def owner(p):
-    return next((s for s in graphs if owns(s, p)), None)
+    x = grid_x + math.floor((p[0]-grid_x)/10000)*10000
+    z = grid_z + math.floor((p[1]-grid_z)/10000)*10000
+    return corners.get((x,z))
 
 
 # ── How busy: land use within 60 m of a pavement ──
@@ -147,6 +148,7 @@ for g in graphs.values():
             turns[a].append(b)
 ids = set()
 roads = []
+road_tags = defaultdict(dict)
 for g in graphs.values():
     for r in g["roads"]:
         if r["id"] in ids or len(r["line"]) < 2:
@@ -167,6 +169,8 @@ for r in roads:
     for t in turns.get(r["id"], []):
         tw, _, tb = t.split("/")
         nxt += [int(tw), int(tb)]
+    if "controls" in graphs[where]:
+        road_tags[where][way] = {k:r[k] for k in ("highway","layer","bridge","tunnel")}
     out[where]["roads"].append([int(way), int(a), int(b), int(r.get("lanes") or 1), flags, nxt, *flat(r["line"])])
 
 # ── Parked places ──
@@ -230,7 +234,15 @@ for g in graphs.values():
             (x, z), (dx, dz) = at_along(line, (i + 0.5) * L / n)
             yaw = math.atan2(dz, dx) + (math.pi if pk.get("side") == "left" else 0)
             slots.append((x, z, yaw, 1))
-mapped = list(slots)
+mapped = defaultdict(list)
+for x,z,_,_ in slots:
+    mapped[(math.floor(x/60),math.floor(z/60))].append((x,z))
+
+
+def mapped_near(q):
+    x,z=math.floor(q[0]/60),math.floor(q[1]/60)
+    return any(math.dist(q,p)<45 for i in range(x-1,x+2) for j in range(z-1,z+2) for p in mapped[(i,j)])
+
 for r in roads:
     way, a, b = r["id"].split("/")
     oneway = f"{way}/{b}/{a}" not in ids
@@ -247,7 +259,7 @@ for r in roads:
             if k is None or k < 35:
                 continue
             q = (x + nx * (k - 11), z + nz * (k - 11))
-            if near_crossing(q) or any(math.dist(q, (p[0], p[1])) < 45 for p in mapped if abs(p[0] - q[0]) < 60 and abs(p[1] - q[1]) < 60):
+            if near_crossing(q) or mapped_near(q):
                 continue
             slots.append((q[0], q[1], math.atan2(dz * side, dx * side), 0))
 # Two places closer than a car's length: the second goes.
@@ -319,6 +331,11 @@ dest = Path(args.out)
 dest.mkdir(parents=True, exist_ok=True)
 index = {"version": 1, "frame": "10n4250", "life": {}}
 for s, o in out.items():
+    graph = graphs[s]
+    # Keep the compact road rows readable by older pages; share topology attributes per OSM way.
+    if "controls" in graph:
+        o.update({k:graph[k] for k in ("controls","signals","stopSigns","photoStopSigns")})
+        o["roadTags"] = road_tags[s]
     body = (json.dumps(o, separators=(",", ":")) + "\n").encode()
     (dest / f"{s}.json").write_bytes(body)
     index["life"][s] = {"path": f"{s}.json", "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
