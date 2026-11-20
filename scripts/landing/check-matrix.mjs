@@ -123,7 +123,7 @@ try {
     await page.waitForTimeout(400);
     assert.ok(held.equals(await page.screenshot({ clip })), "Pause holds the rain");
     assert.ok(!held.equals(before), "the Matrix changes the view");
-    assert.equal(await page.locator(".matrix-exit").isVisible(), true);
+    assert.equal(await page.locator('[data-sign="matrix-exit"][data-hit]').isVisible(), true);
     assert.equal(await page.locator('[data-egg="rain"]').getAttribute("aria-pressed"), "true");
     await page.keyboard.press("Escape");
     assert.equal(await inMatrix(page), false, "Esc leaves");
@@ -151,8 +151,9 @@ try {
     assert.ok(playing.bakes <= 7, `the city rebakes about once a second, not ${playing.bakes} times`);
     assert.ok(playing.fog === playing.frames, "the marine layer still runs");
     await page.screenshot({ path: join(out, "night.png") });
-    await page.locator(".matrix-exit").click();
-    assert.equal(await inMatrix(page), false, "the exit key leaves");
+    await page.locator('[data-sign="matrix-exit"][data-hit]').click();
+    assert.equal(await inMatrix(page), false, "the exit plate leaves");
+    await page.locator('[data-sign="time"][data-hit]').waitFor({ state: "attached" });
     assert.notEqual(await page.evaluate(() => document.activeElement), null);
     assert.equal(await page.evaluate(() => document.activeElement === document.body), false, "focus doesn't drop to the body");
     await context.close();
@@ -222,7 +223,7 @@ try {
     await context.close();
   }
 
-  // Phone, by touch: the exit key stays clear of every directory control.
+  // Phone, by touch: the billboard swaps its controls for the exit plate.
   for (const scheme of ["dark", "light"]) {
     const { context, page } = await open({ width: 390, height: 844, scale: 3, mobile: true, scheme, preset: "medium" });
     await live(page);
@@ -241,14 +242,11 @@ try {
     await page.touchscreen.tap(red.x, red.y);
     assert.equal(await inMatrix(page), true, "a tapped tower light enters on a phone");
     await page.waitForTimeout(6000);
-    const exit = await page.locator(".matrix-exit").boundingBox();
-    assert.ok(exit.width >= 44 && exit.height >= 44, "the exit key is a full touch target");
-    for (const hit of await page.locator("[data-sign][data-hit]").all()) {
-      const b = await hit.boundingBox();
-      if (!b) continue;
-      const apart = exit.x + exit.width <= b.x || b.x + b.width <= exit.x || exit.y + exit.height <= b.y || b.y + b.height <= exit.y;
-      assert.ok(apart, `the exit key clears ${await hit.getAttribute("data-sign")}`);
-    }
+    // The directory turns digital: its controls give way to one Exit the Matrix plate.
+    const exit = await page.locator('[data-sign="matrix-exit"][data-hit]').boundingBox();
+    assert.ok(exit.width >= 44 && exit.height >= 44, "the exit plate is a full touch target");
+    for (const id of ["time", "pause", "sound", "postcard", "view"])
+      assert.equal(await page.locator(`[data-sign="${id}"][data-hit]`).count(), 0, `${id} gives way on the billboard`);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth), 390);
     await page.screenshot({ path: join(out, `phone-${scheme === "dark" ? "night" : "day"}.png`) });
     await context.close();

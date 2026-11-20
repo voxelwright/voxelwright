@@ -39,6 +39,7 @@ ${links(true)}
 <button type="button" data-sign="support-still">Support</button>
 <a data-sign="plain-still" data-view="2d" href="/?view=2d">Plain page</a>
 <button type="button" data-sign="postcard" aria-haspopup="dialog" title="Make a postcard">Make a postcard</button>
+<button type="button" data-sign="matrix-exit" hidden>Exit the Matrix</button>
 <details class="display-settings"><summary data-sign="view">View</summary>
 <div class="view-panel"><fieldset><legend>Graphics</legend>
 <label data-sign="preset">Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
@@ -81,7 +82,6 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 <button class="vx-button" type="button" data-egg="rick">Tune the tow banner</button>
 <button class="vx-button" type="button" data-egg="lives">Konami code</button>
 </div></details></details><p class="egg-status" role="status" aria-live="polite"></p>
-<button class="vx-button matrix-exit" data-vx-material="chalk" type="button" hidden>Leave the Matrix</button>
 </div>`;
   const markdown =
     [
