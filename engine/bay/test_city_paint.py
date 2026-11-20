@@ -75,3 +75,50 @@ class Park(unittest.TestCase):
             struct.unpack_from("<4i", out, len(out) - 16), (x + 400, z, 100, 3)
         )
         self.assertEqual(without_eye_trees(out), out)
+
+
+class ResumableCameraPairs(unittest.TestCase):
+    def test_carry_only_complete_pair_with_same_inputs_and_matching_bytes(self):
+        from unittest.mock import MagicMock
+        import city_panel
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            poses = root / "poses.json"
+            poses.write_text(json.dumps({"one": {"street": [1] * 5, "100 m": [2] * 5}}))
+            dest = root / "proof"
+            dest.mkdir()
+            (root / "shots").mkdir()
+            server = MagicMock()
+            server.__enter__.return_value.stdout = [
+                "engine page on http://127.0.0.1:1234"
+            ]
+            visits = []
+
+            def capture(args, **kwargs):
+                self.assertNotIn("timeout", kwargs)
+                name = args[args.index("--name") + 1]
+                visits.append(name)
+                for i in range(2):
+                    (root / "shots" / f"{name}-{i}.png").write_bytes(
+                        bytes([len(visits), i])
+                    )
+                return MagicMock(returncode=0, stdout="")
+
+            with (
+                patch.object(city_panel, "BAY", root),
+                patch.object(city_panel, "POSES", poses),
+                patch.object(city_panel.subprocess, "Popen", return_value=server),
+                patch.object(city_panel.subprocess, "run", side_effect=capture),
+            ):
+
+                def shoot(key):
+                    city_panel.shot(root, [{"place": "one", "square": "x"}], dest, key)
+
+                shoot("first")
+                shoot("first")
+                self.assertEqual(len(visits), 1)
+                (dest / "one-1.png").write_bytes(b"partial")
+                shoot("first")
+                shoot("second")
+                self.assertEqual(len(visits), 3)
