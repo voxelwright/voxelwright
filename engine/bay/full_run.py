@@ -2,6 +2,7 @@
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import json
 import math
@@ -70,9 +71,15 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
         + 12 * h[13]
         + 16 * h[14]
     )
-    if path.stat().st_size != length:
+    if path.stat().st_size < length:
         raise ValueError(f"truncated BAY1: {path}")
     with path.open("rb") as f:
+        if path.stat().st_size > length:
+            from street_furniture import decode
+
+            f.seek(length)
+            if gstep != 10 or not decode(f.read()):
+                raise ValueError(f"invalid street fixtures: {path}")
         f.seek(64 + 2 * h[5] ** 2 + (4 + 2 * walls) * h[9] ** 2)
         for first, count, *_ in struct.iter_unpack("<6i", f.read(24 * h[12])):
             if first < 0 or count < 3 or first + count > h[13]:
@@ -122,6 +129,9 @@ def build(args, lock_fd):
             "street_trees.py",
             "pilot-hashes.json",
             "pilot-frontages.json",
+            "street_detail.py",
+            "street_detail_sources.py",
+            "street_furniture.py",
         )
     ]
     recipe += [args.pilot]
@@ -178,6 +188,7 @@ def build(args, lock_fd):
     import street_graph, street_sources
 
     from appearance import enhance
+    import street_detail, street_detail_sources
 
     def keep(log, name):
         dest = root / "inputs" / (name + ".zip")
@@ -255,6 +266,16 @@ def build(args, lock_fd):
             packs / "graph" / (name + ".json"),
         )
         print("appearance", json.dumps(result), file=log)
+        stats, audit = street_detail.apply(
+            pack,
+            root / "inputs" / (name + ".zip"),
+            root / "inputs" / (name + ".detail.json.gz"),
+            packs / "graph" / (name + ".json"),
+        )
+        report = root / "audits" / (name + ".json")
+        report.parent.mkdir(exist_ok=True)
+        save(report, {"square": name, "counts": stats, **audit})
+        print("street detail", json.dumps(stats), file=log)
         x, z, _, _ = bounds(name)
         verify(pack, x * 10, z * 10, 10000, 10, 5, 160, 0)
         data = json.loads(meta.read_text())
@@ -266,7 +287,7 @@ def build(args, lock_fd):
             )
         ):
             raise ValueError("incorrect names file")
-        return [pack, meta]
+        return [pack, meta, report]
 
     for name in dict.fromkeys(PILOT + names):
         task("inputs-" + name, keep, name)
@@ -290,6 +311,42 @@ def build(args, lock_fd):
             return [observations, path]
 
         task("streets-" + name, streets, name)
+
+        def details(log, square_name):
+            files = []
+            for suffix, get in (
+                (
+                    "detail",
+                    lambda dest: street_detail_sources.acquire(
+                        root / "inputs" / (square_name + ".zip"), dest
+                    ),
+                ),
+                (
+                    "fixtures",
+                    lambda dest: street_detail_sources.public_works(square_name, dest),
+                ),
+            ):
+                dest = root / "inputs" / (square_name + "." + suffix + ".json.gz")
+                if not dest.exists():
+                    seed = args.detail_seed / dest.name
+                    if seed.is_file():
+                        temp = dest.with_suffix(".part")
+                        shutil.copyfile(seed, temp)
+                        temp.replace(dest)
+                    elif args.offline_inputs:
+                        raise ValueError(f"offline street detail missing: {seed}")
+                    else:
+                        get(dest)
+                with gzip.open(dest) as source:
+                    data = json.load(source)
+                if data["square"] != square_name or data["version"] != (
+                    2 if suffix == "fixtures" else 1
+                ):
+                    raise ValueError(f"incorrect street detail: {dest}")
+                files.append(dest)
+            return files
+
+        task("detail-" + name, details, name)
         task(name, square, name)
         print(time.ctime(), "verified square", name, flush=True)
         raw = root / "raw" / name
@@ -365,6 +422,7 @@ if __name__ == "__main__":
         action="store_true",
         help="require both retained observations for every square; no square source acquisition",
     )
+    parser.add_argument("--detail-seed", type=Path, default=BAY / "450-detail-inputs")
     parser.add_argument("--input-seed", type=Path, default=BAY / "450-inputs")
     parser.add_argument("--seed", type=Path, default=BAY / "pilot450/packs")
     parser.add_argument(

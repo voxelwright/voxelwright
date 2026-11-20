@@ -18,6 +18,7 @@ import glob, json, os, struct
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw
 import earth
+from street_furniture import decode, encode
 
 PACKS = os.path.join(os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay')), 'packs')
 NONE, BED, WATER = -32768, -30, 5
@@ -43,6 +44,7 @@ def read(path):
     verts = take(nv * 3, '<i4').reshape(nv, 3)
     p['buildings'] = [(tuple(map(tuple, verts[r[0]:r[0] + r[1]].tolist())), tuple(int(v) for v in r[2:])) for r in rows]
     p['trunks'] = [tuple(t) for t in take(nt * 4, '<i4').reshape(nt, 4).tolist()]
+    p["fixtures"] = decode(b[at:])
     return p
 
 
@@ -65,7 +67,7 @@ def cut(paths, wanted=None):
     ground = np.full((H // 2 + 1, W // 2 + 1), BED, '<i2')
     top, cls, tint = np.full((H, W), NONE, '<i2'), np.full((H, W), WATER, 'u1'), np.zeros((H, W), 'u1')
     known = np.zeros((H, W), bool)
-    buildings, trunks = {}, set()
+    buildings, trunks, fixtures = {}, set(), set()
     for p in squares:
         i, j = (p['gx0'] - X0) // 10, (p['gz0'] - Z0) // 10
         ground[j:j + p['gw'], i:i + p['gw']] = p['ground']
@@ -73,9 +75,17 @@ def cut(paths, wanted=None):
         for whole, part in ((top, p['top']), (cls, p['class']), (tint, p['tint'])):
             whole[j:j + p['tw'], i:i + p['tw']] = part
         known[j:j + p['tw'], i:i + p['tw']] = True
-        buildings.update(p['buildings'])  # one that stands on two squares is in both: once here
+        for verts, row in p['buildings']:
+            # Adjacent squares can measure different eaves on the same outline.
+            # Choose the square containing its centre, with sorted square order for ties.
+            key = tuple((x,z,flags & 4) for x,z,flags in verts)
+            cx = (min(v[0] for v in verts)+max(v[0] for v in verts))//2
+            cz = (min(v[1] for v in verts)+max(v[1] for v in verts))//2
+            if key not in buildings or p['gx0']+160 <= cx < p['gx0']+10160 and p['gz0']+160 <= cz < p['gz0']+10160:
+                buildings[key] = (verts,row)
         trunks.update(p['trunks'])
-    buildings, trunks = sorted(buildings.items()), sorted(trunks)
+        fixtures.update(p['fixtures'])
+    buildings, trunks = sorted(buildings.values()), sorted(trunks)
     # Where a building stands and its wall's colour, at half a metre: for the tiles that hold no outlines.
     mass = Image.new('I', (W, H), 0)
     for verts, row in buildings:
@@ -137,6 +147,10 @@ def cut(paths, wanted=None):
                     rows.append((len(verts), len(v), *r))
                     verts += v
                 blob = earth.pack(x0, z0, size, gstep, g, tstep, x0 - margin, z0 - margin, t, c, n, walls, rows, verts, stems)
+                if level == 0 and fixtures:
+                    near = [r for r in sorted(fixtures) if max(r[0],r[3])+3 >= x0-margin and min(r[0],r[3])-3 < x0+size+margin
+                            and max(r[2],r[5])+3 >= z0-margin and min(r[2],r[5])-3 < z0+size+margin]
+                    blob += encode(near)
                 path = f'{PACKS}/tiles/{level}/{tx}_{tz}.bay'
                 with open(path + '.part', 'wb') as f:
                     f.write(blob)

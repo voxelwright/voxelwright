@@ -19,6 +19,8 @@ export interface WorldOptions {
   levels: number
   /** How many words of trees the GPU keeps. */
   poolWords: number
+  /** Surveyed facades can run diagonally across the cell grid. */
+  surveyedWalls?: boolean
   workers: number
   /** How many times finer than the core's own the finest cells here are (#259, an experiment; worker.ts). */
   fine?: number

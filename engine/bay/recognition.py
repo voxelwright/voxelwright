@@ -22,6 +22,9 @@ CONTROLS = [
     ("North Beach", "551.7_4183.5", "1194860254413003", 80),
     ("Telegraph Hill", "551.7_4183.5", "370214465301047", 260),
 ]
+# Eye elevations relative to engine zero in the first publication pair.
+# Freeze them when later ground passes move a street vertex.
+CONTROL_GROUND = {"Russian Hill": 38.0, "North Beach": 24.9, "Telegraph Hill": 79.4}
 WIDTH, HEIGHT, FOV = 960, 540, 70
 ENGINE = Path(__file__).resolve().parents[1]
 
@@ -85,7 +88,8 @@ def reference(inputs, out, label, square, id_, yaw):
 
 
 def shoot(root, phase, port, square, label, x, z, yaw):
-    views = f"{x},+2.5,{z},{yaw},0;{x},+100,{z},0,-90"
+    ground = CONTROL_GROUND[label]
+    views = f"{x},{ground+2.5:.1f},{z},{yaw},0;{x},{ground+100:.1f},{z},0,-90"
     subprocess.run(
         [
             "node",
@@ -113,19 +117,18 @@ def prefix(phase, label):
     return f"450-data-{phase}-" + label.replace(" ", "")
 
 
-def sheet(out):
-    canvas = Image.new("RGB", (1440, 6 * 303), "#1c2023")
+def sheet(out, phases=("before", "final"), titles=("Pilot", "Publication")):
+    canvas = Image.new("RGB", (480 * (len(phases) + 1), 6 * 303), "#1c2023")
     draw = ImageDraw.Draw(canvas)
     for i, (label, _, __, ___) in enumerate(CONTROLS):
         for j, alt in enumerate(("street", "100 m")):
             sources = [out / (label + (" 100 m" if j else "") + ".jpg")]
             sources.extend(
-                BAY / "shots" / f"{prefix(phase, label)}-{j}.png"
-                for phase in ("before", "final")
+                BAY / "shots" / f"{prefix(phase, label)}-{j}.png" for phase in phases
             )
             y = (2 * i + j) * 303
             for k, (path, title) in enumerate(
-                zip(sources, ("NAIP" if j else "Mapillary", "Pilot", "Publication"))
+                zip(sources, ("NAIP" if j else "Mapillary", *titles))
             ):
                 draw.text(
                     (k * 480 + 8, y + 7),
@@ -144,15 +147,30 @@ def sheet(out):
 
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("phase", choices=("before", "final", "sheet"))
+    p.add_argument(
+        "phase",
+        choices=("before", "final", "sheet", *(f"pass-{i}" for i in range(1, 6))),
+    )
     p.add_argument("--inputs", type=Path, default=BAY / "450-inputs")
     p.add_argument("--out", type=Path, default=BAY / "450-accuracy")
+    p.add_argument(
+        "--round-sheet",
+        action="store_true",
+        help="include the five street-level passes after the previous publication",
+    )
     p.add_argument("--release", type=Path)
     p.add_argument("--port", type=int)
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     if args.phase == "sheet":
-        sheet(args.out)
+        if args.round_sheet:
+            sheet(
+                args.out,
+                ("final", *(f"pass-{i}" for i in range(1, 6))),
+                ("Previous", "Footprints", "Walls", "Facades", "Ground", "Furniture"),
+            )
+        else:
+            sheet(args.out)
     else:
         if not args.release or not args.port:
             p.error("supply --release and its running engine server's --port")

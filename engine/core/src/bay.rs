@@ -47,7 +47,7 @@ const BLOCK: i32 = 6;
 /// How far from its trunk a tree's crown is shaped by it.
 const REACH: i32 = 64;
 /// How far out of its outline a building may put cells: a bay window, a cornice.
-const OUT: i32 = 8;
+const OUT: i32 = 15;
 
 struct Building {
     first: usize,
@@ -92,6 +92,8 @@ struct Pack {
     trunks: Vec<[i32; 4]>,
     near: Vec<Vec<u32>>,
     stems: Vec<Vec<u32>>,
+    fixtures: Vec<[i32; 8]>,
+    fixtures_near: Vec<Vec<usize>>,
     pw: i32,
     /// The lowest ground and the highest thing in each patch of 6.4 m.
     lows: Vec<i16>,
@@ -181,6 +183,19 @@ fn read(b: &[u8]) -> Option<Pack> {
     let rows = ints(take(nb.checked_mul(24)?)?);
     let verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
+    let mut fixtures = Vec::new();
+    if from < b.len() {
+        let extra = b.get(from..)?;
+        if extra.get(..4)? != b"SFST" { return None; }
+        let n = u32::from_le_bytes(extra.get(4..8)?.try_into().ok()?) as usize;
+        if n.checked_mul(32)? != extra.len().checked_sub(8)? { return None; }
+        for chunk in extra[8..].chunks_exact(32) {
+            let r: [i32; 8] = ints(chunk).try_into().ok()?;
+            if !(1..=100).contains(&r[6]) || !(1..=65535).contains(&r[7])
+                || r[..6].iter().any(|v| v.unsigned_abs() > 10_000_000) { return None; }
+            fixtures.push(r);
+        }
+    }
     let mut buildings = Vec::with_capacity(nb);
     for r in rows.chunks_exact(6) {
         let (first, count) = (r[0] as usize, r[1] as usize);
@@ -205,7 +220,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             high: [own.iter().map(|v| v[0]).max()?, own.iter().map(|v| v[1]).max()?],
         });
     }
-    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -247,6 +262,26 @@ fn read(b: &[u8]) -> Option<Pack> {
             if t != NONE {
                 let k = (((p.tz0 - p.gz0 + j * p.tstep) >> BLOCK).clamp(0, p.bw - 1) * p.bw + ((p.tx0 - p.gx0 + i * p.tstep) >> BLOCK).clamp(0, p.bw - 1)) as usize;
                 p.highs[k] = p.highs[k].max(t);
+            }
+        }
+    }
+    if !p.fixtures.is_empty() {
+        p.fixtures_near = vec![Vec::new(); (p.pw * p.pw) as usize];
+        for (i, r) in p.fixtures.iter().enumerate() {
+            let pad = (r[6] + 9) / 10 + 2;
+            let lo = [r[0].min(r[3])-pad, r[2].min(r[5])-pad];
+            let hi = [r[0].max(r[3])+pad, r[2].max(r[5])+pad];
+            for z in patch(lo[1], p.gz0, p.pw)..=patch(hi[1], p.gz0, p.pw) {
+                for x in patch(lo[0], p.gx0, p.pw)..=patch(hi[0], p.gx0, p.pw) {
+                    p.fixtures_near[(z*p.pw+x) as usize].push(i);
+                }
+            }
+            let clamp = |v:i32, origin:i32| ((v-origin)>>BLOCK).clamp(0,p.bw-1);
+            for z in clamp(lo[1],p.gz0)..=clamp(hi[1],p.gz0) {
+                for x in clamp(lo[0],p.gx0)..=clamp(hi[0],p.gx0) {
+                    let k=(z*p.bw+x) as usize;
+                    p.highs[k]=p.highs[k].max((r[1].max(r[4])+pad).clamp(-32767,32767) as i16);
+                }
             }
         }
     }
@@ -334,7 +369,7 @@ impl Pack {
             if p.inside {
                 return Some((b, p));
             }
-            if p.far < OUT as f32 && best.as_ref().is_none_or(|(_, q)| p.far < q.far) {
+            if p.far < (if p.looks >> 24 != 0 { OUT } else { 8 }) as f32 && best.as_ref().is_none_or(|(_, q)| p.far < q.far) {
                 best = Some((b, p));
             }
         }
@@ -376,6 +411,31 @@ impl Pack {
         p
     }
 
+    /// Vertical intervals cut by visible street furniture in one column. Sample
+    /// a narrow wire across the cell width so a diagonal remains connected.
+    fn fixture_spans(&self, x: i32, z: i32, size: i32) -> Vec<(i32,i32,Kind)> {
+        let mut spans = Vec::new();
+        if size > 4 || self.fixtures_near.is_empty() { return spans; }
+        let px = ((x-self.gx0)>>PATCH).clamp(0,self.pw-1);
+        let pz = ((z-self.gz0)>>PATCH).clamp(0,self.pw-1);
+        for &i in &self.fixtures_near[(pz*self.pw+px) as usize] {
+            let r = self.fixtures[i];
+            let (dx,dz) = ((r[3]-r[0]) as f32,(r[5]-r[2]) as f32);
+            let (ux,uz) = ((x-r[0]) as f32,(z-r[2]) as f32);
+            let length = dx*dx+dz*dz;
+            let t = if length > 0.0 { ((ux*dx+uz*dz)/length).clamp(0.0,1.0) } else { 0.0 };
+            let rad = r[6] as f32/10.0 + size as f32*0.5;
+            let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
+            if far > rad*rad { continue; }
+            let height = |v:f32| r[1] as f32 + v*(r[4]-r[1]) as f32;
+            let reach = if length>0.0 { ((rad*rad-far)/length).sqrt() } else { 1.0 };
+            let a = height((t-reach).max(0.0));
+            let b = height((t+reach).min(1.0));
+            spans.push(((a.min(b)-rad).ceil() as i32,(a.max(b)+rad).floor() as i32,r[7] as Kind));
+        }
+        spans
+    }
+
     /// The trunk nearest a column, if one stands within reach: how far off it is, and the trunk.
     fn trunk(&self, x: i32, z: i32) -> Option<(f32, [i32; 4])> {
         let patch = (((z - self.gz0) >> PATCH).clamp(0, self.pw - 1) * self.pw + ((x - self.gx0) >> PATCH).clamp(0, self.pw - 1)) as usize;
@@ -412,6 +472,17 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         } else {
             b.wall
         };
+    }
+    let detail = p.looks >> 24;
+    // Place the entry beside the garage, with both meeting the local street grade.
+    if detail != 0 && over_ground < 30 {
+        let entry = (p.long * 0.22).clamp(7.0, 18.0);
+        if detail & 8 != 0 && (p.along - entry).abs() <= 5.0 && (4..=26).contains(&over_ground) {
+            return if over_ground > 21 { glass } else { kind(WOOD, grey(9)) };
+        }
+        if detail & 4 != 0 && (p.along - p.long * 0.66).abs() < (p.long * 0.23).min(19.0) && over_ground < 23 {
+            return if over_ground % 5 == 0 { b.trim } else { kind(WOOD, grey(5)) };
+        }
     }
     // The cornice: the wall's last cells are trim.
     if up >= top - 3 && size <= 2 {
@@ -485,6 +556,7 @@ struct Column<'a> {
     ground: Kind,
     kerb: i32,
     what: What<'a>,
+    fixtures: Vec<(i32,i32,Kind)>,
 }
 
 enum What<'a> {
@@ -501,7 +573,7 @@ enum What<'a> {
 
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { g: BED, ground: kind(SAND, OWN), kerb: 0, what: What::Open };
+        return Column { g: BED, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open };
     };
     let g = p.ground(x, z);
     let (class, tint) = p.surface(x, z);
@@ -509,7 +581,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, OWN), 0),
-        PAVEMENT => (kind(CONCRETE, OWN), 1),
+        PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
         WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
@@ -519,7 +591,14 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     };
     let what = match p.building(x, z) {
         Some((b, probe)) if probe.inside => {
-            let roof = p.top(x, z).unwrap_or(b.base + 2 * b.storey).max(g + 22);
+            let raster = p.top(x, z).unwrap_or(b.base + 2 * b.storey);
+            // Glass and the vertical wall can be the highest lidar return at its edge.
+            // Give a surveyed plane one eave; blend into the roof over the next metre.
+            let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
+                let eave = (probe.looks >> 8) as i16 as i32;
+                let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
+                (eave as f32 + (raster - eave) as f32 * blend).round() as i32
+            } else { raster }.max(g + 22);
             What::In(b, probe, roof, tint)
         }
         Some((b, probe)) if size <= 2 && probe.looks & 2 != 0 => {
@@ -527,7 +606,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
             let far = probe.far.max(0.01);
             let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
-            match p.top(ix, iz) {
+            match if probe.looks & 128 != 0 { Some((probe.looks >> 8) as i16 as i32) } else { p.top(ix, iz) } {
                 Some(roof) => What::By(b, probe, roof),
                 None => What::Open,
             }
@@ -561,7 +640,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         },
         _ => What::Open,
     };
-    Column { g, ground, kerb, what }
+    Column { g, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
 }
 
 /// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
@@ -570,6 +649,9 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     let mid = y + size / 2;
     if mid <= c.g {
         return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
+    }
+    for &(bottom, top, kind) in &c.fixtures {
+        if mid >= bottom && mid <= top { return kind; }
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
@@ -590,12 +672,33 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 return c.ground;
             }
             let (up, top) = (mid - b.base, *roof - b.base);
+            let detail = p.looks >> 24;
+            let street_y = mid - c.g;
+            if detail & 8 != 0 && (p.along - (p.long * 0.22).clamp(7.0, 18.0)).abs() < 7.0 {
+                let step = (4 - (p.far / 3.0) as i32).max(0);
+                if street_y <= step * 2 { return kind(CONCRETE, grey(4)); }
+            }
+            if detail & 16 != 0 && p.along > 2.0 && p.along < p.long - 2.0 && p.far < 14.0 {
+                let canopy = 32 - (p.far * 0.42) as i32;
+                if (canopy-1..=canopy).contains(&street_y) || p.far > 12.0 && (canopy-4..canopy).contains(&street_y) {
+                    return kind(PLASTER, if p.along as i32 / 4 % 2 == 0 { grey(2) } else { colour(8, 8) });
+                }
+            }
+            if detail & 32 != 0 && up >= b.storey - 2 && up < top-5 && p.far <= 10.0 {
+                let along = p.along-p.long*0.5;
+                let fy = (up+2).rem_euclid(b.storey);
+                if along.abs() <= 12.0 && (fy < 2 || ((fy == 11 || (along as i32 % 5 == 0 && fy < 11)) && p.far >= 9.0))
+                    || (along + 8.0).abs() < 3.0 && p.far >= 7.0 && ((along + 8.0).abs() >= 2.0 || fy % 4 == 0) {
+                    return kind(STEEL, grey(13));
+                }
+            }
+            if detail & 2 != 0 && p.far <= 4.0 && up >= top-4 && up <= top+3 { return b.trim; }
             // The cornice stands a cell or two out from the wall's top.
             if p.far < 2.0 && up >= top - 3 && up <= top {
                 return b.trim;
             }
             // Bay windows: on a home's street front, over every other bay of it, from the first floor to the cornice.
-            if !b.home || p.long < b.module as f32 || up < b.storey || up > top - 4 {
+            if (if detail != 0 { detail & 1 == 0 } else { !b.home }) || p.long < b.module as f32 || up < b.storey || up > top - 4 {
                 return 0;
             }
             let module = b.module as f32;
@@ -605,7 +708,7 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 return 0;
             }
             let (bay, mu) = ((within / module) as i32, within % module - module / 2.0);
-            if count > 1.0 && (bay + b.seed as i32) % 2 == 1 || b.seed % 5 == 0 {
+            if count > 1.0 && (bay + b.seed as i32) % 2 == 1 || detail == 0 && b.seed % 5 == 0 {
                 return 0;
             }
             // Six cells out across the middle, slanting back to the wall at each side.
@@ -796,6 +899,22 @@ mod tests {
         let rows = 64 + 65 * 65 * 2 + 128 * 128 * 4;
         wrong[rows + 4..rows + 8].copy_from_slice(&900i32.to_le_bytes());
         assert!(read(&wrong).is_none());
+    }
+
+    #[test]
+    fn a_street_fixture_spans_its_cells_and_rejects_a_truncated_record() {
+        let mut bytes = pack();
+        bytes.extend(b"SFST");
+        bytes.extend(1u32.to_le_bytes());
+        for n in [120, 180, 120, 120, 265, 120, 12, kind(STEEL, OWN) as i32] {
+            bytes.extend(n.to_le_bytes());
+        }
+        let p = read(&bytes).unwrap();
+        assert!(p.fixture_spans(120,120,1).iter().any(|s| s.0 <= 180 && s.1 >= 265 && s.2 == kind(STEEL,OWN)));
+        assert!(p.fixture_spans(125,120,1).is_empty());
+        assert!(p.highs.iter().copied().max().unwrap() >= 265);
+        bytes.pop();
+        assert!(read(&bytes).is_none());
     }
 
     #[test]

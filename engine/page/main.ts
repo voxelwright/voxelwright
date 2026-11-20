@@ -98,6 +98,7 @@ async function main() {
   }
   const world = new World(device, {
     merge,
+    surveyedWalls: BAY_ON,
     grid,
     levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
     poolWords: (poolMb << 20) / 4,

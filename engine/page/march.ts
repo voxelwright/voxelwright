@@ -1082,6 +1082,25 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       slope = true;
     }
   }
+  ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
+  // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
+  if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
+    let c = hit.cell - lvh.cells;
+    let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
+                                vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
+    var outward = vec2f(0.0);
+    for (var i = 0u; i < 8u; i++) {
+      let d = vec3i(ring[i].x, 0, ring[i].y);
+      let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
+      outward += normalize(vec2f(ring[i])) * f32(delta);
+    }
+    if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
+      let plan = normalize(outward);
+      n = vec3f(plan.x,0.0,plan.y);
+      at += n * (0.85/lvh.scale);
+      slope = true;
+    }
+  }` : ''}
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {
     var sunny = -1.0;
