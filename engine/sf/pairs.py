@@ -101,4 +101,5 @@ else:
     v = 0.5 + np.arctan2(cam[:, 1], np.hypot(cam[:, 0], cam[:, 2])) / np.pi
     px = img[np.clip((v * img.shape[0]).astype(int), 0, img.shape[0] - 1), np.clip((u * img.shape[1]).astype(int), 0, img.shape[1] - 1)]
     Image.fromarray(px.reshape(h, w, 3).astype(np.uint8)).save(out)
-    print(out)
+    # How light the view is (0 to 255): whether it was taken by day, whatever its clock says.
+    print(json.dumps({"out": out, "luma": float(px.mean())}))

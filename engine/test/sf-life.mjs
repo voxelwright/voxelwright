@@ -244,7 +244,14 @@ try {
     const photos = around.status === 0 ? JSON.parse(around.stdout.trim().split('\n').pop() || '[]') : []
     const yaw = (340 * Math.PI) / 180
     for (const [n, cam] of photos.slice(0, 4).entries()) {
-      const when = new Date(cam.captured), h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(when)) + when.getUTCMinutes() / 60
+      const when = new Date(cam.captured)
+      // Its hour in San Francisco; but a photograph in daylight stamped in the night was taken by a camera whose
+      // clock kept local time as if it were UTC: then the stamp's own hour is the hour.
+      const crop = spawnSync(PY, [join(here, 'sf/pairs.py'), 'view', cam.id, String(yaw), '-0.02', '70', '1280', '720', join(shots, `chinatown-${n}-photo.png`)], { encoding: 'utf8' })
+      const luma = crop.status === 0 ? JSON.parse(crop.stdout.trim().split('\n').pop()).luma : 0
+      let h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(when)) + when.getUTCMinutes() / 60
+      const local = luma > 90 && (h < 7 || h > 19)
+      if (local) h = when.getUTCHours() + when.getUTCMinutes() / 60
       await page.evaluate((h) => { globalThis.engine.hour = h }, h)
       // On Grant Ave's carriageway beside the camera: at the camera's own spot the eye is inside the awnings and
       // arcades over the pavement, which the bake has solid.
@@ -254,9 +261,8 @@ try {
       const c = await page.evaluate(() => globalThis.engine.street.count(globalThis.engine.view(), 600))
       const name = `chinatown-${n}`
       await page.screenshot({ path: join(shots, `${name}-engine.png`) })
-      spawnSync(PY, [join(here, 'sf/pairs.py'), 'view', cam.id, String(yaw), '-0.02', '70', '1280', '720', join(shots, `${name}-photo.png`)], { encoding: 'utf8' })
-      results.density.push({ place: 'Chinatown, Grant Ave', photo: cam.id, captured: when.toISOString().slice(0, 16), hour: round(h), peopleSeen: c.peopleSeen, people60m: c.people, vehiclesSeen: c.vehiclesSeen, name })
-      console.log(`  Chinatown ${n}: photo ${cam.id} at ${round(h)}h; engine at that hour: ${c.peopleSeen} people and ${c.vehiclesSeen} vehicles in view, ${c.people} people within 60 m`)
+      results.density.push({ place: 'Chinatown, Grant Ave', photo: cam.id, captured: when.toISOString().slice(0, 16), hour: round(h), clockLocal: local, peopleSeen: c.peopleSeen, people60m: c.people, vehiclesSeen: c.vehiclesSeen, name })
+      console.log(`  Chinatown ${n}: photo ${cam.id} at ${round(h)}h${local ? ' (its clock kept local time)' : ''}; engine at that hour: ${c.peopleSeen} people and ${c.vehiclesSeen} vehicles in view, ${c.people} people within 60 m`)
     }
     await page.evaluate((h) => { globalThis.engine.hour = h }, hour)
   }
@@ -403,6 +409,9 @@ try {
     const after20 = e.street.cars(at[0], at[2], 300)
     return { at, down, flinch, thrown, thrownCellsFromBlast: moved, trafficSpeedsAt2s: stopped, cars: carsBefore.length, carsLater: later.length, drivingAt6s: later.filter((c) => c.kind === 'traffic').map((c) => Math.round(c.v)), drivingAt20s: after20.filter((c) => c.kind === 'traffic').map((c) => Math.round(c.v)) }
   })
+  // Seen from 10 m up, over where it went off (at the eye's height the smoke fills the picture).
+  await page.evaluate((at) => { const e = globalThis.engine; Object.assign(e.pose, { x: at[0] / 10 - 14, z: at[2] / 10 + 8, y: at[1] / 10 + 10, yaw: Math.atan2(14, -(-8)), pitch: -0.55 }) }, blast.at ?? [P.columbus.pose.x * 10, 200, P.columbus.pose.z * 10])
+  await page.waitForTimeout(1500)
   await page.screenshot({ path: join(shots, 'blast.png') })
   results.blast = blast
   console.log(`  ${JSON.stringify(blast)}`)
@@ -437,6 +446,8 @@ try {
       return { craters: c.craters, blockedRoads: c.blockedRoads, carsInHoleMost: into }
     }, [s.x, s.z])
     results.crater = hole
+    await page.evaluate(([x, z]) => { const e = globalThis.engine, ex = x / 10 - 12, ez = z / 10 + 9; Object.assign(e.pose, { x: ex, z: ez, y: e.ground(x / 10, z / 10) + 11, yaw: Math.atan2(x / 10 - ex, -(z / 10 - ez)), pitch: -0.6 }) }, [s.x, s.z])
+    await page.waitForTimeout(2000)
     await page.screenshot({ path: join(shots, 'crater.png') })
     console.log(`  ${JSON.stringify(hole)}`)
     check(hole.craters > 0 && hole.blockedRoads > 0 && hole.carsInHoleMost === 0, `a charge in Columbus Ave: ${hole.craters} hole(s) seen in the world, ${hole.blockedRoads} road(s) closed, no car in 15 s stood where the road was gone`)
