@@ -97,12 +97,19 @@ class Requests:
             state["lastCooldown"] = dict(reason=reason, at=now, until=state["next"])
 
     def strike(self, reason):
-        # An isolated failure backs off briefly. Repeats within ten minutes escalate to the limit cooldown.
+        # An isolated failure backs off briefly. Repeats within ten minutes escalate to the limit
+        # cooldown. Workers failing together during one backoff count as a single strike.
         with self.allowance() as state:
             now = time.time()
+            if now < state.get("backoff", 0):
+                return
             strikes = [t for t in state.get("strikes", []) if t > now - 600] + [now]
             seconds = min(LIMIT_COOLDOWN, 15 * 2 ** (len(strikes) - 1))
-            state.update(strikes=strikes, next=max(state.get("next", 0), now + seconds))
+            state.update(
+                strikes=strikes,
+                backoff=now + seconds,
+                next=max(state.get("next", 0), now + seconds),
+            )
             state["lastCooldown"] = dict(reason=reason, at=now, until=state["next"])
 
     def get(self, url, api=True):
@@ -145,9 +152,10 @@ class Requests:
             else:
                 self.strike(f"HTTP {e.code}")
             raise RuntimeError(f"image request returned HTTP {e.code}") from None
-        except (URLError, TimeoutError, ConnectionError):
-            self.strike("network")
-            raise RuntimeError("image request failed") from None
+        except (URLError, TimeoutError, ConnectionError) as e:
+            reason = f"network: {getattr(e, 'reason', e)}"
+            self.strike(reason)
+            raise RuntimeError(f"image request failed ({reason})") from None
         if usage:
             with self.allowance() as state:
                 state["lastAppUsage"] = {

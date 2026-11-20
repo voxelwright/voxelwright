@@ -98,6 +98,13 @@ class Reserve(unittest.TestCase):
                 req.get("https://scontent.example/x.jpg", False)
         self.assertEqual(self.state()["next"] - self.clock[0], 30)
 
+    def test_workers_failing_together_count_once(self):
+        a, b = requests_at(self.root, self.clock), requests_at(self.root, self.clock)
+        a.strike("network")
+        b.strike("network")
+        self.assertEqual(len(self.state()["strikes"]), 1)
+        self.assertEqual(self.state()["next"] - self.clock[0], 15)
+
     def test_missing_image_is_recorded_without_a_cooldown(self):
         req = requests_at(self.root, self.clock)
         with patch("paint_cameras.urlopen", side_effect=self.reply(404)):
