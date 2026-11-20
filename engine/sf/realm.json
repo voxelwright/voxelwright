@@ -5,6 +5,7 @@
   "world": {
     "bay": "1"
   },
+  "release": "current.json",
   "arrive": {
     "at": [
       516466.6,
@@ -25,7 +26,8 @@
         516046,
         0,
         663900
-      ]
+      ],
+      "kerb": true
     }
   ],
   "roll": -0.1764,
