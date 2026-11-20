@@ -15,7 +15,7 @@
 // Modules are written as player/build.mjs writes them: Node's own stripper over each module the page reaches, with
 // `.ts` addresses written `.js`, nothing bundled. The tiles, the car and this folder never go in git.
 import { stripTypeScriptTypes } from 'node:module'
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
 import { dirname, join, relative, resolve } from 'node:path'

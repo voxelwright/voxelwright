@@ -50,8 +50,10 @@ const failing = new Map()
 const fail = (path) => { const n = failing.get(path); if (!n) return 0; failing.set(path, n - 1); return 503 }
 const site = await plain(dist, '127.0.0.1', 0, { plainly: has('plainly'), fail })
 let back = await turn()
-/** Runs `measure` with every turn on the GPU (kit.mjs `quiet`): no other thread's check draws beside a timing. */
-const alone = async (measure) => { back(); const all = await quiet(); try { return await measure() } finally { all(); back = await turn() } }
+// Stopped from outside (a timeout, ^C), the turn is given back as on any other way out.
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { console.log(`\nstopped (${signal}) in ${current.name}`); back(); process.exit(1) })
+/** Runs `measure` with every turn on the GPU (kit.mjs `quiet`): no other thread's check draws beside a timing. Its phase's clock starts once they are had. */
+const alone = async (name, minutes, measure) => { back(); const all = await quiet(); try { phase(name, minutes); return await measure() } finally { all(); back = await turn() } }
 const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
 // The helper a visitor might be offered (a link, or something kept from another page): it must never be asked.
 const HELPER = 'http://127.0.0.1:5762'
@@ -63,6 +65,17 @@ const page = await context.newPage()
 const errors = []
 page.on('pageerror', (e) => errors.push(e.message))
 page.on('console', (m) => { if (m.type() === 'error' && !/503 \(Service Unavailable\)/.test(m.text())) errors.push(m.text()) })
+// ── Phases, each with its own time: one that runs over is said, fails the check, and closes the browser, so that
+// whatever it waits on throws and the run ends through `finally` (the turn on the GPU given back). ──
+const current = { name: 'starting', deadline: Infinity }
+const phase = (name, minutes) => { Object.assign(current, { name, deadline: Date.now() + minutes * 60_000 }); console.log(`\n${name}`) }
+const watchdog = setInterval(() => {
+  if (Date.now() < current.deadline) return
+  console.log(`  FAIL ${current.name}: timed out`)
+  failures.push(`${current.name}: timed out`)
+  current.deadline = Infinity
+  void browser.close()
+}, 1000)
 const results = { url: `${site.url}/sf/index.html`, release: pointer.release, served: has('plainly') ? 'plainly' : 'brotli where taken' }
 
 const mb = (n) => round(n / 1048576, 2)
@@ -83,7 +96,7 @@ const sent = (from, to) => {
 
 try {
   // ── The first visit, cold, on an ordinary link ──
-  console.log(`\nfirst visit (cold cache, ${mbit} Mbit/s, 40 ms)`)
+  phase(`first visit (cold cache, ${mbit} Mbit/s, 40 ms)`, 5)
   const cdp = await context.newCDPSession(page)
   await cdp.send('Network.enable')
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 })
@@ -110,7 +123,7 @@ try {
   check(source.release === pointer.release, `pinned to release ${String(source.release).slice(0, 12)} (manifest hash checked: ${source.checked})`)
 
   // ── Frames ──
-  const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 90_000, polling: 250 }).catch(() => null)
+  const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 60_000, polling: 250 }).catch(() => null)
   const frames = async (name, pose, fov, full = false) => {
     await page.evaluate(({ pose, fov }) => { const e = globalThis.engine; Object.assign(e.pose, pose); if (fov) e.fov = fov }, { pose, fov })
     await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2000)
@@ -120,10 +133,10 @@ try {
     // Once pinned the picture's size stays pinned: the passes at full size come after all the steered ones.
     if (full) { await page.evaluate(() => { globalThis.engine.scale = 1 }); await page.waitForTimeout(2000) }
     // Other lanes draw on this GPU too, some outside the turns (kit.mjs): a pass short of 60 fps at 0.7 is taken again
-    // twice, a while apart, and the best kept, with what else was drawing beside it.
+    // twice, ten seconds apart, and the best kept, with what else was drawing beside it.
     let w = await take(), r = { ...said(w), fov: w.fov, residentsDrawn: w.people, tries: 1 }
     for (let again = 0; !full && again < 2 && !(r.p50 <= 17.5 && r.scale >= 0.7); again++) {
-      await page.waitForTimeout(20_000)
+      await page.waitForTimeout(10_000)
       w = await take()
       const next = { ...said(w), fov: w.fov, residentsDrawn: w.people, tries: r.tries + 1 }
       r = next.scale > r.scale ? next : { ...r, tries: next.tries }
@@ -133,13 +146,12 @@ try {
     console.log(`  ${name}: ${JSON.stringify(r)}`)
     return r
   }
-  console.log('\nframes')
   const park = await page.evaluate(() => ({ ...globalThis.engine.pose }))
   // Taylor St between Green and Union, looking north along it, a person's eye over the road.
   const street = { x: 51590, z: 66300 }
   street.y = await page.evaluate(({ x, z }) => globalThis.engine.ground(x, z), street) + 1.7
   const parkGround = ground
-  results.frames = await alone(async () => ({
+  results.frames = await alone('frames', 8, async () => ({
     park: await frames('park', park, 25.05),
     street: await frames('street', { ...street, yaw: -0.164, pitch: 0 }, 70),
     up150: await frames('up150', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70),
@@ -148,7 +160,7 @@ try {
   for (const [where, f] of Object.entries(results.frames)) check(f.p50 <= 17.5 && f.scale >= 0.7, `60 fps ${where}: p50 ${f.p50} ms, p99 ${f.p99} ms at picture scale ${f.scale} (bounds 17.5 ms, 0.7)`)
 
   // ── Features ──
-  console.log('\nfeatures')
+  phase('features', 4)
   const f = (results.features = {})
   f.residents = results.frames.street.residentsDrawn
   console.log(`  (report) residents drawn at street level on Taylor St: ${f.residents}; at the park: ${results.frames.park.residentsDrawn}`)
@@ -247,7 +259,7 @@ try {
   check(!models.rules.models && !models.known && away.length === 0 && models.bar === 'none', `no models: rules ${JSON.stringify(models.rules)}, helper known ${models.known}, an ask ${models.done}, ask bar ${models.bar}, ${away.length} requests off the site`)
 
   // ── What the page carries on through ──
-  console.log('\nfaults')
+  phase('faults', 5)
   const ff = (results.faults = {})
   await page.evaluate(() => { globalThis.engine.patience = 4000 })
   // A reset sent while a blast's answer is on its way: nothing of the blast may come down in the world put back.
@@ -296,7 +308,7 @@ try {
   await page.evaluate(() => { globalThis.engine.patience = 10_000 })
 
   // ── Moving through the city: what the tiles cost ──
-  console.log('\nmoving')
+  phase('moving', 4)
   await page.evaluate(() => globalThis.engine.reset())
   const travel = async (name, kind) => {
     const from = Date.now()
@@ -327,6 +339,7 @@ try {
   results.moving = { walk60: await travel('walk60', 'walk'), flight60: await travel('flight60', 'fly') }
 
   // ── What is held ──
+  phase('what is held and asked', 1)
   results.memory = await page.evaluate(async () => { const e = globalThis.engine, m = await e.tiles.memory(); return { device: e.tiles.device, coresMB: Math.round((m.page + m.workers.reduce((a, b) => a + b, 0)) / 1048576), pageCoreMB: Math.round(m.page / 1048576), workerCoresMB: m.workers.map((b) => Math.round(b / 1048576)), tilesHeldMB: Math.round(m.tiles / 1048576), jsHeapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, tally: e.tiles.tally, water: e.tiles.water() } })
   console.log(`\nmemory: ${JSON.stringify(results.memory)}`)
   check(results.memory.tilesHeldMB <= 96, `the page holds ${results.memory.tilesHeldMB} MB of tiles for its workers (cap 96 MB on a desktop), the cores ${results.memory.coresMB} MB`)
@@ -335,7 +348,7 @@ try {
   const tilesAsked = site.asked.filter((a) => isTile(a.path))
   const tileFiles = new Set(tilesAsked.map((a) => a.path))
   const failedOnPurpose = tilesAsked.filter((a) => a.status === 503).length
-  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path === '/sf/index.html' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
+  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path === '/sf/index.html' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
   const pointerAsked = site.asked.filter((a) => a.path === '/sf/current.json').length
   const notFound = site.asked.filter((a) => a.status === 404)
   results.asked = { requests: site.asked.length, tileRequests: tilesAsked.length - failedOnPurpose, tileFiles: tileFiles.size, perFile: round((tilesAsked.length - failedOnPurpose) / tileFiles.size, 2), pointer: pointerAsked, outside: outside.map((a) => a.path), notFound: notFound.map((a) => a.path) }
@@ -344,16 +357,19 @@ try {
   check(results.asked.perFile <= 1.05, `each tile fetched once: ${results.asked.tileRequests} requests for ${results.asked.tileFiles} files (${results.asked.perFile} a file, before 3.2)`)
 
   // ── Every pixel drawn (scale 1): what each place costs the GPU ──
-  console.log('\nframes at full size')
-  results.framesFull = await alone(async () => ({
+  results.framesFull = await alone('frames at full size', 4, async () => ({
     park: await frames('park-full', park, 25.05, true),
     street: await frames('street-full', { ...street, yaw: -0.164, pitch: 0 }, 70, true),
     up150: await frames('up150-full', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, true),
   }))
   results.errors = errors.filter((e) => !/failed: 503|tiles\/0\/.*503/.test(e))
   check(results.errors.length === 0, `no page errors${results.errors.length ? `: ${results.errors.slice(0, 3).join(' | ')}` : ''}`)
+} catch (e) {
+  console.log(`  FAIL ${current.name}: ${String(e?.message ?? e).split('\n')[0]}`)
+  if (!failures.some((f) => f.startsWith(current.name))) failures.push(`${current.name}: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
-  await browser.close()
+  clearInterval(watchdog)
+  await browser.close().catch(() => {})
   site.stop()
   back()
 }

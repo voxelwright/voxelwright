@@ -38,7 +38,7 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
-import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, memory, near, open, share, silent, tally, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, memory, near, open, share, silent, tally, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -1213,7 +1213,7 @@ async function main() {
   // Defined, not assigned: Object.assign would copy what a getter says once, and drop a setter.
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({
     /** For the checks (#450): ends a worker without a word, as a tab out of memory would, to see the page carry on. */
-    kill: (which: 'mover' | 'maker') => { if (which === 'mover') moverWorker?.terminate(); else (world as unknown as { workers: { worker: Worker }[] }).workers[0]?.worker.terminate() },
+    kill: (which: 'mover' | 'maker') => end(which === 'mover' ? moverWorker : (world as unknown as { workers: { worker: Worker }[] }).workers[0]?.worker),
     get mended() { return { movers: moversLost, makers: world.stats.crashed, staleAnswers: stale.answers } },
     set patience(ms: number) { moverPatience = ms; world.patience = ms },
   }))

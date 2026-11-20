@@ -244,9 +244,13 @@ export function share(worker: Worker): Worker {
   sharing.set(worker, entry)
   // Let go of with the worker.
   const end = worker.terminate.bind(worker)
+  ending.set(worker, end)
   worker.terminate = () => { clearInterval(ping); sharing.delete(worker); port1.close(); end() }
   return worker
 }
+const ending = new WeakMap<Worker, () => void>()
+/** For the checks: ends a worker as a tab out of memory would, without a word and still watched, so the page must find it gone. */
+export const end = (worker: Worker | null | undefined) => { if (worker) ending.get(worker)?.() }
 const sharing = new Map<Worker, { port: MessagePort; memory: { bytes: number }; owed: number }>()
 /** How long since a worker given a port (`share`) last said anything, ms. */
 export const silent = (worker: Worker | null): number => { const e = worker && sharing.get(worker); return e?.owed ? performance.now() - e.owed : 0 }
