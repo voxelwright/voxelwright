@@ -1,0 +1,66 @@
+{
+  "Russian Hill": [
+    6.5,
+    7.5
+  ],
+  "North Beach": [
+    7.5,
+    8.0
+  ],
+  "Telegraph Hill": [
+    7.5,
+    8.0
+  ],
+  "Financial District": [
+    3.0,
+    4.0
+  ],
+  "Nob Hill": [
+    5.0,
+    7.5
+  ],
+  "Embarcadero": [
+    7.0,
+    7.5
+  ],
+  "Fishermans Wharf": [
+    6.5,
+    7.5
+  ],
+  "Chinatown": [
+    5.0,
+    7.5
+  ],
+  "Mission": [
+    5.5,
+    7.5
+  ],
+  "Haight-Ashbury": [
+    6.5,
+    8.0
+  ],
+  "Painted Ladies": [
+    6.5,
+    7.5
+  ],
+  "Marina": [
+    6.0,
+    7.5
+  ],
+  "Outer Sunset": [
+    6.0,
+    7.5
+  ],
+  "Castro": [
+    5.5,
+    7.5
+  ],
+  "SoMa": [
+    6.0,
+    7.5
+  ],
+  "Dogpatch": [
+    4,
+    7.5
+  ]
+}
