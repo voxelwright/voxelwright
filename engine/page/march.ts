@@ -1155,6 +1155,27 @@ fn leaving(ro: vec3f, rd: vec3f, hit: Hit, whole: bool) -> f32 {
   return max(min(out.x, min(out.y, out.z)), hit.t) + 0.002 * size / lv.scale;
 }
 
+// A wall's own plane where a look meets the side of one of its cells: the outward of the solid round the cell, over
+// a short piece of its footprint (w 1), or nothing (w 0). A diagonal wall's cells are a staircase whose faces
+// alternate sunlit and dark, and whose panes each mirror the sky along their risers: bright slits beside every
+// window of a turned or curved front (#450).
+fn wallPlane(hit: Hit, n: vec3f) -> vec4f {
+  let c = hit.cell - g.level[hit.level].cells;
+  let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
+                              vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
+  var outward = vec2f(0.0);
+  for (var i = 0u; i < 8u; i++) {
+    let d = vec3i(ring[i].x, 0, ring[i].y);
+    let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
+    outward += normalize(vec2f(ring[i])) * f32(delta);
+  }
+  if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
+    let plan = normalize(outward);
+    return vec4f(plan.x, 0.0, plan.y, 1.0);
+  }
+  return vec4f(n, 0.0);
+}
+
 // What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
 // 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
 fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
@@ -1177,7 +1198,9 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var slope = false;
   if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
     let c = hit.cell - g.level[hit.level].cells;
-    if (!solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
+    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450.)
+    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && (kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u' : 'false'};
+    if (!kerb && !solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
       // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
@@ -1185,21 +1208,41 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       slope = true;
     }
   }
-  ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
-  // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
-  if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
+  ${world.options.surveyedWalls ? `// A bank steeper than a cell a cell is a staircase of 10 cm cells: treads lit, risers dark and the corner of every
+  // step shut in, a chessboard across Telegraph Hill (#450). Ground on a step is lit on the slope that the solid round
+  // it makes, asked about the sun from over its cell, and not darkened in the step's corner.
+  if (ground && faced && hit.level <= 1u && (hit.kind & 64u) == 0u) {
     let c = hit.cell - lvh.cells;
-    let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
-                                vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
-    var outward = vec2f(0.0);
-    for (var i = 0u; i < 8u; i++) {
-      let d = vec3i(ring[i].x, 0, ring[i].y);
-      let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
-      outward += normalize(vec2f(ring[i])) * f32(delta);
+    let up = vec3i(0, 1, 0);
+    // A riser is on a slope where the ground behind it rises higher (a kerb's has the pavement level behind it); a
+    // tread is where ground beside it stands a step or three higher (a pavement's wall beside it stands higher yet).
+    var step = false;
+    if (abs(hit.n.y) < 0.5) {
+      step = solidAt(c - vec3i(hit.n) + up, hit.level);
+    } else if (!solidAt(c + up, hit.level)) {
+      let beside = array<vec3i, 4>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
+      for (var i = 0u; i < 4u && !step; i++) {
+        step = solidAt(c + beside[i] + up, hit.level) && !solidAt(c + beside[i] + up * 4, hit.level);
+      }
     }
-    if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
-      let plan = normalize(outward);
-      n = vec3f(plan.x,0.0,plan.y);
+    if (step) {
+      let around = array<vec3i, 13>(vec3i(3,0,0), vec3i(0,3,0), vec3i(0,0,3), vec3i(2,2,0), vec3i(2,-2,0), vec3i(2,0,2),
+        vec3i(2,0,-2), vec3i(0,2,2), vec3i(0,2,-2), vec3i(2,2,2), vec3i(2,2,-2), vec3i(2,-2,2), vec3i(2,-2,-2));
+      var grad = vec3f(0.0);
+      for (var i = 0u; i < 13u; i++) {
+        grad += vec3f(around[i]) * (f32(solidAt(c - around[i], hit.level)) - f32(solidAt(c + around[i], hit.level)));
+      }
+      if (grad.y > 0.0) {
+        n = normalize(grad);
+        at = p + n * (1.0 / lvh.scale);
+        slope = true;
+      }
+    }
+  }` : ''}
+  ${world.options.surveyedWalls ? `if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
+    let plane = wallPlane(hit, n);
+    if (plane.w > 0.0) {
+      n = plane.xyz;
       face = n;
       at += n * (0.85/lvh.scale);
       slope = true;
@@ -1528,6 +1571,7 @@ override FOGGY: bool = false;
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
       if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      ${world.options.surveyedWalls ? `if (abs(n.y) < 0.5 && hit.level <= 2u) { n = wallPlane(hit, n).xyz; }` : ''}
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -1812,9 +1856,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     // where the others are clear, so a dry clear day is told exactly what it was told before.)
     const overcast = Math.max(rain, cloud, 0.2 * fog)
     const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
+    // The real city's shade is lit by its sky and by the sunlit fronts across the street, and a photograph's white
+    // balance takes the blue out of it: lit by the sky's blue alone, every shaded road and front came out navy where
+    // the panel's photographs are grey (#450, render_checks.py \`shade\`).
+    const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
-      ...wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
+      ...fill(wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7)), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
       ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - overcast),
       ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,
