@@ -267,6 +267,8 @@ async function main() {
   // The town's residents (#218): by rule from place and from the clock every page of a world shares. `?people=0` leaves them out.
   const folkClock = { now: () => Date.now() / 1000 }
   const shocks: Shock[] = []
+  /** Where the cutter cut (street life closes the roads it broke, as a blast's). */
+  const cuts: { at: [number, number, number]; radius: number }[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
@@ -770,7 +772,7 @@ async function main() {
       shadow?.postMessage({ forget: true })
       for (const piece of moving.values()) piece.destroy()
       for (const l of lying) l.piece.destroy()
-      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
       heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
       for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
       // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
@@ -829,6 +831,7 @@ async function main() {
       runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
     }
     make(rows(Int32Array.from(runs), [at[0] - reach, at[1], at[2] - reach, at[0] + reach + 1, at[1] + 2, at[2] + reach + 1]), at)
+    cuts.push({ at, radius: reach })
     return { at, ...hit }
   }
 
@@ -1245,7 +1248,7 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
@@ -1264,7 +1267,7 @@ async function main() {
     moverAge++
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
-    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
     farModel.forget()

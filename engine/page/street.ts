@@ -128,14 +128,14 @@ export interface Street {
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
   enabled: boolean
-  /** One of every kept vehicle in a row along a heading from a place (cells, radians), standing still: for looking at them (the checks' line-up). Null clears it. */
+  /** One of every kept vehicle side by side, standing still, all facing a heading (radians) with their fronts on a line through a place (cells) and the row going off to their left: for looking at them (the checks' line-up). Null clears it. */
   lineup(at: readonly [number, number] | null, heading?: number): string[]
   /**
    * The rules kept, over `seconds` of the clock from now (for the checks): every cable car crossing a stop line with
    * lights, and how many of those at red; left turns on green as they crossed the line, and how many with something
    * coming the other way; the buses and trolleybuses driving, how many on their route, and the stops they served.
    */
-  audit(seconds: number): { cable: { lines: number; crossings: number; red: number; amber: number }; left: { turns: number; conflicts: number }; buses: { driving: number; onRoute: number; trolleys: number; trolleysWired: number; stops: number; pieces: number } }
+  audit(seconds: number): { cable: { lines: number; crossings: number; red: number; amber: number; redAt: object[] }; left: { turns: number; conflicts: number }; buses: { driving: number; onRoute: number; trolleys: number; trolleysWired: number; stops: number; pieces: number } }
   /** Rules turned off, to show what each is for (the checks): left turns that wait for nobody, cable cars that pass every light. */
   rules: { yieldLeft: boolean; cableLights: boolean }
   /** What is on its way to life and which faces are made (for the checks). */
@@ -154,6 +154,8 @@ export function street(o: {
   /** Seconds on the clock people walk by. */
   clock: () => number
   shocks: readonly Shock[]
+  /** Where the cutter cut (main.ts `cut`): the road there is looked at as a blast's is. */
+  cuts?: readonly { at: readonly [number, number, number]; radius: number }[]
   /** Where everyone else stands (their feet): people go round them, cars wait for them. */
   bodies: () => readonly (readonly [number, number, number])[]
   /** Where this page's own person stands on foot, or null: what is near is near them. */
@@ -225,7 +227,7 @@ export function street(o: {
     for (const r of s.rail) if (r[2] === 1) rails.push({ a: r[0], b: r[1], p: line(r, 3).p })
     // (The rail's own joining is only for a release without transit routes.)
     if (!routed) joinRails()
-    for (const l of [...tramLines, ...lines]) l.lights!.length = 0
+    for (const l of [...tramLines, ...lines]) { l.lights!.length = 0; lightsDone.delete(l) }
     // A junction on a seam is whole only now: walks timed against half of it are timed again, and the cable cars'
     // timetables.
     routes.clear(); junctions.clear(); timetables.clear()
@@ -610,7 +612,10 @@ export function street(o: {
   const faces = new Map<string, Born | 'asked'>()
   const maker = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
   let asking = 0
-  maker.onmessage = (e: MessageEvent<{ key: string; faces: Uint32Array<ArrayBuffer>; filled: number }>) => { asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces }) }
+  maker.onmessage = (e: MessageEvent<{ key: string; faces?: Uint32Array<ArrayBuffer>; filled?: number; cells?: Uint16Array }>) => {
+    if (e.data.cells) { const k = e.data.key; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(k, Promise.resolve(e.data.cells)); cellsAsked.get(k)?.(e.data.cells); cellsAsked.delete(k); return }
+    asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled!, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces! })
+  }
   const lookOf = (key: string) => { const [id, , i] = key.split('/'); return ready.get(id)?.looks[Number(i)] }
   const bornOf = (m: Model, paint: number, i: number): Born | null => {
     const key = `${m.id}/${paint}/${i}`, f = faces.get(key)
@@ -634,10 +639,29 @@ export function street(o: {
     const [x, y, z, w] = q, ix = w * v[0] + y * v[2] - z * v[1], iy = w * v[1] + z * v[0] - x * v[2], iz = w * v[2] + x * v[1] - y * v[0], iw = -x * v[0] - y * v[1] - z * v[2]
     return [ix * w + iw * -x + iy * -z - iz * -y, iy * w + iw * -y + iz * -x - ix * -z, iz * w + iw * -z + ix * -y - iy * -x]
   }
+  /**
+   * The road's top under a wheel: the town's footing (feetAt), lowered to what the world has there now if something
+   * took the top away (a blast's hole, the cutter's slot). The footing is a rule and knows nothing of either: a car
+   * set by it alone stood on air over a hole. Nothing solid within 3 m under it (the world not made there yet): the rule.
+   * Asked of the world only near where a blast or the cutter changed it (asking under every wheel cost a millisecond a
+   * frame): elsewhere the world is the rule's.
+   */
+  const changedNear = (x: number, z: number) => {
+    for (const s of o.shocks) if (Math.abs(s.at[0] - x) < s.radius * 2 + 80 && Math.abs(s.at[2] - z) < s.radius * 2 + 80) return true
+    for (const s of o.cuts ?? []) if (Math.abs(s.at[0] - x) < s.radius + 60 && Math.abs(s.at[2] - z) < s.radius + 60) return true
+    return false
+  }
+  const wheelAt = (x: number, z: number) => {
+    const f = feetAt(x, z), ix = Math.round(x), iz = Math.round(z)
+    if (!changedNear(x, z)) return f
+    if (o.land.world_kind(ix, f - 1, iz)) return f
+    for (let y = f - 2; y >= f - 30; y--) if (o.land.world_kind(ix, y, iz)) return y + 1
+    return f
+  }
   /** Sets a car on the road under a point: its height from the ground under its front and back wheels, its nose up the hill. */
   const settle = (c: Car) => {
     const hl = c.model.long * 0.32, fx = Math.cos(c.heading), fz = Math.sin(c.heading)
-    const front = feetAt(c.x + fx * hl, c.z + fz * hl), back = feetAt(c.x - fx * hl, c.z - fz * hl)
+    const front = wheelAt(c.x + fx * hl, c.z + fz * hl), back = wheelAt(c.x - fx * hl, c.z - fz * hl)
     c.y = (front + back) / 2 - 0.5
     c.pitch = Math.atan2(front - back, 2 * hl)
   }
@@ -777,7 +801,9 @@ export function street(o: {
     c.waking = true
     const kinds = c.paint >= 0 ? m.variants[c.paint].body : m.body.palette
     const body = unrun(m.body.runs, m.size[0] * m.size[1] * m.size[2], kinds)
-    const fine = parts.map(({ l, i }, k) => { const cells = fineCells(m, c.paint, i); o.faces?.(cells, l.size, made[k]!); return { size: l.size, per: l.per, low: l.low, cells } })
+    // Its looks' cells, decoded off the page's thread.
+    const looks = await Promise.all(parts.map(({ i }) => fineCells(m, c.paint, i)))
+    const fine = parts.map(({ l }, k) => { const cells = looks[k]; o.faces?.(cells, l.size, made[k]!); return { size: l.size, per: l.per, low: l.low, cells } })
     const low: [number, number, number] = [Math.round(c.x - m.size[0] / 2), Math.round(c.y) + 4, Math.round(c.z - m.size[2] / 2)]
     const thing = await o.alive.spawn({ name: m.name, cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
     c.waking = false
@@ -797,11 +823,15 @@ export function street(o: {
   /** Cars on their way to life, drawn where they stand meanwhile, and asked again each frame. */
   const pending = new Map<Car, { inside: boolean; push?: readonly [number, number, number]; then?: (t: Thing) => void }>()
   /** A look's cells in a colour, made once and kept: the page's faces for a look are kept by its cells (main.ts), so a second car of a kind makes nothing. */
-  const fineKept = new Map<string, Uint16Array>()
-  const fineCells = (m: Model, paint: number, i: number) => {
+  const fineKept = new Map<string, Promise<Uint16Array>>(), cellsAsked = new Map<string, (cells: Uint16Array) => void>()
+  const fineCells = (m: Model, paint: number, i: number): Promise<Uint16Array> => {
     const key = `${m.id}/${paint}/${i}`
     let k = fineKept.get(key)
-    if (!k) { const l = m.looks[i]; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(key, k = unrun(l.runs, l.size[0] * l.size[1] * l.size[2], paint >= 0 ? m.variants[paint].looks[i] : l.palette)) }
+    if (!k) {
+      const l = m.looks[i]
+      fineKept.set(key, k = new Promise((done) => cellsAsked.set(key, done)))
+      maker.postMessage({ key, runs: l.runs, kinds: paint >= 0 ? m.variants[paint].looks[i] : l.palette, size: l.size, cells: true })
+    }
     return k
   }
   /** Lets a living car go back to being drawn where it stands, if it was never moved and nobody is near it. */
@@ -1214,8 +1244,19 @@ export function street(o: {
     kept.set(left, tt = Float32Array.from(out))
     return tt
   }
+  /**
+   * A line's timetables are made again when its lights change: while squares come, a light may be found, or a
+   * junction's main way (whose lights go green first) may change. Once every square near it is in, they are kept.
+   */
+  const lightsSeen = new WeakMap<Line, string>()
+  const freshLights = (l: Line) => {
+    if (!cableLights || lightsDone.has(l)) return
+    const sig = lightsOf(l as (typeof tramLines)[number]).map((L) => { const j = junctionOf(L.node); return `${L.node}:${L.s}:${phaseOf(j, L.dx, L.dz)}:${j.offset}` }).join()
+    if (lightsSeen.get(l) !== sig) { lightsSeen.set(l, sig); timetables.delete(l) }
+  }
   /** Each car on a line at a moment: how far along it is and how fast it goes. */
   const cableAt = (l: Line, t: number, each: (s: number, v: number) => void) => {
+    freshLights(l)
     const { every, base } = departures(l), most = (2 * l.len) / CABLE_SPEED + 300
     for (let n = Math.ceil((t - most - base) / every); n <= Math.floor((t - base) / every); n++) {
       const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE), f = (t - t0) / STEP, i = Math.floor(f)
@@ -1247,8 +1288,10 @@ export function street(o: {
   const trams: Car[] = []
   const TRAM_APART = 8000, TRAM_SPEED = 100
   /** The lights a line passes: junctions with lights within 10 m of it, where along it, and which way it goes there. */
+  const lightsDone = new WeakSet<Line>()
   const lightsOf = (l: (typeof tramLines)[number]) => {
-    if (l.lights.length) return l.lights
+    if (lightsDone.has(l)) return l.lights
+    l.lights.length = 0
     const seen = new Set<number>()
     for (let s = 0; s < l.len; s += 40) {
       along(l.p, l.cum, s, P)
@@ -1260,6 +1303,8 @@ export function street(o: {
       }
     }
     l.lights.sort((a, b) => a.s - b.s)
+    // (Kept once every square near it is in: a junction on a seam is whole only then.)
+    if (squares.size && [...squares.values()].every((v) => v === 'held')) lightsDone.add(l)
     return l.lights
   }
   const tramsDrive = (dt: number, view: View, t: number, any: boolean) => {
@@ -1339,20 +1384,24 @@ export function street(o: {
           if (Math.hypot(P.x - s.at[0], P.z - s.at[2]) > reach) continue
           const x = Math.round(P.x), z = Math.round(P.z), f = o.land.feet_at(x, z)
           // The road's own top gone (and what was under it), or something fallen on it a car cannot go over.
-          const hole = !o.land.world_kind(x, f - 1, z) && !o.land.world_kind(x, f - 3, z)
+          const hole = !o.land.world_kind(x, f - 1, z) && (!o.land.world_kind(x, f - 2, z) || !o.land.world_kind(x, f - 3, z))
           const heap = o.land.world_kind(x, f + 4, z) !== 0 && o.land.world_kind(x, f + 7, z) !== 0
           if (hole || heap) { broken = true; bad++; sx += P.x; sz += P.z }
         }
         if (broken) r.blocked = true
       }
       if (bad) craters.push({ x: sx / bad, z: sz / bad, r: s.radius + 10 })
+      // Parked cars there settle on what is left under them.
+      for (const c of parked.values()) if (!c.thing && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach + c.model.long) settle(c)
     }
   }
 
   // ── Blasts ──
   /** How many of the shocks this has answered. A blast throws the few cars nearest it (they come to life, pushed away from it) and stops the traffic round it a while. */
-  let heard = o.shocks.length
+  let heard = o.shocks.length, cutsHeard = o.cuts?.length ?? 0
   const shaken = (view: View) => {
+    // The cutter's cuts: the road there is looked at once the world has been changed, as a blast's is.
+    if (o.cuts) { if (o.cuts.length < cutsHeard) cutsHeard = 0; for (; cutsHeard < o.cuts.length; cutsHeard++) looks.push({ at: o.cuts[cutsHeard].at, radius: o.cuts[cutsHeard].radius, when: performance.now() / 1000 + 1 }) }
     if (o.shocks.length < heard) heard = 0
     for (; heard < o.shocks.length; heard++) {
       const s = o.shocks[heard], reach = s.radius * 3 + 40, now = performance.now() / 1000
@@ -1396,6 +1445,7 @@ export function street(o: {
   }
 
   let ms = 0, on = true
+  const laps: Record<string, number> = {}
   const self: Street = {
     folk,
     frame(dt, view) {
@@ -1406,31 +1456,51 @@ export function street(o: {
       // Moved far at once (a jump, a portal, the checks): the traffic round the new place is there already.
       if (lastEye && Math.hypot(eye[0] - lastEye[0], eye[2] - lastEye[2]) > 1500) { for (const c of [...traffic, ...trams]) hide(c); traffic.length = 0; trams.length = 0; holds.clear(); filled = false }
       lastEye = [eye[0], eye[1], eye[2]]
+      let tl = performance.now()
+      const lap = (n: string) => { const now = performance.now(); laps[n] = (laps[n] ?? 0) + ((now - tl) - (laps[n] ?? 0)) * 0.1; tl = now }
       park(eye, o.hour())
+      lap('park')
       if (roads.size && ready.size) { spawn(view, !filled); busSpawn(view, !filled, o.clock()); filled = true }
+      lap('spawn')
       drive(dt, view, o.clock())
+      lap('drive')
       tramsDrive(dt, view, o.clock(), !trams.length)
+      lap('trams')
       cableCars(o.clock(), view)
+      lap('cables')
       const feet = o.feet()
+      lap('feet')
       shaken(view)
+      lap('shaken')
       probe()
+      lap('probe')
       for (const [c, how] of pending) void wake(c, how)
+      lap('wake')
       reachable(feet)
+      lap('reachable')
       offer(feet)
+      lap('offer')
       for (const c of parked.values()) show(c, view)
+      lap('showParked')
       for (const c of traffic) show(c, view)
+      lap('showTraffic')
       for (const c of cables) show(c, view)
+      lap('showCables')
       for (const c of trams) show(c, view)
+      lap('showTrams')
       for (const c of showcase) show(c, view)
+      lap('showcase')
       for (const c of pending.keys()) show(c, view)
+      lap('showPending')
       showHeads(view, o.clock())
+      lap('heads')
       ms += (performance.now() - t0 - ms) * 0.1
     },
     reset() {
       for (const c of [...traffic, ...parked.values(), ...cables]) hide(c)
       for (const c of trams) hide(c)
       for (const r of roads.values()) r.blocked = false
-      craters.length = 0; looks.length = 0
+      craters.length = 0; looks.length = 0; cutsHeard = o.cuts?.length ?? 0
       traffic.length = 0; trams.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0; pending.clear(); heard = o.shocks.length
       cue?.remove(); cue = null; beside?.(); beside = null
       rng = 0x2545f491; filled = false
@@ -1478,6 +1548,7 @@ export function street(o: {
         let at = 0, near = Infinity
         for (let s = 0; s <= l.len; s += 20) { along(l.p, l.cum, s, P); const d = Math.hypot(P.x - x, P.z - z); if (d < near) { near = d; at = s } }
         // When each car that has left or leaves in the next while comes there, by its timetable.
+        freshLights(l)
         const { every, base } = departures(l), most = (2 * l.len) / CABLE_SPEED + 300
         for (let n = Math.ceil((t - most - base) / every); n <= Math.floor((t + most - base) / every); n++) {
           const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE)
@@ -1491,17 +1562,17 @@ export function street(o: {
       }
       return best
     },
-    get debug() { return { pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
+    get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get red() { return shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; return q.sig && lightFor(junctionOf(q.sig), q.cdx!, q.cdz!, o.clock()) === 'red' }).map((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }, j = junctionOf(q.sig!); return { seed: p.seed, node: q.sig, u: Math.round(cycleAt(j, o.clock())), phase: phaseOf(j, q.cdx!, q.cdz!), axis: [j.ax, j.az].map((v) => Math.round(v * 100) / 100), dir: [q.cdx!, q.cdz!].map((v) => Math.round(v * 100) / 100), at: [Math.round(p.at[0]), Math.round(p.at[2])], jat: [Math.round(j.x), Math.round(j.z)] } }) },
     lineup(at, heading = 0) {
       for (const c of showcase) hide(c)
       showcase.length = 0
       if (!at) return []
       let along = 0
-      const fx = Math.cos(heading), fz = Math.sin(heading)
+      const fx = Math.cos(heading), fz = Math.sin(heading), lx = fz, lz = -fx
       for (const m of library.map((c) => ready.get(c.id)).filter((m): m is Model => !!m)) {
-        const c: Car = { id: ids++, model: m, paint: -1, kind: 'parked', seed: ids, x: at[0] + fx * (along + m.long / 2), y: 0, z: at[1] + fz * (along + m.long / 2), heading, pitch: 0, v: 0, piece: null, shown: '' }
-        settle(c); showcase.push(c); along += m.long + 15
+        const c: Car = { id: ids++, model: m, paint: -1, kind: 'parked', seed: ids, x: at[0] + lx * (along + m.wide / 2) - fx * m.long / 2, y: 0, z: at[1] + lz * (along + m.wide / 2) - fz * m.long / 2, heading, pitch: 0, v: 0, piece: null, shown: '' }
+        settle(c); showcase.push(c); along += m.wide + 22
       }
       return showcase.map((c) => c.model.name)
     },
@@ -1512,7 +1583,9 @@ export function street(o: {
     audit(seconds) {
       const t = o.clock()
       let crossings = 0, red = 0, amber = 0
+      const redAt: object[] = []
       for (const l of lines) {
+        freshLights(l)
         const { every, base } = departures(l), lights = cableLights ? lightsOf(l as (typeof tramLines)[number]) : lightsOf({ ...l, lights: [] } as (typeof tramLines)[number])
         for (let n = Math.ceil((t - base) / every); n <= Math.floor((t + seconds - base) / every); n++) {
           const t0 = base + n * every, tt = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE)
@@ -1522,13 +1595,13 @@ export function street(o: {
             // (The moment it goes past the line: one standing at it has not crossed.)
             while (lo < hi) { const m = (lo + hi) >> 1; if (tt[m] <= L.s) lo = m + 1; else hi = m }
             const light = lightFor(junctionOf(L.node), L.dx, L.dz, t0 + lo * STEP)
-            crossings++; if (light === 'red') red++; if (light === 'amber') amber++
+            crossings++; if (light === 'red') { red++; if (redAt.length < 4) redAt.push({ s: Math.round(L.s), len: Math.round(l.len), left: ((t0 % CYCLE) + CYCLE) % CYCLE, at: lo * STEP, u: Math.round(cycleAt(junctionOf(L.node), t0 + lo * STEP)), before: Array.from(tt.slice(Math.max(0, lo - 12), lo + 2)).map((v) => Math.round(v)), done: lightsDone.has(l), fresh: (() => { const kept = timetables.get(l)?.get(((t0 % CYCLE) + CYCLE) % CYCLE); timetables.get(l)?.delete(((t0 % CYCLE) + CYCLE) % CYCLE); const f = timetable(l, ((t0 % CYCLE) + CYCLE) % CYCLE); if (kept) timetables.get(l)!.set(((t0 % CYCLE) + CYCLE) % CYCLE, kept); let i = 0; while (i < f.length - 1 && f[i] <= L.s) i++; return lightFor(junctionOf(L.node), L.dx, L.dz, t0 + i * STEP) })(), lights: lights.filter((M) => Math.abs(M.s - L.s) < 500).map((M) => Math.round(M.s)) }) } if (light === 'amber') amber++
           }
         }
       }
       const buses = traffic.filter((c) => c.model.kind === 'bus' || c.model.kind === 'trolley')
       return {
-        cable: { lines: lines.length, crossings, red, amber },
+        cable: { lines: lines.length, crossings, red, amber, redAt },
         left: { turns: leftTurns, conflicts: leftConflicts },
         buses: { driving: buses.length, onRoute: buses.filter((c) => c.route && c.route.piece.keys[c.route.i] === c.road!.key).length, trolleys: buses.filter((c) => c.model.kind === 'trolley').length, trolleysWired: buses.filter((c) => c.model.kind === 'trolley' && c.road!.wired).length, stops: busStops, pieces: busPieces.length },
       }

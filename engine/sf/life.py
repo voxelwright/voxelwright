@@ -8,7 +8,10 @@ release record, sf/release.md). A segment is written in the square its first poi
 nothing and the page joins them by node id. Positions are the release frame's 10 cm cells, as the graph has them.
 
 Beside them, `transit.json` holds the streetcar and cable car routes as OSM's route relations order them: for
-each, its line letter, kind (streetcar or cable) and the pieces of track it runs on, in order. Stops, lights and
+each, its line letter, kind (streetcar or cable) and the pieces of track it runs on, in order. Its `buses` are the
+bus and trolleybus routes (OSM's route=bus and route=trolleybus relations, fetched once from Overpass into --routes):
+for each, its ref, kind, operator, the hours it runs and its pieces in these squares, each the graph's roads `way/a/b`
+in order and its stops as [road index, cells along that road]. Stops, lights and
 classes come from the raw street survey kept beside each square (sf-450-city/inputs: OSM ways with tags, each node's
 highway tag, the photo-matched stop signs and the trolley wires).
 
@@ -30,6 +33,9 @@ A file holds:
                                                     crossings, where the kerb leaves room for a lane and a car
   rail   [a, b, cable, x0, z0, ...]                   track centres; cable 1 where it runs in a cable car line's
                                                     street (Powell, Mason, Hyde, ...), 0 for a streetcar's
+  heads  [way, a, b, x, z, mapped]                  signal heads: a post at the right kerb of each way into a
+                                                    junction with lights, showing road way/a/b's lights; mapped 1
+                                                    where it stands at OSM's own traffic_signals node
 """
 
 import argparse
