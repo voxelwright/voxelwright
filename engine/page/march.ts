@@ -283,6 +283,9 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
   if (abs(n.x) > 0.5) { along = cell.z; across = cell.x; }
   var up = cell.y;
   if (!wall) { up = cell.z; across = cell.y; }
+  // A diagonal wall (a smoothed normal) crosses the cell rows: its depth would step every few cells and its wear
+  // jump with it, a stripe at each step.
+  if (wall && min(abs(n.x), abs(n.z)) > 0.02) { across = 0; }
   // Where on the face, 0 to 1 across the cell: along it and up it.
   var fa = q.x;
   var fu = q.y;
@@ -316,7 +319,10 @@ fn paint(kind: u32, cell: vec3i, n: vec3f, fine: f32, q: vec3f, sharp: f32) -> v
       // Far off the lower cell of a board is in the shade of the one above; near, it is a line of shadow under the lap.
       let lower = (up & 1) == 0;
       let lap = select(0.0, 1.0, !lower && fu > 0.7);
-      v -= mix(select(0.0, 0.17 * fine, lower), lap * 0.42 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.07, lines);
+      // Where a board's two cells are under three pixels, its shade alternates faster than pixels and beats with
+      // them into ribs: take the mean shade.
+      let boards = clamp((sharp - 1.5) / 1.5, 0.0, 1.0);
+      v -= mix(mix(0.085, select(0.0, 0.17, lower), boards) * fine, lap * 0.42 + ((f32(up & 1) + fu) * 0.5 - 0.5) * 0.07, lines);
     }
     v += worn * 0.14 + speck * 0.03 * grain;
   } else if (stuff == 10u) {
@@ -1104,7 +1110,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   // The finest cell the hit's cell begins at; its pattern only where it is drawn as itself.
   let lvh = g.level[hit.level];
   let qc = clamp((p - lvh.boxMin) * lvh.scale - vec3f(hit.cell - lvh.cells), vec3f(0.0), vec3f(0.999));
-  let albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), n, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
+  // The face a material's courses and wear follow: a diagonal wall's own plane, below, not its cells' staircase.
+  var face = n;
   // Earth, grass, sand, asphalt and paving lie on the hills in steps a cell high. A step's riser is lit as the tread
   // is, so a street reads as a slope: a riser is a side face with air over its cell and ground under the cell before it.
   let stuff = hit.kind & 15u;
@@ -1135,10 +1142,12 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
       let plan = normalize(outward);
       n = vec3f(plan.x,0.0,plan.y);
+      face = n;
       at += n * (0.85/lvh.scale);
       slope = true;
     }
   }` : ''}
+  let albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), face, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {
     var sunny = -1.0;
