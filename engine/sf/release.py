@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
-from compact_store import TileStore, read as read_base
+from compact_store import TileStore, link_libraries, read as read_base
 
 CREDITS = [
     "U.S. Geological Survey 3DEP",
@@ -219,7 +219,9 @@ def generate(
                 locator.symlink_to(
                     os.path.relpath(Path(compact_store).resolve(), dest.resolve())
                 )
-        if not inventory_only:
+        if compact_store and not inventory_only:
+            link_libraries(Path(compact_store), dest, files, verified_files)
+        elif not inventory_only:
             for name, source in files.items():
                 path = dest / name
                 path.parent.mkdir(parents=True, exist_ok=True)

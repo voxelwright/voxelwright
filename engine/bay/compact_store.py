@@ -3,6 +3,7 @@
 from contextlib import closing
 from hashlib import sha256
 import json
+import fcntl
 import os
 from pathlib import Path
 import re
@@ -11,6 +12,7 @@ import sqlite3
 import struct
 import subprocess
 import tempfile
+import sys
 import zlib
 
 ZSTD = shutil.which("zstd") or "/opt/homebrew/bin/zstd"
@@ -71,7 +73,7 @@ def compact(path, store, expected):
     target = put_base(store, path.read_bytes(), expected)
     tmp = link.with_suffix(".link")
     tmp.unlink(missing_ok=True)
-    tmp.symlink_to(os.path.relpath(target, link.parent))
+    tmp.symlink_to(os.path.relpath(target.resolve(), link.parent.resolve()))
     tmp.replace(link)
     if sha256(decompress(link)).hexdigest() != expected:
         raise ValueError(f"compressed checkpoint differs: {path}")
@@ -180,10 +182,80 @@ class TileStore:
         return body
 
 
+def link_libraries(store, dest, files, hashes):
+    """Share an immutable names/graph/life/cars/far directory between successive paint pins."""
+    kinds = sorted({Path(name).parts[0] for name in files})
+    for kind in kinds:
+        members = {
+            str(Path(name).relative_to(kind)): hashes[name]
+            for name in sorted(files)
+            if Path(name).parts[0] == kind
+        }
+        fingerprint = sha256(json.dumps(members, sort_keys=True).encode()).hexdigest()
+        pool = store / "libraries" / kind
+        pool.mkdir(parents=True, exist_ok=True)
+        bundle = pool / fingerprint
+        with (pool / "write.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if not bundle.exists():
+                with tempfile.TemporaryDirectory(dir=pool) as temp:
+                    stage = Path(temp) / "files"
+                    for rel, expected in members.items():
+                        f = stage / rel
+                        f.parent.mkdir(parents=True, exist_ok=True)
+                        source = files[kind + "/" + rel]
+                        if sys.platform == "darwin":
+                            subprocess.run(
+                                ["/bin/cp", "-c", source.resolve(), f], check=True
+                            )
+                        else:
+                            shutil.copyfile(source, f)
+                        if sha256(f.read_bytes()).hexdigest() != expected:
+                            raise ValueError(f"library object changed: {kind}/{rel}")
+                    stage.rename(bundle)
+            else:
+                for rel, expected in members.items():
+                    if sha256((bundle / rel).read_bytes()).hexdigest() != expected:
+                        raise ValueError(f"stored library differs: {kind}/{rel}")
+        link = dest / kind
+        if link.exists():
+            # A historical plain release can have the same digest and is already shared publicly with other lanes.
+            for rel, expected in members.items():
+                if sha256((link / rel).read_bytes()).hexdigest() != expected:
+                    raise ValueError(f"existing release object differs: {kind}/{rel}")
+        else:
+            link.symlink_to(os.path.relpath(bundle.resolve(), dest.resolve()))
+
+
+def archive_candidate(out, candidate, latest):
+    """Compress only an unpublished, superseded city manifest. All its objects remain addressable."""
+    if (
+        not candidate
+        or candidate == latest
+        or not re.fullmatch("[0-9a-f]{64}", candidate)
+    ):
+        return
+    dest = out / "releases" / candidate
+    marker = dest / ".bay-store"
+    with (out / ".promote.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        pointer = out / "current.json"
+        if (
+            pointer.exists()
+            and json.loads(pointer.read_bytes())["release"] == candidate
+        ) or any(dest.glob("panel-*.json")):
+            return
+        if marker.is_symlink():
+            with (out / (".stage-" + candidate + ".lock")).open("a") as staging:
+                fcntl.flock(staging, fcntl.LOCK_EX)
+                compact(dest / "manifest.json", marker.resolve(), candidate)
+
+
 def export(manifest, out, wanted=None):
     """Export the pinned wire objects one at a time. A caller can request just one relative path."""
-    obj = json.loads(manifest.read_bytes())
-    pin = sha256(manifest.read_bytes()).hexdigest()
+    manifest_bytes = read(manifest)
+    obj = json.loads(manifest_bytes)
+    pin = sha256(manifest_bytes).hexdigest()
     if pin != manifest.parent.name:
         raise ValueError("manifest differs from release pin")
 
@@ -223,7 +295,7 @@ def export(manifest, out, wanted=None):
     if wanted and not found:
         raise ValueError("object absent from pin")
     if not wanted:
-        shutil.copyfile(manifest, out / "manifest.json")
+        (out / "manifest.json").write_bytes(manifest_bytes)
     return found
 
 

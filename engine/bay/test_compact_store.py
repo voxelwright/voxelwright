@@ -1,11 +1,20 @@
 import hashlib
+import json
 from pathlib import Path
 import struct
 import tempfile
 import unittest
 from contextlib import closing
 
-from compact_store import TileStore, compact, packed, read
+from compact_store import (
+    TileStore,
+    archive_candidate,
+    compact,
+    export,
+    link_libraries,
+    packed,
+    read,
+)
 
 
 class CompactStoreTest(unittest.TestCase):
@@ -29,6 +38,43 @@ class CompactStoreTest(unittest.TestCase):
             compact(path, root, digest)
             compact(path, root, digest)
             self.assertEqual(read(path), data)
+
+    def test_superseded_candidate_exports_after_manifest_is_archived(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            store = root / "objects"
+            graph = root / "survey.json"
+            graph.write_bytes(b'{"roads":[]}\n')
+            name = "graph/square.json"
+            digest = hashlib.sha256(graph.read_bytes()).hexdigest()
+            rec = dict(path=name, sha256=digest, bytes=graph.stat().st_size)
+            for version in (1, 2):
+                data = json.dumps(dict(version=version, graph={"square": rec})).encode()
+                pin = hashlib.sha256(data).hexdigest()
+                release = root / "releases" / pin
+                release.mkdir(parents=True)
+                (release / ".bay-store").symlink_to(store)
+                link_libraries(store, release, {name: graph}, {name: digest})
+                manifest = release / "manifest.json"
+                manifest.write_bytes(data)
+                if version == 1:
+                    first, old = pin, manifest
+            self.assertEqual(
+                (old.parent / "graph").resolve(), (release / "graph").resolve()
+            )
+            archive_candidate(root, first, pin)
+            self.assertFalse(old.exists())
+            self.assertEqual(export(old, root / "export"), 1)
+            self.assertEqual((root / "export" / name).read_bytes(), graph.read_bytes())
+            self.assertEqual(
+                hashlib.sha256(
+                    (root / "export/manifest.json").read_bytes()
+                ).hexdigest(),
+                first,
+            )
+            (release / "panel-approved.json").write_text("{}")
+            archive_candidate(root, pin, first)
+            self.assertTrue(manifest.is_file())
 
     def test_two_pins_share_geometry_and_walls_preserving_order(self):
         with tempfile.TemporaryDirectory() as tmp, closing(TileStore(tmp)) as store:

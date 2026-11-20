@@ -8,6 +8,7 @@ import sys
 from tempfile import TemporaryDirectory
 
 from city_paint import CITY, HERE, ROOT
+from compact_store import archive_candidate
 from full_run import digest, plan, save
 
 
@@ -52,7 +53,10 @@ def stage():
         far=digest(far) if far.is_file() else None,
     )
     record = ROOT / "city-release.json"
-    if record.is_file() and json.loads(record.read_text())["inputs"] == stamp:
+    prior = json.loads(record.read_bytes()) if record.is_file() else {}
+    if prior.get("archive"):
+        archive_candidate(ROOT / "sf", prior["archive"], prior["release"])
+    if prior.get("inputs") == stamp:
         return
     sf = HERE.parent / "sf"
     with TemporaryDirectory(dir=ROOT) as temp:
@@ -93,7 +97,8 @@ def stage():
             compact_store=CITY / "objects",
             paint=ROOT / "accepted" / (batch + ".json"),
         )
-        save(record, dict(inputs=stamp, release=pin))
+        save(record, dict(inputs=stamp, release=pin, archive=prior.get("release")))
+        archive_candidate(ROOT / "sf", prior.get("release"), pin)
         print(
             "complete city candidate staged for the full-release panel", pin, flush=True
         )
