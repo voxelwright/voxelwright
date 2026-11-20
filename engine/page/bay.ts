@@ -25,7 +25,7 @@ export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? []
 /** Whether this page's world is the Bay's at all. */
 export const ON = STREAM || SQUARES.length > 0
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}${query.get('heroes') === '0' ? '&heroes=0' : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : ''
+export const BAY = (STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
