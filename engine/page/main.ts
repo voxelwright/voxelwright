@@ -1209,12 +1209,13 @@ async function main() {
     void setDown()
     over.notice('Something went wrong with what moves: it was set down again', 4000)
   }
-  Object.assign((globalThis as unknown as { engine: object }).engine, {
+  // Defined, not assigned: Object.assign would copy what a getter says once, and drop a setter.
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({
     /** For the checks (#450): ends a worker without a word, as a tab out of memory would, to see the page carry on. */
     kill: (which: 'mover' | 'maker') => { if (which === 'mover') moverWorker?.terminate(); else (world as unknown as { workers: { worker: Worker }[] }).workers[0]?.worker.terminate() },
     get mended() { return { movers: moversLost, makers: world.stats.crashed, staleAnswers: stale.answers } },
     set patience(ms: number) { moverPatience = ms; world.patience = ms },
-  })
+  }))
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
     const button = document.createElement('button')
@@ -1223,7 +1224,7 @@ async function main() {
     button.onclick = () => void reset()
     document.body.append(button)
   }
-  Object.assign((globalThis as unknown as { engine: object }).engine, { tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } })
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
