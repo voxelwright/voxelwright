@@ -10,7 +10,8 @@
 // Writes <out>/far.json and <out>/far/<band>/<x>_<z>.far:
 //   - far.json is the manifest's `far` object as asked of the data lane on #450: `size` (a tile's side in 10 cm cells,
 //     on the frame's grid), `bands` (the least size of a face in each band, metres), `tiles` (key `x_z`, a record or
-//     null per band: {path, bytes, sha256} over the bytes as written); far.state.json says what each tile was made from.
+//     null per band: {path, bytes, sha256} over the bytes as written), `wedge` (the place's: its apex in cells, the
+//     bearings it lies between and its reach in metres); far.state.json says what each tile was made from.
 //   - A tile's band holds the faces whose low corner is in the tile and whose size (metres, the geometric mean of
 //     its sides) is in the band. A far tile is fetched only for band 0, nearer ones add the rest.
 //   - A `.far` file: 'FAR1', a u32 length, that many bytes of JSON (spaces to a multiple of 4), then the faces with
@@ -19,9 +20,11 @@
 //     world's cells, in runs by which way they look (1 up, 2 to 5 the walls), each run biggest first with how many of
 //     its faces are at least each of `lods` metres across.
 //
-// One owner a tile: the place where the wedge holds the tile whole (its four corners in the wedge), else the squares,
-// else the place. Incremental: a tile whose sources are as they were (owner, files, sizes, times) is kept as it is,
-// so the far model grows square by square as the city's run finishes them.
+// One owner a place: the wedge's faces inside it, the squares' outside. A tile the wedge holds whole is the place's;
+// one it holds in part takes both, each face by where its middle is: the tiles round the landing's eye are in part,
+// and with the squares' metre cells there the foreground was coarser than the march's own. A tile with no squares is
+// the place's. Incremental: a tile whose sources are as they were (owner, files, sizes, times) is kept as it is, so
+// the far model grows square by square as the city's run finishes them.
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -93,10 +96,12 @@ for (const [key, list] of by) {
   const kinds = new Set(list.map((i) => blocks[i].owner).filter((o) => o !== 'hero'))
   const [x, z] = key.split('_').map(Number)
   const whole = [[0, 0], [1, 0], [0, 1], [1, 1]].every(([a, c]) => inWedge((x + a) * SIZE, (z + c) * SIZE))
-  owner.set(key, !kinds.size ? 'hero' : kinds.has('place') && (whole || !kinds.has('squares')) ? 'place' : 'squares')
+  owner.set(key, !kinds.size ? 'hero' : !kinds.has('place') ? 'squares' : whole || !kinds.has('squares') ? 'place' : 'both')
 }
+/** Whether a tile's owner takes a block's faces (`both`: the place's in the wedge, the squares' out of it). */
+const takes = (key, from) => from === 'hero' || owner.get(key) === from || (owner.get(key) === 'both' && from !== 'hero')
 /** What a tile is made from: its owner's blocks that may hold its faces. */
-const sourcesOf = (key) => by.get(key).filter((i) => blocks[i].owner === owner.get(key) || blocks[i].owner === 'hero')
+const sourcesOf = (key) => by.get(key).filter((i) => takes(key, blocks[i].owner))
 const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\n${ruledTiles.has(key) ? heroes.rules : ''}\n${sourcesOf(key).map((i) => blocks[i].sign).join('\n')}`).digest('hex').slice(0, 20)
 
 // ── What changed since the last packing ──
@@ -154,7 +159,10 @@ for (let at = 0; at < todo.length; at += BATCH) {
       const e = extent(w[f * 5], w[f * 5 + 1], w[f * 5 + 2])
       const wx = pos[0] + (c0[0] * e.x0 + c2[0] * e.z0) * cell, wz = pos[2] + (c0[2] * e.x0 + c2[2] * e.z0) * cell
       const key = `${Math.floor(wx / SIZE)}_${Math.floor(wz / SIZE)}`
-      if (!batch.has(key) || (b.owner !== 'hero' && owner.get(key) !== b.owner)) continue
+      if (!batch.has(key) || !takes(key, b.owner)) continue
+      // Where the place and the squares share a tile, a face whose middle is in the wedge is the place's, else the squares'
+      // (the place's land past the lidar is out of the wedge).
+      if (owner.get(key) === 'both' && b.owner !== 'hero' && (b.owner === 'place') !== inWedge(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
       // Under a landmark whose rule owns its place, the lidar's columns of it are not drawn (its ground is), nor is
       // anything else but a rule's own faces (the wedge's landmarks are layer 'hero' too).
       if (b.owner !== 'hero' && b.layer !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key) && ruled(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
@@ -211,7 +219,7 @@ for (let at = 0; at < todo.length; at += BATCH) {
       // Each of a face's 20 bytes grouped: byte j of face i at j * n + i.
       const grouped = new Uint8Array(all.length)
       for (let i = 0; i < start; i++) for (let j = 0; j < 20; j++) grouped[j * start + i] = all[i * 20 + j]
-      let head = Buffer.from(JSON.stringify({ version: 1, sections, styles: meta.styles, sun: owner.get(key) === 'place' ? meta.sun : null, grouped: true }))
+      let head = Buffer.from(JSON.stringify({ version: 1, sections, styles: meta.styles, sun: ['place', 'both'].includes(owner.get(key)) ? meta.sun : null, grouped: true }))
       head = Buffer.concat([head, Buffer.alloc((4 - (head.length % 4)) % 4, 32)])
       const body = Buffer.concat([Buffer.from('FAR1'), Buffer.from(new Uint32Array([head.length]).buffer), head, grouped])
       const path = `far/${band}/${key}.far`
@@ -226,6 +234,8 @@ for (let at = 0; at < todo.length; at += BATCH) {
   }
 }
 listing.credit = [...new Set(meta.credits.flatMap((c) => c.split('; ')))].join('; ')
+// Where the place's faces are (page/far.ts takes over from the cells nearer there): its apex in cells, its bearings, its reach.
+if (blocks.some((b) => b.owner === 'place')) listing.wedge = { at: [Math.round((we - E0) * 10), Math.round((N0 - wn) * 10)], from: wfrom, to: wto, far: wfar }
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'far.state.json'), JSON.stringify(sources))
 writeFileSync(join(out, 'far.json.part'), JSON.stringify(listing))

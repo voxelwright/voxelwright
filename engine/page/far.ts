@@ -15,11 +15,19 @@
 // tiles in the view, the biggest on the screen first; a tile draws them until every band it needs is here, and then
 // lets them go. Away from that eye they are not used.
 //
+// In #423's wedge (`wedge`, sf/far/pack.mjs) the faces are a quarter of a metre (half a metre past 700 m from its apex)
+// and laid out with the streets, finer than the cells of 40 cm and more past 100 m: there they begin at `farnear`
+// through a lens narrower than 50 degrees (NARROW). A cell of the march's boxes is a 512th to a 256th of its distance
+// (world.ts: 16 sectors of 64 cells across, each box twice the last), so through the landing's 25 degree lens every
+// cell is 3 to 7 pixels across and the foreground stood in steps against the streets; at 70 degrees they are one or
+// two, and the cells (with their painted walls) are kept.
+//
 //   ?farreach=500        metres from the eye where faces begin (0: no far model)
+//   ?farnear=100         metres from the eye where they begin in the wedge
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
-import { shader, type Target } from '../probe/gpu.ts'
-import { AIR, GLOBALS, LIGHT, type Marcher, type View } from './march.ts'
+import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
+import { AIR, GLOBALS, HANDOVER, LIGHT, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -30,6 +38,7 @@ struct V {
   up: vec3f, reach: f32,
   forward: vec3f, shaded: f32,
   sun: vec3f, pad: f32,
+  wedge: vec4f, bear: vec4f,
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
@@ -44,6 +53,7 @@ ${GLOBALS}
 @group(1) @binding(0) var<uniform> b: B;
 ${LIGHT}
 ${AIR}
+${HANDOVER}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) seen: vec3f,
@@ -107,11 +117,12 @@ fn hashf(p: vec2f, k: u32) -> f32 {
 // nearer than the reach against the sky: what stands near the eye is the cells' to say.
 fn ours(in: Out) -> bool {
   let dist = length(in.seen);
+  let reach = reachAt(in.seen, v.reach, v.wedge, v.bear);
   let z = textureLoad(marched, vec2i(in.pos.xy), 0);
-  if (z >= 1.0) { return dist >= v.reach; }
+  if (z >= 1.0) { return dist >= reach; }
   let along = dot(in.seen, v.forward);
   let met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9);
-  if (dist < v.reach && met * dist / max(along, 1e-3) < v.reach) { return false; }
+  if (dist < reach && met * dist / max(along, 1e-3) < reach) { return false; }
   return along < met;
 }
 struct Drawn { @location(0) colour: vec4f }
@@ -159,6 +170,22 @@ struct Drawn { @location(0) colour: vec4f }
 }
 `
 
+// What the far model drew, into the picture's depth as the march writes it (one over the distance along the look,
+// to the march's 0 to 1): what is drawn among the cells after it (cars, people, crumbs) is hidden by its faces. Its
+// faces begin 100 m off in the wedge, where the street's cars had shown through them.
+const MERGE = /* wgsl */ `
+@group(0) @binding(0) var faces: texture_depth_2d;
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  let uv = vec2f(f32((i << 1u) & 2u), f32(i & 2u));
+  return vec4f(uv * 2.0 - 1.0, 0.0, 1.0);
+}
+@fragment fn fs(@builtin(position) at: vec4f) -> @builtin(frag_depth) f32 {
+  let z = textureLoad(faces, vec2i(at.xy), 0);
+  if (z <= 0.0) { discard; }
+  return clamp(${FAR.toFixed(1)} / (${FAR.toFixed(1)} - ${NEAR.toFixed(1)}) * (1.0 - ${NEAR.toFixed(1)} * z), 0.0, 1.0);
+}
+`
+
 /** The far model's listing (pack.mjs `far.json`, the release manifest's `far` asked for on #450). */
 export interface Listing {
   size: number
@@ -168,9 +195,11 @@ export interface Listing {
   credit?: string
   /** The landing's cut: where its eye is (cells), and one object a tile, its paths from the manifest as the bands' are. */
   landing?: Landing
+  /** #423's wedge, whose faces are finer: its apex (cells, x and z), the compass bearings it lies between and how far it reaches (metres). */
+  wedge?: { at: [number, number]; from: number; to: number; far: number }
 }
 type Rec = { path: string; bytes: number; sha256: string }
-interface Landing { eye: [number, number, number]; tiles: Record<string, Rec> }
+interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number }
 interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
 
@@ -182,6 +211,8 @@ export interface Far {
   drawIds(encoder: GPUCommandEncoder, ids: GPUTextureView, depth: GPUTextureView, size: readonly [number, number], view: View): void
   /** Metres from the eye where faces begin. */
   reach: number
+  /** Metres from the eye where faces begin in the listing's wedge. */
+  near: number
   /** Pixels across a face must be to be drawn. */
   detail: number
   /** What the last frame drew, and what is held. */
@@ -207,7 +238,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {} }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {} }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -233,7 +264,13 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
   })
   const [picture, numbers] = await Promise.all([pipelineFor('fs', format), pipelineFor('fsIds', format)])
-  const uniforms = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const mergeModule = await shader(device, 'far depth', MERGE)
+  const merging = await device.createRenderPipelineAsync({
+    label: 'far depth', layout: 'auto', vertex: { module: mergeModule, entryPoint: 'vs' }, fragment: { module: mergeModule, entryPoint: 'fs', targets: [] },
+    depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: 'less' },
+  })
+  const mergeBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
+  const uniforms = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const windows = device.createBuffer({ size: 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   let styled = false
   let sunBaked: [number, number, number] | null = null
@@ -348,6 +385,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
   /** Faces held at most: past this the furthest tiles' finer bands are let go. */
   const BUDGET = Number(query.get('farfaces') ?? 12_000_000)
+  /** The lens (half its height's tangent) the wedge's faces begin nearer through: under 50 degrees, where at 720 pixels tall a cell of the march is over 3 pixels across (the realm's is 25). Not by the picture's own pixels: the page's scale moves with its load, and the foreground would flip between cells and faces. */
+  const NARROW = Math.tan((50 * Math.PI) / 360)
   /** How near the landing's eye the eye must be for its cut to be used, cells. */
   const LANDED = 200
   /** How far past the reach a tile is still drawn, metres. */
@@ -361,7 +400,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const changed = new Set<string>()
 
   const self: Far = {
-    listing, reach: reachAsked, detail: Number(query.get('fardetail') ?? 0.75), stats,
+    listing, reach: reachAsked, near: Number(query.get('farnear') ?? 100), detail: Number(query.get('fardetail') ?? 0.75), stats,
     get whole() { return whole },
     get ready() { return ready },
     shown() { first = false },
@@ -371,7 +410,17 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     forget() { changed.clear() },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
-    draw(encoder, to, view) { pass(encoder, to.color, to.depth, to.size, view, picture, false) },
+    draw(encoder, to, view) {
+      pass(encoder, to.color, to.depth, to.size, view, picture, false)
+      if (!stats.faces || !own) return
+      let bind = mergeBinds.get(own.view)
+      if (!bind) { bind = device.createBindGroup({ layout: merging.getBindGroupLayout(0), entries: [{ binding: 0, resource: own.view }] }); mergeBinds.set(own.view, bind) }
+      const merge = encoder.beginRenderPass({ label: 'far depth', colorAttachments: [], depthStencilAttachment: { view: to.depth, depthLoadOp: 'load', depthStoreOp: 'store' } })
+      merge.setPipeline(merging)
+      merge.setBindGroup(0, bind)
+      merge.draw(3)
+      merge.end()
+    },
     drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
   }
   const viewBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
@@ -390,7 +439,6 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     // The march's map of held tiles is 64 a side round the eye's tile (the city is wider than that: 32 km).
     const map: [number, number] = [Math.floor(eye[0] / size) - 32, Math.floor(eye[2] / size) - 32]
     const shaded = sunBaked && march.sun.s ? sunBaked[0] * march.sun.s[0] + sunBaked[1] * march.sun.s[1] + sunBaked[2] * march.sun.s[2] > 0.999 : false
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, 0]))
     // What is fetched: for each tile in the view, the landing's cut of it while the eye is there, then every band it
     // needs, the tiles that cover most of the screen first; then what the tiles out of the view need, nearest first.
     // Which tiles are whole, for the march. Until the place is first shown, only the landing's cut of the view (or,
@@ -402,6 +450,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     whole = true
     let short = false
     let held = 0, heldBytes = 0
+    /** Whether a tile draws the landing's cut, which holds no face nearer than the reach it was cut for. */
+    let onCut = false
     for (const t of tiles) {
       const d = away(eye, t.lo, t.hi)
       const seen = d < FURTHEST * 10 && inView(view, aspect, t.lo, t.hi) ? coverage(view, aspect, t.lo, t.hi) : 0
@@ -419,7 +469,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       const cut = t.held[C]
       if ((all || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
       const cutHeld = !all && there && !!cut && cut !== 'coming'
-      if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes }
+      if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes; onCut = true }
       const cutting = there && t.listed[C]
       // What it is fetched for now: before the first show, the cut if the tile is in the view (or else its first
       // band); after, the cut while the tile is in the view and not whole, and every band it needs.
@@ -450,8 +500,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
       for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
     }
-    const coverKey = `${cover.join(',')}:${reach}:${map}`
-    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
+    // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
+    // While a tile draws the landing's cut, no nearer than the reach the cut was made for: nearer it has no faces.
+    const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
+    const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
+    const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, 0, ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}`
+    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
     if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }] }); viewBinds.set(depth, bind) }
@@ -467,9 +523,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       if (!t.held.some((h) => h && h !== 'coming') || changed.has(t.key)) continue
       const d = away(eye, t.lo, t.hi)
       if (d > FURTHEST * 10 || !inView(view, aspect, t.lo, t.hi)) continue
-      // A tile wholly within the reach is the cells'.
+      // A tile wholly within the reach (the wedge's, where there is one) is the cells'.
       const furthest = Math.hypot(...[0, 1, 2].map((a) => Math.max(Math.abs(t.lo[a] - eye[a]), Math.abs(t.hi[a] - eye[a]))))
-      if (furthest < reach) continue
+      if (furthest < (wedge ? near : reach)) continue
       drawn++
       // A tile not yet whole draws the landing's cut where it has it, else what bands it has.
       const cut = t.held[C]
