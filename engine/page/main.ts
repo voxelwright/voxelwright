@@ -207,7 +207,8 @@ async function main() {
   // How many frames came well late just now.
   let lateRun = 0
   const steer = (budget: number, gap: number) => {
-    if (fixed) return
+    // Pinned by whoever measures (`engine.scale`): not even a late frame moves it.
+    if (fixed || held > 1e6) return
     // A look turned from a cheap view to a dear one (#367): the march is suddenly several frames long, and coming down
     // 15% every 45 frames the picture took three seconds to fit again (60 frames dropped in one turn of the head, with
     // the march at 50 ms). Two late frames close together with the GPU's clock saying why bring it down at once to what fits.
