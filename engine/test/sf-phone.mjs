@@ -2,7 +2,7 @@
 // static folder in Safari on the iOS Simulator (Xcode's, on this Mac), at an iPhone's screen. It is WebKit's engine and
 // its limits, drawn on this Mac's GPU: what it says of frame time is WebKit's, not a phone's GPU.
 //
-//   node test/sf-phone.mjs [--device "iPhone 17"] [--seconds 10] [--shots ~/.village/engine/sf]
+//   node test/sf-phone.mjs [--device "iPhone 17"] [--seconds 10] [--shots ~/.village/engine/sf/runtime]
 //
 // A page of the check's own (`/measure.html`, served only by this check, never in the folder) holds the realm in a
 // frame of the same site, waits for it, then reads the realm's own numbers as test/sf.mjs does (when the park was
@@ -15,7 +15,7 @@ import { execFileSync } from 'node:child_process'
 import { arg, here, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
-const device = arg('device', 'iPhone 17'), seconds = Number(arg('seconds', '10')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf'))
+const device = arg('device', 'iPhone 17'), seconds = Number(arg('seconds', '10')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'runtime'))
 mkdirSync(shots, { recursive: true })
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }

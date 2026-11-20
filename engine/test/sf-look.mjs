@@ -144,7 +144,8 @@ try {
     check(seen.rain.rain === 1, 'rain: it rains hard')
     // Fog rolling in, 150 m over the park: caught a few seconds in, the front still on its way east.
     await sky('clear'); await calm()
-    await at(up150[1], 70)
+    // Facing west, where the bank comes from (forward is sin yaw, -cos yaw: west is -pi/2), a little down.
+    await at({ ...up150[1], yaw: -Math.PI / 2, pitch: -0.2 }, 70)
     const before = await lightOf(page, 'fog-before')
     await sky('fog')
     // Caught when the front is half a kilometre short of the eye (it starts 6 km west): what a time alone catches

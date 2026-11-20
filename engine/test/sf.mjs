@@ -2,7 +2,7 @@
 // of plain files set up for a release would serve it (player/serve.mjs: Brotli where the browser takes it, a year's
 // keep for what a release holds, the pointer asked every time; no COOP, COEP or CSP), opened in Chrome with WebGPU.
 //
-//   node test/sf.mjs [--no-build] [--dist dist-sf] [--far <far.json>] [--seconds 10] [--shots ~/.village/engine/sf] [--headed] [--plainly] [--mbit 25]
+//   node test/sf.mjs [--no-build] [--dist dist-sf] [--far <far.json>] [--seconds 10] [--shots ~/.village/engine/sf/runtime] [--headed] [--plainly] [--mbit 25]
 //
 // It says, and fails where any is worse than its bound:
 //   - what crosses the wire until the first picture, until the place is shown round the eye and until the world is
@@ -25,7 +25,7 @@ import { chromium } from 'playwright'
 import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
-const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf')), seconds = Number(arg('seconds', '10')), mbit = Number(arg('mbit', '25'))
+const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'runtime')), seconds = Number(arg('seconds', '10')), mbit = Number(arg('mbit', '25'))
 const M = 10
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
 const failures = []
