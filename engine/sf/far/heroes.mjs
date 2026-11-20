@@ -46,19 +46,37 @@ for (const [n, hero] of listed.entries()) {
     const words = core.hero_faces(hero.sort, step, ...from, ...cells)
     const two = new Uint32Array(core.memory.buffer, core.hero_faces_at(), words).slice()
     if (!two.length) continue
-    // A landmark's face is a row of cells one cell high (pieces.ts); the far model's is five words (matte.py `pack`).
-    const five = new Uint32Array((two.length / 2) * 5)
-    let top = 0
+    // A landmark's face is a row of cells one cell high (pieces.ts); a wall's rows that stand one on another are
+    // drawn as one face as tall as they are, so that a tower is as big to the far model as it looks (its sizes of
+    // detail, pack.mjs `sizeOf`), and the far model's is five words (matte.py `pack`).
+    const rows = new Map(), flat = []
     for (let i = 0; i < two.length; i += 2) {
       const a = two[i], b = two[i + 1]
-      const x = a & 1023, y = (a >> 10) & 1023, z = (a >> 20) & 1023, long = b & 255, axis = (b >> 8) & 3, side = (b >> 10) & 1, kind = b >>> 16
+      const f = { x: a & 1023, y: (a >> 10) & 1023, z: (a >> 20) & 1023, long: b & 255, axis: (b >> 8) & 3, side: (b >> 10) & 1, kind: b >>> 16, top: 0 }
+      f.top = f.y
+      if (f.axis === 1) { flat.push(f); continue }
+      const key = `${f.axis} ${f.side} ${f.x} ${f.z} ${f.long} ${f.kind}`
+      if (!rows.has(key)) rows.set(key, [])
+      rows.get(key).push(f)
+    }
+    const merged = [...flat]
+    for (const list of rows.values()) {
+      list.sort((p, q) => p.y - q.y)
+      let run = list[0]
+      for (const f of list.slice(1)) { if (f.y === run.top + 1) run.top = f.y; else { merged.push(run); run = f } }
+      merged.push(run)
+    }
+    const five = new Uint32Array(merged.length * 5)
+    let top = 0
+    for (const [n, f] of merged.entries()) {
+      const { x, y, z, long, axis, side, kind } = f
       const [r, g, bl] = rgb(kind), mirror = stuff[(kind & 15) * 8 + 5] > 0
       // Its windows by the far model's rule where it is glass a building would have (no style: a landmark draws its own).
-      const o = (i / 2) * 5
+      const o = n * 5
       let lu = 1, lw = 1, y0, y1, shade = 0
       if (axis === 1) { lu = long; y0 = y1 = (y + side) * step; if (!side) shade = 65535 }
-      else if (axis === 2) { lu = long; y0 = y * step; y1 = (y + 1) * step }
-      else { lw = long; y0 = y * step; y1 = (y + 1) * step }
+      else if (axis === 2) { lu = long; y0 = y * step; y1 = (f.top + 1) * step }
+      else { lw = long; y0 = y * step; y1 = (f.top + 1) * step }
       const way = axis === 1 ? 0 : axis === 2 ? 2 : 1
       five[o] = (x | (z << 11) | (lu << 22)) >>> 0
       five[o + 1] = (y0 | (y1 << 16)) >>> 0

@@ -102,7 +102,7 @@ const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\
 // ── What changed since the last packing ──
 const before = existsSync(join(out, 'far.json')) && existsSync(join(out, 'far.state.json')) ? { ...JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')), sources: JSON.parse(readFileSync(join(out, 'far.state.json'), 'utf8')) } : null
 /** How this packs a tile (the FAR1 object's own layout): raised when it changes, so every tile is packed again. */
-const PACKED = 4
+const PACKED = 5
 // The listing is the release manifest's `far` (engine/sf/release.md, version 1); what each tile was made from is
 // kept beside it in far.state.json, for packing again only what changed.
 const listing = { version: 1, size: SIZE, bands: BANDS, lods: LODS, tiles: {} }
@@ -161,7 +161,9 @@ for (let at = 0; at < todo.length; at += BATCH) {
       // The sea is the march's to draw: bare ground no higher than a metre over it is where the lidar had a return off
       // the water (matte.py and bake.py take that for land), and it drew grey bands across the Bay.
       if (b.layer.startsWith('ground') && pos[1] + e.y1 <= 10) continue
-      const size = sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
+      // A landmark's faces are drawn as far as its tile is: a lattice tower 300 m tall is made of thin bars, each one
+      // under a pixel from across the city, that together are what one sees of it.
+      const size = b.owner === 'hero' ? LODS[0] : sizeOf(e, cell), band = BANDS.findIndex((least) => size >= least)
       const t = sorted.get(key)[band]
       let l = t.get(i)
       if (!l) t.set(i, (l = []))
