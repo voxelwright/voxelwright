@@ -297,6 +297,11 @@ async function main() {
     debris.light(sun, day)
     water.light(sun, day)
   }
+  // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
+  if (LOCAL?.air) {
+    march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
+    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) { const sun = LOCAL.air.sun; march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1); if (LOCAL.air.grade) grade = LOCAL.air.grade }
+  }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
   // `?rain=1` or the R key: rain.

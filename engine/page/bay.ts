@@ -25,7 +25,7 @@ export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? []
 /** Whether this page's world is the Bay's at all. */
 export const ON = STREAM || SQUARES.length > 0
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : ''
+export const BAY = (STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -51,7 +51,7 @@ export const START: [number, number] | null = there ? [there.x, there.z] : null
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
 
-interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number }
+interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
 
 /** Which tiles there are: a level's tiles are `size` cells a side with a ground sample every `gstep`; `squares` are the baked squares they were cut from (their names and addresses). */
 interface Index { levels: { size: number; gstep: number }[]; tiles: [number, number][][]; squares: string[] }
@@ -64,9 +64,18 @@ const tiles = () => (index ??= fetch(`${BASE}tiles/index.json`).then(async (r) =
 export async function open<T>(url: string): Promise<T> {
   const core = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
   if (STREAM) core.bay_begin()
+  // Landmarks by rule (#450, core/src/heroes.rs): every core is told where each stands before it makes a sector.
+  // `?heroes=0` leaves them out (as the tiles have the place), for what they cost.
+  if (query.get('heroes') === '0') core.bay_landmarks(0)
+  for (const h of await heroes()) { const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
   for (const name of SQUARES) await take(core, `${BASE}${name}.bay`)
   return core as unknown as T
 }
+
+/** The landmarks a Bay world has (sf/heroes.json, copied beside the tiles as heroes.json): where each stands. */
+export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number }
+let landmarks: Promise<Landmark[]> | null = null
+const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
 
 /** Has a core take the pack at an address. False where there is none to take: a tile that is all sea. */
 async function take(core: Core, url: string): Promise<boolean> {

@@ -29,6 +29,11 @@ export interface Local extends Realm {
   roll?: number
   /** The far model (far.ts): the folder beside the page its far.json is in. */
   far?: string
+  /**
+   * The realm's air (#450, march.ts `Air`): haze and cloud against the town's own, its sky by day, and the sun and
+   * grade of the afternoon it is seen in until the hour is set. The SF realm's is the landing photograph's (#423).
+   */
+  air?: { haze?: number; clouds?: number; sky?: { zenith: [number, number, number]; horizon: [number, number, number] }; sun?: [number, number, number]; grade?: [number, number] }
   /** Street life (street.ts): where its graphs of each square (`life/index.json`) and its kept vehicles (`cars/index.json`) are, beside the page. Its people take the place of the town's residents. */
   street?: { life: string; cars: string }
 }

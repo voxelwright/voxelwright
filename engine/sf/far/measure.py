@@ -74,12 +74,19 @@ def main():
     if arg('--picture', None):
         full = cv2.imread(arg('--picture', None))
         ours = cv2.warpAffine(full, move, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        # How alike in colour, as overlay.py measures it: CIELAB distance of the two pictures a little blurred, over
+        # what is land in both, and over the sky in both (2.3 is about what an eye just tells apart).
+        lab = lambda im: cv2.cvtColor(cv2.GaussianBlur(im, (0, 0), 1.5).astype(np.float32) / 255, cv2.COLOR_BGR2LAB)
+        lo, lp = lab(ours), lab(photo())
+        de = np.sqrt(((lo - lp) ** 2).sum(2))
+        land, sky = (way > 0) & ~sky_p & cols, sky_p & sky_o & cols
+        out['colour'] = {k: {'median': round(float(np.median(de[m])), 1), 'lighter': round(float((lo[..., 0] - lp[..., 0])[m].mean()), 1)} for k, m in (('land', land), ('sky', sky)) if m.any()}
         half = cv2.addWeighted(photo(), 0.5, ours, 0.5, 0)
         half[line_p] = (0, 220, 255)
         half[line_o] = (255, 80, 200)
         cv2.imwrite(arg('--out', None), half, [cv2.IMWRITE_JPEG_QUALITY, 88])
     s = out['skyline']
-    print(json.dumps({'skyline': {'median': s['median'], 'p90': s['p90'], 'ok': s['ok']}, 'named_ok': f"{sum(b['ok'] for b in buildings)} of {len(buildings)}", 'skylineCells': out['skylineCells']}))
+    print(json.dumps({'skyline': {'median': s['median'], 'p90': s['p90'], 'ok': s['ok']}, 'named_ok': f"{sum(b['ok'] for b in buildings)} of {len(buildings)}", 'skylineCells': out['skylineCells'], 'colour': out.get('colour')}))
 
 
 if __name__ == '__main__':

@@ -32,10 +32,24 @@ const VIEWS = {
   downtown: { size: [1280, 720], fov: 70, at: [52440, 150, 66990], look: [301.8, -6] },
   pyramid: { size: [1280, 720], fov: 40, at: [54000, 120, 66900], look: [276.4, -0.5] },
   street: { size: [1280, 720], fov: 70, at: [51800, null, 67130], look: [80.6, -1.5] },
+  // Landmarks by rule (#450, sf/heroes.json), each near, at a person's height (null: over the ground), and far.
+  'gate-near': { size: [1280, 720], fov: 70, at: [46250, null, 65250], look: [305.6, 16] },
+  'gate-far': { size: [1280, 720], fov: 50, at: [49500, 60, 65800], look: [295.8, 0] },
+  'ferry-near': { size: [1280, 720], fov: 70, at: [53250, null, 66800], look: [54.6, 10] },
+  'ferry-far': { size: [1280, 720], fov: 50, at: [55500, 60, 67500], look: [291, 0] },
+  'coit-near': { size: [1280, 720], fov: 70, at: [51980, 70, 65900], look: [97.7, 8] },
+  'coit-far': { size: [1280, 720], fov: 50, at: [53500, 40, 64600], look: [221.6, 1] },
+  'sutro-near': { size: [1280, 720], fov: 70, at: [48480, null, 70920], look: [225.2, 30] },
+  'sutro-far': { size: [1280, 720], fov: 50, at: [51100, 150, 68500], look: [227, 2] },
+  'hall-near': { size: [1280, 720], fov: 70, at: [51300, null, 68520], look: [270, 12] },
+  'hall-far': { size: [1280, 720], fov: 50, at: [49790, 105, 68850], look: [76.1, -1] },
+  'palace-near': { size: [1280, 720], fov: 70, at: [48740, null, 65930], look: [270, 8] },
+  'palace-far': { size: [1280, 720], fov: 50, at: [50200, 40, 65600], look: [258.7, -0.5] },
 }
 const squeezed = new Map()
 const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(dist, 'sf', path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
-const only = arg('only', Object.keys(VIEWS).join(',')).split(',')
+// The four of round one unless asked: `--only landmarks` for the twelve landmark views, `--only all` for every one.
+const only = { landmarks: Object.keys(VIEWS).filter((k) => k.includes('-')), all: Object.keys(VIEWS) }[arg('only', '')] ?? arg('only', 'park,downtown,pyramid,street').split(',')
 
 const site = await plain(dist, '127.0.0.1')
 // `--quiet`: every turn on the GPU, so that no other lane's check draws beside the timing (kit.mjs `quiet`).

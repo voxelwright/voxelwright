@@ -1,0 +1,65 @@
+[
+  {
+    "name": "Salesforce Tower",
+    "sort": 1,
+    "at": [37.789776, -122.396929],
+    "toward": [37.789092, -122.3961895],
+    "foot": 4.1,
+    "far": "place",
+    "from": "As #423 (engine/bay/heroes.json on PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its outline and height; its taper off a photograph. Its far model is the Ina wedge's (landing/ina/heroes.mjs)."
+  },
+  {
+    "name": "Golden Gate Bridge",
+    "sort": 2,
+    "at": [37.8197555, -122.4785628],
+    "toward": [37.8254996, -122.479234],
+    "foot": 0,
+    "step": 16,
+    "from": "As #423 (PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its place, turn and towers; the bridge district's published figures for spans, heights, cables and truss."
+  },
+  {
+    "name": "Bay Bridge, western span",
+    "sort": 4,
+    "at": [37.7981888, -122.3778586],
+    "toward": [37.8056188, -122.3698989],
+    "foot": 0,
+    "far": "place",
+    "from": "As #423 (PR 428). Its far model is the Ina wedge's."
+  },
+  {
+    "name": "Ferry Building",
+    "sort": 5,
+    "at": [37.795533, -122.393439],
+    "toward": [37.794812, -122.392759],
+    "foot": 2.5,
+    "step": 4,
+    "from": "Outline 202 by 56 m along bearing 143 degrees, 15 to 16 m high, and the clock tower's seven stages over a 12 m square to 70 m: Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 3.46 m NAVD88. Arcade, clock and belfry by eye. The rule is engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Sutro Tower",
+    "sort": 7,
+    "at": [37.755241, -122.452853],
+    "toward": [37.755241, -122.451853],
+    "foot": 254.3,
+    "step": 8,
+    "from": "Height 298 m and its platforms' triangles at 55, 115, 168, 198 and 230 m: Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 255.3 m NAVD88. Bracing and bands by eye. The rule is engine/core/src/heroes.rs."
+  },
+  {
+    "name": "City Hall",
+    "sort": 8,
+    "at": [37.779276, -122.419239],
+    "toward": [37.778389, -122.419054],
+    "foot": 17.6,
+    "step": 4,
+    "from": "Outline 127 by 98 m, 30 m high, the cross wing and the rotunda's stages to the dome at 75 m: Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation); the dome's top at 93.6 m (307.5 feet) as published. Its foot: USGS 3DEP 1 m elevation, 18.55 m NAVD88. Colonnades, courts and gilding by eye. The rule is engine/core/src/heroes.rs."
+  },
+  {
+    "name": "Palace of Fine Arts",
+    "sort": 9,
+    "at": [37.80278, -122.44806],
+    "toward": [37.80278, -122.44706],
+    "foot": 1.7,
+    "step": 4,
+    "from": "The rotunda's place and its height of 49 m (162 feet) as published; the exhibition hall behind is the map's (Overture Maps 2026-10-21.0, © OpenStreetMap contributors, Overture Maps Foundation). Its foot: USGS 3DEP 1 m elevation, 2.68 m NAVD88. Piers, arches, colonnade and planter boxes by eye. The rule is engine/core/src/heroes.rs."
+  }
+]

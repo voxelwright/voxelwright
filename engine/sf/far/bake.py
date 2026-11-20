@@ -2,7 +2,7 @@
 half a metre, every side of them, as #423's place is baked (landing/ina/matte.py) but from any eye.
 
 It reads the data lane's retained inputs, one archive a square (bay/intermediate.py writes them as the city's run
-finishes each): ~/.village/engine/bay/450-inputs/<square>.zip with frame.json, top_mm.npy (the highest return in each
+finishes each): ~/.village/engine/bay/sf-450-city/inputs/<square>.zip (the pilot's in 450-inputs/) with frame.json, top_mm.npy (the highest return in each
 quarter metre, NAVD88 millimetres), count, multi and intensity of the returns, footprint.npy (each quarter metre's
 building, a row of footprints.geojson counted from 1) and ground.npy (1 m, NAVD88). All start in the north-west; a
 square's arrays reach PAD metres past it, so a wall at its edge knows its neighbour.
@@ -28,7 +28,13 @@ sys.path.insert(0, os.path.join(HERE, '..', '..', 'landing', 'ina'))
 import looks  # noqa: E402  wall colours and windows by rule (#423)
 from matte import faces, filled, rgb24  # noqa: E402  columns to faces (#423)
 
-INPUTS = os.path.expanduser('~/.village/engine/bay/450-inputs')
+# Where the archives are: the city's run (bay/full_run.py) writes them square by square; the pilot's are kept apart.
+# A square in both is the run's.
+INPUTS = [os.path.expanduser('~/.village/engine/bay/sf-450-city/inputs'), os.path.expanduser('~/.village/engine/bay/450-inputs')]
+
+
+def archive(square):
+    return next(f'{d}/{square}.zip' for d in INPUTS if os.path.exists(f'{d}/{square}.zip'))
 OUT = os.path.expanduser('~/.village/engine/sf/far/squares')
 E0, N0, SEA = 500_000.0, 4_250_000.0, 1.0
 TILE = 500.0  # metres: the far model's tiles (pack.mjs SIZE)
@@ -65,7 +71,7 @@ def named(frame, ids, cell):
 
 
 def bake(square, force=False, cell=0.5, out=OUT):
-    src = f'{INPUTS}/{square}.zip'
+    src = archive(square)
     st = os.stat(src)
     sig = f'{VERSION}:{cell}:{st.st_size}:{int(st.st_mtime)}'
     dest = f'{out}/{square}'
@@ -201,10 +207,19 @@ def main():
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
     cell, out = float(arg('--cell', '1')), os.path.expanduser(arg('--out', OUT))
     asked = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith('--') and sys.argv[i - 1] not in ('--cell', '--out')]
-    squares = asked or sorted(f[:-4] for f in os.listdir(INPUTS) if f.endswith('.zip') and not f.endswith('.part'))
+    squares = asked or sorted({f[:-4] for d in INPUTS if os.path.isdir(d) for f in os.listdir(d) if f.endswith('.zip')})
+    failed = []
     for s in squares:
-        said = bake(s, force, cell, out)
+        # One square that fails is said and passed over: the rest are still baked.
+        try:
+            said = bake(s, force, cell, out)
+        except Exception as e:
+            failed.append(s)
+            print(f'{s}: FAILED {type(e).__name__}: {e}', flush=True)
+            continue
         print(json.dumps(said) if said else f'{s}: as it was', flush=True)
+    if failed:
+        print(f'{len(failed)} squares failed: {" ".join(failed)}', flush=True)
 
 
 if __name__ == '__main__':
