@@ -2,6 +2,7 @@
 
 import argparse
 import fcntl
+import gzip
 import hashlib
 import json
 import math
@@ -12,10 +13,13 @@ import subprocess
 import sys
 import time
 import traceback
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
 from coverage import bounds, tile_keys
+import compact_store
+from street_furniture import verify_tile_tail
 
 HERE = Path(__file__).resolve().parent
 BAY = Path.home() / ".village/engine/bay"
@@ -31,6 +35,8 @@ RADIUS = (500, 4000, 16000)  # includes the desktop clip boxes' sector alignment
 
 
 def digest(path):
+    if path.suffix == ".bay" and not path.is_file():
+        return hashlib.sha256(compact_store.read(path)).hexdigest()
     with path.open("rb") as f:
         return hashlib.file_digest(f, "sha256").hexdigest()
 
@@ -70,9 +76,17 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
         + 12 * h[13]
         + 16 * h[14]
     )
-    if path.stat().st_size != length:
+    if path.stat().st_size < length:
         raise ValueError(f"truncated BAY1: {path}")
     with path.open("rb") as f:
+        if path.stat().st_size > length:
+            from street_furniture import decode
+
+            f.seek(length)
+            if gstep == 10 and size == 2500:
+                verify_tile_tail(f.read(), h[13])
+            elif gstep != 10 or not decode(f.read()):
+                raise ValueError(f"invalid street fixtures: {path}")
         f.seek(64 + 2 * h[5] ** 2 + (4 + 2 * walls) * h[9] ** 2)
         for first, count, *_ in struct.iter_unpack("<6i", f.read(24 * h[12])):
             if first < 0 or count < 3 or first + count > h[13]:
@@ -94,16 +108,18 @@ def plan(names, planet, horizon):
 
 
 def build(args, lock_fd):
+    source = args.bake_source or HERE
+    sys.path.insert(0, str(source))
     import earth
     import tiles
 
     root = args.output.resolve()
     packs = root / "packs"
-    square_list = json.loads((HERE / "sf-squares.json").read_text())
+    square_list = json.loads((source / "sf-squares.json").read_text())
     names = PILOT if args.pilot else square_list["lidar"]
     keys = plan(names, square_list["planet"], not args.pilot)
     recipe = [
-        digest(HERE / f)
+        digest(source / f)
         for f in (
             "full_run.py",
             "intermediate.py",
@@ -118,11 +134,17 @@ def build(args, lock_fd):
             "earth.py",
             "fetch.py",
             "tiles.py",
+            "paint_tile.py",
             "frontage.py",
             "street_trees.py",
             "pilot-hashes.json",
             "pilot-frontages.json",
+            "street_detail.py",
+            "street_detail_sources.py",
+            "street_furniture.py",
+            "surface_detail.py",
         )
+        if f != "paint_tile.py" or (source / f).exists()
     ]
     recipe += [args.pilot]
     statefile = root / "state.json"
@@ -142,6 +164,30 @@ def build(args, lock_fd):
     env = {**os.environ, "VILLAGE_BAY_ROOT": str(root)}
     tiles.PACKS = str(packs)
 
+    def store_outputs(records):
+        if args.compact:
+            for rel, sha in records.items():
+                if rel.endswith(".bay"):
+                    compact_store.compact(root / rel, root / "objects", sha)
+
+    def wait_for_space(id_):
+        # A raw acquisition can occupy over a GiB before its verified ZIP releases the LAZ.
+        minimum = (max(args.free_gib, 18) if args.compact else args.free_gib) * 2**30
+        notice = root / "disk-hold.json"
+        while shutil.disk_usage(root).free < minimum:
+            if not args.compact:
+                raise SystemExit(
+                    f"low disk before {id_}; state saved; resume with the same command"
+                )
+            save(
+                notice, dict(task=id_, requiredGiB=minimum / 2**30, checked=time.time())
+            )
+            if (root / "hold-at-boundary").exists():
+                raise SystemExit(75)
+            print(f"waiting before {id_} for {minimum / 2**30:g} GiB free", flush=True)
+            time.sleep(60)
+        notice.unlink(missing_ok=True)
+
     def task(id_, make, *inputs):
         previous = state["done"].get(id_)
         if previous is not None:
@@ -150,12 +196,10 @@ def build(args, lock_fd):
                     raise ValueError(
                         f"{rel} changed after verification: restore it or use a new output directory"
                     )
+            store_outputs(previous)
             return previous
         for attempt in range(3):
-            if shutil.disk_usage(root).free < args.free_gib * 2**30:
-                raise SystemExit(
-                    f"low disk before {id_}; state saved; resume with the same command"
-                )
+            wait_for_space(id_)
             with (logs / f"{id_}.log").open("a", buffering=1) as log:
                 print(time.ctime(), "attempt", attempt + 1, file=log)
                 try:
@@ -164,27 +208,29 @@ def build(args, lock_fd):
                     }
                     state["done"][id_] = result
                     save(statefile, state)
-                    return result
+                    break
                 except Exception:
                     traceback.print_exc(file=log)
                     if attempt == 2:
                         raise
             time.sleep(2 ** (attempt + 1))
+        store_outputs(result)
+        return result
 
-    seeds = json.loads((HERE / "pilot-hashes.json").read_text())
+    seeds = json.loads((source / "pilot-hashes.json").read_text())
 
     from intermediate import restore, write
     from panoramas import acquire
     import street_graph, street_sources
 
     from appearance import enhance
+    from street_trees import align
+    import street_detail, street_detail_sources, surface_detail
 
     def keep(log, name):
         dest = root / "inputs" / (name + ".zip")
         seed = args.input_seed / dest.name
         if seed.exists():
-            import zipfile
-
             with zipfile.ZipFile(seed) as archive:
                 if (
                     archive.testzip()
@@ -197,7 +243,7 @@ def build(args, lock_fd):
             if args.offline_inputs:
                 raise ValueError(f"offline input missing: {seed}")
             subprocess.run(
-                [sys.executable, HERE / "fetch.py", name],
+                [sys.executable, source / "fetch.py", name],
                 env=env,
                 stdout=log,
                 stderr=log,
@@ -212,24 +258,24 @@ def build(args, lock_fd):
         pack, meta = packs / f"{name}.bay", packs / f"{name}.json"
         # Only accept byte-identical pairs measured in this pilot.
         seed = seeds.get(name)
-        source = args.seed
+        seed_root = args.seed
         if (
             seed
-            and source
+            and seed_root
             and all(
-                (source / p.name).is_file()
-                and digest(source / p.name) == seed[p.suffix]
+                (seed_root / p.name).is_file()
+                and digest(seed_root / p.name) == seed[p.suffix]
                 for p in (pack, meta)
             )
         ):
             for p in (pack, meta):
-                shutil.copyfile(source / p.name, p)
+                shutil.copyfile(seed_root / p.name, p)
             print("verified pilot seed", file=log)
         else:
             restore(root / "inputs" / (name + ".zip"), root / "raw" / name)
             for script in ("bake.py",):
                 subprocess.run(
-                    [sys.executable, HERE / script, name],
+                    [sys.executable, source / script, name],
                     env=env,
                     stdout=log,
                     stderr=log,
@@ -237,17 +283,19 @@ def build(args, lock_fd):
                     pass_fds=(lock_fd,),
                 )
             from frontage import apply
-            from street_trees import align
 
-            align(pack, root / "raw" / name / "trees.geojson")
-            observations = json.loads((HERE / "pilot-frontages.json").read_text()).get(
-                name, {}
-            )
+            observations = json.loads(
+                (source / "pilot-frontages.json").read_text()
+            ).get(name, {})
             if observations:
                 apply(pack, pack, observations)
                 names_data = json.loads(meta.read_text())
                 names_data["credit"] += "; façade colours: Mapillary"
                 save(meta, names_data)
+        # Two original pilot packs predate surveyed trunk alignment. A seed and
+        # a reconstruction must locate the same tree before measuring its crown.
+        with zipfile.ZipFile(root / "inputs" / (name + ".zip")) as archive:
+            align(pack, zipfile.Path(archive, "trees.geojson"))
         result = enhance(
             pack,
             root / "inputs" / (name + ".zip"),
@@ -255,6 +303,17 @@ def build(args, lock_fd):
             packs / "graph" / (name + ".json"),
         )
         print("appearance", json.dumps(result), file=log)
+        stats, audit = street_detail.apply(
+            pack,
+            root / "inputs" / (name + ".zip"),
+            root / "inputs" / (name + ".detail.json.gz"),
+            packs / "graph" / (name + ".json"),
+        )
+        stats.update(surface_detail.apply(pack, root / "inputs" / (name + ".zip")))
+        report = root / "audits" / (name + ".json")
+        report.parent.mkdir(exist_ok=True)
+        save(report, {"square": name, "counts": stats, **audit})
+        print("street detail", json.dumps(stats), file=log)
         x, z, _, _ = bounds(name)
         verify(pack, x * 10, z * 10, 10000, 10, 5, 160, 0)
         data = json.loads(meta.read_text())
@@ -266,9 +325,16 @@ def build(args, lock_fd):
             )
         ):
             raise ValueError("incorrect names file")
-        return [pack, meta]
+        return [pack, meta, report]
 
-    for name in dict.fromkeys(PILOT + names):
+    priority_file = root / "priority.json"
+    priority = json.loads(priority_file.read_text()) if priority_file.exists() else []
+    if not isinstance(priority, list) or any(name not in names for name in priority):
+        raise ValueError("priority.json must list square names in this run")
+    for name in dict.fromkeys(priority + PILOT + names):
+        if (root / "hold-at-boundary").exists():
+            print("holding before square", name, flush=True)
+            return False
         task("inputs-" + name, keep, name)
         observations = root / "inputs" / (name + ".json.gz")
 
@@ -290,6 +356,46 @@ def build(args, lock_fd):
             return [observations, path]
 
         task("streets-" + name, streets, name)
+
+        def details(log, square_name):
+            files = []
+            for suffix, get in (
+                (
+                    "detail",
+                    lambda dest: street_detail_sources.acquire(
+                        root / "inputs" / (square_name + ".zip"), dest
+                    ),
+                ),
+                (
+                    "fixtures",
+                    lambda dest: street_detail_sources.public_works(square_name, dest),
+                ),
+                (
+                    "stops",
+                    lambda dest: street_detail_sources.stop_signs(square_name, dest),
+                ),
+            ):
+                dest = root / "inputs" / (square_name + "." + suffix + ".json.gz")
+                if not dest.exists():
+                    seed = args.detail_seed / dest.name
+                    if seed.is_file():
+                        temp = dest.with_suffix(".part")
+                        shutil.copyfile(seed, temp)
+                        temp.replace(dest)
+                    elif args.offline_inputs:
+                        raise ValueError(f"offline street detail missing: {seed}")
+                    else:
+                        get(dest)
+                with gzip.open(dest) as source:
+                    data = json.load(source)
+                if data["square"] != square_name or data["version"] != (
+                    2 if suffix == "fixtures" else 1
+                ):
+                    raise ValueError(f"incorrect street detail: {dest}")
+                files.append(dest)
+            return files
+
+        task("detail-" + name, details, name)
         task(name, square, name)
         print(time.ctime(), "verified square", name, flush=True)
         raw = root / "raw" / name
@@ -318,7 +424,25 @@ def build(args, lock_fd):
     def group_output(log, level, inputs, group):
         size, gstep, tstep, margin, _ = earth.LEVELS[level]
         if inputs:
-            result = tiles.cut([packs / f"{name}.bay" for name in inputs], set(group))
+            paths = [packs / f"{name}.bay" for name in inputs]
+            if args.compact:
+                # The frozen cutter gets ordinary files for just this group. The build lock owns its scratch.
+                scratch = root / ".cut-work"
+                if scratch.exists():
+                    shutil.rmtree(scratch)
+                scratch.mkdir()
+                try:
+                    for path in paths:
+                        data = compact_store.read(path)
+                        expected = state["done"][path.stem][str(path.relative_to(root))]
+                        if hashlib.sha256(data).hexdigest() != expected:
+                            raise ValueError(f"cut contributor changed: {path.name}")
+                        (scratch / path.name).write_bytes(data)
+                    result = tiles.cut([scratch / p.name for p in paths], set(group))
+                finally:
+                    shutil.rmtree(scratch)
+            else:
+                result = tiles.cut(paths, set(group))
             if {(level, x, z) for x, z in result["tiles"][level]} != set(group):
                 raise ValueError(f"incomplete tile group {group}")
         paths = []
@@ -341,6 +465,9 @@ def build(args, lock_fd):
         return paths
 
     for number, ((level, _, __, inputs), group) in enumerate(groups.items()):
+        if (root / "hold-at-boundary").exists():
+            print("holding before tile group", number, flush=True)
+            return False
         files = task(f"tiles-{number}", group_output, level, inputs, group)
         for _, x, z in group:
             present = f"packs/tiles/{level}/{x}_{z}.bay" in files
@@ -355,9 +482,21 @@ def build(args, lock_fd):
         "sea keys",
     )
 
+    return True
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="verify and retain zstd bases at each checkpoint",
+    )
+    parser.add_argument(
+        "--bake-source",
+        type=Path,
+        help="frozen input recipe and byte generators for an existing state",
+    )
     parser.add_argument("--output", type=Path, default=BAY / "sf-450-release")
     parser.add_argument("--street-seed", type=Path, default=BAY / "450-street-inputs")
     parser.add_argument(
@@ -365,6 +504,7 @@ if __name__ == "__main__":
         action="store_true",
         help="require both retained observations for every square; no square source acquisition",
     )
+    parser.add_argument("--detail-seed", type=Path, default=BAY / "450-detail-inputs")
     parser.add_argument("--input-seed", type=Path, default=BAY / "450-inputs")
     parser.add_argument("--seed", type=Path, default=BAY / "pilot450/packs")
     parser.add_argument(
@@ -377,4 +517,5 @@ if __name__ == "__main__":
     args.output.mkdir(parents=True, exist_ok=True)
     with (args.output / "build.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        build(args, lock.fileno())
+        if build(args, lock.fileno()) is False:
+            sys.exit(75)

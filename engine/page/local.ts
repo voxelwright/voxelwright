@@ -27,6 +27,17 @@ export interface Local extends Realm {
   release?: string
   /** The eye's angle from top to bottom, degrees, where the address does not say. */
   fov?: number
+  /** How far the picture is turned about the look, degrees clockwise: a photograph's camera has it (#423). */
+  roll?: number
+  /** The far model (far.ts): the folder beside the page its far.json is in. */
+  far?: string
+  /**
+   * The realm's air (#450, march.ts `Air`): haze and cloud against the town's own, its sky by day, and the sun and
+   * grade of the afternoon it is seen in until the hour is set. The SF realm's is the landing photograph's (#423).
+   */
+  air?: { haze?: number; clouds?: number; sky?: { zenith: [number, number, number]; horizon: [number, number, number] }; sun?: [number, number, number]; grade?: [number, number] }
+  /** Street life (street.ts): where its graphs of each square (`life/index.json`) and its kept vehicles (`cars/index.json`) are, beside the page. Its people take the place of the town's residents. */
+  street?: { life: string; cars: string }
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */

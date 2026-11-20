@@ -415,6 +415,7 @@ def coarsen(t, c, n, m, k, level):
     top = np.where(built | leafy, high, NONE)
     walls = np.where(built, m.max(-1) & 0xffff, 0)
     cls = (c[..., mid] & 7) | np.where(leafy & ~built, CANOPY, 0) | np.where(built, BUILT, 0)
+    cls |= np.where((cls == ROAD) & ((c[..., mid] & 135) == 128), 128, 0)
     return top, cls, n[..., mid], walls
 
 

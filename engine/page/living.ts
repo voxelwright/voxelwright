@@ -158,6 +158,12 @@ export interface Living {
   forget(): void
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
   drive(thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
+  /** Sets a thing still at a place (its middle, cells) turned so (a quaternion): one brought to life where it was drawn standing (#450). On this page's own solver only. */
+  place(thing: Thing, at: readonly [number, number, number], rot: readonly [number, number, number, number]): void
+  /** Takes a thing out of the world at once, leaving nothing (a parked car that is drawn again where it stood, #450). On this page's own solver only. */
+  vanish(thing: Thing): void
+  /** So much speed given to a thing at once (cells a second): thrown by a blast it was not alive for. On this page's own solver only. */
+  kick(thing: Thing, speed: readonly [number, number, number]): void
   readonly things: Thing[]
   readonly riding: Thing | null
   /** The thing near enough to get on. */
@@ -204,6 +210,8 @@ export function living(o: {
   /** The page's person gets on a thing (true) or is set down off it (false): a body on foot is taken up and put down. */
   ridden?: (on: boolean) => void
   made?: () => Things
+  /** A body taken out of the solver with nothing told of it (`vanish`): whoever keeps its piece lets it go. */
+  dropped?: (id: number) => void
 }): Living {
   const M = 10
   const things: Thing[] = [], waiting: { making: Making; done: (thing: Thing) => void }[] = [], struck: Struck[] = []
@@ -423,6 +431,19 @@ export function living(o: {
       o.send({ spawn: { cells: making.cells, size: making.size, low: making.low, take: making.take, motor: numbers(making.motor) } })
     }),
     drive: tell,
+    kick(thing, speed) { if (o.world) return; o.send({ kick: { id: thing.id, speed: [speed[0], speed[1], speed[2]] } }); o.wake() },
+    vanish(thing) {
+      if (o.world || !things.includes(thing)) return
+      if (riding === thing) mount(null)
+      o.send({ vanish: thing.id })
+      thing.alive = false
+      things.splice(things.indexOf(thing), 1)
+      unwear(thing)
+      if (near === thing) { near = null; cue?.remove(); cue = null; reach(false) }
+      o.piece(thing.id)?.destroy()
+      o.dropped?.(thing.id)
+    },
+    place(thing, at, rot) { if (o.world) return; o.send({ place: { id: thing.id, at: [at[0], at[1], at[2]], rot: [rot[0], rot[1], rot[2], rot[3]] } }); o.wake() },
     forget() {
       if (riding) mount(null)
       for (const thing of things) { thing.alive = false; unwear(thing) }

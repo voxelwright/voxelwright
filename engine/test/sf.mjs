@@ -41,7 +41,9 @@ const pointer = JSON.parse(readFileSync(join(dist, 'sf/current.json'), 'utf8'))
 const manifest = JSON.parse(readFileSync(join(dist, 'sf', pointer.manifest), 'utf8'))
 const releaseAt = `/sf/${pointer.manifest.replace(/manifest\.json$/, '')}`
 /** Every address the page may ask for in a release: the manifest and what it lists. */
-const listed = new Set([`/sf/${pointer.manifest}`, ...manifest.levels.flatMap((l) => Object.values(l.tiles).map((r) => releaseAt + r.path)), ...Object.values(manifest.names).map((r) => releaseAt + r.path)])
+/** Every record's path in a manifest, wherever it lies (tiles, names, graphs, street life, cars, the far model). */
+const paths = (v) => (Array.isArray(v) ? v.flatMap(paths) : v && typeof v === 'object' ? (typeof v.path === 'string' && typeof v.sha256 === 'string' ? [v.path] : Object.values(v).flatMap(paths)) : [])
+const listed = new Set([`/sf/${pointer.manifest}`, ...paths(manifest).map((p) => releaseAt + p)])
 const isTile = (path) => path.startsWith(releaseAt + 'tiles/')
 
 // ── Faults, for the checks of what the page carries on through ──
@@ -380,7 +382,7 @@ try {
   const tilesAsked = site.asked.filter((a) => isTile(a.path))
   const tileFiles = new Set(tilesAsked.map((a) => a.path))
   const failedOnPurpose = tilesAsked.filter((a) => a.status === 503).length
-  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path === '/sf/index.html' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
+  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path === '/sf/index.html' || a.path === '/bay/heroes.json' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
   const pointerAsked = site.asked.filter((a) => a.path === '/sf/current.json').length
   const notFound = site.asked.filter((a) => a.status === 404)
   results.asked = { requests: site.asked.length, tileRequests: tilesAsked.length - failedOnPurpose, tileFiles: tileFiles.size, perFile: round((tilesAsked.length - failedOnPurpose) / tileFiles.size, 2), pointer: pointerAsked, outside: outside.map((a) => a.path), notFound: notFound.map((a) => a.path) }

@@ -17,14 +17,18 @@ coarse the sector it is making is (bay.rs `least_step`), and bay.ts asks for til
 import glob, json, os, struct
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw
+from shapely import make_valid, union_all
+from shapely.geometry import LineString, Point, Polygon, box as survey_box
 import earth
+import compact_store
+from street_furniture import decode, encode
 
 PACKS = os.path.join(os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay')), 'packs')
 NONE, BED, WATER = -32768, -30, 5
 FRAME = '10n4250'  # the frame the squares are baked in (bake.py: zone 10 north, z south from 4,250 km)
 
 def read(path):
-    b = open(path, 'rb').read()
+    b = compact_store.read(path)
     h = struct.unpack('<16i', b[:64])
     assert h[0] == 0x31594142 and h[4] == 10 and h[8] == 5, 'tiles are cut from squares baked at 1 m and 0.5 m'
     gw, tw, nb, nv, nt = h[5], h[9], h[12], h[13], h[14]
@@ -43,6 +47,7 @@ def read(path):
     verts = take(nv * 3, '<i4').reshape(nv, 3)
     p['buildings'] = [(tuple(map(tuple, verts[r[0]:r[0] + r[1]].tolist())), tuple(int(v) for v in r[2:])) for r in rows]
     p['trunks'] = [tuple(t) for t in take(nt * 4, '<i4').reshape(nt, 4).tolist()]
+    p["fixtures"] = decode(b[at:])
     return p
 
 
@@ -56,8 +61,71 @@ def window(a, origin, step, x0, z0, n, fill):
     return out
 
 
+def outline(verts):
+    rings, ring = [], []
+    for x, z, flags in verts:
+        ring.append((x, z))
+        if flags & 4:
+            if len(ring) >= 3:
+                rings.append(ring)
+            ring = []
+    if not rings:
+        return Polygon()
+    polygon = Polygon(rings[0], rings[1:])
+    return polygon if polygon.is_valid else make_valid(polygon)
+
+
+def polygons(geometry):
+    if geometry.geom_type == 'Polygon':
+        yield geometry
+    elif hasattr(geometry, 'geoms'):
+        for part in geometry.geoms:
+            yield from polygons(part)
+
+
+def outside_survey(rows, vertices, surveyed, tile):
+    """Fallback geometry has no wall inside land owned by a surveyed square."""
+    for start, count, *style in rows:
+        original = vertices[start:start + count]
+        polygon = outline(original)
+        if surveyed.covers(polygon):
+            continue
+        if surveyed.disjoint(polygon):
+            yield tuple(original), tuple(style)
+            continue
+        # Only an actual survey boundary cuts a fallback polygon. The new cut
+        # face is plain; surviving measured edges keep their open/street flags.
+        edges = []
+        first = 0
+        for i, a in enumerate(original):
+            b = original[first if a[2] & 4 else i + 1]
+            if a[:2] != b[:2]:
+                edges.append((LineString([a[:2], b[:2]]), a[2] & 3))
+            if a[2] & 4:
+                first = i + 1
+        for part in polygons(polygon.difference(surveyed)):
+            if part.area < 1 or not part.intersects(tile):
+                continue
+            result = []
+            for j, ring in enumerate([part.exterior, *part.interiors]):
+                points = [(round(x), round(z)) for x, z in ring.coords[:-1]]
+                points = [p for i, p in enumerate(points) if p != points[i-1]]
+                if len(set(points)) < 3:
+                    if j == 0:
+                        break
+                    continue
+                for i, a in enumerate(points):
+                    b = points[(i+1) % len(points)]
+                    mid = Point((a[0]+b[0])/2, (a[1]+b[1])/2)
+                    flags = next((f for edge, f in edges if edge.distance(mid) <= 0.75), 0)
+                    result.append((*a, flags | (4 if i+1 == len(points) else 0)))
+            if result:
+                yield tuple(result), tuple(style)
+
+
 def cut(paths, wanted=None):
     squares = [read(p) for p in sorted(paths)]
+    surveyed = union_all([survey_box(p['tx0'], p['tz0'], p['tx0'] + 5*p['tw'], p['tz0'] + 5*p['tw']) for p in squares])
     # One picture of everything baked, at half a metre and at a metre, from the frame's cell (X0, Z0).
     X0, Z0 = min(p['gx0'] for p in squares), min(p['gz0'] for p in squares)
     X1, Z1 = max(p['gx0'] + (p['gw'] - 1) * 10 for p in squares), max(p['gz0'] + (p['gw'] - 1) * 10 for p in squares)
@@ -65,7 +133,7 @@ def cut(paths, wanted=None):
     ground = np.full((H // 2 + 1, W // 2 + 1), BED, '<i2')
     top, cls, tint = np.full((H, W), NONE, '<i2'), np.full((H, W), WATER, 'u1'), np.zeros((H, W), 'u1')
     known = np.zeros((H, W), bool)
-    buildings, trunks = {}, set()
+    buildings, trunks, fixtures = {}, set(), set()
     for p in squares:
         i, j = (p['gx0'] - X0) // 10, (p['gz0'] - Z0) // 10
         ground[j:j + p['gw'], i:i + p['gw']] = p['ground']
@@ -73,9 +141,17 @@ def cut(paths, wanted=None):
         for whole, part in ((top, p['top']), (cls, p['class']), (tint, p['tint'])):
             whole[j:j + p['tw'], i:i + p['tw']] = part
         known[j:j + p['tw'], i:i + p['tw']] = True
-        buildings.update(p['buildings'])  # one that stands on two squares is in both: once here
+        for verts, row in p['buildings']:
+            # Adjacent squares can measure different eaves on the same outline.
+            # Choose the square containing its centre, with sorted square order for ties.
+            key = tuple((x,z,flags & 4) for x,z,flags in verts)
+            cx = (min(v[0] for v in verts)+max(v[0] for v in verts))//2
+            cz = (min(v[1] for v in verts)+max(v[1] for v in verts))//2
+            if key not in buildings or p['gx0']+160 <= cx < p['gx0']+10160 and p['gz0']+160 <= cz < p['gz0']+10160:
+                buildings[key] = (verts,row)
         trunks.update(p['trunks'])
-    buildings, trunks = sorted(buildings.items()), sorted(trunks)
+        fixtures.update(p['fixtures'])
+    buildings, trunks = sorted(buildings.values()), sorted(trunks)
     # Where a building stands and its wall's colour, at half a metre: for the tiles that hold no outlines.
     mass = Image.new('I', (W, H), 0)
     for verts, row in buildings:
@@ -122,12 +198,19 @@ def cut(paths, wanted=None):
                 if level == 0:
                     seen = seen[..., 0]
                     t, c, n = np.where(seen, t[..., 0], et), np.where(seen, c[..., 0], ec), np.where(seen, n[..., 0], en)
-                    def unseen(x, z):
-                        i, j = (x - x0 + margin) // 5, (z - z0 + margin) // 5
-                        return not (0 <= i < tw and 0 <= j < tw and seen[j, i])
                     own = [(v, r) for v, r in buildings if max(q[0] for q in v) >= x0 - margin and min(q[0] for q in v) < x0 + size + margin and max(q[1] for q in v) >= z0 - margin and min(q[1] for q in v) < z0 + size + margin]
-                    own += [(tuple(everts[r[0]:r[0] + r[1]]), tuple(r[2:])) for r in erows if unseen(*everts[r[0]][:2])]
-                    stems = [s for s in trunks if x0 - margin <= s[0] < x0 + size + margin and z0 - margin <= s[1] < z0 + size + margin] + [s for s in etrunks if unseen(s[0], s[1])]
+                    stems = [s for s in trunks if x0 - margin <= s[0] < x0 + size + margin and z0 - margin <= s[1] < z0 + size + margin]
+                    if not seen.all():
+                        tile = survey_box(x0-margin, z0-margin, x0+size+margin, z0+size+margin)
+                        # Some surveyed footprints continue beyond the edge of their raster.
+                        crossing = []
+                        for verts, _ in own:
+                            polygon = outline(verts)
+                            if not surveyed.covers(polygon.envelope):
+                                crossing.append(polygon)
+                        solid = union_all([surveyed, *crossing]) if crossing else surveyed
+                        own.extend(outside_survey(erows, everts, solid, tile))
+                        stems.extend(s for s in etrunks if not surveyed.covers(Point(s[0], s[1])))
                 else:
                     seen = seen.all(-1)
                     bt, bc, bn, bw = earth.coarsen(t, c, n, m, k, level)
@@ -137,6 +220,12 @@ def cut(paths, wanted=None):
                     rows.append((len(verts), len(v), *r))
                     verts += v
                 blob = earth.pack(x0, z0, size, gstep, g, tstep, x0 - margin, z0 - margin, t, c, n, walls, rows, verts, stems)
+                if level == 0 and fixtures:
+                    near = [r for r in sorted(fixtures) if max(r[0],r[3])+3 >= x0-margin and min(r[0],r[3])-3 < x0+size+margin
+                            and max(r[2],r[5])+3 >= z0-margin and min(r[2],r[5])-3 < z0+size+margin]
+                    blob += encode(near)
+                from paint_tile import without_eye_trees
+                blob = without_eye_trees(blob)
                 path = f'{PACKS}/tiles/{level}/{tx}_{tz}.bay'
                 with open(path + '.part', 'wb') as f:
                     f.write(blob)

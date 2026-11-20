@@ -25,7 +25,7 @@ export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? []
 /** Whether this page's world is the Bay's at all. */
 export const ON = STREAM || SQUARES.length > 0
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : ''
+export const BAY = (STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -51,7 +51,7 @@ export const START: [number, number] | null = there ? [there.x, there.z] : null
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
 
-interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number }
+interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
 
 /** A level of the tiles: `size` cells a side, with a ground sample every `gstep`. */
 export interface Level { size: number; gstep: number }
@@ -72,7 +72,7 @@ const LEVELS: Level[] = [{ size: 2500, gstep: 10 }, { size: 10000, gstep: 20 }, 
 //     asking (bay/earth.py). A 404 there is a place nobody made, and sea.
 /** A tile's record in a release manifest. */
 interface Record { path: string; bytes: number; sha256: string }
-interface Manifest { version: number; frame: string; levels: (Level & { level: number; tiles: { [key: string]: Record }; sea: string[] })[]; names: { [square: string]: Record }; credits: string[] }
+interface Manifest { version: number; frame: string; far?: object; levels: (Level & { level: number; tiles: { [key: string]: Record }; sea: string[] })[]; names: { [square: string]: Record }; credits: string[] }
 /** What the page knows of where tiles are: their levels, how to find one, the squares' names and whose data it is. */
 export interface Source {
   levels: Level[]
@@ -80,8 +80,11 @@ export interface Source {
   find(level: number, key: string): { url: string; bytes?: number; sha256?: string; listed: boolean } | null
   names: { url: string; bytes?: number; sha256?: string }[]
   credits: string[] | null
-  /** The release this page is pinned to, or null under the page server. */
+  /** The release this page is pinned to, and its manifest's address (far.ts reads its `far` from it), or null under the page server. */
   release: string | null
+  manifest: string | null
+  /** Whether the release holds a far model (its manifest's `far`). */
+  far: boolean
   /** Whether the manifest's hash was checked (crypto.subtle is only in secure contexts: https and localhost). */
   checked: boolean
 }
@@ -109,6 +112,8 @@ async function released(pointer: URL): Promise<Source> {
     names: Object.values(manifest.names).map((r) => ({ url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256 })),
     credits: manifest.credits,
     release: at.release,
+    manifest: where.href,
+    far: !!manifest.far,
     checked: sum !== null,
   }
 }
@@ -122,6 +127,8 @@ async function served(): Promise<Source> {
     names: (BAKED ? i.squares : []).map((name) => ({ url: `${BASE}${name}.json` })),
     credits: null,
     release: null,
+    manifest: null,
+    far: false,
     checked: false,
   }
 }
@@ -266,9 +273,19 @@ export async function open<T>(url: string): Promise<T> {
   const core = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
   opened.push(core)
   if (STREAM) core.bay_begin()
+  // Landmarks by rule (#450, core/src/heroes.rs): every core is told where each stands before it makes a sector.
+  // `?heroes=0` leaves them out (as the tiles have the place), for what they cost.
+  if (query.get('heroes') === '0') core.bay_landmarks(0)
+  for (const h of await heroes()) { const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
   for (const name of SQUARES) await take(core, await whole(`${BASE}${name}.bay`))
   return core as unknown as T
 }
+
+/** The landmarks a Bay world has (sf/heroes.json, copied beside the tiles as heroes.json): where each stands. */
+export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number }
+let landmarks: Promise<Landmark[]> | null = null
+const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
+
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {
   let answer = await fetch(url)
@@ -348,7 +365,7 @@ export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await 
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
  */
-export async function whereabouts(at: () => [number, number]): Promise<void> {
+export async function whereabouts(at: () => [number, number], /** Whose else the place is made from (the far model's, far.ts). */ more: readonly string[] = []): Promise<void> {
   const squares = await names()
   const label = document.createElement('div')
   label.id = 'where'
@@ -356,8 +373,10 @@ export async function whereabouts(at: () => [number, number]): Promise<void> {
   const credit = document.createElement('div')
   credit.style.cssText = 'font:400 10px system-ui,sans-serif;opacity:.75;margin-top:2px'
   // Who the place is made from: the baked squares' sources, and for everything else the planet's (bay/earth.py).
+  // The release's credits where there is one (they name every source in it), else the squares' and the planet's;
+  // with whose else the place is made from (`more`), each said once.
   const credits = STREAM ? (await where()).credits : null
-  credit.textContent = credits ? credits.join('; ') : [...new Set(squares.map((s) => s.credit)), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])].join('; ')
+  credit.textContent = [...new Set([...(credits ?? [...squares.map((s) => s.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])]), ...more].flatMap((c) => c.split('; ')))].join('; ')
   const line = document.createElement('div')
   label.append(line, credit)
   document.body.append(label)

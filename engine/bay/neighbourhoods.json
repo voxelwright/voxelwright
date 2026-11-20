@@ -1,0 +1,118 @@
+[
+  {
+    "place": "Russian Hill",
+    "street": "Russian Hill",
+    "square": "550.7_4183.5",
+    "image": "253220090780749",
+    "yaw": 95
+  },
+  {
+    "place": "North Beach",
+    "street": "Columbus Avenue",
+    "square": "551.7_4183.5",
+    "image": "1194860254413003",
+    "yaw": 80
+  },
+  {
+    "place": "Telegraph Hill",
+    "street": "Filbert Street",
+    "square": "551.7_4183.5",
+    "image": "370214465301047",
+    "yaw": 260
+  },
+  {
+    "place": "Financial District",
+    "street": "Financial District",
+    "square": "551.7_4182.5",
+    "image": "619120140004961",
+    "yaw": 270,
+    "eye": 6.23
+  },
+  {
+    "place": "Nob Hill",
+    "street": "Nob Hill",
+    "square": "550.7_4182.5",
+    "image": "661375958590078",
+    "yaw": 225,
+    "eye": 98.29
+  },
+  {
+    "place": "Embarcadero",
+    "street": "Embarcadero",
+    "square": "552.7_4183.5",
+    "image": "129322870156765",
+    "yaw": 90,
+    "eye": 3.98
+  },
+  {
+    "place": "Fishermans Wharf",
+    "street": "Fishermans Wharf",
+    "square": "551.7_4184.5",
+    "image": "142445264954641",
+    "yaw": 90,
+    "eye": 4.25
+  },
+  {
+    "place": "Chinatown",
+    "street": "Grant Avenue",
+    "square": "551.7_4182.5",
+    "image": "1694521907789274",
+    "yaw": 340
+  },
+  {
+    "place": "Mission",
+    "street": "Valencia Street",
+    "square": "550.7_4178.5",
+    "image": "292451567040937",
+    "yaw": 350
+  },
+  {
+    "place": "Haight-Ashbury",
+    "street": "Haight and Ashbury",
+    "square": "548.7_4179.5",
+    "image": "479114030992331",
+    "yaw": 123
+  },
+  {
+    "place": "Painted Ladies",
+    "street": "Steiner opposite Alamo Square",
+    "square": "549.7_4180.5",
+    "image": "1520309078384954",
+    "yaw": 87
+  },
+  {
+    "place": "Marina",
+    "street": "Chestnut Street",
+    "square": "548.7_4183.5",
+    "image": "5663758490384274",
+    "yaw": 27
+  },
+  {
+    "place": "Outer Sunset",
+    "street": "46th Avenue at Kirkham",
+    "square": "542.7_4178.5",
+    "image": "461851530161717",
+    "yaw": 355
+  },
+  {
+    "place": "Castro",
+    "street": "Castro at 18th",
+    "square": "549.7_4178.5",
+    "image": "1353314272072543",
+    "yaw": 353
+  },
+  {
+    "place": "SoMa",
+    "street": "Southeast end of South Park",
+    "square": "552.7_4181.5",
+    "image": "788789623602888",
+    "yaw": 35
+  },
+  {
+    "place": "Dogpatch",
+    "street": "Third Street near 20th",
+    "square": "553.7_4178.5",
+    "image": "1188221963344760",
+    "yaw": 350
+  }
+]

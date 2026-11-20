@@ -1,0 +1,133 @@
+<!doctype html>
+<!-- The overlay (#423): the photograph of the view from Ina Coolbrith Park and what the engine draws from the same
+     camera, one over the other, with how far apart their lines are. overlay.py makes what it shows; private, on the
+     tailnet only. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ina Coolbrith overlay</title>
+<style>
+  :root { --ink: #e9eaf0; --dim: #9aa0b4; --ground: #0c0d12; --panel: #151722; --line: #2a2e42; --blue: #0e22ff; --yellow: #fff600; --good: #6fdc8c; --bad: #ff7a6b; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; padding: 10px 16px; background: #0c0d12ee; border-bottom: 1px solid var(--line); backdrop-filter: blur(6px); }
+  h1 { font-size: 15px; margin: 0 8px 0 0; font-weight: 650; letter-spacing: .01em; }
+  label { color: var(--dim); display: inline-flex; align-items: center; gap: 6px; }
+  select, button { font: inherit; color: var(--ink); background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 9px; }
+  button { cursor: pointer; }
+  button[aria-pressed="true"] { background: var(--blue); border-color: var(--blue); color: #fff; }
+  input[type=range] { accent-color: var(--yellow); width: 170px; }
+  #stage { overflow: auto; max-height: calc(100vh - 56px); background: #000; }
+  #stack { position: relative; width: 100%; aspect-ratio: 2000 / 862; }
+  #stack img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #stack img[hidden] { display: none; }
+  #stack.sharp img { image-rendering: pixelated; }
+  #ours.difference { mix-blend-mode: difference; }
+  main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px; max-width: 1200px; margin: 0 auto; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .card h2 { margin: 0 0 4px; font-size: 12px; font-weight: 600; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .big { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .big small { font-size: 13px; color: var(--dim); font-weight: 500; }
+  .note { color: var(--dim); font-size: 12.5px; margin: 4px 0 0; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 5px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--dim); font-weight: 600; font-size: 12px; }
+  th:first-child, td:first-child { text-align: left; }
+  tr.ok td.v { color: var(--good); } tr.no td.v { color: var(--bad); }
+  tbody tr { cursor: pointer; } tbody tr:hover { background: #1c2030; }
+  footer { color: var(--dim); font-size: 12px; padding: 0 16px 28px; max-width: 1200px; margin: 0 auto; }
+  footer a { color: var(--ink); }
+  .key i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Ina Coolbrith Park: the photograph and ours</h1>
+  <label>Round <select id="round"></select></label>
+  <label>Ours <input id="strength" type="range" min="0" max="100" value="50"><span id="strengthSaid">50%</span></label>
+  <button id="flick" aria-pressed="false">Flick</button>
+  <button id="diff" aria-pressed="false">Difference</button>
+  <button id="edges" aria-pressed="false">Edges</button>
+  <button id="lines" aria-pressed="false">Skylines</button>
+  <label>Size <select id="size"><option value="fit">fit</option><option value="1">1 : 1</option><option value="2">2 : 1</option><option value="4">4 : 1</option></select></label>
+  <span class="key note"><i style="background:var(--yellow)"></i>the photograph's lines <i style="background:var(--blue); margin-left:10px"></i>ours</span>
+</header>
+<div id="stage"><div id="stack">
+  <img id="photo" alt="The photograph" src="/place/ina-overlay/photo.jpg">
+  <img id="ours" alt="What the engine draws from the same camera">
+  <img id="photoEdges" alt="" hidden src="/place/ina-overlay/photo-edges.png">
+  <img id="oursEdges" alt="" hidden>
+  <img id="skylines" alt="" hidden>
+</div></div>
+<main>
+  <div class="cards" id="cards"></div>
+  <div class="card">
+    <h2>Buildings on our skyline</h2>
+    <p class="note" id="rule"></p>
+    <div class="scroll"><table><thead><tr><th>Building</th><th>at x</th><th>metres off</th><th>median px</th><th>90th px</th><th>ours to photo</th><th>photo to ours</th></tr></thead><tbody id="rows"></tbody></table></div>
+  </div>
+  <div class="card" id="tracedCard" hidden>
+    <h2>Outlines traced on the photograph</h2>
+    <div class="scroll"><table><thead><tr><th>Building</th><th>median px</th><th>90th px</th><th>ours to photo</th><th>photo to ours</th></tr></thead><tbody id="traced"></tbody></table></div>
+  </div>
+</main>
+<footer>
+  <p>Photograph: <a id="credit" href="#"></a>. It is shown here to measure against; nothing of it is in the place itself unless a layer says so.
+  The place is made from U.S. Geological Survey 3DEP lidar and the City and County of San Francisco's building outlines (DataSF). Private: tailnet only.</p>
+</footer>
+<script type="module">
+const $ = (id) => document.getElementById(id)
+const base = '/place/ina-overlay/'
+const index = await (await fetch(base + 'index.json')).json()
+$('credit').textContent = `"${index.photo.title}" by ${index.photo.author}, ${index.photo.licence}, Wikimedia Commons`
+$('credit').href = index.photo.page
+for (const r of [...index.rounds].reverse()) $('round').add(new Option(`${r.name}${r.label ? `: ${r.label}` : ''} (${r.when})`, r.name))
+const stack = $('stack'), stage = $('stage')
+const fmt = (v) => (v === null || v === undefined ? 'none' : v.toFixed(2))
+const side = (s) => (s ? `${fmt(s.median)} / ${fmt(s.p90)}` : 'none')
+
+async function show(name) {
+  const m = await (await fetch(`${base}${name}.json`)).json()
+  $('ours').src = `${base}${name}.png`
+  $('oursEdges').src = `${base}${name}-edges.png`
+  $('skylines').src = `${base}${name}-skylines.png`
+  const within = m.buildings.filter((b) => b.ok).length
+  const card = (title, big, note) => `<div class="card"><h2>${title}</h2><div class="big">${big}</div><p class="note">${note}</p></div>`
+  $('cards').innerHTML = [
+    card('Skyline, both ways', `${fmt(m.skyline.median)} <small>px median</small> · ${fmt(m.skyline.p90)} <small>90th</small>`, `Ours to the photograph ${side(m.skyline.ours_to_photo)}; the photograph to ours ${side(m.skyline.photo_to_ours)}. Target ${m.target.median} and ${m.target.p90}.`),
+    card('Buildings within target', `${within} <small>of ${m.buildings.length}</small>`, `Each under ${m.target.median} px median and ${m.target.p90} px at the 90th, at 2000 px wide.`),
+    card('Our edges to any edge', `${fmt(m.edges.median)} <small>px median</small> · ${fmt(m.edges.p90)} <small>90th</small>`, 'One way only, and the photograph has edges everywhere: it flatters. Shown, not a target.'),
+    ...(m.look?.all ? [card('Colour, land and sky', `${fmt(m.look.all.median)} <small>land</small> · ${fmt(m.look.sky?.median ?? 0)} <small>sky</small>`, `How far apart the two pictures are in colour (CIELAB, middle value; 2.3 is what an eye just tells apart): within 400 m ${fmt(m.look['within 400 m']?.median ?? 0)}, to 1 km ${fmt(m.look['400 m to 1 km']?.median ?? 0)}, past it ${fmt(m.look['past 1 km']?.median ?? 0)}. Not where things stand: a painted place scores well here whatever is under the paint.`)] : []),
+    card('This round', `${(m.faces ?? 0).toLocaleString('en-US')} <small>faces</small>`, `${m.label || 'No note.'}${m.shift[0] || m.shift[1] ? ` Ours moved ${m.shift[0]}, ${m.shift[1]} px on purpose.` : ''}`),
+  ].join('')
+  $('rule').textContent = `For each building that tops our picture somewhere: the pixels of our skyline that are its own to the photograph's line, and the photograph's line over those columns to ours. No distance counts over ${m.most} px. Left of x 330 (the bay and the far hills) and right of 1940 (the wall beside the photographer) are left out.`
+  $('rows').innerHTML = m.buildings.map((b) => `<tr class="${b.ok ? 'ok' : 'no'}" data-x="${b.at[0]}" data-y="${b.at[1]}"><td>${b.name || `building ${b.id}`}</td><td>${b.at[0]}</td><td>${b.far ?? ''}</td><td class="v">${fmt(b.median)}</td><td class="v">${fmt(b.p90)}</td><td>${side(b.ours_to_photo)}</td><td>${side(b.photo_to_ours)}</td></tr>`).join('')
+  $('tracedCard').hidden = !m.outlines.length
+  $('traced').innerHTML = m.outlines.map((o) => `<tr class="${o.ok ? 'ok' : 'no'}"><td>${o.name}</td><td class="v">${fmt(o.median)}</td><td class="v">${fmt(o.p90)}</td><td>${side(o.ours_to_photo)}</td><td>${side(o.photo_to_ours)}</td></tr>`).join('')
+}
+$('round').onchange = () => show($('round').value)
+const strength = () => { $('ours').style.opacity = $('diff').getAttribute('aria-pressed') === 'true' ? 1 : $('strength').value / 100; $('strengthSaid').textContent = `${$('strength').value}%` }
+$('strength').oninput = strength
+const toggle = (id, then) => { $(id).onclick = () => { const on = $(id).getAttribute('aria-pressed') !== 'true'; $(id).setAttribute('aria-pressed', String(on)); then(on) } }
+toggle('diff', (on) => { $('ours').classList.toggle('difference', on); strength() })
+toggle('edges', (on) => { $('photoEdges').hidden = $('oursEdges').hidden = !on })
+toggle('lines', (on) => { $('skylines').hidden = !on })
+let flicking = 0
+toggle('flick', (on) => { clearInterval(flicking); if (on) { let up = false; flicking = setInterval(() => { up = !up; $('ours').style.opacity = up ? 1 : 0 }, 450) } else strength() })
+$('size').onchange = () => { const v = $('size').value; stack.style.width = v === 'fit' ? '100%' : `${2000 * Number(v)}px`; stack.classList.toggle('sharp', v === '4') }
+// A row of the table brings its building to the middle, at two to one.
+$('rows').onclick = (e) => {
+  const row = e.target.closest('tr'); if (!row) return
+  if ($('size').value === 'fit') { $('size').value = '2'; $('size').onchange() }
+  const k = stack.clientWidth / 2000
+  stage.scrollTo({ left: row.dataset.x * k - stage.clientWidth / 2, top: row.dataset.y * k - stage.clientHeight / 3, behavior: 'smooth' })
+  scrollTo({ top: 0, behavior: 'smooth' })
+}
+if (index.rounds.length) await show($('round').value)
+strength()
+</script>
+</body>
+</html>

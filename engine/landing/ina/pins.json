@@ -1,0 +1,41 @@
+{
+ "note": "The crosses of Our Lady of Guadalupe: their tops as peaks in the lidar (UTM east, north, NAVD88 height) and on the photograph at 2000 px, read from zooms five times that size. And the tip of the pyramid's spire: the highest lidar return in its outline, and where its tip is on the photograph.",
+ "pins": [
+  {
+   "name": "church, right tower, top of the cross",
+   "xyz": [
+    551732.3635735621,
+    4183491.172235448,
+    80.87000274658203
+   ],
+   "uv": [
+    1738.0,
+    505.0
+   ]
+  },
+  {
+   "name": "church, left tower, top of the cross",
+   "xyz": [
+    551746.1727799529,
+    4183493.4756717626,
+    80.80000305175781
+   ],
+   "uv": [
+    1554.4,
+    499.0
+   ]
+  },
+  {
+   "name": "Transamerica Pyramid, tip of the spire",
+   "xyz": [
+    552580.43,
+    4183256.38,
+    265.07
+   ],
+   "uv": [
+    642.5,
+    61.0
+   ]
+  }
+ ]
+}

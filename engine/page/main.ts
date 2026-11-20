@@ -9,7 +9,7 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FLAT, HEAT, MIRRORS, SHADOWS, marcher, materials, palette, type View } from './march.ts'
+import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, marcher, materials, palette, type View } from './march.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
 import { space } from './space.ts'
@@ -23,6 +23,7 @@ import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
+import { street as streetOf, type Street } from './street.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -38,6 +39,8 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
+import { far as farOf } from './far.ts'
+import { fog } from './fog.ts'
 import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
@@ -100,6 +103,7 @@ async function main() {
   }
   const world = new World(device, {
     merge,
+    surveyedWalls: BAY_ON,
     grid,
     levels: Number(query.get('levels') ?? (phone ? 8 : 9) + Number(query.get('fine') ?? 0)),
     poolWords: (poolMb << 20) / 4,
@@ -107,10 +111,10 @@ async function main() {
     // Cells may hold finer cells (#259): a made thing may be of cells of 2.5 or 1.25 cm (#372). `?bricks=1` from the
     // start, `?bricks=0` never; otherwise from the moment this world first holds such a thing, so that a world
     // without one pays nothing (world.ts `bricksLater`).
-    bricks: query.get('bricks') === '1',
+    bricks: query.get('bricks') === '1' || (BAY_ON && query.get('bricks') !== '0'),
     fineSun: query.get('bricks') === '1' && query.get('finesun') !== '0',
     // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
-    bricksLater: query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
+    bricksLater: !BAY_ON && query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     // Each maker holds its own core and the tiles round what it makes (bay.ts `HOLD`): a phone has two (#450).
     workers: Number(query.get('workers') ?? (phone ? 2 : Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2)))),
   })
@@ -126,6 +130,13 @@ async function main() {
    * eye at its middle, so the ground is out of it when the eye is 6.5 km up: from 8 km there was a blue square in haze. */
   const SPACE = 6_000
   const falling = await pieces(device, gpu.format, march)
+  // The far model (#450, far.ts): the city past the cells' reach as faces, where the realm has one (its record's
+  // `far`, a folder beside the page) or the address names one (`?far=/path/`).
+  // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
+  const released = LOCAL?.release ? await where().catch(() => null) : null
+  const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
+  const marine = await fog(device, gpu.format, march)
   // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
   const shade = await under(device, gpu.format)
   const folk = await people(device, gpu.format, march)
@@ -154,10 +165,12 @@ async function main() {
   const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', BAY_ON ? [64, 4] : [20, -8])
   /** The eye's angle from top to bottom, degrees. */
   let fov = Number(query.get('fov') ?? LOCAL?.fov ?? 70)
+  /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
+  const roll = (Number(query.get('roll') ?? LOCAL?.roll ?? 0) * Math.PI) / 180
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)])
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [])
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -167,8 +180,11 @@ async function main() {
 
   const view = (): View => {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
-    const right = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
-    const up = [right[1] * forward[2] - right[2] * forward[1], right[2] * forward[0] - right[0] * forward[2], right[0] * forward[1] - right[1] * forward[0]] as const
+    const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
+    const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
+    const cr = Math.cos(roll), sr = Math.sin(roll)
+    const right = roll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
+    const up = roll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
     // Someone whose down is not the world's (person.ts): the eye's whole frame is turned with them.
     if (pose.tilt) { const q = pose.tilt, t = (v: readonly number[]) => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] as const }; return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward: t(forward), right: t(right), up: t(up), tanHalf: Math.tan((fov * Math.PI) / 360) } }
     // Under the sea: under its top, where the ground by itself lies under it too (not in a pit dug on land).
@@ -253,7 +269,10 @@ async function main() {
   const shocks: Shock[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
-  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
+  // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
+  let streetLife: Street | null = null
+  const lively = !!LOCAL?.street && query.get('street') !== '0'
+  if (query.get('people') !== '0' && !LOCAL?.street) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
@@ -285,6 +304,11 @@ async function main() {
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)
+  }
+  // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
+  if (LOCAL?.air) {
+    march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
+    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) { const sun = LOCAL.air.sun; march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1); if (LOCAL.air.grade) grade = LOCAL.air.grade }
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
@@ -385,6 +409,8 @@ async function main() {
     lap('steer')
     fallOn(dt)
     lap('fallOn')
+    streetLife?.frame(dt, v)
+    lap('street')
     world.update(v.eye)
     lap('update')
     if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
@@ -407,6 +433,8 @@ async function main() {
     } else {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
+      farModel.draw(encoder, to, v)
+      marine.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
@@ -508,7 +536,7 @@ async function main() {
   // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -602,7 +630,7 @@ async function main() {
   // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
   // (By the cells and by their size: the same cells may be a part of another shape.)
   const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
-  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } }, dropped: (id) => moving.delete(id) })
   /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
   const shades = () => alive.things.flatMap((t) => {
     const w = alive.where(t)
@@ -1095,7 +1123,55 @@ async function main() {
     put()
     return taken(fineRows(runs, box, grain)) ? runs.length / 5 : 0
   }
-  Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, pause: (on: boolean) => { paused = on } })
+  /**
+   * The far model (#450) as measured: each pixel's building over the whole picture at `size`, four bytes a pixel, rows
+   * from the top. A face of the far model gives its building's number (three bytes) and which way it looks (the fourth,
+   * 1 to 5); a cell the march met gives number 1 and way 6; sky and sea give nothing (all four 0).
+   */
+  const farIds = async (size: [number, number]) => {
+    const v = view(), to = offscreen(gpu, size), row = Math.ceil((size[0] * 4) / 256) * 256
+    const read = [0, 1].map(() => device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
+    paused = true
+    const encoder = device.createCommandEncoder()
+    march.draw(encoder, to, v, PICK, 0)
+    encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read[0], bytesPerRow: row }, size)
+    farModel.drawIds(encoder, to.color, to.depth, size, v)
+    encoder.copyTextureToBuffer({ texture: to.texture }, { buffer: read[1], bytesPerRow: row }, size)
+    device.queue.submit([encoder.finish()])
+    await Promise.all(read.map((r) => r.mapAsync(GPUMapMode.READ)))
+    const [cells, faces] = read.map((r) => new Uint8Array(r.getMappedRange().slice(0)))
+    read.forEach((r) => { r.unmap(); r.destroy() }); to.destroy()
+    paused = false
+    const blue = gpu.format.startsWith('bgra'), out = new Uint8Array(size[0] * size[1] * 4)
+    for (let y = 0; y < size[1]; y++) for (let x = 0; x < size[0]; x++) {
+      const i = y * row + x * 4, o = (y * size[0] + x) * 4
+      if (faces[i] | faces[i + 1] | faces[i + 2] | faces[i + 3]) { out[o] = faces[blue ? i + 2 : i]; out[o + 1] = faces[i + 1]; out[o + 2] = faces[blue ? i : i + 2]; out[o + 3] = faces[i + 3] }
+      else if (cells[i] | cells[i + 1] | cells[i + 2] | cells[i + 3]) { out[o] = 1; out[o + 3] = 6 }
+    }
+    return out
+  }
+  /**
+   * What the far model costs the GPU here, at the canvas's full size and the device's own pace: the march alone and
+   * the march with the far model, turn about, the middle of `rounds` each, ms a frame (a pass's own clock says the
+   * march's time on this GPU, not the pass's: #423).
+   */
+  const farPasses = async (rounds = 5) => {
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = [], fogged: number[] = []
+    paused = true
+    for (let i = 0; i < rounds; i++) {
+      alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0) }, 100)).ms)
+      both.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
+      // And the marine layer over both, where it is on (fog.ts).
+      if (marine.strength > 0) fogged.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v); marine.draw(encoder, target, farModel.depth, v, 0) }, 100)).ms)
+    }
+    paused = false
+    to.destroy()
+    const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
+    return { march: middle(alone), withFar: middle(both), withFog: fogged.length ? middle(fogged) : null, size: [canvas.width, canvas.height], ...farModel.stats }
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, far: farModel, farIds, farPasses, pause: (on: boolean) => { paused = on } })
+  // How thick the marine layer is, 0 to 1 (fog.ts): a property, as the hour and the rain are.
+  Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'fog', { get: () => marine.strength, set: (v: number) => { marine.strength = Math.max(0, Math.min(1, v)) } })
 
   // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
   // `?living=finecar`: the same car wearing a look in cells of 2.5 cm, with seats, a dash and a wheel inside (V from the seat).
@@ -1168,6 +1244,11 @@ async function main() {
     return alive.spawn({ ...making, low })
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
+  if (LOCAL?.street && lively && !far) {
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    streetLife = life
+    if (query.get('people') !== '0') folk.from.push(life.folk)
+  }
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
@@ -1186,7 +1267,9 @@ async function main() {
     moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
+    farModel.forget()
     core.world_forget()
+    streetLife?.reset()
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
@@ -1226,7 +1309,7 @@ async function main() {
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) }) })
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
