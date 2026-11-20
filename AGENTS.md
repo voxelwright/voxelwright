@@ -79,9 +79,26 @@ The owner had been first to spot six visible faults in 14 days.
   `gcloud` and related tools. Never work around it (for example with an
   app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
   until the owner authorizes a specific use.
-- Use Claude Opus for every dispatch (owner, November 20, 2026), with effort
-  set by the task: low or medium for lookups, merges and mechanical fixes, high
-  for ordinary building, and xhigh for diagnosis, design and retrospectives.
+- Choose each agent's model by how much the work matters, how ambiguous it is
+  and how hard it is (owner, November 20, 2026):
+  - Claude Opus 5.5 is the default for important work, where reliability,
+    comprehension and quality matter, especially when the task is ambiguous.
+  - GPT-6.2 Astra (or the latest Astra) at high or xhigh is a capable
+    alternative. It gets blocked more easily and needs a precise brief and
+    closer supervision.
+  - Claude Fable 5.2 at medium or high is for the most challenging, complex
+    work. Use higher effort only when earlier runs show it needs more thinking.
+    Fable has its own limit on top of the weekly one: never spend it on
+    mundane work, but do use it.
+  - For well-defined work that smaller models do well, the lead may choose
+    Sonnet, Haiku or GPT-6.2 Sol.
+- Pace Claude usage to the weekly reset, Friday 8am Pacific. If usage runs
+  ahead of the clock (for example half left on a Sunday), shift toward Astra
+  and Sol. On Wednesday and Thursday, plan to use the allowance up by the
+  reset. If no work remains, give Opus or Fable a deep improvement task, such
+  as finding implicit state machines, running the reviewers skill, or using
+  Taproot to find and fix deep debt. Ask the owner for the usage figure when
+  pacing matters.
 - Start each unit of work in a fresh thread with a self-contained brief. Do not
   hand new work to a long, finished lane thread.
 - A lead coordinating other agents follows `.agents/skills/lead-orchestration`.

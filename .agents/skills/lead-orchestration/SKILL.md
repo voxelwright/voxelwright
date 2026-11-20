@@ -29,9 +29,14 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
 
 ## Dispatching
 
-- Use Claude Opus for every dispatch, with effort set by the task: medium for
-  merges, conflict resolution and mechanical fixes, high for ordinary building,
-  and xhigh for diagnosis, design, look-closely passes and retrospectives.
+- Choose models as AGENTS.md says. In practice:
+  - Opus, medium effort: merges and conflict resolution.
+  - Opus, high: ordinary building.
+  - Opus, xhigh: diagnosis, look-closely passes and retrospectives.
+  - Fable, medium or high: the hardest design and engine problems.
+  - Sonnet or Sol: clearly specified, mechanical work.
+  - Astra, high: when Claude usage runs ahead of the reset. Give it a tighter
+    brief.
 - Start each unit in a fresh thread (`delegate_task`). Do not send new orders
   into a long, finished lane thread: a 1,900-item thread carries stale context,
   and the owner stopped one. A completed delegate wakes the lead, so don't poll
