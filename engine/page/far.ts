@@ -339,6 +339,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const pass = (encoder: GPUCommandEncoder, colour: GPUTextureView, depth: GPUTextureView, sz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
     frame++
     const reach = self.reach * 10, aspect = sz[0] / sz[1], focal = sz[1] / (2 * view.tanHalf), eye = view.eye
+    // The march's map of held tiles is 64 a side round the eye's tile (the city is wider than that: 32 km).
+    const map: [number, number] = [Math.floor(eye[0] / size) - 32, Math.floor(eye[2] / size) - 32]
     const shaded = sunBaked && march.sun.s ? sunBaked[0] * march.sun.s[0] + sunBaked[1] * march.sun.s[1] + sunBaked[2] * march.sun.s[2] > 0.999 : false
     device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, 0]))
     // What is fetched: every band a tile within sight needs, nearest first; and which tiles are whole, for the march.
@@ -360,7 +362,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // The march hands a tile over only once all it needs is here: until then its cells stand in. Nor one the world
       // was changed in.
       if (all && d < FURTHEST * 10 && !changed.has(t.key)) {
-        const bx = t.x - corner[0], bz = t.z - corner[1]
+        const bx = t.x - map[0], bz = t.z - map[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       } else if (!all && inView(view, aspect, t.lo, t.hi)) whole = false
     }
@@ -373,8 +375,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
       for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
     }
-    const coverKey = cover.join(',') + reach
-    if (coverKey !== covered) { covered = coverKey; march.farCover(corner, size, reach, cover); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
+    const coverKey = `${cover.join(',')}:${reach}:${map}`
+    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
     if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }] }); viewBinds.set(depth, bind) }
