@@ -59,7 +59,83 @@ def paving(cls, tint, top, ground, src):
     }
 
 
-def apply(path, archive, passes=("paving",)):
+def crowns(cls, tint, top, ground, src):
+    from bake import palette
+
+    g = ground[:-1, :-1].repeat(2, 0).repeat(2, 1)
+    mask = ((cls & 24) == 8) & (top > g + 7)
+    if not mask.any():
+        return {}
+    w = len(top)
+    rgb = image(src, "naip.png", w)
+    nir = image(src, "naip-nir.png", w)[:, :, 0].astype("i2")
+    red = rgb[:, :, 0].astype("i2")
+    green = (nir - red) > 0.12 * (nir + red + 1)
+    fine = np.load(src.open("top_mm.npy")).reshape(w, 2, w, 2)
+    # The second-highest quarter-metre return rejects lone high points. Keep
+    # the measured crest where the neighbouring crown and its returns agree.
+    heights = np.sort(fine.transpose(0, 2, 1, 3).reshape(w, w, 4), axis=2)
+    observed = heights[:, :, 2] != -2147483648
+    robust = (
+        np.rint(heights[:, :, 2].astype("f4") / 100 - 10)
+        .clip(-32768, 32767)
+        .astype("i2")
+    )
+    del fine, heights
+    padded = np.pad(np.where(mask, top, -32768), 1, constant_values=-32768)
+    neighbours = np.sort(
+        np.stack(
+            [padded[1:-1, :-2], padded[1:-1, 2:], padded[:-2, 1:-1], padded[2:, 1:-1]],
+            axis=2,
+        ),
+        axis=2,
+    )
+    mid = neighbours[:, :, 2]
+    fix = mask & observed & (mid > g + 8) & (top > mid + 15) & (robust < top - 5)
+    top[fix] = np.maximum(mid[fix], robust[fix])
+    # Average foliage colour within the observed crown only. A neutral wall or
+    # a sunlit pavement must not bleed into an isolated branch at the edge.
+    valid = mask & green
+    if not valid.any():
+        return {"crownSpikesFiltered": int(fix.sum())}
+    n = (w + 7) // 8
+
+    def average(values):
+        return np.asarray(
+            Image.fromarray(values.astype("f4"))
+            .resize((n, n), Image.Resampling.BOX)
+            .resize((w, w), Image.Resampling.BILINEAR)
+        )
+
+    weight = average(valid)
+    base = np.percentile(rgb[valid], 60, axis=0)
+    target = []
+    for ch in range(3):
+        total = average(np.where(valid, rgb[:, :, ch], 0))
+        target.append(
+            np.where(weight > 0.08, total / np.maximum(weight, 0.01), base[ch])[mask]
+        )
+    target = np.stack(target, axis=1)
+    # Recover local colour without baking the flight's deepest leaf shadows
+    # a second time. Keep the observed red/green/blue ratios.
+    peak = np.maximum(target.max(1), 1)
+    target *= (np.clip(peak * 1.12, 83, 168) / peak)[:, None]
+    choices = [16 + h * 10 + tone for h in range(3, 11) for tone in (2, 5, 6, 8, 9)]
+    table = palette() * 255
+    # A 5-bit RGB lookup bounds the working set on the densest park square.
+    axis = np.arange(32) * 8 + 4
+    lut = np.stack(np.meshgrid(axis, axis, axis, indexing="ij"), axis=-1)
+    closest = np.sum((lut[:, :, :, None, :] - table[choices]) ** 2, axis=-1).argmin(3)
+    bucket = (target.clip(0, 255).astype("u1") // 8).T
+    tint[mask] = np.asarray(choices, "u1")[closest[tuple(bucket)]]
+    return {
+        "surveyedCanopySamples": int(mask.sum()),
+        "crownFoliageSamples": int(valid.sum()),
+        "crownSpikesFiltered": int(fix.sum()),
+    }
+
+
+def apply(path, archive, passes=("paving", "crowns")):
     data = bytearray(path.read_bytes())
     h = struct.unpack_from("<16i", data)
     if h[4] != 10 or h[8] != 5 or h[15] != 0:
@@ -75,6 +151,8 @@ def apply(path, archive, passes=("paving",)):
         for fn in passes:
             if fn == "paving":
                 stats.update(paving(cls, tint, top, ground, src))
+            elif fn == "crowns":
+                stats.update(crowns(cls, tint, top, ground, src))
             else:
                 raise ValueError(f"unknown surface pass {fn}")
     temp = path.with_suffix(".surface-part")

@@ -615,7 +615,7 @@ enum What<'a> {
     /// Just outside one, where its bays and cornice stand: how high its wall is there.
     By(&'a Building, Probe, i32),
     /// Leaves from here up to there, and a trunk up to so high if one stands in this column.
-    Crown(i32, i32, Option<i32>),
+    Crown { foot: i32, top: i32, trunk: Option<i32>, tint: u8, edge: f32 },
     /// A building seen from far, from a pack with no outlines: its roof's cell and colour, and its wall.
     Mass(i32, u8, Kind),
 }
@@ -682,10 +682,12 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                         let middle = g as f32 + high as f32 - deep / 2.0;
                         let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
                         let foot = (under as i32 + ragged).max(g + 18).min(t - 3);
-                        What::Crown(foot, t, (far <= (trunk[3] & 255) as f32 + 0.5).then(|| t - 8))
+                        What::Crown { foot, top: t, trunk: (far <= (trunk[3] & 255) as f32 + 0.5).then(|| t - 8),
+                            tint, edge: (far/rim.max(1.0)).min(1.0) }
                     }
                     // A bush or a hedge is leaves to the ground.
-                    _ => What::Crown(if tall < 28 { g + 1 } else { t - (tall / 2).clamp(10, 40) + ragged }, t, None),
+                    _ => What::Crown { foot: if tall < 28 { g + 1 } else { t - (tall / 2).clamp(10, 40) + ragged },
+                        top: t, trunk: None, tint, edge: 0.6 },
                 }
             }
             _ => What::Open,
@@ -693,6 +695,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         _ => What::Open,
     };
     Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what }
+}
+
+fn measured_foliage(tint: u8) -> bool {
+    tint >= 16 && (3..=10).contains(&((tint-16)/10)) && matches!((tint-16)%10, 2 | 5 | 6 | 8 | 9)
 }
 
 /// The kind of the cell whose low corner is at height `y` in a column (cells of `size`: `y` is a multiple of it).
@@ -777,13 +783,22 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 b.wall
             }
         }
-        What::Crown(foot, top, trunk) => {
+        What::Crown { foot, top, trunk, tint, edge } => {
             if trunk.is_some_and(|t| mid <= t) {
                 kind(WOOD, colour(2, 9))
             } else if size == 1 && mid <= c.g + c.kerb {
                 c.ground
             } else if mid < *foot || mid > *top {
                 0
+            } else if measured_foliage(*tint) {
+                // Correlated openings expose the branch structure and the sky.
+                // Keep the trunk and the denser centre of the surveyed crown.
+                let fringe = *edge > 0.76 || mid < *foot + 7 || mid > *top - 6;
+                let cluster = hash3((x+z).div_euclid(9), mid.div_euclid(6), (x-z).div_euclid(9), 43);
+                let gap = size <= 8 && cluster % 100 < if fringe { 48 } else { 22 };
+                if gap || (size <= 2 && hash3(x >> 1, mid >> 1, z >> 1, 3) % 9 == 0) {
+                    0
+                } else { kind(LEAVES, *tint) }
             } else if size == 1 && hash3(x >> 1, y >> 1, z >> 1, 3) % 7 == 0 {
                 0 // light comes through a crown
             } else {
@@ -943,6 +958,27 @@ mod tests {
         }
         b.extend(std::iter::repeat_n(300i16.to_le_bytes(), 25).flatten());
         b
+    }
+
+    #[test]
+    fn measured_crowns_have_openings_and_keep_the_trunk() {
+        let tint = colour(6, 5);
+        let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
+            what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new() };
+        let mut gaps = 0;
+        let mut leaves = 0;
+        for x in 0..90 {
+            for y in 25..70 {
+                match kind_at(&c, x, y, 35, 1) {
+                    0 => gaps += 1,
+                    value if value == kind(LEAVES, tint) => leaves += 1,
+                    _ => panic!("unexpected crown material"),
+                }
+            }
+        }
+        assert!(gaps > 300 && leaves > 300);
+        c.what = What::Crown { foot: 25, top: 70, trunk: Some(62), tint, edge: 0.0 };
+        assert!((1..=62).all(|y| kind_at(&c, 0, y, 35, 1) == kind(WOOD, colour(2, 9))));
     }
 
     #[test]
