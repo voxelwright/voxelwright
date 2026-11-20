@@ -71,3 +71,25 @@ For the 16-place recognition panel, `neighbourhoods.json` pins each spherical im
 Near tiles give surveyed geometry ownership of its whole covered area. At a genuine survey boundary the cutter clips fallback building polygons to the unmeasured side. For open road samples, class bit 7 enables the pavement grey stored in the tint byte. The bake estimates daylight reflectance in 16 m patches from neutral, low, unmarked NAIP and lidar samples. At the nearest level the road top follows the interpolated DEM in 2.5 cm increments.
 
 Crown heights reject isolated quarter-metre lidar returns. The foliage tint comes from NAIP RGB and near-infrared observations within the crown. Trunks are aligned to the DataSF tree inventory before measuring the crown radius, including when a pilot pack supplies the starting geometry. Where branches overhang a road, the engine uses the crown tint for the leaves and nearby surveyed asphalt for the ground below.
+
+### Candidate facade surveys
+
+Keep the city acquisition on its pinned recipe. A local paint survey takes a square pack, its retained camera data and a named 180 m × 180 m street window. The sixteen panel reference images are reserved for judging. The following commands run from the repository root in the Bay Python environment.
+
+```sh
+python engine/bay/paint_cameras.py "$work/cameras" "$panel/fixed-poses.json" Chinatown --requests 50
+python engine/bay/facade_paint.py "$source/packs/551.7_4182.5.bay" "$work/cameras/Chinatown/cameras.json" "$work/Chinatown.faces" 52249.2 66692
+cp -cR "$source" "$candidate"
+python engine/bay/frontage_tiles.py "$source" "$candidate" "$city/inputs" --paint "$work/Chinatown.faces" --towers 551.7_4182.5 --manifest "$base_manifest"
+python engine/sf/release.py "$candidate" "$work/sf"
+```
+
+Here `source` is a frozen staging directory containing only the source packs and their tiles, `candidate` is a new sibling directory on APFS, and `base_manifest` is the matching materialized pin. Supply `--platforms 553.7_4178.5` for the Dogpatch platform and track survey. The tile decorator verifies the source pin, includes unchanged objects and writes the derived checkpoint last. The manifest digest is ready for panel scoring and promotion as described in [the release format](../sf/release.md).
+
+Acquisition is serial with a request budget, spacing between requests and a saved cooldown. Each solved image is cached by ID. Rerunning projection and tiling reads local files. Each supported wall texel carries a palette index and a zero marks an unseen texel. Ring endpoints identify faces across tile cuts. A new, overlapping survey of the same wall requires a joint projection before release.
+
+For a larger run, finish one street window and check its pin before moving to the next. Use the current app quota and response headers to set a daily request allowance. Journal the solve IDs, pass version, block extent, input hashes and completed face bundle. Keep the original acquisition archives and budget new full-resolution panoramas in a separate cache. Roll the contiguous validated windows into each square's level-zero tiles and run the panel gate before advancing the release. The prototype measures four windows; the measurements and local contact sheet are on issue #450.
+
+The named Transamerica survey uses the DataSF landmark address, the USGS description of its perimeter truss and the architect's account of the lobby glazing. [USGS structural survey](https://pubs.usgs.gov/of/1989/0568/report.pdf) · [Foster + Partners](https://www.fosterandpartners.com/news/the-column-transamerica-pyramid-center)
+
+To acquire another window, pass a `--sites` JSON array with its `place` and `square` and add its metre-based `street` pose to the poses file. Keep one shared camera-cache root for the acquisition queue. The sixteen judging image IDs stay excluded even when a different site inventory is supplied.

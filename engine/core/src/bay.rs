@@ -834,7 +834,7 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
                 if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
-                    return kind(PLASTER, tint);
+                    return kind(material(b.wall), tint);
                 }
                 front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
             } else {
@@ -892,7 +892,7 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                 return 0;
             }
             if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
-                return kind(PLASTER, tint);
+                return kind(material(b.wall), tint);
             }
             let fy = up.rem_euclid(b.storey);
             if up >= top - 6 {

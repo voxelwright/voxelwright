@@ -91,11 +91,15 @@ def stage_manifest(manifest, candidate, changed):
     if manifest.parent.name != pin:
         raise ValueError("base manifest directory differs from its digest")
     data = json.loads(manifest.read_text())
-    if "far" in data:
-        raise ValueError("supply the far inventory again with release.py --far")
     checks = {}
     tiles = [level["tiles"] for level in data["levels"]]
-    for group in [*tiles, data["names"], data.get("graph", {})]:
+    far = data.get("far")
+    far_objects = (
+        {r["path"]: r for bands in far["tiles"].values() for r in bands if r}
+        if far
+        else {}
+    )
+    for group in [*tiles, data["names"], data.get("graph", {}), far_objects]:
         for row in group.values():
             rel = Path(row["path"])
             if rel.is_absolute() or ".." in rel.parts:
@@ -104,6 +108,8 @@ def stage_manifest(manifest, candidate, changed):
             if digest(source) != row["sha256"]:
                 raise ValueError(f"base materialization differs from pin: {rel}")
             dest = candidate / "packs" / (rel.name if rel.parts[0] == "names" else rel)
+            if rel.parts[0] == "far":
+                dest = candidate / rel
             if rel in changed:
                 if changed[rel][0] != row["sha256"] or digest(dest) != changed[rel][1]:
                     raise ValueError(f"tile changed during derivation: {rel}")
@@ -133,6 +139,8 @@ def stage_manifest(manifest, candidate, changed):
         ],
         squares=sorted(data["names"]),
     )
+    if far:
+        save(candidate / "far.json", far)
     save(candidate / "packs/tiles/index.json", index)
     save(
         candidate / "state.json",

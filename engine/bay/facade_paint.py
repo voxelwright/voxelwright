@@ -6,7 +6,7 @@ import math
 import struct
 import time
 from pathlib import Path
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
 import numpy as np
 from PIL import Image
@@ -30,6 +30,44 @@ def edges(vertices):
         yield i, (x, z, a, b), flags
 
 
+def pixels(img, rays):
+    u = (np.arctan2(rays[:, 0], rays[:, 2]) / (2 * np.pi) + 0.5) % 1
+    v = 0.5 + np.arctan2(rays[:, 1], np.hypot(rays[:, 0], rays[:, 2])) / np.pi
+    return img[
+        (v * img.shape[0]).astype(int).clip(0, img.shape[0] - 1),
+        (u * img.shape[1]).astype(int),
+    ].astype("f4")
+
+
+def exposure(pack, x, z, eye, rot, img):
+    """Use bare asphalt seen in both surveys as a local daylight grey reference."""
+    a = np.arange(-120, 121, 10)
+    dx, dz = (v.ravel() for v in np.meshgrid(a, a))
+    i = ((x + dx - pack["tx0"]) / 5).astype(int)
+    j = ((z + dz - pack["tz0"]) / 5).astype(int)
+    valid = (
+        (np.hypot(dx, dz) > 48)
+        & (np.hypot(dx, dz) < 120)
+        & (i >= 0)
+        & (j >= 0)
+        & (i < pack["tw"])
+        & (j < pack["tw"])
+    )
+    dx, dz, i, j = (v[valid] for v in (dx, dz, i, j))
+    grey = pack["tint"][j, i]
+    valid = (pack["class"][j, i] == 128) & (grey > 0) & (grey <= 15)
+    dx, dz, grey = (v[valid] for v in (dx, dz, grey))
+    gi = np.rint((x + dx - pack["gx0"]) / 10).astype(int).clip(0, pack["gw"] - 1)
+    gj = np.rint((z + dz - pack["gz0"]) / 10).astype(int).clip(0, pack["gw"] - 1)
+    rgb = pixels(img, np.column_stack((dx, -dz, pack["ground"][gj, gi] - eye)) @ rot.T)
+    neutral = (rgb.max(1) - rgb.min(1) < 40) & (rgb.mean(1) > 24) & (rgb.mean(1) < 210)
+    if neutral.sum() < 18:
+        return 1.0
+    observed = rgb[neutral].mean(1)
+    daylight = (0.86 - (grey[neutral].astype("f4") - 1) * 0.8 / 14) * 255
+    return float(np.clip(np.median(daylight / observed), 0.92, 2.0))
+
+
 def project(pack, catalog, center):
     began = time.monotonic()
     p = read(pack)
@@ -43,22 +81,32 @@ def project(pack, catalog, center):
         dtype="u1",
     )
     cameras = []
+    excluded = {
+        r["image"]
+        for r in json.loads(Path(__file__).with_name("neighbourhoods.json").read_text())
+    }
+    used = set()
     for meta in json.loads(catalog.read_text()):
+        ident = str(meta["id"])
+        if ident in excluded or ident in used:
+            raise ValueError("duplicate camera or reserved panel reference")
+        used.add(ident)
+        if meta.get("camera_type") != "spherical":
+            continue
         x, z = np.array(xy(meta)) * 10
         i, j = np.rint([(x - p["gx0"]) / 10, (z - p["gz0"]) / 10]).astype(int)
         if not (0 <= i < p["gw"] and 0 <= j < p["gw"]):
             continue
         with Image.open(catalog.parent / (str(meta["id"]) + ".jpg")) as img:
             rgb = np.array(img.convert("RGB"))
-        cameras.append(
-            (
-                x,
-                z,
-                int(p["ground"][j, i]) + 25,
-                rotation(np.array(meta["computed_rotation"])),
-                rgb,
-            )
-        )
+        eye = int(p["ground"][j, i]) + 25
+        rot = rotation(np.array(meta["computed_rotation"]))
+        cameras.append((x, z, eye, rot, rgb, exposure(p, x, z, eye, rot, rgb)))
+    # If the median camera saturates the calibration range, the road is in
+    # deeper shade than the facades. Its exposure cannot calibrate this block.
+    measured_gain = float(np.median([v[-1] for v in cameras])) if cameras else None
+    if measured_gain == 2.0:
+        cameras = [(*v[:-1], 1.0) for v in cameras]
     painted = {}
     stats = dict(
         cameras=len(cameras), faces=0, buildings=0, texels=0, blended=0, eligible=0
@@ -106,7 +154,7 @@ def project(pack, catalog, center):
             views = []
             best = np.zeros((h, cols), "f4")
             guide = np.zeros_like(total)
-            for a, b, eye, rot, img in cameras:
+            for a, b, eye, rot, img, gain in cameras:
                 dist = np.hypot(x - a, z - b).clip(1)
                 incidence = abs(dx * (b - az) - dz * (a - ax)) / (length * dist)
                 allowed = (
@@ -136,15 +184,7 @@ def project(pack, catalog, center):
                     continue
                 rr, cc = np.nonzero(visible)
                 rays = np.column_stack((x[cc] - a, b - z[cc], y[rr, 0] - eye)) @ rot.T
-                uimg = (np.arctan2(rays[:, 0], rays[:, 2]) / (2 * np.pi) + 0.5) % 1
-                vimg = (
-                    0.5
-                    + np.arctan2(rays[:, 1], np.hypot(rays[:, 0], rays[:, 2])) / np.pi
-                )
-                rgb = img[
-                    (vimg * img.shape[0]).astype(int).clip(0, img.shape[0] - 1),
-                    (uimg * img.shape[1]).astype(int),
-                ].astype("f4")
+                rgb = pixels(img, rays)
                 r, g, blue = rgb.T
                 sky = (blue > r * 1.28) & (blue > g * 1.10) & (blue > 120)
                 leaves = (g > r * 1.16) & (g > blue * 1.28)
@@ -158,6 +198,7 @@ def project(pack, catalog, center):
                 w = daylight**2 * incidence[cc] ** 3 / (1 + (dist[cc] / 185) ** 2)
                 # The strongest frontal solve anchors small details. Colour disagreement
                 # downweights displaced windows and transient objects in other views.
+                rgb = np.clip(rgb * gain, 0, 255)
                 take = w > best[rr, cc]
                 best[rr[take], cc[take]] = w[take]
                 guide[rr[take], cc[take]] = rgb[take]
@@ -181,6 +222,10 @@ def project(pack, catalog, center):
             stats["eligible"] += int(seen.size)
         stats["buildings"] += int(count > 0)
         stats["faces"] += count
+    stats["measuredExposure"] = measured_gain
+    stats["medianExposure"] = (
+        round(float(np.median([v[-1] for v in cameras])), 3) if cameras else None
+    )
     stats["seconds"] = round(time.monotonic() - began, 2)
     return painted, stats
 
@@ -190,8 +235,10 @@ def write_faces(path, faces):
     tmp = path.with_suffix(".part")
     with ZipFile(tmp, "w", compression=ZIP_DEFLATED) as f:
         for key, (base, grid) in sorted(faces.items()):
+            info = ZipInfo(",".join(map(str, key)))
+            info.compress_type = ZIP_DEFLATED
             f.writestr(
-                ",".join(map(str, key)),
+                info,
                 struct.pack("<iHH", base, grid.shape[1], grid.shape[0])
                 + grid.tobytes(),
             )

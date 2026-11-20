@@ -27,7 +27,15 @@ def encode(data):
     ).encode()
 
 
-def generate(root, out, inventory_only=False, graph_dir=None, far_index=None, panel=None):
+def generate(
+    root,
+    out,
+    inventory_only=False,
+    graph_dir=None,
+    far_index=None,
+    panel=None,
+    core=None,
+):
     packs = root / "packs"
     index = json.loads((packs / "tiles/index.json").read_text())
     state = json.loads((root / "state.json").read_text())
@@ -74,6 +82,8 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None, pa
             s: record(source / (s + ".json"), f"graph/{s}.json", graph_dir is None)
             for s in names
         }
+    if far_index is None and (root / "far.json").is_file():
+        far_index = root / "far.json"
     if far_index:
         far = json.loads(far_index.read_text())
         if far.get("version") != 1 or far["size"] != 5000 or far["bands"] != [4, 1, 0]:
@@ -100,21 +110,28 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None, pa
     digest = hashlib.sha256(manifest).hexdigest()
     dest = out / "releases" / digest
     dest.mkdir(parents=True, exist_ok=True)
-    if not inventory_only:
-        for name, source in files.items():
-            path = dest / name
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".part")
-            if sys.platform == "darwin":
-                # On the bake volume this produces an independent APFS clone.
-                subprocess.run(["/bin/cp", "-c", source, tmp], check=True)
-            else:
-                shutil.copyfile(source, tmp)
-            with tmp.open("rb") as stream:
-                if hashlib.file_digest(stream, "sha256").hexdigest() != verified_files[name]:
-                    raise ValueError(f"{name} changed while staging")
-            tmp.replace(path)
-    (dest / "manifest.json").write_bytes(manifest)
+    with (out / f".stage-{digest}.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if not inventory_only:
+            for name, source in files.items():
+                path = dest / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = path.with_suffix(".part")
+                if sys.platform == "darwin":
+                    # On the bake volume this produces an independent APFS clone.
+                    subprocess.run(["/bin/cp", "-c", source, tmp], check=True)
+                else:
+                    shutil.copyfile(source, tmp)
+                with tmp.open("rb") as stream:
+                    if (
+                        hashlib.file_digest(stream, "sha256").hexdigest()
+                        != verified_files[name]
+                    ):
+                        raise ValueError(f"{name} changed while staging")
+                tmp.replace(path)
+        tmp = dest / "manifest.part"
+        tmp.write_bytes(manifest)
+        tmp.replace(dest / "manifest.json")
     # The manifest is available for a fixed-camera candidate run before promotion.
     # Recheck the preceding pin under the same lock that moves current.json.
     if panel is None or inventory_only:
@@ -127,22 +144,59 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None, pa
     pointer = out / "current.json"
     with (out / ".promote.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        prior = json.loads(pointer.read_text())["release"] if pointer.exists() else None
+        current = json.loads(pointer.read_text()) if pointer.exists() else {}
+        prior = current.get("release")
+        core = core or Path(__file__).resolve().parents[1] / "page/core.wasm"
+        spec = Path(__file__).resolve().parents[1] / "bay/neighbourhoods.json"
+        for name, source in (("coreSha256", core), ("panelSpecSha256", spec)):
+            if hashlib.sha256(source.read_bytes()).hexdigest() != receipt.get(name):
+                raise ValueError(
+                    f"panel {name} differs from the tested renderer or camera panel"
+                )
         if receipt["release"] != digest or receipt["previousRelease"] != prior:
-            raise ValueError("panel must describe this candidate and the current predecessor")
+            raise ValueError(
+                "panel must describe this candidate and the current predecessor"
+            )
         if prior is not None and not re.fullmatch("[a-f0-9]{64}", prior):
             raise ValueError("invalid predecessor digest")
-        old = out / "releases" / prior / "panel.json" if prior else None
+        previous_hash = current.get("panelSha256")
+        if previous_hash is not None and not re.fullmatch(
+            "[a-f0-9]{64}", previous_hash
+        ):
+            raise ValueError("invalid predecessor panel digest")
+        old = (
+            out / "releases" / prior / f"panel-{previous_hash}.json"
+            if previous_hash
+            else None
+        )
         floors = Path(__file__).resolve().parents[1] / "bay/panel-floors.json"
-        previous = json.loads(old.read_text())["scores"] if old and old.exists() else json.loads(floors.read_text())
+        if previous_hash is not None and (
+            not old.is_file()
+            or hashlib.sha256(old.read_bytes()).hexdigest() != current["panelSha256"]
+        ):
+            raise ValueError("preceding pin is missing its verified panel receipt")
+        previous = (
+            json.loads(old.read_text())["scores"]
+            if old and old.exists()
+            else json.loads(floors.read_text())
+        )
         check(receipt["scores"], previous)
         # Save judge evidence outside the hashed runtime manifest.
+        receipt_hash = hashlib.sha256(encode(receipt)).hexdigest()
         tmp = dest / "panel.part"
         tmp.write_bytes(encode(receipt))
-        tmp.replace(dest / "panel.json")
+        tmp.replace(dest / f"panel-{receipt_hash}.json")
         tmp = pointer.with_suffix(".part")
-        tmp.write_bytes(encode({"version": 1, "release": digest,
-                                "manifest": f"releases/{digest}/manifest.json"}))
+        tmp.write_bytes(
+            encode(
+                {
+                    "version": 1,
+                    "release": digest,
+                    "panelSha256": receipt_hash,
+                    "manifest": f"releases/{digest}/manifest.json",
+                }
+            )
+        )
         tmp.replace(pointer)
     print(digest, len(files), "objects pinned; 32 views passed")
     return digest
@@ -162,5 +216,16 @@ if __name__ == "__main__":
         "--far", type=Path, help="far/far.json listing and its sibling band directories"
     )
     cli.add_argument("--panel", type=Path, help="scored release receipt for promotion")
+    cli.add_argument(
+        "--core", type=Path, help="tested core.wasm for this panel receipt"
+    )
     args = cli.parse_args()
-    generate(args.root, args.out, args.inventory_only, args.graphs, args.far, args.panel)
+    generate(
+        args.root,
+        args.out,
+        args.inventory_only,
+        args.graphs,
+        args.far,
+        args.panel,
+        args.core,
+    )

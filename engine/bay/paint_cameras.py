@@ -1,8 +1,10 @@
 """Cache solved Mapillary panoramas around a single frontage survey, with a hard request budget."""
 
 import argparse
+import fcntl
 import json
 import math
+import shutil
 import time
 import zipfile
 from pathlib import Path
@@ -21,10 +23,11 @@ class Requests:
         self.root = root
         self.maximum = maximum
         self.count = self.api = self.bytes = 0
-        self.start = time.monotonic()
         self.token = (BAY / "keys/mapillary.token").read_text().strip()
 
     def get(self, url, api=True):
+        if shutil.disk_usage(self.root).free < 15 * (1 << 30) + (16 << 20):
+            raise RuntimeError("15 GiB reserve reached; progress saved")
         if self.count >= self.maximum:
             raise RuntimeError(
                 "request budget exhausted; resume with the saved cameras"
@@ -86,7 +89,9 @@ def select(place, center, yaw, square, holdouts, root, requests, limit):
                     f"https://tiles.mapillary.com/maps/vtp/mly1_public/2/14/{tx}/{ty}?access_token="
                     + requests.token
                 )
-                tile.write_bytes(blob)
+                tmp = tile.with_suffix(".part")
+                tmp.write_bytes(blob)
+                tmp.replace(tile)
             layer = mapbox_vector_tile.decode(tile.read_bytes()).get("image", {})
             for f in layer.get("features", []):
                 p = f["properties"]
@@ -126,7 +131,7 @@ def select(place, center, yaw, square, holdouts, root, requests, limit):
             if any(math.hypot(x - cx2, z - cz2) < 10 for cx2, cz2 in keep):
                 continue
             meta, jpg = dest / (ident + ".json"), dest / (ident + ".jpg")
-            if not meta.exists():
+            if not meta.exists() or (not jpg.exists() and json.loads(meta.read_text())):
                 if ident in catalog:
                     p = catalog[ident]
                     data = src.read("photos/" + ident + ".jpg")
@@ -170,13 +175,32 @@ def main():
     parser.add_argument("places", nargs="+")
     parser.add_argument("--images", type=int, default=18)
     parser.add_argument("--requests", type=int, default=165)
+    parser.add_argument(
+        "--sites",
+        type=Path,
+        help="place and square inventory for additional street windows",
+    )
     args = parser.parse_args()
     rows = json.loads(Path(__file__).with_name("neighbourhoods.json").read_text())
+    holdouts = {r["image"] for r in rows}
+    if args.sites:
+        rows = json.loads(args.sites.read_text())
+    sites = {r["place"]: r["square"] for r in rows}
+    if any(
+        name not in sites or Path(name).name != name or name in ("", ".", "..")
+        for name in args.places
+    ):
+        parser.error("unknown place or invalid cache directory name")
     poses = json.loads(args.poses.read_text())
     args.root.mkdir(exist_ok=True, parents=True)
+    with (args.root / ".acquire.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        acquire_places(args, sites, poses, holdouts)
+
+
+def acquire_places(args, sites, poses, holdouts):
     req = Requests(args.root, args.requests)
     for place in args.places:
-        row = next(r for r in rows if r["place"] == place)
         pose = poses[place]["street"]
         start = time.monotonic()
         before = (req.count, req.api, req.bytes)
@@ -186,8 +210,8 @@ def main():
                     place,
                     (pose[0], pose[2]),
                     pose[3],
-                    row["square"],
-                    {r["image"] for r in rows},
+                    sites[place],
+                    holdouts,
                     args.root,
                     req,
                     args.images,
