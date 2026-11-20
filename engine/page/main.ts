@@ -23,6 +23,7 @@ import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
 import { ball, fineRows, rows, stream, type Edit } from './edits.ts'
 import { people, townsfolk, type Person } from './people.ts'
+import { street as streetOf, type Street } from './street.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
@@ -260,7 +261,10 @@ async function main() {
   const shocks: Shock[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
-  if (query.get('people') !== '0') folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
+  // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
+  let streetLife: Street | null = null
+  const lively = !!LOCAL?.street && query.get('street') !== '0'
+  if (query.get('people') !== '0' && !LOCAL?.street) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
@@ -392,6 +396,8 @@ async function main() {
     lap('steer')
     fallOn(dt)
     lap('fallOn')
+    streetLife?.frame(dt, v)
+    lap('street')
     world.update(v.eye)
     lap('update')
     if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
@@ -586,7 +592,7 @@ async function main() {
   // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
   // (By the cells and by their size: the same cells may be a part of another shape.)
   const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
-  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } } })
+  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } }, dropped: (id) => moving.delete(id) })
   /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
   const shades = () => alive.things.flatMap((t) => {
     const w = alive.where(t)
@@ -1150,6 +1156,11 @@ async function main() {
     return alive.spawn({ ...making, low })
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
+  if (LOCAL?.street && lively && !far) {
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    streetLife = life
+    if (query.get('people') !== '0') folk.from.push(life.folk)
+  }
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
@@ -1169,6 +1180,7 @@ async function main() {
     spoiled.push(...world.swap([]))
     farModel.forget()
     core.world_forget()
+    streetLife?.reset()
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
@@ -1182,7 +1194,7 @@ async function main() {
     button.onclick = () => void reset()
     document.body.append(button)
   }
-  Object.assign((globalThis as unknown as { engine: object }).engine, { reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } })
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.

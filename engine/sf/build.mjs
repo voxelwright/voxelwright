@@ -90,6 +90,14 @@ for (const k of realm.kept ?? []) {
   if (made.status !== 0) { console.error(made.stderr); process.exit(1) }
 }
 
+// ── Street life (#450, page/street.ts): each square's graph to walk and drive (sf/life.py), and the kept vehicles (sf/cars.mjs) ──
+if (realm.street) {
+  cpSync(join(root, 'sf/pilot-life'), join(out, 'sf', realm.street.life), { recursive: true })
+  const cars = spawnSync(process.execPath, [join(root, 'sf/cars.mjs'), join(out, 'sf', realm.street.cars)], { encoding: 'utf8' })
+  if (cars.status !== 0) { console.error(cars.stderr); process.exit(1) }
+  console.log(cars.stdout.trimEnd())
+}
+
 // ── Whose data it is: shown on the page by bay.ts, and written beside it ──
 put('sf/CREDITS.txt', [
   'Ground, buildings and trees in the baked squares: U.S. Geological Survey 3DEP; USDA NAIP; City and County of San Francisco (DataSF). Public domain (DataSF: PDDL).',

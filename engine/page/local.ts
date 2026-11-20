@@ -29,6 +29,8 @@ export interface Local extends Realm {
   roll?: number
   /** The far model (far.ts): the folder beside the page its far.json is in. */
   far?: string
+  /** Street life (street.ts): where its graphs of each square (`life/index.json`) and its kept vehicles (`cars/index.json`) are, beside the page. Its people take the place of the town's residents. */
+  street?: { life: string; cars: string }
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */

@@ -29,5 +29,6 @@
     }
   ],
   "roll": -0.1764,
-  "far": "./"
+  "far": "./",
+  "street": { "life": "life/", "cars": "cars/" }
 }
