@@ -1155,27 +1155,6 @@ fn leaving(ro: vec3f, rd: vec3f, hit: Hit, whole: bool) -> f32 {
   return max(min(out.x, min(out.y, out.z)), hit.t) + 0.002 * size / lv.scale;
 }
 
-// A wall's own plane where a look meets the side of one of its cells: the outward of the solid round the cell, over
-// a short piece of its footprint (w 1), or nothing (w 0). A diagonal wall's cells are a staircase whose faces
-// alternate sunlit and dark, and whose panes each mirror the sky along their risers: bright slits beside every
-// window of a turned or curved front (#450).
-fn wallPlane(hit: Hit, n: vec3f) -> vec4f {
-  let c = hit.cell - g.level[hit.level].cells;
-  let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
-                              vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
-  var outward = vec2f(0.0);
-  for (var i = 0u; i < 8u; i++) {
-    let d = vec3i(ring[i].x, 0, ring[i].y);
-    let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
-    outward += normalize(vec2f(ring[i])) * f32(delta);
-  }
-  if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
-    let plan = normalize(outward);
-    return vec4f(plan.x, 0.0, plan.y, 1.0);
-  }
-  return vec4f(n, 0.0);
-}
-
 // What a ray sees, lit: the colour before the air between is added. shadows: 0 none, 1 from the maps or else a ray,
 // 2 from the maps only (and corners are not asked about: this is something seen in a mirror).
 fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
@@ -1243,10 +1222,21 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       }
     }
   }` : ''}
-  ${world.options.surveyedWalls ? `if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
-    let plane = wallPlane(hit, n);
-    if (plane.w > 0.0) {
-      n = plane.xyz;
+  ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
+  // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
+  if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
+    let c = hit.cell - lvh.cells;
+    let ring = array<vec2i, 8>(vec2i(5,0),vec2i(4,2),vec2i(3,3),vec2i(2,4),
+                                vec2i(0,5),vec2i(-2,4),vec2i(-3,3),vec2i(-4,2));
+    var outward = vec2f(0.0);
+    for (var i = 0u; i < 8u; i++) {
+      let d = vec3i(ring[i].x, 0, ring[i].y);
+      let delta = i32(solidAt(c-d,hit.level)) - i32(solidAt(c+d,hit.level));
+      outward += normalize(vec2f(ring[i])) * f32(delta);
+    }
+    if (length(outward) > 3.3 && dot(outward,n.xz) > 0.0) {
+      let plan = normalize(outward);
+      n = vec3f(plan.x,0.0,plan.y);
       face = n;
       at += n * (0.85/lvh.scale);
       slope = true;
@@ -1575,7 +1565,6 @@ override FOGGY: bool = false;
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
       if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
-      ${world.options.surveyedWalls ? `if (abs(n.y) < 0.5 && hit.level <= 2u) { n = wallPlane(hit, n).xyz; }` : ''}
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -1862,7 +1851,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
     // The real city's shade is lit by its sky and by the sunlit fronts across the street, and a photograph's white
     // balance takes the blue out of it: lit by the sky's blue alone, every shaded road and front came out navy where
-    // the panel's photographs are grey (#450, render_checks.py \`shade\`).
+    // the panel's photographs are grey (#450, render_checks.py shade).
     const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
