@@ -204,7 +204,9 @@ if (typeof document === 'undefined' && typeof self !== 'undefined') {
     if (!told?.tiles) return
     e.stopImmediatePropagation()
     port = told.tiles; toldLevels = told.levels ?? LEVELS; toldKeep = told.keep ?? HOLD.keep
-    port.onmessage = (m: MessageEvent<Said | { memory: true }>) => {
+    port.onmessage = (m: MessageEvent<Said | { memory: true } | { ping: number }>) => {
+      // Answered at once, whatever this worker is waiting on: the page knows it is there (`silent`).
+      if ('ping' in m.data) return port!.postMessage({ pong: m.data.ping })
       if ('memory' in m.data) return port!.postMessage({ memory: opened.reduce((n, c) => n + c.memory.buffer.byteLength, 0) })
       const s = m.data as Said
       waiting.get(s.id)?.(s); waiting.delete(s.id)
@@ -219,26 +221,40 @@ async function fromPage(level: number, key: string): Promise<ArrayBuffer | null>
   if (s.error) throw new Error(s.error)
   return s.body ?? null
 }
-/** The page's side: gives a worker that streams the Bay a port to ask for tiles on, and answers it. */
+/**
+ * The page's side: gives a worker a port to ask for tiles on (where it streams the Bay), answers it, and asks it
+ * every second whether it is there: a worker ended without a word (a tab out of memory) is known by its silence.
+ */
 export function share(worker: Worker): Worker {
-  if (!STREAM) return worker
   const { port1, port2 } = new MessageChannel()
-  const memory = { bytes: 0 }
-  port1.onmessage = async (m: MessageEvent<{ id: number; level: number; key: string } | { memory: number }>) => {
-    if ('memory' in m.data) { memory.bytes = m.data.memory; return }
+  const entry = { port: port1, memory: { bytes: 0 }, owed: 0 }
+  port1.onmessage = async (m: MessageEvent<{ id: number; level: number; key: string } | { memory: number } | { pong: number }>) => {
+    entry.owed = 0
+    if ('pong' in m.data) return
+    if ('memory' in m.data) { entry.memory.bytes = m.data.memory; return }
     const { id, level, key } = m.data
     try { const body = await tile(level, key); port1.postMessage({ id, body } satisfies Said) } catch (e) { port1.postMessage({ id, error: String((e as Error).message ?? e) } satisfies Said) }
   }
-  void where().then((s) => worker.postMessage({ tiles: port2, levels: s.levels, keep: HOLD.keep }, [port2]), () => worker.postMessage({ tiles: port2, levels: LEVELS, keep: HOLD.keep }, [port2]))
-  sharing.push({ port: port1, memory })
+  const give = (levels: Level[]) => worker.postMessage({ tiles: port2, levels, keep: HOLD.keep }, [port2])
+  if (STREAM) void where().then((s) => give(s.levels), () => give(LEVELS))
+  else give(LEVELS)
+  // Silence is counted from the oldest ping not answered: a page whose timers slept (a tab in the background) does
+  // not take its workers for gone when it wakes.
+  const ping = setInterval(() => { entry.owed ||= performance.now(); port1.postMessage({ ping: entry.owed }) }, 1000)
+  sharing.set(worker, entry)
+  // Let go of with the worker.
+  const end = worker.terminate.bind(worker)
+  worker.terminate = () => { clearInterval(ping); sharing.delete(worker); port1.close(); end() }
   return worker
 }
-const sharing: { port: MessagePort; memory: { bytes: number } }[] = []
+const sharing = new Map<Worker, { port: MessagePort; memory: { bytes: number }; owed: number }>()
+/** How long since a worker given a port (`share`) last said anything, ms. */
+export const silent = (worker: Worker | null): number => { const e = worker && sharing.get(worker); return e?.owed ? performance.now() - e.owed : 0 }
 /** What every core holds, in bytes of its memory (#450): the page's own and each worker's, as each last said. */
 export async function memory(): Promise<{ page: number; workers: number[]; tiles: number }> {
-  for (const s of sharing) s.port.postMessage({ memory: true })
+  for (const s of sharing.values()) s.port.postMessage({ memory: true })
   await pause(150)
-  return { page: opened.reduce((n, c) => n + c.memory.buffer.byteLength, 0), workers: sharing.map((s) => s.memory.bytes), tiles: heldTotal }
+  return { page: opened.reduce((n, c) => n + c.memory.buffer.byteLength, 0), workers: [...sharing.values()].map((s) => s.memory.bytes), tiles: heldTotal }
 }
 
 /** A core from its address, holding the Bay's packs where the page asked for the Bay. */

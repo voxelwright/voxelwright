@@ -6,7 +6,7 @@
 // words, and tells the shader which part of each box is whole enough to march.
 import { stream, type Edit } from './edits.ts'
 import type { Answer, Ask } from './worker.ts'
-import { BAY, share } from './bay.ts'
+import { BAY, share, silent } from './bay.ts'
 
 export const SIDE = 64
 const UNIFORM = 0x80000000
@@ -166,7 +166,7 @@ function holdsFiner(words: Int32Array): boolean {
 }
 
 /** A maker of sectors as the world keeps it: how many asks it has in hand, which, when it was last heard, and how to let it go. */
-interface Maker { worker: Worker; busy: number; asked: Set<number>; heard: number; lose: () => void }
+interface Maker { worker: Worker; busy: number; asked: Set<number>; lose: () => void }
 
 export class World {
   levels: Level[]
@@ -205,9 +205,9 @@ export class World {
   /** A maker of sectors (worker.ts). One that fails is let go and another hired: what it was making is asked again. */
   private hire(): Maker {
     const worker = share(new Worker(new URL(`./worker.ts${BAY}`, import.meta.url), { type: 'module' }))
-    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), heard: performance.now(), lose: () => {} }
+    const slot: Maker = { worker, busy: 0, asked: new Set<number>(), lose: () => {} }
     if (this.core) worker.postMessage({ core: this.core })
-    worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; slot.heard = performance.now(); slot.asked.delete(e.data.id); this.take(e.data) }
+    worker.onmessage = (e: MessageEvent<Answer>) => { slot.busy--; slot.asked.delete(e.data.id); this.take(e.data) }
     worker.onerror = (e) => { e.preventDefault(); lose() }
     const lose = (slot.lose = () => {
       if (!this.workers.includes(slot)) return
@@ -224,8 +224,8 @@ export class World {
     })
     return slot
   }
-  /** How long a maker with work in hand may say nothing before it is taken for gone, ms. */
-  patience = 45_000
+  /** How long a maker may say nothing, not even to the page's pings (bay.ts `share`), before it is taken for gone, ms. */
+  patience = 10_000
   /** The core the workers were last told to use (`recore`), for one hired after. */
   private core: string | null = null
   /** Columns made while a tile they need had not come (#450): made again when due, a little later each time. */
@@ -360,9 +360,8 @@ export class World {
       }
     }
     if (this.again.length) this.retry()
-    // A worker that has gone quiet with work in hand is gone too (a tab out of memory ends a worker without a word).
-    const now = performance.now()
-    for (const w of this.workers) if (w.busy > 0 && now - w.heard > this.patience) w.lose()
+    // A worker that has gone silent is gone too (a tab out of memory ends a worker without a word).
+    for (const w of this.workers) if (silent(w.worker) > this.patience) w.lose()
     if (this.plan) this.replan(eye)
     this.send()
     this.flush()
@@ -430,7 +429,6 @@ export class World {
         if (reach.length >= 8) this.tidy(reach, ask.level, ask.sx, ask.sz)
         const heights = new Int32Array(reach.length * 2)
         for (let i = 0; i < reach.length; i++) { heights[i * 2] = reach[i].box[1]; heights[i * 2 + 1] = reach[i].box[4] }
-        if (!w.busy) w.heard = performance.now()
         w.busy++
         w.asked.add(this.nextId)
         w.worker.postMessage({ id: this.nextId++, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, y1: ask.y1, edits: stream(reach), heights, fine: this.options.fine, bricks: this.options.bricks } satisfies Ask)

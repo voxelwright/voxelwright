@@ -20,7 +20,8 @@ const SETTLE = 4
 interface Piece { mood: string; seed: number; sections: Section[]; layers: number[]; figure?: Line; asked: number; done: number; /** The step of its section that is given next, and the moment that step falls. */ step: number; at: number; /** The step at which it is to stop, if it has been told to. */ stop: number | null }
 
 export function conductor(voice: Sound, seed = (Math.random() * 2 ** 31) | 0) {
-  const worker = new Worker('/page/sound/music/worker.ts', { type: 'module' })
+  // Beside this module, so that a static folder (#450) finds it as the page server does.
+  const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
   const waiting = new Map<number, (s: Section) => void>()
   let asks = 0
   worker.onmessage = (e: MessageEvent<{ id: number; section: Section }>) => { waiting.get(e.data.id)?.(e.data.section); waiting.delete(e.data.id) }

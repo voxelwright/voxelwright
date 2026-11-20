@@ -2,11 +2,13 @@
 // the realm's record (sf/realm.json) in the page, a pinned release of the city's tiles beside it (sf/release.md), and
 // its kept living things. Any host of plain files serves it: no page server, no world's process, no helper.
 //
-//   node sf/build.mjs [--out dist-sf] [--from <full_run.py output>] [--car <shelf record>] [--quality 11]
+//   node sf/build.mjs [--out dist-sf] [--from <full_run.py output>] [--far <far.json>] [--staged <a staged sf folder>] [--car <shelf record>] [--quality 11]
 //
 // The release is written by sf/release.py, the data lane's one owner of its layout, from the verified output of
-// bay/full_run.py (the six-square pilot by default). Its id must be the one pinned in sf/pilot/current.json when it
-// is made from the pilot. Every file a host sends is also written Brotli-compressed beside itself (`<file>.br`), for a
+// bay/full_run.py (the staged publication of the six squares by default; `--far` adds the far lane's objects). Its
+// id must be the one pinned in sf/pilot/current.json when it is made from the publication alone. Or
+// `--staged` takes a folder a run has already staged (its current.json and releases/) as it is, so the page follows
+// whichever release that pointer names. Every file a host sends is also written Brotli-compressed beside itself (`<file>.br`), for a
 // host to send with `Content-Encoding: br` (player/serve.mjs does, as R2 objects stored with that encoding would).
 // A host that does not send the plain file, which is the same release: nothing is lost but bytes.
 //
@@ -25,8 +27,8 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const out = resolve(root, arg('out', 'dist-sf'))
 const VILLAGE = join(homedir(), '.village', 'engine')
-const PILOT = join(VILLAGE, 'bay', 'pilot450', 'final-release')
-const from = resolve(arg('from', PILOT))
+const PUBLICATION = join(VILLAGE, 'bay', '450-accuracy', 'publication')
+const from = resolve(arg('from', PUBLICATION)), far = arg('far', null), staged = arg('staged', null)
 const SHELF = join(VILLAGE, 'kept-cars', 'shelf')
 const PYTHON = join(VILLAGE, 'bay', 'venv', 'bin', 'python')
 const quality = Number(arg('quality', '11'))
@@ -54,16 +56,23 @@ cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
 const page = readFileSync(join(root, 'page/index.html'), 'utf8')
 if (!page.includes('src="/page/main.ts"')) fail('page/index.html no longer loads /page/main.ts: change the build')
 const record = `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n`
-put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title>`).replace('<script type="module" src="/page/main.ts">', `${record}<script type="module" src="../page/main.js">`))
+put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,">`).replace('<script type="module" src="/page/main.ts">', `${record}<script type="module" src="../page/main.js">`))
 
 // ── The city's tiles: a release, written by its owner ──
-if (!existsSync(PYTHON)) fail(`${PYTHON} is missing: the Bay's Python environment (bay/README.md)`)
-const made = spawnSync(PYTHON, [join(root, 'sf', 'release.py'), from, join(out, 'sf')], { encoding: 'utf8' })
-if (made.status !== 0) fail(`sf/release.py failed:\n${made.stdout}${made.stderr}`)
-const pointer = JSON.parse(readFileSync(join(out, 'sf', 'current.json'), 'utf8'))
 if (realm.release !== 'current.json') fail('sf/realm.json must name its release pointer: "release": "current.json"')
+if (staged) {
+  // As a run staged it: the pointer and every release it holds.
+  if (!existsSync(join(staged, 'current.json'))) fail(`${staged} holds no current.json`)
+  cpSync(join(staged, 'current.json'), join(out, 'sf', 'current.json'))
+  cpSync(join(staged, 'releases'), join(out, 'sf', 'releases'), { recursive: true })
+} else {
+  if (!existsSync(PYTHON)) fail(`${PYTHON} is missing: the Bay's Python environment (bay/README.md)`)
+  const made = spawnSync(PYTHON, [join(root, 'sf', 'release.py'), from, join(out, 'sf'), ...(far ? ['--far', far] : [])], { encoding: 'utf8' })
+  if (made.status !== 0) fail(`sf/release.py failed:\n${made.stdout}${made.stderr}`)
+}
+const pointer = JSON.parse(readFileSync(join(out, 'sf', 'current.json'), 'utf8'))
 const pinned = JSON.parse(readFileSync(join(root, 'sf', 'pilot', 'current.json'), 'utf8'))
-if (from === PILOT && pointer.release !== pinned.release) fail(`the pilot made release ${pointer.release}, not the pinned ${pinned.release} (sf/pilot/current.json)`)
+if (!staged && from === PUBLICATION && !far && pointer.release !== pinned.release) fail(`the publication made release ${pointer.release}, not the pinned ${pinned.release} (sf/pilot/current.json)`)
 const manifest = JSON.parse(readFileSync(join(out, 'sf', pointer.manifest), 'utf8'))
 const tiles = manifest.levels.reduce((n, l) => n + Object.keys(l.tiles).length, 0), sea = manifest.levels.reduce((n, l) => n + l.sea.length, 0)
 
@@ -107,5 +116,5 @@ for (const file of files(out)) {
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`
 console.log(`${relative(process.cwd(), out)}: ${modules.size} modules, ${mb(raw)} in all, ${mb(br)} as Brotli (${compressed} compressed now)`)
 console.log(`  page, code and kept things: ${mb(code)} (${mb(codeBr)} brotli)`)
-console.log(`  release ${pointer.release.slice(0, 12)}: ${tiles} tiles, ${sea} sea keys, ${Object.keys(manifest.names).length} names; ${mb(raw - code)} (${mb(br - codeBr)} brotli)`)
+console.log(`  release ${pointer.release.slice(0, 12)}${pointer.release === pinned.release ? ' (the pin)' : ''}: ${tiles} tiles, ${sea} sea keys, ${Object.keys(manifest.names).length} names, ${Object.keys(manifest.graph ?? {}).length} graphs, ${Object.keys(manifest.far?.tiles ?? {}).length} far keys; ${mb(raw - code)} (${mb(br - codeBr)} brotli)`)
 console.log(`  open sf/index.html from any host of plain files (node player/serve.mjs --dir ${relative(root, out)})`)

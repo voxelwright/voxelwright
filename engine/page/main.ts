@@ -38,7 +38,7 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
-import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, memory, near, open, share, tally, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, memory, near, open, share, silent, tally, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -466,20 +466,20 @@ async function main() {
   // `?realm=id`: another realm that the server keeps (#264), in place of home.
   const far = query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
   // The worker that moves things, hired again if it fails (#450): it ends without a word when a tab runs out of
-  // memory, so one that says nothing for a while with a step in hand is taken for gone too (`moverLost`, below).
+  // memory, so one that answers none of the page's pings for a while is taken for gone too (`moverLost`, below).
   const heed: { message: ((e: MessageEvent<Answer>) => void) | null; error: ((e: ErrorEvent) => void) | null } = { message: null, error: null }
-  let moverWorker: Worker | null = null, moverHeard = performance.now(), moverOwes = 0, moverLost = () => {}
-  /** How long the mover may owe an answer before it is taken for gone, ms. */
-  let moverPatience = 20_000
+  let moverWorker: Worker | null = null, moverLost = () => {}
+  /** How long the mover may say nothing, not even to the page's pings (bay.ts `share`), before it is taken for gone, ms. */
+  let moverPatience = 10_000
   /** How many times the world was put back (`reset`): an answer about the world before the last is not this world's. */
   let moverAge = 0
   const hireMover = () => {
     const w = share(new Worker(new URL(`./mover.ts${BAY}`, import.meta.url), { type: 'module' }))
-    w.onmessage = (e: MessageEvent<Answer>) => { moverHeard = performance.now(); heed.message?.(e) }
+    w.onmessage = (e: MessageEvent<Answer>) => heed.message?.(e)
     w.onerror = (e) => { e.preventDefault(); heed.error?.(e); loseMover(w) }
     return w
   }
-  const loseMover = (w: Worker | null) => { if (!w || w !== moverWorker) return; w.terminate(); moverWorker = hireMover(); moverHeard = performance.now(); moverOwes = 0; moverLost() }
+  const loseMover = (w: Worker | null) => { if (!w || w !== moverWorker) return; w.terminate(); moverWorker = hireMover(); moverLost() }
   if (!far) moverWorker = hireMover()
   const mover: { postMessage(ask: Ask): void; onmessage: ((e: MessageEvent<Answer>) => void) | null; onerror: ((e: ErrorEvent) => void) | null } = far ? (far as never) : {
     postMessage: (ask: Ask) => moverWorker!.postMessage({ ...ask, age: moverAge }),
@@ -621,8 +621,7 @@ async function main() {
     owed = Math.min(owed + dt, 0.1)
     if (putting.length && (performance.now() - putSince > 180 || bodies === 0)) put()
     if (!far && (bodies > 0 || burning > 0 || running) && !ticking) { ticking = true; mover.postMessage({ tick: owed * tempo.rate } satisfies Ask); owed = 0 }
-    // Watched from when an answer is first owed: a step or a blast. Asks that want none (a drive, a walk) are not.
-    if (!far) { const t = performance.now(); if (!(ticking || waiting > 0)) moverOwes = 0; else if (!moverOwes) moverOwes = t; else if (t - Math.max(moverOwes, moverHeard) > moverPatience) loseMover(moverWorker) }
+    if (!far && silent(moverWorker) > moverPatience) loseMover(moverWorker)
     if (bodies === 0 && burning === 0 && !running) owed = 0
     if (!off.has('flames')) for (let i = 0; i < flames.length; i += 3) smoke.flame([flames[i], flames[i + 1], flames[i + 2]], dt)
     if (running) for (const at of water.landings) smoke.spray(at, dt)
@@ -1120,7 +1119,8 @@ async function main() {
   const keptFiles = new Map<string, Promise<Omit<Making, 'low'> | null>>()
   /**
    * Where a thing `size` cells big (its length along x) may stand at a kerb near (x, z), as a parked car does: on
-   * asphalt, its near side a few cells off a pavement, nothing standing in its box (a tree's crown, a pole). It
+   * asphalt, its near side a few cells off a pavement, nothing standing in its box (a tree's crown, a pole) or in
+   * the 30 m of road ahead of it. It
    * looks along the streets of the squares (bay.ts `names`) that run along x (the kept thing turns in no other way
    * yet), nearest first, within 300 m. Null where there is none; the street graph (#450, the data lane) will name
    * parking edges in its place.
@@ -1142,7 +1142,12 @@ async function main() {
       while (out < 160 && road(px, pz + side * (out + 2))) out += 2
       if (out < wide * 2 || out >= 160) continue
       const cz = pz + side * (out - wide), corners = [[-half, -wide], [half, -wide], [-half, wide], [half, wide], [0, 0]]
-      if (corners.every(([dx, dz]) => road(px + dx, cz + dz) && clear(px + dx, cz + dz))) return [Math.round(px), 0, Math.round(cz)]
+      // And 30 m of road ahead of its front (+x) to pull out into.
+      const ahead = Array.from({ length: 15 }, (_, i) => half + 20 * (i + 1))
+      // On a gentle grade (under 1 in 12 along it): the body stands level, and on a steep street one end would be in the hill.
+      const grounds = corners.map(([dx, dz]) => core.ground_at(Math.round(px + dx), Math.round(cz + dz)))
+      if (Math.max(...grounds) - Math.min(...grounds) > (half * 2) / 12) continue
+      if (corners.every(([dx, dz]) => road(px + dx, cz + dz) && clear(px + dx, cz + dz)) && ahead.every((d) => road(px + d, cz) && clear(px + d, cz))) return [Math.round(px), Math.max(...grounds), Math.round(cz)]
     }
     return null
   }
@@ -1153,7 +1158,8 @@ async function main() {
     // Over the ground where it stands (bay.ts has the tiles there by now: the realm begins beside it), or at the
     // kerb of a street near there.
     const spot = k.kerb ? (parked.get(k.file) ?? parked.set(k.file, await kerbside(k.at[0], k.at[2], making.size)).get(k.file)) : null
-    const [x, , z] = spot ?? k.at, low: [number, number, number] = [Math.round(x - making.size[0] / 2), Math.max(k.at[1], core.ground_at(x, z) + 2), Math.round(z - making.size[2] / 2)]
+    // A kerb's spot says the highest ground under it.
+    const [x, , z] = spot ?? k.at, low: [number, number, number] = [Math.round(x - making.size[0] / 2), Math.max(k.at[1], (spot ? spot[1] : core.ground_at(x, z)) + 2), Math.round(z - making.size[2] / 2)]
     return alive.spawn({ ...making, low })
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
