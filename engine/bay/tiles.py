@@ -17,6 +17,8 @@ coarse the sector it is making is (bay.rs `least_step`), and bay.ts asks for til
 import glob, json, os, struct
 import numpy as np
 from PIL import Image, ImageChops, ImageDraw
+from shapely import make_valid, union_all
+from shapely.geometry import LineString, Point, Polygon, box as survey_box
 import earth
 from street_furniture import decode, encode
 
@@ -58,8 +60,71 @@ def window(a, origin, step, x0, z0, n, fill):
     return out
 
 
+def outline(verts):
+    rings, ring = [], []
+    for x, z, flags in verts:
+        ring.append((x, z))
+        if flags & 4:
+            if len(ring) >= 3:
+                rings.append(ring)
+            ring = []
+    if not rings:
+        return Polygon()
+    polygon = Polygon(rings[0], rings[1:])
+    return polygon if polygon.is_valid else make_valid(polygon)
+
+
+def polygons(geometry):
+    if geometry.geom_type == 'Polygon':
+        yield geometry
+    elif hasattr(geometry, 'geoms'):
+        for part in geometry.geoms:
+            yield from polygons(part)
+
+
+def outside_survey(rows, vertices, surveyed, tile):
+    """Fallback geometry has no wall inside land owned by a surveyed square."""
+    for start, count, *style in rows:
+        original = vertices[start:start + count]
+        polygon = outline(original)
+        if surveyed.covers(polygon):
+            continue
+        if surveyed.disjoint(polygon):
+            yield tuple(original), tuple(style)
+            continue
+        # Only an actual survey boundary cuts a fallback polygon. The new cut
+        # face is plain; surviving measured edges keep their open/street flags.
+        edges = []
+        first = 0
+        for i, a in enumerate(original):
+            b = original[first if a[2] & 4 else i + 1]
+            if a[:2] != b[:2]:
+                edges.append((LineString([a[:2], b[:2]]), a[2] & 3))
+            if a[2] & 4:
+                first = i + 1
+        for part in polygons(polygon.difference(surveyed)):
+            if part.area < 1 or not part.intersects(tile):
+                continue
+            result = []
+            for j, ring in enumerate([part.exterior, *part.interiors]):
+                points = [(round(x), round(z)) for x, z in ring.coords[:-1]]
+                points = [p for i, p in enumerate(points) if p != points[i-1]]
+                if len(set(points)) < 3:
+                    if j == 0:
+                        break
+                    continue
+                for i, a in enumerate(points):
+                    b = points[(i+1) % len(points)]
+                    mid = Point((a[0]+b[0])/2, (a[1]+b[1])/2)
+                    flags = next((f for edge, f in edges if edge.distance(mid) <= 0.75), 0)
+                    result.append((*a, flags | (4 if i+1 == len(points) else 0)))
+            if result:
+                yield tuple(result), tuple(style)
+
+
 def cut(paths, wanted=None):
     squares = [read(p) for p in sorted(paths)]
+    surveyed = union_all([survey_box(p['tx0'], p['tz0'], p['tx0'] + 5*p['tw'], p['tz0'] + 5*p['tw']) for p in squares])
     # One picture of everything baked, at half a metre and at a metre, from the frame's cell (X0, Z0).
     X0, Z0 = min(p['gx0'] for p in squares), min(p['gz0'] for p in squares)
     X1, Z1 = max(p['gx0'] + (p['gw'] - 1) * 10 for p in squares), max(p['gz0'] + (p['gw'] - 1) * 10 for p in squares)
@@ -132,12 +197,19 @@ def cut(paths, wanted=None):
                 if level == 0:
                     seen = seen[..., 0]
                     t, c, n = np.where(seen, t[..., 0], et), np.where(seen, c[..., 0], ec), np.where(seen, n[..., 0], en)
-                    def unseen(x, z):
-                        i, j = (x - x0 + margin) // 5, (z - z0 + margin) // 5
-                        return not (0 <= i < tw and 0 <= j < tw and seen[j, i])
                     own = [(v, r) for v, r in buildings if max(q[0] for q in v) >= x0 - margin and min(q[0] for q in v) < x0 + size + margin and max(q[1] for q in v) >= z0 - margin and min(q[1] for q in v) < z0 + size + margin]
-                    own += [(tuple(everts[r[0]:r[0] + r[1]]), tuple(r[2:])) for r in erows if unseen(*everts[r[0]][:2])]
-                    stems = [s for s in trunks if x0 - margin <= s[0] < x0 + size + margin and z0 - margin <= s[1] < z0 + size + margin] + [s for s in etrunks if unseen(s[0], s[1])]
+                    stems = [s for s in trunks if x0 - margin <= s[0] < x0 + size + margin and z0 - margin <= s[1] < z0 + size + margin]
+                    if not seen.all():
+                        tile = survey_box(x0-margin, z0-margin, x0+size+margin, z0+size+margin)
+                        # Some surveyed footprints continue beyond the edge of their raster.
+                        crossing = []
+                        for verts, _ in own:
+                            polygon = outline(verts)
+                            if not surveyed.covers(polygon.envelope):
+                                crossing.append(polygon)
+                        solid = union_all([surveyed, *crossing]) if crossing else surveyed
+                        own.extend(outside_survey(erows, everts, solid, tile))
+                        stems.extend(s for s in etrunks if not surveyed.covers(Point(s[0], s[1])))
                 else:
                     seen = seen.all(-1)
                     bt, bc, bn, bw = earth.coarsen(t, c, n, m, k, level)
