@@ -53,7 +53,20 @@ let back = await turn()
 // Stopped from outside (a timeout, ^C), the turn is given back as on any other way out.
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { console.log(`\nstopped (${signal}) in ${current.name}`); back(); process.exit(1) })
 /** Runs `measure` with every turn on the GPU (kit.mjs `quiet`): no other thread's check draws beside a timing. Its phase's clock starts once they are had. */
-const alone = async (name, minutes, measure) => { back(); const all = await quiet(); try { phase(name, minutes); return await measure() } finally { all(); back = await turn() } }
+const alone = async (name, minutes, measure) => {
+  // Our own turn is kept; `quiet` takes the rest (it counts the one this process holds). Waited for three minutes at
+  // most: where other lanes keep the GPU busy, it is measured beside them and said so.
+  Object.assign(current, { name: `${name} (waiting for the GPU to be quiet)`, deadline: Date.now() + 5 * 60_000 })
+  const asked = quiet()
+  const rest = await Promise.race([asked, new Promise((r) => setTimeout(() => r(null), 3 * 60_000))])
+  // Had after the wait was given up: given back at once.
+  if (!rest) void asked.then((give) => give())
+  try {
+    phase(name, minutes)
+    const r = await measure()
+    return rest ? r : { ...r, sharedGPU: drawing() }
+  } finally { rest?.() }
+}
 const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
 // The helper a visitor might be offered (a link, or something kept from another page): it must never be asked.
 const HELPER = 'http://127.0.0.1:5762'
@@ -298,12 +311,15 @@ try {
   // Each column made without the tile is made again 2, 4, 8 s after: by then the tile has come.
   await page.waitForTimeout(30_000); await settle()
   ff.tile = await page.evaluate(({ x, z }) => {
-    const e = globalThis.engine, l = e.world.levels[0], g = Math.round(e.ground(x, z) * 10) - 1, slot = l.slot(Math.floor(x * 10 / 64), Math.floor(g / 64), Math.floor(z * 10 / 64))
-    return { lacking: e.world.stats.lacking, crashed: e.world.stats.crashed, failed: e.tiles.tally.failed, retried: e.tiles.tally.retried, groundM: e.ground(x, z), drawn: l.top[slot] !== 0 }
+    // The finest box that holds the ground's top cell there: its sector is made and not air.
+    const e = globalThis.engine, g = Math.round(e.ground(x, z) * 10) - 1
+    const l = e.world.levels.find((l) => { const side = 64 << l.index; return l.holds(Math.floor((x * 10) / side), Math.floor(g / side), Math.floor((z * 10) / side)) })
+    const side = 64 << (l?.index ?? 0), slot = l ? l.slot(Math.floor((x * 10) / side), Math.floor(g / side), Math.floor((z * 10) / side)) : -1
+    return { lacking: e.world.stats.lacking, crashed: e.world.stats.crashed, failed: e.tiles.tally.failed, retried: e.tiles.tally.retried, groundM: e.ground(x, z), level: l?.index, drawn: !!l && l.state[slot] === 3 && l.top[slot] !== 0 }
   }, fidi)
   ff.tile.requests = site.asked.filter((a) => a.path === tileThere).map((a) => a.status)
   await page.screenshot({ path: join(shots, 'after-faults.png') })
-  check(cameBack && ff.tile.drawn && ff.tile.requests.at(-1) === 200, `a tile that failed ${ff.tile.requests.filter((s) => s !== 200).length} times came on try ${ff.tile.requests.length}: ${ff.tile.lacking} columns made without it were made again, the ground there drawn (${ff.tile.drawn}, ${round(ff.tile.groundM)} m)`)
+  check(cameBack && ff.tile.drawn && ff.tile.requests.at(-1) === 200, `a tile that failed ${ff.tile.requests.filter((s) => s !== 200).length} times came on try ${ff.tile.requests.length}: ${ff.tile.lacking} columns made without it were made again, the ground there drawn (${ff.tile.drawn}, box ${ff.tile.level}, ${round(ff.tile.groundM)} m)`)
   check(ff.tile.crashed >= 1, `a maker of sectors that died was hired again (${ff.tile.crashed}) and the world there came whole`)
   await page.evaluate(() => { globalThis.engine.patience = 10_000 })
 

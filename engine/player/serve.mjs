@@ -20,11 +20,13 @@ const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; ch
  * beside it (`<file>.br`, sf/build.mjs) is sent as that copy with `Content-Encoding: br` to a browser that takes it;
  * what is under a `releases/` folder may be kept a year and never asked again (it is named by its hash); and a
  * release's pointer (`current.json`) is asked again every time. `fail(path)`, for the checks, answers a status in
- * place of the file where it says one.
+ * place of the file where it says one. `extra(req, res)`, for the checks, answers what it says it has (true).
  */
-export async function plain(dir, host = '127.0.0.1', port = 0, { plainly = false, fail = null } = {}) {
+export async function plain(dir, host = '127.0.0.1', port = 0, { plainly = false, fail = null, extra = null } = {}) {
   const asked = []
   const server = createServer((req, res) => {
+    // A check's own pages and reports (test/sf-phone.mjs), answered before any file.
+    if (extra?.(req, res)) return
     const path = decodeURIComponent(new URL(req.url, 'http://x').pathname), rel = normalize(path).replace(/^[/\\]+/, ''), file = join(dir, rel)
     const accept = String(req.headers['accept-encoding'] ?? '')
     const failed = fail?.(path)

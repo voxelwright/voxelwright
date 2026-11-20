@@ -147,13 +147,17 @@ try {
     await at(up150[1], 70)
     const before = await lightOf(page, 'fog-before')
     await sky('fog')
-    await page.waitForTimeout(4000)
+    // Caught when the front is half a kilometre short of the eye (it starts 6 km west): what a time alone catches
+    // depends on how fast this page is drawing.
+    const began = Date.now()
+    await page.waitForFunction(() => { const e = globalThis.engine; return e.march.front - e.pose.x * 10 > -5000 }, null, { timeout: 30_000, polling: 50 }).catch(() => null)
+    const caughtMs = Date.now() - began
     const rolling = await page.evaluate(() => { const e = globalThis.engine; return { fog: e.march.fog, front: e.march.front, eye: e.pose.x * 10, moving: e.realmControls.sky.moving } })
     const mid = await lightOf(page, 'fog-rolling-in')
     await calm(); await page.waitForTimeout(1000)
     const whole = await lightOf(page, 'fog-from-150m')
-    console.log(`  fog rolling in, 150 m up: before ${JSON.stringify(before)}, 4 s in ${JSON.stringify(mid)} (front ${round((rolling.front - rolling.eye) / 10, 0)} m east of the eye), all in ${JSON.stringify(whole)}`)
-    check(rolling.moving && rolling.front < 1e8 && mid.contrast < before.contrast && whole.contrast < mid.contrast, `a change of weather is smooth: 4 s into the fog the front is ${round((rolling.front - rolling.eye) / 10, 0)} m from the eye and the contrast ${before.contrast}, ${mid.contrast}, ${whole.contrast} falls as it comes`)
+    console.log(`  fog rolling in, 150 m up: before ${JSON.stringify(before)}, ${round(caughtMs / 1000, 1)} s in ${JSON.stringify(mid)} (front ${round((rolling.front - rolling.eye) / 10, 0)} m east of the eye), all in ${JSON.stringify(whole)}`)
+    check(rolling.moving && rolling.front < 1e8 && mid.contrast < before.contrast && whole.contrast < mid.contrast, `a change of weather is smooth: ${round(caughtMs / 1000, 1)} s into the fog the front is ${round((rolling.front - rolling.eye) / 10, 0)} m from the eye and the contrast ${before.contrast}, ${mid.contrast}, ${whole.contrast} falls as it comes`)
     // The hour, glided: halfway there a moment after it was asked for.
     await sky('clear'); await calm()
     await at(PARK, 25.05)
