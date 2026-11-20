@@ -314,6 +314,26 @@ def finish(root, candidate):
     if (work / "shots").exists():
         (work / "shots").rename(dest / "shots")
     shutil.rmtree(work)
+    # Keep the first panel and the latest accepted image at every pose. Older receipts retain
+    # their shot hashes, while obsolete full-resolution comparisons share a bounded cache.
+    receipt = load(root / "accepted" / (candidate + ".json"))
+    current = {h for pair in receipt["views"].values() for h in pair}
+    archives = sorted(
+        (root / "proof").glob("*/shots/*.png"), key=lambda p: p.stat().st_mtime
+    )
+    size = sum(p.stat().st_size for p in archives)
+    if size > 384 * 2**20:
+        first = {
+            p.stem
+            for p in (root / "accepted").glob("*.json")
+            if load(p)["previous"] is None
+        }
+        for p in archives:
+            if size <= 384 * 2**20:
+                break
+            if p.parents[1].name not in first and digest(p) not in current:
+                size -= p.stat().st_size
+                p.unlink()
 
 
 if __name__ == "__main__":

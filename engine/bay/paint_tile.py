@@ -52,9 +52,13 @@ def records(data):
         pos = end
 
 
-def apply(blob, faces):
+def apply(blob, faces, structures=None):
     blob = without_eye_trees(blob)
     h = struct.unpack_from("<16i", blob)
+    if structures and h[3] == 2500:
+        from frontage_tiles import details
+
+        blob, _ = details(blob, *structures)
     if h[3] != 2500 or not faces:
         return blob
     start = 64 + 2 * h[5] ** 2 + 4 * h[9] ** 2
@@ -81,3 +85,36 @@ def apply(blob, faces):
     )
     verify_tile_tail(tail, h[13])
     return blob[:end] + tail
+
+
+def prototype(root):
+    """Restore the graded T Third platforms and downtown tower bases when cutting from old city packs."""
+    from frontage_tiles import ground_floors
+    from transit_platforms import segments
+    from tiles import read
+    import json
+    from pathlib import Path
+
+    subjects = json.loads(Path(__file__).with_name("neighbourhoods.json").read_text())
+    rods, styles = [], {}
+    for row in subjects:
+        if row["place"] not in ("Dogpatch", "Financial District"):
+            continue
+        square = row["square"]
+        pack = root / "packs" / (square + ".bay")
+        source = (
+            root
+            / "inputs"
+            / (
+                square
+                + (".zip" if row["place"] == "Financial District" else ".json.gz")
+            )
+        )
+        if not (pack.is_file() and source.is_file()):
+            continue
+        data = read(pack)
+        if row["place"] == "Dogpatch":
+            rods = segments(data, source)
+        else:
+            styles = ground_floors(data, source)
+    return (rods, styles) if rods or styles else None

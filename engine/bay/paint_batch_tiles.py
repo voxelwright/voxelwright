@@ -8,7 +8,7 @@ from tempfile import TemporaryDirectory
 from city_paint import CITY, HERE, PILOT, SEEDS
 from facade_paint import edges, FaceLibrary
 from full_run import digest, plan
-from paint_tile import apply
+from paint_tile import apply, prototype
 import tiles
 
 
@@ -46,6 +46,7 @@ def measure(root, members, previous):
     old_paths = bundles(root, previous) + [PILOT / (n + ".faces") for n in SEEDS]
     old = FaceLibrary(old_paths)
     faces = FaceLibrary([*old_paths, *bundles(root, new)])
+    structures = prototype(CITY)
     records = {}
     donors = {}
     from hashlib import sha256
@@ -64,8 +65,8 @@ def measure(root, members, previous):
                 name = f"{x}_{z}"
                 p = Path(temp) / "tiles/0" / (name + ".bay")
                 base = p.read_bytes()
-                before = apply(base, old)
-                after = apply(base, faces)
+                before = apply(base, old, structures)
+                after = apply(base, faces, structures)
                 if before != after:
                     records[name] = dict(
                         base=sha256(base).hexdigest(),

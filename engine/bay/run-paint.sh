@@ -33,7 +33,13 @@ PY
     if launchctl print "$domain/$label" >/dev/null 2>&1; then
         launchctl bootout "$domain/$label"
     fi
-    launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$label.plist"
+    # bootout returns while the old instance is still leaving its bootstrap domain.
+    remaining=20
+    until launchctl bootstrap "$domain" "$HOME/Library/LaunchAgents/$label.plist" 2>"$job/bootstrap.err"; do
+        remaining=$((remaining-1))
+        if [ "$remaining" -le 0 ]; then cat "$job/bootstrap.err" >&2; exit 1; fi
+        sleep 1
+    done
     ;;
 status)
     launchctl list "$label" | head -6

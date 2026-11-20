@@ -60,9 +60,10 @@ def generate(
     if paint:
         sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bay"))
         from city_panel import accepted_faces
-        from paint_tile import apply
+        from paint_tile import apply, prototype
 
         wall_faces = accepted_faces(paint)
+        structures = prototype(root)
     levels = []
     for level, spec in enumerate(index["levels"]):
         tiles = {}
@@ -76,7 +77,7 @@ def generate(
             if wall_faces is not None:
                 if shutil.disk_usage(out.parent).free < 17 * 2**30:
                     raise ValueError("disk reserve reached; staging can resume")
-                blob = apply(source.read_bytes(), wall_faces)
+                blob = apply(source.read_bytes(), wall_faces, structures)
                 sha = hashlib.sha256(blob).hexdigest()
                 if sha != tiles[key]["sha256"]:
                     cache = out / ".paint-objects" / sha
