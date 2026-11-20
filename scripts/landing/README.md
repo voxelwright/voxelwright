@@ -53,7 +53,7 @@ The shipped model covers the surveyed, visibility-culled view from Ina Coolbrith
 
 ## Atmosphere, arrival and sound
 
-Everything below composites after the cached city copy unless noted, so a still scene costs one copy and a few small passes.
+Everything below composites after the cached city copy unless noted, so a still scene costs one copy and a few small passes. After dusk, above Low, the changing windows (see City life) also rebake the city once a second.
 
 - **Marine layer** (`static/landing/fog.js`). A depth-aware march through a drifting fog slab that tops out between 70 and 125 m, beginning 420 m from the eye, so the signs stay clear and the downtown footings sink into it. It uses the paused clock, takes 6, 9 or 12 steps on Medium, High or Ultra, and is off on Low.
 - **Tower beacons** (`static/landing/beacons.js`). Red flashers on the 14 tallest roofs above 140 m within 6 km, found in the decoded face buffer at load. They pulse together about thirty times a minute.
@@ -96,3 +96,21 @@ PLAYWRIGHT=/path/to/node_modules/playwright node scripts/check-lost.mjs
 ```
 
 It checks the 404 status at several depths, including a request that accepts Markdown. It follows each way out and runs without a script. It checks reduced motion, including when it turns on mid-visit, and night from the system, a saved Night and a saved day. At 390 px it uses a long address and checks the edges and plate sizes, and it checks the edges again at 768 px. It checks that a tall screen doesn't scroll. It also checks that the pointer and a tap clear the fog. Screenshots go to `.shots/lost` (or `OUT`).
+
+## City life
+
+`static/landing/life.js` adds the life that reads from the park over the roofs and the skyline. Everything moves on the paused clock, so Pause stops it where it is. It is off on Low, and reduced motion keeps the GPU-free still.
+
+- **Windows.** The city shader gives each pane a fixed lit value. `windowsShader` patches that line at runtime, and `shaders.js` stays as the refresh emits it. Each pane now keeps its state for two to eight minutes, then rolls again. The rolls land on whole seconds of the paused clock (`Globals.pad1`). After dusk the cached city rebakes once a second, and a few panes across the city change on each rebake. By day and on Low the clock is not baked in. A zero clock reproduces the original pattern exactly, so the first frame matches the still.
+- **Gulls.** Four small flocks of western gulls (18 birds) circle over the slope between the park and downtown, 100 to 310 m out. Each flock is placed by bearing and range from the survey station in `place.json`, at 100 to 116 m over NAVD88. They circle at 9 m/s, bank into the turn and flap in short bursts, with a 1.3 m wingspan at true scale. `test/landing-life.test.mjs` checks that the lowest bird stays at least 10 m above every roof under its orbit, wander included, and that every flock is inside the surveyed view. After dark the city's light catches their undersides. The gulls are drawn in one pass after the fog, the beacons and the tow plane. They depth-test against the cached city and never write depth, so towers, roofs and the signs hide them.
+
+Some candidates were tried and dropped. Street traffic and the cable cars were dropped because almost no street is visible from the survey camera. A raster of the pack from the camera finds about 160 half-resolution pixels of road surface, nearly all of it a sliver of the Embarcadero at the left edge. Boats were dropped because the bay shows only as a small window under the Bay Bridge, cropped out at 16:10 and on phones. Rooftop steam was dropped because plumes on the flat roofs of large office blocks 300 m to 1.2 km out barely showed by day at true scale. At night the nearest plume read as a grey smear rather than steam. Rooftop flags were dropped because the pack does not record which roofs have flagpoles. The tower beacons already light the tallest roofs.
+
+Cost on the default path: one extra render pass with one draw a frame (18 gulls of three boxes each, 1,944 vertices) and one 16-byte uniform write. There is no per-frame simulation on the CPU, because all motion is computed in the vertex shader. After dusk the city also rebakes once a second.
+
+```sh
+npm run build
+PLAYWRIGHT=/path/to/node_modules/playwright node scripts/landing/check-life.mjs
+```
+
+The check counts the gull draws and the city's rebakes by wrapping WebGPU's encoder. It covers one gull draw per frame and a steady preset over 30 idle seconds at night (`IDLE` overrides the duration). It also covers one rebake a second at night on a fixed High setting and none by day. Under Pause the life clock is frozen, Low draws nothing, reduced motion keeps the still, and the phone layout has no sideways scroll. It saves day, night and phone screenshots to `.shots/life` (`OUT` overrides).
