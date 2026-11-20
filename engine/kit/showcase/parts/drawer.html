@@ -12,6 +12,43 @@
   .facts { display: grid; margin-block-start: calc(var(--vx) * 4) !important; grid-template-columns: max-content minmax(0, 1fr); gap: calc(var(--vx) * 2) calc(var(--vx) * 5); margin: 0; }
   .facts dt { color: var(--vx-ink-quiet); }
   .facts dd { margin: 0; overflow-wrap: anywhere; }
+  /* The native dialog loses [open] before its last painted frame. Keep its
+     column measured while the carriage runs back into the receiver. */
+  #deploy { --_w: min(27rem, calc(100vw - 44px)); flex-direction: column; }
+  #deploy[data-vx-live]:not([open], [data-vx-surface]) > * { opacity: 0; }
+  #deploy > header { padding: 24px 24px 20px 32px; }
+  #deploy-h { font-size: 1.5rem; letter-spacing: -.025em; }
+  #deploy-h span { font-family: var(--vx-mono); }
+  #deploy .vx-drawer-body {
+    flex: 0 1 auto; margin-inline: 20px; padding: 20px;
+    color: #f2f5e9;
+  }
+  #deploy:not([data-vx-live]) .vx-drawer-body { background: #232824; border: 2px solid #515754; }
+  #deploy:not([data-vx-live]) > header { background: none; }
+  #deploy-p { margin: 0; font-size: .9375rem; }
+  #deploy-p strong { display: flex; gap: 10px; align-items: center; font: 600 1.25rem/1.4 var(--vx-font); }
+  #deploy .facts {
+    border-block-start: 1px solid #647066; padding-block-start: 16px;
+    gap: 10px 20px; font: .875rem/1.45 var(--vx-mono);
+  }
+  #deploy .facts dt { color: #c1cabc; font-family: var(--vx-font); }
+  #deploy > footer { margin-block-start: auto; padding: 28px 24px max(24px, env(safe-area-inset-bottom)); }
+  @media (min-width: 640px) {
+    #deploy { block-size: fit-content; max-block-size: calc(100% - 32px); margin-block: auto; padding-inline-end: 12px; }
+  }
+  @media (max-width: 639.98px) {
+    #deploy { padding-block-end: 8px; }
+    #deploy > header { padding: 4px 16px 12px 24px; }
+    #deploy .vx-drawer-body { margin-inline: 12px; padding: 16px; }
+    #deploy > footer { padding: 20px 16px max(20px, env(safe-area-inset-bottom)); }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    #deploy { transition-duration: 195ms; }
+    #deploy[open] { transition-duration: 280ms; transition-timing-function: linear(0, .38 12%, .72 28%, .94 48%, 1.006 74%, 1); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #deploy[data-vx-live] { transition: display 120ms allow-discrete, overlay 120ms allow-discrete; }
+  }
   /* Every state: a drawer at the bottom of a small window (a phone) and at the side of a wide
      one, standing open so that it can be looked at. These are not modal and do not slide. */
   .frames { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 3fr); gap: calc(var(--vx) * 5) calc(var(--vx) * 6); inline-size: 100%; }
@@ -81,10 +118,10 @@
   </section>
 </main>
 
-<dialog class="vx-drawer" id="deploy" aria-labelledby="deploy-h" aria-describedby="deploy-p">
-  <header><h2 id="deploy-h">Deploy 213</h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close deploy 213">×</button></header>
+<dialog class="vx-drawer" id="deploy" data-vx-carriage aria-labelledby="deploy-h" aria-describedby="deploy-p">
+  <header><h2 id="deploy-h">Deploy <span>213</span></h2><button class="vx-button vx-close" type="button" data-vx-close="cancel" aria-label="Close deploy 213">×</button></header>
   <div class="vx-drawer-body">
-    <p id="deploy-p">Live since 10:25, four minutes ago.</p>
+    <p id="deploy-p"><strong><span class="vx-lamp" data-vx-light="go" aria-hidden="true"></span>Live</strong> since 10:25, four minutes ago.</p>
     <dl class="facts">
       <dt>Branch</dt><dd>main</dd>
       <dt>Commit</dt><dd>4f2c9a1</dd>

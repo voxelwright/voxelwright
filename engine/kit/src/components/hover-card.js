@@ -51,7 +51,8 @@ function wire(el, on, live) {
     const want = hover || focus;
     if (want !== isOpen()) timer = setTimeout(want ? show : hide, want ? OPEN : CLOSE);
   };
-  anchored(el, on, live, { trigger: () => t });
+  const travel = el.hasAttribute('data-vx-duty-plate') ? { surface: 'courses', duration: 0.22, gap: 1 } : {};
+  anchored(el, on, live, { trigger: () => t, ...travel });
   on(el, 'toggle', (e) => {
     if (e.newState === 'open') { if (!up.size) document.addEventListener('keydown', escape, true); up.add(dismiss); return; }
     up.delete(dismiss);
@@ -79,7 +80,22 @@ export const hoverCard = {
   glowRadius: 2.2,
   glowStrength: halo(0.15),
 
-  build(live, m) { slabOnLight(live, m); },
+  build(live, m) {
+    const { el, W, H, vx } = live;
+    if (!el.hasAttribute('data-vx-duty-plate')) return slabOnLight(live, m);
+    // A shallow folded carrier holds the reading insert. The exposed lower rail
+    // carries the on-call pilot and its legend, even when the legend wraps.
+    const body = m.part('body');
+    live.faceZ = 4;
+    if (W < 8 || H < 6) return; // closed popovers have no measurable face
+    const rail = Math.round(el.querySelector('.duty').offsetTop / vx);
+    body.slab(1, 1, 0, W - 2, H - 2, 1, 'gasket', 2);
+    body.slab(0, 0, 1, W, H, 2, 'steel', 2);
+    body.slab(1, 1, 3, W - 2, H - 2, 1, 'gasket', 1);
+    body.box(2, 2, 3, W - 4, Math.max(0, rail - 2), 1, live.look.readingPlate ?? 'chalk');
+    // Two flat retaining clips fold over the top edge of the insert.
+    for (const x of [5, W - 9]) body.box(x, 0, 3, 4, 2, 1, 'steel');
+  },
 
   pose(live) { live.glowStrength = halo(live.theme === 'day' ? 0.04 : 0.025); },
 

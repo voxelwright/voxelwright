@@ -10,6 +10,15 @@
   .project { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); inline-size: 100%; }
   .project h3 { font-size: 1.25rem; line-height: 1.25; }
   .project .where { color: var(--vx-ink-quiet); max-inline-size: 60ch; }
+  #pages a { padding-block-end: calc(var(--vx) * 4); }
+  #pages a[aria-current="page"] { text-shadow: .3px 0 currentColor; }
+  #pages:not([data-vx-live]) a { background: linear-gradient(var(--vx-steel), var(--vx-steel)) 0 calc(100% - var(--vx) / 2) / 100% calc(var(--vx) * 2) no-repeat; }
+  #pages:not([data-vx-live]) a::before {
+    content: ""; position: absolute; inset-inline-start: 50%; translate: -50% 0;
+    bottom: var(--vx); width: calc(var(--vx) * 5); height: var(--vx);
+    background: var(--vx-ink-quiet);
+  }
+  #pages:not([data-vx-live]) a[aria-current="page"]::before { background: var(--lit-accent, var(--vx-enamel)); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 8) calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 2); align-content: start; justify-items: start; }
   .state > p { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
@@ -30,7 +39,7 @@
     <h2>In use: the pages of a project</h2>
     <div class="project">
       <h3>harbor-api</h3>
-      <nav class="vx-nav" id="pages" data-vx-mark="groove" aria-label="harbor-api">
+      <nav class="vx-nav" id="pages" data-vx-mark="index" aria-label="harbor-api">
         <a href="#overview">Overview</a>
         <a href="#deploys" aria-current="page">Deploys</a>
         <a href="#logs">Logs</a>

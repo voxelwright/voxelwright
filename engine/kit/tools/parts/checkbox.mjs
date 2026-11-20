@@ -19,15 +19,24 @@ for (const mode of ['live', 'plain']) {
   // a checkbox as its input says it, and as the voxels show it: which of the cap's three states
   // is drawn (cap: dark, lit: its lamp on, some: a bar of light), and how far down it is
   const read = (id) => p.evaluate((id) => {
-    const i = document.getElementById(id), l = window.vx?.live(i.parentElement.querySelector('.vx-box'));
+    const i = document.getElementById(id), l = window.vx?.live(i.nextElementSibling);
     const level = i.indeterminate ? 0.5 : i.checked ? 1 : 0;
     if (!l) return { level, drawn: false };
+    if (id === 'tests') {
+      const { cap, socket, glass, tick, bar } = l.model.byName;
+      const shown = [glass, tick, bar].filter(p => !p.hidden).map(p => p.name).join();
+      const rest = -5 * level, spring = l.spring('height');
+      const expected = { 0: 'glass', 0.5: 'bar', 1: 'tick' }[level];
+      return { level, shown, tz: cap.tz, light: [tick, bar].some(p => !p.hidden && p.col.some((v, i) => i % 4 === 3 && v > 0)),
+        agrees: socket.tz === 0 && cap.tz === rest && spring.target === rest && shown === expected,
+        atStop: spring.target === -7 && Math.abs(cap.tz + 7) < 0.05 };
+    }
     const shown = ['cap', 'lit', 'some'].filter((n) => !l.model.byName[n].hidden);
     return { level, drawn: true, to: l.spring('on').target, at: l.spring('on').x, shown: shown.join(), tz: +l.model.byName[shown[0]].tz.toFixed(2), travel: l.look.travel, step: l.look.step, held: l.spring('press').target, glow: l.glowStrength, off: l.state.off };
   }, id);
   const want = { 0: 'cap', 0.5: 'some', 1: 'lit' };
   // the input and the button agree: it is where its input says, showing what its input says
-  const agrees = (s) => (mode === 'plain' ? true : s.drawn && s.to === s.level && s.at === s.level && s.shown === want[s.level] && s.tz === -s.travel * s.level);
+  const agrees = (s) => (mode === 'plain' ? true : s.agrees ?? (s.drawn && s.to === s.level && s.at === s.level && s.shown === want[s.level] && s.tz === -s.travel * s.level));
   if (mode === 'plain') await p.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
   await p.goto(`http://127.0.0.1:${port}/kit/showcase/parts/checkbox.html?theme=light`);
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
@@ -35,15 +44,15 @@ for (const mode of ['live', 'plain']) {
   await p.waitForTimeout(700);
   const lives = await p.locator('[data-vx-live]').count();
   say(mode === 'live' ? lives > 0 : lives === 0, mode === 'live' ? `the page is drawn in voxels (${lives} parts)` : 'the page is plain');
-  say(await p.evaluate(() => [...document.querySelectorAll('.vx-check')].every((l) => l.tagName === 'LABEL' && l.querySelector('input')?.type === 'checkbox' && l.querySelector('input + .vx-box') && l.textContent.trim())), 'every one is a real checkbox in its own label, with words');
+  say(await p.evaluate(() => [...document.querySelectorAll('.vx-check')].every((l) => l.tagName === 'LABEL' && l.querySelector('input')?.type === 'checkbox' && l.querySelector('input + :is(.vx-box, .test-latch)') && l.textContent.trim())), 'every one is a real checkbox in its own label, with words');
   say(await p.evaluate(() => [...document.querySelectorAll('.vx-check')].every((l) => l.getBoundingClientRect().height >= 44)), 'every one is at least 44 px tall to hit');
-  boxes[mode] = await p.evaluate(() => [...document.querySelectorAll('.vx-check, .vx-box')].map((e) => { const r = e.getBoundingClientRect(); return [r.left, r.top + scrollY, r.width, r.height].map((v) => Math.round(v * 10) / 10).join(' '); }).join(';'));
+  boxes[mode] = await p.evaluate(() => [...document.querySelectorAll('.vx-check, .vx-box, .test-latch')].map((e) => { const r = e.getBoundingClientRect(); return [r.left, r.top + scrollY, r.width, r.height].map((v) => Math.round(v * 10) / 10).join(' '); }).join(';'));
 
   // as the page arrives
   let s = await read('tests'), t = await read('post'), u = await read('some');
   say(s.level === 1 && agrees(s) && t.level === 0 && agrees(t) && u.level === 0.5 && agrees(u), 'as the page arrives each is as its input says' + (mode === 'live' ? `: ticked is latched down with its lamp on (${s.shown}, ${s.tz}), empty stands up dark (${t.shown}, ${t.tz}), some of them is half way with a bar of light (${u.shown}, ${u.tz})` : ''));
   if (mode === 'live') {
-    say(s.glow > 0 && t.glow === 0, `only one that is ticked has light (halo ${s.glow.toFixed(4)} ticked, ${t.glow} empty)`);
+    say(s.light && t.glow === 0, 'the checked lens is lit and the empty cap is dark');
     say(await p.evaluate(() => window.vx.stage.awake.size) === 0, 'at rest nothing runs');
   }
 
@@ -59,17 +68,17 @@ for (const mode of ['live', 'plain']) {
   if (mode === 'live') {
     // held: the first frame answers, whichever way it rests
     for (const id of ['post', 'tests']) {
-      const b = await p.locator(`label:has(#${id}) .vx-box`).boundingBox();
+      const b = await p.locator(`#${id} + span`).boundingBox();
       await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 4 });
       await p.mouse.down();
       await p.waitForTimeout(250);
       const h = await read(id);
-      say(h.held === -h.step && h.tz === -h.travel * h.level - h.step, `held down, one that is ${h.level ? 'ticked' : 'empty'} goes a step under where it rests (${h.tz})`);
+      say(h.atStop ?? (h.held === -h.step && h.tz === -h.travel * h.level - h.step), `held down, one that is ${h.level ? 'ticked' : 'empty'} goes a step under where it rests (${h.tz})`);
       await p.mouse.move(b.x + b.width / 2, b.y - 60, { steps: 4 }); // dragged off before letting go
       await p.mouse.up();
       await p.waitForTimeout(400);
       const a = await read(id);
-      say(a.held === 0 && a.level === h.level && agrees(a), 'dragged off before letting go, it is not changed and comes back to rest');
+      say((a.held ?? 0) === 0 && a.level === h.level && agrees(a), 'dragged off before letting go, it is not changed and comes back to rest');
     }
   }
 

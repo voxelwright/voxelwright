@@ -27,7 +27,7 @@ if (args[0] === '--compare') {
 }
 
 const name = args[0] && !args[0].startsWith('--') ? args[0] : 'baseline';
-const path = flag('page', 'showcase/');
+const path = flag('page', 'showcase/principles.html');
 const dir = `shots/${name}`;
 await mkdir(dir, { recursive: true });
 

@@ -1,6 +1,7 @@
 // The scroll area, under a real wheel, real keys, a real mouse on its bar, and a finger: is it a
 // scrolling element first, and is the bar only an extra?
 //   PORT=5989 node tools/parts/scroll-area.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 
 const port = process.env.PORT || 5989;
@@ -37,7 +38,8 @@ async function bar(p, how) {
   let s = await read(p);
   const focus = await p.evaluate(() => document.activeElement.getAttribute('aria-label') || document.activeElement.tagName);
   say(s.shown && s.native === 'none' && s.live === (how === 'voxels'), `${how}: the kit's bar is shown and the browser's own steps aside`);
-  say(s.len >= 44 && s.bar.w === 16, `${how}: the key is ${s.len} px long in a trench ${s.bar.w} px wide`);
+  const expectedLength = Math.max(44, (s.bar.h - 8) * s.view.h / (s.view.h + s.far));
+  say(near(s.len, expectedLength, 2) && s.bar.w === 32, `${how}: the key is ${s.len} px long on a plate ${s.bar.w} px wide`);
   // the wheel, over the words
   await p.mouse.move(s.view.x + s.view.w / 2, s.view.y + s.view.h / 2);
   await p.mouse.wheel(0, 120);
@@ -92,7 +94,7 @@ async function bar(p, how) {
 const p = await open();
 say(await p.evaluate(() => { const v = document.querySelector('#log .vx-scroll-view'), b = document.querySelector('#log .vx-scroll-bar'); return v.getAttribute('role') === 'region' && v.getAttribute('aria-label') === 'Build log' && v.tabIndex === 0 && getComputedStyle(v).overflowY === 'auto' && b.getAttribute('aria-hidden') === 'true' && b.tabIndex === -1 && !v.hasAttribute('data-vx-live'); }), 'the view is a named region that scrolls and takes focus; the bar is hidden from a screen reader and takes none; the view is no part\'s own element');
 // keys, once it has focus
-await p.keyboard.press('Tab');
+await reachByTab(p, '#log .vx-scroll-view');
 say(await p.evaluate(() => document.activeElement === document.querySelector('#log .vx-scroll-view') && getComputedStyle(document.querySelector('#log .vx-scroll-well')).outlineStyle === 'solid'), 'Tab puts focus on the view, and the recess shows the focus ring');
 const keys = [];
 const top = () => p.evaluate(() => document.querySelector('#log .vx-scroll-view').scrollTop);
@@ -157,7 +159,7 @@ await n.mouse.move(before.x, before.y);
 await n.mouse.wheel(0, 100);
 await n.waitForTimeout(300);
 const wheeled = await n.evaluate(() => document.querySelector('#log .vx-scroll-view').scrollTop);
-await n.keyboard.press('Tab');
+await reachByTab(n, '#log .vx-scroll-view');
 await n.keyboard.press('End');
 await n.waitForTimeout(350);
 const ended = await n.evaluate(() => { const v = document.querySelector('#log .vx-scroll-view'); return [document.activeElement === v, v.scrollTop, v.scrollHeight - v.clientHeight]; });

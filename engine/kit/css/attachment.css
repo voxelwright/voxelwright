@@ -49,7 +49,7 @@ a.vx-attachment-name:focus-visible { outline: 2px solid var(--vx-focus); outline
 .vx-attachment[data-vx-leaving] .vx-button:not([data-vx-live]) { visibility: hidden; }
 
 /* plain: a painted plate with its shadow */
-.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
+.vx-attachment-tile:not([data-vx-live]) { background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk-top))); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 0.75) 0 var(--vx-shadow); }
 .vx-attachment[data-vx-leaving] .vx-attachment-tile:not([data-vx-live]) { visibility: hidden; }
 
 @media (prefers-reduced-motion: reduce) {

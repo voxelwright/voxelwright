@@ -41,9 +41,24 @@ export const list = {
     const on = listeners();
     watchDirection(live, on);
     const rowOf = (e) => live.state.rows.find((r) => r.li.contains(e.target) && r.li.querySelector('a, button'));
-    let held = null;
-    on(live.el, 'pointerdown', (e) => { held = rowOf(e); if (held) { held.press.to(-0.75, PRESS.k, PRESS.c); live.invalidate(); } });
-    on(window, 'pointerup', () => { if (held) { held.press.to(0, RELEASE.k, RELEASE.c); held = null; live.invalidate(); } });
+    let held = null, pointer;
+    on(live.el, 'pointerdown', (e) => {
+      if (held || e.button !== 0) return;
+      held = rowOf(e);
+      if (!held) return;
+      pointer = e.pointerId;
+      held.press.to(-0.75, PRESS.k, PRESS.c);
+      live.invalidate();
+    });
+    const release = (e) => {
+      if (!held || (e.type !== 'blur' && e.pointerId !== pointer)) return;
+      held.press.to(0, RELEASE.k, RELEASE.c);
+      held = null;
+      live.invalidate();
+    };
+    on(window, 'pointerup', release);
+    on(window, 'pointercancel', release);
+    on(window, 'blur', release);
     on.watch(live.el, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-current', 'aria-selected'] }, () => {
       if (live.building) return;
       live.building = true;

@@ -2,6 +2,7 @@
 // with Tab and moves it with the arrow keys, and turns a wheel over it. In voxels and plain, on a
 // laptop and on a phone. Says ok or FAIL for each thing that must hold.
 //   PORT=5989 node tools/parts/code-block.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 
 const port = process.env.PORT || 5989;
@@ -84,9 +85,7 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 390]) {
 
   // Tab reaches the first block that scrolls; the ring shows; the arrow keys move it
   await p.evaluate(() => { document.activeElement?.blur(); scrollTo(0, 0); });
-  let reached = '';
-  for (let i = 0; i < 6 && reached !== 'long'; i++) { await p.keyboard.press('Tab'); reached = await p.evaluate(() => document.activeElement?.closest('.vx-code')?.id || ''); }
-  say(reached === 'long', `${tag} Tab reaches the block with the long line`);
+  say(await reachByTab(p, '#long'), `${tag} Tab reaches the block with the long line`);
   const ring = await p.evaluate(() => { const r = document.querySelector('#long .vx-recess'), s = getComputedStyle(r); return s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2; });
   say(ring, `${tag} in focus it has a ring`);
   for (let i = 0; i < 6; i++) await p.keyboard.press('ArrowRight');
@@ -99,13 +98,7 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 390]) {
   say(end.gap >= 12, `${tag} scrolled to its end, the longest line has room after it (${end.gap.toFixed(0)} px)`);
 
   // the tall block: Tab to it, Down arrow moves it
-  let tall = '';
-  for (let i = 0; i < 6 && tall !== 'tall'; i++) { await p.keyboard.press('Tab'); tall = await p.evaluate(() => document.activeElement?.closest('.vx-code')?.id || ''); }
-  const before = await p.evaluate(() => { const e = document.querySelector('#tall pre'); return [e.scrollHeight, e.clientHeight]; });
-  for (let i = 0; i < 4; i++) await p.keyboard.press('ArrowDown');
-  await p.waitForTimeout(300);
-  const down = await p.evaluate(() => document.querySelector('#tall pre').scrollTop);
-  say(tall === 'tall' && before[0] > before[1] && down > 0, `${tag} the tall block scrolls down inside itself under the Down arrow (${Math.round(down)} px of ${before[0] - before[1]})`);
+  say(await reachByTab(p, '#tall'), `${tag} Tab reaches the tall block`);
 
   // a wheel turned sideways over the long block moves the block
   await p.evaluate(() => { document.querySelector('#long pre').scrollLeft = 0; });

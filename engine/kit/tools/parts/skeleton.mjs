@@ -46,7 +46,8 @@ say(all.filter((b) => !b.busy).length > 0 && all.filter((b) => !b.busy).every((b
 
 // out of sight: a real wheel takes the page down
 await p.mouse.move(500, 200);
-await p.mouse.wheel(0, 700);
+const firstBone = await p.locator('#list .vx-bone').first().boundingBox();
+await p.mouse.wheel(0, firstBone.y + firstBone.height + 320);
 await p.waitForTimeout(700);
 all = await bones(p);
 say(all.some((b) => b.busy && b.far) && all.filter((b) => b.busy && b.far).every((b) => !b.awake), `scrolled away with the wheel: the trenches out of sight are asleep (${all.filter((b) => b.busy && b.far && !b.awake).length} of ${all.filter((b) => b.busy && b.far).length})`);
@@ -84,6 +85,7 @@ say(await p.evaluate(() => [...document.querySelectorAll('#still .vx-bone')].eve
 // what was coming arrives: a real press on the key
 await p.evaluate(() => scrollTo(0, 0));
 await p.waitForTimeout(300);
+await p.locator('#flip').scrollIntoViewIfNeeded();
 const b = await p.locator('#flip').boundingBox();
 await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 });
 await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up();

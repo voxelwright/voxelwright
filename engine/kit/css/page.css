@@ -1,0 +1,54 @@
+/* ---------- Page ----------
+   The page itself: the ground every part stands on, and the column a site is laid out in.
+   Tool: none. Most of a page is words on the ground; parts stand on it where they belong.
+     <body class="vx-page">
+       <div class="vx-page-column">
+         <header class="vx-card vx-navbar-surface" data-vx-bolts="none">…the navbar…</header>
+         <main>…</main>
+         <footer class="vx-page-foot">…words and links…</footer>
+       </div>
+     </body>
+   --vx-page-width is the widest the column grows. The page clips sideways (overflow-x: clip),
+   so a part's shadow and light may pass its edge without the page scrolling. */
+
+html:has(> body.vx-page) { background: var(--vx-ground); overflow-x: clip; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.vx-page {
+  margin: 0;
+  min-block-size: 100dvh;
+  overflow-x: clip;
+  background: var(--vx-ground);
+  color: var(--vx-ink);
+  font: 400 1rem/1.55 var(--vx-font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vx-page-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: calc(var(--vx) * 10);
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: var(--vx-page-width, calc(var(--vx) * 280));
+  min-block-size: 100dvh;
+  margin-inline: auto;
+  padding: calc(var(--vx) * 4) clamp(16px, 4vw, calc(var(--vx) * 10)) calc(var(--vx) * 8);
+}
+/* the foot keeps to the bottom of a short page */
+.vx-page-column > .vx-page-foot { align-self: end; }
+
+/* the foot: words and links on the ground, parted from what is above by a groove when it has one */
+.vx-page-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: calc(var(--vx) * 1) calc(var(--vx) * 8);
+  font-size: 0.875rem; color: var(--vx-ink-quiet);
+}
+.vx-page-foot :is(ul, ol) { display: flex; flex-wrap: wrap; gap: 0 calc(var(--vx) * 6); margin: 0; padding: 0; list-style: none; }
+/* a standalone link down here is still a 44 px target, though its words are small */
+.vx-page-foot a { display: inline-flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: inherit; text-underline-offset: 0.22em; }
+.vx-page-foot a:hover { color: var(--vx-ink); text-decoration-thickness: 2px; }
+.vx-page-foot a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+
+@media (max-width: 35rem) {
+  .vx-page-column { gap: calc(var(--vx) * 8); }
+}

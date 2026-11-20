@@ -10,7 +10,7 @@ export const KNOB = 7;
 
 export const toggle = {
   name: 'toggle',
-  selector: '.vx-switch',
+  selector: '.vx-switch:not(.ship-latch)',
   pad: 6,
 
   build(live, m) {

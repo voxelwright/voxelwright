@@ -3,7 +3,6 @@
 // names the file and line where it is to be mended. The light is not measured: it stays upper
 // left, and shadows fall right and down, whatever the language.
 //   PORT=5989 node tools/parts/direction.mjs
-// Exit 2 singles out the known Vox Text script-coverage gap. Other failures exit 1.
 import { chromium } from 'playwright';
 import { execFileSync } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
@@ -34,6 +33,18 @@ const show = async (p, sel) => { await p.locator(sel).first().scrollIntoViewIfNe
 // ============================================================ voxels
 const p = await open(false);
 
+// The reading edge follows each quote. The project identifier keeps its Latin direction.
+const quoteEdges = await p.evaluate(() => {
+  const plate = document.querySelector('#p-groove .reading-plate');
+  const live = window.vx.live(plate);
+  const lensX = plate.getBoundingClientRect().left + live.model.byName.diffuser.rest[0] * live.vx;
+  const english = document.querySelector('#p-groove [dir="ltr"] .quote');
+  return english.querySelector('.vx-groove').getBoundingClientRect().right < english.querySelector('p').getBoundingClientRect().left
+    && lensX > plate.querySelector('p').getBoundingClientRect().right
+    && getComputedStyle(plate.querySelector('bdi')).direction === 'ltr';
+});
+say(quoteEdges, 'reading edges flank the English and Arabic quotes, with the project name left to right');
+
 // ---- switch
 const knob = (sel) => p.evaluate((sel) => { const el = document.querySelector(sel), l = window.vx.live(el), k = l.model.byName.knob, lit = l.model.byName.lit; const xs = []; for (let i = 0; i < lit.count; i++) if (lit.scales[i] > 0.5) xs.push(lit.rest[i * 3]); return { x: k.tx, far: 1 + l.state.travel, W: l.W, lit: xs.length ? [Math.min(...xs), Math.max(...xs)] : null, on: el.parentElement.querySelector('input').checked }; }, sel);
 let a = await knob(ltr('p-switch', '.vx-toggle:nth-child(1) .vx-switch')), b = await knob(rtl('p-switch', '.vx-toggle:nth-child(1) .vx-switch'));
@@ -60,7 +71,16 @@ const slide = async (sel) => {
   const r = await p.locator(sel).boundingBox(), x = r.x + r.width * 0.8, y = r.y + r.height / 2;
   await p.mouse.click(x, y);
   await p.waitForTimeout(350);
-  const s = await p.evaluate((sel) => { const el = document.querySelector(sel), l = window.vx.live(el), t = l.model.byName.thumb; return { value: Number(el.querySelector('input').value), thumb: el.getBoundingClientRect().left + (t.tx + (l.well ? 3.5 : 2.5)) * l.vx }; }, sel);
+  const s = await p.evaluate(async sel => {
+    const { SHEAR } = await import('/kit/src/core/stage.js');
+    const el = document.querySelector(sel), l = window.vx.live(el), thumb = l.model.byName.thumb;
+    const index = thumb.mats.findIndex(id => id === window.vx.MATERIALS.ivory.id);
+    if (index < 0) throw new Error('Missing fader index');
+    const x = thumb.tx + thumb.rest[index * 3];
+    const z = thumb.tz + thumb.rest[index * 3 + 2] + .5;
+    const projected = l.canvas.getBoundingClientRect().left + (l.ox + (x + SHEAR[0] * z) * l.s) / devicePixelRatio;
+    return { value: Number(el.querySelector('input').value), thumb: projected };
+  }, sel);
   await p.evaluate((sel) => { document.querySelector(sel + ' input').value = 20; }, sel);
   return { ...s, x };
 };
@@ -119,7 +139,14 @@ const tray = (sel) => p.evaluate((sel) => {
   const el = document.querySelector(sel), l = window.vx.live(el), row = l.model.byName.row0;
   const cs = getComputedStyle(el.querySelector('.vx-row'));
   const pad = [parseFloat(cs.paddingLeft), parseFloat(cs.paddingRight)];
-  // the lit look draws the mark as a groove (a hole) at the row's start
+  const lens = l.model.byName.lens;
+  if (lens) {
+    const xs = [];
+    for (let i = 0; i < lens.count; i++) if (lens.col[i * 4 + 3] > 0) xs.push(lens.rest[i * 3]);
+    if (!xs.length) throw new Error('No powered row lens');
+    return { W: l.W, mark: [Math.min(...xs), Math.max(...xs)], pad };
+  }
+  // Other looks can use a groove or a raised row marker.
   if (!row && l.well) return { W: l.W, mark: [l.well[0], l.well[2] - 1], pad };
   let top = -Infinity; for (let i = 0; i < row.count; i++) top = Math.max(top, row.rest[i * 3 + 2]);
   const xs = []; for (let i = 0; i < row.count; i++) if (row.rest[i * 3 + 2] === top) xs.push(row.rest[i * 3]);
@@ -139,7 +166,6 @@ const sides = await p.evaluate(() => {
   return {
     check: r(`#p-check ${R} .vx-box`).left > words(`#p-check ${R} .vx-check`).right,
     toggle: r(`#p-switch ${R} .vx-switch`).left > words(`#p-switch ${R} .vx-toggle`).right,
-    groove: r(`#p-groove ${R} .vx-groove`).left > r(`#p-groove ${R} p`).right,
     words: Math.round(r(`#p-words ${R} li`).right - r(`#p-words ${R} .mark`).right),
     field: [getComputedStyle(q(`#p-field ${R} input`)).direction, getComputedStyle(q(`#p-field ${R} input`)).textAlign, getComputedStyle(q(`#p-field ${R} input[type="email"]`)).direction],
     label: Math.round(r(`#p-field ${R} .vx-well`).right - text(q(`#p-field ${R} .vx-field-label`)).right),
@@ -156,7 +182,7 @@ const sides = await p.evaluate(() => {
 say(sides.keys && sides.block === 0, 'right to left: the first key of a row and the first tab are at the right');
 say(sides.check && sides.toggle && sides.spinner, 'right to left: a checkbox, a switch and a spinner stand to the right of their words');
 say(sides.field[0] === 'rtl' && sides.field[1] === 'start' && sides.label === 0 && sides.field[2] === 'ltr', 'right to left: a field\'s label and what is typed start at the right; an address given dir="ltr" still runs left to right');
-say(sides.groove && sides.words === 4, 'right to left: a quote\'s groove and the accent groove of the current row are at the right (they are placed with logical properties)');
+say(sides.words === 4, 'right to left: the current row has its accent groove at the right');
 say(sides.bar && sides.spy[0] === 0 && sides.spy[1] === 0, 'right to left, this batch: the scroll area\'s bar is at the left, the far edge; the spy\'s groove lies under the current link, the first from the right');
 say(sides.empty[0] === 0 && sides.empty[1] === 0 && sides.bone === 0, 'right to left, this batch: an empty state set at the start, and a skeleton\'s trenches, begin at the right');
 say(sides.canvases.every((d) => d < 0.6), `right to left: every voxel canvas sits on its own element (${sides.canvases.length} of them, the furthest off by ${Math.max(...sides.canvases).toFixed(2)} px)`);
@@ -171,9 +197,13 @@ const faces = async (sel) => { const { root } = await cdp.send('DOM.getDocument'
 await cdp.send('DOM.enable'); await cdp.send('CSS.enable');
 const en = await faces(ltr('p-button', '.vx-button .vx-label')), ar = await faces(rtl('p-button', '.vx-button .vx-label')), body = await faces(rtl('p-empty', '.vx-empty-text'));
 say(/Vox Text/.test(en), `a legend in English is drawn in the key face (${en})`);
-const missingArabic = !/Vox Text/.test(ar);
-say(!missingArabic, `a legend in Arabic belongs in a key face too; it is drawn in ${ar}, the system's, because Vox Text has no Arabic (nor Hebrew) glyphs. Mend: fonts/vox-text (the glyph set), or name a face for these scripts in --vx-key-font at voxelmorphism.css:58`);
-note(`reading text in Arabic is drawn in ${body}: IBM Plex Sans is shipped in Latin and Cyrillic only (voxelmorphism.css:5-26), so Arabic and Hebrew are the system's face`);
+say(/Plex Sans Arabic/.test(ar) && /Plex Sans Arabic/.test(body), `Arabic legends and body use the shipped script face (${ar}, ${body})`);
+const hebrewLegend = rtl('p-button', '.vx-button .vx-label');
+await p.locator(hebrewLegend).first().scrollIntoViewIfNeeded();
+await p.locator(hebrewLegend).first().evaluate(el => { el.lang = 'he'; el.textContent = 'שמירה'; });
+await p.evaluate(async () => { await document.fonts.load('400 16px "IBM Plex Sans Hebrew"', 'שמירה'); await new Promise(requestAnimationFrame); });
+const he = await faces(hebrewLegend);
+say(/Plex Sans Hebrew/.test(he), `Hebrew legends use the shipped script face (${he})`);
 await p.context().close();
 
 // ============================================================ plain
@@ -232,4 +262,4 @@ await q.context().close();
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
 await browser.close();
 console.log(bad ? `${bad} to mend` : 'everything turns');
-process.exit(missingArabic && bad === 1 ? 2 : bad ? 1 : 0);
+process.exit(bad ? 1 : 0);

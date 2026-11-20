@@ -12,6 +12,41 @@
   /* the ones shown open stand in the page's own flow, so the page has room for them */
   .stand { grid-template-columns: minmax(0, 1fr); }
   .stand dialog[open] { position: relative; margin: calc(var(--vx) * 4) 0 calc(var(--vx) * 6); }
+  #delete {
+    --vx-look: delete-confirmation;
+    inline-size: min(28rem, calc(100vw - 32px));
+    color: #e1e5dc;
+  }
+  #delete > header {
+    padding: 1.25rem 1.75rem .25rem;
+    padding-inline-end: 3.5rem;
+    color: #fff8e7;
+    font: 700 1.375rem/1.35 var(--vx-font);
+  }
+  #delete .vx-dialog-body { padding: .25rem 1.75rem 1.25rem; }
+  #delete-p strong { display: block; color: #fff8e7; font-weight: 600; }
+  #delete > footer { justify-content: space-between; padding: 1.25rem 1.75rem 1.5rem; gap: 1.25rem; }
+  #delete .vx-button { --vx-key: #ebe3cc; --lit-legend: #292722; }
+  #delete [data-vx-kind="danger"] { --vx-look: delete-key; --vx-key: #933e38; --vx-danger-legend: #fff4e6; }
+  #delete .vx-button .vx-label { color: var(--_on); text-shadow: none; }
+  #delete .vx-button:focus { outline: 2px solid #fff1b9; outline-offset: 5px; }
+  #delete .vx-button[data-vx-live]:focus { outline: none; }
+  #delete .vx-button[data-vx-live]:focus::after {
+    content: ""; position: absolute; pointer-events: none;
+    inset: -16px -6px -6px -16px; border: 2px solid #fff1b9; }
+  #delete:not([data-vx-live]) {
+    background: #242d2c; box-shadow: inset 0 0 0 6px #65383c, 2px 4px 0 #262525;
+  }
+  #delete:not([data-vx-live]) > header { position: relative; background: none; }
+  #delete:not([data-vx-live]) > header::before {
+    content: ""; position: absolute; inset-inline-end: 1.75rem; top: 2rem;
+    width: .75rem; height: .25rem; background: #ff6856; box-shadow: 0 0 0 2px #191b1b;
+  }
+  #delete:not([data-vx-live]) > footer { background: #65383c; }
+  #delete .vx-button:not([data-vx-live]) { background: var(--vx-key); }
+  @media (max-width: 24rem) {
+    #delete > footer { display: grid; grid-template-columns: minmax(0, 1fr); }
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -53,7 +88,7 @@
 
 <dialog class="vx-dialog vx-alert-dialog" role="alertdialog" id="delete" aria-labelledby="delete-h" aria-describedby="delete-p">
   <header id="delete-h">Delete harbor-api?</header>
-  <div class="vx-dialog-body"><p id="delete-p">Its 213 deploys, its logs and its address go with it. This cannot be undone.</p></div>
+  <div class="vx-dialog-body"><p id="delete-p">Its 213 deploys, its logs and its address go with it. <strong>This cannot be undone.</strong></p></div>
   <footer>
     <button class="vx-button" data-vx-close="cancel" autofocus>Keep it</button>
     <button class="vx-button" data-vx-kind="danger" data-vx-close="delete">Delete harbor-api</button>
@@ -70,12 +105,18 @@
 </dialog>
 
 <script type="module">
+  import './delete-confirmation.js';
   import { show } from './parts.js';
   import { LOOKS } from '../../src/index.js';
   import { parts } from '../../src/looks/lit-existing.js';
   Object.assign(LOOKS.lit.parts, parts);
   const $ = (id) => document.getElementById(id);
-  $('open-delete').addEventListener('click', () => $('delete').showModal());
+  $('open-delete').addEventListener('click', event => {
+    // WebKit leaves a pointer-activated button unfocused. Give the native
+    // dialog its return target before it moves focus to the safe answer.
+    event.currentTarget.focus({ preventScroll: true });
+    $('delete').showModal();
+  });
   $('open-revoke').addEventListener('click', () => $('revoke').showModal());
   $('open-still').addEventListener('click', () => $('still').show());
   const said = { delete: 'harbor-api deleted', remove: 'Ada removed', cancel: 'Nothing deleted' };

@@ -93,7 +93,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   await p.waitForTimeout(500);
 
   // by keyboard: focus shows it at once, Tab moves it on, Escape hides it and the focus stays
-  await p.mouse.down(); await p.mouse.up(); // a press on the bare ground: Tab starts from the top of the page again
+  await p.locator('.part-nav a').last().focus(); // Tab into the specimen from the catalog navigation
   await p.keyboard.press('Tab');
   await p.waitForTimeout(80);
   say(await focus() === 'k-deploy' && await open('#t-deploy'), 'Tab to the first key: its tooltip is there at once');
@@ -117,6 +117,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   say(!(await open('#t-back')), 'the focus leaves: it goes');
 
   // where it is asked to be, and at rest
+  await p.locator('#s-below').evaluate(el => el.scrollIntoView({ block: 'center' }));
   await onto('#s-below');
   await p.waitForTimeout(700);
   k = await rect('#s-below'); f = await rect('#ts-below');
@@ -192,7 +193,7 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   say(!(await open('#t-back')), 'plain: Escape hides it');
   await away();
   await p.waitForTimeout(450);
-  await p.mouse.down(); await p.mouse.up();
+  await p.locator('.part-nav a').last().focus();
   await p.keyboard.press('Tab');
   await p.waitForTimeout(80);
   say(await focus() === 'k-deploy' && await open('#t-deploy'), 'plain: the focus shows it');

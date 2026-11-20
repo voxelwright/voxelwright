@@ -13,6 +13,22 @@
   .each h3 { font-size: 0.875rem; font-weight: 600; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 3); }
   .each h3:first-child { margin-block-start: 0; }
   .narrow { inline-size: 100%; max-inline-size: calc(var(--vx) * 76); }
+  #mina-item .presence-optic {
+    --vx: 1px;
+    position: relative;
+    isolation: isolate;
+    flex: none;
+    inline-size: 18px;
+    block-size: 10px;
+    align-self: flex-start;
+    margin-block-start: calc((1lh - 10px) / 2);
+  }
+  .presence-optic:not([data-vx-live]) {
+    border: 2px solid var(--vx-steel);
+    background: var(--vx-slate);
+    box-shadow: inset 0 0 0 1px var(--vx-ink-quiet);
+  }
+  .presence-optic[data-vx-light="go"]:not([data-vx-live]) { background: var(--lit-go, var(--vx-leaf)); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -29,10 +45,10 @@
   <section>
     <h2>In use: the people of a team</h2>
     <div class="people" id="people">
-      <div class="vx-item">
+      <div class="vx-item" id="mina-item">
         <span class="vx-item-lead"><span class="vx-avatar"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E%3Crect width='12' height='12' fill='%23bcd0ee'/%3E%3Crect x='3' y='2' width='6' height='7' fill='%232a2030'/%3E%3Crect x='4' y='3' width='4' height='5' fill='%23c58a66'/%3E%3Crect x='5' y='8' width='2' height='1' fill='%23c58a66'/%3E%3Crect x='2' y='9' width='8' height='3' fill='%232f4fb8'/%3E%3C/svg%3E" alt=""></span></span>
         <span class="vx-item-text"><span class="vx-item-title">Mina Okafor</span><span class="vx-item-line">Owner, deployed four minutes ago</span></span>
-        <span class="vx-item-trail"><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Here now</span></span>
+        <span class="vx-item-trail"><span class="vx-badge"><span class="presence-optic" data-vx-light="go" aria-hidden="true"></span><span>Here now</span></span></span>
       </div>
       <div class="vx-item">
         <span class="vx-item-lead"><span class="vx-avatar"><img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12' shape-rendering='crispEdges'%3E%3Crect width='12' height='12' fill='%23f0d9b8'/%3E%3Crect x='3' y='2' width='6' height='3' fill='%23b5562a'/%3E%3Crect x='4' y='3' width='4' height='5' fill='%23f0c4a0'/%3E%3Crect x='5' y='8' width='2' height='1' fill='%23f0c4a0'/%3E%3Crect x='2' y='9' width='8' height='3' fill='%233d6b4f'/%3E%3C/svg%3E" alt=""></span></span>
@@ -86,7 +102,57 @@
 <script type="module">
   import { show } from './parts.js';
   import { avatar } from '../../src/components/avatar.js';
-  show(avatar); // the item is words: the wells and the lamps in it are other parts
+  // A flush presence window. The ferrule and smoked diffuser stay in the panel
+  // when power is removed. Only the small region above the diode transmits light.
+  const presence = {
+    name: 'item-presence',
+    selector: '#mina-item .presence-optic',
+    pad: 3,
+    glowStrength: 0,
+    build(live, model) {
+      const { W, H } = live;
+      const collar = model.part('ferrule');
+      const lens = model.part('diffuser');
+      const diode = model.part('diode');
+      live.well = [0, 0, W, H];
+      for (const part of [collar, lens, diode]) {
+        part.grounded = false;
+        part.sunk = true;
+      }
+      collar.slab(0, 0, -2, W, H, 2, 'steel', 3);
+      collar.carve(2, 2, -1, W - 4, H - 4, 1);
+      const x = Math.floor(W / 2) - 2, y = Math.floor(H / 2) - 1;
+      collar.carve(x, y, -2, 4, 2, 1);
+      diode.box(x, y, -2, 4, 2, 1, live.el.dataset.vxLight === 'go' ? 'light-go' : 'lens');
+      lens.slab(2, 2, -1, W - 4, H - 4, 1, 'lens', 1);
+      live.faceZ = 0;
+      live.state.tinted = null;
+    },
+    pose(live) {
+      if (live.state.tinted === live.tintRevision) return;
+      live.state.tinted = live.tintRevision;
+      if (live.el.dataset.vxLight !== 'go') return;
+      const { ferrule, diffuser, diode } = live.model.byName;
+      // The opal centre scatters across the window. The steel rim takes
+      // a much fainter reflection and has no emission of its own.
+      for (const part of [diffuser, ferrule]) {
+        for (let i = 0; i < part.count; i++) {
+          const dx = (part.rest[i * 3] - live.W / 2) / 5;
+          const dy = (part.rest[i * 3 + 1] - live.H / 2) / 3;
+          const intensity = Math.min(1, 1.4 * Math.exp(-dx * dx - dy * dy));
+          const weight = intensity * (part === diffuser ? 0.96 : 0.22);
+          for (let c = 0; c < 3; c++) part.col[i * 4 + c] += (diode.col[c] - part.col[i * 4 + c]) * weight;
+          if (part === diffuser) part.col[i * 4 + 3] = weight * 0.8;
+        }
+      }
+    },
+    bind(live) {
+      const observer = new MutationObserver(() => live.rebuild());
+      observer.observe(live.el, { attributes: true, attributeFilter: ['data-vx-light'] });
+      return () => observer.disconnect();
+    },
+  };
+  show(avatar, presence);
   // the page's own: what a press does here
   document.getElementById('press').addEventListener('click', (e) => { const t = document.getElementById('pressed'); t.textContent = t.textContent === 'Closed' ? 'Open' : 'Closed'; });
   document.getElementById('let-in').addEventListener('click', (e) => { e.currentTarget.closest('.vx-item').querySelector('.vx-item-line').textContent = 'Can deploy'; e.currentTarget.disabled = true; });

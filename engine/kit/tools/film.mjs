@@ -51,6 +51,11 @@ if (has('hardware')) {
       act: async (p, b) => p.mouse.click(b.x + b.width / 2, b.y + b.height / 2) },
     'hardware-menu': { ...SCENES['menu-open'], path: 'menu', el: '#project-menu', scroll: '#trigger',
       act: async (p) => p.click('#trigger') },
+    'release-menu': { el: '#project-menu', path: 'menu', scroll: '#trigger', frames: 16, pad: 44, expect: [90, 160],
+      before: async p => { await p.click('#trigger'); await p.clock.runFor(400); }, act: async p => p.keyboard.press('Escape') },
+    'release-toast': { el: '.vx-toasts .vx-toast', path: 'toast', scroll: '#stay', frames: 20, pad: 44, expect: [160, 240],
+      before: async p => { await p.click('#stay'); await p.clock.runFor(400); },
+      act: async (p, b) => p.mouse.click(b.x + b.width / 4, b.y + b.height / 2) },
     'raise-plate': { ...SCENES['dialog-open'], path: 'dialog', el: '#rename', scroll: '#open-rename',
       act: async (p) => p.click('#open-rename') },
     'lower-plate': { ...SCENES['dialog-close'], path: 'dialog', el: '#rename', scroll: '#open-rename',
@@ -71,7 +76,7 @@ for (const name of names) {
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
-  const path = sc.path ? `showcase/parts/${sc.path}.html?theme=${has('dark') ? 'dark' : 'light'}` : flag('page', 'showcase/');
+  const path = sc.path ? `showcase/parts/${sc.path}.html?theme=${has('dark') ? 'dark' : 'light'}` : flag('page', 'showcase/principles.html');
   await page.goto(`http://127.0.0.1:${port}/kit/${path}`);
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await page.evaluate(() => document.fonts.ready);
@@ -82,7 +87,7 @@ for (const name of names) {
   await page.clock.runFor(200);
   if (sc.before) await sc.before(page);
   await page.evaluate(() => { window.vx.stage.manual = true; });
-  const followsInk = ['menu-open', 'hardware-menu', 'dialog-open', 'raise-plate', 'dialog-close', 'lower-plate', 'toast'].includes(name);
+  const followsInk = ['menu-open', 'hardware-menu', 'dialog-open', 'raise-plate', 'dialog-close', 'lower-plate', 'toast', 'release-toast', 'release-menu'].includes(name);
   if (followsInk) await page.evaluate(async () => {
     window.measurePlateInk = (await import('/kit/tools/plate-ink.mjs')).plateInk;
   });
@@ -111,13 +116,20 @@ for (const name of names) {
         if (d > 0.012 || Math.abs(s - ps) > 0.012) changed++; // under a twentieth of a pixel nobody sees it
       } else if (prev) changed = n;
     }
+    // A reduced-motion surface changes opacity with stationary vertices. Measure the
+    // actual rendered alpha as well as translations, including the native close frame.
+    if (window.measurePlateInk) {
+      const alpha = el.getClientRects().length ? Number(getComputedStyle(live.canvas).opacity) * Number(getComputedStyle(el).opacity) : 0;
+      if (Math.abs(alpha - window.__filmAlpha) > 0.01) changed++;
+      window.__filmAlpha = alpha;
+    }
     window.__film = cur;
     return { n, visible, maxStep, popped, changed, ink: window.measurePlateInk?.(live) };
   }, sc.el);
 
   let box = sc.late ? null : await page.locator(sc.el).first().boundingBox();
   await page.evaluate(() => { window.__film = null; });
-  if (!sc.late) await measure();
+  const resting = sc.late ? null : await measure();
   await sc.act(page, box);
   await page.waitForTimeout(40); // real time, so the page has handled the input before frame 1
   const firstInk = followsInk ? await page.evaluate(sel => {
@@ -134,7 +146,7 @@ for (const name of names) {
     const m = await measure();
     stats.push(m);
     if (f % every === 0) {
-      box = await page.locator(sc.el).first().boundingBox().catch(() => box) || box;
+      box = await page.evaluate(sel => document.querySelector(sel)?.getBoundingClientRect().toJSON(), sc.el).then(r => r?.width ? r : box);
       if (box) {
         const pad = sc.pad;
         const clip = { x: Math.max(0, box.x - pad), y: Math.max(0, box.y - pad), width: box.width + pad * 2, height: box.height + pad * 2 };
@@ -153,7 +165,7 @@ for (const name of names) {
   const live = stats.filter(Boolean);
   if (!live.length) lines.push('not filmed: no voxels behind ' + sc.el);
   else {
-    const segments = sc.mid ? [[0, sc.mid.at, sc.expect], [sc.mid.at, stats.length, sc.expectAfter]] : [[0, stats.length, sc.expect]];
+    const segments = sc.mid ? [[0, sc.mid.at, sc.expect], [sc.mid.at, stats.length, sc.expectAfter]] : [[0, stats.length, followsInk && has('reduced') ? [90, 170] : sc.expect]];
     for (const [a, b, expect] of segments) {
       const seg = stats.slice(a, b);
       if (seg[0] && seg[0].changed === 0 && !sc.late) lines.push(`no response: nothing changed on the frame of the input (frame ${a + 1})`);
@@ -176,7 +188,7 @@ for (const name of names) {
     }
   }
   if (followsInk) {
-    const samples = [firstInk, ...live.map(m => m.ink)].filter(Boolean);
+    const samples = [resting?.ink, firstInk, ...live.map(m => m.ink)].filter(Boolean);
     const checked = samples.reduce((sum, sample) => sum + sample.checked, 0);
     const unsupported = samples.reduce((sum, sample) => sum + sample.unsupported, 0);
     if (!checked || unsupported) faults++;

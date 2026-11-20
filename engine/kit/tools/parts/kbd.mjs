@@ -56,7 +56,7 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 768, 390]) {
   const before = await p.evaluate(() => document.querySelector('main').innerHTML.length + '|' + document.querySelector('main').offsetHeight);
   await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 5 });
   await p.mouse.down(); await p.waitForTimeout(80);
-  const held = mode === 'voxels' ? await p.evaluate(() => { const l = window.vx.live(document.querySelector('.shortcuts .vx-kbd')); return l ? Object.values(l.springs).some((s) => s.moving) || !l.well || l.model.byName.floor.tz !== 0 : null; }) : false;
+  const held = mode === 'voxels' ? await p.evaluate(() => { const l = window.vx.live(document.querySelector('.shortcuts .vx-kbd')); return l ? Object.values(l.springs).some((s) => s.moving) || l.faceZ <= 0 || l.model.byName.cap?.tz !== 0 : null; }) : false;
   await p.mouse.up();
   const after = await p.evaluate(() => document.querySelector('main').innerHTML.length + '|' + document.querySelector('main').offsetHeight);
   say(before === after && held === false, `${tag} pressing a cap with a real mouse moves nothing and changes nothing`);

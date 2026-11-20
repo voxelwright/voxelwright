@@ -1,5 +1,5 @@
 // A marker is a line across a thread with a word in it. What must hold: the word is read where it
-// stands and the grooves are only seen; "New" is in the accent's light and says what is new in
+// stands and the grooves are only seen; the unread pilot carries the accent and says what is new in
 // words; a date keeps to the room's own light; long words wrap between the grooves. Says ok or
 // FAIL for each thing; exit 1 on a failure.
 //   PORT=5989 node tools/parts/marker.mjs
@@ -30,8 +30,25 @@ async function behaves(p, tag, live) {
   say(m.every((x) => x.grooves === 'true,true' && x.words.trim()), `${tag}every marker is a word between two grooves that are only seen ("${m[0].words}")`);
   const day = await p.evaluate(() => document.querySelector('#day time').getAttribute('datetime'));
   say(day === '2026-11-16', `${tag}a date is a <time> (datetime="${day}")`);
-  const fresh = await p.evaluate(() => { const k = document.getElementById('new'); return { said: k.querySelector('.vx-marker-word').textContent, lights: [...k.querySelectorAll('.vx-groove')].map((g) => g.dataset.vxLight).join() }; });
-  say(fresh.said === 'New messages' && fresh.lights === 'accent,accent', `${tag}where the new begins: "${fresh.said}" to a screen reader, its grooves in the accent's light`);
+  const fresh = p.locator('#new');
+  const lamp = fresh.locator('.marker-pilot[aria-hidden="true"]');
+  say(await fresh.locator('.vx-marker-word').textContent() === 'New messages' && await lamp.count() === 1,
+    `${tag}the unread boundary has one fixed pilot and reads “New messages”`);
+  say(await p.locator('.stack [data-vx-kind="new"] > [data-vx-light="accent"]').count() === 2,
+    `${tag}the catalog's generic new marker retains its two accent grooves`);
+  if (live) {
+    const emission = () => lamp.evaluate(el => {
+      const lens = window.vx.live(el).model.byName.lens;
+      return [lens.count, Math.max(...lens.col.filter((_, i) => i % 4 === 3))];
+    });
+    const [cells, on] = await emission();
+    await fresh.evaluate(el => el.removeAttribute('data-vx-kind'));
+    const [unlitCells, off] = await emission();
+    await fresh.evaluate(el => { el.dataset.vxKind = 'new'; });
+    const [, restored] = await emission();
+    say(cells > 0 && cells === unlitCells && on > 0 && off === 0 && restored === on,
+      'the same lens stays seated through light, dark and return');
+  }
   const grooves = await p.evaluate(() => [...document.querySelectorAll('.vx-marker > .vx-groove')].map((g) => g.getBoundingClientRect().width));
   say(grooves.every((w) => w >= 16), `${tag}no groove is narrower than four voxels (narrowest ${Math.min(...grooves)} px)`);
   if (live) {

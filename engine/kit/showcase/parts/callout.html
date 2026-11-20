@@ -13,6 +13,20 @@
   .deploy .when { color: var(--vx-ink-quiet); font-size: 0.9375rem; margin-block-start: calc(var(--vx) * -3); }
   .kinds { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
   .vx-callout code { font: 400 0.875em/1 var(--vx-mono); }
+  #build-note { padding-inline-start: calc(var(--vx) * 7); gap: .375rem; }
+  #build-note .vx-callout-title {
+    font-size: 1.375rem; line-height: 1.18; letter-spacing: -.02em; text-wrap: balance;
+  }
+  #build-note .note-kind {
+    display: block; margin-block-end: .375rem; color: var(--vx-ink-quiet);
+    font: 600 .75rem/1rem var(--vx-mono); text-transform: uppercase; letter-spacing: .09em;
+  }
+  #build-note .note-setting { display: block; color: var(--vx-ink-quiet); font-size: .9375rem; }
+  #build-note:not([data-vx-live])::before {
+    inset-block: var(--vx) auto;
+    inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 3);
+    border: 1px solid var(--vx-ink-quiet); box-sizing: border-box;
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -43,9 +57,9 @@
   <section>
     <h2>Every kind</h2>
     <div class="kinds">
-      <aside class="vx-callout" data-vx-kind="note" aria-labelledby="note-title">
-        <h3 class="vx-callout-title" id="note-title">Note: builds start on a push to main</h3>
-        <p>Other branches build only when you ask. Change this under Settings, Branches.</p>
+      <aside id="build-note" class="vx-callout" data-vx-fitting="pilot" data-vx-kind="note" aria-labelledby="note-title">
+        <h3 class="vx-callout-title" id="note-title"><span class="note-kind">Note</span> Pushes to main start a build</h3>
+        <p>Other branches build on request. <span class="note-setting">Change this in Settings under Branches.</span></p>
       </aside>
       <div class="vx-callout" data-vx-kind="done" role="status">
         <p class="vx-callout-title">Done: harbor-api is live</p>

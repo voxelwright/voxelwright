@@ -23,7 +23,13 @@ const read = (id) => p.evaluate((id) => {
   const { thumb, lit, walls } = l.model.byName, r = el.getBoundingClientRect();
   let on = 0;
   for (let i = 0; i < lit.count; i++) if (lit.scales[i] > 0.5) on++;
-  return { value: Number(input.value), key: r.left + (thumb.tx + 3.5) * l.vx, down: thumb.tz, press: l.spring('press').target, lit: on / (lit.count || 1), trench: !!walls && !!l.well, left: r.left, right: r.right, y: r.top + r.height / 2, W: l.W, vx: l.vx };
+  const ivory = window.vx.MATERIALS.ivory.id;
+  const stripe = input.matches(':disabled') ? window.vx.MATERIALS.slate.id : ivory;
+  const index = thumb.mats.findIndex((mat, i) => mat === stripe && thumb.rest[i * 3] === 3.5);
+  if (index < 0) throw Error('Missing position stripe on fader ' + id);
+  const stripeX = thumb.rest[index * 3], stripeTop = thumb.rest[index * 3 + 2] + 0.5;
+  const projected = stripeX + thumb.tx + (stripeTop + thumb.tz) / 2;
+  return { value: Number(input.value), key: r.left + projected * l.vx, down: thumb.tz, press: l.spring('press').target, lit: on / (lit.count || 1), trench: !!walls && !!l.well, left: r.left, right: r.right, y: r.top + r.height / 2, W: l.W, vx: l.vx };
 }, id);
 
 let s = await read('fine');

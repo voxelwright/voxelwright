@@ -44,7 +44,7 @@
 .vx-radio input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .vx-radio input:disabled { cursor: default; }
 .vx-radio:has(input:disabled) { color: var(--vx-ink-quiet); cursor: default; }
-.vx-dot { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 5); }
+.vx-dot { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 7); }
 .vx-radio input:focus-visible + .vx-dot { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
 
 /* plain: a painted well with its corners stepped; chosen, it is the accent's colour */
@@ -56,7 +56,7 @@
 }
 .vx-dot:not([data-vx-live])::before { content: ""; position: absolute; inset: var(--vx); background: var(--vx-floor, var(--vx-chalk)); }
 .vx-radio input:checked + .vx-dot:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
-.vx-radio input:checked + .vx-dot:not([data-vx-live])::before { content: none; }
+.vx-radio input:checked + .vx-dot:not([data-vx-live])::before { content: var(--vx-radio-insert, none); }
 .vx-radio input:disabled + .vx-dot:not([data-vx-live]) { background: var(--vx-steel); }
 .vx-radio input:disabled + .vx-dot:not([data-vx-live])::before { background: var(--vx-slate); }
-.vx-radio input:disabled:checked + .vx-dot:not([data-vx-live])::before { content: none; }
+.vx-radio input:disabled:checked + .vx-dot:not([data-vx-live])::before { content: var(--vx-radio-insert, none); }

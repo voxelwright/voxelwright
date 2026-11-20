@@ -41,6 +41,23 @@ export const RELEASE = { k: 1000, c: 2 * Math.sqrt(1000) * RETURN_DAMPING };
 export const SLIDE = { k: 420, c: 30 };    // toggles, tabs: about 220 ms with a little carry
 export const CALM = { k: 170, c: 26 };
 
+/**
+ * A spring as a CSS easing, so the plain version moves by the same physics as the voxels:
+ * { time: ms until it stays within 1% of its target, easing: 'linear(...)' } for a move from 0
+ * to 1. The kit's stylesheet carries PRESS, RELEASE and SLIDE this way (--vx-press-*, and so on);
+ * tools/feel.mjs checks that they still match.
+ */
+export function springCurve({ k, c }, points = 24) {
+  const s = new Spring(0, k, c).to(1), dt = 1 / 480, xs = [0];
+  while (s.step(dt) && xs.length < 960) xs.push(s.x);
+  xs.push(1);
+  let end = xs.length - 1;
+  while (end > 0 && Math.abs(xs[end - 1] - 1) <= 0.01) end--;
+  const at = (i) => Math.round(xs[Math.min(i, xs.length - 1)] * 1000) / 1000;
+  const stops = Array.from({ length: points + 1 }, (_, j) => (j === points ? 1 : at(Math.round((j / points) * end))));
+  return { time: Math.round(end * dt * 1000), easing: `linear(${stops.join(', ')})` };
+}
+
 const easeOutBack = (p, s = 1.25) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
 const easeOut = (p) => 1 - Math.pow(1 - p, 4);
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -179,29 +196,85 @@ export function crumble(part, opts = {}) {
   };
 }
 
-/** The plate carries its front face, lettering and controls throughout its travel. */
-export function plateMotion(part, { duration = 0.4, top, out, still, start = out ? 1 : 0 }) {
-  const end = still ? 0.16 : duration;
+// A transient is assembled on one grid shared by its body, light and inlays. Run the
+// same course backwards on dismissal so an interrupted build releases exactly where it is.
+export function surfaceCourses(part, { W, H, top, duration, from, rim, still, out, start, previousRelease, contactPose }) {
+  // A reversal retraces the same trajectory, including each block's tilt.
+  const release = !!contactPose || (start > 0 && start < 1 ? previousRelease ?? false : out && start === 1);
+  const end = Math.max(0.001, (still ? 0.12 : duration) * Math.abs((out ? 0 : 1) - start));
+  const size = rim ? 3 : brickSize(W, H);
+  const grid = still ? null : bricks(part, size);
+  const count = grid?.count ?? 0;
+  const delay = new Float32Array(count), depth = new Float32Array(count);
+  const shift = new Float32Array(count), phase = new Float32Array(count);
+  // Each course tips about its long edge as the fittings come apart. Use the same
+  // pivot for the inlay and for the block supporting it, even on separate model parts.
+  const tipping = release && !rim && !still;
+  const rotation = tipping ? new Float32Array(4 * count) : null;
+  const [x, y] = from;
+  const far = Math.hypot(Math.max(x, W - x), Math.max(y, H - y)) || 1;
+  for (let b = 0; b < count; b++) {
+    const col = grid.cell[b * 2], row = grid.cell[b * 2 + 1];
+    const cx = (col + 0.5) * size - (row & 1) * size / 2, cy = (row + 0.5) * size;
+    const grain = hash3(col, row, 19);
+    const distance = Math.min(1, Math.hypot(cx - x, cy - y) / far);
+    delay[b] = (release ? 0.55 : 0.34) * distance + 0.08 * grain;
+    // The center of a frequently opened control is there under the pointer from frame one.
+    const border = Math.min(cx, W - cx, cy, H - cy) < size;
+    depth[b] = rim ? (border ? 2.5 : 0) : top + 1;
+    shift[b] = (grain - 0.5) * (rim ? 1.6 : 6);
+  }
   return {
-    kind: out ? 'lower' : 'assemble', t: 0, end,
-    get progress() {
-      const t = clamp01(this.t / end);
-      if (out) return start * (1 - t) ** 2;
-      if (still) return start + (1 - start) * t;
-      // The return spring has the same damping as a released key. A heavier plate
-      // takes longer to reach its stop, where its first return to level ends the travel.
-      const ratio = RETURN_DAMPING / Math.sqrt(1 - RETURN_DAMPING ** 2);
-      const phase = t * (1.5 * Math.PI + Math.atan(ratio));
-      return 1 - (1 - start) * Math.exp(-ratio * phase) * (Math.cos(phase) + ratio * Math.sin(phase));
-    },
-    get dz() { return still ? 0 : (this.progress - 1) * (top - 0.5); },
+    kind: out ? 'crumble' : 'assemble', t: 0, end, from, still, rim, release,
+    get progress() { return start + ((out ? 0 : 1) - start) * clamp01(this.t / end); },
     write(pos, o) {
-      const dz = this.dz;
+      const progress = contactPose ? 1 - clamp01(this.t / end) : this.progress;
+      for (let b = 0; b < count; b++) {
+        const t = clamp01(((release ? 1 - progress : progress) - delay[b]) / (1 - delay[b]));
+        phase[b] = depth[b] ? (release ? t : (1 - t) ** 2) : 0;
+        if (tipping) {
+          const angle = shift[b] * 0.22 * t;
+          rotation[b * 4] = Math.cos(angle);
+          rotation[b * 4 + 1] = Math.sin(angle);
+          rotation[b * 4 + 2] = Math.sin(angle / 2);
+          rotation[b * 4 + 3] = Math.cos(angle / 2);
+        }
+      }
       for (let i = 0; i < part.count; i++, o += 8) {
-        pos[o] = part.rest[i * 3] + part.tx;
+        const b = grid?.of[i], loose = still ? 0 : phase[b];
+        pos[o] = part.rest[i * 3] + part.tx + (still ? 0 : shift[b] * loose);
         pos[o + 1] = part.rest[i * 3 + 1] + part.ty;
-        pos[o + 2] = part.rest[i * 3 + 2] + part.tz + dz;
-        pos[o + 3] = 1; pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
+        pos[o + 2] = part.rest[i * 3 + 2] + part.tz - (still ? 0 : depth[b] * loose);
+        pos[o + 3] = part.scales?.[i] ?? 1;
+        pos[o + 4] = pos[o + 5] = pos[o + 6] = 0;
+        pos[o + 7] = 1;
+        if (tipping) {
+          const dy = part.rest[i * 3 + 1] - (grid.cell[b * 2 + 1] + 0.5) * size;
+          const dz = part.rest[i * 3 + 2] - top / 2;
+          const c = rotation[b * 4] - 1, s = rotation[b * 4 + 1];
+          pos[o + 1] += c * dy - s * dz + 3 * loose;
+          pos[o + 2] += s * dy + c * dz;
+          pos[o + 4] = rotation[b * 4 + 2];
+          pos[o + 7] = rotation[b * 4 + 3];
+        }
+        if (contactPose) {
+          // Each block waits at its interrupted pose until the wave from the tap reaches it.
+          const offset = i * 8, held = 1 - loose;
+          if (loose === 0) {
+            for (let j = 0; j < 8; j++) pos[o + j] = contactPose[offset + j];
+          } else {
+            pos[o] += held * (contactPose[offset] - part.rest[i * 3] - part.tx);
+            pos[o + 1] += held * (contactPose[offset + 1] - part.rest[i * 3 + 1] - part.ty);
+            pos[o + 2] += held * (contactPose[offset + 2] - part.rest[i * 3 + 2] - part.tz);
+            // Course rotations share the same hinge axis. Compose the remaining initial tilt.
+            const angle = Math.atan2(contactPose[offset + 4], contactPose[offset + 7]);
+            if (angle) {
+              const half = Math.atan2(pos[o + 4], pos[o + 7]) + held * angle;
+              pos[o + 4] = Math.sin(half);
+              pos[o + 7] = Math.cos(half);
+            }
+          }
+        }
       }
       return this.t >= end;
     },
