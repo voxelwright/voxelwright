@@ -10,11 +10,14 @@ start)
     mkdir -p "$runner" "$output"
     if [ ! -f "$runner/revision" ]; then
         rev=$(git rev-parse HEAD)
-        git archive "$rev" engine/bay | tar -x -C "$runner"
+        git archive "$rev" engine/bay engine/sf/release.py | tar -x -C "$runner"
         echo "$rev" > "$runner/revision"
     fi
     launchctl submit -l "$label" -o "$bay/450-city.log" -e "$bay/450-city.err" -- \
-        /usr/bin/caffeinate -dimsu "$bay/venv/bin/python" -u "$runner/engine/bay/full_run.py" --output "$output"
+        /usr/bin/caffeinate -dimsu /bin/sh -ec '
+            "$1" -u "$2/engine/bay/full_run.py" --output "$3"
+            "$1" "$2/engine/sf/release.py" "$3" "$3/sf"
+        ' sf-bake "$bay/venv/bin/python" "$runner" "$output"
     ;;
 status)
     launchctl list "$label" || true

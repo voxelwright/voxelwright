@@ -11,7 +11,7 @@ The layout is `sf/releases/<release>/manifest.json`, with `tiles/<level>/<x>_<z>
 Run the following from the repository root, with the Bay Python environment. The output directory represents the site's sf directory. The checked-in pilot fixture contains metadata only. To materialize its matching assets locally use
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/sf/release.py ~/.village/engine/bay/pilot450/final-release /tmp/village-sf/sf --graphs engine/sf/pilot-graph
+~/.village/engine/bay/venv/bin/python engine/sf/release.py ~/.village/engine/bay/450-accuracy/publication /tmp/village-sf/sf
 ```
 
 ## Optional far model

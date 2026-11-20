@@ -5,6 +5,8 @@ import hashlib
 import json
 import re
 import shutil
+import subprocess
+import sys
 from pathlib import Path
 
 CREDITS = [
@@ -30,6 +32,7 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
     state = json.loads((root / "state.json").read_text())
     verified = {k: v for task in state["done"].values() for k, v in task.items()}
     files = {}
+    verified_files = {}
 
     def record(path, name, checkpoint=True):
         with path.open("rb") as stream:
@@ -37,6 +40,7 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
         if checkpoint and verified.get(str(path.relative_to(root))) != digest:
             raise ValueError(f"{path} absent or changed since verification")
         files[name] = path
+        verified_files[name] = digest
         return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
 
     levels = []
@@ -100,7 +104,14 @@ def generate(root, out, inventory_only=False, graph_dir=None, far_index=None):
             path = dest / name
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")
-            shutil.copyfile(source, tmp)
+            if sys.platform == "darwin":
+                # On the bake volume this produces an independent APFS clone.
+                subprocess.run(["/bin/cp", "-c", source, tmp], check=True)
+            else:
+                shutil.copyfile(source, tmp)
+            with tmp.open("rb") as stream:
+                if hashlib.file_digest(stream, "sha256").hexdigest() != verified_files[name]:
+                    raise ValueError(f"{name} changed while staging")
             tmp.replace(path)
     (dest / "manifest.json").write_bytes(manifest)
     pointer = out / "current.json"

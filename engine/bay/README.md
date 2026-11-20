@@ -7,7 +7,7 @@ engine/bay/run-city.sh start
 engine/bay/run-city.sh status
 ```
 
-The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry.
+The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` and writes its verified `sf/current.json` pointer last. On APFS the decoded objects are independent copy-on-write files.
 
 ### Retained observations
 
@@ -34,7 +34,7 @@ The six original pack and name pairs qualify as seeds only when they match the p
 
 ## Frontages and pictures
 
-The four pilot locations used individual Mapillary panoramas. To sample another selected frontage, supply one square pack, the place in frame metres and a local observations file. For example, the Financial District sample is at x=52580 and z=66743. `frontage.py` gets the Mapillary image-point tile for that place, selects nearby panoramas and samples a low band of visible walls. The output keeps colour indices and source image IDs. Photos stay beside the local observations. Inspect the result against a matched view before incorporating new observations into a release. The full run samples geographically distributed panoramas, takes visible wall colours where two cameras agree, estimates material and ground-floor use, filters roof returns and draws surveyed crowns and mapped street detail.
+The four pilot locations used individual Mapillary panoramas. To sample another selected frontage, supply one square pack, the place in frame metres and a local observations file. For example, the Financial District sample is at x=52580 and z=66743. `frontage.py` gets the Mapillary image-point tile for that place, selects nearby panoramas and samples a low band of visible walls. The output keeps colour indices and source image IDs. Photos stay beside the local observations. Inspect the result against a matched view before incorporating new observations into a release. The full run samples geographically distributed panoramas, takes visible wall colours where two cameras agree or a near, road-facing panel has consistent paint, estimates material and ground-floor use, filters roof returns and draws surveyed crowns and mapped street detail.
 
 To open the measured six-square build on this Mac, from `engine/` run
 
@@ -43,3 +43,6 @@ VILLAGE_BAY_ROOT="$HOME/.village/engine/bay/pilot450/final-release" node serve.m
 ```
 
 Open `http://127.0.0.1:5938/city?bay=1`. The same `VILLAGE_BAY_ROOT` selects the ground pack for `bay/shot.mjs`. The shot tool gets its GPU turn through `test/kit.mjs`. Paired street views and the 100 m contact sheet are in `~/.village/engine/bay/pilot450/pairs/`. The original two-square installation is backed up in `~/.village/engine/bay/pilot450/backup/`.
+
+
+To repeat the neighbourhood comparison, run the pilot and publication servers in turn with their respective releases as `VILLAGE_BAY_ROOT`. From the repository root use `engine/bay/recognition.py before --release PATH --port PORT` and `engine/bay/recognition.py final --release PATH --port PORT` with the Bay Python interpreter. The reference cameras are fixed. Run `recognition.py sheet` to compose the pictures. The street reference is the solved panorama at an estimated 2.5 m camera height. At 100 m the reference is a north-up NAIP orthophoto cropped to the ground-plane field of view. Roof displacement on tall buildings differs between that projection and a perspective camera.
