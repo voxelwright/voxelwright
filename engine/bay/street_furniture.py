@@ -215,6 +215,21 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
                 vx, vz = kerb.x - x, kerb.y - z
                 size = max(1, math.hypot(vx, vz))
                 x, z = kerb.x + 5 * vx / size, kerb.y + 5 * vz / size
+            # A two-dimensional sign fix may fall on the wall behind its foot.
+            # Search toward its road for the first sidewalk sample at street grade.
+            if kind in ("stop", "observedStop"):
+                foot = Point(x, z)
+                at_road = nearest_points(foot, road)[1]
+                road_grade = base(at_road.x, at_road.y)
+                distance = foot.distance(at_road)
+                if distance > 0 and base(x, z) > road_grade + 6:
+                    toward = LineString((foot, at_road))
+                    for along in np.arange(2, min(30, distance) + 1, 2):
+                        q = toward.interpolate(along)
+                        if base(q.x, q.y) <= road_grade + 4:
+                            x, z = q.x, q.y
+                            stats["signFeetAtStreetGrade"] += 1
+                            break
         y = base(x, z)
         if kind in ("stop", "observedStop"):
             rod((x, y, z), (x, y + 27, z), 5, steel)
