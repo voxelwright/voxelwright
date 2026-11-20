@@ -32,6 +32,108 @@ def encode(data):
     ).encode()
 
 
+def library(kind, source, inventory, record):
+    """The `life` or `cars` section: its producer's index and every object it lists, the streetcar routes with life."""
+    idx = source / "index.json"
+    index_record = record(idx, f"{kind}/index.json")
+    listing = json.loads(idx.read_text())
+    if listing.get("version") != 1:
+        raise ValueError(f"unknown {kind} index")
+    if kind == "life":
+        entries = list(listing["life"].items())
+        if listing.get("frame") != inventory["frame"] or set(listing["life"]) != set(
+            inventory["names"]
+        ):
+            raise ValueError("life index does not cover exactly this release")
+        if "transit" in listing:
+            entries.append(("transit", listing["transit"]))
+    else:
+        entries = [(r["id"], r) for r in listing["cars"]]
+    objects = {}
+    for key, row in entries:
+        if (
+            not re.fullmatch(r"[a-zA-Z0-9_.-]+", key)
+            or key in (".", "..", "index")
+            or key in objects
+            or row["path"] != key + ".json"
+        ):
+            raise ValueError(f"invalid {kind} object")
+        rec = record(source / row["path"], kind + "/" + row["path"])
+        if rec["sha256"] != row["sha256"] or rec["bytes"] != row["bytes"]:
+            raise ValueError(f"{kind}/{key} differs from its index")
+        objects[key] = rec
+    return {"index": index_record, "objects": objects}
+
+
+def cut(source, far, record):
+    """The `far.landing` section: sf/far/landing.mjs's listing, each tile's cut checked and recorded like a band's."""
+    listing = json.loads((source / "landing.json").read_text())
+    eye = listing.get("eye")
+    if listing.get("version") != 1 or not (
+        isinstance(eye, list) and len(eye) == 3 and all(isinstance(v, (int, float)) for v in eye)
+    ):
+        raise ValueError("unknown landing cut")
+    for key, row in listing["tiles"].items():
+        path = f"far/landing/{key}.far"
+        if key not in far["tiles"] or row["path"] != path or record(source / path, path) != row:
+            raise ValueError(f"invalid landing object: {path}")
+    return listing
+
+
+def restock(out, life=None, cars=None, landing=None, base=None):
+    """Stage a pinned release again with new street life, vehicles or landing cut; every other object stays as it is.
+
+    The candidate's tiles, names, graphs and far bands are the base release's own (OUT's pin unless --base names
+    another), so its panel scores carry over unchanged; it is staged beside it (APFS clones, the old release untouched)
+    and its digest printed, for sf/pilot/current.json to name."""
+    release = base or json.loads((out / "current.json").read_text())["release"]
+    old = out / "releases" / release
+    body = (old / "manifest.json").read_bytes()
+    if hashlib.sha256(body).hexdigest() != release or encode(json.loads(body)) != body:
+        raise ValueError("base manifest differs from its digest")
+    inventory = json.loads(body)
+    files = {}
+
+    def record(path, name):
+        files[name] = path
+        with path.open("rb") as stream:
+            digest = hashlib.file_digest(stream, "sha256").hexdigest()
+        return {"path": name, "sha256": digest, "bytes": path.stat().st_size}
+
+    replaced = [kind for kind, source in (("life", life), ("cars", cars)) if source]
+    for kind in replaced:
+        inventory[kind] = library(kind, life if kind == "life" else cars, inventory, record)
+    if landing:
+        if "far" not in inventory:
+            raise ValueError("a landing cut needs a release with a far model")
+        inventory["far"]["landing"] = cut(landing, inventory["far"], record)
+    if not files:
+        raise ValueError("nothing to restock: pass --life, --cars or --landing")
+    manifest = encode(inventory)
+    digest = hashlib.sha256(manifest).hexdigest()
+    dest = out / "releases" / digest
+    if dest.exists():
+        raise ValueError(f"{dest} already exists")
+    tmp = out / "releases" / f".restock-{digest}"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    for entry in old.iterdir():
+        if entry.name in (*replaced, "manifest.json") or entry.name.startswith(("panel-", ".")):
+            continue
+        subprocess.run(["/bin/cp", "-cR", entry, tmp / entry.name], check=True)
+    if landing:
+        shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
+    if (old / ".bay-store").is_symlink():
+        (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
+    for name, source in files.items():
+        (tmp / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, tmp / name)
+    (tmp / "manifest.json").write_bytes(manifest)
+    tmp.rename(dest)
+    print(digest, "staged with", len(files), "new objects; everything else as", release)
+    return digest
+
+
 def generate(
     root,
     out,
@@ -151,33 +253,12 @@ def generate(
     ):
         if not source.exists() and not (life if kind == "life" else cars):
             continue
-        idx = source / "index.json"
-        index_record = record(idx, f"{kind}/index.json", False)
-        listing = json.loads(idx.read_text())
-        if listing.get("version") != 1:
-            raise ValueError(f"unknown {kind} index")
-        if kind == "life":
-            entries = listing["life"].items()
-            if listing.get("frame") != inventory["frame"] or set(
-                listing["life"]
-            ) != set(names):
-                raise ValueError("life index does not cover exactly this release")
-        else:
-            entries = [(r["id"], r) for r in listing["cars"]]
-        objects = {}
-        for key, row in entries:
-            if (
-                not re.fullmatch(r"[a-zA-Z0-9_.-]+", key)
-                or key in (".", "..", "index")
-                or key in objects
-                or row["path"] != key + ".json"
-            ):
-                raise ValueError(f"invalid {kind} object")
-            rec = record(source / row["path"], kind + "/" + row["path"], False)
-            if rec["sha256"] != row["sha256"] or rec["bytes"] != row["bytes"]:
-                raise ValueError(f"{kind}/{key} differs from its index")
-            objects[key] = rec
-        inventory[kind] = {"index": index_record, "objects": objects}
+        inventory[kind] = library(
+            kind,
+            source,
+            inventory,
+            lambda path, name: record(path, name, False),
+        )
     if far_index is None and state.get("farIndex") == "far.json":
         far_index = root / "far.json"
     if far_index:
@@ -346,7 +427,17 @@ if __name__ == "__main__":
     cli.add_argument("--life", type=Path, help="life.py directory with its index")
     cli.add_argument("--cars", type=Path, help="cars.mjs directory with its index")
     cli.add_argument("--paint", type=Path, help="accepted city-paint batch receipt")
+    cli.add_argument(
+        "--restock",
+        action="store_true",
+        help="stage OUT's pinned release again with only --life, --cars or --landing new (ROOT unused)",
+    )
+    cli.add_argument("--landing", type=Path, help="sf/far/landing.mjs directory with its landing.json")
+    cli.add_argument("--base", help="with --restock, the staged release to start from instead of OUT's pin")
     args = cli.parse_args()
+    if args.restock:
+        restock(args.out, args.life, args.cars, args.landing, args.base)
+        sys.exit()
     generate(
         args.root,
         args.out,

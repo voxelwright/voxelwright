@@ -44,7 +44,7 @@ try {
   const until = t.origin + t.near, folders = {}
   for (const a of site.asked) {
     if (a.status !== 200 || a.at > until) continue
-    const m = a.path.match(/\/releases\/[0-9a-f]{64}\/([^/]+)\//), key = m ? m[1] : a.path.startsWith('/sf/releases/') ? 'manifest' : a.path.startsWith('/sf/landing/') ? 'landing (staged)' : 'page'
+    const m = a.path.match(/\/releases\/[0-9a-f]{64}\/(far\/landing|[^/]+)\//), key = m ? m[1] : a.path.startsWith('/sf/releases/') ? 'manifest' : a.path.startsWith('/sf/landing/') ? 'landing (staged)' : 'page'
     const f = (folders[key] ??= { files: 0, wireMB: 0, rawMB: 0 })
     f.files++; f.wireMB += a.wire / 1048576; f.rawMB += a.bytes / 1048576
   }

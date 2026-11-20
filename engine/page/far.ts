@@ -37,12 +37,13 @@ struct V {
   right: vec3f, aspect: f32,
   up: vec3f, reach: f32,
   forward: vec3f, shaded: f32,
-  sun: vec3f, pad: f32,
+  sun: vec3f, pixel: f32,
   wedge: vec4f, bear: vec4f,
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
-struct B { pos: vec3f, cell: f32, nth: u32, u0: f32, w0: f32, pad2: u32, c0: vec3f, pad3: f32, c2: vec3f, pad4: f32 }
+// A landmark's section (whole) has every face drawn, each at least a pixel across.
+struct B { pos: vec3f, cell: f32, nth: u32, u0: f32, w0: f32, whole: u32, c0: vec3f, pad3: f32, c2: vec3f, pad4: f32 }
 struct Style { size: vec4f, glass: vec4f }
 struct Styles { s: array<Style, 16> }
 @group(0) @binding(0) var<uniform> v: V;
@@ -82,9 +83,18 @@ const FAR = 100000.0;
   let cv = f32((vi >> 1u) & 1u);
   var p: vec3f;
   var n: vec3f;
-  if (axis == 0u) { p = vec3f(x + cu * lu, y1, z + cv * lw); n = vec3f(0.0, 1.0, 0.0); }
-  else if (axis == 1u) { p = vec3f(x + side, mix(y0, y1, cv), z + cu * lw); n = b.c0 * (side * 2.0 - 1.0); }
-  else { p = vec3f(x + cu * lu, mix(y0, y1, cv), z + side); n = b.c2 * (side * 2.0 - 1.0); }
+  // A landmark's faces are a cell high and its grid's breadth across: from far they are under a pixel and fall
+  // between pixels, and the sky shows through the tower. Each is grown about its middle to a pixel each way.
+  var grow = vec2f(0.0);
+  if (b.whole != 0u) {
+    let mid = b.pos + b.c0 * ((x + lu * 0.5) * b.cell) + vec3f(0.0, (y0 + y1) * 0.5, 0.0) + b.c2 * ((z + lw * 0.5) * b.cell) - v.eye;
+    let least = max(dot(mid, v.forward), 1.0) * v.pixel;
+    let across = select(select(vec2f(lu * b.cell, y1 - y0), vec2f(lw * b.cell, y1 - y0), axis == 1u), vec2f(lu * b.cell, lw * b.cell), axis == 0u);
+    grow = max(vec2f(least) - across, vec2f(0.0)) * (vec2f(cu, cv) - 0.5);
+  }
+  if (axis == 0u) { p = vec3f(x + cu * lu + grow.x / b.cell, y1, z + cv * lw + grow.y / b.cell); n = vec3f(0.0, 1.0, 0.0); }
+  else if (axis == 1u) { p = vec3f(x + side, mix(y0, y1, cv) + grow.y, z + cu * lw + grow.x / b.cell); n = b.c0 * (side * 2.0 - 1.0); }
+  else { p = vec3f(x + cu * lu + grow.x / b.cell, mix(y0, y1, cv) + grow.y, z + side); n = b.c2 * (side * 2.0 - 1.0); }
   let world = b.pos + b.c0 * (p.x * b.cell) + vec3f(0.0, p.y, 0.0) + b.c2 * (p.z * b.cell) - v.eye;
   var out: Out;
   out.seen = world;
@@ -325,6 +335,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
         device.queue.writeBuffer(own, 0, new Float32Array([s.pos[0] - anchor[0], s.pos[1] - anchor[1], s.pos[2] - anchor[2], s.cell]))
         device.queue.writeBuffer(own, 16, new Uint32Array([0]))
         device.queue.writeBuffer(own, 20, new Float32Array(s.uw ?? [0, 0]))
+        device.queue.writeBuffer(own, 28, new Uint32Array([s.layer === 'hero' ? 1 : 0]))
         device.queue.writeBuffer(own, 32, new Float32Array([...s.c0, 0, ...s.c2, 0]))
         // The tile's box is what its faces fill, once any are here (a face may reach past its tile).
         if (!t.bounded) { t.lo = [...s.lo]; t.hi = [...s.hi]; t.bounded = true }
@@ -505,7 +516,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, 0, ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0])]))
     const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}`
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
@@ -537,7 +548,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
           if (!inView(view, aspect, s.lo, s.hi)) continue
           const least = (self.detail * ds) / 10 / focal
           // lods run from big to small: every face at least the first of them under `least` metres.
-          const k = lods.findIndex((l) => l <= least)
+          const k = s.layer === 'hero' ? -1 : lods.findIndex((l) => l <= least)
           let bound = false
           for (const run of s.runs) {
             // A run of faces all looking away from the eye (it is behind their plane at every corner of the section) is not drawn.
