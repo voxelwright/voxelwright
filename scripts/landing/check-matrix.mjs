@@ -170,10 +170,13 @@ try {
     await page.screenshot({ path: join(out, "day.png") });
     await page.keyboard.type("blue pill");
     assert.equal(await inMatrix(page), false, "blue pill leaves");
+    await page.keyboard.type("follow the white rabbit");
+    assert.equal(await inMatrix(page), true, "the longest phrase enters too");
+    await page.keyboard.press("Escape");
     await context.close();
   }
 
-  // Low: no marine layer, but the windows and the grade still play.
+  // Low: its marine layer is off, but a light one (four steps) comes with the mood.
   {
     const { context, page } = await open({ preset: "low" });
     await live(page);
@@ -184,7 +187,38 @@ try {
     await reset(page);
     await page.waitForTimeout(2000);
     const low = await read(page);
-    assert.ok(low.screen > 30 && low.grade > 30 && low.fog === 0, `Low plays without fog: ${JSON.stringify(low)}`);
+    assert.ok(low.screen > 30 && low.grade > 30 && low.fog === low.frames, `Low plays with a light fog: ${JSON.stringify(low)}`);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(2500);
+    await reset(page);
+    await page.waitForTimeout(1000);
+    assert.equal((await read(page)).fog, 0, "Low's marine layer goes again with the mood");
+    await context.close();
+  }
+
+  // The fitted default with adaptive pacing, the egg on and the pointer leaning the
+  // view (each lean frame rebakes the city and the map): the preset holds.
+  {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: "dark",
+      storageState: { cookies: [], origins: [{ origin: new URL(base).origin, localStorage: [{ name: "support-button-muted", value: "1" }] }] } });
+    await context.addInitScript(counter);
+    const page = await context.newPage();
+    page.on("pageerror", (error) => errors.push(error.message));
+    await page.goto(base);
+    await live(page);
+    await page.waitForTimeout(4000);
+    const preset = () => page.locator(".display-settings [name=preset]").inputValue();
+    const before = await preset();
+    await page.locator("#main").focus();
+    await page.keyboard.type("neo");
+    await reset(page);
+    const seconds = Number(process.env.LEAN ?? 20);
+    const end = Date.now() + seconds * 1000;
+    for (let i = 0; Date.now() < end; i++) await page.mouse.move(400 + 600 * Math.abs(Math.sin(i / 9)), 300 + 200 * Math.abs(Math.cos(i / 7)), { steps: 4 });
+    const n = await read(page);
+    console.log(`adaptive with lean ${seconds} s:`, JSON.stringify(n), "fps", (n.frames / seconds).toFixed(1), "preset", before, "→", await preset());
+    assert.equal(await preset(), before, "the egg and the lean keep the preset");
+    assert.ok(n.map > seconds * 10, "the lean rebakes the map with the city");
     await context.close();
   }
 
@@ -193,6 +227,16 @@ try {
     const { context, page } = await open({ width: 390, height: 844, scale: 3, mobile: true, scheme, preset: "medium" });
     await live(page);
     await page.waitForTimeout(3000);
+    // No red light's reach covers the moon, which a night tap resizes.
+    const clash = await page.evaluate(async () => {
+      const { project } = await import("/landing/survey.js");
+      const world = window.__world();
+      const { width, height } = document.querySelector(".park-canvas").getBoundingClientRect();
+      const reach = Math.max(18, height * 0.025), moon = Math.max(14, height * 0.044);
+      return world.beacons.map((p) => project(p, world.frame, width, height))
+        .some(([x, y, z]) => z > 0 && Math.hypot(x - width * 0.7, y - height * 0.14) < reach + moon);
+    });
+    assert.equal(clash, false, "tower lights and the moon don't share a tap");
     const red = await beacon(page);
     await page.touchscreen.tap(red.x, red.y);
     assert.equal(await inMatrix(page), true, "a tapped tower light enters on a phone");
