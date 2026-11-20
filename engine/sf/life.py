@@ -46,6 +46,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--graphs", default=str(ROOT / "engine/sf/pilot-graph"))
 ap.add_argument("--inputs", default=str(Path.home() / ".village/engine/bay/450-inputs"))
 ap.add_argument("--out", default=str(ROOT / "engine/sf/pilot-life"))
+ap.add_argument("--routes", default="~/.village/engine/bay/450-bus/routes.json.gz", help="OSM bus and trolleybus routes (fetched from Overpass once if missing)")
 args = ap.parse_args()
 
 from pyproj import Transformer  # noqa: E402
@@ -439,6 +440,66 @@ for x, z, yaw, m in kept:
     if where:
         out[where]["park"] += [int(round(x)), int(round(z)), int(round(yaw * 100)), m]
 
+# ── Signal heads: one on a post at the right kerb of each way into a junction with lights, facing whoever comes ──
+# Along the way: at OSM's own traffic_signals node on it where one is mapped within 25 m of the junction (where the
+# survey drew the stop line and its post), else 6 m short of the junction's middle. Across: on the pavement 0.6 m past
+# the kerb the survey drew on its right, else past the lanes. Written per square as [way, a, b, x, z, mapped]: the page
+# shows each the lights of the road `way/a/b`, as the cars on it obey them.
+def signal_node_on(r, reach=250):
+    way, a, b = r["id"].split("/")
+    nodes = raw_ways.get(way, {}).get("nodes", [])
+    J = int(b)
+    if J not in nodes or int(a) not in nodes:
+        return None
+    i, j = nodes.index(int(a)), nodes.index(J)
+    step = 1 if j > i else -1
+    for k in range(j - step, i - step, -step):
+        p = at_cells(nodes[k])
+        if p is None or math.dist(p, end_at[J]) > reach:
+            break
+        if node_tag.get(nodes[k]) == "traffic_signals":
+            return p
+    return None
+
+
+def project(line, p):
+    best, s0 = None, 0.0
+    for j in range(len(line) - 1):
+        (ax, az), (bx, bz) = line[j], line[j + 1]
+        ex, ez = bx - ax, bz - az
+        l = math.hypot(ex, ez) or 1
+        t = max(0, min(l, ((p[0] - ax) * ex + (p[1] - az) * ez) / l))
+        d = math.hypot(p[0] - ax - ex * t / l, p[1] - az - ez * t / l)
+        if best is None or d < best[0]:
+            best = (d, s0 + t)
+        s0 += l
+    return best[1]
+
+
+heads_split = defaultdict(int)
+for r in roads:
+    if control.get(r["id"], 0) < 2:
+        continue
+    where = owner(r["line"][-1])
+    if not where:
+        continue
+    L = length(r["line"])
+    tagged = signal_node_on(r)
+    s = min(L * 0.8, max(L * 0.3, project(r["line"], tagged))) if tagged else max(L * 0.4, L - 60)
+    (x, z), (dx, dz) = at_along(r["line"], s)
+    m = math.hypot(dx, dz) or 1
+    dx, dz = dx / m, dz / m
+    # Right of the way it runs (x east, z south: right of (dx, dz) is (-dz, dx)).
+    k = ray((x, z), (-dz, dx), 250)
+    way, a, b = r["id"].split("/")
+    oneway = f"{way}/{b}/{a}" not in ids
+    lanes = int(r.get("lanes") or 1)
+    off = k + 6 if k is not None else (lanes * 33 / 2 if oneway else lanes * 33) + 25
+    out[where].setdefault("heads", []).append([int(way), int(a), int(b), int(round(x - dz * off)), int(round(z + dx * off)), 1 if tagged else 0])
+    heads_split["at a mapped signal" if tagged else "6 m short"] += 1
+    heads_split["at the kerb" if k is not None else "past the lanes"] += 1
+print("signal heads:", sum(len(o.get("heads", [])) for o in out.values()), "at", len({h[2] for o in out.values() for h in o.get("heads", [])}), "junctions;", dict(heads_split), file=sys.stderr)
+
 # ── Rail ──
 # Which track is a cable car's: the street it runs in is one of the three lines' (the graph does not say; the
 # Embarcadero's and Market's tracks are streetcars').
@@ -527,6 +588,130 @@ for name, r in sorted(relations.items()):
     transit.append({"ref": ref, "kind": "cable" if ref in CABLE_REFS else "streetcar", "lines": [[int(round(v)) for p in l for v in p] for l in lines]})
 print("transit:", [(t["ref"], t["kind"], len(t["lines"]), round(sum(math.dist((l[i], l[i + 1]), (l[i + 2], l[i + 3])) for l in t["lines"] for i in range(0, len(l) - 2, 2)) / 10)) for t in transit], file=sys.stderr)
 
+# ── Buses and trolleybuses: OSM's route relations (public_transport v2), each as the roads of the graph it runs on ──
+# A route's member ways in their order, each turned to carry on from the last, are cut at the graph's junctions into
+# the directed roads `way/a/b` the page drives; where one is not in the graph (a busway the graph left out, or the
+# route's leaving these squares), a new piece begins. Its stop positions (role stop) are put on the nearest of its
+# roads within 15 m, as [road index in the piece, cells along that road]. When it runs, from its name: owl lines at
+# night, peak-only lines at their peak, the rest from five in the morning to one at night.
+def bus_routes(path):
+    if not path.exists():
+        from urllib.parse import urlencode
+        from urllib.request import Request, urlopen
+        lon_lat = Transformer.from_crs(26910, 4326, always_xy=True)
+        corners = [lon_lat.transform(*p) for s in graphs for p in ((float(s.split("_")[0]) * 1000, float(s.split("_")[1]) * 1000), ((float(s.split("_")[0]) + 1) * 1000, (float(s.split("_")[1]) + 1) * 1000))]
+        box = f"{min(c[1] for c in corners):.4f},{min(c[0] for c in corners):.4f},{max(c[1] for c in corners):.4f},{max(c[0] for c in corners):.4f}"
+        q = f'[out:json][timeout:150];relation[type=route][route~"^(bus|trolleybus)$"]({box});out body;>;out skel qt;'
+        req = Request("https://overpass-api.de/api/interpreter", data=urlencode({"data": q}).encode(), headers={"User-Agent": "Village-SF-data"})
+        with urlopen(req, timeout=200) as reply:
+            data = json.load(reply)
+        if data.get("remark") or not data.get("elements"):
+            raise ValueError("incomplete OSM bus routes")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(gzip.compress(json.dumps(data).encode(), mtime=0))
+    return json.load(gzip.open(path))
+
+
+osm = bus_routes(Path(args.routes).expanduser())
+osm_way = {e["id"]: e["nodes"] for e in osm["elements"] if e["type"] == "way"}
+osm_at = {e["id"]: frame(*UTM.transform(e["lon"], e["lat"])) for e in osm["elements"] if e["type"] == "node"}
+graph_nodes = defaultdict(set)
+for r in roads:
+    w, a, b = r["id"].split("/")
+    graph_nodes[int(w)].update((int(a), int(b)))
+
+
+def hours_of(name):
+    n = name.lower()
+    if "owl" in n or "late night" in n:
+        return [1, 5]
+    if "8pm-midnight" in n:
+        return [20, 24]
+    if "early morning" in n:
+        return [5, 7]
+    if "(evenings)" in n:
+        return [16, 20]
+    if "(mornings)" in n:
+        return [6, 10]
+    return [5, 25]
+
+
+def near_road(p, keys, most=150):
+    best = None
+    for i, k in enumerate(keys):
+        line = road_line[k]
+        s0 = 0.0
+        for j in range(len(line) - 1):
+            (ax, az), (bx, bz) = line[j], line[j + 1]
+            ex, ez = bx - ax, bz - az
+            l2 = ex * ex + ez * ez or 1
+            t = max(0, min(1, ((p[0] - ax) * ex + (p[1] - az) * ez) / l2))
+            d = math.hypot(p[0] - ax - ex * t, p[1] - az - ez * t)
+            if d < most and (best is None or d < best[0]):
+                best = (d, i, s0 + math.sqrt(l2) * t)
+            s0 += math.sqrt(l2)
+    return best
+
+
+road_line = {r["id"]: r["line"] for r in roads}
+buses, bus_split = [], defaultdict(int)
+for rel in osm["elements"]:
+    if rel["type"] != "relation":
+        continue
+    tags = rel.get("tags", {})
+    members = [m for m in rel["members"] if m["type"] == "way" and m["role"] in ("", "forward", "backward") and m["ref"] in osm_way]
+    # Each way's nodes, turned to carry on from the last one's end.
+    seq, end = [], None
+    for k, m in enumerate(members):
+        ns = list(osm_way[m["ref"]])
+        if end is None:
+            nxt = osm_way[members[k + 1]["ref"]] if k + 1 < len(members) else []
+            if ns[0] in (nxt[0], nxt[-1]) if nxt else False:
+                ns = ns[::-1]
+        elif ns[-1] == end:
+            ns = ns[::-1]
+        elif ns[0] != end:
+            seq.append(None)
+        seq.append((m["ref"], ns))
+        end = ns[-1]
+    pieces, cur = [], []
+    for item in seq:
+        if item is None:
+            if cur:
+                pieces.append(cur)
+            cur = []
+            continue
+        way, ns = item
+        marks = [n for n in ns if n in graph_nodes.get(way, ())]
+        for a, b in zip(marks, marks[1:]):
+            key = f"{way}/{a}/{b}"
+            if key in ids:
+                cur.append(key)
+            else:
+                bus_split["roads not in the graph"] += 1
+                if cur:
+                    pieces.append(cur)
+                cur = []
+    if cur:
+        pieces.append(cur)
+    pieces = [p for p in pieces if sum(length(road_line[k]) for k in p) > 1500]
+    if not pieces:
+        continue
+    stops = [m["ref"] for m in rel["members"] if m["type"] == "node" and m["role"].startswith("stop") and m["ref"] in osm_at]
+    out_pieces = []
+    for p in pieces:
+        placed = []
+        for n in stops:
+            hit = near_road(osm_at[n], p)
+            if hit:
+                placed.append([hit[1], int(round(hit[2]))])
+        placed.sort()
+        out_pieces.append({"roads": p, "stops": placed})
+    kind = "trolleybus" if tags.get("route") == "trolleybus" else "bus"
+    buses.append({"ref": tags.get("ref", ""), "kind": kind, "name": tags.get("name", ""), "operator": tags.get("operator", ""), "hours": hours_of(tags.get("name", "")), "pieces": out_pieces})
+    bus_split[kind] += 1
+print("buses:", dict(bus_split), "pieces", sum(len(b["pieces"]) for b in buses), "stops", sum(len(p["stops"]) for b in buses for p in b["pieces"]), file=sys.stderr)
+
 dest = Path(args.out)
 dest.mkdir(parents=True, exist_ok=True)
 index = {"version": 1, "frame": "10n4250", "life": {}}
@@ -541,7 +726,7 @@ for s, o in out.items():
     index["life"][s] = {"path": f"{s}.json", "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
     mapped_n = sum(1 for i in range(3, len(o["park"]), 4) if o["park"][i])
     print(f"{s}: walk {len(o['walk'])}, roads {len(o['roads'])}, parked places {len(o['park']) // 4} ({mapped_n} mapped), rail {len(o['rail'])}; {len(body) / 1024:.0f} KB")
-body = (json.dumps({"version": 1, "routes": transit}, separators=(",", ":")) + "\n").encode()
+body = (json.dumps({"version": 1, "routes": transit, "buses": buses}, separators=(",", ":")) + "\n").encode()
 (dest / "transit.json").write_bytes(body)
 index["transit"] = {"path": "transit.json", "bytes": len(body), "sha256": hashlib.sha256(body).hexdigest()}
 (dest / "index.json").write_text(json.dumps(index, indent=1) + "\n")
