@@ -133,7 +133,7 @@ export const water = () => ({ sea: seaKeys, unlisted })
 export const where = (): Promise<Source> => (source ??= LOCAL?.release ? released(new URL(LOCAL.release, location.href)) : served())
 
 /** How much a device may hold (#450): a phone's tab is killed long before a laptop's. */
-export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 900 ? 'phone' : 'desktop'
+export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 600 ? 'phone' : 'desktop'
 /** What one device class may hold: tiles kept by each core, at each level, and tile bytes the page keeps for its workers. */
 export const HOLD = DEVICE === 'phone' ? { keep: [12, 4, 4], bytes: 24 << 20 } : { keep: [24, 8, 8], bytes: 96 << 20 }
 
@@ -227,9 +227,9 @@ async function fromPage(level: number, key: string): Promise<ArrayBuffer | null>
  */
 export function share(worker: Worker): Worker {
   const { port1, port2 } = new MessageChannel()
-  const entry = { port: port1, memory: { bytes: 0 }, owed: 0 }
+  const entry = { port: port1, memory: { bytes: 0 }, owed: false, missed: 0 }
   port1.onmessage = async (m: MessageEvent<{ id: number; level: number; key: string } | { memory: number } | { pong: number }>) => {
-    entry.owed = 0
+    entry.owed = false; entry.missed = 0
     if ('pong' in m.data) return
     if ('memory' in m.data) { entry.memory.bytes = m.data.memory; return }
     const { id, level, key } = m.data
@@ -238,9 +238,9 @@ export function share(worker: Worker): Worker {
   const give = (levels: Level[]) => worker.postMessage({ tiles: port2, levels, keep: HOLD.keep }, [port2])
   if (STREAM) void where().then((s) => give(s.levels), () => give(LEVELS))
   else give(LEVELS)
-  // Silence is counted from the oldest ping not answered: a page whose timers slept (a tab in the background) does
-  // not take its workers for gone when it wakes.
-  const ping = setInterval(() => { entry.owed ||= performance.now(); port1.postMessage({ ping: entry.owed }) }, 1000)
+  // Silence is counted in pings gone unanswered, a second apart, not in time: a page whose timers slept (a tab in the
+  // background) or whose own thread stalled sends none meanwhile, so it does not take its workers for gone.
+  const ping = setInterval(() => { if (entry.owed) entry.missed++; entry.owed = true; port1.postMessage({ ping: 1 }) }, 1000)
   sharing.set(worker, entry)
   // Let go of with the worker.
   const end = worker.terminate.bind(worker)
@@ -251,9 +251,9 @@ export function share(worker: Worker): Worker {
 const ending = new WeakMap<Worker, () => void>()
 /** For the checks: ends a worker as a tab out of memory would, without a word and still watched, so the page must find it gone. */
 export const end = (worker: Worker | null | undefined) => { if (worker) ending.get(worker)?.() }
-const sharing = new Map<Worker, { port: MessagePort; memory: { bytes: number }; owed: number }>()
-/** How long since a worker given a port (`share`) last said anything, ms. */
-export const silent = (worker: Worker | null): number => { const e = worker && sharing.get(worker); return e?.owed ? performance.now() - e.owed : 0 }
+const sharing = new Map<Worker, { port: MessagePort; memory: { bytes: number }; owed: boolean; missed: number }>()
+/** How long a worker given a port (`share`) has said nothing, ms: a second for each ping it has let pass. */
+export const silent = (worker: Worker | null): number => { const e = worker && sharing.get(worker); return e ? e.missed * 1000 : 0 }
 /** What every core holds, in bytes of its memory (#450): the page's own and each worker's, as each last said. */
 export async function memory(): Promise<{ page: number; workers: number[]; tiles: number }> {
   for (const s of sharing.values()) s.port.postMessage({ memory: true })
@@ -290,7 +290,7 @@ function take(core: Core, body: ArrayBuffer | null): boolean {
 }
 
 /** What each core holds: a tile by level and place, when it was last wanted, and its coming. */
-const held = new WeakMap<object, Map<string, { level: number; x0: number; z0: number; used: number; came: Promise<boolean> }>>()
+const held = new WeakMap<object, Map<string, { level: number; x0: number; z0: number; used: number; came: Promise<boolean>; failed?: boolean }>>()
 let clock = 0
 
 /**
@@ -307,19 +307,24 @@ export async function need(core: object, x0: number, z0: number, x1: number, z1:
   const reach = level ? 0 : 96
   let mine = held.get(core)
   if (!mine) held.set(core, (mine = new Map()))
-  const coming: Promise<boolean>[] = [], stamp = ++clock
-  let whole = true
+  const coming: Promise<boolean>[] = [], wanted: { failed?: boolean }[] = [], stamp = ++clock
   for (let tz = Math.floor((z0 - reach) / size); tz <= Math.floor((z1 - 1 + reach) / size); tz++) for (let tx = Math.floor((x0 - reach) / size); tx <= Math.floor((x1 - 1 + reach) / size); tx++) {
     const key = `${level}/${tx}_${tz}`
     let t = mine.get(key)
     if (!t) {
       const body = typeof document === 'undefined' ? fromPage(level, `${tx}_${tz}`) : tile(level, `${tx}_${tz}`)
-      mine.set(key, (t = { level, x0: tx * size, z0: tz * size, used: stamp, came: body.then((b) => take(core as Core, b)).catch(() => { mine!.delete(key); whole = false; return false }) }))
+      const entry: { level: number; x0: number; z0: number; used: number; came: Promise<boolean>; failed?: boolean } = { level, x0: tx * size, z0: tz * size, used: stamp, came: Promise.resolve(false) }
+      // Failed, it is let go of (the next ask tries again), and every ask that waited on it hears so: each column made
+      // meanwhile is made again (world.ts `lacking`), not only the one that first asked.
+      entry.came = body.then((b) => take(core as Core, b)).catch(() => { mine!.delete(key); entry.failed = true; return false })
+      mine.set(key, (t = entry))
     }
     t.used = stamp
     coming.push(t.came)
+    wanted.push(t)
   }
   await Promise.all(coming)
+  const whole = !wanted.some((t) => t.failed)
   // Let go of the longest unwanted of this level, never one wanted since this ask began.
   const same = [...mine].filter(([, t]) => t.level === level && t.used < stamp).sort((a, b) => a[1].used - b[1].used)
   for (let over = [...mine.values()].filter((t) => t.level === level).length - keep[level]; over > 0 && same.length; over--) {
@@ -330,6 +335,8 @@ export async function need(core: object, x0: number, z0: number, x1: number, z1:
   return whole
 }
 
+/** Has a core hold the finest tiles round someone, for what is asked of the ground underfoot: what the page needs before its first picture. */
+export const underfoot = (core: object, x: number, z: number): Promise<boolean> => need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1)
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */
 export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 12000, z - 12000, x + 12000, z + 12000, 16), need(core, x - 50000, z - 50000, x + 50000, z + 50000, 128)]).then((w) => w.every(Boolean))
 

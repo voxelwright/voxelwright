@@ -3,6 +3,11 @@
 // its limits, drawn on this Mac's GPU: what it says of frame time is WebKit's, not a phone's GPU.
 //
 //   node test/sf-phone.mjs [--device "iPhone 17"] [--seconds 10] [--shots ~/.village/engine/sf/runtime]
+//   node test/sf-phone.mjs --safari     the same page in this Mac's Safari, the realm in a frame of 390 x 844
+//
+// The Simulator's Safari offers navigator.gpu but no adapter (iOS 26.5, November 2026), so there it says only that.
+// `--safari` opens a tab in this Mac's own Safari, which has WebGPU, and closes it after (by AppleScript, where this
+// Mac lets it; else the tab stays and the check says so).
 //
 // A page of the check's own (`/measure.html`, served only by this check, never in the folder) holds the realm in a
 // frame of the same site, waits for it, then reads the realm's own numbers as test/sf.mjs does (when the park was
@@ -22,9 +27,10 @@ const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); 
 const sim = (...a) => execFileSync('xcrun', ['simctl', ...a], { encoding: 'utf8' })
 
 const MEASURE = `<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}</style>
+<style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100%;height:100%}iframe.phone{width:390px;height:844px}</style>
 <iframe id="realm" src="/sf/index.html"></iframe>
 <script>
+if (location.search.includes('phone')) document.getElementById('realm').className = 'phone'
 const say = (what) => fetch('/report', { method: 'POST', body: JSON.stringify(what) })
 const wait = (ask, ms) => new Promise((done, fail) => { const t0 = performance.now(); const tick = () => { let v; try { v = ask() } catch {} if (v) return done(v); if (performance.now() - t0 > ms) return fail(new Error('waited')); setTimeout(tick, 250) }; tick() })
 onerror = (m) => say({ error: String(m) })
@@ -74,21 +80,28 @@ const extra = (req, res) => {
   return false
 }
 const site = await plain(join(here, 'dist-sf'), '127.0.0.1', 0, { extra })
-const id = sim('list', 'devices', 'available').split('\n').find((l) => l.trim().startsWith(`${device} (`))?.match(/\(([0-9A-F-]{36})\)/)?.[1]
-if (!id) { console.error(`no simulator named ${device}`); process.exit(1) }
-let back = () => {}
-const stop = () => { try { sim('shutdown', id) } catch { /* already */ } site.stop(); back() }
+const safari = process.argv.includes('--safari')
+const id = safari ? null : sim('list', 'devices', 'available').split('\n').find((l) => l.trim().startsWith(`${device} (`))?.match(/\(([0-9A-F-]{36})\)/)?.[1]
+if (!safari && !id) { console.error(`no simulator named ${device}`); process.exit(1) }
+let back = () => {}, tabLeft = false
+const url = `${site.url}/measure.html${safari ? '?phone' : ''}`
+const closeTab = () => { try { execFileSync('osascript', ['-e', `tell application "Safari" to close (every tab of every window whose URL starts with "${site.url}")`], { encoding: 'utf8', timeout: 10_000 }) } catch { tabLeft = true } }
+const stop = () => { if (safari) closeTab(); else try { sim('shutdown', id) } catch { /* already */ } site.stop(); back() }
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { stop(); process.exit(1) })
 try {
   back = await turn()
-  try { sim('boot', id) } catch { /* booted */ }
-  sim('bootstatus', id, '-b')
-  console.log(`${device} (${id}): ${site.url}/measure.html`)
-  sim('openurl', id, `${site.url}/measure.html`)
+  if (safari) { console.log(`this Mac's Safari: ${url}`); execFileSync('open', ['-a', 'Safari', url]) }
+  else {
+    try { sim('boot', id) } catch { /* booted */ }
+    sim('bootstatus', id, '-b')
+    console.log(`${device} (${id}): ${url}`)
+    sim('openurl', id, url)
+  }
   const began = Date.now()
   while (!report && Date.now() - began < 10 * 60_000) await new Promise((r) => setTimeout(r, 1000))
-  try { sim('io', id, 'screenshot', join(shots, 'phone-webkit.png')) } catch { /* no picture */ }
+  if (!safari) try { sim('io', id, 'screenshot', join(shots, 'phone-webkit.png')) } catch { /* no picture */ }
 } finally { stop() }
+if (tabLeft) console.log(`  (the tab at ${site.url} is still open in Safari: this Mac did not let AppleScript close it)`)
 writeFileSync(join(shots, 'phone-webkit.json'), JSON.stringify({ device, said, asked: site.asked }, null, 1))
 // How far the page came, by what it asked for.
 const kinds = {}

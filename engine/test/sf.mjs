@@ -125,8 +125,10 @@ try {
   }
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
   console.log(JSON.stringify(results.load, null, 1))
-  check(t.near > 0 && t.near < 8000, `the park shown round the eye in ${Math.round(t.near)} ms on ${mbit} Mbit/s (bound 8 s; first frame ${Math.round(t.first)} ms, whole ${Math.round(t.whole)} ms)`)
-  check(results.load.untilPlaceShown.all.wireMB < 8, `${results.load.untilPlaceShown.all.wireMB} MB over the wire until the park is shown (bound 8 MB)`)
+  // The bounds are for a host that sends Brotli; a plain host sends nine times the bytes, and is checked only to work.
+  const squeezed = !has('plainly')
+  check(t.near > 0 && (!squeezed || t.near < 8000), `the park shown round the eye in ${Math.round(t.near)} ms on ${mbit} Mbit/s (bound 8 s with Brotli; first frame ${Math.round(t.first)} ms, whole ${Math.round(t.whole)} ms)`)
+  check(!squeezed || results.load.untilPlaceShown.all.wireMB < 8, `${results.load.untilPlaceShown.all.wireMB} MB over the wire until the park is shown (bound 8 MB)`)
   const firstTile = site.asked.find((a) => isTile(a.path) && a.status === 200)
   results.load.encoding = { accept: firstTile?.accept, sent: firstTile?.encoding }
   check(has('plainly') ? firstTile?.encoding === 'identity' : firstTile?.encoding === 'br', `tiles sent as ${firstTile?.encoding} (the browser takes "${firstTile?.accept}")`)
@@ -137,25 +139,28 @@ try {
 
   // ── Frames ──
   const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 60_000, polling: 250 }).catch(() => null)
-  const frames = async (name, pose, fov, full = false) => {
+  /**
+   * Frame gaps at a place: as the page steers its picture's size (it aims the march at six tenths of a frame, in steps
+   * of 0.05, so it settles on either side of a bound), or with the size pinned (`pin`): at 0.7 for the bound, at 1 for
+   * the cost. Once pinned it stays pinned, so the pinned passes come after the steered ones.
+   */
+  const frames = async (name, pose, fov, pin = null) => {
     await page.evaluate(({ pose, fov }) => { const e = globalThis.engine; Object.assign(e.pose, pose); if (fov) e.fov = fov }, { pose, fov })
     await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2000)
-    // As the page steers its picture's size (it aims the march at six tenths of a frame), then with every pixel drawn: the second is the cost.
     const take = () => page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, scale: e.scale, gpuMs: e.gpuMs, cpuMs: e.cpuMs, fov: e.fov, people: e.folk.drawn?.people ?? 0 } }, seconds * 1000)
     const said = (w) => { const g = w.gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => round(g[Math.min(g.length - 1, Math.floor(g.length * p))]); return { frames: g.length, p50: q(0.5), p99: q(0.99), worst: round(g[g.length - 1]), scale: round(w.scale, 2), marchMs: round(w.gpuMs), cpuMs: round(w.cpuMs) } }
-    // Once pinned the picture's size stays pinned: the passes at full size come after all the steered ones.
-    if (full) { await page.evaluate(() => { globalThis.engine.scale = 1 }); await page.waitForTimeout(2000) }
-    // Other lanes draw on this GPU too, some outside the turns (kit.mjs): a pass short of 60 fps at 0.7 is taken again
-    // twice, ten seconds apart, and the best kept, with what else was drawing beside it.
+    if (pin) { await page.evaluate((v) => { globalThis.engine.scale = v }, pin); await page.waitForTimeout(2000) }
+    // Other lanes draw on this GPU too, some outside the turns (kit.mjs): the bound's pass, short of 60 fps, is taken
+    // again twice, ten seconds apart, and the best kept, with how many other browsers were drawing.
     let w = await take(), r = { ...said(w), fov: w.fov, residentsDrawn: w.people, tries: 1 }
-    for (let again = 0; !full && again < 2 && !(r.p50 <= 17.5 && r.scale >= 0.7); again++) {
+    for (let again = 0; pin === 0.7 && again < 2 && r.p50 > 17.5; again++) {
       await page.waitForTimeout(10_000)
       w = await take()
       const next = { ...said(w), fov: w.fov, residentsDrawn: w.people, tries: r.tries + 1 }
-      r = next.scale > r.scale ? next : { ...r, tries: next.tries }
+      r = next.p50 < r.p50 ? next : { ...r, tries: next.tries }
     }
     if (r.tries > 1) r.besideOthers = drawing()
-    if (!full) await page.screenshot({ path: join(shots, `${name}.png`) })
+    if (!pin) await page.screenshot({ path: join(shots, `${name}.png`) })
     console.log(`  ${name}: ${JSON.stringify(r)}`)
     return r
   }
@@ -164,19 +169,12 @@ try {
   const street = { x: 51590, z: 66300 }
   street.y = await page.evaluate(({ x, z }) => globalThis.engine.ground(x, z), street) + 1.7
   const parkGround = ground
-  results.frames = await alone('frames', 8, async () => ({
+  // As the page steers it: reported, the bound is taken pinned at the end.
+  results.frames = await alone('frames as steered', 6, async () => ({
     park: await frames('park', park, 25.05),
     street: await frames('street', { ...street, yaw: -0.164, pitch: 0 }, 70),
     up150: await frames('up150', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70),
   }))
-  // Headless Chrome is held to 60 Hz: the gaps say only whether 60 fps holds; the scale says at what size.
-  for (const [where, f] of Object.entries(results.frames).filter(([k]) => k !== 'sharedGPU')) {
-    const ok = f.p50 <= 17.5 && f.scale >= 0.7, what = `60 fps ${where}: p50 ${f.p50} ms, p99 ${f.p99} ms at picture scale ${f.scale} (bounds 17.5 ms, 0.7)`
-    // Short of it on every try with other browsers drawing beside it: said, not failed; a timing beside them is not this page's.
-    if (!ok && f.besideOthers > 0) console.log(`  WARN ${what}, beside ${f.besideOthers} other browsers drawing on every try`)
-    else check(ok, what)
-  }
-
   // ── Features ──
   phase('features', 4)
   const f = (results.features = {})
@@ -204,7 +202,7 @@ try {
   check(f.walkMetres > 1, `walking: on foot, W walked ${f.walkMetres} m`)
   await page.evaluate(() => globalThis.engine.me.walk(false))
   // The kept car: at a kerb, got into, driven.
-  const car = await page.evaluate(async () => {
+  const driving = page.evaluate(async () => {
     const e = globalThis.engine
     // Set down after the tiles round it came (main.ts `kerbside`): waited for, as a visitor would walk to it.
     for (let i = 0; i < 100 && !e.alive.things.some((t) => t.alive && t.name === 'grey saloon' && e.alive.where(t)); i++) await new Promise((r) => setTimeout(r, 100))
@@ -216,6 +214,11 @@ try {
     const g = e.ground(at[0] / 10, at[2] / 10) * 10
     for (let x = low[0] + 1; x < low[0] + size[0] - 1; x += 3) for (let z = low[2] + 1; z < low[2] + size[2] - 1; z += 3) for (let y = Math.round(g) + 2; y < Math.round(g) + size[1]; y += 3) if (e.kind(x, y, z)) inBox++
     const stands = { top: e.top(at[0], at[2]) & 15, inBox, at: at.map(Math.round) }
+    // Seen as it stands, from across the street and a little up, before anyone gets in.
+    Object.assign(e.pose, { x: at[0] / 10 + 2, y: at[1] / 10 + 5, z: at[2] / 10 + 12, yaw: 0, pitch: -0.3 })
+    await new Promise((r) => setTimeout(r, 2500))
+    globalThis.__parked = true
+    for (let i = 0; i < 50 && globalThis.__parked; i++) await new Promise((r) => setTimeout(r, 100))
     Object.assign(e.pose, { x: at[0] / 10 - 6, y: at[1] / 10 + 3, z: at[2] / 10, yaw: Math.PI / 2, pitch: -0.2 })
     e.alive.mount(thing)
     const from = e.alive.where(thing).at
@@ -225,7 +228,10 @@ try {
     const to = end.at, riding = e.alive.riding === thing
     return { name: thing.name, from, to, moved: Math.hypot(to[0] - from[0], to[2] - from[2]) / 10, riding, look: e.alive.look(thing).parts.length, stands }
   })
-  await page.screenshot({ path: join(shots, 'car.png') })
+  // The picture of it parked, taken while the page waits on it.
+  if (await page.waitForFunction(() => globalThis.__parked === true, null, { timeout: 30_000 }).then(() => true, () => false)) { await page.screenshot({ path: join(shots, 'car-parked.png') }); await page.evaluate(() => { globalThis.__parked = false }) }
+  const car = await driving
+  await page.screenshot({ path: join(shots, 'car-driven.png') })
   if (car?.missing) console.log(`  car missing: ${JSON.stringify(car.missing)}`)
   f.car = car
   check(!!car?.stands && car.stands.top === 6 && car.stands.inBox === 0, `the kept car stands at a kerb: on asphalt (ground kind ${car?.stands.top}), ${car?.stands.inBox} cells of the world in its box, at ${car?.stands.at}`)
@@ -316,15 +322,20 @@ try {
   // Each column made without the tile is made again 2, 4, 8 s after: by then the tile has come.
   await page.waitForTimeout(30_000); await settle()
   ff.tile = await page.evaluate(({ x, z }) => {
-    // The finest box that holds the ground's top cell there: its sector is made and not air.
-    const e = globalThis.engine, g = Math.round(e.ground(x, z) * 10) - 1
-    const l = e.world.levels.find((l) => { const side = 64 << l.index; return l.holds(Math.floor((x * 10) / side), Math.floor(g / side), Math.floor((z * 10) / side)) })
-    const side = 64 << (l?.index ?? 0), slot = l ? l.slot(Math.floor((x * 10) / side), Math.floor(g / side), Math.floor((z * 10) / side)) : -1
-    return { lacking: e.world.stats.lacking, crashed: e.world.stats.crashed, failed: e.tiles.tally.failed, retried: e.tiles.tally.retried, groundM: e.ground(x, z), level: l?.index, drawn: !!l && l.state[slot] === 3 && l.top[slot] !== 0 }
+    // Across the whole of the tile that failed (2500 cells a side), 5 x 5 places: at each, the finest box that holds
+    // the ground's top cell has its sector made and not air. Every column made without the tile, not only one.
+    const e = globalThis.engine, tx = Math.floor((x * 10) / 2500) * 2500, tz = Math.floor((z * 10) / 2500) * 2500, places = []
+    for (let i = 0; i < 5; i++) for (let j = 0; j < 5; j++) {
+      const cx = tx + 150 + i * 550, cz = tz + 150 + j * 550, g = e.ground(cx / 10, cz / 10) * 10 - 1
+      const l = e.world.levels.find((l) => { const side = 64 << l.index; return l.holds(Math.floor(cx / side), Math.floor(g / side), Math.floor(cz / side)) })
+      const side = 64 << (l?.index ?? 0), slot = l ? l.slot(Math.floor(cx / side), Math.floor(g / side), Math.floor(cz / side)) : -1
+      places.push({ level: l?.index ?? null, groundM: Math.round(g) / 10, drawn: !!l && l.state[slot] === 3 && l.top[slot] !== 0 })
+    }
+    return { lacking: e.world.stats.lacking, crashed: e.world.stats.crashed, failed: e.tiles.tally.failed, retried: e.tiles.tally.retried, groundM: e.ground(x, z), drawnPlaces: places.filter((p) => p.drawn).length, places: places.length, notDrawn: places.filter((p) => !p.drawn), drawn: places.every((p) => p.drawn) }
   }, fidi)
   ff.tile.requests = site.asked.filter((a) => a.path === tileThere).map((a) => a.status)
   await page.screenshot({ path: join(shots, 'after-faults.png') })
-  check(cameBack && ff.tile.drawn && ff.tile.requests.at(-1) === 200, `a tile that failed ${ff.tile.requests.filter((s) => s !== 200).length} times came on try ${ff.tile.requests.length}: ${ff.tile.lacking} columns made without it were made again, the ground there drawn (${ff.tile.drawn}, box ${ff.tile.level}, ${round(ff.tile.groundM)} m)`)
+  check(cameBack && ff.tile.drawn && ff.tile.requests.at(-1) === 200, `a tile that failed ${ff.tile.requests.filter((s) => s !== 200).length} times came on try ${ff.tile.requests.length}: ${ff.tile.lacking} columns made without it were made again, the ground drawn at ${ff.tile.drawnPlaces} of ${ff.tile.places} places across the tile${ff.tile.notDrawn.length ? ` (not: ${JSON.stringify(ff.tile.notDrawn.slice(0, 3))})` : ''}`)
   check(ff.tile.crashed >= 1, `a maker of sectors that died was hired again (${ff.tile.crashed}) and the world there came whole`)
   await page.evaluate(() => { globalThis.engine.patience = 10_000 })
 
@@ -378,11 +389,42 @@ try {
   check(results.asked.perFile <= 1.05, `each tile fetched once: ${results.asked.tileRequests} requests for ${results.asked.tileFiles} files (${results.asked.perFile} a file, before 3.2)`)
 
   // ── Every pixel drawn (scale 1): what each place costs the GPU ──
-  results.framesFull = await alone('frames at full size', 4, async () => ({
-    park: await frames('park-full', park, 25.05, true),
-    street: await frames('street-full', { ...street, yaw: -0.164, pitch: 0 }, 70, true),
-    up150: await frames('up150-full', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, true),
+  // The bound: 60 fps with the picture at 0.7 of its size, pinned (headless Chrome is held to 60 Hz, so the gaps say
+  // only whether 60 fps holds). Then the cost of every pixel. A pass short of it on every try with other browsers
+  // drawing beside it is said, not failed: a timing beside them is not this page's.
+  results.frames70 = await alone('frames at 0.7', 4, async () => ({
+    park: await frames('park-0.7', park, 25.05, 0.7),
+    street: await frames('street-0.7', { ...street, yaw: -0.164, pitch: 0 }, 70, 0.7),
+    up150: await frames('up150-0.7', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, 0.7),
   }))
+  for (const [where, f] of Object.entries(results.frames70).filter(([k]) => k !== 'sharedGPU')) {
+    const ok = f.p50 <= 17.5, what = `60 fps ${where} at picture scale 0.7: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms (bound 17.5 ms)`
+    if (!ok && (f.besideOthers > 0 || results.frames70.sharedGPU > 0)) console.log(`  WARN ${what}, beside other browsers drawing on every try`)
+    else check(ok, what)
+  }
+  results.framesFull = await alone('frames at full size', 4, async () => ({
+    park: await frames('park-full', park, 25.05, 1),
+    street: await frames('street-full', { ...street, yaw: -0.164, pitch: 0 }, 70, 1),
+    up150: await frames('up150-full', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, 1),
+  }))
+  // ── A phone's class (bay.ts DEVICE): Chrome at an iPhone's screen with touch, which the page takes for a phone ──
+  phase('a phone\'s class (Chrome at 390 x 844, touch)', 4)
+  const handheld = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
+  const small = await handheld.newPage()
+  small.on('pageerror', (e) => errors.push(`phone: ${e.message}`))
+  await small.goto(`${site.url}/sf/index.html`)
+  await small.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 })
+  await small.waitForTimeout(3000)
+  results.phone = await small.evaluate(async (ms) => {
+    const e = globalThis.engine, m = await e.tiles.memory(), gaps = []
+    const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop()
+    const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b)
+    return { device: e.tiles.device, workers: m.workers.length, coresMB: Math.round((m.page + m.workers.reduce((a, b) => a + b, 0)) / 1048576), pageCoreMB: Math.round(m.page / 1048576), workerCoresMB: m.workers.map((b) => Math.round(b / 1048576)), tilesHeldMB: Math.round(m.tiles / 1048576), jsHeapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : null, wholeMs: Math.round(e.seen.whole), parkP50: g[Math.floor(g.length / 2)], scale: e.scale }
+  }, 5000)
+  await small.screenshot({ path: join(shots, 'phone-class.png') })
+  await handheld.close()
+  console.log(`  phone: ${JSON.stringify(results.phone)}`)
+  check(results.phone.device === 'phone' && results.phone.workers === 3 && results.phone.tilesHeldMB <= 24, `a phone holds less: ${results.phone.workers} workers (two makers and the mover), ${results.phone.coresMB} MB in its cores, ${results.phone.tilesHeldMB} MB of tiles (cap 24)`)
   results.errors = errors.filter((e) => !/failed: 503|tiles\/0\/.*503/.test(e))
   check(results.errors.length === 0, `no page errors${results.errors.length ? `: ${results.errors.slice(0, 3).join(' | ')}` : ''}`)
 } catch (e) {

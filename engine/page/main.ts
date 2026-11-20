@@ -38,7 +38,7 @@ import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
-import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, memory, near, open, share, silent, tally, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -56,7 +56,8 @@ import { hearing } from './sound/world.ts'
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
 const canvas = document.querySelector('canvas')!
-const phone = navigator.maxTouchPoints > 0 && Math.min(screen.width, screen.height) < 600
+// One device class for the whole page (bay.ts `DEVICE`): what it draws and what it holds.
+const phone = DEVICE === 'phone'
 /** Keys, pointer and touch (input.ts), and what is shown over the picture (hud.ts): the one owner of each. */
 const controls = input(canvas, { phone, useButton: document.querySelector('#boom') })
 const over = hud(controls)
@@ -144,7 +145,9 @@ async function main() {
   const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? LOCAL.arrive : null
   let startX = arrive ? arrive.at[0] : BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = arrive ? arrive.at[2]! : BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
   // Where the Bay comes in tiles, the ones round the start and round where the page was told to stand come first.
-  if (STREAM) { const there = query.get('at')?.split(',').map(Number); await near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
+  // Before the first picture only the finest round the start (#450): what is asked of the ground there, first on the
+  // line. The coarser ones come after; the makers of sectors ask for what they need themselves.
+  if (STREAM) { const there = query.get('at')?.split(',').map(Number); await underfoot(inner, startX, startZ); void near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
   while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
   const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
