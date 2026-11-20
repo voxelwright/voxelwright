@@ -14,7 +14,7 @@ from facade_paint import FaceLibrary
 from full_run import digest, save
 from neighbourhood_panel import stage
 from paint_tile import apply
-from panel_gate import check
+from panel_gate import check, gate
 
 ENGINE = HERE.parent
 POSES = BAY / "450-panel/fixed-poses.json"
@@ -59,6 +59,9 @@ def accepted_faces(receipt):
     batch = data.pop("batch")
     scores = data.pop("scores")
     data.pop("cityTiles", None)
+    floors = data.pop("floors", None)
+    for key in ("inspection", "scoresCarried"):
+        data.pop(key, None)
     if (
         receipt.parent.name != "accepted"
         or receipt.stem != batch
@@ -70,7 +73,7 @@ def accepted_faces(receipt):
         if data["previous"]
         else load(PILOT / "final-scores.json")
     )
-    check(scores, previous)
+    check(scores, previous, None if floors is None else {tuple(f) for f in floors})
     paths = bundles(root, data["members"])
     for place, sha in data["seeds"].items():
         path = PILOT / (place + ".faces")
@@ -264,14 +267,21 @@ def stage_batch(root):
     save(work / "evidence.json", result)
     old_views = prev.get("views", {k: v["after"] for k, v in original["views"].items()})
     if old_views == views:
-        accept(
-            root, result["batch"], prev.get("scores", load(PILOT / "final-scores.json"))
-        )
+        accept(root, result["batch"], None)
     else:
         print("awaiting review", result["batch"], flush=True)
 
 
-def accept(root, candidate, scores):
+def shot_file(root, place, i, sha):
+    """A view's render: this batch's new shot, or the accepted one it carries, kept in an earlier proof."""
+    for path in [root / "pending/shots" / f"{place}-{i}.png", *sorted((root / "proof").glob(f"*/shots/{place}-{i}.png"))]:
+        if path.is_file() and digest(path) == sha:
+            return path
+    raise ValueError(f"no render with the recorded bytes: {place} {i}")
+
+
+def accept(root, candidate, scores=None):
+    """Scores are optional: without them the previous ones are carried, flagged, and hold no floor."""
     work = root / "pending"
     e = load(work / "evidence.json")
     if e.pop("batch") != candidate or fingerprint(e) != candidate:
@@ -283,16 +293,12 @@ def accept(root, candidate, scores):
     )
     if e["previous"] != prior or e["renderer"] != renderer():
         raise ValueError("stale batch")
-    previous = (
-        load(root / "accepted" / (prior + ".json"))["scores"]
-        if prior
-        else load(PILOT / "final-scores.json")
-    )
-    check(scores, previous)
+    prior_receipt = load(root / "accepted" / (prior + ".json")) if prior else {}
+    previous = prior_receipt.get("scores") or load(PILOT / "final-scores.json")
     previous_views = (
         load(root / "accepted" / (prior + ".json"))["views"] if prior else {}
     )
-    if set(e["views"]) != set(scores):
+    if set(e["views"]) != set(scores if scores is not None else previous):
         raise ValueError("missing fixed-camera evidence")
     for group, inventory in e["tileFiles"].items():
         for rel, sha in inventory.items():
@@ -308,6 +314,20 @@ def accept(root, candidate, scores):
                     raise ValueError("candidate shot changed")
             elif previous_views.get(place) != hashes:
                 raise ValueError("missing new camera pair")
+    # Every view's pixels, carried or new, before any score: a floor only where the earlier render passed them.
+    report = gate(
+        {p: [shot_file(root, p, i, h) for i, h in enumerate(pair)] for p, pair in e["views"].items()},
+        root / "inspections",
+    )
+    judged = set()
+    if not prior_receipt.get("scoresCarried"):
+        for place, pair in prior_receipt.get("inspection", {}).items():
+            judged.update((place, i) for i, passed in enumerate(pair) if passed)
+    carried = scores is None
+    if carried:
+        scores = previous
+    else:
+        check(scores, previous, judged)
     bundles(root, e["members"])
     from paint_batch_tiles import measure
 
@@ -319,7 +339,15 @@ def accept(root, candidate, scores):
     accepted.mkdir(exist_ok=True)
     save(
         accepted / (candidate + ".json"),
-        dict(**e, batch=candidate, scores=scores, cityTiles=city_tiles),
+        dict(
+            **e,
+            batch=candidate,
+            scores=scores,
+            scoresCarried=carried,
+            floors=[] if carried else sorted(judged),
+            inspection={p: [r["passed"] for r in pair] for p, pair in report.items()},
+            cityTiles=city_tiles,
+        ),
     )
     save(root / "current.json", dict(batch=candidate))
     finish(root, candidate)
@@ -358,7 +386,7 @@ if __name__ == "__main__":
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("action", choices=["stage", "accept"])
     cli.add_argument("--batch")
-    cli.add_argument("--scores", type=Path)
+    cli.add_argument("--scores", type=Path, help="the building lane's scores, if any")
     args = cli.parse_args()
     with (ROOT / "panel.lock").open("a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -372,4 +400,4 @@ if __name__ == "__main__":
                 finish(ROOT, load(receipt)["batch"])
             stage_batch(ROOT)
         else:
-            accept(ROOT, args.batch, load(args.scores))
+            accept(ROOT, args.batch, load(args.scores) if args.scores else None)
