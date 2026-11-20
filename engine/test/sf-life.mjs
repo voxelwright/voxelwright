@@ -245,7 +245,10 @@ try {
     for (const [n, cam] of photos.slice(0, 4).entries()) {
       const when = new Date(cam.captured), h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(when)) + when.getUTCMinutes() / 60
       await page.evaluate((h) => { globalThis.engine.hour = h }, h)
-      await look({ x: cam.x / 10, z: cam.z / 10, h: 2.4, yaw, pitch: -0.02 })
+      // On Grant Ave's carriageway beside the camera: at the camera's own spot the eye is inside the awnings and
+      // arcades over the pavement, which the bake has solid.
+      const g = onStreet('Grant Avenue', cam.x, cam.z), along = (cam.x - g.x) * g.dx + (cam.z - g.z) * g.dz
+      await look({ x: (g.x + g.dx * along) / 10, z: (g.z + g.dz * along) / 10, h: 2.4, yaw, pitch: -0.02 })
       await page.waitForTimeout(2500); await settle(); await page.waitForTimeout(4000)
       const c = await page.evaluate(() => globalThis.engine.street.count(globalThis.engine.view(), 600))
       const name = `chinatown-${n}`
@@ -262,7 +265,7 @@ try {
   const start = onStreet('Taylor Street', 515900, 663000)
   await look({ x: start.x / 10, z: start.z / 10, h: 1.7, yaw: Math.atan2(start.dx, -start.dz), pitch: -0.1 })
   await page.waitForTimeout(1500); await settle()
-  const car = await page.evaluate(({ x, z }) => globalThis.engine.street.cars(x, z, 600).filter((c) => c.kind === 'parked').sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null, { x: start.x, z: start.z })
+  const car = await page.evaluate(({ x, z }) => globalThis.engine.street.cars(x, z, 600).filter((c) => c.kind === 'parked' && c.model === 'car').sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null, { x: start.x, z: start.z })
   check(!!car, `a parked car on Taylor St to get into${car ? ` (${car.name})` : ''}`)
   if (car) {
     // On foot beside it: it comes to life, and E gets in.
@@ -331,7 +334,11 @@ try {
           // Wedged (pushing and not moving): back off a car's length, the wheel the other way, then on.
           if (speed < 3 && ticks > 30) wedged++; else wedged = 0
           if (wedged > 20) { backing = 15; wedged = 0 }
-          if (backing > 0) { backing--; e.alive.drive(thing, -1, -Math.sign(err) || 1, 0) }
+          // Near the route's end (where mapping or the road ends), it pulls up and stops.
+          let rest = 0
+          for (let i = at; i + 3 < lane.length && rest < 160; i += 2) rest += Math.hypot(lane[i + 2] - lane[i], lane[i + 3] - lane[i + 1])
+          if (rest < 150) e.alive.drive(thing, speed > 5 ? -0.5 : 0, 0, 0)
+          else if (backing > 0) { backing--; e.alive.drive(thing, -1, -Math.sign(err) || 1, 0) }
           else e.alive.drive(thing, speed < wanted ? 1 : speed > wanted + 15 ? -0.4 : 0.15, Math.max(-1, Math.min(1, err * 2.2)), 0)
           let dh = h - lastHeading; dh -= Math.round(dh / (2 * Math.PI)) * 2 * Math.PI
           turnSum += dh; lastHeading = h
@@ -424,13 +431,13 @@ try {
       await new Promise((r) => setTimeout(r, 4000))
       const c = e.street.count(e.view(), 1500)
       let into = 0
-      for (let n = 0; n < 15; n++) { await new Promise((r) => setTimeout(r, 1000)); into = Math.max(into, e.street.cars(x, z, 60).filter((k) => k.kind === 'traffic').length) }
+      for (let n = 0; n < 15; n++) { await new Promise((r) => setTimeout(r, 1000)); into = Math.max(into, e.street.cars(x, z, 300).filter((k) => { if (k.kind !== 'traffic') return false; const f = e.feet(Math.round(k.x), Math.round(k.z)); return !e.kind(k.x, f - 1, k.z) && !e.kind(k.x, f - 3, k.z) }).length) }
       return { craters: c.craters, blockedRoads: c.blockedRoads, carsInHoleMost: into }
     }, [s.x, s.z])
     results.crater = hole
     await page.screenshot({ path: join(shots, 'crater.png') })
     console.log(`  ${JSON.stringify(hole)}`)
-    check(hole.craters > 0 && hole.blockedRoads > 0 && hole.carsInHoleMost === 0, `a charge in Columbus Ave: ${hole.craters} hole(s) seen in the world, ${hole.blockedRoads} road(s) closed, no car drove into it in 15 s`)
+    check(hole.craters > 0 && hole.blockedRoads > 0 && hole.carsInHoleMost === 0, `a charge in Columbus Ave: ${hole.craters} hole(s) seen in the world, ${hole.blockedRoads} road(s) closed, no car in 15 s stood where the road was gone`)
   }
   // Reset puts the street back.
   await page.evaluate(() => globalThis.engine.reset())

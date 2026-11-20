@@ -331,8 +331,8 @@ export function street(o: {
    * change. `start` is when the round began on the shared clock, so where anyone is stays a rule of place and time.
    * The time in between, at the far end, is what the round has left; if waits leave none, the walk back is hurried.
    */
-  const planOf = (r: Route, v: number, T: number, rest: number, start: number) => {
-    const leg = (from: number, forward: boolean, t0: number) => {
+  const planOf = (r: Route, v0: number, T: number, rest: number, start: number) => {
+    const leg = (from: number, forward: boolean, t0: number, v = v0) => {
       const pts = [0, from]
       let t = 0, s = from
       const order = forward ? r.crossings : [...r.crossings].reverse()
@@ -354,10 +354,12 @@ export function street(o: {
       return pts
     }
     const out = leg(0, true, 0), outEnd = out[out.length - 2]
-    let backAt = Math.max(outEnd + 3, T - rest - (r.len / v) * 1.15), back = leg(r.len, false, backAt)
+    let backAt = Math.max(outEnd + 3, T - rest - (r.len / v0) * 1.15), back = leg(r.len, false, backAt)
     for (let n = 0; n < 3 && backAt + back[back.length - 2] > T - rest; n++) { backAt = Math.max(outEnd + 2, T - rest - back[back.length - 2]); back = leg(r.len, false, backAt) }
-    // Still over: the way back is walked faster, so that the round ends at home.
-    const room = T - rest - backAt, took = back[back.length - 2]
+    // Still over: the way back is walked more briskly (timed again, so every wait still ends on its walking sign),
+    // and the pause at home is what is left of the round.
+    for (let fast = 1.25; backAt + back[back.length - 2] > T - 1 && fast < 3; fast *= 1.25) back = leg(r.len, false, backAt, v0 * fast)
+    const room = T - 1 - backAt, took = back[back.length - 2]
     if (took > room) for (let i = 0; i < back.length; i += 2) back[i] *= room / took
     return { out, back, outEnd, backAt, backEnd: backAt + Math.min(took, room) }
   }
