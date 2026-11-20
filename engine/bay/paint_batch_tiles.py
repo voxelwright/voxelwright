@@ -1,6 +1,8 @@
 """Hash the affected publication tiles, including windows outside the recognition panel."""
 
 from collections import defaultdict
+from contextlib import closing
+from compact_store import TileStore
 import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -40,7 +42,7 @@ def measure(root, members, previous):
         names = planned.get(key, [])
         ready = tuple(s for s in names if s in state)
         if ready:
-            groups[ready].add(key)
+            groups[(ready, key[1] // 4, key[2] // 4)].add(key)
         if len(ready) != len(names):
             pending[f"{key[1]}_{key[2]}"] = [s for s in names if s not in state]
     old_paths = bundles(root, previous) + [PILOT / (n + ".faces") for n in SEEDS]
@@ -51,28 +53,29 @@ def measure(root, members, previous):
     donors = {}
     from hashlib import sha256
 
-    for names, wanted in groups.items():
-        paths = [CITY / "packs" / (s + ".bay") for s in names]
-        for s, p in zip(names, paths):
-            if s not in donors:
-                donors[s] = digest(p)
-                if donors[s] != state[s]["packs/" + p.name]:
-                    raise ValueError("source square changed")
-        with TemporaryDirectory(dir=root) as temp:
-            tiles.PACKS = temp
-            tiles.cut(paths, wanted)
-            for _, x, z in wanted:
-                name = f"{x}_{z}"
-                p = Path(temp) / "tiles/0" / (name + ".bay")
-                base = p.read_bytes()
-                before = apply(base, old, structures)
-                after = apply(base, faces, structures)
-                if before != after:
-                    records[name] = dict(
-                        base=sha256(base).hexdigest(),
-                        previous=sha256(before).hexdigest(),
-                        sha256=sha256(after).hexdigest(),
-                        bytes=len(after),
-                        contributors=list(names),
-                    )
+    with closing(TileStore(CITY / "objects")) as store:
+        for (names, _, __), wanted in groups.items():
+            paths = [CITY / "packs" / (s + ".bay") for s in names]
+            for s, p in zip(names, paths):
+                if s not in donors:
+                    donors[s] = digest(p)
+                    if donors[s] != state[s]["packs/" + p.name]:
+                        raise ValueError("source square changed")
+            with TemporaryDirectory(dir=root) as temp:
+                tiles.PACKS = temp
+                tiles.cut(paths, wanted)
+                for _, x, z in wanted:
+                    name = f"{x}_{z}"
+                    p = Path(temp) / "tiles/0" / (name + ".bay")
+                    base = p.read_bytes()
+                    before = apply(base, old, structures)
+                    after = apply(base, faces, structures)
+                    if before != after:
+                        records[name] = dict(
+                            base=sha256(base).hexdigest(),
+                            previous=sha256(before).hexdigest(),
+                            sha256=store.put(after),
+                            bytes=len(after),
+                            contributors=list(names),
+                        )
     return dict(squares=donors, tiles=records, pendingNeighbours=pending)
