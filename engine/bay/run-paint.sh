@@ -5,7 +5,7 @@ bay="$HOME/.village/engine/bay"
 job="$bay/450-city-paint"
 label=village.sf450.facadepaint
 case "${1:-status}" in
-start|publication)
+start|publication|panel)
     rev=$(git rev-parse HEAD)
     src="$job/runner/$rev"
     mkdir -p "$job/runner" "$HOME/Library/LaunchAgents"
@@ -17,9 +17,9 @@ start|publication)
         /bin/cp -c engine/page/core.wasm "$staging/engine/page/core.wasm"
         mv "$staging" "$src"
     fi
-    if [ "$1" = publication ]; then
-        # Each publication starts a new interpreter. Switch its entry only; keep any current worker or panel alive.
-        "$bay/venv/bin/python" - "$job" "$label" "$src" <<'PYTHON'
+    if [ "$1" != start ]; then
+        # Offline tasks start fresh interpreters. Switch one entry between invocations.
+        "$bay/venv/bin/python" - "$job" "$label" "$src" "$1" <<'PYTHON'
 import json, os, plistlib, sys
 from pathlib import Path
 root, label, source = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
@@ -27,18 +27,20 @@ plist = Path.home() / "Library/LaunchAgents" / (label + ".plist")
 entry = Path(plistlib.loads(plist.read_bytes())["ProgramArguments"][-1])
 if entry.name != "paint_service.py" or not entry.is_relative_to(root / "runner"):
     raise ValueError("unknown active supervisor")
-target = source / "engine/bay/paint_publication.py"
+task = sys.argv[4]
+script = {"publication":"paint_publication.py", "panel":"city_panel.py"}[task]
+target = source / "engine/bay" / script
 live = entry.with_name(target.name)
 if not target.is_file():
-    raise ValueError("missing publication snapshot")
+    raise ValueError("missing offline task snapshot")
 if live != target:
     tmp = live.with_suffix(".switch")
     tmp.unlink(missing_ok=True)
     tmp.symlink_to(target)
     tmp.replace(live)
-record = root / "publication-runner.json"
+record = root / (task + "-runner.json")
 tmp = record.with_suffix(".tmp")
-tmp.write_text(json.dumps(dict(supervisor=str(entry), publication=str(target)))+"\n")
+tmp.write_text(json.dumps({"supervisor":str(entry), task:str(target)})+"\n")
 tmp.replace(record)
 PYTHON
         exit 0
@@ -71,5 +73,5 @@ status)
     launchctl list "$label" | head -6
     "$bay/venv/bin/python" "$(dirname "$0")/city_paint.py" status
     ;;
-*) echo "usage: $0 start|publication|status" >&2; exit 2 ;;
+*) echo "usage: $0 start|publication|panel|status" >&2; exit 2 ;;
 esac

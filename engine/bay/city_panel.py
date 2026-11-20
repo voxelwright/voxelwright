@@ -80,7 +80,7 @@ def accepted_faces(receipt):
     return FaceLibrary(paths)
 
 
-def shot(group, places, dest):
+def shot(group, places, dest, inputs=None):
     # The server chooses an available loopback port. shot.mjs uses kit.chrome() / turn().
     env = {**os.environ, "VILLAGE_BAY_ROOT": str(group)}
     with subprocess.Popen(
@@ -103,10 +103,17 @@ def shot(group, places, dest):
             poses = load(POSES)
             for r in places:
                 place = r["place"]
+                checkpoint = dest / (place + ".pair.json")
+                pair = [dest / f"{place}-{i}.png" for i in range(2)]
+                if inputs and checkpoint.is_file() and all(p.is_file() for p in pair):
+                    if load(checkpoint) == dict(
+                        inputs=inputs, shots=[digest(p) for p in pair]
+                    ):
+                        continue
                 args = ";".join(
                     ",".join(map(str, poses[place][k])) for k in ("street", "100 m")
                 )
-                name = "450-citypaint-" + place.replace(" ", "")
+                name = f"450-citypaint-{os.getpid()}-" + place.replace(" ", "")
                 result = subprocess.run(
                     [
                         "node",
@@ -128,7 +135,7 @@ def shot(group, places, dest):
                     text=True,
                     cwd=ENGINE,
                     env=env,
-                    timeout=550,
+                    # The shared GPU queue may wait indefinitely. Playwright bounds the browser operations.
                 )
                 if (
                     result.returncode
@@ -138,9 +145,15 @@ def shot(group, places, dest):
                     raise RuntimeError(
                         f"incomplete GPU pair: {place} {result.stdout[-300:]}"
                     )
-                for i in range(2):
-                    shutil.copyfile(
-                        BAY / "shots" / f"{name}-{i}.png", dest / f"{place}-{i}.png"
+                for i, target in enumerate(pair):
+                    src = BAY / "shots" / f"{name}-{i}.png"
+                    temp = target.with_suffix(".part")
+                    shutil.copyfile(src, temp)
+                    temp.replace(target)
+                    src.unlink()
+                if inputs:
+                    save(
+                        checkpoint, dict(inputs=inputs, shots=[digest(p) for p in pair])
                     )
                 print("captured", place, flush=True)
         finally:
@@ -224,7 +237,12 @@ def stage_batch(root):
         shots = work / "shots"
         shots.mkdir(exist_ok=True)
         if not same:
-            shot(dest, places, shots)
+            shot(
+                dest,
+                places,
+                shots,
+                fingerprint([group, batch["renderer"], hashes[group]]),
+            )
         for r in places:
             p = r["place"]
             refs = [digest(REFS / (p + suffix + ".jpg")) for suffix in ("", " 100 m")]
