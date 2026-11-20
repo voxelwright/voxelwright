@@ -20,6 +20,16 @@ Supply `--far /local/build/far.json` to include face objects in the pin. The far
 
 The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in metres. Each `far.tiles[x_z]` is a three-element array of object records or null. Each FAR1 object contains its section headers and face payload. Fetch coarse band 0 first and add finer bands toward the eye. Unlisted keys have no far coverage.
 
+## New street life or vehicles
+
+`--life` and `--cars` add the `life.py` and `cars.mjs` outputs as the `life` and `cars` objects, each with its producer's `index.json`. The life objects are one per square plus `transit`, the streetcar and cable car routes. When only these change, restage the pinned release with them and keep every other object:
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --life <life dir> --cars <cars dir> - ~/.village/engine/bay/450-city-paint/sf
+```
+
+It checks the pinned manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
+
 ## Promotion after a visual pass
 
 The generator stages a local candidate and prints its digest. Score each fixed camera from `engine/bay/neighbourhoods.json` at street level and at 100 m. Run the same command with `--panel /path/to/panel.json` to move `current.json`. The receipt contains the candidate `release`, the `previousRelease` currently pinned in this output directory (JSON null for a first release), the SHA-256 of the tested Wasm in `coreSha256`, the SHA-256 of `neighbourhoods.json` in `panelSpecSha256`, and a `scores` object keyed by all sixteen place names. The default Wasm comes from `engine/page/core.wasm` by default. Pass `--core` for a staged build. Each value is a pair of numbers ordered street, 100 m. Every value must equal or exceed the preceding pin and the committed visual floors. A stale receipt or one lower score leaves the existing pointer in place. Inventory-only output stages metadata for inspection.

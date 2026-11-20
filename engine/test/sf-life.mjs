@@ -85,10 +85,19 @@ try {
     e.scale = scale
     await new Promise((r) => setTimeout(r, 1000))
     const stop = e.watch((g) => { gaps.push(g); street.push(e.street.ms) })
-    await new Promise((r) => setTimeout(r, ms))
+    // Once a second: who is on a crossing at red (none should be), who waits at a kerb, what each car waits for.
+    let red = 0, waiting = 0, faces = 0
+    const stops0 = e.street.count(e.view(), 1500).signStops
+    const waits = {}
+    for (let n = 0; n < ms / 1000; n++) {
+      await new Promise((r) => setTimeout(r, 1000))
+      const c = e.street.count(e.view(), 1500)
+      red = Math.max(red, c.crossingRed); waiting = Math.max(waiting, c.waiting); faces = Math.max(faces, e.falling.faces)
+      for (const car of e.street.cars(e.view().eye[0], e.view().eye[2], 1500)) if (car.kind === 'traffic' && car.v < 2) waits[car.wait || 'starting'] = (waits[car.wait || 'starting'] ?? 0) + 1
+    }
     stop()
     const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => g[Math.min(g.length - 1, Math.floor(g.length * p))]
-    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), figures: e.folk.drawn }
+    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), wide: e.street.count(e.view(), 3000), figures: e.folk.drawn, red, waiting, waits, faces, signStops: e.street.count(e.view(), 1500).signStops - stops0 }
   }, { ms: seconds * 1000, scale: SCALE })
 
   // ── Four places ──
@@ -96,8 +105,11 @@ try {
   results.places = {}
   for (const spot of SPOTS) {
     const s = onStreet(spot.street, ...spot.at)
-    // 25 m back along the street from the place and 3.5 m to its right, a person's eye by the kerb, looking along it.
-    let x = s.x - s.dx * 250 - s.dz * 35, z = s.z - s.dz * 250 + s.dx * 35
+    // 25 m back along the street from the place, a person's eye on its right-hand pavement: the first spot out from
+    // the middle that is past the lanes (7 m) and clear of anything solid round the eye (a tree, an awning, a wall).
+    const bx = s.x - s.dx * 250, bz = s.z - s.dz * 250
+    const side = await page.evaluate(([bx, bz, dx, dz]) => { const e = globalThis.engine; for (const o of [70, 80, 60, 90, 50, 100]) { const x = bx - dz * o, z = bz + dx * o, f = e.feet(Math.round(x), Math.round(z)); let clear = true; for (let y = f + 8; y <= f + 25 && clear; y += 3) for (const [ox, oz] of [[0, 0], [8, 0], [-8, 0], [0, 8], [0, -8]]) if (e.kind(x + ox, y, z + oz)) clear = false; if (clear) return o } return 35 }, [bx, bz, s.dx, s.dz])
+    const x = bx - s.dz * side, z = bz + s.dx * side
     const pose = { x: x / 10, z: z / 10, h: 1.7, yaw: Math.atan2(s.dx, -s.dz), pitch: -0.03 }
     if (spot.cable) {
       // The clock people and cars go by, moved on to when a cable car is coming up the line here.
@@ -115,16 +127,17 @@ try {
     await page.waitForTimeout(2500)
     const on = await take()
     await page.screenshot({ path: join(shots, `${spot.name}.png`) })
-    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
+    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, redMost: on.red, waitingMost: on.waiting, signStopsSeen: on.signStops, waits: on.waits, faces: on.faces, within300: { tram: on.wide.tram, cable: on.wide.cable, bus: on.wide.bus, trolley: on.wide.trolley }, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
     results.places[spot.name] = r
     results.places[spot.name].pose = pose
-    console.log(`  ${spot.what}: people ${r.people} (${r.peopleSeen} in view), parked ${r.parked}, driving ${r.traffic}, cable cars ${r.cable}, vehicles in view ${r.vehiclesSeen}`)
+    console.log(`  ${spot.what}: people ${r.people} (${r.peopleSeen} in view, up to ${r.waitingMost} waiting at a kerb, ${r.redMost} on a crossing at red), parked ${r.parked}, driving ${r.traffic} (bus ${r.bus}, trolleybus ${r.trolley}, van ${r.van}, truck ${r.truck}), streetcars ${r.tram}, cable cars ${r.cable}; within 300 m ${JSON.stringify(r.within300)}; vehicles in view ${r.vehiclesSeen}, ${r.faces} faces drawn`)
+    console.log(`    cars waiting on: ${JSON.stringify(r.waits)}; parked in a lane ${r.parkedInLaneNow}`)
     console.log(`    on  p50 ${r.frames.on.p50} p99 ${r.frames.on.p99} ms, march only ${r.frames.on.gpuMs} ms at scale ${r.frames.on.scale}, page CPU ${r.frames.on.cpuMs} ms (street ${r.frames.on.streetCpuMs}, figures ${r.frames.on.figuresMs})`)
     console.log(`    off p50 ${r.frames.off.p50} p99 ${r.frames.off.p99} ms, march only ${r.frames.off.gpuMs} ms at scale ${r.frames.off.scale}, page CPU ${r.frames.off.cpuMs} ms`)
     if (spot.cable) await page.evaluate(() => { const e = globalThis.engine; e.folkClock.now = () => Date.now() / 1000 })
   }
   // ── Budgets: what street life may cost, by place (on this M1 Pro, 1280 x 720) ──
-  const BUDGET = { peopleSeen: 80, vehiclesSeen: 40, streetCpuMs: 2.5, figuresCpuMs: 2.5, cpuAddedMs: 3, lifeBrotliPerSquareKB: 100, carBrotliKB: 250 }
+  const BUDGET = { peopleSeen: 80, vehiclesSeen: 40, streetCpuMs: 2.5, figuresCpuMs: 2.5, cpuAddedMs: 3, faces: 3_000_000, lifeBrotliPerSquareKB: 100, carBrotliKB: 250 }
   results.budget = BUDGET
   for (const [name, r] of Object.entries(results.places)) {
     const added = r.frames.on.cpuMs - r.frames.off.cpuMs
@@ -147,6 +160,14 @@ try {
     if (made.status === 0) results.places[spot.name].pair = { photo: cam.id, metres: round(cam.far / 10), captured: new Date(cam.captured).toISOString().slice(0, 10) }
   }
   const P = results.places
+  // ── Junctions, transit, parking ──
+  const places = Object.values(P).filter((p) => p.what)
+  check(places.every((p) => p.redMost === 0), `nobody on a crossing at red, sampled each second (${places.map((p) => p.redMost).join(', ')})`)
+  check(places.some((p) => p.waitingMost > 0), `people wait at the kerb for their walking sign (most at once: ${places.map((p) => p.waitingMost).join(', ')})`)
+  check((P.columbus.waits.lights ?? 0) > 0, `cars wait at the lights at Columbus and Broadway (${JSON.stringify(P.columbus.waits)})`)
+  check(P.hill.signStopsSeen > 0, `cars come to a full stop at signs on Russian Hill (${P.hill.signStopsSeen} full stops in ${seconds} s; waiting on ${JSON.stringify(P.hill.waits)})`)
+  check(P.embarcadero.within300.tram > 0, `a streetcar on the Embarcadero within 300 m (${P.embarcadero.within300.tram})`)
+  check(places.every((p) => p.parkedInLaneNow === 0), `no parked car reaches into a lane (${places.map((p) => p.parkedInLaneNow).join(', ')}; ${Math.max(...places.map((p) => p.parkedInLane))} places dropped for it)`)
   // By day: at night the streets are near empty everywhere, and a charge may find nobody.
   const day = hour >= 7 && hour <= 22
   if (day) check(P.columbus.people > P.hill.people, `busier at Columbus and Broadway (${P.columbus.people} people) than on the residential hill (${P.hill.people})`)
@@ -186,12 +207,77 @@ try {
     }
   }
 
+  for (const [name, r] of Object.entries(P)) if (r.what) check(r.faces <= BUDGET.faces, `${name}: ${r.faces} faces of things drawn (budget ${BUDGET.faces})`)
+
+  // ── People are where they were a moment ago: no one jumps, at a round's end or a wait's ──
+  {
+    const jumps = await page.evaluate(async () => {
+      const e = globalThis.engine, v = e.view(), was = e.folkClock.now
+      let worst = 0, pairs = 0
+      for (let n = 0; n < 150; n++) {
+        const t = Date.now() / 1000 + n * 7.3
+        e.folkClock.now = () => t
+        const a = new Map(e.street.folk(v, 1).map((p) => [p.seed, [p.at[0], p.at[2]]]))
+        e.folkClock.now = () => t + 0.1
+        for (const p of e.street.folk(v, 1.1)) { const q = a.get(p.seed); if (q) { pairs++; worst = Math.max(worst, Math.hypot(p.at[0] - q[0], p.at[2] - q[1])) } }
+      }
+      e.folkClock.now = was
+      return { pairs, worstCells: Math.round(worst * 10) / 10 }
+    })
+    results.continuity = jumps
+    check(jumps.worstCells < 6, `over ${jumps.pairs} people a tenth of a second apart, nobody moves more than ${round(jumps.worstCells / 10, 2)} m`)
+  }
+
+  // ── Every vehicle, close up ──
+  {
+    const s = onStreet('The Embarcadero', 528000, 661600), h = Math.atan2(s.dz, s.dx), at = [s.x - s.dz * 40, s.z + s.dx * 40]
+    results.lineup = await page.evaluate(([at, h]) => globalThis.engine.street.lineup(at, h), [at, h])
+    await page.evaluate(([at, h]) => { const e = globalThis.engine, cx = at[0] / 10 + Math.cos(h) * 25, cz = at[1] / 10 + Math.sin(h) * 25, ex = at[0] / 10 - Math.cos(h) * 9 - Math.sin(h) * 9, ez = at[1] / 10 - Math.sin(h) * 9 + Math.cos(h) * 9; Object.assign(e.pose, { x: ex, z: ez, y: e.ground(ex, ez) + 2.2, yaw: Math.atan2(cx - ex, -(cz - ez)), pitch: -0.06 }); e.fov = 55 }, [at, h])
+    await page.waitForTimeout(3000); await settle(); await page.waitForTimeout(3000)
+    await page.screenshot({ path: join(shots, 'lineup.png') })
+    await page.evaluate(() => { const e = globalThis.engine; e.street.lineup(null); e.fov = 70 })
+    check(results.lineup.length >= 9, `the line-up: ${results.lineup.join(', ')}`)
+  }
+
+  // ── Density against street photographs: Chinatown (Grant Ave), at each photograph's own hour ──
+  // The engine's eye where each kept panorama was taken (2.4 m up, as a camera on a car or a pole is), looking as the
+  // neighbourhood panel looks there, at the hour of day it was taken; who is in view counted, the photograph beside.
+  // Union Square and the Mission are not in this release's squares (the city run has not reached them): said, not faked.
+  results.density = []
+  if (!has('no-pairs')) {
+    const around = spawnSync(PY, [join(here, 'sf/pairs.py'), 'around', '522492', '666920', '600'], { encoding: 'utf8' })
+    const photos = around.status === 0 ? JSON.parse(around.stdout.trim().split('\n').pop() || '[]') : []
+    const yaw = (340 * Math.PI) / 180
+    for (const [n, cam] of photos.slice(0, 4).entries()) {
+      const when = new Date(cam.captured)
+      // Its hour in San Francisco; but a photograph in daylight stamped in the night was taken by a camera whose
+      // clock kept local time as if it were UTC: then the stamp's own hour is the hour.
+      const crop = spawnSync(PY, [join(here, 'sf/pairs.py'), 'view', cam.id, String(yaw), '-0.02', '70', '1280', '720', join(shots, `chinatown-${n}-photo.png`)], { encoding: 'utf8' })
+      const luma = crop.status === 0 ? JSON.parse(crop.stdout.trim().split('\n').pop()).luma : 0
+      let h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(when)) + when.getUTCMinutes() / 60
+      const local = luma > 90 && (h < 7 || h > 19)
+      if (local) h = when.getUTCHours() + when.getUTCMinutes() / 60
+      await page.evaluate((h) => { globalThis.engine.hour = h }, h)
+      // On Grant Ave's carriageway beside the camera: at the camera's own spot the eye is inside the awnings and
+      // arcades over the pavement, which the bake has solid.
+      const g = onStreet('Grant Avenue', cam.x, cam.z), along = (cam.x - g.x) * g.dx + (cam.z - g.z) * g.dz
+      await look({ x: (g.x + g.dx * along) / 10, z: (g.z + g.dz * along) / 10, h: 2.4, yaw, pitch: -0.02 })
+      await page.waitForTimeout(2500); await settle(); await page.waitForTimeout(4000)
+      const c = await page.evaluate(() => globalThis.engine.street.count(globalThis.engine.view(), 600))
+      const name = `chinatown-${n}`
+      await page.screenshot({ path: join(shots, `${name}-engine.png`) })
+      results.density.push({ place: 'Chinatown, Grant Ave', photo: cam.id, captured: when.toISOString().slice(0, 16), hour: round(h), clockLocal: local, peopleSeen: c.peopleSeen, people60m: c.people, vehiclesSeen: c.vehiclesSeen, name })
+      console.log(`  Chinatown ${n}: photo ${cam.id} at ${round(h)}h${local ? ' (its clock kept local time)' : ''}; engine at that hour: ${c.peopleSeen} people and ${c.vehiclesSeen} vehicles in view, ${c.people} people within 60 m`)
+    }
+    await page.evaluate((h) => { globalThis.engine.hour = h }, hour)
+  }
+
   // ── A car got into on foot and driven 60 s, through a turn and up a hill ──
   console.log('\ndriving')
   const start = onStreet('Taylor Street', 515900, 663000)
   await look({ x: start.x / 10, z: start.z / 10, h: 1.7, yaw: Math.atan2(start.dx, -start.dz), pitch: -0.1 })
   await page.waitForTimeout(1500); await settle()
-  const car = await page.evaluate(({ x, z }) => globalThis.engine.street.cars(x, z, 600).filter((c) => c.kind === 'parked').sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null, { x: start.x, z: start.z })
+  const car = await page.evaluate(({ x, z }) => globalThis.engine.street.cars(x, z, 600).filter((c) => c.kind === 'parked' && c.model === 'car').sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null, { x: start.x, z: start.z })
   check(!!car, `a parked car on Taylor St to get into${car ? ` (${car.name})` : ''}`)
   if (car) {
     // On foot beside it: it comes to life, and E gets in.
@@ -239,7 +325,8 @@ try {
         for (let i = 0; i + 1 < pts.length; i += 2) { const j = Math.min(i, pts.length - 4), dx = pts[j + 2] - pts[j], dz = pts[j + 3] - pts[j + 1], l = Math.hypot(dx, dz) || 1; lane.push(pts[i] - (dz / l) * 16, pts[i + 1] + (dx / l) * 16) }
         const track = [], t0 = performance.now(), start = w0.at
         let at = 0, last = null, turnSum = 0, lastHeading = heading, top = start[1], low = start[1], ticks = 0, off = 0
-        const offs = [], samples = []
+        const offs = [], samples = [], surface = []
+        let wedged = 0, backing = 0
         let lastErr = 0
         while (performance.now() - t0 < 60_000 && thing.alive) {
           const w = e.alive.where(thing)
@@ -248,7 +335,7 @@ try {
           let near = Infinity
           for (let i = at; i < Math.min(lane.length, at + 80); i += 2) { const d = Math.hypot(lane[i] - w.at[0], lane[i + 1] - w.at[2]); if (d < near) { near = d; at = i } }
           // How far it is from the middle of the nearest road (any the graph has), twice a second once it has set off.
-          if (performance.now() - t0 > 3000 && ticks % 5 === 0) { let d = Infinity; for (const r of e.street.roads(w.at[0], w.at[2], 300)) for (let i = 0; i + 3 < r.line.length; i += 2) { const ax = r.line[i], az = r.line[i + 1], bx = r.line[i + 2] - ax, bz = r.line[i + 3] - az, l2 = bx * bx + bz * bz || 1, t = Math.max(0, Math.min(1, ((w.at[0] - ax) * bx + (w.at[2] - az) * bz) / l2)); d = Math.min(d, Math.hypot(w.at[0] - ax - bx * t, w.at[2] - az - bz * t)) } if (d < Infinity) { off = Math.max(off, d); offs.push(d); if (offs.length % 10 === 1) samples.push([Math.round(w.at[0]), Math.round(w.at[2]), Math.round(d), Math.round(near), offs.length]) } }
+          if (performance.now() - t0 > 3000 && ticks % 5 === 0) { let d = Infinity; for (const r of e.street.roads(w.at[0], w.at[2], 300)) for (let i = 0; i + 3 < r.line.length; i += 2) { const ax = r.line[i], az = r.line[i + 1], bx = r.line[i + 2] - ax, bz = r.line[i + 3] - az, l2 = bx * bx + bz * bz || 1, t = Math.max(0, Math.min(1, ((w.at[0] - ax) * bx + (w.at[2] - az) * bz) / l2)); d = Math.min(d, Math.hypot(w.at[0] - ax - bx * t, w.at[2] - az - bz * t)) } if (d < Infinity) { const f = e.feet(Math.round(w.at[0]), Math.round(w.at[2])); surface.push((e.kind(w.at[0], f - 1, w.at[2]) & 15) === 6); off = Math.max(off, d); offs.push(d); if (offs.length % 10 === 1) samples.push([Math.round(w.at[0]), Math.round(w.at[2]), Math.round(d), Math.round(near), offs.length]) } }
           let ahead = at, run = 0
           while (ahead + 3 < lane.length && run < (Math.abs(lastErr) > 0.3 ? 55 : 90)) { run += Math.hypot(lane[ahead + 2] - lane[ahead], lane[ahead + 3] - lane[ahead + 1]); ahead += 2 }
           const tx = lane[ahead] - w.at[0], tz = lane[ahead + 1] - w.at[2], h = Math.atan2(w.front[2], w.front[0])
@@ -256,7 +343,15 @@ try {
           lastErr = err
           const speed = last ? Math.hypot(w.at[0] - last[0], w.at[2] - last[2]) / 0.1 : 0
           const wanted = Math.abs(err) > 0.35 ? 30 : 85
-          e.alive.drive(thing, speed < wanted ? 1 : speed > wanted + 15 ? -0.4 : 0.15, Math.max(-1, Math.min(1, err * 2.2)), 0)
+          // Wedged (pushing and not moving): back off a car's length, the wheel the other way, then on.
+          if (speed < 3 && ticks > 30) wedged++; else wedged = 0
+          if (wedged > 20) { backing = 15; wedged = 0 }
+          // Near the route's end (where mapping or the road ends), it pulls up and stops.
+          let rest = 0
+          for (let i = at; i + 3 < lane.length && rest < 160; i += 2) rest += Math.hypot(lane[i + 2] - lane[i], lane[i + 3] - lane[i + 1])
+          if (rest < 150) e.alive.drive(thing, speed > 5 ? -0.5 : 0, 0, 0)
+          else if (backing > 0) { backing--; e.alive.drive(thing, -1, -Math.sign(err) || 1, 0) }
+          else e.alive.drive(thing, speed < wanted ? 1 : speed > wanted + 15 ? -0.4 : 0.15, Math.max(-1, Math.min(1, err * 2.2)), 0)
           let dh = h - lastHeading; dh -= Math.round(dh / (2 * Math.PI)) * 2 * Math.PI
           turnSum += dh; lastHeading = h
           top = Math.max(top, w.at[1]); low = Math.min(low, w.at[1])
@@ -271,7 +366,7 @@ try {
         for (let i = 2; i < track.length; i++) { const a = Math.atan2(track[i][2] - track[i - 1][2], track[i][0] - track[i - 1][0]), b = Math.atan2(track[i - 1][2] - track[i - 2][2], track[i - 1][0] - track[i - 2][0]); let d = a - b; d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI; sum += d; largest = Math.max(largest, Math.abs(sum)); if (i % 6 === 0) sum = 0 }
         let path = 0
         for (let i = 1; i < track.length; i++) path += Math.hypot(track[i][0] - track[i - 1][0], track[i][2] - track[i - 1][2])
-        return { seconds: (performance.now() - t0) / 1000, whole: thing.alive, route: route.length, routeMetres: lane.reduce((n, _v, i) => (i >= 2 && i % 2 === 0 ? n + Math.hypot(lane[i] - lane[i - 2], lane[i + 1] - lane[i - 1]) : n), 0) / 10, pathMetres: path / 10, climbMetres: (top - start[1]) / 10, dropMetres: (start[1] - low) / 10, endRiseMetres: w ? (w.at[1] - start[1]) / 10 : null, turnedDegrees: largest * 180 / Math.PI, offLaneMetres: off / 10, offLaneMedianMetres: ([...offs].sort((a, b) => a - b)[Math.floor(offs.length / 2)] ?? 0) / 10, samples, offLaneP95Metres: (offs.sort((a, b) => a - b)[Math.floor(offs.length * 0.95)] ?? 0) / 10, track }
+        return { seconds: (performance.now() - t0) / 1000, whole: thing.alive, route: route.length, routeMetres: lane.reduce((n, _v, i) => (i >= 2 && i % 2 === 0 ? n + Math.hypot(lane[i] - lane[i - 2], lane[i + 1] - lane[i - 1]) : n), 0) / 10, pathMetres: path / 10, climbMetres: (top - start[1]) / 10, dropMetres: (start[1] - low) / 10, endRiseMetres: w ? (w.at[1] - start[1]) / 10 : null, turnedDegrees: largest * 180 / Math.PI, offLaneMetres: off / 10, onAsphalt: surface.filter(Boolean).length / Math.max(1, surface.length), offLaneMedianMetres: ([...offs].sort((a, b) => a - b)[Math.floor(offs.length / 2)] ?? 0) / 10, samples, offLaneP95Metres: (offs.sort((a, b) => a - b)[Math.floor(offs.length * 0.95)] ?? 0) / 10, track }
       })
       // A picture half way up, from behind.
       await page.waitForTimeout(32_000)
@@ -279,7 +374,8 @@ try {
       const drove = await driving
       results.drive = { ...drove, track: undefined }
       console.log(`  ${JSON.stringify(results.drive)}`)
-      check(drove.offLaneMedianMetres < 3 && drove.offLaneP95Metres < 6, `on the road: ${round(drove.offLaneMedianMetres)} m from a road's middle at the median, ${round(drove.offLaneP95Metres)} m at the 95th percentile (at most ${round(drove.offLaneMetres)} m)`)
+      // On the road: asphalt under it (the world's own surface), not the distance from a mapped middle line, which on a wide street is 6 m from its kerb.
+      check(drove.onAsphalt >= 0.9, `on the road: asphalt under it in ${Math.round(drove.onAsphalt * 100)}% of samples (${round(drove.offLaneMedianMetres)} m from a road's middle at the median, at most ${round(drove.offLaneMetres)} m)`)
       check(drove.whole && drove.seconds > 55, `driven ${round(drove.seconds)} s and still whole`)
       check(drove.pathMetres > 150, `went ${round(drove.pathMetres)} m`)
       check(drove.turnedDegrees > 60, `turned ${round(drove.turnedDegrees)}° at a junction`)
@@ -318,6 +414,9 @@ try {
     const after20 = e.street.cars(at[0], at[2], 300)
     return { at, down, flinch, thrown, thrownCellsFromBlast: moved, trafficSpeedsAt2s: stopped, cars: carsBefore.length, carsLater: later.length, drivingAt6s: later.filter((c) => c.kind === 'traffic').map((c) => Math.round(c.v)), drivingAt20s: after20.filter((c) => c.kind === 'traffic').map((c) => Math.round(c.v)) }
   })
+  // Seen from 10 m up, over where it went off (at the eye's height the smoke fills the picture).
+  await page.evaluate((at) => { const e = globalThis.engine; Object.assign(e.pose, { x: at[0] / 10 - 14, z: at[2] / 10 + 8, y: at[1] / 10 + 10, yaw: Math.atan2(14, -(-8)), pitch: -0.55 }) }, blast.at ?? [P.columbus.pose.x * 10, 200, P.columbus.pose.z * 10])
+  await page.waitForTimeout(1500)
   await page.screenshot({ path: join(shots, 'blast.png') })
   results.blast = blast
   console.log(`  ${JSON.stringify(blast)}`)
@@ -337,6 +436,27 @@ try {
   if (thrown) check(thrown.thrown > 0 && thrown.movedCells.some((d) => d > 8), `a charge 3 m from a parked ${thrown.car} throws ${thrown.thrown} car(s), now ${thrown.movedCells.join(', ')} cells from where it stood`)
   // (A car that comes into the 80 m after the blast was not near it.)
   if (blast.trafficSpeedsAt2s?.length) check(blast.trafficSpeedsAt2s.filter((v) => v < 15).length >= blast.trafficSpeedsAt2s.length * 0.8, `traffic within 80 m stops (${blast.trafficSpeedsAt2s.join(', ')} cells a second) and moves on later (${blast.drivingAt20s?.join(', ')})`)
+  // A charge in the road at Columbus and Broadway: the world says where it is broken, the road is closed, and no car drives into the hole.
+  {
+    const s = onStreet('Columbus Avenue', 522628, 664243)
+    await look({ x: s.x / 10 - s.dx * 25, z: s.z / 10 - s.dz * 25, h: 1.7, yaw: Math.atan2(s.dx, -s.dz), pitch: -0.05 })
+    await page.waitForTimeout(2000); await settle(); await page.waitForTimeout(3000)
+    const hole = await page.evaluate(async ([x, z]) => {
+      const e = globalThis.engine, y = e.feet(Math.round(x), Math.round(z))
+      e.strike([Math.round(x), y, Math.round(z)], 25)
+      await new Promise((r) => setTimeout(r, 4000))
+      const c = e.street.count(e.view(), 1500)
+      let into = 0
+      for (let n = 0; n < 15; n++) { await new Promise((r) => setTimeout(r, 1000)); into = Math.max(into, e.street.cars(x, z, 300).filter((k) => { if (k.kind !== 'traffic') return false; const f = e.feet(Math.round(k.x), Math.round(k.z)); return !e.kind(k.x, f - 1, k.z) && !e.kind(k.x, f - 3, k.z) }).length) }
+      return { craters: c.craters, blockedRoads: c.blockedRoads, carsInHoleMost: into }
+    }, [s.x, s.z])
+    results.crater = hole
+    await page.evaluate(([x, z]) => { const e = globalThis.engine, ex = x / 10 - 12, ez = z / 10 + 9; Object.assign(e.pose, { x: ex, z: ez, y: e.ground(x / 10, z / 10) + 11, yaw: Math.atan2(x / 10 - ex, -(z / 10 - ez)), pitch: -0.6 }) }, [s.x, s.z])
+    await page.waitForTimeout(2000)
+    await page.screenshot({ path: join(shots, 'crater.png') })
+    console.log(`  ${JSON.stringify(hole)}`)
+    check(hole.craters > 0 && hole.blockedRoads > 0 && hole.carsInHoleMost === 0, `a charge in Columbus Ave: ${hole.craters} hole(s) seen in the world, ${hole.blockedRoads} road(s) closed, no car in 15 s stood where the road was gone`)
+  }
   // Reset puts the street back.
   await page.evaluate(() => globalThis.engine.reset())
   await page.waitForTimeout(3000)
@@ -358,7 +478,8 @@ for (const spot of SPOTS) {
   sheet.push(item)
   if (r.pair) sheet.push({ name: `${spot.what}, as photographed`, engine: join(shots, `${spot.name}-engine.png`), photo: join(shots, `${spot.name}-photo.png`), photoFar: r.pair.metres, line: `panorama ${r.pair.photo}, ${r.pair.captured}, ${r.pair.metres} m from the place` })
 }
-for (const extra of ['in-car', 'drive', 'blast']) sheet.push({ name: extra, engine: join(shots, `${extra}.png`), photo: null, line: extra === 'drive' && results.drive ? `${round(results.drive.pathMetres)} m in ${round(results.drive.seconds)} s, climbed ${round(results.drive.climbMetres)} m, turned ${round(results.drive.turnedDegrees)}°` : extra === 'blast' && results.blast ? `${results.blast.down} thrown down, ${results.blast.flinch} flinched` : '' })
+for (const d of results.density ?? []) sheet.push({ name: `${d.place}, ${d.captured}`, engine: join(shots, `${d.name}-engine.png`), photo: join(shots, `${d.name}-photo.png`), photoFar: 0, line: `engine at ${d.hour}h: ${d.peopleSeen} people, ${d.vehiclesSeen} vehicles in view` })
+for (const extra of ['lineup', 'in-car', 'drive', 'blast', 'crater']) sheet.push({ name: extra, engine: join(shots, `${extra}.png`), photo: null, line: extra === 'drive' && results.drive ? `${round(results.drive.pathMetres)} m in ${round(results.drive.seconds)} s, climbed ${round(results.drive.climbMetres)} m, turned ${round(results.drive.turnedDegrees)}°` : extra === 'blast' && results.blast ? `${results.blast.down} thrown down, ${results.blast.flinch} flinched` : extra === 'lineup' ? (results.lineup ?? []).join(', ') : extra === 'crater' && results.crater ? `${results.crater.blockedRoads} road(s) closed, ${results.crater.carsInHoleMost} cars in the hole` : '' })
 const html = `<!doctype html><meta charset=utf-8><body style="margin:0;background:#15171c;color:#e8ecf1;font:13px system-ui"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px">${sheet.map((s) => `<figure style="margin:0"><div style="display:flex;gap:4px">${[s.engine, s.photo].filter(Boolean).map((p) => `<img src="data:image/png;base64,${readFileSync(p).toString('base64')}" style="width:${s.photo ? '50%' : '100%'};display:block">`).join('')}</div><figcaption style="padding:4px 2px"><b>${s.name}</b> · ${s.line}${s.photo ? ` · right: street photograph ${s.photoFar} m away (Mapillary, CC BY-SA)` : ''}</figcaption></figure>`).join('')}</div>`
 writeFileSync(join(shots, 'sheet.html'), html)
 {
