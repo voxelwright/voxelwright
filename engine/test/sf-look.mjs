@@ -158,7 +158,10 @@ try {
     await calm(); await page.waitForTimeout(1000)
     const whole = await lightOf(page, 'fog-from-150m')
     console.log(`  fog rolling in, 150 m up: before ${JSON.stringify(before)}, ${round(caughtMs / 1000, 1)} s in ${JSON.stringify(mid)} (front ${round((rolling.front - rolling.eye) / 10, 0)} m east of the eye), all in ${JSON.stringify(whole)}`)
-    check(rolling.moving && rolling.front < 1e8 && mid.contrast < before.contrast && whole.contrast < mid.contrast, `a change of weather is smooth: ${round(caughtMs / 1000, 1)} s into the fog the front is ${round((rolling.front - rolling.eye) / 10, 0)} m from the eye and the contrast ${before.contrast}, ${mid.contrast}, ${whole.contrast} falls as it comes`)
+    // Fog whitens what it reaches: half way in, the light is between the clear picture's and the fogged one's (by at
+    // least a point each side), and the contrast is gone only at the end. Contrast alone moves too little before the
+    // front arrives to say so.
+    check(rolling.moving && rolling.front < 1e8 && mid.mean >= before.mean + 1 && mid.mean <= whole.mean - 1 && whole.contrast < before.contrast, `a change of weather is smooth: ${round(caughtMs / 1000, 1)} s into the fog the front is ${round((rolling.front - rolling.eye) / 10, 0)} m from the eye, the light ${before.mean}, ${mid.mean}, ${whole.mean} and the contrast ${before.contrast}, ${mid.contrast}, ${whole.contrast}`)
     // The hour, glided: halfway there a moment after it was asked for.
     await sky('clear'); await calm()
     await at(PARK, 25.05)
