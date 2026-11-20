@@ -25,7 +25,7 @@ import { chance, out as homeHours, type Shock } from './residents.ts'
 import { unrun } from './runs.ts'
 
 /** What street life asks of the land (the core's exports). */
-export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number }
+export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number }
 
 type Ring = Float64Array
 interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
@@ -114,7 +114,7 @@ export interface Street {
   /** Everything as it was: the traffic begins again, every parked car is back at its kerb. */
   reset(): void
   /** What is in sight: people and vehicles within `r` cells of a point (both counted on the ground plan) and in the eye's view. */
-  count(view: View, r?: number): { people: number; peopleSeen: number; parked: number; traffic: number; cable: number; tram: number; bus: number; trolley: number; van: number; truck: number; vehiclesSeen: number; living: number; waiting: number; crossingRed: number; crossingLights: number }
+  count(view: View, r?: number): { people: number; peopleSeen: number; parked: number; traffic: number; cable: number; tram: number; bus: number; trolley: number; van: number; truck: number; vehiclesSeen: number; living: number; waiting: number; crossingRed: number; crossingLights: number; craters: number; blockedRoads: number; parkedInLane: number; parkedInLaneNow: number }
   /** The roads near a place, for a driver to follow (the checks). */
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
   /** Vehicles near a place: where each stands, which way it heads, and what it is. */
@@ -128,6 +128,7 @@ export interface Street {
   /** What is on its way to life and which faces are made (for the checks). */
   readonly debug: unknown
   readonly red: unknown
+  trace(seed: number, times: number[]): unknown
   readonly ms: number
   readonly ready: boolean
 }
@@ -323,7 +324,7 @@ export function street(o: {
     return r
   }
   /** One person at a second: where on their walk, which way they face, what they are doing. */
-  const W = { x: 0, z: 0, hx: 0, hz: 1, s: 0, walking: 0, still: false, far: false, stood: 0, crossing: false, kind: 0, waiting: false, sig: 0, cdx: 0, cdz: 0 }
+  const W = { x: 0, z: 0, hx: 0, hz: 1, s: 0, walking: 0, still: false, far: false, stood: 0, crossing: false, kind: 0, waiting: false, sig: 0, cdx: 0, cdz: 0, pause: 0 }
   /**
    * A walk out and back, timed: at each crossing with lights they stop a step short of the kerb and wait for their
    * walking sign (a rule of the clock, cycleAt), going only if what is left of it sees them across before the lights
@@ -383,9 +384,9 @@ export function street(o: {
     let s = 0, back = false, stood = 0, waiting = false
     W.still = false; W.far = false
     if (tau < plan.outEnd) { const at = follow(plan.out, tau); s = at.s; waiting = at.waiting; W.walking = at.walking; W.s = s }
-    else if (tau < plan.backAt) { s = r.len; W.still = true; W.far = true; stood = tau - plan.outEnd; W.walking = 0; W.s = r.len }
+    else if (tau < plan.backAt) { s = r.len; W.still = true; W.far = true; stood = tau - plan.outEnd; W.pause = plan.backAt - plan.outEnd; W.walking = 0; W.s = r.len }
     else if (tau < plan.backEnd) { const at = follow(plan.back, tau - plan.backAt); s = at.s; waiting = at.waiting; back = true; W.walking = at.walking; W.s = 2 * r.len - s }
-    else { s = 0; W.still = true; stood = tau - plan.backEnd; W.walking = 0; W.s = 2 * r.len }
+    else { s = 0; W.still = true; stood = tau - plan.backEnd; W.pause = T - plan.backEnd; W.walking = 0; W.s = 2 * r.len }
     W.stood = stood
     W.waiting = waiting
     const P = r.P, C = r.C
@@ -402,14 +403,28 @@ export function street(o: {
     W.sig = on ? on.node : 0; W.cdx = on ? on.dx : 0; W.cdz = on ? on.dz : 0
     // Keep right: half a metre to a metre to the right of their way, less on a crossing. Standing, they cross over
     // to the other side slowly, to walk back on their right.
-    const side = (W.crossing ? 3 : 5 + 5 * chance(seed, 6))
+    // Nearer the middle on a crossing, and drawing in over the 2 m before it, so the step onto it is not a jump.
+    let toCrossing = Infinity
+    for (let j = Math.max(0, segment - 6); j < Math.min(r.kinds.length, segment + 7); j++) if (r.kinds[j] === 1) toCrossing = Math.min(toCrossing, s < C[j] ? C[j] - s : s > C[j + 1] ? s - C[j + 1] : 0)
+    const side = 3 + (2 + 5 * chance(seed, 6)) * ease(toCrossing / 20)
     let lateral = back ? -side : side
-    if (W.still) { const f = ease((stood - 2) / 4); lateral = W.far ? side * (1 - 2 * f) : -side * (1 - 2 * f) }
-    // Right of the way out: (-tz, tx).
-    W.x = R.x - R.tz * lateral; W.z = R.z + R.tx * lateral; W.hx = hx; W.hz = hz
+    // (Over the pause they have: a short one is crossed in it, not jumped at its end.)
+    if (W.still) { const f = ease(Math.min((stood - 2) / 4, stood / Math.max(0.5, W.pause - 0.2))); lateral = W.far ? side * (1 - 2 * f) : -side * (1 - 2 * f) }
+    // At home they stand on the pavement's middle line, and keep to a side from 3 m out: the next round's walk may
+    // leave the other way along it, and its right is the other side.
+    lateral *= W.still && !W.far ? 0 : ease(s / 30)
+    // Right of the way out, taken over 3 m of it, so that at a corner the side turns with them and is not jumped.
+    const a3 = { x: 0, z: 0, tx: 0, tz: 0 }, b3 = { x: 0, z: 0, tx: 0, tz: 0 }
+    along(P, C, s - 15, a3); along(P, C, s + 15, b3)
+    let nx = b3.x - a3.x, nz = b3.z - a3.z
+    const nl = Math.hypot(nx, nz)
+    if (nl > 1) { nx /= nl; nz /= nl } else { nx = R.tx; nz = R.tz }
+    // Where the way turns back on itself (a path's dead end), the side shrinks to nothing as it turns: no flip.
+    lateral *= Math.min(1, (nl / 30) ** 2)
+    W.x = R.x - nz * lateral; W.z = R.z + nx * lateral; W.hx = hx; W.hz = hz
     if (W.still) {
       // Standing they turn to the houses or the street, whichever their number says.
-      const turn = ease((stood - 1) / 1.5) * (chance(seed, 7 + k) < 0.5 ? 1 : -1) * Math.PI / 2, c = Math.cos(turn), sn = Math.sin(turn)
+      const turn = ease((stood - 1) / 1.5) * ease((W.pause - stood - 0.3) / 1.2) * (chance(seed, 7 + k) < 0.5 ? 1 : -1) * Math.PI / 2, c = Math.cos(turn), sn = Math.sin(turn)
       W.hx = hx * c - hz * sn; W.hz = hx * sn + hz * c
     }
   }
@@ -634,12 +649,14 @@ export function street(o: {
         if (Math.hypot(s.x - eye[0], s.z - eye[2]) > PARKED || gone.has(i)) continue
         seen.add(i)
         if (parked.has(i) || chance(s.seed, 3) >= parkedFill(s, hour)) continue
-        const m = cars[Math.floor(chance(s.seed, 4) * cars.length)], paint = chance(s.seed, 5) < 0.3 ? -1 : Math.floor(chance(s.seed, 6) * m.variants.length)
+        const van = ready.get('van'), m = van && chance(s.seed, 8) < 0.08 ? van : cars[Math.floor(chance(s.seed, 4) * cars.length)], paint = chance(s.seed, 5) < 0.3 ? -1 : Math.floor(chance(s.seed, 6) * m.variants.length)
         const c: Car = { id: ids++, model: m, paint, kind: 'parked', seed: s.seed, x: s.x, y: 0, z: s.z, heading: s.yaw, pitch: 0, v: 0, piece: null, shown: '', slot: i }
         settle(c)
         // Not on a roof or a stair (the footing there is not the street's), and not in what the survey left standing at the kerb.
         const g = o.land.ground_at(Math.round(s.x), Math.round(s.z))
         if (c.y - g > 8 || Math.abs(c.pitch) > 0.3) { gone.add(i); continue }
+        // Never in a lane: no part of it where a lane's cars go (by the lanes as traffic keeps them, laneOff).
+        if (inLane(s.x, s.z, m.wide / 2)) { gone.add(i); inLanes++; continue }
         parked.set(i, c)
       }
     }
@@ -729,7 +746,26 @@ export function street(o: {
   /** Whether cars may go along a road: not where its line runs under a roof (a tunnel, or a building over it: the footing there is the roof's). */
   /** How many roads may be looked over in a frame: each costs a few dozen questions of the land. Unknown, a road is not taken this frame. */
   let probes = 0
+  /** Whether something this wide (half its width, cells) standing at a place reaches into any road's lanes. */
+  const inLane = (x: number, z: number, half: number) => {
+    for (const r of roadGrid.get(cell(Math.floor(x / GRID), Math.floor(z / GRID))) ?? []) {
+      for (let i = 0; i + 3 < r.p.length; i += 2) {
+        const ax = r.p[i], az = r.p[i + 1], bx = r.p[i + 2] - ax, bz = r.p[i + 3] - az, l2 = bx * bx + bz * bz
+        if (!l2) continue
+        const t = ((x - ax) * bx + (z - az) * bz) / l2
+        if (t < 0 || t > 1) continue
+        const l = Math.sqrt(l2), right = ((x - ax) * -bz + (z - az) * bx) / l
+        // A two-way road's lanes are to its right of the middle line; a one-way's either side of it.
+        let lo = Infinity, hi = -Infinity
+        for (let lane = 0; lane < r.lanes; lane++) { const off = laneOff(r, lane); lo = Math.min(lo, off - 16.5); hi = Math.max(hi, off + 16.5) }
+        if (right + half > lo + 2 && right - half < hi - 2) return true
+      }
+    }
+    return false
+  }
+  let inLanes = 0
   const open = (r: Road) => {
+    if (r.blocked) return false
     if (r.open !== null) return r.open
     if (probes <= 0) return false
     probes--
@@ -849,7 +885,9 @@ export function street(o: {
   const drive = (dt: number, view: View, t: number) => {
     obstacles.length = 0
     for (const c of traffic) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
-    // (Parked cars are at the kerb, out of every lane: a place inferred a little into one is passed, not queued behind for ever.)
+    // Parked cars, which no place puts in a lane (inLane); and the holes blasts made in the road.
+    for (const c of parked.values()) if (!c.thing) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: Math.cos(c.heading), hz: Math.sin(c.heading) })
+    for (const h of craters) obstacles.push({ x: h.x, z: h.z, long: h.r, wide: h.r, v: 0, hx: 1, hz: 0 })
     for (const c of [...cables, ...trams]) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
     for (const t of o.alive.things) { const w = o.alive.where(t); if (w) obstacles.push({ x: w.at[0], z: w.at[2], long: Math.max(t.size[0], t.size[2]) / 2, wide: Math.min(t.size[0], t.size[2]) / 2, v: t.state ? Math.abs(t.state.speed ?? 0) : 0, hx: w.front[0], hz: w.front[2] }) }
     for (const [x, z] of crossing) obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
@@ -922,6 +960,12 @@ export function street(o: {
       c.held = held && c.v < 2 ? (c.held ?? 0) + dt : 0
       c.stuck = c.v < 2 && !held ? c.stuck! + dt : 0
       c.wait = c.v < 2 ? why : ''
+      // A hole ahead in its road: it turns round where it waits, onto the other way if there is one.
+      if (r.blocked && c.stuck! > 3) {
+        const back = roads.get(`${r.way}/${r.b}/${r.a}`)
+        if (back && !back.blocked) { c.prev = null; c.road = back; c.s = Math.max(0, back.len - c.s!); c.lane = 0; c.next = choose(back, c.model.kind); c.stuck = 0; letGo(c) }
+        else if (unseen(c.x, c.z, view)) { letGo(c); hide(c); traffic.splice(i, 1); continue }
+      }
       // At the end of a road that goes nowhere it may (mapping ends there, or the way on is closed): it turns round.
       if (!c.next && c.stuck! > 4 && c.road!.len - c.s! < 40) {
         const back = roads.get(`${c.road!.way}/${c.road!.b}/${c.road!.a}`)
@@ -1040,6 +1084,37 @@ export function street(o: {
   /** The line-up's vehicles (`lineup`). */
   const showcase: Car[] = []
 
+  // ── Holes in the road ──
+  /** Where blasts broke the road (cells): a hole, or rubble on it. Asked of the world itself (world_kind), not the blast. */
+  const craters: { x: number; z: number; r: number }[] = []
+  const looks: { at: readonly [number, number, number]; radius: number; when: number }[] = []
+  const probe = () => {
+    const now = performance.now() / 1000
+    for (let n = looks.length - 1; n >= 0; n--) {
+      const s = looks[n]
+      if (now < s.when) continue
+      looks.splice(n, 1)
+      const reach = s.radius * 1.5 + 30
+      const seen = new Set<Road>()
+      for (let gx = Math.floor((s.at[0] - reach) / GRID); gx <= Math.floor((s.at[0] + reach) / GRID); gx++) for (let gz = Math.floor((s.at[2] - reach) / GRID); gz <= Math.floor((s.at[2] + reach) / GRID); gz++) for (const r of roadGrid.get(cell(gx, gz)) ?? []) seen.add(r)
+      let bad = 0, sx = 0, sz = 0
+      for (const r of seen) {
+        let broken = false
+        for (let lane = 0; lane < r.lanes; lane++) for (let d = 0; d <= r.len; d += 8) {
+          lanePoint(r, lane, d, P)
+          if (Math.hypot(P.x - s.at[0], P.z - s.at[2]) > reach) continue
+          const x = Math.round(P.x), z = Math.round(P.z), f = o.land.feet_at(x, z)
+          // The road's own top gone (and what was under it), or something fallen on it a car cannot go over.
+          const hole = !o.land.world_kind(x, f - 1, z) && !o.land.world_kind(x, f - 3, z)
+          const heap = o.land.world_kind(x, f + 4, z) !== 0 && o.land.world_kind(x, f + 7, z) !== 0
+          if (hole || heap) { broken = true; bad++; sx += P.x; sz += P.z }
+        }
+        if (broken) r.blocked = true
+      }
+      if (bad) craters.push({ x: sx / bad, z: sz / bad, r: s.radius + 10 })
+    }
+  }
+
   // ── Blasts ──
   /** How many of the shocks this has answered. A blast throws the few cars nearest it (they come to life, pushed away from it) and stops the traffic round it a while. */
   let heard = o.shocks.length
@@ -1055,6 +1130,8 @@ export function street(o: {
         pending.set(c, { inside: false, push: [(dx / d) * 160 * k, 60 + 80 * k, (dz / d) * 160 * k] })
       }
       for (const c of traffic) if (Math.hypot(c.x - s.at[0], c.z - s.at[2]) < 800) c.shaken = now
+      looks.push({ at: s.at, radius: s.radius, when: now + 1.5 })
+      // Where it broke the road is known once the world has been changed: looked at in a moment.
     }
     void view
   }
@@ -1097,6 +1174,7 @@ export function street(o: {
       cableCars(o.clock(), view)
       const feet = o.feet()
       shaken(view)
+      probe()
       for (const [c, how] of pending) void wake(c, how)
       reachable(feet)
       offer(feet)
@@ -1111,6 +1189,8 @@ export function street(o: {
     reset() {
       for (const c of [...traffic, ...parked.values(), ...cables]) hide(c)
       for (const c of trams) hide(c)
+      for (const r of roads.values()) r.blocked = false
+      craters.length = 0; looks.length = 0
       traffic.length = 0; trams.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0; pending.clear(); heard = o.shocks.length
       cue?.remove(); cue = null; beside?.(); beside = null
       rng = 0x2545f491; filled = false
@@ -1133,6 +1213,7 @@ export function street(o: {
         // On a crossing with lights while their way is red (not green, not its amber): what the walking signs forbid.
         crossingRed: shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; if (!q.sig || !within(p.at[0], p.at[2])) return false; const j = junctionOf(q.sig); return lightFor(j, q.cdx!, q.cdz!, o.clock()) === 'red' }).length,
         crossingLights: shown.filter((p) => within(p.at[0], p.at[2]) && (p as { sig?: number }).sig).length,
+        craters: craters.length, blockedRoads: [...roads.values()].filter((r) => r.blocked).length, parkedInLane: inLanes, parkedInLaneNow: [...parked.values()].filter((c) => !c.thing && inLane(c.x, c.z, c.model.wide / 2)).length,
         vehiclesSeen: v.filter((c) => seen(c.x, c.y + 7, c.z)).length, living: living.size,
       }
     },
@@ -1177,6 +1258,10 @@ export function street(o: {
         settle(c); showcase.push(c); along += m.long + 15
       }
       return showcase.map((c) => c.model.name)
+    },
+    trace(seed: number, times: number[]) {
+      for (let wi = 0; wi < walks.length; wi++) for (let h = 0; h < walks[wi].homes; h++) if (mix(walks[wi].seed, h) === seed) return times.map((t) => { placeOf(wi, seed, t); return { t, x: Math.round(W.x), z: Math.round(W.z), s: Math.round(W.s), still: W.still, far: W.far, waiting: W.waiting, crossing: W.crossing, kind: W.kind, walking: Math.round(W.walking * 100) / 100 } })
+      return null
     },
     get enabled() { return on },
     set enabled(v: boolean) { on = v },

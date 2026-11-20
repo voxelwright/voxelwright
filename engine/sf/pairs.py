@@ -33,7 +33,29 @@ def rotation(r):
     return np.eye(3) + math.sin(angle) * cross + (1 - math.cos(angle)) * (cross @ cross)
 
 
+PANEL = Path.home() / ".village/engine/bay/450-panel/photos"
+
+
+class Folder:
+    """A folder of solved panoramas (the neighbourhood panel's), read as a square's ZIP is."""
+
+    def __init__(self, path):
+        self.path = path
+
+    def read(self, name):
+        return (self.path / name.split("/")[-1]).read_bytes()
+
+
 def cameras():
+    seen = set()
+    for d in sorted(PANEL.glob("*/cameras.json")):
+        for c in json.loads(d.read_text()):
+            if c.get("camera_type") != "spherical" or not c.get("computed_rotation") or c["id"] in seen or not (d.parent / f"{c['id']}.jpg").exists():
+                continue
+            seen.add(c["id"])
+            lon, lat = c["computed_geometry"]["coordinates"]
+            e, n = UTM.transform(lon, lat)
+            yield Folder(d.parent), c, (e - 500000) * 10, (4250000 - n) * 10
     for zf in sorted(INPUTS.glob("*.zip")):
         z = zipfile.ZipFile(zf)
         if "photos/cameras.json" not in z.namelist():
@@ -47,7 +69,12 @@ def cameras():
             yield zf, c, (e - 500000) * 10, (4250000 - n) * 10
 
 
-if sys.argv[1] == "near":
+if sys.argv[1] == "around":
+    # Every panorama within r cells of a point, nearest first.
+    x, z, r = float(sys.argv[2]), float(sys.argv[3]), float(sys.argv[4])
+    found = sorted(((math.hypot(cx - x, cz - z), c["id"], cx, cz, c.get("captured_at")) for _, c, cx, cz in cameras() if math.hypot(cx - x, cz - z) < r))
+    print(json.dumps([{"id": i, "x": cx, "z": cz, "far": d, "captured": t} for d, i, cx, cz, t in found]))
+elif sys.argv[1] == "near":
     x, z = float(sys.argv[2]), float(sys.argv[3])
     best = min(cameras(), key=lambda t: math.hypot(t[2] - x, t[3] - z), default=None)
     if best is None:
@@ -58,7 +85,8 @@ if sys.argv[1] == "near":
 else:
     id_, yaw, pitch, fov, w, h, out = sys.argv[2], float(sys.argv[3]), float(sys.argv[4]), float(sys.argv[5]), int(sys.argv[6]), int(sys.argv[7]), sys.argv[8]
     zf, c = next((zf, c) for zf, c, _, _ in cameras() if c["id"] == id_)
-    img = np.asarray(Image.open(io.BytesIO(zipfile.ZipFile(zf).read(f"photos/{id_}.jpg"))).convert("RGB"))
+    src = zf if isinstance(zf, Folder) else zipfile.ZipFile(zf)
+    img = np.asarray(Image.open(io.BytesIO(src.read(f"photos/{id_}.jpg"))).convert("RGB"))
     R = rotation(np.array(c["computed_rotation"]))
     # Each pixel's ray: forward, right and up of the page's eye, in east, north, up.
     fwd = np.array([math.sin(yaw) * math.cos(pitch), math.cos(yaw) * math.cos(pitch), math.sin(pitch)])

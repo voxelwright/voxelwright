@@ -83,10 +83,18 @@ try {
     e.scale = scale
     await new Promise((r) => setTimeout(r, 1000))
     const stop = e.watch((g) => { gaps.push(g); street.push(e.street.ms) })
-    await new Promise((r) => setTimeout(r, ms))
+    // Once a second: who is on a crossing at red (none should be), who waits at a kerb, what each car waits for.
+    let red = 0, waiting = 0, faces = 0
+    const waits = {}
+    for (let n = 0; n < ms / 1000; n++) {
+      await new Promise((r) => setTimeout(r, 1000))
+      const c = e.street.count(e.view(), 1500)
+      red = Math.max(red, c.crossingRed); waiting = Math.max(waiting, c.waiting); faces = Math.max(faces, e.falling.faces)
+      for (const car of e.street.cars(e.view().eye[0], e.view().eye[2], 1500)) if (car.kind === 'traffic' && car.v < 2) waits[car.wait || 'starting'] = (waits[car.wait || 'starting'] ?? 0) + 1
+    }
     stop()
     const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => g[Math.min(g.length - 1, Math.floor(g.length * p))]
-    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), figures: e.folk.drawn }
+    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), wide: e.street.count(e.view(), 3000), figures: e.folk.drawn, red, waiting, waits, faces }
   }, { ms: seconds * 1000, scale: SCALE })
 
   // ── Four places ──
@@ -113,16 +121,17 @@ try {
     await page.waitForTimeout(2500)
     const on = await take()
     await page.screenshot({ path: join(shots, `${spot.name}.png`) })
-    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
+    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, redMost: on.red, waitingMost: on.waiting, waits: on.waits, faces: on.faces, within300: { tram: on.wide.tram, cable: on.wide.cable, bus: on.wide.bus, trolley: on.wide.trolley }, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
     results.places[spot.name] = r
     results.places[spot.name].pose = pose
-    console.log(`  ${spot.what}: people ${r.people} (${r.peopleSeen} in view), parked ${r.parked}, driving ${r.traffic}, cable cars ${r.cable}, vehicles in view ${r.vehiclesSeen}`)
+    console.log(`  ${spot.what}: people ${r.people} (${r.peopleSeen} in view, up to ${r.waitingMost} waiting at a kerb, ${r.redMost} on a crossing at red), parked ${r.parked}, driving ${r.traffic} (bus ${r.bus}, trolleybus ${r.trolley}, van ${r.van}, truck ${r.truck}), streetcars ${r.tram}, cable cars ${r.cable}; within 300 m ${JSON.stringify(r.within300)}; vehicles in view ${r.vehiclesSeen}, ${r.faces} faces drawn`)
+    console.log(`    cars waiting on: ${JSON.stringify(r.waits)}; parked in a lane ${r.parkedInLaneNow}`)
     console.log(`    on  p50 ${r.frames.on.p50} p99 ${r.frames.on.p99} ms, march only ${r.frames.on.gpuMs} ms at scale ${r.frames.on.scale}, page CPU ${r.frames.on.cpuMs} ms (street ${r.frames.on.streetCpuMs}, figures ${r.frames.on.figuresMs})`)
     console.log(`    off p50 ${r.frames.off.p50} p99 ${r.frames.off.p99} ms, march only ${r.frames.off.gpuMs} ms at scale ${r.frames.off.scale}, page CPU ${r.frames.off.cpuMs} ms`)
     if (spot.cable) await page.evaluate(() => { const e = globalThis.engine; e.folkClock.now = () => Date.now() / 1000 })
   }
   // ── Budgets: what street life may cost, by place (on this M1 Pro, 1280 x 720) ──
-  const BUDGET = { peopleSeen: 80, vehiclesSeen: 40, streetCpuMs: 2.5, figuresCpuMs: 2.5, cpuAddedMs: 3, lifeBrotliPerSquareKB: 100, carBrotliKB: 250 }
+  const BUDGET = { peopleSeen: 80, vehiclesSeen: 40, streetCpuMs: 2.5, figuresCpuMs: 2.5, cpuAddedMs: 3, faces: 3_000_000, lifeBrotliPerSquareKB: 100, carBrotliKB: 250 }
   results.budget = BUDGET
   for (const [name, r] of Object.entries(results.places)) {
     const added = r.frames.on.cpuMs - r.frames.off.cpuMs
@@ -145,6 +154,14 @@ try {
     if (made.status === 0) results.places[spot.name].pair = { photo: cam.id, metres: round(cam.far / 10), captured: new Date(cam.captured).toISOString().slice(0, 10) }
   }
   const P = results.places
+  // ── Junctions, transit, parking ──
+  const places = Object.values(P).filter((p) => p.what)
+  check(places.every((p) => p.redMost === 0), `nobody on a crossing at red, sampled each second (${places.map((p) => p.redMost).join(', ')})`)
+  check(places.some((p) => p.waitingMost > 0), `people wait at the kerb for their walking sign (most at once: ${places.map((p) => p.waitingMost).join(', ')})`)
+  check((P.columbus.waits.lights ?? 0) > 0, `cars wait at the lights at Columbus and Broadway (${JSON.stringify(P.columbus.waits)})`)
+  check((P.hill.waits['stop sign'] ?? 0) + (P.hill.waits['its turn'] ?? 0) > 0, `cars stop at the signs on Russian Hill (${JSON.stringify(P.hill.waits)})`)
+  check(P.embarcadero.within300.tram > 0, `a streetcar on the Embarcadero within 300 m (${P.embarcadero.within300.tram})`)
+  check(places.every((p) => p.parkedInLaneNow === 0), `no parked car reaches into a lane (${places.map((p) => p.parkedInLaneNow).join(', ')}; ${Math.max(...places.map((p) => p.parkedInLane))} places dropped for it)`)
   // By day: at night the streets are near empty everywhere, and a charge may find nobody.
   const day = hour >= 7 && hour <= 22
   if (day) check(P.columbus.people > P.hill.people, `busier at Columbus and Broadway (${P.columbus.people} people) than on the residential hill (${P.hill.people})`)
@@ -182,6 +199,62 @@ try {
       if (results.onFoot.passedWithin5m) check(results.onFoot.nearestCells >= 4, `${results.onFoot.passedWithin5m} people passed within 5 m of someone standing on the pavement, none nearer than ${round(results.onFoot.nearestCells / 10, 2)} m`)
       await page.evaluate(() => globalThis.engine.me.walk(false))
     }
+  }
+
+  for (const [name, r] of Object.entries(P)) if (r.what) check(r.faces <= BUDGET.faces, `${name}: ${r.faces} faces of things drawn (budget ${BUDGET.faces})`)
+
+  // ── People are where they were a moment ago: no one jumps, at a round's end or a wait's ──
+  {
+    const jumps = await page.evaluate(async () => {
+      const e = globalThis.engine, v = e.view(), was = e.folkClock.now
+      let worst = 0, pairs = 0
+      for (let n = 0; n < 150; n++) {
+        const t = Date.now() / 1000 + n * 7.3
+        e.folkClock.now = () => t
+        const a = new Map(e.street.folk(v, 1).map((p) => [p.seed, [p.at[0], p.at[2]]]))
+        e.folkClock.now = () => t + 0.1
+        for (const p of e.street.folk(v, 1.1)) { const q = a.get(p.seed); if (q) { pairs++; worst = Math.max(worst, Math.hypot(p.at[0] - q[0], p.at[2] - q[1])) } }
+      }
+      e.folkClock.now = was
+      return { pairs, worstCells: Math.round(worst * 10) / 10 }
+    })
+    results.continuity = jumps
+    check(jumps.worstCells < 6, `over ${jumps.pairs} people a tenth of a second apart, nobody moves more than ${round(jumps.worstCells / 10, 2)} m`)
+  }
+
+  // ── Every vehicle, close up ──
+  {
+    const s = onStreet('The Embarcadero', 528000, 661600), h = Math.atan2(s.dz, s.dx), at = [s.x - s.dz * 40, s.z + s.dx * 40]
+    results.lineup = await page.evaluate(([at, h]) => globalThis.engine.street.lineup(at, h), [at, h])
+    await page.evaluate(([at, h]) => { const e = globalThis.engine, cx = at[0] / 10 + Math.cos(h) * 25, cz = at[1] / 10 + Math.sin(h) * 25, ex = at[0] / 10 - Math.cos(h) * 9 - Math.sin(h) * 9, ez = at[1] / 10 - Math.sin(h) * 9 + Math.cos(h) * 9; Object.assign(e.pose, { x: ex, z: ez, y: e.ground(ex, ez) + 2.2, yaw: Math.atan2(cx - ex, -(cz - ez)), pitch: -0.06 }); e.fov = 55 }, [at, h])
+    await page.waitForTimeout(3000); await settle(); await page.waitForTimeout(3000)
+    await page.screenshot({ path: join(shots, 'lineup.png') })
+    await page.evaluate(() => { const e = globalThis.engine; e.street.lineup(null); e.fov = 70 })
+    check(results.lineup.length >= 9, `the line-up: ${results.lineup.join(', ')}`)
+  }
+
+  // ── Density against street photographs: Chinatown (Grant Ave), at each photograph's own hour ──
+  // The engine's eye where each kept panorama was taken (2.4 m up, as a camera on a car or a pole is), looking as the
+  // neighbourhood panel looks there, at the hour of day it was taken; who is in view counted, the photograph beside.
+  // Union Square and the Mission are not in this release's squares (the city run has not reached them): said, not faked.
+  results.density = []
+  if (!has('no-pairs')) {
+    const around = spawnSync(PY, [join(here, 'sf/pairs.py'), 'around', '522492', '666920', '600'], { encoding: 'utf8' })
+    const photos = around.status === 0 ? JSON.parse(around.stdout.trim().split('\n').pop() || '[]') : []
+    const yaw = (340 * Math.PI) / 180
+    for (const [n, cam] of photos.slice(0, 4).entries()) {
+      const when = new Date(cam.captured), h = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', hourCycle: 'h23' }).format(when)) + when.getUTCMinutes() / 60
+      await page.evaluate((h) => { globalThis.engine.hour = h }, h)
+      await look({ x: cam.x / 10, z: cam.z / 10, h: 2.4, yaw, pitch: -0.02 })
+      await page.waitForTimeout(2500); await settle(); await page.waitForTimeout(4000)
+      const c = await page.evaluate(() => globalThis.engine.street.count(globalThis.engine.view(), 600))
+      const name = `chinatown-${n}`
+      await page.screenshot({ path: join(shots, `${name}-engine.png`) })
+      spawnSync(PY, [join(here, 'sf/pairs.py'), 'view', cam.id, String(yaw), '-0.02', '70', '1280', '720', join(shots, `${name}-photo.png`)], { encoding: 'utf8' })
+      results.density.push({ place: 'Chinatown, Grant Ave', photo: cam.id, captured: when.toISOString().slice(0, 16), hour: round(h), peopleSeen: c.peopleSeen, people60m: c.people, vehiclesSeen: c.vehiclesSeen, name })
+      console.log(`  Chinatown ${n}: photo ${cam.id} at ${round(h)}h; engine at that hour: ${c.peopleSeen} people and ${c.vehiclesSeen} vehicles in view, ${c.people} people within 60 m`)
+    }
+    await page.evaluate((h) => { globalThis.engine.hour = h }, hour)
   }
 
   // ── A car got into on foot and driven 60 s, through a turn and up a hill ──
@@ -238,6 +311,7 @@ try {
         const track = [], t0 = performance.now(), start = w0.at
         let at = 0, last = null, turnSum = 0, lastHeading = heading, top = start[1], low = start[1], ticks = 0, off = 0
         const offs = [], samples = []
+        let wedged = 0, backing = 0
         let lastErr = 0
         while (performance.now() - t0 < 60_000 && thing.alive) {
           const w = e.alive.where(thing)
@@ -254,7 +328,11 @@ try {
           lastErr = err
           const speed = last ? Math.hypot(w.at[0] - last[0], w.at[2] - last[2]) / 0.1 : 0
           const wanted = Math.abs(err) > 0.35 ? 30 : 85
-          e.alive.drive(thing, speed < wanted ? 1 : speed > wanted + 15 ? -0.4 : 0.15, Math.max(-1, Math.min(1, err * 2.2)), 0)
+          // Wedged (pushing and not moving): back off a car's length, the wheel the other way, then on.
+          if (speed < 3 && ticks > 30) wedged++; else wedged = 0
+          if (wedged > 20) { backing = 15; wedged = 0 }
+          if (backing > 0) { backing--; e.alive.drive(thing, -1, -Math.sign(err) || 1, 0) }
+          else e.alive.drive(thing, speed < wanted ? 1 : speed > wanted + 15 ? -0.4 : 0.15, Math.max(-1, Math.min(1, err * 2.2)), 0)
           let dh = h - lastHeading; dh -= Math.round(dh / (2 * Math.PI)) * 2 * Math.PI
           turnSum += dh; lastHeading = h
           top = Math.max(top, w.at[1]); low = Math.min(low, w.at[1])
@@ -335,6 +413,25 @@ try {
   if (thrown) check(thrown.thrown > 0 && thrown.movedCells.some((d) => d > 8), `a charge 3 m from a parked ${thrown.car} throws ${thrown.thrown} car(s), now ${thrown.movedCells.join(', ')} cells from where it stood`)
   // (A car that comes into the 80 m after the blast was not near it.)
   if (blast.trafficSpeedsAt2s?.length) check(blast.trafficSpeedsAt2s.filter((v) => v < 15).length >= blast.trafficSpeedsAt2s.length * 0.8, `traffic within 80 m stops (${blast.trafficSpeedsAt2s.join(', ')} cells a second) and moves on later (${blast.drivingAt20s?.join(', ')})`)
+  // A charge in the road at Columbus and Broadway: the world says where it is broken, the road is closed, and no car drives into the hole.
+  {
+    const s = onStreet('Columbus Avenue', 522628, 664243)
+    await look({ x: s.x / 10 - s.dx * 25, z: s.z / 10 - s.dz * 25, h: 1.7, yaw: Math.atan2(s.dx, -s.dz), pitch: -0.05 })
+    await page.waitForTimeout(2000); await settle(); await page.waitForTimeout(3000)
+    const hole = await page.evaluate(async ([x, z]) => {
+      const e = globalThis.engine, y = e.feet(Math.round(x), Math.round(z))
+      e.strike([Math.round(x), y, Math.round(z)], 25)
+      await new Promise((r) => setTimeout(r, 4000))
+      const c = e.street.count(e.view(), 1500)
+      let into = 0
+      for (let n = 0; n < 15; n++) { await new Promise((r) => setTimeout(r, 1000)); into = Math.max(into, e.street.cars(x, z, 60).filter((k) => k.kind === 'traffic').length) }
+      return { craters: c.craters, blockedRoads: c.blockedRoads, carsInHoleMost: into }
+    }, [s.x, s.z])
+    results.crater = hole
+    await page.screenshot({ path: join(shots, 'crater.png') })
+    console.log(`  ${JSON.stringify(hole)}`)
+    check(hole.craters > 0 && hole.blockedRoads > 0 && hole.carsInHoleMost === 0, `a charge in Columbus Ave: ${hole.craters} hole(s) seen in the world, ${hole.blockedRoads} road(s) closed, no car drove into it in 15 s`)
+  }
   // Reset puts the street back.
   await page.evaluate(() => globalThis.engine.reset())
   await page.waitForTimeout(3000)
@@ -356,7 +453,8 @@ for (const spot of SPOTS) {
   sheet.push(item)
   if (r.pair) sheet.push({ name: `${spot.what}, as photographed`, engine: join(shots, `${spot.name}-engine.png`), photo: join(shots, `${spot.name}-photo.png`), photoFar: r.pair.metres, line: `panorama ${r.pair.photo}, ${r.pair.captured}, ${r.pair.metres} m from the place` })
 }
-for (const extra of ['in-car', 'drive', 'blast']) sheet.push({ name: extra, engine: join(shots, `${extra}.png`), photo: null, line: extra === 'drive' && results.drive ? `${round(results.drive.pathMetres)} m in ${round(results.drive.seconds)} s, climbed ${round(results.drive.climbMetres)} m, turned ${round(results.drive.turnedDegrees)}°` : extra === 'blast' && results.blast ? `${results.blast.down} thrown down, ${results.blast.flinch} flinched` : '' })
+for (const d of results.density ?? []) sheet.push({ name: `${d.place}, ${d.captured}`, engine: join(shots, `${d.name}-engine.png`), photo: join(shots, `${d.name}-photo.png`), photoFar: 0, line: `engine at ${d.hour}h: ${d.peopleSeen} people, ${d.vehiclesSeen} vehicles in view` })
+for (const extra of ['lineup', 'in-car', 'drive', 'blast', 'crater']) sheet.push({ name: extra, engine: join(shots, `${extra}.png`), photo: null, line: extra === 'drive' && results.drive ? `${round(results.drive.pathMetres)} m in ${round(results.drive.seconds)} s, climbed ${round(results.drive.climbMetres)} m, turned ${round(results.drive.turnedDegrees)}°` : extra === 'blast' && results.blast ? `${results.blast.down} thrown down, ${results.blast.flinch} flinched` : extra === 'lineup' ? (results.lineup ?? []).join(', ') : extra === 'crater' && results.crater ? `${results.crater.blockedRoads} road(s) closed, ${results.crater.carsInHoleMost} cars in the hole` : '' })
 const html = `<!doctype html><meta charset=utf-8><body style="margin:0;background:#15171c;color:#e8ecf1;font:13px system-ui"><div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px">${sheet.map((s) => `<figure style="margin:0"><div style="display:flex;gap:4px">${[s.engine, s.photo].filter(Boolean).map((p) => `<img src="data:image/png;base64,${readFileSync(p).toString('base64')}" style="width:${s.photo ? '50%' : '100%'};display:block">`).join('')}</div><figcaption style="padding:4px 2px"><b>${s.name}</b> · ${s.line}${s.photo ? ` · right: street photograph ${s.photoFar} m away (Mapillary, CC BY-SA)` : ''}</figcaption></figure>`).join('')}</div>`
 writeFileSync(join(shots, 'sheet.html'), html)
 {
