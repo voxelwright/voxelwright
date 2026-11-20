@@ -85,6 +85,7 @@ try {
     const stop = e.watch((g) => { gaps.push(g); street.push(e.street.ms) })
     // Once a second: who is on a crossing at red (none should be), who waits at a kerb, what each car waits for.
     let red = 0, waiting = 0, faces = 0
+    const stops0 = e.street.count(e.view(), 1500).signStops
     const waits = {}
     for (let n = 0; n < ms / 1000; n++) {
       await new Promise((r) => setTimeout(r, 1000))
@@ -94,7 +95,7 @@ try {
     }
     stop()
     const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => g[Math.min(g.length - 1, Math.floor(g.length * p))]
-    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), wide: e.street.count(e.view(), 3000), figures: e.folk.drawn, red, waiting, waits, faces }
+    return { frames: g.length, p50: q(0.5), p99: q(0.99), gpuMs: e.gpuMs, cpuMs: e.cpuMs, scale: e.scale, streetMs: street.reduce((a, b) => a + b, 0) / Math.max(1, street.length), count: e.street.count(e.view(), 1500), wide: e.street.count(e.view(), 3000), figures: e.folk.drawn, red, waiting, waits, faces, signStops: e.street.count(e.view(), 1500).signStops - stops0 }
   }, { ms: seconds * 1000, scale: SCALE })
 
   // ── Four places ──
@@ -121,7 +122,7 @@ try {
     await page.waitForTimeout(2500)
     const on = await take()
     await page.screenshot({ path: join(shots, `${spot.name}.png`) })
-    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, redMost: on.red, waitingMost: on.waiting, waits: on.waits, faces: on.faces, within300: { tram: on.wide.tram, cable: on.wide.cable, bus: on.wide.bus, trolley: on.wide.trolley }, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
+    const r = { what: spot.what, eye: [round(pose.x), round(pose.z)], ...on.count, redMost: on.red, waitingMost: on.waiting, signStopsSeen: on.signStops, waits: on.waits, faces: on.faces, within300: { tram: on.wide.tram, cable: on.wide.cable, bus: on.wide.bus, trolley: on.wide.trolley }, frames: { on: { p50: round(on.p50), p99: round(on.p99), gpuMs: round(on.gpuMs), cpuMs: round(on.cpuMs), scale: on.scale, streetCpuMs: round(on.streetMs, 2), figuresMs: round(on.figures?.ms ?? 0, 2), boxes: on.figures?.boxes }, off: { p50: round(off.p50), p99: round(off.p99), gpuMs: round(off.gpuMs), cpuMs: round(off.cpuMs), scale: off.scale } } }
     results.places[spot.name] = r
     results.places[spot.name].pose = pose
     console.log(`  ${spot.what}: people ${r.people} (${r.peopleSeen} in view, up to ${r.waitingMost} waiting at a kerb, ${r.redMost} on a crossing at red), parked ${r.parked}, driving ${r.traffic} (bus ${r.bus}, trolleybus ${r.trolley}, van ${r.van}, truck ${r.truck}), streetcars ${r.tram}, cable cars ${r.cable}; within 300 m ${JSON.stringify(r.within300)}; vehicles in view ${r.vehiclesSeen}, ${r.faces} faces drawn`)
@@ -159,7 +160,7 @@ try {
   check(places.every((p) => p.redMost === 0), `nobody on a crossing at red, sampled each second (${places.map((p) => p.redMost).join(', ')})`)
   check(places.some((p) => p.waitingMost > 0), `people wait at the kerb for their walking sign (most at once: ${places.map((p) => p.waitingMost).join(', ')})`)
   check((P.columbus.waits.lights ?? 0) > 0, `cars wait at the lights at Columbus and Broadway (${JSON.stringify(P.columbus.waits)})`)
-  check((P.hill.waits['stop sign'] ?? 0) + (P.hill.waits['its turn'] ?? 0) > 0, `cars stop at the signs on Russian Hill (${JSON.stringify(P.hill.waits)})`)
+  check(P.hill.signStopsSeen > 0, `cars come to a full stop at signs on Russian Hill (${P.hill.signStopsSeen} full stops in ${seconds} s; waiting on ${JSON.stringify(P.hill.waits)})`)
   check(P.embarcadero.within300.tram > 0, `a streetcar on the Embarcadero within 300 m (${P.embarcadero.within300.tram})`)
   check(places.every((p) => p.parkedInLaneNow === 0), `no parked car reaches into a lane (${places.map((p) => p.parkedInLaneNow).join(', ')}; ${Math.max(...places.map((p) => p.parkedInLane))} places dropped for it)`)
   // By day: at night the streets are near empty everywhere, and a charge may find nobody.
@@ -313,7 +314,7 @@ try {
         for (let i = 0; i + 1 < pts.length; i += 2) { const j = Math.min(i, pts.length - 4), dx = pts[j + 2] - pts[j], dz = pts[j + 3] - pts[j + 1], l = Math.hypot(dx, dz) || 1; lane.push(pts[i] - (dz / l) * 16, pts[i + 1] + (dx / l) * 16) }
         const track = [], t0 = performance.now(), start = w0.at
         let at = 0, last = null, turnSum = 0, lastHeading = heading, top = start[1], low = start[1], ticks = 0, off = 0
-        const offs = [], samples = []
+        const offs = [], samples = [], surface = []
         let wedged = 0, backing = 0
         let lastErr = 0
         while (performance.now() - t0 < 60_000 && thing.alive) {
@@ -323,7 +324,7 @@ try {
           let near = Infinity
           for (let i = at; i < Math.min(lane.length, at + 80); i += 2) { const d = Math.hypot(lane[i] - w.at[0], lane[i + 1] - w.at[2]); if (d < near) { near = d; at = i } }
           // How far it is from the middle of the nearest road (any the graph has), twice a second once it has set off.
-          if (performance.now() - t0 > 3000 && ticks % 5 === 0) { let d = Infinity; for (const r of e.street.roads(w.at[0], w.at[2], 300)) for (let i = 0; i + 3 < r.line.length; i += 2) { const ax = r.line[i], az = r.line[i + 1], bx = r.line[i + 2] - ax, bz = r.line[i + 3] - az, l2 = bx * bx + bz * bz || 1, t = Math.max(0, Math.min(1, ((w.at[0] - ax) * bx + (w.at[2] - az) * bz) / l2)); d = Math.min(d, Math.hypot(w.at[0] - ax - bx * t, w.at[2] - az - bz * t)) } if (d < Infinity) { off = Math.max(off, d); offs.push(d); if (offs.length % 10 === 1) samples.push([Math.round(w.at[0]), Math.round(w.at[2]), Math.round(d), Math.round(near), offs.length]) } }
+          if (performance.now() - t0 > 3000 && ticks % 5 === 0) { let d = Infinity; for (const r of e.street.roads(w.at[0], w.at[2], 300)) for (let i = 0; i + 3 < r.line.length; i += 2) { const ax = r.line[i], az = r.line[i + 1], bx = r.line[i + 2] - ax, bz = r.line[i + 3] - az, l2 = bx * bx + bz * bz || 1, t = Math.max(0, Math.min(1, ((w.at[0] - ax) * bx + (w.at[2] - az) * bz) / l2)); d = Math.min(d, Math.hypot(w.at[0] - ax - bx * t, w.at[2] - az - bz * t)) } if (d < Infinity) { const f = e.feet(Math.round(w.at[0]), Math.round(w.at[2])); surface.push((e.kind(w.at[0], f - 1, w.at[2]) & 15) === 6); off = Math.max(off, d); offs.push(d); if (offs.length % 10 === 1) samples.push([Math.round(w.at[0]), Math.round(w.at[2]), Math.round(d), Math.round(near), offs.length]) } }
           let ahead = at, run = 0
           while (ahead + 3 < lane.length && run < (Math.abs(lastErr) > 0.3 ? 55 : 90)) { run += Math.hypot(lane[ahead + 2] - lane[ahead], lane[ahead + 3] - lane[ahead + 1]); ahead += 2 }
           const tx = lane[ahead] - w.at[0], tz = lane[ahead + 1] - w.at[2], h = Math.atan2(w.front[2], w.front[0])
@@ -354,7 +355,7 @@ try {
         for (let i = 2; i < track.length; i++) { const a = Math.atan2(track[i][2] - track[i - 1][2], track[i][0] - track[i - 1][0]), b = Math.atan2(track[i - 1][2] - track[i - 2][2], track[i - 1][0] - track[i - 2][0]); let d = a - b; d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI; sum += d; largest = Math.max(largest, Math.abs(sum)); if (i % 6 === 0) sum = 0 }
         let path = 0
         for (let i = 1; i < track.length; i++) path += Math.hypot(track[i][0] - track[i - 1][0], track[i][2] - track[i - 1][2])
-        return { seconds: (performance.now() - t0) / 1000, whole: thing.alive, route: route.length, routeMetres: lane.reduce((n, _v, i) => (i >= 2 && i % 2 === 0 ? n + Math.hypot(lane[i] - lane[i - 2], lane[i + 1] - lane[i - 1]) : n), 0) / 10, pathMetres: path / 10, climbMetres: (top - start[1]) / 10, dropMetres: (start[1] - low) / 10, endRiseMetres: w ? (w.at[1] - start[1]) / 10 : null, turnedDegrees: largest * 180 / Math.PI, offLaneMetres: off / 10, offLaneMedianMetres: ([...offs].sort((a, b) => a - b)[Math.floor(offs.length / 2)] ?? 0) / 10, samples, offLaneP95Metres: (offs.sort((a, b) => a - b)[Math.floor(offs.length * 0.95)] ?? 0) / 10, track }
+        return { seconds: (performance.now() - t0) / 1000, whole: thing.alive, route: route.length, routeMetres: lane.reduce((n, _v, i) => (i >= 2 && i % 2 === 0 ? n + Math.hypot(lane[i] - lane[i - 2], lane[i + 1] - lane[i - 1]) : n), 0) / 10, pathMetres: path / 10, climbMetres: (top - start[1]) / 10, dropMetres: (start[1] - low) / 10, endRiseMetres: w ? (w.at[1] - start[1]) / 10 : null, turnedDegrees: largest * 180 / Math.PI, offLaneMetres: off / 10, onAsphalt: surface.filter(Boolean).length / Math.max(1, surface.length), offLaneMedianMetres: ([...offs].sort((a, b) => a - b)[Math.floor(offs.length / 2)] ?? 0) / 10, samples, offLaneP95Metres: (offs.sort((a, b) => a - b)[Math.floor(offs.length * 0.95)] ?? 0) / 10, track }
       })
       // A picture half way up, from behind.
       await page.waitForTimeout(32_000)
@@ -362,7 +363,8 @@ try {
       const drove = await driving
       results.drive = { ...drove, track: undefined }
       console.log(`  ${JSON.stringify(results.drive)}`)
-      check(drove.offLaneMedianMetres < 3 && drove.offLaneP95Metres < 6, `on the road: ${round(drove.offLaneMedianMetres)} m from a road's middle at the median, ${round(drove.offLaneP95Metres)} m at the 95th percentile (at most ${round(drove.offLaneMetres)} m)`)
+      // On the road: asphalt under it (the world's own surface), not the distance from a mapped middle line, which on a wide street is 6 m from its kerb.
+      check(drove.onAsphalt >= 0.9, `on the road: asphalt under it in ${Math.round(drove.onAsphalt * 100)}% of samples (${round(drove.offLaneMedianMetres)} m from a road's middle at the median, at most ${round(drove.offLaneMetres)} m)`)
       check(drove.whole && drove.seconds > 55, `driven ${round(drove.seconds)} s and still whole`)
       check(drove.pathMetres > 150, `went ${round(drove.pathMetres)} m`)
       check(drove.turnedDegrees > 60, `turned ${round(drove.turnedDegrees)}° at a junction`)

@@ -114,7 +114,7 @@ export interface Street {
   /** Everything as it was: the traffic begins again, every parked car is back at its kerb. */
   reset(): void
   /** What is in sight: people and vehicles within `r` cells of a point (both counted on the ground plan) and in the eye's view. */
-  count(view: View, r?: number): { people: number; peopleSeen: number; parked: number; traffic: number; cable: number; tram: number; bus: number; trolley: number; van: number; truck: number; vehiclesSeen: number; living: number; waiting: number; crossingRed: number; crossingLights: number; craters: number; blockedRoads: number; parkedInLane: number; parkedInLaneNow: number }
+  count(view: View, r?: number): { people: number; peopleSeen: number; parked: number; traffic: number; cable: number; tram: number; bus: number; trolley: number; van: number; truck: number; vehiclesSeen: number; living: number; waiting: number; crossingRed: number; crossingLights: number; craters: number; blockedRoads: number; parkedInLane: number; signStops: number; parkedInLaneNow: number }
   /** The roads near a place, for a driver to follow (the checks). */
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
   /** Vehicles near a place: where each stands, which way it heads, and what it is. */
@@ -174,7 +174,7 @@ export function street(o: {
       const [a, b, kind, busy, signal] = w, { p, cum, len } = line(w, 5)
       if (len < 1) continue
       // How many live along it: none on a crossing, a few on steps, and on a pavement more the busier it is.
-      const per = kind === 1 ? 0 : kind === 2 ? 0.4 : 0.5 + 0.1 * busy, seed = mix(idSeed(a), idSeed(b))
+      const per = kind === 1 ? 0 : kind === 2 ? 0.4 : 0.5 + 0.045 * busy, seed = mix(idSeed(a), idSeed(b))
       const homes = Math.floor((len / 1000) * per + chance(seed, 9))
       const i = walks.push({ a, b, kind, busy, signal, p, cum, len, homes, seed, mx: (p[0] + p[p.length - 2]) / 2, mz: (p[1] + p[p.length - 1]) / 2 }) - 1
       for (const [id, x, z] of [[a, p[0], p[1]], [b, p[p.length - 2], p[p.length - 1]]]) { let n = nodes.get(id); if (!n) nodes.set(id, n = { x, z, walks: [] }); n.walks.push(i) }
@@ -765,7 +765,7 @@ export function street(o: {
     }
     return false
   }
-  let inLanes = 0
+  let inLanes = 0, signStops = 0
   const open = (r: Road) => {
     if (r.blocked) return false
     if (r.open !== null) return r.open
@@ -926,7 +926,7 @@ export function street(o: {
         } else {
           if (r.ctl === 1 && c.stopped !== r.b) {
             // A stop sign: a full stop at the line first.
-            if (c.v < 1.5 && left < 60) c.stopped = r.b
+            if (c.v < 1.5 && left < 60) { c.stopped = r.b; signStops++ }
             else line(30, 'stop sign')
           }
           if (!held) {
@@ -1124,7 +1124,12 @@ export function street(o: {
     if (o.shocks.length < heard) heard = 0
     for (; heard < o.shocks.length; heard++) {
       const s = o.shocks[heard], reach = s.radius * 3 + 40, now = performance.now() / 1000
-      const near = [...parked.values(), ...traffic].filter((c) => !c.thing && !!c.model.motor && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach && Math.abs(c.y - s.at[1]) < reach).sort((a, b) => Math.hypot(a.x - s.at[0], a.z - s.at[2]) - Math.hypot(b.x - s.at[0], b.z - s.at[2])).slice(0, 3)
+      // Whatever stands in the blast itself goes, whatever it is (a bus is too big to throw: it is taken off, broken);
+      // of the rest, the three nearest that can be are thrown.
+      const inside = (c: Car) => Math.hypot(c.x - s.at[0], c.z - s.at[2]) < s.radius + c.model.long / 2 && Math.abs(c.y - s.at[1]) < s.radius + 20
+      for (const c of [...traffic, ...parked.values()]) if (!c.thing && !c.model.motor && inside(c)) { hide(c); if (c.kind === 'traffic') { traffic.splice(traffic.indexOf(c), 1); letGo(c) } if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot) } }
+      const candidates = [...parked.values(), ...traffic].filter((c) => !c.thing && !!c.model.motor && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach && Math.abs(c.y - s.at[1]) < reach).sort((a, b) => Math.hypot(a.x - s.at[0], a.z - s.at[2]) - Math.hypot(b.x - s.at[0], b.z - s.at[2]))
+      const near = candidates.filter((c, i) => i < 3 || inside(c))
       for (const c of near) {
         const dx = c.x - s.at[0], dz = c.z - s.at[2], d = Math.hypot(dx, dz) || 1, k = 1 - d / reach
         if (c.kind === 'traffic') { traffic.splice(traffic.indexOf(c), 1); letGo(c); c.kind = 'parked' }
@@ -1215,7 +1220,7 @@ export function street(o: {
         // On a crossing with lights while their way is red (not green, not its amber): what the walking signs forbid.
         crossingRed: shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; if (!q.sig || !within(p.at[0], p.at[2])) return false; const j = junctionOf(q.sig); return lightFor(j, q.cdx!, q.cdz!, o.clock()) === 'red' }).length,
         crossingLights: shown.filter((p) => within(p.at[0], p.at[2]) && (p as { sig?: number }).sig).length,
-        craters: craters.length, blockedRoads: [...roads.values()].filter((r) => r.blocked).length, parkedInLane: inLanes, parkedInLaneNow: [...parked.values()].filter((c) => !c.thing && inLane(c.x, c.z, c.model.wide / 2)).length,
+        craters: craters.length, blockedRoads: [...roads.values()].filter((r) => r.blocked).length, parkedInLane: inLanes, signStops, parkedInLaneNow: [...parked.values()].filter((c) => !c.thing && inLane(c.x, c.z, c.model.wide / 2)).length,
         vehiclesSeen: v.filter((c) => seen(c.x, c.y + 7, c.z)).length, living: living.size,
       }
     },
