@@ -82,7 +82,7 @@ def generate(
             s: record(source / (s + ".json"), f"graph/{s}.json", graph_dir is None)
             for s in names
         }
-    if far_index is None and (root / "far.json").is_file():
+    if far_index is None and state.get("farIndex") == "far.json":
         far_index = root / "far.json"
     if far_index:
         far = json.loads(far_index.read_text())

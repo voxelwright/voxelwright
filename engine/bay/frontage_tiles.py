@@ -144,7 +144,11 @@ def stage_manifest(manifest, candidate, changed):
     save(candidate / "packs/tiles/index.json", index)
     save(
         candidate / "state.json",
-        dict(baseRelease=pin, done={"verified-frontages": checks}),
+        dict(
+            baseRelease=pin,
+            farIndex="far.json" if far else None,
+            done={"verified-frontages": checks},
+        ),
     )
 
 
