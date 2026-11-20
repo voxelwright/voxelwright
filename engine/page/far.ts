@@ -94,14 +94,17 @@ fn hashf(p: vec2f, k: u32) -> f32 {
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
-// Whether this point is the far model's to draw: past the reach, and not behind what the march met.
+// Whether this point is the far model's to draw: not behind what the march met, and past the reach, or anywhere
+// along a look on which the march met nothing before the reach (the cells' coarse boxes and the faces do not agree
+// to the metre where they meet, and a look the march hands over must find the far model's faces, however near).
 fn ours(in: Out) -> bool {
   let dist = length(in.seen);
-  if (dist < v.reach) { return false; }
   let z = textureLoad(marched, vec2i(in.pos.xy), 0);
-  if (z >= 1.0) { return true; }
-  let met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9);
-  return dot(in.seen, v.forward) < met;
+  let along = dot(in.seen, v.forward);
+  var met = 1e30;
+  if (z < 1.0) { met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9); }
+  if (dist < v.reach && met * dist / max(along, 1e-3) < v.reach) { return false; }
+  return along < met;
 }
 struct Drawn { @location(0) colour: vec4f }
 @fragment fn fs(in: Out) -> Drawn {
@@ -133,8 +136,9 @@ struct Drawn { @location(0) colour: vec4f }
   // of them a scatter. Where panes are under two pixels the wall glows by the share of them that are lit.
   if (g.weather.z > 0.0 && in.style != 0u && in.style < 14u) {
     let one = smoothstep(0.62, 0.66, hashf(floor(vec2f(fx, fy)), in.id + in.way * 7919u));
-    let lamp = mix(one * pane, pane * 0.36, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
-    col += vec3f(1.0, 0.62, 0.3) * lamp * 2.4;
+    // (Where panes are under two pixels, their share lit, a fifth, spread over the wall: brighter made a tower a lantern.)
+    let lamp = mix(one * pane, pane * 0.2, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
+    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(2.4, 1.5, blur);
   }
   col = air(col, rd, dist);
   // Beside the colour, how far brighter than any lit surface the pixel is, as the march writes it (glow.ts reads it).
@@ -172,6 +176,8 @@ export interface Far {
   readonly stats: { faces: number; sections: number; tiles: number; held: number; heldBytes: number; fetched: number; fetchedBytes: number; coming: number; covered: number; failed: number; error: string }
   /** Whether every band the view needs is here. */
   readonly whole: boolean
+  /** The objects held now, by their paths in the listing: for counting what a view costs to send. */
+  held(): string[]
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -179,7 +185,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page), or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null, held: () => [] }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   const listing = await fetch(`${base}far.json`).then((r) => (r.ok ? (r.json() as Promise<Listing>) : null)).catch(() => null)
@@ -297,6 +303,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const self: Far = {
     listing, reach: reachAsked, detail: Number(query.get('fardetail') ?? 0.75), stats,
     get whole() { return whole },
+    held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [listing.tiles[t.key][k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) { pass(encoder, to.color, to.depth, to.size, view, picture, false) },
     drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
@@ -323,7 +330,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     let held = 0, heldBytes = 0
     for (const t of tiles) {
       const d = away(eye, t.lo, t.hi)
-      const need = d < FURTHEST * 10 ? needs(d, focal, self.detail) : bands.map(() => false)
+      // Out of sight and over a kilometre off, a tile holds only its biggest faces, until the eye turns to it (the
+      // march's cells stand in meanwhile): the park's narrow lens had fetched the whole circle round it.
+      const need = d >= FURTHEST * 10 ? bands.map(() => false) : d > 10_000 && !inView(view, aspect, t.lo, t.hi) ? bands.map((_, k) => k === 0) : needs(d, focal, self.detail)
       let all = true
       for (const [k, h] of t.held.entries()) {
         if (!t.listed[k]) continue

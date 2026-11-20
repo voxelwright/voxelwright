@@ -3,18 +3,19 @@
 //   - park: the Ina Coolbrith Park camera at the photograph's own size, with each pixel's building beside the
 //     picture, for sf/far/measure.py to lay over the photograph (#423's overlay measures);
 //   - downtown: 150 m over California St, looking back at the park;
-//   - pyramid: the Transamerica Pyramid from behind, from over the Embarcadero;
+//   - pyramid: the Transamerica Pyramid from behind, from over the Bay 1.4 km east of it;
 //   - street: at a person's height on California St, looking down it to the Bay.
 // For each it says the faces drawn, the far model's bytes held and fetched, and the GPU's ms a frame for the march
 // alone and with the far model (paired at full size). Pictures go to ~/.village/engine/sf/far/.
 //
-//   node sf/far/check.mjs [--no-build] [--far <dir>] [--only park,street] [--name run] [--query "&farreach=800"] [--night]
-import { mkdirSync, writeFileSync } from 'node:fs'
+//   node sf/far/check.mjs [--no-build] [--far <dir>] [--only park,street] [--name run] [--query "&farreach=800"] [--night] [--quiet]
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { brotliCompressSync, constants } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, turn } from '../../test/kit.mjs'
+import { arg, CHROME, has, here, quiet, turn } from '../../test/kit.mjs'
 import { plain } from '../../player/serve.mjs'
 
 const dist = join(here, 'dist-sf'), out = join(homedir(), '.village', 'engine', 'sf', 'far'), name = arg('name', 'run')
@@ -29,13 +30,16 @@ if (!has('no-build')) {
 const VIEWS = {
   park: { size: [2018, 864], fov: null },
   downtown: { size: [1280, 720], fov: 70, at: [52440, 150, 66990], look: [301.8, -6] },
-  pyramid: { size: [1280, 720], fov: 50, at: [53330, 110, 67170], look: [299.8, -2.5] },
+  pyramid: { size: [1280, 720], fov: 40, at: [54000, 120, 66900], look: [276.4, -0.5] },
   street: { size: [1280, 720], fov: 70, at: [51800, null, 67130], look: [80.6, -1.5] },
 }
+const squeezed = new Map()
+const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(dist, 'sf', path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
 const only = arg('only', Object.keys(VIEWS).join(',')).split(',')
 
 const site = await plain(dist, '127.0.0.1')
-const back = await turn()
+// `--quiet`: every turn on the GPU, so that no other lane's check draws beside the timing (kit.mjs `quiet`).
+const back = has('quiet') ? await quiet() : await turn()
 const browser = await chromium.launch(CHROME)
 const results = {}
 for (const key of only) {
@@ -44,7 +48,7 @@ for (const key of only) {
   const page = await context.newPage()
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
-  page.on('console', (m) => { if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) errors.push(m.text()) })
+  page.on('console', (m) => { if ((m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) || (m.type() === 'warning' && /match|Invalid|invalid|Error/.test(m.text()))) errors.push(m.text().slice(0, 300)) })
   const at = view.at ? `&at=${view.at.map((v) => v ?? 0).join(',')}&look=${view.look.join(',')}&fov=${view.fov}&roll=0` : ''
   const night = has('night') ? '&hour=22' : ''
   const url = `${site.url}/sf/index.html?scale=1&sound=0&people=0${at}${night}${arg('query', '')}`
@@ -66,10 +70,12 @@ for (const key of only) {
     let text = ''
     for (let i = 0; i < bytes.length; i += 0x8000) text += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
     const cost = await engine.farPasses(5)
-    return { ids: btoa(text), cost, pose: { ...engine.pose }, fov: engine.fov }
+    return { ids: btoa(text), cost, pose: { ...engine.pose }, fov: engine.fov, held: engine.far.held() }
   }, view.size)
   writeFileSync(join(out, 'shots', `${name}-${key}-ids.rgba`), Buffer.from(said.ids, 'base64'))
-  const r = { whole, readyMs: ready, url, pose: said.pose, fov: said.fov, size: view.size, march: said.cost.march, withFar: said.cost.withFar, farMs: +(said.cost.withFar - said.cost.march).toFixed(2), faces: said.cost.faces, sections: said.cost.sections, tilesDrawn: said.cost.tiles, heldFaces: said.cost.held, heldMB: +(said.cost.heldBytes / 1048576).toFixed(1), fetched: said.cost.fetched, fetchedMB: +(said.cost.fetchedBytes / 1048576).toFixed(1), covered: said.cost.covered, errors }
+  // What the far model held here as a host would send it: Brotli 5, as the release counts it (release.md).
+  const br = said.held.reduce((n, path) => n + brotli(path), 0)
+  const r = { whole, heldBrotliMB: +(br / 1048576).toFixed(1), readyMs: ready, url, pose: said.pose, fov: said.fov, size: view.size, march: said.cost.march, withFar: said.cost.withFar, farMs: +(said.cost.withFar - said.cost.march).toFixed(2), faces: said.cost.faces, sections: said.cost.sections, tilesDrawn: said.cost.tiles, heldFaces: said.cost.held, heldMB: +(said.cost.heldBytes / 1048576).toFixed(1), fetched: said.cost.fetched, fetchedMB: +(said.cost.fetchedBytes / 1048576).toFixed(1), covered: said.cost.covered, errors }
   results[key] = r
   console.log(key, JSON.stringify(r))
   await context.close()

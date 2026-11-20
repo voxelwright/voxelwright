@@ -1646,7 +1646,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
   let sunPipeline = await sunning(module)
-  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }] })
+  // (looks too: trace reads the far model's map, farHeld, though a sun's look never hands over.)
+  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }] })
   let sunBind = sunBinding()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
