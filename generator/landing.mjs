@@ -40,6 +40,8 @@ ${links(true)}
 <a data-sign="plain-still" data-view="2d" href="/?view=2d">Plain page</a>
 <button type="button" data-sign="postcard" aria-haspopup="dialog" title="Make a postcard">Make a postcard</button>
 <button type="button" data-sign="matrix-exit" hidden>Exit the Matrix</button>
+<button type="button" data-sign="video-mute" aria-pressed="false" hidden>Mute the video</button>
+<button type="button" data-sign="video-stop" hidden>Stop the video</button>
 <details class="display-settings"><summary data-sign="view">View</summary>
 <div class="view-panel"><fieldset><legend>Graphics</legend>
 <label data-sign="preset">Quality <select name="preset"><option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option><option value="ultra">Ultra</option></select></label>
@@ -72,7 +74,7 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 </section>
 <details class="park-credit" id="about-view"><summary>About this view</summary><p>A Village reconstruction from USGS 3DEP lidar, DataSF buildings and Mapterhorn terrain, with landmark outlines from OpenStreetMap contributors and Overture Maps Foundation. Camera and colour reference from <a href="https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg">Frank Schulenburg’s view of the park</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
 <details class="park-secrets" hidden><summary>Park secrets</summary>
-<p>Hold the B on the park sign, or focus Blog and press Space.</p>
+<p>Hold the B on the park sign, or focus Blog and press Space. Tap the tow banner twice, or flip Night four times in a row.</p>
 <div class="egg-actions">
 <button class="vx-button" type="button" data-egg="break">Loosen the B</button>
 <button class="vx-button" type="button" data-egg="god" aria-pressed="false">IDDQD</button>
@@ -80,6 +82,8 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 <button class="vx-button" type="button" data-egg="roll">Do a barrel roll</button>
 <button class="vx-button" type="button" data-egg="rain" aria-pressed="false">Wake up</button>
 <button class="vx-button" type="button" data-egg="rick">Tune the tow banner</button>
+<button class="vx-button" type="button" data-egg="rickroll" aria-pressed="false">Rickroll the windows</button>
+<button class="vx-button" type="button" data-egg="apple" aria-pressed="false">Bad Apple!!</button>
 <button class="vx-button" type="button" data-egg="lives">Konami code</button>
 </div></details></details><p class="egg-status" role="status" aria-live="polite"></p>
 </div>`;
