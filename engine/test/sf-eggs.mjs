@@ -1,5 +1,6 @@
 // The landing's easter eggs in the San Francisco realm (#450, page/eggs.ts), from the static folder, in Chrome with
-// WebGPU and the browser's own rule for sound (a page may play sound only after the visitor has pressed or tapped).
+// WebGPU. Sound is refused by a simulated browser rule (Playwright's evaluate counts as a press, so a real refusal
+// cannot be had in a check): the egg plays muted, and Unmute, a real click, brings the sound.
 //
 //   node test/sf-eggs.mjs [--no-build] [--shots ~/.village/engine/sf/eggs] [--headed]
 //
@@ -7,7 +8,7 @@
 // (read from the canvas: the windows, the sky, the moon, against the picture before), that it is undone (Esc, a
 // phrase, reset) and the sky comes back, and the frame gaps while it runs, beside the same sky without the window
 // screen (what the screen itself costs). A video's windows are checked against the frame held on them: the light of
-// the windows follows the picture's light and dark. Its sound: refused without a press (played muted, Unmute brings
+// the windows follows the picture's light and dark. Its sound: refused (simulated: it plays muted, and Unmute brings
 // it), and decoded when a typed line started it.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -37,11 +38,17 @@ const results = {}
 /** A page of the realm, up with the world round the park whole. */
 const open = async (context) => {
   const page = await context.newPage()
+  // A browser's refusal of sound, simulated: Playwright's evaluate counts as a press, so a check's page always may
+  // play sound. While `refuseSound` is set, an unmuted video's play() is refused as a browser refuses it.
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    HTMLMediaElement.prototype.play = function () { return globalThis.refuseSound && !this.muted && this.src ? Promise.reject(new DOMException('refused (simulated)', 'NotAllowedError')) : play.call(this) }
+  })
   page.errors = []
   page.said = []
   page.on('pageerror', (e) => page.errors.push(e.message))
   page.on('console', (m) => { page.said.push(m.text()); if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) page.errors.push(m.text()) })
-  await page.goto(`${site.url}/sf/index.html`)
+  await page.goto(`${site.url}/sf/index.html?knock=0`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.eggs, null, { timeout: 180_000 })
   await page.evaluate(() => { globalThis.engine.scale = 1 })
   return page
@@ -53,7 +60,9 @@ const still = async (page) => {
   await settle(page)
   await page.waitForTimeout(600)
 }
-const state = (page) => page.evaluate(() => ({ ...globalThis.engine.eggs.state, hour: globalThis.engine.hour, weather: globalThis.engine.realmControls.sky.weather, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.content && ('text' in s.content ? s.content.text : 'video' in s.content ? 'video' : 'image')])) }))
+const state = (page) => page.evaluate(() => ({ ...globalThis.engine.eggs.state, status: document.querySelector('.egg-status')?.textContent, hour: globalThis.engine.hour, weather: globalThis.engine.realmControls.sky.weather, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.own || !s.content ? null : 'text' in s.content ? s.content.text : 'video' in s.content ? 'video' : 'image'])) }))
+/** Until an egg is running (a picture or a video is fetched when it starts). */
+const started = (page, egg) => page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, egg, { timeout: 30_000 }).catch(() => null)
 /** Says something on the line, as a visitor does: Enter, the words, Enter. */
 const sayTo = async (page, words) => { await page.keyboard.press('Enter'); await page.keyboard.type(words, { delay: 25 }); await page.keyboard.press('Enter') }
 
@@ -109,19 +118,30 @@ try {
   console.log(`  arrival frames: ${JSON.stringify(day)}`)
 
   // ── Sound is the visitor's to start: an egg started with no press plays muted, and Unmute is the press ──
-  console.log('\nsound, with no press yet')
-  await page.evaluate(() => globalThis.engine.eggs.say('bad apple'))
-  await page.waitForFunction(() => globalThis.engine.eggs.state.playing, null, { timeout: 30_000 }).catch(() => null)
+  console.log('\nsound refused (simulated)')
+  await page.evaluate(() => { globalThis.refuseSound = true; globalThis.engine.eggs.say('bad apple') })
+  /** Until the video really plays (its clock past a third of a second) or its sound was refused, or it ended. */
+  const begun = () => page.waitForFunction(() => { const s = globalThis.engine.eggs.state; return s.blocked || s.time > 0.3 || !s.running }, null, { timeout: 30_000 }).catch(() => null)
+  await begun()
+  await page.waitForFunction(() => globalThis.engine.eggs.state.time > 0.3, null, { timeout: 10_000 }).catch(() => null)
   let s = await state(page)
-  check(s.running === 'apple' && s.playing && s.muted && s.blocked, `refused its sound, Bad Apple!! plays muted (${JSON.stringify({ playing: s.playing, muted: s.muted, blocked: s.blocked })})`)
+  const player = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), m = globalThis.engine.eggs.media; return { hidden: p.hidden, display: getComputedStyle(p).display, box: [r.x, r.y, r.width, r.height].map(Math.round), media: m && { paused: m.paused, ended: m.ended, error: m.error?.code ?? null, src: !!m.src } } })
+  check(s.running === 'apple' && s.time > 0 && s.muted && s.blocked, `refused its sound, Bad Apple!! plays muted (${JSON.stringify({ running: s.running, time: round(s.time), muted: s.muted, blocked: s.blocked, status: s.status })})`)
+  if (!(s.muted && s.blocked)) console.log('   ', JSON.stringify(await player()), page.said.slice(-6).join(' | '))
   check(await page.locator('.egg-player .mute').textContent() === 'Unmute', 'the player offers Unmute')
-  await page.click('.egg-player .mute')
-  await page.waitForTimeout(2500)
-  s = await state(page)
-  check(s.playing && !s.muted && s.sound > 0, `Unmute (a press) brings the sound: playing, unmuted, ${s.sound} bytes of sound decoded`)
-  await page.click('.egg-player .stop')
-  await page.waitForTimeout(300)
-  check((await state(page)).running === null, 'Stop on the player ends it')
+  try {
+    await page.evaluate(() => { globalThis.refuseSound = false })
+    await page.click('.egg-player .mute', { timeout: 5000 })
+    await page.waitForTimeout(2500)
+    s = await state(page)
+    check(s.playing && !s.muted && s.sound > 0, `Unmute (a press) brings the sound: playing, unmuted, ${s.sound} bytes of sound decoded`)
+    await page.click('.egg-player .stop', { timeout: 5000 })
+    await page.waitForTimeout(300)
+    check((await state(page)).running === null, 'Stop on the player ends it')
+  } catch (e) {
+    check(false, `the player's keys: ${String(e.message).split('\n')[0]} ${JSON.stringify(await player())}`)
+    await page.evaluate(() => globalThis.engine.eggs.undo(true))
+  }
   await still(page)
 
   // ── The Matrix, from the line: the board shows what is typed; code rain on the windows, a green night in fog ──
@@ -129,13 +149,14 @@ try {
   await page.keyboard.press('Enter')
   await page.keyboard.type('wake up', { delay: 25 })
   s = await state(page)
-  check(s.typing && s.signs.board === '> wake up_', `what is typed shows on the board as it is typed ("${s.signs.board}")`)
+  check(s.typing && s.signs.support === '> wake up_', `what is typed shows on the board as it is typed ("${s.signs.support}")`)
   const walked = await page.evaluate(() => globalThis.engine.pose.x)
   await page.keyboard.press('Enter')
   check(await page.evaluate((x) => globalThis.engine.pose.x === x, walked), 'typing on the line moves nobody (W, A, S and D were letters)')
+  await started(page, 'matrix')
   await still(page)
   s = await state(page)
-  check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22, `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; banner "${s.signs.banner}", board "${s.signs.board}"`)
+  check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22, `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; banner "${s.signs.banner}", board "${s.signs.support}"`)
   const m1 = await grid(page, 'matrix'), m2 = (await page.waitForTimeout(400), await grid(page))
   const city0 = cells(before, CITY), city1 = cells(m1, CITY), city2 = cells(m2, CITY)
   const green = (cs) => mean(cs, (c) => c[1] - (c[0] + c[2]) / 2)
@@ -156,7 +177,8 @@ try {
   // ── Bad Apple!!, from the line, with sound: the windows follow the frame held on them ──
   console.log('\nBad Apple!!')
   await sayTo(page, 'bad apple')
-  await page.waitForFunction(() => globalThis.engine.eggs.state.playing, null, { timeout: 30_000 }).catch(() => null)
+  await started(page, 'apple')
+  await begun()
   await page.waitForTimeout(2500)
   s = await state(page)
   check(s.running === 'apple' && s.playing && !s.muted && s.sound > 0, `typed, it plays with its sound: ${s.sound} bytes decoded`)
@@ -197,7 +219,8 @@ try {
   s = await state(page)
   check(s.signs.banner === 'Never gonna', `"who's there?" and the banner says "${s.signs.banner}"`)
   await sayTo(page, 'never gonna who?')
-  await page.waitForFunction(() => globalThis.engine.eggs.state.playing, null, { timeout: 30_000 }).catch(() => null)
+  await started(page, 'rickroll')
+  await begun()
   await page.waitForTimeout(2500)
   s = await state(page)
   check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0, `"never gonna who?" and Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"`)
@@ -216,8 +239,10 @@ try {
   // ── The moon: night, and a tool used at it makes it grow ──
   console.log('\nthe moon')
   await sayTo(page, 'moon')
+  await page.waitForFunction(() => globalThis.engine.realmControls.sky.hour > 23, null, { timeout: 10_000 }).catch(() => null)
   await still(page)
-  const aim = await page.evaluate(() => { const e = globalThis.engine, [x, y, z] = e.march.sun.s; const yaw = Math.atan2(x, -z), pitch = Math.asin(y / Math.hypot(x, y, z)); e.pose.yaw = yaw; e.pose.pitch = pitch; return { yaw, pitch } })
+  // From 150 m over the park: from the park itself a tower stands between the eye and the moon.
+  const aim = await page.evaluate(() => { const e = globalThis.engine, [x, y, z] = e.march.sun.s; const yaw = Math.atan2(x, -z), pitch = Math.asin(y / Math.hypot(x, y, z)); e.pose.y += 150; e.pose.yaw = yaw; e.pose.pitch = pitch; return { yaw, pitch } })
   await page.waitForTimeout(800)
   const disc = (g) => cells(g, [0.4, 0.38, 0.6, 0.62]).filter((c) => light(c) > 150).length
   const moon1 = disc(await grid(page, 'moon-1'))
@@ -231,25 +256,25 @@ try {
   await page.waitForTimeout(500)
   const moon3 = disc(await grid(page))
   check((await state(page)).moon === 0 && moon3 < moon2, `Esc and it is its own size (${moon3} bright cells)`)
-  await page.evaluate(() => { const e = globalThis.engine; e.pose.yaw = 2.097982; e.pose.pitch = -0.009161 })
+  await page.evaluate(() => { const e = globalThis.engine; e.pose.y -= 150; e.pose.yaw = 2.097982; e.pose.pitch = -0.009161 })
   await still(page)
 
   // ── IDDQD: no tool breaks anything; again, and they do ──
   console.log('\nIDDQD')
   const edits = () => page.evaluate(() => globalThis.engine.world.done().length)
-  await page.evaluate(() => globalThis.engine.pickTool(3))
+  await page.evaluate(() => globalThis.engine.pickTool(1))
   await sayTo(page, 'iddqd')
   const e0 = await edits()
   await page.evaluate(() => globalThis.engine.input.use())
   await page.waitForTimeout(2500)
   const e1 = await edits()
   s = await state(page)
-  check(s.shield && e1 === e0 && s.signs.banner === 'God mode', `under IDDQD the cannon breaks nothing (${e0} edits, then ${e1}); banner "${s.signs.banner}"`)
+  check(s.shield && e1 === e0 && s.signs.banner === 'God mode', `under IDDQD a charge breaks nothing (${e0} edits, then ${e1}); banner "${s.signs.banner}"`)
   await sayTo(page, 'iddqd')
   await page.evaluate(() => globalThis.engine.input.use())
   await page.waitForFunction((n) => globalThis.engine.world.done().length > n, e1, { timeout: 15_000 }).catch(() => null)
   const e2 = await edits()
-  check(!(await state(page)).shield && e2 > e1, `said again, the cannon breaks things (${e2} edits)`)
+  check(!(await state(page)).shield && e2 > e1, `said again, a charge breaks things (${e2} edits)`)
 
   // ── Reset ends an egg and puts the sky back ──
   console.log('\nreset')
@@ -291,10 +316,10 @@ try {
   await page.evaluate((y) => { globalThis.engine.pose.yaw = y }, yaw0)
   await sayTo(page, 'open sesame')
   s = await state(page)
-  check(s.running === null && /no such thing/.test(s.signs.board ?? ''), `a line it does not know is answered on the board ("${s.signs.board}")`)
+  check(s.running === null && /no such thing/.test(s.signs.support ?? ''), `a line it does not know is answered on the board ("${s.signs.support}")`)
   await sayTo(page, 'xyzzy')
   s = await state(page)
-  check(/Try: wake up/.test(s.signs.board ?? ''), `two misses and the board gives a hint ("${s.signs.board}")`)
+  check(/Try: wake up/.test(s.signs.support ?? ''), `two misses and the board gives a hint ("${s.signs.support}")`)
 
   check(page.errors.length === 0, `no errors on the page${page.errors.length ? `: ${page.errors.slice(0, 3).join(' | ')}` : ''}`)
 } catch (e) {

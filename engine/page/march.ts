@@ -1291,7 +1291,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
       // The window screen (eggs.ts): a pane shows its pixel of it, and its own lamp as much as the picture leaves on.
       let pic = screenOf(p);
-      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 1.2;
+      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
     }${world.options.surveyedWalls ? `
     // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
     // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
@@ -1830,7 +1830,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
-  const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT })
+  const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
   const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0 }
   const binding = () => device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),

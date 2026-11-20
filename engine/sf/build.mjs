@@ -198,10 +198,11 @@ for (const file of files(out)) {
     writeFileSync(cached, squeezed)
     compressed++
   }
-  // Worth it only where it is smaller.
-  if (squeezed.length < body.length) writeFileSync(`${file}.br`, squeezed)
-  raw += body.length; br += Math.min(squeezed.length, body.length)
-  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += Math.min(squeezed.length, body.length) }
+  // Worth it only where it is smaller, and never for video (H.264 and AAC are squeezed already; the eggs' videos).
+  if (squeezed.length < body.length && !file.endsWith('.mp4')) writeFileSync(`${file}.br`, squeezed)
+  const sent = file.endsWith('.mp4') ? body.length : Math.min(squeezed.length, body.length)
+  raw += body.length; br += sent
+  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += sent }
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`

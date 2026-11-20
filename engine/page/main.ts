@@ -56,7 +56,7 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
 import { eggs } from './eggs.ts'
-import { standInSigns } from './signs.ts'
+import { standInSigns } from './signs-stand-in.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -1322,12 +1322,12 @@ async function main() {
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
-    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs.ts, a stand-in
-    // for feature/450-boards' until it lands).
+    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs-stand-in.ts,
+    // the shape of feature/450-boards' signs.ts until it lands).
     const signs = standInSigns()
     let hushed: AudioContext | null = null
     Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
-      device, march, controls, sky: realmUi.sky, hour: () => hour, setHour, ownLight, view, pose, signs,
+      device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
       mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
       notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
       watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
