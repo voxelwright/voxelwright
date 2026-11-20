@@ -60,6 +60,7 @@ struct Building {
     home: bool,
     /// 1: a round tower of concrete, fluted, with an arcade under its top.
     special: u32,
+    ground_floor: u32,
     seed: u32,
     /// The street's level at its lowest: where its storeys are counted from.
     base: i32,
@@ -197,6 +198,7 @@ fn read(b: &[u8]) -> Option<Pack> {
             module: (style >> 8 & 255).max(16) as i32,
             home: style >> 16 & 1 == 1,
             special: style >> 17 & 3,
+            ground_floor: style >> 20 & 7,
             seed: style >> 24,
             base: r[5],
             low: [own.iter().map(|v| v[0]).min()?, own.iter().map(|v| v[1]).min()?],
@@ -429,7 +431,13 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
     let chance = hash(bay, p.side as i32, b.seed);
     // What the opening is: its half width, its foot and its head, and whether it is a door.
     let (half, foot, head, door) = if floor == 0 && p.looks & 2 != 0 && over_ground < storey && storey <= 60 {
-        if !b.home {
+        if b.ground_floor == 2 || b.ground_floor == 3 {
+            (module / 2.0 - 2.0, 0, if b.ground_floor == 3 { storey - 3 } else { 24 }, 2)
+        } else if b.ground_floor == 4 {
+            (module / 2.0 - 4.0, 0, storey - 4, 3)
+        } else if b.ground_floor == 5 {
+            (module / 2.0 - 2.0, 0, storey - 3, 4)
+        } else if b.ground_floor == 1 || !b.home {
             (module / 2.0 - 3.0, 5, storey - 7, 0) // a shop's window
         } else if chance % 3 == 0 {
             (module / 2.0 - 4.0, 0, 23, 2) // a garage
@@ -458,6 +466,8 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         return b.wall;
     }
     match door {
+        4 => if deep < 2.0 * size as f32 { 0 } else { dark },
+        3 => if deep < 1.0 { 0 } else { glass },
         2 => if deep < 1.0 && size == 1 { 0 } else { kind(WOOD, grey(4 + (chance >> 4) as u8 % 6)) },
         1 => if deep < 1.0 && size == 1 { 0 } else if fy >= head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
         // A window sits a cell back in its wall, with the room dark behind it.
@@ -494,6 +504,8 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let g = p.ground(x, z);
     let (class, tint) = p.surface(x, z);
     let (ground, kerb) = match class & 7 {
+        ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
+        ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
         ROAD => (kind(ASPHALT, OWN), 0),
         PAVEMENT => (kind(CONCRETE, OWN), 1),
         GRASS_HERE => (kind(GRASS, OWN), 0),
@@ -532,11 +544,12 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                     Some((far, trunk)) if tall >= 28 => {
                         let high = (trunk[2] - g).max(tall);
                         let deep = (high as f32 * 0.55).clamp(16.0, 90.0);
-                        let rim = (high as f32 * 0.4).clamp(14.0, REACH as f32);
+                        let measured = trunk[3] >> 8;
+                        let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
                         let middle = g as f32 + high as f32 - deep / 2.0;
                         let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
                         let foot = (under as i32 + ragged).max(g + 18).min(t - 3);
-                        What::Crown(foot, t, (far <= trunk[3] as f32 + 0.5).then(|| t - 8))
+                        What::Crown(foot, t, (far <= (trunk[3] & 255) as f32 + 0.5).then(|| t - 8))
                     }
                     // A bush or a hedge is leaves to the ground.
                     _ => What::Crown(if tall < 28 { g + 1 } else { t - (tall / 2).clamp(10, 40) + ragged }, t, None),

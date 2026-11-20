@@ -113,7 +113,7 @@ def main():
         return (e - W) / step, (N - n) / step
 
     # ── Ground: the 1 m model, a sample at each whole metre.
-    ground = ground_grid(f'{HOME}/raw', e0, n0, size)
+    ground = np.load(f'{raw}/ground.npy') if os.path.exists(f'{raw}/ground.npy') else ground_grid(f'{HOME}/raw', e0, n0, size)
     gw = ground.shape[0]
     # At half a metre, for telling what stands above it.
     g2 = np.asarray(Image.fromarray(ground).resize((half, half), Image.BILINEAR, box=(0, 0, gw - 1, gw - 1)))
