@@ -19,7 +19,14 @@ from coverage import bounds, tile_keys
 
 HERE = Path(__file__).resolve().parent
 BAY = Path.home() / ".village/engine/bay"
-PILOT = ["550.7_4182.5", "550.7_4183.5", "551.7_4182.5", "551.7_4183.5", "551.7_4184.5", "552.7_4183.5"]
+PILOT = [
+    "550.7_4182.5",
+    "550.7_4183.5",
+    "551.7_4182.5",
+    "551.7_4183.5",
+    "551.7_4184.5",
+    "552.7_4183.5",
+]
 RADIUS = (500, 4000, 16000)  # includes the desktop clip boxes' sector alignment
 
 
@@ -55,7 +62,14 @@ def verify(path, x, z, size, gstep, tstep, margin, walls):
     )
     if h[:12] != expected or h[15] != walls or min(h[12:15]) < 0:
         raise ValueError(f"incorrect BAY1 header: {path}")
-    length = 64 + 2 * h[5] ** 2 + (4 + 2 * walls) * h[9] ** 2 + 24 * h[12] + 12 * h[13] + 16 * h[14]
+    length = (
+        64
+        + 2 * h[5] ** 2
+        + (4 + 2 * walls) * h[9] ** 2
+        + 24 * h[12]
+        + 12 * h[13]
+        + 16 * h[14]
+    )
     if path.stat().st_size != length:
         raise ValueError(f"truncated BAY1: {path}")
     with path.open("rb") as f:
@@ -92,6 +106,11 @@ def build(args, lock_fd):
         digest(HERE / f)
         for f in (
             "full_run.py",
+            "intermediate.py",
+            "panoramas.py",
+            "appearance.py",
+            "street_graph.py",
+            "street_sources.py",
             "coverage.py",
             "sf-squares.json",
             "bake.py",
@@ -107,7 +126,11 @@ def build(args, lock_fd):
     ]
     recipe += [args.pilot]
     statefile = root / "state.json"
-    state = json.loads(statefile.read_text()) if statefile.exists() else {"recipe": recipe, "done": {}}
+    state = (
+        json.loads(statefile.read_text())
+        if statefile.exists()
+        else {"recipe": recipe, "done": {}}
+    )
     if state["recipe"] != recipe:
         raise SystemExit("recipe changed: use a fresh release directory")
     if not statefile.exists() and any(p.name != "build.lock" for p in root.iterdir()):
@@ -130,11 +153,15 @@ def build(args, lock_fd):
             return previous
         for attempt in range(3):
             if shutil.disk_usage(root).free < args.free_gib * 2**30:
-                raise SystemExit(f"low disk before {id_}; state saved; resume with the same command")
+                raise SystemExit(
+                    f"low disk before {id_}; state saved; resume with the same command"
+                )
             with (logs / f"{id_}.log").open("a", buffering=1) as log:
                 print(time.ctime(), "attempt", attempt + 1, file=log)
                 try:
-                    result = {str(p.relative_to(root)): digest(p) for p in make(log, *inputs)}
+                    result = {
+                        str(p.relative_to(root)): digest(p) for p in make(log, *inputs)
+                    }
                     state["done"][id_] = result
                     save(statefile, state)
                     return result
@@ -146,6 +173,41 @@ def build(args, lock_fd):
 
     seeds = json.loads((HERE / "pilot-hashes.json").read_text())
 
+    from intermediate import restore, write
+    from panoramas import acquire
+    import street_graph, street_sources
+
+    from appearance import enhance
+
+    def keep(log, name):
+        dest = root / "inputs" / (name + ".zip")
+        seed = args.input_seed / dest.name
+        if seed.exists():
+            import zipfile
+
+            with zipfile.ZipFile(seed) as archive:
+                if (
+                    archive.testzip()
+                    or json.loads(archive.read("frame.json"))["square"] != name
+                ):
+                    raise ValueError("invalid pilot intermediate")
+            dest.parent.mkdir(exist_ok=True)
+            shutil.copyfile(seed, dest)
+        else:
+            if args.offline_inputs:
+                raise ValueError(f"offline input missing: {seed}")
+            subprocess.run(
+                [sys.executable, HERE / "fetch.py", name],
+                env=env,
+                stdout=log,
+                stderr=log,
+                check=True,
+                pass_fds=(lock_fd,),
+            )
+            raw = root / "raw" / name
+            write(raw, dest, acquire(raw))
+        return [dest]
+
     def square(log, name):
         pack, meta = packs / f"{name}.bay", packs / f"{name}.json"
         # Only accept byte-identical pairs measured in this pilot.
@@ -155,7 +217,8 @@ def build(args, lock_fd):
             seed
             and source
             and all(
-                (source / p.name).is_file() and digest(source / p.name) == seed[p.suffix]
+                (source / p.name).is_file()
+                and digest(source / p.name) == seed[p.suffix]
                 for p in (pack, meta)
             )
         ):
@@ -163,7 +226,8 @@ def build(args, lock_fd):
                 shutil.copyfile(source / p.name, p)
             print("verified pilot seed", file=log)
         else:
-            for script in ("fetch.py", "bake.py"):
+            restore(root / "inputs" / (name + ".zip"), root / "raw" / name)
+            for script in ("bake.py",):
                 subprocess.run(
                     [sys.executable, HERE / script, name],
                     env=env,
@@ -176,28 +240,63 @@ def build(args, lock_fd):
             from street_trees import align
 
             align(pack, root / "raw" / name / "trees.geojson")
-            observations = json.loads((HERE / "pilot-frontages.json").read_text()).get(name, {})
+            observations = json.loads((HERE / "pilot-frontages.json").read_text()).get(
+                name, {}
+            )
             if observations:
                 apply(pack, pack, observations)
                 names_data = json.loads(meta.read_text())
                 names_data["credit"] += "; façade colours: Mapillary"
                 save(meta, names_data)
+        result = enhance(
+            pack,
+            root / "inputs" / (name + ".zip"),
+            root / "inputs" / (name + ".json.gz"),
+            packs / "graph" / (name + ".json"),
+        )
+        print("appearance", json.dumps(result), file=log)
         x, z, _, _ = bounds(name)
         verify(pack, x * 10, z * 10, 10000, 10, 5, 160, 0)
         data = json.loads(meta.read_text())
         if (
             data["square"] != name
             or data["at"] != [x * 10, z * 10, 10000]
-            or not all(isinstance(data[k], list) for k in ("names", "ways", "addresses"))
+            or not all(
+                isinstance(data[k], list) for k in ("names", "ways", "addresses")
+            )
         ):
             raise ValueError("incorrect names file")
         return [pack, meta]
 
-    for name in names:
+    for name in dict.fromkeys(PILOT + names):
+        task("inputs-" + name, keep, name)
+        observations = root / "inputs" / (name + ".json.gz")
+
+        def streets(log, square_name):
+            cached = args.street_seed / observations.name
+            if cached.exists():
+                shutil.copyfile(cached, observations)
+            else:
+                if args.offline_inputs:
+                    raise ValueError(f"offline street input missing: {cached}")
+                street_sources.acquire(square_name, observations)
+            path = packs / "graph" / (square_name + ".json")
+            street_graph.build(
+                square_name,
+                root / "inputs" / (square_name + ".zip"),
+                observations,
+                path,
+            )
+            return [observations, path]
+
+        task("streets-" + name, streets, name)
         task(name, square, name)
+        print(time.ctime(), "verified square", name, flush=True)
         raw = root / "raw" / name
         if raw.is_dir():
-            shutil.rmtree(raw)  # this run's private staging area, after both outputs were recorded
+            shutil.rmtree(
+                raw
+            )  # this run's private staging area, after both outputs were recorded
 
     index = {
         "levels": [{"size": r[0], "gstep": r[1]} for r in earth.LEVELS],
@@ -209,7 +308,12 @@ def build(args, lock_fd):
     for key, inputs in keys.items():
         level, x, z = key
         # Amortise rasterisation over locally adjacent tiles with identical input lists.
-        groups[level, x // 4 if level == 0 else x, z // 4 if level == 0 else z, tuple(inputs)].append(key)
+        groups[
+            level,
+            x // 4 if level == 0 else x,
+            z // 4 if level == 0 else z,
+            tuple(inputs),
+        ].append(key)
 
     def group_output(log, level, inputs, group):
         size, gstep, tstep, margin, _ = earth.LEVELS[level]
@@ -229,7 +333,9 @@ def build(args, lock_fd):
                 tmp = path.with_suffix(".part")
                 tmp.write_bytes(blob)
                 tmp.replace(path)
-            verify(path, x * size, z * size, size, gstep, tstep, margin, int(level != 0))
+            verify(
+                path, x * size, z * size, size, gstep, tstep, margin, int(level != 0)
+            )
             paths.append(path)
         print(group, inputs, len(paths), "nonempty", file=log)
         return paths
@@ -253,9 +359,18 @@ def build(args, lock_fd):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, default=BAY / "sf-450-release")
+    parser.add_argument("--street-seed", type=Path, default=BAY / "450-street-inputs")
+    parser.add_argument(
+        "--offline-inputs",
+        action="store_true",
+        help="require both retained observations for every square; no square source acquisition",
+    )
+    parser.add_argument("--input-seed", type=Path, default=BAY / "450-inputs")
     parser.add_argument("--seed", type=Path, default=BAY / "pilot450/packs")
-    parser.add_argument("--pilot", action="store_true", help="only six squares, no horizon")
-    parser.add_argument("--free-gib", type=float, default=6)
+    parser.add_argument(
+        "--pilot", action="store_true", help="only six squares, no horizon"
+    )
+    parser.add_argument("--free-gib", type=float, default=15)
     args = parser.parse_args()
     if not math.isfinite(args.free_gib) or args.free_gib <= 0:
         parser.error("free disk threshold must be positive")
