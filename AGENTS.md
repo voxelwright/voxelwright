@@ -50,6 +50,29 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Bring the owner results and things to try, not permission questions. Ask
   only when something below is his to decide, with a recommendation.
 
+## Quality
+
+From the November 20, 2026 retrospective (`~/.village/retro/2026-11-20-process.md`).
+The owner had been first to spot six visible faults in 14 days.
+
+- Look before you score. Before any score, an agent that did not build the work
+  lists what a person would point at, working from full-size frames beside the
+  reference. A listed defect blocks acceptance.
+- A gate reads the output itself. A score file written by the builder is not a
+  gate.
+- Judge a baseline independently before it becomes a floor. A gate that only
+  forbids getting worse keeps every fault in its first render.
+- Every fault the owner finds becomes an automatic check, and that check must
+  fail on the old output.
+- The lead opens every picture at full size before relaying it, and embeds it in
+  the report.
+- A projection longer than a day names what bounds it and gives a source. The
+  lead checks it before relaying it.
+- Cross-lane asks go in a checklist in the issue body. The lead routes each one
+  within an hour.
+- No branch runs more than a day or 15 commits ahead of main. Ship unfinished
+  work behind a switch.
+
 ## Agents and models
 
 - A lock file on the maintainer's machine can block agents from `codex`,
