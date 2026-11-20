@@ -13,6 +13,7 @@ import subprocess
 import sys
 import time
 import traceback
+import zipfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -189,14 +190,13 @@ def build(args, lock_fd):
     import street_graph, street_sources
 
     from appearance import enhance
+    from street_trees import align
     import street_detail, street_detail_sources, surface_detail
 
     def keep(log, name):
         dest = root / "inputs" / (name + ".zip")
         seed = args.input_seed / dest.name
         if seed.exists():
-            import zipfile
-
             with zipfile.ZipFile(seed) as archive:
                 if (
                     archive.testzip()
@@ -249,9 +249,7 @@ def build(args, lock_fd):
                     pass_fds=(lock_fd,),
                 )
             from frontage import apply
-            from street_trees import align
 
-            align(pack, root / "raw" / name / "trees.geojson")
             observations = json.loads((HERE / "pilot-frontages.json").read_text()).get(
                 name, {}
             )
@@ -260,6 +258,10 @@ def build(args, lock_fd):
                 names_data = json.loads(meta.read_text())
                 names_data["credit"] += "; façade colours: Mapillary"
                 save(meta, names_data)
+        # Two original pilot packs predate surveyed trunk alignment. A seed and
+        # a reconstruction must locate the same tree before measuring its crown.
+        with zipfile.ZipFile(root / "inputs" / (name + ".zip")) as archive:
+            align(pack, zipfile.Path(archive, "trees.geojson"))
         result = enhance(
             pack,
             root / "inputs" / (name + ".zip"),
