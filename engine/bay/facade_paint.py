@@ -68,7 +68,7 @@ def exposure(pack, x, z, eye, rot, img):
     return float(np.clip(np.median(daylight / observed), 0.92, 2.0))
 
 
-def project(pack, catalog, center):
+def project(pack, catalog, center, photos=None):
     began = time.monotonic()
     p = read(pack)
     table = (palette()[1:] * 255).astype("f4")
@@ -97,7 +97,7 @@ def project(pack, catalog, center):
         i, j = np.rint([(x - p["gx0"]) / 10, (z - p["gz0"]) / 10]).astype(int)
         if not (0 <= i < p["gw"] and 0 <= j < p["gw"]):
             continue
-        with Image.open(catalog.parent / (str(meta["id"]) + ".jpg")) as img:
+        with Image.open((photos or catalog.parent) / (str(meta["id"]) + ".jpg")) as img:
             rgb = np.array(img.convert("RGB"))
         eye = int(p["ground"][j, i]) + 25
         rot = rotation(np.array(meta["computed_rotation"]))

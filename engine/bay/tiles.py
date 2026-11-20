@@ -151,6 +151,16 @@ def cut(paths, wanted=None):
         trunks.update(p['trunks'])
         fixtures.update(p['fixtures'])
     buildings, trunks = sorted(buildings.values()), sorted(trunks)
+    # The Ina photograph predates the close lidar canopy (landing/ina/matte.py).
+    # Clear only canopy tops and trunks inside the eye's 40 m disc before any LOD reduction.
+    eye_x, eye_z = 516467, 664023
+    if X0 - 400 < eye_x < X1 + 400 and Z0 - 400 < eye_z < Z1 + 400:
+        j, i = np.ogrid[:H, :W]
+        inside = (X0 + 5*i + 2.5 - eye_x)**2 + (Z0 + 5*j + 2.5 - eye_z)**2 < 400**2
+        crowns = inside & ((cls & 8) != 0)
+        cls[crowns] &= 247
+        top[crowns] = NONE
+        trunks = [t for t in trunks if (t[0]-eye_x)**2 + (t[1]-eye_z)**2 >= 400**2]
     # Where a building stands and its wall's colour, at half a metre: for the tiles that hold no outlines.
     mass = Image.new('I', (W, H), 0)
     for verts, row in buildings:
