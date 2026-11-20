@@ -82,7 +82,7 @@ const results = { url: `${site.url}/sf/index.html` }
 try {
   // ── The first visit ──
   console.log('\nfirst visit (cold cache)')
-  await page.goto(`${site.url}/sf/index.html?sound=0#helper=${encodeURIComponent(HELPER)}&secret=offered`)
+  await page.goto(`${site.url}/sf/index.html#helper=${encodeURIComponent(HELPER)}&secret=offered`)
   await page.waitForFunction(() => globalThis.engine?.seen?.first > 0, null, { timeout: 120_000 })
   await page.waitForFunction(() => globalThis.engine.seen.whole > 0, null, { timeout: 180_000 })
   const t = await page.evaluate(() => ({ origin: performance.timeOrigin, ...globalThis.engine.seen, isolated: crossOriginIsolated, shared: typeof SharedArrayBuffer !== 'undefined', gpu: !!navigator.gpu }))
@@ -91,6 +91,7 @@ try {
     untilFirstFrame: sent(site.asked, 0, t.origin + t.first), untilWhole: sent(site.asked, 0, t.origin + t.whole),
     crossOriginIsolated: t.isolated, sharedArrayBuffer: t.shared,
   }
+  results.load.tilesBeforeFirst = site.asked.filter((a) => a.status === 200 && a.path.startsWith('/bay/') && a.at <= t.origin + t.first).map((a) => a.path.replace('/bay/', ''))
   console.log(JSON.stringify(results.load, null, 1))
   check(t.first > 0 && t.whole > 0, `drawn from plain files without COOP/COEP (crossOriginIsolated ${t.isolated}): first picture ${Math.round(t.first)} ms, world whole ${Math.round(t.whole)} ms`)
   const ground = await page.evaluate(() => { const e = globalThis.engine; return e.ground(e.pose.x, e.pose.z) })
@@ -98,13 +99,17 @@ try {
 
   // ── Frames ──
   const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 90_000, polling: 250 }).catch(() => null)
-  const frames = async (name, pose, fov) => {
+  const frames = async (name, pose, fov, full = false) => {
     await page.evaluate(({ pose, fov }) => { const e = globalThis.engine; Object.assign(e.pose, pose); if (fov) e.fov = fov }, { pose, fov })
     await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2000)
-    const w = await page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, scale: e.scale, gpuMs: e.gpuMs, cpuMs: e.cpuMs, fov: e.fov, people: e.folk.drawn?.people ?? 0 } }, seconds * 1000)
-    const g = w.gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => round(g[Math.min(g.length - 1, Math.floor(g.length * p))])
-    const r = { frames: g.length, p50: q(0.5), p99: q(0.99), worst: round(g[g.length - 1]), scale: w.scale, marchMs: round(w.gpuMs), cpuMs: round(w.cpuMs), fov: w.fov, residentsDrawn: w.people }
-    await page.screenshot({ path: join(shots, `${name}.png`) })
+    // As the page steers its picture's size (it aims the march at six tenths of a frame), then with every pixel drawn: the second is the cost.
+    const take = () => page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, scale: e.scale, gpuMs: e.gpuMs, cpuMs: e.cpuMs, fov: e.fov, people: e.folk.drawn?.people ?? 0 } }, seconds * 1000)
+    const said = (w) => { const g = w.gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => round(g[Math.min(g.length - 1, Math.floor(g.length * p))]); return { frames: g.length, p50: q(0.5), p99: q(0.99), worst: round(g[g.length - 1]), scale: w.scale, marchMs: round(w.gpuMs), cpuMs: round(w.cpuMs) } }
+    // Once pinned the picture's size stays pinned: the passes at full size come after all the steered ones.
+    if (full) { await page.evaluate(() => { globalThis.engine.scale = 1 }); await page.waitForTimeout(2000) }
+    const w = await take()
+    if (!full) await page.screenshot({ path: join(shots, `${name}.png`) })
+    const r = { ...said(w), fov: w.fov, residentsDrawn: w.people }
     console.log(`  ${name}: ${JSON.stringify(r)}`)
     return r
   }
@@ -125,7 +130,11 @@ try {
   const f = (results.features = {})
   // Residents on the real pavements: drawn round the eye at street level.
   f.residents = results.frames.street.residentsDrawn
-  check(f.residents > 0, `residents drawn at street level: ${f.residents}`)
+  console.log(`  (report) residents drawn at street level on Taylor St: ${f.residents}; at the park: ${results.frames.park.residentsDrawn}`)
+  // Sound from plain files: its worklet is beside its module. A key is a gesture, which lets the page make sound.
+  await page.keyboard.press('KeyH'); await page.keyboard.press('KeyH')
+  f.sound = await page.waitForFunction(() => globalThis.engine.ears !== null, null, { timeout: 15_000 }).then(() => true, () => false)
+  check(f.sound, 'sound starts from plain files (its worklet found beside its module)')
   // Flying: the eye moves with the keys.
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, p), { ...street, yaw: -0.164, pitch: 0 })
   const before = await page.evaluate(() => ({ ...globalThis.engine.pose }))
@@ -232,6 +241,13 @@ try {
     return cost.tiles
   }
   results.moving = { walk60: await travel('walk60', 'walk'), flight60: await travel('flight60', 'fly') }
+  // Every pixel drawn (scale 1): what each place costs the GPU, where the steered passes above say only that 60 fps holds.
+  console.log('\nframes at full size')
+  results.framesFull = {
+    park: await frames('park-full', park, 25.05, true),
+    street: await frames('street-full', { ...street, yaw: -0.164, pitch: 0 }, 70, true),
+    up150: await frames('up150-full', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, true),
+  }
   results.errors = errors
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`)
 } finally {

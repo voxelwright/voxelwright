@@ -138,14 +138,13 @@ async function main() {
 
   // Start on land, a little above a street.
   // In the Bay (#373, `?bay=1`): in Washington Square, looking at Telegraph Hill.
-  let startX = BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
+  // A realm run alone (local.ts) says where one arrives: the eye there, in the world's cells, and how it faces in radians.
+  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? LOCAL.arrive : null
+  let startX = arrive ? arrive.at[0] : BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = arrive ? arrive.at[2]! : BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
   // Where the Bay comes in tiles, the ones round the start and round where the page was told to stand come first.
   if (STREAM) { const there = query.get('at')?.split(',').map(Number); await near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
   while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
-  // A realm run alone (local.ts) says where one arrives: the eye there, in the world's cells, and how it faces in degrees.
-  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? LOCAL.arrive : null
-  if (STREAM && arrive) await near(inner, arrive.at[0], arrive.at[2]!)
   const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
   const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', BAY_ON ? [64, 4] : [20, -8])
   /** The eye's angle from top to bottom, degrees. */
