@@ -41,6 +41,8 @@ interface Car {
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
   road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number
   slot?: number; thing?: Thing | null; waking?: boolean
+  /** What it last waited for, if it is held up: a car, a person, a turn at a junction, the end of the road. */
+  wait?: string
 }
 
 /** How far off people are worked out and drawn (people.ts REACH), and how far a walk takes anyone from home. */
@@ -100,7 +102,7 @@ export interface Street {
   /** The roads near a place, for a driver to follow (the checks). */
   roads(x: number, z: number, r: number): { key: string; name: number; lanes: number; flags: number; next: string[]; line: number[]; open: boolean | null }[]
   /** Vehicles near a place: where each stands, which way it heads, and what it is. */
-  cars(x: number, z: number, r: number): { kind: Car['kind']; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean }[]
+  cars(x: number, z: number, r: number): { kind: Car['kind']; x: number; y: number; z: number; heading: number; name: string; v: number; living: boolean; wait: string; stuck: number }[]
   /** Seconds from now on the clock people walk by until a cable car is nearest a place, and how near it comes (cells); null with no line. */
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
@@ -577,7 +579,9 @@ export function street(o: {
   const traffic: Car[] = []
   let rng = 0x2545f491
   const random = () => { rng ^= rng << 13; rng ^= rng >>> 17; rng ^= rng << 5; return (rng >>> 0) / 4294967296 }
-  const holds = new Map<number, Car>()
+  /** Who is crossing each junction now, and the way each came in and goes out: cars that cross no one's path (straight on, from the same way or the opposite one) share it. */
+  const holds = new Map<number, Map<Car, { ax: number; az: number; straight: boolean }>>()
+  const letGo = (c: Car) => { for (const [n, h] of holds) { h.delete(c); if (!h.size) holds.delete(n) } }
   const P = { x: 0, z: 0, tx: 0, tz: 0 }, Q = { x: 0, z: 0, tx: 0, tz: 0 }
   const laneOff = (r: Road, lane: number) => (r.flags & 1 ? (lane - (r.lanes - 1) / 2) * 33 : (lane + 0.5) * 33)
   /** A lane's middle at a distance along a road. */
@@ -673,14 +677,14 @@ export function street(o: {
   const drive = (dt: number, view: View) => {
     obstacles.length = 0
     for (const c of traffic) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading), car: c })
-    for (const c of parked.values()) if (!c.thing) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: 0, hx: Math.cos(c.heading), hz: Math.sin(c.heading) })
+    // (Parked cars are at the kerb, out of every lane: a place inferred a little into one is passed, not queued behind for ever.)
     for (const c of cables) obstacles.push({ x: c.x, z: c.z, long: c.model.long / 2, wide: c.model.wide / 2, v: c.v, hx: Math.cos(c.heading), hz: Math.sin(c.heading) })
     for (const t of o.alive.things) { const w = o.alive.where(t); if (w) obstacles.push({ x: w.at[0], z: w.at[2], long: Math.max(t.size[0], t.size[2]) / 2, wide: Math.min(t.size[0], t.size[2]) / 2, v: t.state ? Math.abs(t.state.speed ?? 0) : 0, hx: w.front[0], hz: w.front[2] }) }
     for (const [x, z] of crossing) obstacles.push({ x, z, long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
     for (const b of o.bodies()) obstacles.push({ x: b[0], z: b[2], long: 3, wide: 3, v: 0, hx: 1, hz: 0 })
     for (let i = traffic.length - 1; i >= 0; i--) {
       const c = traffic[i], r = c.road!, hx = Math.cos(c.heading), hz = Math.sin(c.heading)
-      let gap = Infinity, lead = 0
+      let gap = Infinity, lead = 0, why = ''
       for (const ob of obstacles) {
         if (ob.car === c) continue
         const dx = ob.x - c.x, dz = ob.z - c.z
@@ -689,17 +693,29 @@ export function street(o: {
         // Whatever stands in its way: across from its middle line by less than the two of them are wide.
         const ext = Math.abs(ob.hx * hz - ob.hz * hx) * ob.long + Math.abs(ob.hx * hx + ob.hz * hz) * ob.wide
         if (ahead <= 0 || ahead > 400 || across > c.model.wide / 2 + ext * 0.9 + 2) continue
+        // A vehicle coming the other way keeps to its own lane: waited for, two meeting at a corner would wait for ever.
+        if (ob.long > 3 && ob.hx * hx + ob.hz * hz < -0.3) continue
         const g = ahead - c.model.long / 2 - (Math.abs(ob.hx * hx + ob.hz * hz) * ob.long + Math.abs(ob.hx * hz - ob.hz * hx) * ob.wide)
-        if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz) }
+        if (g < gap) { gap = g; lead = ob.v * (ob.hx * hx + ob.hz * hz); why = ob.car ? 'car' : ob.long === 3 ? 'person' : 'vehicle' }
       }
-      // At a junction of three ways or more, one at a time: whoever holds it goes, the rest wait at the line.
+      // At a junction of three ways or more, by turns: whoever crosses it goes, and those whose way crosses theirs wait at the line.
       const left = r.len - c.s!
       if (left < 150 && busyJunction(r.b)) {
-        const holder = holds.get(r.b)
-        if (!holder || !traffic.includes(holder)) holds.set(r.b, c)
-        if (holds.get(r.b) !== c) { gap = Math.min(gap, left - 30); lead = 0 }
+        let h = holds.get(r.b)
+        if (!h) holds.set(r.b, h = new Map())
+        if (!h.has(c)) {
+          along(r.p, r.cum, r.len, P)
+          const ax = P.tx, az = P.tz
+          let straight = true
+          if (c.next) { along(c.next.p, c.next.cum, 0, Q); straight = ax * Q.tx + az * Q.tz > 0.8 }
+          for (const k of h.keys()) if (!traffic.includes(k)) h.delete(k)
+          const clear = [...h.values()].every((o) => straight && o.straight && Math.abs(o.ax * ax + o.az * az) > 0.8)
+          // Waited long (whoever holds it is held up in turn): it goes when it can.
+          if (clear || c.stuck! > 12) h.set(c, { ax, az, straight })
+          else if (left - 30 < gap) { gap = left - 30; lead = 0; why = 'junction' }
+        }
       }
-      if (!c.next && left < 200) { c.next = choose(r); if (!c.next) { gap = Math.min(gap, left - 10); lead = 0 } }
+      if (!c.next && left < 200) { c.next = choose(r); if (!c.next && left - 10 < gap) { gap = left - 10; lead = 0; why = 'end' } }
       // A turn is taken slowly.
       let v0 = limit(r)
       if (c.next && left < 200) { along(r.p, r.cum, r.len, P); along(c.next.p, c.next.cum, 0, Q); if (P.tx * Q.tx + P.tz * Q.tz < 0.8) v0 = Math.min(v0, 45) }
@@ -709,18 +725,24 @@ export function street(o: {
       if (gap < 5) c.v = Math.min(c.v, Math.max(0, gap) * 2)
       c.s! += c.v * dt
       c.stuck = c.v < 2 ? c.stuck! + dt : 0
+      c.wait = c.v < 2 ? why : ''
+      // At the end of a road that goes nowhere it may (mapping ends there, or the way on is closed): it turns round.
+      if (!c.next && c.stuck! > 4 && c.road!.len - c.s! < 40) {
+        const back = roads.get(`${c.road!.way}/${c.road!.b}/${c.road!.a}`)
+        if (back && open(back)) { c.prev = null; c.road = back; c.s = 0; c.lane = Math.min(c.lane!, back.lanes - 1); c.next = choose(back); c.stuck = 0; letGo(c) }
+      }
       while (c.s! >= c.road!.len) {
         if (!c.next) break
         c.s! -= c.road!.len
         c.prev = c.road!; c.road = c.next; c.lane = Math.min(c.lane!, c.road.lanes - 1); c.next = choose(c.road)
       }
       // Past the junction it held by 8 m: it is free for the next.
-      if (c.prev && holds.get(c.prev.b) === c && c.s! > 80) holds.delete(c.prev.b)
+      if (c.prev && c.s! > 80) { const h = holds.get(c.prev.b); if (h?.delete(c) && !h.size) holds.delete(c.prev.b) }
       const d = Math.hypot(c.x - view.eye[0], c.z - view.eye[2])
       // Gone where nobody sees: too far, at a road's end, or stuck a long while out of sight.
-      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 40 && unseen(c.x, c.z, view))) { for (const [n, h] of holds) if (h === c) holds.delete(n); hide(c); traffic.splice(i, 1); continue }
+      if (d > DRIVEN * 1.25 || (!c.next && c.s! >= c.road!.len - 12 && unseen(c.x, c.z, view)) || (c.stuck! > 40 && unseen(c.x, c.z, view))) { letGo(c); hide(c); traffic.splice(i, 1); continue }
       // Someone held a junction a long time without moving (a person stands in front of them): let it go.
-      if (c.stuck! > 6) for (const [n, h] of holds) if (h === c) holds.delete(n)
+      if (c.stuck! > 6) letGo(c)
       pose(c)
     }
   }
@@ -759,7 +781,7 @@ export function street(o: {
     const takeIt = () => {
       if (!traffic.includes(car)) return
       traffic.splice(traffic.indexOf(car), 1)
-      for (const [n, h] of holds) if (h === car) holds.delete(n)
+      letGo(car)
       car.kind = 'parked'
       void wake(car, (thing) => o.alive.mount(thing))
       cue?.remove(); cue = null; beside?.(); beside = null
@@ -823,7 +845,7 @@ export function street(o: {
       return out
     },
     cars(x, z, r) {
-      return [...parked.values(), ...traffic, ...cables].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ kind: c.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing }))
+      return [...parked.values(), ...traffic, ...cables].filter((c) => Math.hypot(c.x - x, c.z - z) < r).map((c) => ({ kind: c.kind, x: c.x, y: c.y, z: c.z, heading: c.heading, name: c.model.name, v: c.v, living: !!c.thing, wait: c.wait ?? '', stuck: c.stuck ?? 0 }))
     },
     cable(x, z) {
       let best: { in: number; near: number } | null = null
