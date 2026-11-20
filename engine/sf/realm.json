@@ -2,9 +2,32 @@
   "id": "sf",
   "name": "San Francisco",
   "about": "The city at true size, from open data. Single player: each visitor has a world of their own, and nothing made from words.",
-  "world": { "bay": "1" },
-  "arrive": { "at": [516467, 860, 664023], "yaw": 2.09798, "pitch": -0.00916 },
-  "fov": 25.05,
-  "rules": { "models": false },
-  "kept": [{ "file": "kept/saloon.json", "at": [516046, 0, 663900] }]
+  "world": {
+    "bay": "1"
+  },
+  "arrive": {
+    "at": [
+      516466.6,
+      859.8,
+      664022.6
+    ],
+    "yaw": 2.097982,
+    "pitch": -0.009161
+  },
+  "fov": 25.0493,
+  "rules": {
+    "models": false
+  },
+  "kept": [
+    {
+      "file": "kept/saloon.json",
+      "at": [
+        516046,
+        0,
+        663900
+      ]
+    }
+  ],
+  "roll": -0.1764,
+  "far": "./"
 }

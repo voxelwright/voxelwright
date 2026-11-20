@@ -134,7 +134,7 @@ export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await 
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
  */
-export async function whereabouts(at: () => [number, number]): Promise<void> {
+export async function whereabouts(at: () => [number, number], /** Whose else the place is made from (the far model's, far.ts). */ more: readonly string[] = []): Promise<void> {
   const squares = await names()
   const label = document.createElement('div')
   label.id = 'where'
@@ -142,7 +142,7 @@ export async function whereabouts(at: () => [number, number]): Promise<void> {
   const credit = document.createElement('div')
   credit.style.cssText = 'font:400 10px system-ui,sans-serif;opacity:.75;margin-top:2px'
   // Who the place is made from: the baked squares' sources, and for everything else the planet's (bay/earth.py).
-  credit.textContent = [...new Set(squares.map((s) => s.credit)), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])].join('; ')
+  credit.textContent = [...new Set([...squares.map((s) => s.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : []), ...more].flatMap((c) => c.split('; ')))].join('; ')
   const line = document.createElement('div')
   label.append(line, credit)
   document.body.append(label)

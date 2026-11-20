@@ -173,6 +173,39 @@ fn glassMirror(rd: vec3f, n: vec3f) -> f32 {
 }
 `
 
+/** The sky's own colour along a look, and what the air between does to a thing seen far off: the same for the world and for the far model (far.ts). Needs `g`. */
+export const AIR = /* wgsl */ `
+// The sky without sun or cloud: what the air between is the colour of.
+fn skyBase(rd: vec3f) -> vec3f {
+  let up = clamp(rd.y, 0.0, 1.0);
+  var horizon = g.skyHorizon.rgb;
+  if (g.low > 0.0) {
+    // A low sun reddens the side of the sky it is on.
+    let sunward = max(dot(normalize(rd.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a)), 0.0);
+    horizon = mix(horizon, g.skyHorizonSun.rgb, sunward * sunward);
+  }
+  var col = mix(horizon, g.skyZenith.rgb, pow(up, g.skyZenith.a));
+  let toward = max(dot(rd, g.sun), 0.0);
+  col += g.lightSun.rgb * vec3f(1.0, 0.8, 0.56) * (pow(toward, 6.0) * 0.22 + pow(toward, 3.0) * g.skyHorizon.a);
+  // Below the horizon the sky is the haze the far ground fades into.
+  return mix(col, horizon * 0.94, clamp(-rd.y * 6.0, 0.0, 1.0));
+}
+// How much of what is dist along a look from the eye is lost in the air: dist is in the finest cells, and the air
+// thickens over kilometres. It is thickest by the sea and thins upward (to a third in 1.3 km), so a mountain stands
+// clear over the haze its foot is lost in: what counts is the air along the look, from the eye's height to the
+// height of what is seen.
+fn haze(rd: vec3f, dist: f32) -> f32 {
+  let low = (g.eye.y - g.sea) / 12000.0;
+  let rise = rd.y * dist / 12000.0;
+  var thick = exp(-max(low, 0.0));
+  if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
+  return 1.0 - exp(-dist * 0.00003 * thick);
+}
+// The colour of that air.
+fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
+fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f { return mix(col, hazeColour(rd), haze(rd, dist)); }
+`
+
 /** How a face is lit and how light becomes a picture: the same for the world and for bodies. */
 export const LIGHT = /* wgsl */ `
 // The light on a face: the sun where it reaches, the sky from above, what the lit ground throws back from below
@@ -494,7 +527,10 @@ ${GLOBALS}
 // One tile of a map being drawn: where its first texel's middle is (across and up from the anchor), a texel's width, the box, the tile's corner in the map.
 struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2f }
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16> }
+// far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
+// is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
+// 64 x 64 tiles it holds.
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32> }
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
@@ -797,6 +833,14 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   return hit;
 }
 ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
+// Whether the far model holds the tile a point is in (far.ts).
+fn farHeld(p: vec3f) -> bool {
+  let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
+  if (any(t < vec2i(0)) || any(t >= vec2i(64))) { return false; }
+  let bit = u32(t.y * 64 + t.x);
+  let word = bit >> 5u;
+  return ((looks.cover[word >> 2u][word & 3u] >> (bit & 31u)) & 1u) != 0u;
+}
 // What a ray meets: what is in the world's cells (march), or the sea. The still sea is not cells: it is all that
 // lies under its top with nothing else in it. A look that comes down from over it meets the top where it crosses
 // that level, if it has met nothing before, or has gone out through the far side of the last box by then. Past the
@@ -806,6 +850,11 @@ ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
 // dearer, sea in it or not.
 fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, spread: f32, rough: bool, through: bool, eyed: bool) -> Hit {
   ${MARCHED(world.options.bricks && !INLOOP)}
+  // Past the far model's reach, where it holds the tile, what the cells met there is its to draw (far.ts): the coarse
+  // boxes stand far wider than the buildings they hold. The look goes on to meet the sea, as though it had left the boxes.
+  // Only a look from the eye (through a pane too): the water's look at what it mirrors starts at the water, and the far
+  // model is not drawn into what is mirrored.
+  if (eyed && looks.far.w > 0.0 && hit.t > looks.far.w && all(ro == g.eye) && farHeld(ro + rd * hit.t)) { hit.t = -1.0; hit.left = true; }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -829,21 +878,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 ${LIGHT}
 ${GLASS}
 ${PAINT}
-// The sky without sun or cloud: what the air between is the colour of.
-fn skyBase(rd: vec3f) -> vec3f {
-  let up = clamp(rd.y, 0.0, 1.0);
-  var horizon = g.skyHorizon.rgb;
-  if (g.low > 0.0) {
-    // A low sun reddens the side of the sky it is on.
-    let sunward = max(dot(normalize(rd.xz + vec2f(0.0001, 0.0)), vec2f(g.skyHorizonSun.a, g.cloudTint.a)), 0.0);
-    horizon = mix(horizon, g.skyHorizonSun.rgb, sunward * sunward);
-  }
-  var col = mix(horizon, g.skyZenith.rgb, pow(up, g.skyZenith.a));
-  let toward = max(dot(rd, g.sun), 0.0);
-  col += g.lightSun.rgb * vec3f(1.0, 0.8, 0.56) * (pow(toward, 6.0) * 0.22 + pow(toward, 3.0) * g.skyHorizon.a);
-  // Below the horizon the sky is the haze the far ground fades into.
-  return mix(col, horizon * 0.94, clamp(-rd.y * 6.0, 0.0, 1.0));
-}
+${AIR}
 // A quick number for a place on a plane: clouds need many and need them only to look unruly.
 fn hash2i(c: vec2i) -> f32 {
   var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
@@ -1266,20 +1301,6 @@ fn deep(rd: vec3f, hit: Hit, shadows: u32, grain: f32) -> vec3f {
   return col;
 }
 
-// How much of what is dist along a look from the eye is lost in the air: dist is in the finest cells, and the air
-// thickens over kilometres. It is thickest by the sea and thins upward (to a third in 1.3 km), so a mountain stands
-// clear over the haze its foot is lost in: what counts is the air along the look, from the eye's height to the
-// height of what is seen.
-fn haze(rd: vec3f, dist: f32) -> f32 {
-  let low = (g.eye.y - g.sea) / 12000.0;
-  let rise = rd.y * dist / 12000.0;
-  var thick = exp(-max(low, 0.0));
-  if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
-  return 1.0 - exp(-dist * 0.00003 * thick);
-}
-// The colour of that air.
-fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
-fn air(col: vec3f, rd: vec3f, dist: f32) -> vec3f { return mix(col, hazeColour(rd), haze(rd, dist)); }
 
 // One texel of a sun map: along the line to the sun through it, how far towards the sun the last solid thing is.
 @fragment fn fs_sun(@builtin(position) at: vec4f) -> @location(0) vec4f {
@@ -1559,6 +1580,12 @@ export interface Marcher {
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
   /**
+   * Where the far model (far.ts) takes over: past `reach` (finest cells from the eye), in the tiles `held` marks, what
+   * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
+   * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn.
+   */
+  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>): void
+  /**
    * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
    * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
    * and the one that was drawing goes on. Answers how long the text took to compile and how long it all took, ms.
@@ -1630,7 +1657,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   const binding = () => device.createBindGroup({
@@ -1640,7 +1667,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
   let sunPipeline = await sunning(module)
-  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }] })
+  // (looks too: trace reads the far model's map, farHeld, though a sun's look never hands over.)
+  const sunBinding = () => device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }] })
   let sunBind = sunBinding()
   const sunTiles = Array.from({ length: SUN_TILES_A_FRAME + 1 }, () => {
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
@@ -1673,9 +1701,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     ], 36 + MAX_LEVELS * 32)
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
+  /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
+  let farMap = [0, 0, 1, 0]
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
+      // The far model's map is measured from the same corner (farCover).
+      if (farMap[3] > 0) device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, new Float32Array([farMap[0] - anchor[0], farMap[1] - anchor[2], farMap[2], farMap[3]]))
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
       f.set([...view.up, time], 8)
@@ -1777,6 +1809,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
+    farCover(corner, size, reach, held) {
+      farMap = [corner[0] * size, corner[1] * size, size, reach]
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
+    },
     async reshade(change) {
       const began = performance.now(), next = await shader(device, 'march', change(code(world, behind)))
       const compiled = performance.now() - began, [[a, plain], b] = await Promise.all([marching(next), sunning(next)])

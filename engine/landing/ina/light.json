@@ -1,0 +1,21 @@
+{
+ "note": "How the photograph was lit and exposed against the engine's day, and its sky (light.py): the light from the sky and the ground on a face is `fill` times the engine's, and the whole is `gain` times brighter; the sky overhead and at the horizon, as light before the tone curve. Read off the photograph.",
+ "light": {
+  "fill": 3.44,
+  "gain": 1.23
+ },
+ "from": "r9",
+ "buildings": 108,
+ "sky": {
+  "zenith": [
+   0.0,
+   0.255,
+   1.773
+  ],
+  "horizon": [
+   0.525,
+   0.901,
+   1.458
+  ]
+ }
+}

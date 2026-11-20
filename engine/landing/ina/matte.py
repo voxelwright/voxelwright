@@ -1,0 +1,408 @@
+"""Bakes the place's far model (#423): everything the photograph looks over, as the outside faces of columns of
+cells, in blocks the page draws over the marched picture (page/matte.ts). A column is a cell of the lidar's
+surface; its faces are its top and the walls it shows where a neighbour is lower. Faces that lie in one plane and
+are alike are merged into rectangles, so a flat roof is one face and a wall is a few.
+
+Layers, each on its own grid laid out with the streets (place.py `turned`):
+  near    what stands (buildings, trees) within 700 m of the eye, cells of 25 cm
+  far     the same out to 3.3 km, cells of 50 cm
+  ground  the bare ground under both, cells of 1 m near and 2 m far: streets are seen only in slivers
+  land    the shore and hills past the lidar (land.py), cells of 40 m
+
+Each face carries its colour, the building it belongs to and how high the shadow stands on it at the photograph's
+minute (sun.py), worked out here over the whole surface: the engine's own shadow maps do not reach this far.
+
+What a column cannot say (a cornice with air under it, a cross) is built as a solid in cells of 10 cm (church.py,
+solid.py), and the lidar's columns are cut off under it.
+
+    python matte.py [--out dir]      writes block files and index.json (the page reads them from /place/ina/)
+"""
+import json, math, os, struct, sys, time
+import numpy as np
+from scipy import ndimage
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import church
+import looks
+import sun as sunny
+from place import DATA, E0, EYE, LANE, N0, SEA, TURN, WEDGE, turned
+from solid import pack, rects
+
+HANDOVER = 700.0
+BLOCK = 1024  # cells a block is across, at most
+VERSION = 1
+
+
+def filled(top, ground):
+    """The surface with no holes: a cell no return fell in stands as its highest neighbour that had one, else as the ground; strays taken off."""
+    seen = top > -1e8
+    t = top.copy()
+    for _ in range(3):
+        p = np.pad(np.where(seen, t, -1e9), 1, constant_values=-1e9)
+        best = np.max(np.stack([p[i:i + t.shape[0], j:j + t.shape[1]] for i in range(3) for j in range(3)]), 0)
+        take = ~seen & (best > -1e8)
+        t[take], seen = best[take], seen | take
+    t = np.where(seen, t, ground)
+    p = np.pad(t, 1, mode='edge')
+    around = np.max(np.stack([p[i:i + t.shape[0], j:j + t.shape[1]] for i in range(3) for j in range(3) if (i, j) != (1, 1)]), axis=0)
+    return np.where(t > around + 3.0, around, t), seen
+
+
+def shadow(h, cell, bearing, height):
+    """How high the shadow stands over every cell: the highest of what stands towards the sun, less the fall of its light on the way. By doubling: each pass looks twice as far."""
+    # The way to the sun in the turned frame's (u, w).
+    a = math.radians(bearing - (90 - TURN))
+    du, dw = math.cos(a), math.sin(a)
+    fall = math.tan(math.radians(height))
+    s = h.astype(np.float32).copy()
+    step = cell
+    reach = float(np.percentile(h, 99.99) - h.min()) / fall + 10
+    while step < reach:
+        moved = ndimage.shift(s, (-dw * step / cell, -du * step / cell), order=1, mode='nearest', prefilter=False)
+        s = np.maximum(s, moved - step * fall)
+        step *= 2
+    return s
+
+
+def faces(h, inside, colour, wall_colour, wall_style, bid, shade, floor, yq):
+    """The faces of the columns `inside` of one block. h: heights in units of `yq` tenths of a metre (whole numbers);
+    colour: each top's (24 bits); wall_colour: each column's walls'; shade: the shadow's height in tenths of a metre;
+    floor: how low a wall goes where the neighbour is not `inside` (the ground there), in h's units."""
+    out = []
+    nr, nc = h.shape
+    lit = (shade <= np.round(h * yq) + 1).astype(np.int64)
+    # Tops: alike in height, colour, building and whether the sun reaches them.
+    key = np.where(inside, (h.astype(np.int64) << 44) | (colour.astype(np.int64) << 20) | ((bid.astype(np.int64) & 0x7ffff) << 1) | lit, -1)
+    r0, c0, tall, wide, v = rects(key)
+    hh = np.round((v >> 44) * yq).astype(np.int64)
+    out.append(pack(c0, r0, wide, tall, hh, hh, 0, 1, np.where(v & 1, 0, 65535), (v >> 20) & 0xffffff, np.zeros(len(v), np.int64), (v >> 1) & 0x7ffff))
+    # Walls: on each side where the neighbour is lower. dr, dc: where the neighbour is; axis and side as the page has them.
+    for dr, dc, axis, side in ((0, 1, 1, 1), (0, -1, 1, 0), (1, 0, 2, 1), (-1, 0, 2, 0)):
+        low = np.full(h.shape, -1, np.int64)
+        other_in = np.zeros(h.shape, bool)
+        other_shade = np.full(h.shape, 0, np.int64)
+        other_bid = np.full(h.shape, -1, np.int64)
+        a = (slice(max(0, -dr), nr - max(0, dr)), slice(max(0, -dc), nc - max(0, dc)))
+        b = (slice(max(0, dr), nr - max(0, -dr)), slice(max(0, dc), nc - max(0, -dc)))
+        low[a], other_in[a], other_shade[a], other_bid[a] = h[b], inside[b], shade[b], bid[b]
+        # Where the neighbour is not of this layer the wall goes down to the ground there.
+        bottom = np.where(other_in, low, np.minimum(floor, h))
+        edge = (low >= 0)
+        wall = inside & edge & (h - bottom >= 1)
+        # The shadow on a wall is the shadow over the cell it looks on, said in half metres so that walls still merge.
+        sh = np.clip((other_shade + 2) // 5, 0, 4095)
+        sh = np.where(sh * 5 <= np.round(bottom * yq), 0, np.where(sh * 5 >= np.round(h * yq), 4095, sh))
+        # A step of a metre or less between two cells of one building is a roof's slope in cells, not a wall: it is
+        # the roof's colour and has no windows. (A pitched roof was drawn with its building's wall colour and panes.)
+        slope = wall & other_in & (other_bid == bid) & (np.round((h - bottom) * yq) <= 10)
+        key = np.where(wall, (h.astype(np.int64) << 48) | (bottom.astype(np.int64) << 34) | (sh << 22) | (slope.astype(np.int64) << 21) | (bid.astype(np.int64) & 0x1fffff), -1)
+        if axis == 1:
+            # Faces that look along u run along w: merge down the columns.
+            r0, c0, tall, wide, v = rects(key.T.copy(), most=1023)
+            x, z, lu, lw = r0, c0, np.ones(len(v), np.int64), wide
+            # rects merged across the other way too (tall): such a face would be a slab, not a wall; split it back.
+            if (tall > 1).any():
+                rep = tall
+                which = np.repeat(np.arange(len(v)), rep)
+                nth = np.arange(len(which)) - np.repeat(np.cumsum(rep) - rep, rep)
+                x, z, lu, lw, v = (x[which] + nth), z[which], lu[which], lw[which], v[which]
+        else:
+            r0, c0, tall, wide, v = rects(key, most=1023)
+            x, z, lu, lw = c0, r0, wide, np.ones(len(v), np.int64)
+            if (tall > 1).any():
+                rep = tall
+                which = np.repeat(np.arange(len(v)), rep)
+                nth = np.arange(len(which)) - np.repeat(np.cumsum(rep) - rep, rep)
+                x, z, lu, lw, v = x[which], (z[which] + nth), lu[which], lw[which], v[which]
+        top, bot, s, b, sloped = np.round((v >> 48) * yq).astype(np.int64), np.round(((v >> 34) & 0x3fff) * yq).astype(np.int64), (v >> 22) & 0xfff, v & 0x1fffff, ((v >> 21) & 1).astype(bool)
+        shade_y = np.where(s == 0, 0, np.where(s == 4095, 65535, s * 5))
+        # A wall's colour may differ by which way it looks (a list of four, in the page's order of ways: 2 to 5).
+        mine = wall_colour[(axis - 1) * 2 + side] if isinstance(wall_colour, (list, tuple)) else wall_colour
+        at = (np.clip(z, 0, nr - 1), np.clip(x, 0, nc - 1))
+        col = np.where(sloped, colour[at], mine[at])
+        out.append(pack(x, z, lu, lw, bot, top, axis, side, shade_y, col, np.where(sloped, 0, wall_style[at]), b))
+    return np.concatenate(out)
+
+
+def rgb24(r, g, b):
+    return (np.clip(r, 0, 255).astype(np.int64) << 16) | (np.clip(g, 0, 255).astype(np.int64) << 8) | np.clip(b, 0, 255).astype(np.int64)
+
+
+def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, hq, u0, w0, cell):
+    """Writes one layer's faces, a block at a time, and lists the blocks."""
+    t = math.radians(TURN)
+    rows, cols = np.nonzero(inside)
+    if not len(rows):
+        return
+    for br in range(rows.min() // BLOCK, rows.max() // BLOCK + 1):
+        for bc in range(cols.min() // BLOCK, cols.max() // BLOCK + 1):
+            # A cell of margin on every side, so that a wall at a block's edge knows its neighbour.
+            r0, r1, c0, c1 = br * BLOCK, min((br + 1) * BLOCK, inside.shape[0]), bc * BLOCK, min((bc + 1) * BLOCK, inside.shape[1])
+            if not inside[r0:r1, c0:c1].any():
+                continue
+            ra, rb, ca, cb = max(0, r0 - 1), min(inside.shape[0], r1 + 1), max(0, c0 - 1), min(inside.shape[1], c1 + 1)
+            sl = (slice(ra, rb), slice(ca, cb))
+            own = np.zeros((rb - ra, cb - ca), bool)
+            own[r0 - ra:r1 - ra, c0 - ca:c1 - ca] = True
+            f = faces(h[sl], inside[sl], roof[sl], [w[sl] for w in walls] if isinstance(walls, list) else walls[sl], style[sl], ids[sl].astype(np.int64), shade[sl], floor[sl], hq)
+            # Faces that begin in the margin are the neighbouring block's.
+            x, z = (f[:, 0] & 0x7ff).astype(np.int64), ((f[:, 0] >> 11) & 0x7ff).astype(np.int64)
+            f = f[own[np.clip(z, 0, rb - ra - 1), np.clip(x, 0, cb - ca - 1)]]
+            if not len(f):
+                continue
+            name = f'{layer}-{br}_{bc}.bin'
+            f.astype('<u4').tofile(f'{out}/{name}')
+            # The block's low corner (of its margin) in the engine's cells of 10 cm.
+            bu, bw = u0 + ca * cell, w0 + ra * cell
+            de, ds = bu * math.cos(t) + bw * math.sin(t), -bu * math.sin(t) + bw * math.cos(t)
+            hs = np.round(h[sl][inside[sl]] * hq)
+            blocks.append({'file': name, 'layer': layer, 'faces': int(len(f)), 'cell': cell * 10, 'uw': [round(bu, 3), round(bw, 3)],
+                           'pos': [round((EYE[0] + de - E0) * 10, 3), 0, round((N0 - EYE[1] + ds) * 10, 3)],
+                           'size': [int(cb - ca), int(hs.max()) + 1, int(rb - ra)], 'low': int(hs.min())})
+
+
+PREPARED = 9  # raised when what `prepared` works out changes: its files are made again
+
+
+def prepared(grid, bearing, height):
+    """One grid's surface made ready, kept in DATA so that a bake with another camera does not work it out again:
+    the surface with no holes and its noise taken off, what is leaf, how pale each building's roof is, and how high
+    the shadow stands."""
+    path = f'{DATA}/prepared-{grid}-{PREPARED}.npz'
+    if os.path.exists(path):
+        return dict(np.load(path))
+    s = np.load(f'{DATA}/surface-{grid}.npz')
+    u0, w0, cell = (float(v) for v in s['frame'])
+    ground = s['ground']
+    top, seen = filled(s['top'], ground)
+    ids = np.load(f'{DATA}/ids-{grid}.npy')
+    count, multi, bright = s['count'].astype(np.float32), s['multi'].astype(np.float32), s['bright']
+    # The lidar's own noise on a flat roof is a few centimetres: taken off, or no two cells of a roof would be
+    # alike. A cell keeps its own height where the cells round it are another surface (a step, a parapet).
+    for size, near in ((3, 0.2), (5, 0.5)):
+        smooth = ndimage.median_filter(top, size=size)
+        top = np.where(np.abs(smooth - top) < near, smooth, top)
+    # A pulse that met a wall on its way down came back from half way up it: such returns make every cell along a
+    # wall's foot a column of its own height, and a wall drawn from them is striped like a bar code. The middle
+    # value of the cells round a cell is one side of the wall or the other, never between: taken over a square
+    # 1.25 m (near) or 1.5 m (far) across. What is narrower than half that goes: an aerial, a flagpole, a cross.
+    top = ndimage.median_filter(top, size=5 if cell < 0.4 else 3)
+    # What stood when the lidar was flown (2023) and not when the photograph was taken (July 2021): fixes.json lists
+    # each by where it is and how high the roof under it is, and it is cut down to that.
+    fixes = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fixes.json')
+    if os.path.exists(fixes):
+        nw, nu = top.shape
+        uu, ww = u0 + (np.arange(nu) + 0.5) * cell, w0 + (np.arange(nw) + 0.5) * cell
+        for f in json.load(open(fixes))['fixes']:
+            if 'box' in f:
+                continue
+            if 'over' in f:
+                # A thing of any shape: the patch of cells over that height that stands at that place (within a
+                # metre and a half), cut down to the middle height of what is round it.
+                c, r, reach, by = int((f['u'] - u0) / cell), int((f['w'] - w0) / cell), int(60 / cell), int(1.5 / cell)
+                if not (reach <= r < nw - reach and reach <= c < nu - reach):
+                    continue
+                part = (slice(r - reach, r + reach), slice(c - reach, c + reach))
+                high = top[part] > f['over']
+                patches, _ = ndimage.label(high)
+                here = np.unique(patches[reach - by:reach + by + 1, reach - by:reach + by + 1])
+                thing = np.isin(patches, here[here > 0])
+                round_it = ndimage.binary_dilation(thing, iterations=int(3 / cell)) & ~high
+                if thing.any() and round_it.any():
+                    top[part] = np.where(thing, np.median(top[part][round_it]), top[part])
+                continue
+            near = np.hypot(uu[None, :] - f['u'], ww[:, None] - f['w']) < f['r']
+            top = np.where(near, np.minimum(top, f['cap']), top)
+    over = top - ground
+    # The city's outline is a building's foot. Its bays, its cornice and a metre of misfit stand outside it, and
+    # those cells had no building: they were drawn pale and without windows, as stripes down a tower's lit side
+    # (555 California's). A cell within 3 m of an outline that stands as high as the building's nearest cell does,
+    # within 2 m, is that building's. A tree beside a house is another height and stays a tree.
+    far, (ri, ci) = ndimage.distance_transform_edt(ids == 0, return_indices=True)
+    beside = (ids == 0) & (far * cell <= 3.0) & (over > 3.0) & (np.abs(top - top[ri, ci]) < 2.0)
+    ids = np.where(beside, ids[ri, ci], ids)
+    del far, ri, ci
+    # Beside a glass tower pulses come back from a few metres out in the air: 62 cells stood 145 to 167 m high
+    # by a brown tower 1.3 km off, 6 px out into the photograph's sky, with no building outlined under them. In a
+    # box that fixes.json names, what stands over 40 m with no outline and covers less than 100 m2 is cut to the
+    # ground. (Done everywhere, it took real things off three other towers, whose outlines are smaller than they are.)
+    if os.path.exists(fixes):
+        within = np.zeros(top.shape, bool)
+        for f in json.load(open(fixes))['fixes']:
+            if 'box' in f:
+                within |= (uu[None, :] >= f['box'][0]) & (uu[None, :] <= f['box'][2]) & (ww[:, None] >= f['box'][1]) & (ww[:, None] <= f['box'][3])
+        lone, n = ndimage.label((ids == 0) & (over > 40.0) & within)
+        if n:
+            small = np.concatenate([[False], ndimage.sum(np.ones(top.shape, np.float32), lone, np.arange(1, n + 1)) * cell * cell < 100.0])
+            top = np.where(small[lone], ground, top)
+            over = top - ground
+        del lone, within
+    # Leaves let a pulse through and send it back more than once; so does the edge of a roof. Leaf is where that
+    # happens away from any building, on something of a tree's height.
+    # A crown's top sends a pulse back once, as a roof does: so a whole thing that stands where no building is
+    # outlined is leaf when an eighth of its cells are, not only the cells that are.
+    clear = ndimage.distance_transform_edt(ids == 0) * cell > 1.5
+    several = (multi / np.maximum(count, 1) > 0.3) & (over > 2.0) & (over < 45.0) & clear
+    things, n = ndimage.label((ids == 0) & (over > 2.0) & (over < 45.0))
+    share = ndimage.mean(several, things, index=np.arange(n + 1)) if n else np.zeros(1)
+    leafy = (np.nan_to_num(share) > 0.125)[things] & (things > 0)
+    scale = 255.0 / max(1.0, float(np.percentile(bright[seen], 98)))
+    grey = np.full(top.shape, 120.0, np.float32)
+    if (ids > 0).any():
+        mean = ndimage.mean(bright[ids > 0] * scale, ids[ids > 0], index=np.arange(int(ids.max()) + 1))
+        grey = np.where(ids > 0, np.nan_to_num(mean)[ids], grey).astype(np.float32)
+    water = ~seen & (ground < 1.6)
+    sh = shadow(np.where(water, 0, top), cell, bearing, height)
+    out = {'top': top.astype(np.float32), 'seen': seen, 'ground': ground, 'ids': ids, 'leafy': leafy, 'grey': grey, 'water': water, 'shadow': sh.astype(np.float32), 'frame': s['frame']}
+    np.savez(path, **out)
+    return out
+
+
+def main():
+    arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
+    # The whole bake, every face: far more than a page should be sent. cull.mjs keeps what can be seen, as `ina`.
+    # `--plain` bakes it with colours by rule alone (looks.py), as `ina-plain-all`.
+    plain = '--plain' in sys.argv
+    out = arg('--out', f"{LANE}/home/.village/engine/place/{'ina-plain-all' if plain else 'ina-all'}")
+    os.makedirs(out, exist_ok=True)
+    for old in os.listdir(out):
+        os.remove(f'{out}/{old}')
+    cam = json.load(open(f'{DATA}/camera.json'))['camera']
+    eu, ew = (float(v) for v in turned(cam['e'], cam['n']))
+    bearing, height = sunny.sun()
+    began = time.time()
+    table = json.load(open(f'{DATA}/buildings.json'))
+    # Each building's colours are the ones fitted to the photograph (fitcolours.py), where that has been run: the
+    # owner's word of November 17 is that a building's colours may be taken from it. The index says where they are from.
+    photo = json.load(open(f'{DATA}/colours-photo.json'))['colours'] if not plain and os.path.exists(f'{DATA}/colours-photo.json') else None
+    given = {}
+    blocks = []
+    for layer, grid, cell_out, lo, hi, standing in (('near', 'fine', 0.25, 3.0, HANDOVER, True), ('far', 'far', 0.5, HANDOVER, WEDGE['far'], True), ('ground-near', 'fine', 1.0, 3.0, HANDOVER, False), ('ground-far', 'far', 2.0, HANDOVER, WEDGE['far'], False)):
+        g = prepared(grid, bearing, height)
+        u0, w0, cell = (float(v) for v in g['frame'])
+        top, ground, ids, leafy, sh = g['top'], g['ground'], g['ids'], g['leafy'], g['shadow']
+        nw, nu = top.shape
+        uu, ww = u0 + (np.arange(nu) + 0.5) * cell, w0 + (np.arange(nw) + 0.5) * cell
+        du, dw = uu[None, :] - eu, ww[:, None] - ew
+        dist = np.hypot(du, dw)
+        brg = (90 - TURN + np.degrees(np.arctan2(dw, du))) % 360
+        domain = (dist >= lo) & (dist < hi) & (brg > WEDGE['from']) & (brg < WEDGE['to'])
+        # Water gives the lidar nothing back: no return, and ground at the bay's level. The bridge is a tent of returns over it, and has a rule of its own.
+        domain &= ~(g['water'] | ((dist > 2300) & (brg < 108)))
+        # Where a thing is built as a solid (church.py), the lidar's columns are cut off at its foot.
+        for a, b, c, d, cap in church.boxes():
+            top = np.where((uu[None, :] >= a) & (uu[None, :] < b) & (ww[:, None] >= c) & (ww[:, None] < d), np.minimum(top, cap), top)
+        over = top - ground
+        # The park's own trees stand round the eye in the lidar (flown two summers after the photograph) as solid
+        # columns from the ground up, and a column is no tree to look out from under: within 40 m of the eye only
+        # buildings stand. The photograph has none of them in its frame but a few crowns at its bottom corner.
+        stands = (ids > 0) | ((over > 2.0) & (dist > 40.0))
+        # Where a landmark's rule stands in the place (heroes.mjs), the lidar's own columns of it are left out.
+        if os.path.exists(f'{DATA}/hero-boxes.json'):
+            for box in json.load(open(f'{DATA}/hero-boxes.json')):
+                c = np.array(box['corners'])
+                # The corners are in the engine's cells of 10 cm (x east, z south of the frame's corner): into this grid's (u, w).
+                bu, bw = turned(c[:, 0] / 10 + E0, N0 - c[:, 1] / 10)
+                pu, pw = uu[None, :], ww[:, None]
+                within = np.ones(top.shape, bool)
+                for k in range(4):
+                    ax, aw, bx, bw2 = bu[k], bw[k], bu[(k + 1) % 4], bw[(k + 1) % 4]
+                    within &= ((bx - ax) * (pw - aw) - (bw2 - aw) * (pu - ax)) * np.sign((bu[2] - bu[0]) * (bw[1] - bw[0]) - (bw[2] - bw[0]) * (bu[1] - bu[0])) <= 0
+                stands &= ~(within & (over > 12.0))
+        if standing:
+            inside = domain & stands
+            # Heights in cells as tall as they are wide: a quarter of a metre near, half a metre far.
+            hq = 2.5 if cell_out < 0.5 else 5
+            h = np.round((top - SEA) * 10 / hq).astype(np.int64)
+            floor = np.round((ground - SEA) * 10 / hq).astype(np.int64)
+            # Colours by rule, which the fitted ones start from and stand in for where a building was never seen: a
+            # building's roof as pale as the lidar's own light came back from it (one grey a building, of sixteen),
+            # leaves green, walls a pale plaster.
+            lum = np.round(np.clip(55 + g['grey'] * 0.75, 60, 230) / 12) * 12
+            roof = rgb24(lum, lum, lum * 0.98)
+            roof = np.where(leafy, rgb24(np.full(top.shape, 62), np.full(top.shape, 98), np.full(top.shape, 46)), roof)
+            # A wall's colour and how its windows go are its building's (looks.py): by its height and its number where
+            # nothing is known of it, by name where something is.
+            wall_of, style_of = looks.walls(table, int(ids.max()))
+            green = rgb24(np.full(top.shape, 46), np.full(top.shape, 74), np.full(top.shape, 36))
+            walls = np.where(leafy, green, wall_of[ids])
+            style = np.where(leafy, 0, style_of[ids])
+            # What colours were given, by building: its roof and its walls (fitcolours.py starts from these).
+            seen_ids = np.unique(ids[inside & (ids > 0)])
+            first = {int(i): n for n, i in zip(*np.unique(ids, return_index=True)[::-1])}
+            for i in seen_ids:
+                at = np.unravel_index(first[int(i)], ids.shape)
+                given[int(i)] = [int(roof[at])] + [int(wall_of[i])] * 4
+            if photo:
+                # The colours fitted to the photograph (fitcolours.py), by building and by which way a face looks.
+                tops = np.zeros(int(ids.max()) + 1, np.int64)
+                sides = [wall_of.copy() for _ in range(4)]
+                has = np.zeros(int(ids.max()) + 1, bool)
+                for i, c in photo.items():
+                    i = int(i)
+                    if i <= ids.max():
+                        tops[i], has[i] = c[0], True
+                        for k in range(4):
+                            sides[k][i] = c[1 + k]
+                roof = np.where(has[ids] & ~leafy, tops[ids], roof)
+                walls = [np.where(leafy, green, side[ids]) for side in sides]
+            shade = np.round((sh - SEA) * 10).astype(np.int64)
+            step = 1
+        else:
+            # The bare ground, coarser: every `step` cells of the grid one cell, at the ground's own height.
+            step = int(round(cell_out / cell))
+            sub = (slice(step // 2, None, step), slice(step // 2, None, step))
+            inside = domain[sub]
+            hq = 5 if cell_out <= 1.0 else 10
+            h = np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64)
+            floor = h
+            grey = np.full(h.shape, 96)
+            roof = rgb24(grey, grey, grey + 2)
+            walls = roof
+            style = np.zeros(h.shape, np.int64)
+            shade = np.round((sh[sub] - SEA) * 10).astype(np.int64)
+            ids = np.zeros(h.shape, np.int32)
+        write(out, blocks, layer, np.maximum(h, 0), inside, roof, walls, style, ids, np.maximum(shade, 0), np.maximum(floor, 0), hq, u0, w0, cell * step)
+        print(f'{layer}: {sum(b["faces"] for b in blocks if b["layer"] == layer)} faces in {sum(1 for b in blocks if b["layer"] == layer)} blocks, {time.time() - began:.0f} s', flush=True)
+    # The church's towers, as solids in cells of 10 cm.
+    named = {b.get('name'): b['id'] for b in table}
+    i = named.get('Our Lady of Guadalupe Church')
+    if i:
+        for said in church.build(out, blocks, photo.get(str(i)) if photo else None, i, (bearing, height)):
+            print(json.dumps(said), flush=True)
+    # The land past the lidar (land.py): the East Bay's shore and hills, 40 m a cell, from where the lidar's wedge ends.
+    if os.path.exists(f'{DATA}/land.npz'):
+        g = np.load(f'{DATA}/land.npz')
+        u0, w0, cell = (float(v) for v in g['frame'])
+        top = g['top']
+        nw, nu = top.shape
+        uu, ww = u0 + (np.arange(nu) + 0.5) * cell, w0 + (np.arange(nw) + 0.5) * cell
+        dist = np.hypot(uu[None, :] - eu, ww[:, None] - ew)
+        # The world is flat and the Earth is not: 15 km off the ground has fallen 15 m under a level line, which is
+        # two pixels of the photograph. Far land is set down by that much, as the camera's fit counts it (camera.py BEND).
+        from camera import BEND
+        low = top - BEND * dist * dist
+        inside = (dist >= WEDGE['far']) & (top > 1.0) & (low > 0.5)
+        hq = 20
+        h = np.round((low - SEA) * 10 / hq).astype(np.int64)
+        grey = np.full(h.shape, 1)
+        colour = rgb24(grey * 124, grey * 122, grey * 106)
+        write(out, blocks, 'land', np.maximum(h, 0), inside, colour, colour, np.zeros(h.shape, np.int64), np.zeros(h.shape, np.int32), np.zeros(h.shape, np.int64), np.zeros(h.shape, np.int64), hq, u0, w0, cell)
+        print(f'land: {sum(b["faces"] for b in blocks if b["layer"] == "land")} faces, {time.time() - began:.0f} s', flush=True)
+    total = sum(b['faces'] for b in blocks)
+    index = {'village': 'matte', 'version': VERSION, 'name': 'Ina Coolbrith Park', 'turn': TURN, 'faces': total, 'blocks': blocks,
+             'sun': {'bearing': round(bearing, 3), 'height': round(height, 3), 'vector': [round(v, 5) for v in sunny.vector(bearing, height)], 'when': '2021-07-15T15:37:30-07:00'},
+             'camera': json.load(open(f'{DATA}/camera.json')).get('engine'),
+             **{k: v for k, v in json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'light.json'))).items() if k in ('light', 'sky')},
+             'styles': looks.STYLES,
+             'credit': 'U.S. Geological Survey 3DEP; City and County of San Francisco (DataSF); terrain: Mapterhorn'}
+    if photo:
+        index['colours'] = {'after': 'View of San Francisco from Ina Coolbrith Park-01445.jpg, Frank Schulenburg, CC BY-SA 4.0, https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg', 'what': 'each building\'s roof and wall colours (five a building) were fitted to the photograph'}
+        index['credit'] += '; colours after a photograph by Frank Schulenburg (CC BY-SA 4.0)'
+    json.dump(given, open(f'{DATA}/colours-default.json', 'w'))
+    json.dump(index, open(f'{out}/index.json', 'w'))
+    print(f'{total} faces, {total * 20 / 1e6:.1f} MB, {len(blocks)} blocks, {time.time() - began:.0f} s')
+
+
+if __name__ == '__main__':
+    main()

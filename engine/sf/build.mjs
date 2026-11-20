@@ -2,7 +2,7 @@
 // the realm's record (sf/realm.json) in the page, the Bay's tiles round where it begins copied in as plain files, and
 // its kept living things. Any host of plain files serves it: no page server, no world's process, no helper.
 //
-//   node sf/build.mjs [--out dist-sf] [--near 6,2,2] [--car <shelf record>]
+//   node sf/build.mjs [--out dist-sf] [--near 6,2,2] [--car <shelf record>] [--far <dir sf/far/pack.mjs wrote>]
 //
 // `--near` is how many tiles each way of the realm's start are copied at each level of the Bay's tiles (bay/tiles.py:
 // 250 m, 1 km, 4 km): the baked squares' tiles always, and the planet's (bay/earth.py, a cache on this machine) within
@@ -72,6 +72,14 @@ for (let level = 0; level < 3; level++) {
     earth += size
   }
 }
+// ── The far model (#450, page/far.ts): far.json and its tiles beside the page, as sf/far/pack.mjs wrote them ──
+const farFrom = arg('far', join(homedir(), '.village', 'engine', 'sf', 'far', 'release'))
+let farBytes = 0
+if (realm.far && existsSync(join(farFrom, 'far.json'))) {
+  cpSync(join(farFrom, 'far.json'), join(out, 'sf', 'far.json'))
+  cpSync(join(farFrom, 'far'), join(out, 'sf', 'far'), { recursive: true })
+  for (const file of files(join(out, 'sf', 'far'))) farBytes += statSync(file).size
+} else if (realm.far) console.log(`  no far model at ${farFrom}: the realm draws cells all the way (sf/far/pack.mjs makes one)`)
 // Street names and addresses of the squares (bay.ts `whereabouts`).
 for (const square of index.squares) copyFileSync(join(BAY, 'packs', `${square}.json`), join(out, 'bay', `${square}.json`))
 
@@ -86,6 +94,7 @@ for (const k of realm.kept ?? []) {
 put('sf/CREDITS.txt', [
   'Ground, buildings and trees in the baked squares: U.S. Geological Survey 3DEP; USDA NAIP; City and County of San Francisco (DataSF). Public domain (DataSF: PDDL).',
   'Everywhere else: © OpenStreetMap contributors, Overture Maps Foundation (ODbL 1.0; these tiles are a derived database under the same licence); terrain: Mapterhorn (https://mapterhorn.com/attribution).',
+  ...(realm.far && existsSync(join(farFrom, 'far.json')) ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
   '',
 ].join('\n'))
 
@@ -95,11 +104,12 @@ const all = files(out)
 for (const file of all) {
   const body = readFileSync(file), rel = relative(out, file)
   raw += body.length
-  if (rel.startsWith('bay/')) continue
+  if (rel.startsWith('bay/') || rel.startsWith('sf/far')) continue
   code += body.length; gz += gzipSync(body, { level: 9 }).length; br += brotliCompressSync(body).length
 }
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`
 console.log(`${relative(process.cwd(), out)}: ${all.length} files, ${modules.size} modules, ${mb(raw)} in all`)
 console.log(`  page, code and kept things: ${mb(code)} (${mb(gz)} gzip, ${mb(br)} brotli)`)
+console.log(`  far model: ${mb(farBytes)} from ${farFrom}`)
 console.log(`  tiles: baked ${mb(baked)}, the planet's ${mb(earth)} (${sea} all-sea tiles left out); reach ${reach.join(',')} tiles round ${centre.map((c) => c.join('_')).join(', ')}`)
 console.log(`  open sf/index.html from any host of plain files (node player/serve.mjs --dir ${relative(root, out)})`)

@@ -1,0 +1,91 @@
+{
+ "camera": {
+  "e": 551646.66417,
+  "n": 4183597.73738,
+  "h": 86.98487,
+  "yaw": 120.20537,
+  "pitch": -0.52485,
+  "roll": -0.17645,
+  "f": 1944.66791,
+  "cx": 991.99985,
+  "cy": 431.95632,
+  "k1": 0.0
+ },
+ "free": [
+  "e",
+  "n",
+  "h",
+  "yaw",
+  "pitch",
+  "roll",
+  "f",
+  "cy",
+  "cx"
+ ],
+ "f_lens": 1969.42,
+ "skyline": {
+  "points": 3523,
+  "median": 0.81,
+  "p90": 9.2,
+  "rms_within_8": 1.66,
+  "within_8": 0.894
+ },
+ "pins": [
+  {
+   "name": "church, right tower, top of the cross",
+   "far": 128,
+   "miss": [
+    -0.03,
+    -0.03
+   ]
+  },
+  {
+   "name": "church, left tower, top of the cross",
+   "far": 139,
+   "miss": [
+    0.04,
+    0.27
+   ]
+  },
+  {
+   "name": "Transamerica Pyramid, tip of the spire",
+   "far": 977,
+   "miss": [
+    0.51,
+    -0.12
+   ]
+  }
+ ],
+ "left_out": [
+  506,
+  594,
+  5442,
+  5437,
+  556
+ ],
+ "seconds": 98,
+ "engine": {
+  "at": [
+   51646.66,
+   85.98,
+   66402.26
+  ],
+  "look": [
+   120.2054,
+   -0.5249
+  ],
+  "roll": -0.1764,
+  "fov": 25.0493,
+  "size": [
+   2018,
+   864
+  ],
+  "crop": [
+   17.0,
+   0.04,
+   2000,
+   862
+  ]
+ },
+ "note": "The photograph's camera as edges.py solved it (README step 3): the eye in UTM zone 10N and metres over NAVD88's zero, the look in degrees, the lens in pixels at a width of 2000. camera.py adopt copies it here."
+}
