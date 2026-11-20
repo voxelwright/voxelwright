@@ -6,5 +6,6 @@
   "arrive": { "at": [516467, 860, 664023], "yaw": 2.09798, "pitch": -0.00916 },
   "fov": 25.05,
   "rules": { "models": false },
-  "kept": [{ "file": "kept/saloon.json", "at": [516046, 0, 663900] }]
+  "kept": [{ "file": "kept/saloon.json", "at": [516046, 0, 663900] }],
+  "street": { "life": "life/", "cars": "cars/" }
 }

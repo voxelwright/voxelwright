@@ -25,6 +25,8 @@ export interface Local extends Realm {
   kept?: { file: string; at: [number, number, number]; yaw?: number }[]
   /** The eye's angle from top to bottom, degrees, where the address does not say. */
   fov?: number
+  /** Street life (street.ts): where its graphs of each square (`life/index.json`) and its kept vehicles (`cars/index.json`) are, beside the page. Its people take the place of the town's residents. */
+  street?: { life: string; cars: string }
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */
