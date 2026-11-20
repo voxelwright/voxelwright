@@ -32,7 +32,11 @@ def decode(tail):
 
 
 def utility_evidence(sq, src, graph, survey, stats):
-    """Pairs of narrow elevated returns joined by an observed overhead span."""
+    """Pairs of narrow elevated returns joined by an observed overhead span.
+
+    A narrow return near a photographed pole is as often a point on the pole's own wire, so a lone one is not drawn:
+    only the two ends of a measured span stand as poles (#450, 24,076 of 25,132 city-wide were lone and stood as
+    pillars to the wire's height)."""
     from PIL import Image, ImageDraw
 
     h = sq.h
@@ -138,7 +142,9 @@ def utility_evidence(sq, src, graph, survey, stats):
     stats["polesWithMeasuredSpans"] = len(poles)
     stats["lidarSupportedWireSpans"] = len(spans)
     return [
-        (u * 5 + sq.h[10], v * 5 + sq.h[11], int(height[v, u])) for u, v in centers
+        (u * 5 + sq.h[10], v * 5 + sq.h[11], int(height[v, u]))
+        for u, v in centers
+        if (u, v) in poles
     ], spans
 
 

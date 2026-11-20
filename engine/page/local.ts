@@ -22,7 +22,9 @@ export interface Local extends Realm {
   world?: { bay?: string }
   rules: Rules
   /** Living things from a kept library, set down where the realm begins: each an address beside the page (sf/kept.mjs writes them). */
-  kept?: { file: string; at: [number, number, number]; yaw?: number }[]
+  kept?: { file: string; at: [number, number, number]; yaw?: number; /** Set down at the kerb of a street near `at`, not at it (main.ts `kerbside`). */ kerb?: boolean }[]
+  /** Where the world's tiles come from: a release pointer beside the page (sf/release.md), read once a page load. */
+  release?: string
   /** The eye's angle from top to bottom, degrees, where the address does not say. */
   fov?: number
   /** How far the picture is turned about the look, degrees clockwise: a photograph's camera has it (#423). */

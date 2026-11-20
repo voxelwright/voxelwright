@@ -606,7 +606,8 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             (6.0, 10, storey - 6, 0)
         }
     } else if b.home {
-        (6.0 + (b.seed % 2) as f32, 9, storey - 6, 0)
+        // A home's front is mostly glass: its window spans the bay but for a pier of 0.6 m, in sashes (#450).
+        ((module / 2.0 - 3.0).max(6.0), 8, storey - 5, 0)
     } else if storey > 60 {
         (4.5, 14, storey - 12, 0) // a church's windows: tall and narrow
     } else {
@@ -631,7 +632,13 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         1 => if deep < 1.0 && size == 1 { 0 } else if fy >= head - 4 { glass } else { kind(WOOD, colour((chance >> 6) as u8 % 24, 5 + (chance >> 12) as u8 % 2)) },
         // A window sits a cell back in its wall, with the room dark behind it.
         _ if size > 1 => if deep < size as f32 { glass } else { dark },
-        _ => if deep < 1.0 { 0 } else if deep < 2.0 { if mu.abs() < 0.6 || (fy - foot) == (head - foot) / 2 { b.trim } else { glass } } else { dark },
+        _ => if deep < 1.0 { 0 } else if deep < 2.0 {
+            // Sashes of about 0.9 m: a narrow window is two, divided in the middle.
+            let sashes = (2.0 * half / 9.0).round().max(2.0);
+            let across = (mu + half) / (2.0 * half) * sashes;
+            let mullion = (across - across.round()).abs() * 2.0 * half / sashes < 0.6 && across.round() > 0.0 && across.round() < sashes;
+            if mullion || (fy - foot) == (head - foot) / 2 { b.trim } else { glass }
+        } else { dark },
     }
 }
 
