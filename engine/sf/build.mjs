@@ -17,6 +17,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
+import { landmarkTiles } from './landmark-tiles.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -53,7 +54,9 @@ put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${rea
 const index = JSON.parse(readFileSync(join(BAY, 'packs/tiles/index.json'), 'utf8'))
 const [ax, , az] = realm.arrive.at, sizes = index.levels.map((l) => l.size)
 const centre = sizes.map((s) => [Math.floor(ax / s), Math.floor(az / s)])
-const within = (level, x, z) => Math.abs(x - centre[level][0]) <= reach[level] && Math.abs(z - centre[level][1]) <= reach[level]
+// And round each landmark (#450, sf/landmark-tiles.mjs), so that one stands on ground when one goes to it.
+const roundLandmarks = new Set(landmarkTiles().map(([l, x, z]) => `${l}/${x}_${z}`))
+const within = (level, x, z) => (Math.abs(x - centre[level][0]) <= reach[level] && Math.abs(z - centre[level][1]) <= reach[level]) || roundLandmarks.has(`${level}/${x}_${z}`)
 let baked = 0, earth = 0, sea = 0
 put('bay/tiles/index.json', JSON.stringify(index))
 for (let level = 0; level < 3; level++) for (const [x, z] of index.tiles[level]) { const name = `${level}/${x}_${z}.bay`; mkdirSync(join(out, 'bay/tiles', String(level)), { recursive: true }); copyFileSync(join(BAY, 'packs/tiles', name), join(out, 'bay/tiles', name)); baked += statSync(join(BAY, 'packs/tiles', name)).size }
@@ -80,6 +83,9 @@ if (realm.far && existsSync(join(farFrom, 'far.json'))) {
   cpSync(join(farFrom, 'far'), join(out, 'sf', 'far'), { recursive: true })
   for (const file of files(join(out, 'sf', 'far'))) farBytes += statSync(file).size
 } else if (realm.far) console.log(`  no far model at ${farFrom}: the realm draws cells all the way (sf/far/pack.mjs makes one)`)
+// Landmarks by rule (#450, core/src/heroes.rs): where each stands, read by every core (bay.ts `open`).
+mkdirSync(join(out, 'bay'), { recursive: true })
+copyFileSync(join(root, 'sf/heroes.json'), join(out, 'bay/heroes.json'))
 // Street names and addresses of the squares (bay.ts `whereabouts`).
 for (const square of index.squares) copyFileSync(join(BAY, 'packs', `${square}.json`), join(out, 'bay', `${square}.json`))
 

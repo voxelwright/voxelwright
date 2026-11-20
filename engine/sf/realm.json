@@ -30,5 +30,34 @@
   ],
   "roll": -0.1764,
   "far": "./",
-  "street": { "life": "life/", "cars": "cars/" }
+  "street": {
+    "life": "life/",
+    "cars": "cars/"
+  },
+  "air": {
+    "haze": 0.12,
+    "clouds": 0.1,
+    "sky": {
+      "zenith": [
+        0,
+        0.255,
+        1.773
+      ],
+      "horizon": [
+        0.525,
+        0.901,
+        1.458
+      ]
+    },
+    "sun": [
+      -0.54006,
+      0.82279,
+      0.17708
+    ],
+    "grade": [
+      1.05,
+      0.25
+    ],
+    "from": "The landing's place (#423, landing/ina: light.json, sun.py, march.ts on PR 433): the photograph's sky, its sun on 2021-07-15 at 15:37, its air and grade."
+  }
 }

@@ -101,6 +101,9 @@ struct Globals {
   // Where a look begins (#264, a window into another world): a plane, its normal and how far along it, measured as
   // the eye is. Nothing nearer the eye than that plane is met. All zero: a look begins at the eye.
   starts: vec4f,
+  // The air (#450): how thick its haze is and how much cloud there is, against the town's own (1, 1). A realm says
+  // its own: the SF realm's is the clear afternoon of the landing's photograph (#423: haze 0.12, cloud 0.1).
+  air: vec4f,
 }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
@@ -199,7 +202,7 @@ fn haze(rd: vec3f, dist: f32) -> f32 {
   let rise = rd.y * dist / 12000.0;
   var thick = exp(-max(low, 0.0));
   if (abs(rise) > 0.01) { thick *= (1.0 - exp(-rise)) / rise; }
-  return 1.0 - exp(-dist * 0.00003 * thick);
+  return 1.0 - exp(-dist * 0.00003 * g.air.x * thick);
 }
 // The colour of that air.
 fn hazeColour(rd: vec3f) -> vec3f { return skyBase(vec3f(rd.x, max(rd.y, 0.02) * 0.3, rd.z)) * 1.6; }
@@ -921,7 +924,7 @@ fn sky(rd: vec3f) -> vec3f {
     let far = (15000.0 - g.eye.y) / rd.y;
     let at = (g.eye.xz + rd.xz * far) / 9000.0 + vec2f(g.time * 0.004, g.time * 0.0015);
     let thick = cloud(at);
-    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y);
+    let cover = smoothstep(0.45, 0.64, thick) * smoothstep(0.015, 0.16, rd.y) * g.air.y;
     if (cover > 0.0) {
       // Bright where it is thin, at its edges; grey in its thick middle.
       var body = mix(vec3f(1.0, 0.98, 0.94), vec3f(0.6, 0.65, 0.76), smoothstep(0.54, 0.78, thick));
@@ -1183,13 +1186,30 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
     // brighter low in the room than at the ceiling. Glass out in the street is a car's and stays dark.
-    let lot = block.x >= 140.0 && block.y >= 140.0;
+    // (The real city's blocks are not the town's: any window there may have someone home, #450.)
+    let lot = (block.x >= 140.0 && block.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'};
     if (stuff == 11u && lot) {
       // A shop's window (its own pale glass) is always lit.
       let w = max(litWindow(fine), select(0.0, 0.8, ci == 146u));
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
       col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
-    }
+    }${world.options.surveyedWalls ? `
+    // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
+    // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
+    // 1.6 m of each storey of 3.1 m, half the bay wide and half the storey tall, about a third of them with someone
+    // home, the same warm light; where a pane is under two pixels, the wall glows by the share of them lit.
+    if (faced && abs(n.y) < 0.5 && !slope && hit.level >= 2u && (stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u)) {
+      let s = f32(1u << hit.level);
+      let q = (vec3f(fine) + qc * s) * 0.1;
+      let fx = select(q.x, q.z, abs(n.x) > abs(n.z)) / 1.6;
+      let fy = q.y / 3.1;
+      let wide = max(hit.t, 1.0) * g.pixel * 0.1 / 1.6;
+      let inPane = smoothstep(0.24, 0.26, fract(fx)) * (1.0 - smoothstep(0.74, 0.76, fract(fx))) * smoothstep(0.24, 0.26, fract(fy)) * (1.0 - smoothstep(0.76, 0.78, fract(fy)));
+      let one = smoothstep(0.62, 0.66, hash2i(vec2i(floor(vec2f(fx, fy))) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))));
+      let blur = smoothstep(0.3, 0.8, wide);
+      let lampWall = mix(one * inPane, 0.26 * 0.2, blur) * clamp(dark * 3.0, 0.0, 1.0);
+      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur);
+    }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
     // the sea or under it, nor in open country: a block whose middle is more than 3.5 km from where the page starts
@@ -1435,7 +1455,7 @@ override MIRRORS: bool = true;
       // A window with someone home at night is lit from within: its blind is drawn and its light shows, not the room.
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
-      if (g.weather.z > 0.0 && lot.x >= 140.0 && lot.y >= 140.0 && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -1623,7 +1643,12 @@ export interface Marcher {
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
+  /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day (linear colours). */
+  air: Air
 }
+
+/** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
+export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
 
 /** `behind`: a marcher for a world seen through a window, whose looks may begin at a plane (`draw`'s `starts`). */
 export async function marcher(device: GPUDevice, format: GPUTextureFormat, world: World, behind = false): Promise<Marcher> {
@@ -1656,7 +1681,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1699,6 +1724,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       // Lights come on as the day goes (the same ease as a shader's smoothstep), and in rain.
       rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain), roofed,
     ], 36 + MAX_LEVELS * 32)
+    // A sky of the realm's own by day (#450, #423's photograph's: overhead and at the horizon), in place of the hour's.
+    if (air.sky && day > 0.5 && !rain) { f.set(air.sky.zenith, 44 + MAX_LEVELS * 32); f.set(air.sky.horizon, 48 + MAX_LEVELS * 32); f.set(air.sky.horizon, 52 + MAX_LEVELS * 32) }
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
@@ -1745,10 +1772,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       // Where looks begin: the plane's normal, and how far along it the plane is from the corner everything is measured from.
       const s = (144 + MAX_LEVELS * 128 + 128) / 4
       if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
+      f.set([air.haze, air.clouds, 0, 0], s + 4)
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
   let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0
+  let air: Air = { haze: 1, clouds: 1 }
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -1779,6 +1808,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     set detail(v: number) { detail = v },
     get day() { return day },
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
+    get air() { return air },
+    set air(a: Air) { air = a; colours() },
     pick(view, plain = false) {
       // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
       const next = picking.then(() => once(view, plain))

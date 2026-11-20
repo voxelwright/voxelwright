@@ -6,6 +6,7 @@
 //! no generated glue. An instance does one thing at a time; a page runs one in each worker.
 
 pub mod bay;
+pub mod heroes;
 pub mod bodies;
 pub mod city;
 pub mod fire;
@@ -289,6 +290,45 @@ pub extern "C" fn bay_begin() {
 #[unsafe(no_mangle)]
 pub extern "C" fn bay_drop(x0: i32, z0: i32, gstep: i32) -> i32 {
     bay::drop(x0, z0, gstep)
+}
+
+/// A landmark stands here (#450, bay.rs `hero`): its rule's sort, where its frame's middle is (x, z, cells), its foot's
+/// height (cells) and its turn (millionths of a radian, from x towards z). Every core of a world is told the same,
+/// before its sectors are made. 0 where no rule has that sort.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_hero(sort: u32, x: i32, z: i32, foot: i32, turn: i32) -> i32 {
+    bay::hero(sort, x, z, foot, turn)
+}
+
+/// Whether this core makes landmarks as the world's cells (bay.rs `landmarks`): 0 leaves them out.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_landmarks(on: i32) {
+    bay::landmarks(on != 0)
+}
+
+/// The outside faces of a block of a landmark (#423, heroes.rs `faces`) in cells `step` wide, for its far model:
+/// returns how many words, which are at `hero_faces_at`.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_faces(sort: u32, step: i32, u: i32, y: i32, w: i32, nu: i32, ny: i32, nw: i32) -> usize {
+    heroes::faces(sort, step, [u, y, w], [nu, ny, nw])
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_faces_at() -> *const u32 {
+    heroes::faces_at()
+}
+
+/// One number of the box a landmark keeps within, in its own metres (heroes.rs `reach`): 0 to 2 its low corner
+/// (u, y, w), 3 to 5 its high. Not a number where there is no such landmark.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_reach(sort: u32, which: usize) -> f32 {
+    heroes::reach(sort).and_then(|r| r.get(which).copied()).unwrap_or(f32::NAN)
+}
+
+/// Whether a landmark's rule is all there is at (u, w) in its frame, metres (heroes.rs `owns`): 1, or 0.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_owns(sort: u32, u: f32, w: f32) -> i32 {
+    heroes::owns(sort, u, 0.0, w) as i32
 }
 
 /// How high the ground is at a column of the finest cells.
