@@ -1134,7 +1134,7 @@ const server = createServer((req, res) => {
   if (url.pathname.startsWith('/bay/')) {
     // Whole squares, and the tiles cut from them that come as the eye moves (bay/tiles.py): tiles/<level>/<x>_<z>.bay, tiles/index.json.
     const named = /^\/bay\/([0-9._]+|tiles\/[0-2]\/-?[0-9]+_-?[0-9]+|tiles\/index)\.(bay|json)$/.exec(url.pathname)
-    try { return send(res, 200, readFileSync(join(homedir(), '.village', 'engine', 'bay', 'packs', `${named[1]}.${named[2]}`)), named[2] === 'json' ? TYPES['.json'] : 'application/octet-stream') } catch { return send(res, 404, 'no such square of the Bay') }
+    try { return send(res, 200, readFileSync(join(process.env.VILLAGE_BAY_ROOT ?? join(homedir(), '.village', 'engine', 'bay'), 'packs', `${named[1]}.${named[2]}`)), named[2] === 'json' ? TYPES['.json'] : 'application/octet-stream') } catch { return send(res, 404, 'no such square of the Bay') }
   }
   if (url.pathname === '/favicon.ico') return send(res, 204, '')
   // The address a phone is sent is the city, which measures itself; the probe keeps its own.

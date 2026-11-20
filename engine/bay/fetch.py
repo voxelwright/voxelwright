@@ -8,8 +8,9 @@ Sources and their licences: .agents/skills/bay-sources.
 """
 import concurrent.futures, json, os, sys, time, urllib.parse, urllib.request
 import pyproj
+from dem import sheets
 
-RAW = os.path.expanduser('~/.village/engine/bay/raw')
+RAW = os.path.join(os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay')), 'raw')
 EPT = 'https://usgs-lidar-public.s3.amazonaws.com/CA_SanFrancisco_1_B23'
 DEM = 'https://prd-tnm.s3.amazonaws.com/StagedProducts/Elevation/1m/Projects/CA_SanFrancisco_B23/TIFF/USGS_1M_10_x{x}y{y}_CA_SanFrancisco_B23.tif'
 NAIP = 'https://imagery.nationalmap.gov/arcgis/rest/services/USGSNAIPImagery/ImageServer/exportImage'
@@ -32,10 +33,21 @@ def get(url, tries=5):
 
 def keep(path, url):
     if not os.path.exists(path):
+        start = time.monotonic()
         data = get(url)
+        # Some services return an HTML or JSON error with HTTP 200. A retry
+        # must be able to fetch real data instead of reusing a cached error.
+        if path.endswith('.geojson') and not isinstance(json.loads(data).get('features'), list):
+            raise ValueError(f'invalid feature collection for {os.path.basename(path)}')
+        signatures = {'.png': (b'\x89PNG\r\n\x1a\n',), '.laz': (b'LASF',), '.tif': (b'II*\0', b'MM\0*', b'II+\0', b'MM\0+')}
+        magic = signatures.get(os.path.splitext(path)[1])
+        if magic and not data.startswith(magic):
+            raise ValueError(f'invalid data for {os.path.basename(path)}')
         with open(path + '.part', 'wb') as f:
             f.write(data)
         os.rename(path + '.part', path)
+        if not path.endswith('.laz'):
+            print(os.path.basename(path), len(data), round(time.monotonic() - start, 2), 'seconds')
     return path
 
 
@@ -63,8 +75,8 @@ def main():
 
     if only in (None, 'dem'):
         # The 1 m ground comes in tiles of 10 km, named by the km of their north-west corner over ten.
-        x, y = int(e0 // 10000), int(n1 // 10000) + 1
-        print('dem', os.path.getsize(keep(f'{RAW}/dem_x{x}y{y}.tif', DEM.format(x=x, y=y))))
+        for x, y in sheets(e0, n0, size):
+            print('dem', os.path.getsize(keep(f'{RAW}/dem_x{x}y{y}.tif', DEM.format(x=x, y=y))))
 
     if only in (None, 'naip'):
         # Colour, 0.5 m a pixel in the square's own frame (the pictures are 0.6 m), with the margin.
