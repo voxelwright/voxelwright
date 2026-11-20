@@ -94,6 +94,29 @@ def enhance(pack, archive, observations, graph):
         def xy(point):
             return ((point[0] - h[10]) / 5, (point[1] - h[11]) / 5)
 
+        # Some DataSF parcels include the travelled roadway (e.g. Columbus
+        # Avenue). Recover its usable width from lane counts and surveyed kerbs.
+        # Opposing directed edges share one OSM centreline.
+        lanes = Counter()
+        for segment in network["roads"]:
+            a, b = map(tuple, segment["line"])
+            lanes[tuple(sorted((a, b)))] += segment["lanes"]
+        centre, corridor, curbs = (Image.new("1", (tw, tw)) for _ in range(3))
+        axis, band, barrier = map(ImageDraw.Draw, (centre, corridor, curbs))
+        for (a, b), count in lanes.items():
+            pts = [xy(a), xy(b)]
+            axis.line(pts, fill=1)
+            band.line(pts, fill=1, width=min(40, max(6, round(count * 6.2))))
+        for line in network["kerbs"]:
+            barrier.line([xy(p) for p in line["line"]], fill=1)
+        usable = (
+            np.asarray(corridor) & ~np.asarray(curbs) & (ids == 0) & ((cls & 7) != 5)
+        )
+        repaired = np.asarray(centre) & usable
+        for _ in range(20):
+            repaired = grow(repaired) & usable
+        stats["roadCellsRecovered"] = int(np.sum(repaired & ((cls & 7) != 0)))
+        cls[repaired] &= 248
         # NAIP bright neutral pixels on the mapped road surface give lane paint.
         rgb = np.asarray(Image.open(src.open("naip.png")).convert("RGB")).astype(
             np.int16
