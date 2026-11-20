@@ -170,6 +170,24 @@ def build(args, lock_fd):
                 if rel.endswith(".bay"):
                     compact_store.compact(root / rel, root / "objects", sha)
 
+    def wait_for_space(id_):
+        # A raw acquisition can occupy over a GiB before its verified ZIP releases the LAZ.
+        minimum = (max(args.free_gib, 18) if args.compact else args.free_gib) * 2**30
+        notice = root / "disk-hold.json"
+        while shutil.disk_usage(root).free < minimum:
+            if not args.compact:
+                raise SystemExit(
+                    f"low disk before {id_}; state saved; resume with the same command"
+                )
+            save(
+                notice, dict(task=id_, requiredGiB=minimum / 2**30, checked=time.time())
+            )
+            if (root / "hold-at-boundary").exists():
+                raise SystemExit(75)
+            print(f"waiting before {id_} for {minimum / 2**30:g} GiB free", flush=True)
+            time.sleep(60)
+        notice.unlink(missing_ok=True)
+
     def task(id_, make, *inputs):
         previous = state["done"].get(id_)
         if previous is not None:
@@ -181,10 +199,7 @@ def build(args, lock_fd):
             store_outputs(previous)
             return previous
         for attempt in range(3):
-            if shutil.disk_usage(root).free < args.free_gib * 2**30:
-                raise SystemExit(
-                    f"low disk before {id_}; state saved; resume with the same command"
-                )
+            wait_for_space(id_)
             with (logs / f"{id_}.log").open("a", buffering=1) as log:
                 print(time.ctime(), "attempt", attempt + 1, file=log)
                 try:

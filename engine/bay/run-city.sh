@@ -32,6 +32,7 @@ status)
     if [ -f "$output/state.json" ]; then
         jq '.done | keys | {inputs:map(select(startswith("inputs-")))|length, squares:map(select(test("^[0-9]")))|length, tileGroups:map(select(startswith("tiles-")))|length}' "$output/state.json"
     fi
+    if [ -f "$output/disk-hold.json" ]; then cat "$output/disk-hold.json"; fi
     df -h "$bay"
     ;;
 *) echo "usage: $0 start|status" >&2; exit 2 ;;
