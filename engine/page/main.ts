@@ -1094,7 +1094,7 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls })
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }

@@ -41,6 +41,10 @@ interface Car {
   // Driving: the road, its lane, how far along, the road before (for the corner) and the one after.
   road?: Road; prev?: Road | null; next?: Road | null; lane?: number; s?: number; hold?: number | null; stuck?: number
   slot?: number; thing?: Thing | null; waking?: boolean
+  /** When a blast near it went off (seconds on the page's clock): it stands on its brakes a while. */
+  shaken?: number
+  /** Thrown by a blast: it lives until the street is reset or the eye is far from it, wherever nobody is. */
+  thrown?: boolean
   /** What it last waited for, if it is held up: a car, a person, a turn at a junction, the end of the road. */
   wait?: string
 }
@@ -107,6 +111,8 @@ export interface Street {
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
   enabled: boolean
+  /** What is on its way to life and which faces are made (for the checks). */
+  readonly debug: unknown
   readonly ms: number
   readonly ready: boolean
 }
@@ -127,6 +133,8 @@ export function street(o: {
   alive: Living
   hud: Hud
   input: Input
+  /** Faces made for a look's cells, for the page to keep beside the ones it makes itself (main.ts): a car brought to life finds its look's faces made. */
+  faces?: (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => void
 }): Street {
   // ── The graph, a square at a time ──
   const walks: Walk[] = [], nodes = new Map<number, { x: number; z: number; walks: number[] }>()
@@ -525,32 +533,47 @@ export function street(o: {
   // ── Brought to life: what someone on foot can reach ──
   const living = new Set<Car>()
   /** Makes a car a living thing where it stands (the solver's, living.ts), and says when it is. */
-  const wake = async (c: Car, then?: (t: Thing) => void) => {
+  /**
+   * Makes a car a living thing where it stands (the solver's, living.ts). Its look's faces are made first, off the
+   * page's thread, and handed to the page's keeping (`faces`), so that coming to life makes none on it: until they
+   * are, it is asked again later (false). `inside`: with the look of its inside, for whoever will sit in it; `push`:
+   * the speed it is given once it lives (thrown by a blast).
+   */
+  const wake = async (c: Car, o2: { inside: boolean; push?: readonly [number, number, number]; then?: (t: Thing) => void }): Promise<boolean> => {
     const motor = c.model.motor
-    if (c.thing || c.waking || !motor) return
+    if (c.thing || c.waking || !motor) return !!c.thing
+    const m = c.model, outside = new Set(lods(m).map((x) => x.i))
+    const parts = m.looks.map((l, i) => ({ l, i })).filter(({ l, i }) => l.per >= 4 && (o2.inside || outside.has(i)))
+    const made = parts.map(({ i }) => bornOf(m, c.paint, i))
+    if (made.some((b) => !b)) return false
     c.waking = true
-    const m = c.model, kinds = (k: number[], i?: number) => (c.paint >= 0 ? (i === undefined ? m.variants[c.paint].kinds : m.variants[c.paint].looks[i]) : k)
-    const body = unrun(m.runs, m.size[0] * m.size[1] * m.size[2], kinds(m.kinds))
-    const fine = m.looks.map((l, i) => ({ l, i })).filter(({ l }) => l.per >= 4).map(({ l, i }) => ({ size: l.size, per: l.per, low: l.low, cells: fineCells(m, c.paint, i) }))
+    const kinds = c.paint >= 0 ? m.variants[c.paint].kinds : m.kinds
+    const body = unrun(m.runs, m.size[0] * m.size[1] * m.size[2], kinds)
+    const fine = parts.map(({ l, i }, k) => { const cells = fineCells(m, c.paint, i); o.faces?.(cells, l.size, made[k]!); return { size: l.size, per: l.per, low: l.low, cells } })
     const low: [number, number, number] = [Math.round(c.x - m.size[0] / 2), Math.round(c.y) + 4, Math.round(c.z - m.size[2] / 2)]
     const thing = await o.alive.spawn({ name: m.name, cells: Int32Array.from(body), size: m.size, low, motor, controls: m.controls ?? 'drive', seats: m.seats, eye: m.eye, fine })
     c.waking = false
-    if (!thing.alive) return
+    if (!thing.alive) return false
     // Turned as it stood: its middle where it was, a little over the road, still.
     const at = o.alive.where(thing), com = at ? [at.at[0] - low[0], at.at[1] - low[1], at.at[2] - low[2]] : [m.size[0] / 2, m.size[1] / 3, m.size[2] / 2]
     const q = turnOf(m, c.heading, c.pitch), off = rotate(q, [com[0] - m.size[0] / 2, com[1], com[2] - m.size[2] / 2])
     o.alive.place(thing, [c.x + off[0], c.y + off[1] + 1, c.z + off[2]], q)
+    if (o2.push) { o.alive.kick(thing, o2.push); c.thrown = true }
     c.thing = thing
+    pending.delete(c)
     hide(c)
     living.add(c)
-    then?.(thing)
+    o2.then?.(thing)
+    return true
   }
+  /** Cars on their way to life, drawn where they stand meanwhile, and asked again each frame. */
+  const pending = new Map<Car, { inside: boolean; push?: readonly [number, number, number]; then?: (t: Thing) => void }>()
   /** A look's cells in a colour, made once and kept: the page's faces for a look are kept by its cells (main.ts), so a second car of a kind makes nothing. */
   const fineKept = new Map<string, Uint16Array>()
   const fineCells = (m: Model, paint: number, i: number) => {
     const key = `${m.id}/${paint}/${i}`
     let k = fineKept.get(key)
-    if (!k) { const l = m.looks[i]; fineKept.set(key, k = unrun(l.runs, l.size[0] * l.size[1] * l.size[2], paint >= 0 ? m.variants[paint].looks[i] : l.kinds)) }
+    if (!k) { const l = m.looks[i]; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(key, k = unrun(l.runs, l.size[0] * l.size[1] * l.size[2], paint >= 0 ? m.variants[paint].looks[i] : l.kinds)) }
     return k
   }
   /** Lets a living car go back to being drawn where it stands, if it was never moved and nobody is near it. */
@@ -565,6 +588,7 @@ export function street(o: {
       if (!c.thing) { living.delete(c); continue }
       const w = c.thing.alive ? o.alive.where(c.thing) : null
       if (!w) { c.thing = null; living.delete(c); if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot) } continue }
+      if (c.thrown) { if (lastEye && Math.hypot(w.at[0] - lastEye[0], w.at[2] - lastEye[2]) > DRIVEN * 1.5) sleep(c); continue }
       const moved = Math.hypot(w.at[0] - c.x, w.at[2] - c.z) > 25
       if (moved || o.alive.riding === c.thing) { if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined } continue }
       if (!feet || Math.hypot(w.at[0] - feet[0], w.at[2] - feet[2]) > 260) sleep(c)
@@ -572,7 +596,7 @@ export function street(o: {
     if (!feet || o.alive.riding) return
     // The nearest three parked within a dozen metres come to life.
     const near = [...parked.values()].filter((c) => !c.thing && !c.waking && Math.hypot(c.x - feet[0], c.z - feet[2]) < 120).sort((a, b) => Math.hypot(a.x - feet[0], a.z - feet[2]) - Math.hypot(b.x - feet[0], b.z - feet[2])).slice(0, 3)
-    for (const c of near) if ([...living].filter((l) => l.kind === 'parked').length < 4) void wake(c)
+    for (const c of near) if ([...living].filter((l) => l.kind === 'parked').length < 4) void wake(c, { inside: true })
   }
 
   // ── Traffic ──
@@ -716,8 +740,9 @@ export function street(o: {
         }
       }
       if (!c.next && left < 200) { c.next = choose(r); if (!c.next && left - 10 < gap) { gap = left - 10; lead = 0; why = 'end' } }
-      // A turn is taken slowly.
+      // A turn is taken slowly; after a blast near it, not at all for a while.
       let v0 = limit(r)
+      if (c.shaken && performance.now() / 1000 - c.shaken < 5) { v0 = 0.01; gap = Math.min(gap, 1); why = why || 'blast' }
       if (c.next && left < 200) { along(r.p, r.cum, r.len, P); along(c.next.p, c.next.cum, 0, Q); if (P.tx * Q.tx + P.tz * Q.tz < 0.8) v0 = Math.min(v0, 45) }
       const want = 25 + c.v * 1.3 + (c.v * (c.v - lead)) / (2 * Math.sqrt(GATHER * BRAKE))
       const acc = GATHER * (1 - (c.v / v0) ** 4 - (gap < Infinity ? (Math.max(0, want) / Math.max(1, gap)) ** 2 : 0))
@@ -770,6 +795,25 @@ export function street(o: {
     for (let i = cables.length - 1; i >= n; i--) { hide(cables[i]); cables.pop() }
   }
 
+  // ── Blasts ──
+  /** How many of the shocks this has answered. A blast throws the few cars nearest it (they come to life, pushed away from it) and stops the traffic round it a while. */
+  let heard = o.shocks.length
+  const shaken = (view: View) => {
+    if (o.shocks.length < heard) heard = 0
+    for (; heard < o.shocks.length; heard++) {
+      const s = o.shocks[heard], reach = s.radius * 3 + 40, now = performance.now() / 1000
+      const near = [...parked.values(), ...traffic].filter((c) => !c.thing && Math.hypot(c.x - s.at[0], c.z - s.at[2]) < reach && Math.abs(c.y - s.at[1]) < reach).sort((a, b) => Math.hypot(a.x - s.at[0], a.z - s.at[2]) - Math.hypot(b.x - s.at[0], b.z - s.at[2])).slice(0, 3)
+      for (const c of near) {
+        const dx = c.x - s.at[0], dz = c.z - s.at[2], d = Math.hypot(dx, dz) || 1, k = 1 - d / reach
+        if (c.kind === 'traffic') { traffic.splice(traffic.indexOf(c), 1); letGo(c); c.kind = 'parked' }
+        if (c.slot !== undefined) { gone.add(c.slot); parked.delete(c.slot); c.slot = undefined }
+        pending.set(c, { inside: false, push: [(dx / d) * 160 * k, 60 + 80 * k, (dz / d) * 160 * k] })
+      }
+      for (const c of traffic) if (Math.hypot(c.x - s.at[0], c.z - s.at[2]) < 800) c.shaken = now
+    }
+    void view
+  }
+
   // ── Taking a car that stops beside someone ──
   let cue: { car: Car; remove(): void } | null = null, beside: (() => void) | null = null
   const offer = (feet: readonly number[] | null) => {
@@ -783,7 +827,7 @@ export function street(o: {
       traffic.splice(traffic.indexOf(car), 1)
       letGo(car)
       car.kind = 'parked'
-      void wake(car, (thing) => o.alive.mount(thing))
+      pending.set(car, { inside: true, then: (thing) => o.alive.mount(thing) })
       cue?.remove(); cue = null; beside?.(); beside = null
     }
     cue = { car, remove: o.hud.cue(`E  Take the ${car.model.name}`, () => [car.x, car.y + car.model.size[1] + 4, car.z], takeIt).remove }
@@ -806,16 +850,19 @@ export function street(o: {
       drive(dt, view)
       cableCars(o.clock(), view)
       const feet = o.feet()
+      shaken(view)
+      for (const [c, how] of pending) void wake(c, how)
       reachable(feet)
       offer(feet)
       for (const c of parked.values()) show(c, view)
       for (const c of traffic) show(c, view)
       for (const c of cables) show(c, view)
+      for (const c of pending.keys()) show(c, view)
       ms += (performance.now() - t0 - ms) * 0.1
     },
     reset() {
       for (const c of [...traffic, ...parked.values(), ...cables]) hide(c)
-      traffic.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0
+      traffic.length = 0; parked.clear(); gone.clear(); holds.clear(); living.clear(); cables.length = 0; pending.clear(); heard = o.shocks.length
       cue?.remove(); cue = null; beside?.(); beside = null
       rng = 0x2545f491; filled = false
     },
@@ -863,6 +910,7 @@ export function street(o: {
       }
       return best
     },
+    get debug() { return { pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get enabled() { return on },
     set enabled(v: boolean) { on = v },
     get ms() { return ms + peopleMs },
