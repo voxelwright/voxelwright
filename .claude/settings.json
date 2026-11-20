@@ -1,0 +1,12 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "mcp__t3-code__delegate_task|mcp__t3-code__t3_thread_launch",
+        "hooks": [
+          { "type": "command", "command": "node \"${CLAUDE_PROJECT_DIR}/.claude/hooks/dispatch-log.mjs\"", "timeout": 10 }
+        ]
+      }
+    ]
+  }
+}
