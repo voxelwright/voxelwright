@@ -7,12 +7,12 @@
 // Each file is a record's own cells as runs (make/cells.mjs), with its palette as the core's kinds so the page needs
 // no table of names:
 //
-//   { name, kind, size, kinds, runs, motor?, controls?, seats?, eye?, looks, variants }
+//   { name, kind, size, body: { palette, runs }, motor?, controls?, seats?, eye?, looks, variants }
 //
-// size is the body in 10 cm cells; kinds [0, k1, ...] and runs (base64 of LEB128 count and palette index pairs, x
+// (the shape sf/kept.mjs writes, #459). size is the body in 10 cm cells; palette [0, k1, ...] and runs (base64 of LEB128 count and palette index pairs, x
 // fastest, then z, then y) are its cells. `looks` are its look in finer cells, finest first: the record's own (4 or 8
 // to a body cell, the inside of a car as well as its outside) and then its outside made coarser (2 and 1 to a body
-// cell) for drawing it far off. `variants` are colours it is also seen in: for each, the kinds of the body and of
+// cell) for drawing it far off. `variants` are colours it is also seen in: for each, the palette of the body and of
 // every look with its paint changed. A thing with no motor (the cable car) is drawn, not driven.
 import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
@@ -41,7 +41,7 @@ function runsOf(cells) {
     i = j
   }
   if (kinds.length > 256) throw new Error(`${kinds.length} kinds: a palette holds 255`)
-  return { kinds, runs: Buffer.from(bytes).toString('base64') }
+  return { palette: kinds, runs: Buffer.from(bytes).toString('base64') }
 }
 
 /** A look made coarser by `by` along each side: a coarse cell is filled where a third of its fine cells are, with the kind most of them are. */
@@ -114,8 +114,8 @@ function kept(id, file, name, kind, colours) {
   const outside = t.living.look?.[0]
   if (outside) for (const by of [2, 4]) { const c = coarser(outside.kinds, outside.size, by); looks.push({ size: c.size, per: outside.per / by, low: outside.low, ...runsOf(c.kinds) }) }
   const paint = paintOf(outside?.kinds ?? t.cells)
-  const variants = colours.map((c) => ({ name: c, kinds: repaint(body.kinds, paint, c), looks: looks.map((l) => repaint(l.kinds, paint, c)) }))
-  wrote(id, { name, kind, size: t.size, ...body, motor: t.living.motor, controls: t.living.scheme ?? 'drive', ...(t.living.seats ? { seats: t.living.seats } : {}), ...(t.living.eye ? { eye: t.living.eye } : {}), looks, variants })
+  const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
+  wrote(id, { name, kind, size: t.size, body, motor: t.living.motor, controls: t.living.scheme ?? 'drive', ...(t.living.seats ? { seats: t.living.seats } : {}), ...(t.living.eye ? { eye: t.living.eye } : {}), looks, variants })
 }
 kept('saloon', join(shelf, '1cb43f52cfc96e74e974e0a7.json'), 'grey saloon', 'car', ['white', 'black', 'red', 'navy', 'silver'])
 kept('suv', join(shelf, '3fa7e950af55009f59480a4c.json'), 'grey SUV', 'car', ['white', 'black', 'green', 'beige', 'navy'])
@@ -169,7 +169,7 @@ kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloo
   const fine = runsOf(cells), looks = [{ size: [W, H, D], per: PER, low: [0, 0, 0], ...fine }]
   const c = coarser(cells, [W, H, D], 2)
   looks.push({ size: c.size, per: 1, low: [0, 0, 0], ...runsOf(c.kinds) })
-  wrote('cable-car', { name: 'cable car', kind: 'cable', size, ...runsOf(c.kinds), looks, variants: [] })
+  wrote('cable-car', { name: 'cable car', kind: 'cable', size, body: runsOf(c.kinds), looks, variants: [] })
 }
 
 writeFileSync(join(out, 'index.json'), JSON.stringify({ version: 1, cars: library }, null, 1))
