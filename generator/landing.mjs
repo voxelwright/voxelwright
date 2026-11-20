@@ -74,7 +74,7 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 </section>
 <details class="park-credit" id="about-view"><summary>About this view</summary><p>A Village reconstruction from USGS 3DEP lidar, DataSF buildings and Mapterhorn terrain, with landmark outlines from OpenStreetMap contributors and Overture Maps Foundation. Camera and colour reference from <a href="https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg">Frank Schulenburg’s view of the park</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
 <details class="park-secrets" hidden><summary>Park secrets</summary>
-<p>Hold the B on the park sign, or focus Blog and press Space. Tap the tow banner twice, or flip Night four times in a row.</p>
+<p>Hold the B on the park sign, or focus Blog and press Space. In the city view, tap the tow banner twice, or flip Night four times in a row.</p>
 <div class="egg-actions">
 <button class="vx-button" type="button" data-egg="break">Loosen the B</button>
 <button class="vx-button" type="button" data-egg="god" aria-pressed="false">IDDQD</button>

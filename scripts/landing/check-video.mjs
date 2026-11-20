@@ -2,8 +2,9 @@
 // eggs, the Rickroll and Bad Apple!!, on the production build. Like check-matrix it
 // counts passes by pipeline label and compares pixels only under Pause. It also
 // counts picture uploads, watches the network for the egg files and reads the hidden
-// media element, which is the clock and the sound. No autoplay flag is set: every egg
-// starts from a real click, key press or tap. The check exposes the live world to
+// media element, which is the clock and the sound. Every egg starts from a click, key
+// press or tap. Playwright's input (and its evaluate) counts as a user gesture, so a
+// browser that refuses sound is simulated, in one section, by a play() that refuses. The check exposes the live world to
 // find the tow banner on screen; the shipped page does not.
 import assert from "node:assert/strict";
 import { mkdir, readFile } from "node:fs/promises";
@@ -77,7 +78,7 @@ try {
   server = await startServer({ root: dist, port: 0, host: "127.0.0.1" });
   const base = `http://127.0.0.1:${server.address().port}/`;
   const home = (await readFile(join(dist, "landing/home.js"), "utf8")) + "\nwindow.__world = () => world;";
-  async function open({ width = 1440, height = 900, scale = 1, scheme = "dark", preset = "high", motion = "no-preference", mobile = false, path = "" }) {
+  async function open({ width = 1440, height = 900, scale = 1, scheme = "dark", preset = "high", motion = "no-preference", mobile = false, path = "", init = "" }) {
     const context = await browser.newContext({
       viewport: { width, height },
       deviceScaleFactor: scale,
@@ -96,7 +97,7 @@ try {
         }],
       },
     });
-    await context.addInitScript(counter);
+    await context.addInitScript(counter + init);
     await context.route("**/landing/home.js", (route) => route.fulfill({ body: home, contentType: "text/javascript" }));
     const page = await context.newPage();
     const fetched = [];
@@ -114,7 +115,7 @@ try {
   const media = (page) =>
     page.evaluate(() => {
       const v = document.querySelector(".egg-media");
-      return v && { time: v.currentTime, paused: v.paused, muted: v.muted, ready: v.readyState, src: !!v.getAttribute("src"), duration: v.duration };
+      return v && { time: v.currentTime, paused: v.paused, muted: v.muted, ready: v.readyState, src: !!v.getAttribute("src"), duration: v.duration, audio: v.webkitAudioDecodedByteCount ?? -1 };
     });
   const until = (page, test, what, timeout = 15000) =>
     page.waitForFunction(test, null, { timeout }).catch(() => assert.fail(`timed out waiting for ${what}`));
@@ -219,6 +220,7 @@ try {
     await page.waitForTimeout(4000);
     const n = await read(page);
     const t1 = (await media(page)).time;
+    assert.ok((await media(page)).audio > 0, "the sound is being decoded, not only unmuted");
     console.log("rickroll 4 s:", JSON.stringify(n), "media advanced", (t1 - t0).toFixed(2), "s");
     assert.ok(Math.abs(t1 - t0 - 4) < 0.6, "the media clock runs in real time");
     assert.equal(n.screen, n.frames, "one screen draw a frame");
@@ -371,6 +373,70 @@ try {
     await plate(page, "video-stop").click();
     assert.equal(await playing(page), "", "Stop on the still's directory stops it");
     await plate(page, "about-still").waitFor({ state: "attached", timeout: 3000 }).catch(() => assert.fail("the still's own plates come back"));
+    await context.close();
+  }
+
+  // A browser that holds back sound plays the egg muted; on the plain page the egg's own
+  // button, pressed again, brings the sound. The refusal is simulated: play() refuses
+  // with NotAllowedError whenever the element isn't muted.
+  {
+    const refuse = `;{const play = HTMLMediaElement.prototype.play;
+      HTMLMediaElement.prototype.play = function () {
+        return this.muted ? play.call(this) : Promise.reject(new DOMException("No sound without a gesture", "NotAllowedError"));
+      };}`;
+    const { context, page } = await open({ path: "?view=2d", init: refuse });
+    await page.locator(".park-credit > summary").click();
+    await page.locator(".park-secrets summary").click();
+    await page.locator('[data-egg="apple"]').click();
+    await started(page);
+    assert.equal((await media(page)).muted, true, "a refused egg plays muted");
+    {
+      assert.match(await status(page), /Playing muted\. Press Bad Apple!! again for sound/);
+      await page.locator('[data-egg="apple"]').click();
+      const m = await media(page);
+      assert.ok(!m.muted && !m.paused, "the next press brings the sound and keeps playing");
+      assert.equal(await playing(page), "apple");
+      await page.locator('[data-egg="apple"]').click();
+      assert.equal(await playing(page), "", "and the press after that stops it");
+    }
+    await context.close();
+  }
+
+  // Reduced motion switched on mid-song: the city gives way to its still and the song
+  // carries on as sound only; a paused song stops quietly.
+  {
+    const { context, page } = await open({});
+    await live(page);
+    await page.waitForTimeout(2500);
+    await page.locator("#main").focus();
+    await page.keyboard.type("rickroll");
+    await started(page);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.locator(".park-still").waitFor({ state: "visible", timeout: 8000 });
+    const t = (await media(page)).time;
+    await page.waitForTimeout(1500);
+    const m = await media(page);
+    assert.ok(!m.paused && m.time > t + 1, "the song carries on");
+    assert.equal(await playing(page), "rickroll");
+    assert.match(await status(page), /sound only now/);
+    await plate(page, "video-stop").waitFor({ timeout: 3000 });
+    assert.equal(await plate(page, "pause").count(), 0);
+    await plate(page, "video-stop").click();
+    assert.equal(await playing(page), "");
+    await context.close();
+  }
+  {
+    const { context, page } = await open({});
+    await live(page);
+    await page.waitForTimeout(2500);
+    await plate(page, "pause").click();
+    await page.locator("#main").focus();
+    await page.keyboard.type("rickroll");
+    await until(page, () => document.querySelector(".egg-media")?.readyState >= 2, "the held frame");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.locator(".park-still").waitFor({ state: "visible", timeout: 8000 });
+    assert.equal(await playing(page), "", "a paused song stops with the city");
+    assert.equal((await media(page)).paused, true);
     await context.close();
   }
 

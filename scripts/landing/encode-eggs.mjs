@@ -40,6 +40,9 @@ for (const [name, egg] of Object.entries(eggs)) {
     "-vf", egg.vf, "-r", String(egg.fps),
     "-c:v", "libx264", "-profile:v", "main", "-preset", "veryslow", "-tune", egg.tune, "-crf", String(egg.crf),
     "-pix_fmt", "yuv420p", "-g", String(egg.fps * 4),
+    // Both at one loudness (EBU R128, -16 LUFS): Bad Apple's master is about 8 dB
+    // hotter than Rick's, and a phone ignores a page's volume.
+    "-af", "loudnorm=I=-16:TP=-1.5:LRA=11",
     // Profile 4 is HE-AAC.
     "-c:a", "aac_at", "-profile:a", "4", "-b:a", "48k", "-ac", "2", "-ar", "44100",
     // The index first, so a partial download can start.
