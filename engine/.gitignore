@@ -3,3 +3,4 @@ core/target/
 page/core.wasm
 dist/
 dist-sf/
+dist-sf-base/
