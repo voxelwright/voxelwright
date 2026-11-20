@@ -144,3 +144,56 @@ class PixelGate(unittest.TestCase):
             check(lower, floors, judged={("Dogpatch", 0)})
         with self.assertRaisesRegex(ValueError, "regression"):
             check(lower, floors)
+
+
+class Acceptance(unittest.TestCase):
+    """accept() with the gate stubbed: scores optional, carried, and a floor that survives carrying."""
+
+    def test_scored_then_carried_then_lower_is_refused_and_receipts_verify(self):
+        import city_panel
+        from full_run import save
+
+        floors = json.loads((HERE / "panel-floors.json").read_text())
+        with TemporaryDirectory() as folder:
+            root, pilot = Path(folder) / "root", Path(folder) / "pilot"
+            (root / "pending/shots").mkdir(parents=True)
+            pilot.mkdir()
+            (pilot / "final-scores.json").write_text(json.dumps(floors))
+            views = {}
+            for place in floors:
+                pair = []
+                for i in (0, 1):
+                    shot = root / "pending/shots" / f"{place}-{i}.png"
+                    shot.write_bytes(f"{place} {i}".encode())
+                    pair.append(hashlib.sha256(shot.read_bytes()).hexdigest())
+                views[place] = pair
+            passed = lambda shots, cache: {p: [dict(passed=True), dict(passed=True)] for p in shots}
+
+            def stage(previous):
+                e = dict(previous=previous, renderer="r", members={}, seeds={}, views=views, tileFiles={})
+                batch = city_panel.fingerprint(e)
+                save(root / "pending/evidence.json", dict(e, batch=batch))
+                return batch
+
+            with (
+                patch.object(city_panel, "PILOT", pilot),
+                patch.object(city_panel, "renderer", lambda: "r"),
+                patch.object(city_panel, "gate", passed),
+                patch.object(city_panel, "bundles", lambda root, members: []),
+                patch.object(city_panel, "finish", lambda root, batch: None),
+                patch("paint_batch_tiles.measure", lambda *a: {}),
+            ):
+                a = stage(None)
+                city_panel.accept(root, a, floors)
+                b = stage(a)
+                city_panel.accept(root, b, None)
+                receipt = json.loads((root / "accepted" / (b + ".json")).read_text())
+                self.assertTrue(receipt["scoresCarried"])
+                self.assertEqual(receipt["scores"], floors)
+                self.assertEqual(len(receipt["measured"]), 32)
+                for batch in (a, b):
+                    city_panel.accepted_faces(root / "accepted" / (batch + ".json"))
+                c = stage(b)
+                lower = {k: [v[0] - 0.5, v[1]] for k, v in floors.items()}
+                with self.assertRaisesRegex(ValueError, "regression"):
+                    city_panel.accept(root, c, lower)

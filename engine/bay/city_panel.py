@@ -60,7 +60,7 @@ def accepted_faces(receipt):
     scores = data.pop("scores")
     data.pop("cityTiles", None)
     floors = data.pop("floors", None)
-    for key in ("inspection", "scoresCarried"):
+    for key in ("inspection", "scoresCarried", "measured"):
         data.pop(key, None)
     if (
         receipt.parent.name != "accepted"
@@ -319,15 +319,17 @@ def accept(root, candidate, scores=None):
         {p: [shot_file(root, p, i, h) for i, h in enumerate(pair)] for p, pair in e["views"].items()},
         root / "inspections",
     )
-    judged = set()
-    if not prior_receipt.get("scoresCarried"):
-        for place, pair in prior_receipt.get("inspection", {}).items():
-            judged.update((place, i) for i, passed in enumerate(pair) if passed)
+    # A score describes a view's pixels while they stay the same; it is a floor where that render also passed.
+    measured = {tuple(v) for v in prior_receipt.get("measured", [])}
+    passed = {(p, i) for p, pair in prior_receipt.get("inspection", {}).items() for i, ok in enumerate(pair) if ok}
+    judged = measured & passed
     carried = scores is None
     if carried:
         scores = previous
+        measured = {(p, i) for p, i in measured if previous_views.get(p, [None, None])[i] == e["views"][p][i]}
     else:
         check(scores, previous, judged)
+        measured = {(p, i) for p in e["views"] for i in (0, 1)}
     bundles(root, e["members"])
     from paint_batch_tiles import measure
 
@@ -344,6 +346,7 @@ def accept(root, candidate, scores=None):
             batch=candidate,
             scores=scores,
             scoresCarried=carried,
+            measured=sorted(measured),
             floors=[] if carried else sorted(judged),
             inspection={p: [r["passed"] for r in pair] for p, pair in report.items()},
             cityTiles=city_tiles,
