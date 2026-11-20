@@ -115,10 +115,14 @@ if (!page.includes('src="/page/main.ts"')) fail('page/index.html no longer loads
 // ── The city: a release, written by its owner, or as a run staged it ──
 if (realm.release !== 'current.json') fail('sf/realm.json must name its release pointer: "release": "current.json"')
 if (staged) {
-  // As a run staged it: its pointer and the one release that pointer names.
-  if (!existsSync(join(staged, 'current.json'))) fail(`${staged} holds no current.json`)
-  const named = JSON.parse(readFileSync(join(staged, 'current.json'), 'utf8'))
-  cpSync(join(staged, 'current.json'), join(out, 'sf', 'current.json'))
+  // As a run staged it: a pointer and the one release it names. The data lane's folder keeps releases side by side, so
+  // from it the page takes the one this checkout pins (sf/pilot/current.json), and moving one checkout's pin leaves
+  // every other checkout's build as it was. Another staged folder: the release its own pointer names.
+  const pointerAt = staged === STAGED ? join(root, 'sf', 'pilot', 'current.json') : join(staged, 'current.json')
+  if (!existsSync(pointerAt)) fail(`${pointerAt} is missing`)
+  const named = JSON.parse(readFileSync(pointerAt, 'utf8'))
+  if (!existsSync(join(staged, named.manifest))) fail(`${staged} holds no release ${named.release}: stage it (sf/release.md)`)
+  cpSync(pointerAt, join(out, 'sf', 'current.json'))
   // Not what a run keeps beside it for itself (`.bay-store`, a link to its store of objects): only the release's files.
   cpSync(join(staged, dirname(named.manifest)), join(out, 'sf', dirname(named.manifest)), { recursive: true, filter: (path) => !basename(path).startsWith('.') })
 } else {
