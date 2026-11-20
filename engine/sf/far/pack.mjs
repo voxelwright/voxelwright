@@ -102,7 +102,7 @@ const sign = (key) => createHash('sha256').update(`${PACKED}\n${owner.get(key)}\
 // ── What changed since the last packing ──
 const before = existsSync(join(out, 'far.json')) && existsSync(join(out, 'far.state.json')) ? { ...JSON.parse(readFileSync(join(out, 'far.json'), 'utf8')), sources: JSON.parse(readFileSync(join(out, 'far.state.json'), 'utf8')) } : null
 /** How this packs a tile (the FAR1 object's own layout): raised when it changes, so every tile is packed again. */
-const PACKED = 3
+const PACKED = 4
 // The listing is the release manifest's `far` (engine/sf/release.md, version 1); what each tile was made from is
 // kept beside it in far.state.json, for packing again only what changed.
 const listing = { version: 1, size: SIZE, bands: BANDS, lods: LODS, tiles: {} }
@@ -155,8 +155,9 @@ for (let at = 0; at < todo.length; at += BATCH) {
       const wx = pos[0] + (c0[0] * e.x0 + c2[0] * e.z0) * cell, wz = pos[2] + (c0[2] * e.x0 + c2[2] * e.z0) * cell
       const key = `${Math.floor(wx / SIZE)}_${Math.floor(wz / SIZE)}`
       if (!batch.has(key) || (b.owner !== 'hero' && owner.get(key) !== b.owner)) continue
-      // Under a landmark whose rule owns its place, the lidar's columns of it are not drawn (its ground is).
-      if (b.owner !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key) && ruled(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
+      // Under a landmark whose rule owns its place, the lidar's columns of it are not drawn (its ground is), nor is
+      // anything else but a rule's own faces (the wedge's landmarks are layer 'hero' too).
+      if (b.owner !== 'hero' && b.layer !== 'hero' && !b.layer.startsWith('ground') && ruledTiles.has(key) && ruled(pos[0] + (c0[0] * (e.x0 + e.x1) + c2[0] * (e.z0 + e.z1)) * cell / 2, pos[2] + (c0[2] * (e.x0 + e.x1) + c2[2] * (e.z0 + e.z1)) * cell / 2)) continue
       // The sea is the march's to draw: bare ground no higher than a metre over it is where the lidar had a return off
       // the water (matte.py and bake.py take that for land), and it drew grey bands across the Bay.
       if (b.layer.startsWith('ground') && pos[1] + e.y1 <= 10) continue

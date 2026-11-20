@@ -56,7 +56,11 @@ const [ax, , az] = realm.arrive.at, sizes = index.levels.map((l) => l.size)
 const centre = sizes.map((s) => [Math.floor(ax / s), Math.floor(az / s)])
 // And round each landmark (#450, sf/landmark-tiles.mjs), so that one stands on ground when one goes to it.
 const roundLandmarks = new Set(landmarkTiles().map(([l, x, z]) => `${l}/${x}_${z}`))
-const within = (level, x, z) => (Math.abs(x - centre[level][0]) <= reach[level] && Math.abs(z - centre[level][1]) <= reach[level]) || roundLandmarks.has(`${level}/${x}_${z}`)
+// Not where the Bay's own baked tiles already hold the ground at that level or a coarser one: a finer planet tile
+// would stand in front of them (a planet tree's flat canopy over the park's eye).
+const bakedAt = index.tiles.map((t) => new Set(t.map(([x, z]) => `${x}_${z}`)))
+const bakedOver = (level, x, z) => sizes.some((s, l) => l >= level && l < 3 && bakedAt[l].has(`${Math.floor((x * sizes[level]) / s)}_${Math.floor((z * sizes[level]) / s)}`))
+const within = (level, x, z) => (Math.abs(x - centre[level][0]) <= reach[level] && Math.abs(z - centre[level][1]) <= reach[level]) || (roundLandmarks.has(`${level}/${x}_${z}`) && !bakedOver(level, x, z))
 let baked = 0, earth = 0, sea = 0
 put('bay/tiles/index.json', JSON.stringify(index))
 for (let level = 0; level < 3; level++) for (const [x, z] of index.tiles[level]) { const name = `${level}/${x}_${z}.bay`; mkdirSync(join(out, 'bay/tiles', String(level)), { recursive: true }); copyFileSync(join(BAY, 'packs/tiles', name), join(out, 'bay/tiles', name)); baked += statSync(join(BAY, 'packs/tiles', name)).size }
