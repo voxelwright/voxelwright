@@ -28,8 +28,8 @@ import { unrun } from './runs.ts'
 export interface Ground { feet_at(x: number, z: number): number; ground_at(x: number, z: number): number }
 
 type Ring = Float64Array
-interface Walk { a: number; b: number; kind: number; busy: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
-interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number }
+interface Walk { a: number; b: number; kind: number; busy: number; signal: number; p: Ring; cum: Ring; len: number; homes: number; seed: number; mx: number; mz: number }
+interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number }
 interface Look { size: [number, number, number]; per: number; low: [number, number, number]; kinds: number[]; runs: string }
@@ -138,7 +138,7 @@ export function street(o: {
 }): Street {
   // ── The graph, a square at a time ──
   const walks: Walk[] = [], nodes = new Map<number, { x: number; z: number; walks: number[] }>()
-  const roads = new Map<string, Road>(), roadsFrom = new Map<number, Road[]>(), ways = new Map<number, Set<number>>()
+  const roads = new Map<string, Road>(), roadsFrom = new Map<number, Road[]>(), roadsTo = new Map<number, Road[]>(), ways = new Map<number, Set<number>>()
   const slots: Slot[] = [], lines: Line[] = []
   const GRID = 1000
   const walkGrid = new Map<number, number[]>(), roadGrid = new Map<number, Road[]>(), slotGrid = new Map<number, number[]>()
@@ -152,29 +152,31 @@ export function street(o: {
   const rails: { a: number; b: number; p: Ring }[] = []
   const take = (s: { walk: number[][]; roads: (number | number[])[][]; park: number[]; rail: number[][] }) => {
     for (const w of s.walk) {
-      const [a, b, kind, busy] = w, { p, cum, len } = line(w, 4)
+      const [a, b, kind, busy, signal] = w, { p, cum, len } = line(w, 5)
       if (len < 1) continue
       // How many live along it: none on a crossing, a few on steps, and on a pavement more the busier it is.
       const per = kind === 1 ? 0 : kind === 2 ? 0.4 : 0.5 + 0.1 * busy, seed = mix(idSeed(a), idSeed(b))
       const homes = Math.floor((len / 1000) * per + chance(seed, 9))
-      const i = walks.push({ a, b, kind, busy, p, cum, len, homes, seed, mx: (p[0] + p[p.length - 2]) / 2, mz: (p[1] + p[p.length - 1]) / 2 }) - 1
+      const i = walks.push({ a, b, kind, busy, signal, p, cum, len, homes, seed, mx: (p[0] + p[p.length - 2]) / 2, mz: (p[1] + p[p.length - 1]) / 2 }) - 1
       for (const [id, x, z] of [[a, p[0], p[1]], [b, p[p.length - 2], p[p.length - 1]]]) { let n = nodes.get(id); if (!n) nodes.set(id, n = { x, z, walks: [] }); n.walks.push(i) }
       const [x0, z0, x1, z1] = box(p)
       file(walkGrid, x0, z0, x1, z1, i)
     }
     for (const r of s.roads) {
-      const [way, a, b, lanes, flags, next] = r as [number, number, number, number, number, number[]]
-      const { p, cum, len } = line(r as number[], 6)
+      const [way, a, b, lanes, flags, next, ctl] = r as [number, number, number, number, number, number[], number]
+      const { p, cum, len } = line(r as number[], 7)
       if (len < 1) continue
       const key = `${way}/${a}/${b}`, nexts: string[] = []
       for (let i = 0; i < next.length; i += 2) nexts.push(`${next[i]}/${b}/${next[i + 1]}`)
-      // How many cars it carries, per cell of its length: a small street few, a wide one more.
-      const weight = (flags & 4 ? 0.25 : 1) * Math.min(3, lanes) / 1000
+      // How many cars it carries, per cell of its length: by its class (sf/life.py: service, residential, tertiary,
+      // secondary, primary, busway) and its lanes; an alley or a place fewer still.
+      const cls = flags >> 4, weight = [0.15, 0.5, 1, 1.5, 2, 0.4][cls] * (flags & 4 ? 0.5 : 1) * Math.min(3, lanes) / 1000
       const mid = { x: 0, z: 0, tx: 0, tz: 0 }
       along(p, cum, len / 2, mid)
-      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, p, cum, len, open: null, weight, mx: mid.x, mz: mid.z }
+      const road: Road = { key, way, a, b, lanes: Math.max(1, Math.min(4, lanes)), flags, next: nexts, ctl, cls, wired: (flags & 8) !== 0, blocked: false, p, cum, len, open: null, weight, mx: mid.x, mz: mid.z }
       roads.set(key, road)
       let from = roadsFrom.get(a); if (!from) roadsFrom.set(a, from = []); from.push(road)
+      let to = roadsTo.get(b); if (!to) roadsTo.set(b, to = []); to.push(road)
       for (const n of [a, b]) { let w = ways.get(n); if (!w) ways.set(n, w = new Set()); w.add(way) }
       const [x0, z0, x1, z1] = box(p)
       file(roadGrid, x0, z0, x1, z1, road)
