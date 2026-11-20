@@ -9,13 +9,15 @@ square's arrays reach PAD metres past it, so a wall at its edge knows its neighb
 
 Writes ~/.village/engine/sf/far/squares/<square>/: index.json and a block of faces for each 500 m tile of the frame's
 grid the square touches (sf/far/pack.mjs packs them into the release's far tiles). Layers:
-  far      what stands (buildings, trees), cells of 50 cm, heights in steps of 50 cm
+  far      what stands (buildings, trees), cells of 1 m (`--cell`), heights in steps of a cell. Half a metre is #423's
+           far layer, for a 25 degree lens over 1 to 3 km; at the 70 degrees a visitor roams with a pixel is a metre and
+           more past 600 m, and downtown 1 m is 3.8 MiB a square kilometre at Brotli 5 against 9.6
   ground   the bare ground, cells of 2 m, heights in steps of 1 m
 
 Incremental: a square whose archive has not changed since it was baked (its size and time, and this bake's VERSION)
 is left alone, so the far model grows as the run finishes squares.
 
-    ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force] [--cell 0.5] [--out dir]
+    ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force] [--cell 1] [--out dir]
 """
 import io, json, math, os, sys, time, zipfile, zlib
 import numpy as np
@@ -189,7 +191,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
 def main():
     force = '--force' in sys.argv
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
-    cell, out = float(arg('--cell', '0.5')), os.path.expanduser(arg('--out', OUT))
+    cell, out = float(arg('--cell', '1')), os.path.expanduser(arg('--out', OUT))
     asked = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith('--') and sys.argv[i - 1] not in ('--cell', '--out')]
     squares = asked or sorted(f[:-4] for f in os.listdir(INPUTS) if f.endswith('.zip') and not f.endswith('.part'))
     for s in squares:
