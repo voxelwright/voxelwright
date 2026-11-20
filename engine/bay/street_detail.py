@@ -470,6 +470,12 @@ def apply(path, archive, sidecar, graph, stage=5):
                 survey = json.load(file)
             if survey["square"] != path.stem or survey["version"] != 2:
                 raise ValueError("incorrect street furniture input")
-            sq.segments = furniture(sq, src, detail, survey, network, stats)
+            with gzip.open(sidecar.with_name(path.stem + ".stops.json.gz")) as file:
+                stops = json.load(file)
+            if stops["square"] != path.stem or stops["version"] != 1:
+                raise ValueError("incorrect stop-sign observations")
+            sq.segments = furniture(
+                sq, src, detail, survey, stops["points"], network, stats
+            )
     sq.write(path)
     return dict(stats), audit

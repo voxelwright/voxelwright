@@ -10,7 +10,7 @@
 
 use crate::hash::{hash, hash3};
 use crate::kinds::*;
-use crate::scratch::Scratch;
+use crate::scratch::{Run, Scratch};
 use crate::tree::{Kind, SIDE, at};
 use std::cell::{Cell, RefCell};
 
@@ -413,7 +413,7 @@ impl Pack {
 
     /// Vertical intervals cut by visible street furniture in one column. Sample
     /// a narrow wire across the cell width so a diagonal remains connected.
-    fn fixture_spans(&self, x: i32, z: i32, size: i32) -> Vec<(i32,i32,Kind)> {
+    fn fixture_spans(&self, x: i32, z: i32, size: i32) -> Vec<FixtureSpan> {
         let mut spans = Vec::new();
         if size > 4 || self.fixtures_near.is_empty() { return spans; }
         let px = ((x-self.gx0)>>PATCH).clamp(0,self.pw-1);
@@ -421,17 +421,20 @@ impl Pack {
         for &i in &self.fixtures_near[(pz*self.pw+px) as usize] {
             let r = self.fixtures[i];
             let (dx,dz) = ((r[3]-r[0]) as f32,(r[5]-r[2]) as f32);
-            let (ux,uz) = ((x-r[0]) as f32,(z-r[2]) as f32);
+            let middle = if size == 1 { 0.5 } else { 0.0 };
+            let (ux,uz) = ((x-r[0]) as f32 + middle,(z-r[2]) as f32 + middle);
             let length = dx*dx+dz*dz;
             let t = if length > 0.0 { ((ux*dx+uz*dz)/length).clamp(0.0,1.0) } else { 0.0 };
-            let rad = r[6] as f32/10.0 + size as f32*0.5;
+            let cable = r[6] <= 3;
+            if cable && size > 2 { continue; }
+            let rad = r[6] as f32/10.0 + if cable && size == 2 { 0.3 } else { size as f32*0.71 };
             let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
             if far > rad*rad { continue; }
             let height = |v:f32| r[1] as f32 + v*(r[4]-r[1]) as f32;
             let reach = if length>0.0 { ((rad*rad-far)/length).sqrt() } else { 1.0 };
             let a = height((t-reach).max(0.0));
             let b = height((t+reach).min(1.0));
-            spans.push(((a.min(b)-rad).ceil() as i32,(a.max(b)+rad).floor() as i32,r[7] as Kind));
+            spans.push(FixtureSpan { low: (a.min(b)-rad).floor() as i32, high: (a.max(b)+rad).floor() as i32, rod: r });
         }
         spans
     }
@@ -550,13 +553,52 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
 }
 
 /// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
+struct FixtureSpan {
+    low: i32,
+    high: i32,
+    rod: [i32; 8],
+}
+
+impl FixtureSpan {
+    // Rasterize a cable at 2.5 cm only inside the candidate 10 cm column.
+    // Relative coordinates retain sub-centimetre precision far from the engine origin.
+    fn cable_rows(&self, x: i32, z: i32, floor: i32, rows: &mut Vec<Run>) {
+        let r = self.rod;
+        let dx = (r[3]-r[0]) as f32;
+        let dy = (r[4]-r[1]) as f32;
+        let dz = (r[5]-r[2]) as f32;
+        let length2 = (dx*dx+dy*dy+dz*dz).max(1.0);
+        let radius2 = (r[6] as f32 / 10.0).powi(2);
+        for y in self.low.max(floor)..=self.high.min(floor+SIDE as i32-1) {
+            for sy in 0..4 {
+                for sz in 0..4 {
+                    let uy = (y-r[1]) as f32 + (sy as f32+0.5)/4.0;
+                    let uz = (z-r[2]) as f32 + (sz as f32+0.5)/4.0;
+                    let (mut first,mut end) = (4,0);
+                    for sx in 0..4 {
+                        let ux = (x-r[0]) as f32 + (sx as f32+0.5)/4.0;
+                        let t = ((ux*dx+uy*dy+uz*dz)/length2).clamp(0.0,1.0);
+                        if (ux-t*dx).powi(2)+(uy-t*dy).powi(2)+(uz-t*dz).powi(2) <= radius2 {
+                            first=first.min(sx);
+                            end=sx+1;
+                        }
+                    }
+                    if first<end {
+                        rows.push(Run { x0:x*4+first, x1:x*4+end, y:y*4+sy, z:z*4+sz, kind:r[7] as Kind });
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct Column<'a> {
     g: i32,
     /// The ground's top cell's kind, and how many cells of it stand over the ground (a pavement's kerb).
     ground: Kind,
     kerb: i32,
     what: What<'a>,
-    fixtures: Vec<(i32,i32,Kind)>,
+    fixtures: Vec<FixtureSpan>,
 }
 
 enum What<'a> {
@@ -650,8 +692,8 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
     if mid <= c.g {
         return if mid >= c.g - 3 * size.max(2) { c.ground } else { kind(EARTH, OWN) };
     }
-    for &(bottom, top, kind) in &c.fixtures {
-        if mid >= bottom && mid <= top { return kind; }
+    for fixture in &c.fixtures {
+        if mid >= fixture.low && mid <= fixture.high { return fixture.rod[7] as Kind; }
     }
     match &c.what {
         What::Open => if size == 1 && mid <= c.g + c.kerb { c.ground } else { 0 },
@@ -791,11 +833,19 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
 pub fn make(s: &mut Scratch) {
     let (k, size) = (s.lod, 1i32 << s.lod);
     let side = SIDE as i32;
+    let mut cables = Vec::new();
     PACKS.with_borrow(|packs| {
         for cz in 0..side {
             for cx in 0..side {
                 let (x, z) = (((s.low[0] + cx) << k) + size / 2, ((s.low[2] + cz) << k) + size / 2);
-                let c = column(packs, x, z, size);
+                let mut c = column(packs, x, z, size);
+                if s.finer && k == 0 {
+                    c.fixtures.retain(|fixture| {
+                        if fixture.rod[6] > 3 { return true; }
+                        fixture.cable_rows(x,z,s.low[1],&mut cables);
+                        false
+                    });
+                }
                 for cy in 0..side {
                     let v = kind_at(&c, x, (s.low[1] + cy) << k, z, size);
                     if v != 0 {
@@ -805,6 +855,7 @@ pub fn make(s: &mut Scratch) {
             }
         }
     });
+    if !cables.is_empty() { s.fine_runs(&cables,2); }
 }
 
 #[cfg(test)]
@@ -910,11 +961,24 @@ mod tests {
             bytes.extend(n.to_le_bytes());
         }
         let p = read(&bytes).unwrap();
-        assert!(p.fixture_spans(120,120,1).iter().any(|s| s.0 <= 180 && s.1 >= 265 && s.2 == kind(STEEL,OWN)));
+        assert!(p.fixture_spans(120,120,1).iter().any(|s| s.low <= 180 && s.high >= 265 && s.rod[7] == kind(STEEL,OWN) as i32));
         assert!(p.fixture_spans(125,120,1).is_empty());
         assert!(p.highs.iter().copied().max().unwrap() >= 265);
         bytes.pop();
         assert!(read(&bytes).is_none());
+    }
+
+    #[test]
+    fn a_cable_occupies_only_the_subcells_its_radius_reaches() {
+        let span = FixtureSpan { low: 31, high: 33, rod: [10,32,20, 30,32,20, 3, STEEL as i32] };
+        let mut runs = Vec::new();
+        span.cable_rows(15,20,0,&mut runs);
+        let count: i32 = runs.iter().map(|r| r.x1-r.x0).sum();
+        assert!(count > 0 && count < 64);
+        assert!(runs.iter().all(|r| r.z == 80 && (127..=128).contains(&r.y)));
+        runs.clear();
+        span.cable_rows(15,22,0,&mut runs);
+        assert!(runs.is_empty());
     }
 
     #[test]

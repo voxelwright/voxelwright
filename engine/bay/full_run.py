@@ -325,6 +325,10 @@ def build(args, lock_fd):
                     "fixtures",
                     lambda dest: street_detail_sources.public_works(square_name, dest),
                 ),
+                (
+                    "stops",
+                    lambda dest: street_detail_sources.stop_signs(square_name, dest),
+                ),
             ):
                 dest = root / "inputs" / (square_name + "." + suffix + ".json.gz")
                 if not dest.exists():

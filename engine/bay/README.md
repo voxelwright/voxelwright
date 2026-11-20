@@ -29,20 +29,21 @@ The six original pack and name pairs qualify as seeds only when they match the p
 
 ### Street-level publication
 
-Two gzip JSON sidecars extend each square. Both include its `square` name. The quarter-metre ZIP remains the source of ground, surface, imagery and original footprint IDs.
+Three gzip JSON sidecars extend each square. Both include its `square` name. The quarter-metre ZIP remains the source of ground, surface, imagery and original footprint IDs.
 
 | Sidecar | Contents |
 |---|---|
 | `inputs/<square>.detail.json.gz`, version 1 | Additional DataSF outlines from a polygon intersection query (WGS84), OSM closed building ways, visible fixtures and wire paths, and 2025 Assessor year, units and storeys by parcel. OSM geometry is in global 10 cm engine cells. |
+| `inputs/<square>.stops.json.gz`, version 1 | Mapillary stop-sign points in global engine cells. The bake groups repeated sightings within 2.5 m and matches them to OSM control nodes within 11 m. |
 | `inputs/<square>.fixtures.json.gz`, version 2 | Public Works map layers 36 and 48, respectively street-light points and trolley overhead polylines, plus Mapillary utility-pole points. All coordinates are global engine x,z cells. |
 
-To collect these sidecars separately, run `street_detail_sources.py DEST INPUTS/*.zip` with the Bay Python environment. The full run collects and checkpoints both automatically. Sources include the [Assessor roll](https://data.sf.gov/d/wv5m-vpq2), the [Public Works map](https://bsm.sfdpw.org/mapviewer/) and [Mapillary point features](https://help.mapillary.com/hc/en-us/articles/115002332165-Map-features).
+To collect these sidecars separately, run `street_detail_sources.py DEST INPUTS/*.zip` with the Bay Python environment. The full run collects and checkpoints the sidecars automatically. Sources include the [Assessor roll](https://data.sf.gov/d/wv5m-vpq2), the [Public Works map](https://bsm.sfdpw.org/mapviewer/) and [Mapillary point features](https://help.mapillary.com/hc/en-us/articles/115002332165-Map-features).
 
 The publication pass checks DataSF polygons against BAY1 outlines and above-ground roof samples. Each square's `audits/<square>.json` records the source IDs with under 80% stand coverage and the IDs remaining after repair. The sweep measures polygon parts covering at least four square metres inside the padded raster. New stands require independent mapped outlines and elevated, locally consistent lidar. Low coverage can reflect a demolished building or a clipped piece of a larger building. Shared margins can appear in two audits.
 
 Near packs carry facade cues in the existing signed 32-bit vertex flags. Bits 0–2 keep their original meanings. Bit 7 enables the signed 16-bit eave height in bits 8–23, in cells above engine zero. Bits 24–29 select residential bays, cornice, garage, stoop, awning and fire escape on that edge. Assignment uses parcel occupancy, building age, storeys, units, frontage direction and the ground-floor classifier. These are architectural inferences. On pavement, class bit 7 selects a two-cell surveyed kerb and bit 5 a flush crossing.
 
-When a square or L0 tile contains fixtures, its last trunk is followed by ASCII `SFST`, a little-endian uint32 segment count and that many eight-int32 records. A record contains start x,y,z, end x,y,z in global cells, radius in centimetres and material kind. The section is optional. The tile cut carries crossing segments into both adjoining tiles. Elevations and dimensions of municipal masts, signs and hydrants are typologies. A utility span inferred from lidar requires narrow, elevated returns along its path and photo-supported pole endpoints. Timber is the inferred material for untyped utility poles.
+When a square or L0 tile contains fixtures, its last trunk is followed by ASCII `SFST`, a little-endian uint32 segment count and that many eight-int32 records. A record contains start x,y,z, end x,y,z in global cells, radius in centimetres and material kind. The section is optional. The tile cut carries crossing segments into both adjoining tiles. Elevations and dimensions of municipal masts, signs and hydrants are typologies. A utility span inferred from lidar requires narrow, elevated returns along its path and photo-supported pole endpoints. Timber is the inferred material for untyped utility poles. Nearby overhead cables occupy quarter cells (2.5 cm) along their measured segments.
 
 ## Coverage
 

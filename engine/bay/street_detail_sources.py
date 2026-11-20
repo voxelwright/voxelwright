@@ -137,7 +137,7 @@ def acquire(archive, dest):
     )
 
 
-def photo_poles(name):
+def photo_points(name, category):
     e, n = (float(v) * 1000 for v in name.split("_"))
     corners = [UTM.transform(e + x, n + y) for x in (-24, 1024) for y in (-24, 1024)]
     west, south = map(min, zip(*corners))
@@ -152,7 +152,7 @@ def photo_poles(name):
             dict(
                 bbox=f"{w},{s},{e},{n}",
                 fields="id,geometry,object_value",
-                object_values="object--support--utility-pole",
+                object_values=category,
                 limit=2000,
             )
         )
@@ -171,11 +171,29 @@ def photo_poles(name):
                 query(*bbox)
             return
         for r in rows:
-            if r["object_value"] == "object--support--utility-pole":
+            if r["object_value"] == category or (
+                category.endswith("*") and r["object_value"].startswith(category[:-1])
+            ):
                 points[r["id"]] = cells(*r["geometry"]["coordinates"])
 
     query(west, south, east, north)
     return sorted(set(map(tuple, points.values())))
+
+
+def stop_signs(name, dest):
+    points = photo_points(name, "regulatory--stop--*")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(f".{os.getpid()}.part")
+    with tmp.open("wb") as file, gzip.GzipFile(
+        filename="", fileobj=file, mode="wb", mtime=0
+    ) as out:
+        out.write(
+            json.dumps(
+                dict(square=name, version=1, points=points), separators=(",", ":")
+            ).encode()
+        )
+    tmp.replace(dest)
+    print(name, "photo stop signs", len(points), flush=True)
 
 
 def public_works(name, dest):
@@ -234,7 +252,12 @@ def public_works(name, dest):
     ) as out:
         out.write(
             json.dumps(
-                dict(square=name, version=2, photoPoles=photo_poles(name), **result),
+                dict(
+                    square=name,
+                    version=2,
+                    photoPoles=photo_points(name, "object--support--utility-pole"),
+                    **result,
+                ),
                 separators=(",", ":"),
             ).encode()
         )
@@ -254,6 +277,7 @@ if __name__ == "__main__":
         for suffix, fetch in (
             ("detail", lambda dest: acquire(archive, dest)),
             ("fixtures", lambda dest: public_works(archive.stem, dest)),
+            ("stops", lambda dest: stop_signs(archive.stem, dest)),
         ):
             dest = Path(sys.argv[1]) / (archive.stem + "." + suffix + ".json.gz")
             if not dest.exists():

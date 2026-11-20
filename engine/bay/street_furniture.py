@@ -142,7 +142,7 @@ def utility_evidence(sq, src, graph, survey, stats):
     ], spans
 
 
-def bake(sq, src, detail, survey, graph, stats):
+def bake(sq, src, detail, survey, stop_points, graph, stats):
     h = sq.h
     margin = box(h[10], h[11], h[10] + 5 * h[9], h[11] + 5 * h[9])
     segments = set()
@@ -155,7 +155,7 @@ def bake(sq, src, detail, survey, graph, stats):
         segments.add(tuple(round(v) for v in (*a, *b, r, material)))
 
     steel, dark, wood = 12 | 9 << 8, 12 | 14 << 8, 10 | 46 << 8
-    white, red = 7 | 1 << 8, 12 | 23 << 8
+    white, red = 7 | 1 << 8, 12 | 20 << 8
     kerbs = [LineString(k["line"]) for k in graph["kerbs"] if len(k["line"]) > 1]
     kerb_tree = STRtree(kerbs)
     roads = [
@@ -172,6 +172,28 @@ def bake(sq, src, detail, survey, graph, stats):
         or not lamp_pts
         or Point(x, z).distance(lamp_pts[lamp_tree.nearest(Point(x, z))]) > 35
     ]
+    # A stop control sits in the road graph; the physical sign can be on either
+    # kerb. Match triangulated signs within 11 m, merging repeat observations.
+    observed = [Point(p) for p in stop_points]
+    sign_tree = STRtree(observed)
+    matched = set()
+    resolved = []
+    for kind, x, z in fixtures:
+        if kind == "stop" and observed:
+            near = sign_tree.query(Point(x, z), predicate="dwithin", distance=110)
+            if len(near):
+                matched.update(near)
+                continue
+        resolved.append((kind, x, z))
+    while matched:
+        i = min(matched)
+        group = matched.intersection(
+            sign_tree.query(observed[i], predicate="dwithin", distance=25)
+        )
+        x, z = np.median([stop_points[j] for j in group], axis=0)
+        resolved.append(("observedStop", round(x), round(z)))
+        matched.difference_update(group)
+    fixtures = resolved
     fixtures.extend(("street_lamp", *p) for p in survey["lamps"])
     for kind, x, z in fixtures:
         pt = Point(x, z)
@@ -194,14 +216,14 @@ def bake(sq, src, detail, survey, graph, stats):
                 size = max(1, math.hypot(vx, vz))
                 x, z = kerb.x + 5 * vx / size, kerb.y + 5 * vz / size
         y = base(x, z)
-        if kind == "stop":
+        if kind in ("stop", "observedStop"):
             rod((x, y, z), (x, y + 27, z), 5, steel)
             for k, width in enumerate((2, 3, 4, 4, 4, 3, 2)):
                 rod(
                     (x + dz * width, y + 22 + k, z - dx * width),
                     (x - dz * width, y + 22 + k, z + dx * width),
                     5,
-                    red if k != 3 else white,
+                    white if k in (0, 6) else red,
                 )
         elif kind == "hydrant":
             rod((x, y, z), (x, y + 7, z), 15, white)
@@ -220,7 +242,7 @@ def bake(sq, src, detail, survey, graph, stats):
                 (x + 13 * dx, y + 85, z + 13 * dz),
                 (x + 18 * dx, y + 85, z + 18 * dz),
                 12,
-                15,
+                15 | 46 << 8,
             )
         elif kind in ("pole", "metalPole"):
             rod((x, y, z), (x, y + 96, z), 16, wood if kind == "pole" else steel)

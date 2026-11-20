@@ -106,10 +106,10 @@ async function main() {
     // Cells may hold finer cells (#259): a made thing may be of cells of 2.5 or 1.25 cm (#372). `?bricks=1` from the
     // start, `?bricks=0` never; otherwise from the moment this world first holds such a thing, so that a world
     // without one pays nothing (world.ts `bricksLater`).
-    bricks: query.get('bricks') === '1',
+    bricks: query.get('bricks') === '1' || (BAY_ON && query.get('bricks') !== '0'),
     fineSun: query.get('bricks') === '1' && query.get('finesun') !== '0',
     // Shadows at the thing's own grain are dear where a fine thing fills the view (#372: 47% of the frame against 30% without, a car 5 m off and a house front), so they are for `?finesun=1`; without, a fine thing shades as its cells of 10 cm.
-    bricksLater: query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
+    bricksLater: !BAY_ON && query.get('bricks') === null ? { fineSun: query.get('finesun') === '1' } : undefined,
     workers: Number(query.get('workers') ?? Math.max(2, Math.min(6, (navigator.hardwareConcurrency || 4) - 2))),
   })
   const march = await marcher(device, gpu.format, world)
