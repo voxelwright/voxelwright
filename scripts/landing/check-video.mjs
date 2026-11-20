@@ -212,6 +212,7 @@ try {
     await started(page);
     m = await media(page);
     assert.ok(m.time < 3 && !m.muted, `Play starts the song from the top, with sound: ${JSON.stringify(m)}`);
+    assert.match(await status(page), /Stop it on the directory/, "the status follows Play");
     await page.waitForTimeout(4000);
     await reset(page);
     const t0 = (await media(page)).time;
@@ -369,7 +370,7 @@ try {
     assert.equal((await media(page)).muted, true);
     await plate(page, "video-stop").click();
     assert.equal(await playing(page), "", "Stop on the still's directory stops it");
-    assert.equal(await plate(page, "about-still").count(), 1, "the still's own plates come back");
+    await plate(page, "about-still").waitFor({ state: "attached", timeout: 3000 }).catch(() => assert.fail("the still's own plates come back"));
     await context.close();
   }
 
