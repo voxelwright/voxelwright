@@ -2,8 +2,17 @@
 [data-profile="high"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * 2.25); }
 [data-profile="low"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * .75); }
 [data-profile] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):is(:active,[aria-pressed="true"],[aria-expanded="true"]) { --_lift: calc(var(--vx) * .5); }
+/* The Ridgeline print as the voxels lay it: low hills along the foot of the cap, inside its
+   two-voxel lip and clear of the legend. The strips come from src/looks/fittings.js. */
 [data-caps="field"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):not([data-vx-kind],[data-vx-step],[data-lamp]) {
- background: radial-gradient(ellipse at 26% 160%,#677c6d 0 45%,#96a089 45% 50%,transparent 51%),var(--vx-key);
+ --_lip: calc(var(--vx) * 2); --_art: calc(var(--vx) * 128) 100%;
+ background:
+  linear-gradient(var(--vx-key),var(--vx-key)) left bottom / 100% var(--_lip) no-repeat,
+  linear-gradient(var(--vx-key),var(--vx-key)) left top / var(--_lip) 100% no-repeat,
+  linear-gradient(var(--vx-key),var(--vx-key)) right top / var(--_lip) 100% no-repeat,
+  var(--vx-cap-ridge) left 0 top var(--_lip) / var(--_art) repeat-x,
+  var(--vx-cap-inlay) left top / var(--_art) repeat-x,
+  var(--vx-key);
 }
 [data-caps="opal"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { background-color: color-mix(in srgb,var(--vx-key) 82%,transparent); }
 [data-caps="carbon"] :is(.vx-button,.vx-toggle-button):not(:disabled):not([data-vx-kind],[data-lamp]) .vx-label {
@@ -165,7 +174,6 @@
 /* Material settings inherit from the nearest cap set. Compute the powered
    tint at the button, where the local lamp supply and color are available. */
 :where([data-caps]) { --vx-lamp-print: none; --vx-lamp-scatter: 0; }
-:where([data-caps="field"]) { --vx-lamp-print: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%); }
 :where([data-caps="opal"]) { --vx-lamp-scatter: 1; }
 /* A lamp key includes the floor and flange within the button's hit target. */
 .vx-button[data-lamp] {
@@ -186,7 +194,7 @@
 }
 .vx-button[data-lamp]:not([data-vx-live])::before {
   content: ""; position: absolute; inset: 7% 7% 8%; z-index: -1;
-  background: var(--vx-lamp-print,none) var(--_resin); border: 0;
+  background: var(--vx-lamp-print,none) var(--_resin); background-size: calc(var(--vx) * 64) 100%; background-repeat: repeat-x; border: 0;
   border-inline: calc(var(--vx) * 1.5) solid var(--_apron);
   border-bottom: calc(var(--vx) * var(--vx-lamp-apron,3)) solid var(--_apron);
   box-shadow: inset 1px 1px 0 var(--_shoulder);
@@ -201,9 +209,13 @@
 .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
   --_face-wash: calc(24% * var(--vx-lamp-scatter,0) * var(--vx-pilot-level,var(--lamp-level,1)));
   --_side-wash: calc(32% * var(--vx-lamp-scatter,0) * var(--lamp-level,1));
-  background-image: var(--vx-lamp-print,none),
+  background-image:
     radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_face-wash),transparent),transparent 52%),
-    radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_side-wash),transparent),transparent 44%);
+    radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_side-wash),transparent),transparent 44%),
+    var(--vx-lamp-print,none);
+  /* the washes fill the cap; the print's two strips run along it */
+  background-size: 100% 100%, 100% 100%, calc(var(--vx) * 64) 100%, calc(var(--vx) * 64) 100%;
+  background-repeat: no-repeat, no-repeat, repeat-x, repeat-x;
 }
 .vx-button[data-vx-pilot="status"] { --vx-pilot-level: 1; }
 .vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::after {
@@ -214,6 +226,20 @@
 }
 .vx-button[data-lamp]:not([data-vx-live]):active:enabled:not([aria-disabled="true"]) .vx-label,
 .vx-button[data-lamp]:not([data-vx-live]):active:enabled:not([aria-disabled="true"])::after { translate: var(--_drop) var(--_drop); }
+/* A plain lamp key travels on the kit's press and release springs, like every other key. */
+.vx-button[data-lamp]:not([data-vx-live])::before,
+.vx-button[data-lamp]:not([data-vx-live])::after,
+.vx-button[data-lamp]:not([data-vx-live]) .vx-label {
+  transition: translate var(--vx-release-time) var(--vx-release-ease), border-bottom-width var(--vx-release-time) var(--vx-release-ease);
+}
+.vx-button[data-lamp]:not([data-vx-live]):active::before,
+.vx-button[data-lamp]:not([data-vx-live]):active::after,
+.vx-button[data-lamp]:not([data-vx-live]):active .vx-label { transition-duration: var(--vx-press-time); transition-timing-function: var(--vx-press-ease); }
+@media (prefers-reduced-motion: reduce) {
+  .vx-button[data-lamp]:not([data-vx-live])::before,
+  .vx-button[data-lamp]:not([data-vx-live])::after,
+  .vx-button[data-lamp]:not([data-vx-live]) .vx-label { transition: none; }
+}
 
 @media (max-width: 400px) {
   .vx-button[data-lamp] { justify-content: center; padding-inline: 0; }

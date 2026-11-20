@@ -5,7 +5,7 @@ import { defineLook, LOOKS } from '../core/look.js';
 import './lit.js';
 import { switchTreble } from '../core/sound.js';
 import { defineMaterial } from '../core/materials.js';
-import { cases, caps, lamps, finish, shellTokens } from './fittings.js';
+import { cases, caps, lamps, finish, shellTokens, hardware } from './fittings.js';
 export { cases, caps, lamps };
 
 for (const [name, day] of Object.entries({
@@ -45,8 +45,8 @@ export function instrument(s, root, stage) {
       materials: { panel: { ...panel }, chalk: paint(shell.plate, { grain: shell.grain, transmission: shell.transmission, jitter: .004 }),
         'lamp-cap': paint(cap.key, { transmission: cap.transmission, jitter: .007 }),
         key: paint(cap.key, { transmission: cap.transmission, jitter: .009 }), ink: { ...ink },
-        steel: paint('#9d998a'), gasket: paint('#232824'), slate: paint('#515754'),
-        floor: two('--vx-floor'), ivory: paint('#dcd5c1'), enamel: LOOKS.lit.appliedTheme?.cap ?? paint('#aa4a27'),
+        steel: paint(hardware.steel), gasket: paint(hardware.gasket), slate: paint(hardware.slate),
+        floor: two('--vx-floor'), ivory: paint(hardware.ivory), enamel: LOOKS.lit.appliedTheme?.cap ?? paint('#aa4a27'),
         'warm-metal': paint('#baaa8b', { grain: (x,y) => .013 * Math.sin(Math.hypot(x,y)*2.5) }) } });
   }
   // Only the decorative light pipe and the cap diffuser follow this dimmer.

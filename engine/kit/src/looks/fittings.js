@@ -32,6 +32,11 @@ export const caps = {
   carbon: { name: 'Carbon PBT', key: '#393f3f', legend: '#f7ead4', face: finish(66, 14) },
   opal: { name: 'Opal', key: '#c8dfdf', legend: '#152c32', transmission: .24, face: finish(130, 90) },
 };
+// The hardware every instrument shares, whatever its case and caps: bezels and collars, gaskets,
+// trenches and the knob of a switch. The voxels paint these (looks/instrument.js) and the plain
+// version takes them as tokens (--vx-hw-*), so a plain switch is the same object.
+export const hardware = { steel: '#9d998a', gasket: '#232824', slate: '#515754', ivory: '#dcd5c1' };
+export const hardwareTokens = () => Object.fromEntries(Object.entries(hardware).map(([k, v]) => [`--vx-hw-${k}`, v]));
 export const lamps = {
   amber: { name: 'Amber', hue: '#ffb45f' }, tide: { name: 'Tide', hue: '#71e2cd' },
   lilac: { name: 'Lilac', hue: '#d5b0ff' }, ember: { name: 'Ember', hue: '#ff9479' },
@@ -68,4 +73,23 @@ export function shellTokens(name, night = false) {
 export function capTokens(name) {
   const cap = caps[name];
   return { '--vx-key': cap.key, '--vx-lamp-resin': cap.key, '--lit-legend': cap.legend, '--vx-danger-legend': name === 'carbon' ? '#ffd4c9' : '#85261c' };
+}
+
+// The Ridgeline print: a range of hills along the foot of each cap, inlay at the horizon and
+// ridge below it. One owner for its shape: the voxels sample these (core/light.js for keys,
+// components/lamp-key.js for lamp keys) and tools/fittings-css.mjs draws the plain print from them.
+// Each gives the horizon as a fraction of the face's height: a key's at u CSS pixels across the
+// bank, a lamp key's at x voxels.
+export const ridgeline = {
+  key: (u) => .74 + .072 * Math.sin(u * .025) + .038 * Math.sin(u * .066),
+  lamp: (x) => .82 + .09 * Math.sin(x * .13) + .05 * Math.sin(x * .31),
+  ink: { inlay: '#909b80', ridge: '#637a6c' },
+};
+
+/** The plain print: a strip a voxel per column, filled below the horizon, to lay along a cap. */
+export function ridgelineImage(horizon, fill, columns = 128, lift = 0) {
+  let d = 'M0 100';
+  for (let x = 0; x < columns; x++) d += `V${(Math.min(1, horizon(x) + lift) * 100).toFixed(1)}H${x + 1}`;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 ${columns} 100' preserveAspectRatio='none' shape-rendering='crispEdges'><path fill='${fill}' d='${d}V100Z'/></svg>`;
+  return `url("data:image/svg+xml,${svg.replace(/#/g, '%23').replace(/</g, '%3C').replace(/>/g, '%3E')}")`;
 }

@@ -56,7 +56,7 @@ backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`
 | `define(def)` | Register a part of your own |
 | `toast(text, { kind, duration })` | Show a toast; returns a function that dismisses it |
 | `closeDialog(el, value)` | Close a dialog the way its own buttons do |
-| `sound(on)`, `cue(name)` | Turn sound on from a user gesture; play a cue |
+| `sound(on)`, `cue(name, { mass }?)` | Turn sound on from a user gesture; play a cue. A press or release is voiced for the cap the hand touched, or for `mass` square voxels |
 | `plant(part, opts)`, `pot(part, …)`, `stageOf(g)` | The plant generator |
 | `refresh(el)` | Redraw a part after changing what it is drawn from (values set from code are heard without it) |
 | `use(renderer)`, `ready()` | Hand the kit another renderer, or `null` for none; know when the page is live |

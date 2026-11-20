@@ -58,6 +58,8 @@ export class Live {
     for (const l of this.labels) { l.node.style.transform = ''; l.last = undefined; } // a label's nudge belongs to the model it was on
     this.labels.length = 0;
     this.form.build(this, this.model);
+    // how proud the face stands, for the stylesheet (a live key's focus ring frames its body)
+    el.style.setProperty('--vx-face-z', String(this.faceZ));
     this.model.bake(this.theme, this.look);
     let n = 0, glows = false;
     for (const p of this.model.parts) { n += p.count; for (let i = 0; i < p.count; i++) if (p.col[i * 4 + 3] > 0) { glows = true; break; } }
@@ -318,6 +320,7 @@ export class Live {
     this.canvas.remove();
     this.el.removeAttribute('data-vx-live');
     this.el.removeAttribute('data-vx-cover-legends');
+    this.el.style.removeProperty('--vx-face-z');
     for (const l of this.labels) l.node.style.transform = '';
   }
 }

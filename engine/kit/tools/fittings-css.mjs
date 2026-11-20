@@ -3,7 +3,7 @@
 //   node tools/fittings-css.mjs           writes css/fittings.css (then run node tools/css.mjs)
 //   node tools/fittings-css.mjs --check   exit 1 if that file is not what fittings.js makes
 import { readFile, writeFile } from 'node:fs/promises';
-import { cases, caps, shellTokens, capTokens } from '../src/looks/fittings.js';
+import { cases, caps, shellTokens, capTokens, ridgeline, ridgelineImage, hardwareTokens } from '../src/looks/fittings.js';
 
 const out = new URL('../css/fittings.css', import.meta.url);
 const block = (selector, tokens) => `${selector} {\n${Object.entries(tokens).map(([k, v]) => `  ${k}: ${v};`).join('\n')}\n}\n`;
@@ -17,12 +17,23 @@ let css = `/* ---------- Fittings ----------
 
 `;
 for (const name of Object.keys(cases)) css += block(`:root[data-shell="${name}"]`, shellTokens(name));
+// the hardware is the same in every case, by day and at night
+css += block(':root[data-shell]', hardwareTokens());
 css += '\n/* at night */\n';
 for (const name of Object.keys(cases)) css += block(`:root[data-theme="dark"][data-shell="${name}"]`, shellTokens(name, true));
 css += '@media (prefers-color-scheme: dark) {\n';
 for (const name of Object.keys(cases)) css += block(`:root:not([data-theme="light"])[data-shell="${name}"]`, shellTokens(name, true)).replace(/^/gm, '  ').replace(/ +$/gm, '');
 css += '}\n\n';
 for (const name of Object.keys(caps)) css += block(`:root[data-caps="${name}"]`, capTokens(name));
+// The Ridgeline print without voxels, drawn from the same horizon as the voxels (a key's at four
+// pixels a voxel). A nested cap set takes it too, so it is keyed on any element.
+const key = (x) => ridgeline.key(x * 4);
+css += '\n/* the Ridgeline print, plain: inlay at the horizon, ridge below it */\n';
+css += block('[data-caps="field"]', {
+  '--vx-cap-inlay': ridgelineImage(key, ridgeline.ink.inlay),
+  '--vx-cap-ridge': ridgelineImage(key, ridgeline.ink.ridge),
+  '--vx-lamp-print': `${ridgelineImage(ridgeline.lamp, ridgeline.ink.ridge, 64, .08)}, ${ridgelineImage(ridgeline.lamp, ridgeline.ink.inlay, 64)}`,
+});
 css = css.replace(/\n+$/, '\n');
 if (process.argv.includes('--check')) {
   const have = await readFile(out, 'utf8').catch(() => '');

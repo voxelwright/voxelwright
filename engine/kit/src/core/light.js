@@ -8,6 +8,7 @@
 //   well     a level below the surface (hole), lit from its rim: where you put something in, and
 //            what you read as set apart.
 // Most of what a page holds is none of these: it is words on the surface.
+import { ridgeline } from '../looks/fittings.js';
 
 // The renderer takes a glowing cube 36% of the way to its own colour for each unit of the
 // light's glow. This much makes it wholly its own colour, in shadow and in a hole alike. The
@@ -153,7 +154,7 @@ export function seatedKey(live, m, disabled, material, lamp) {
       for (let x = lip; x < W - lip; x++) {
         const rim = sculpt && (x < lip + 2 || x >= W - lip - 2);
         const u = (origin + x) * live.vx;
-        const horizon = H * (.74 + .072 * Math.sin(u * .025) + .038 * Math.sin(u * .066));
+        const horizon = H * ridgeline.key(u);
         for (let y = 2; y < H - 2; y++) {
           const art = material === 'key' && look.artwork && y >= horizon;
           key.plot(x, y, depth - 1, art ? (y > horizon + 2 ? 'cap-ridge' : 'cap-inlay') : material);

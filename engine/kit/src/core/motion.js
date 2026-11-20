@@ -41,6 +41,23 @@ export const RELEASE = { k: 1000, c: 2 * Math.sqrt(1000) * RETURN_DAMPING };
 export const SLIDE = { k: 420, c: 30 };    // toggles, tabs: about 220 ms with a little carry
 export const CALM = { k: 170, c: 26 };
 
+/**
+ * A spring as a CSS easing, so the plain version moves by the same physics as the voxels:
+ * { time: ms until it stays within 1% of its target, easing: 'linear(...)' } for a move from 0
+ * to 1. The kit's stylesheet carries PRESS, RELEASE and SLIDE this way (--vx-press-*, and so on);
+ * tools/feel.mjs checks that they still match.
+ */
+export function springCurve({ k, c }, points = 24) {
+  const s = new Spring(0, k, c).to(1), dt = 1 / 480, xs = [0];
+  while (s.step(dt) && xs.length < 960) xs.push(s.x);
+  xs.push(1);
+  let end = xs.length - 1;
+  while (end > 0 && Math.abs(xs[end - 1] - 1) <= 0.01) end--;
+  const at = (i) => Math.round(xs[Math.min(i, xs.length - 1)] * 1000) / 1000;
+  const stops = Array.from({ length: points + 1 }, (_, j) => (j === points ? 1 : at(Math.round((j / points) * end))));
+  return { time: Math.round(end * dt * 1000), easing: `linear(${stops.join(', ')})` };
+}
+
 const easeOutBack = (p, s = 1.25) => 1 + (s + 1) * Math.pow(p - 1, 3) + s * Math.pow(p - 1, 2);
 const easeOut = (p) => 1 - Math.pow(1 - p, 4);
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);

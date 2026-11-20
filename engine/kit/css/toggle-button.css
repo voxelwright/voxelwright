@@ -48,11 +48,12 @@
 .vx-toggle-button:not([data-vx-live])::before {
   content: "";
   position: absolute;
-  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
-  border-top: var(--_lift) solid var(--_top);
-  border-left: var(--_lift) solid var(--_side);
-  border-right: var(--_lift) solid transparent;
-  border-bottom: var(--_lift) solid transparent;
+  --_body: calc(var(--_lift) + var(--_hover));
+  inset: calc(var(--_body) * -1) 0 0 calc(var(--_body) * -1);
+  border-top: var(--_body) solid var(--_top);
+  border-left: var(--_body) solid var(--_side);
+  border-right: var(--_body) solid transparent;
+  border-bottom: var(--_body) solid transparent;
   box-sizing: border-box;
   z-index: -1;
   pointer-events: none;
