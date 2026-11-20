@@ -20,6 +20,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { read } from '../make/cells.mjs'
+import { boxTruck, cableCar, cityBus, streetcar, trolleybus, van } from './fleet.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -121,55 +122,15 @@ kept('saloon', join(shelf, '1cb43f52cfc96e74e974e0a7.json'), 'grey saloon', 'car
 kept('suv', join(shelf, '3fa7e950af55009f59480a4c.json'), 'grey SUV', 'car', ['white', 'black', 'green', 'beige', 'navy'])
 kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloon', 'car', ['red', 'silver', 'white', 'taxi', 'green'])
 
-// ── The cable car, written by hand ──
-// A Powell Street car as the city runs them: 8.3 m long, 2.4 m wide, 3.2 m to its roof. Open benches at each end
-// where riders face out, a closed saloon between with windows, a clerestory roof, running boards, and the maroon,
-// cream and blue it is painted in. In cells of 5 cm, two to a body cell. It runs on its rail and is not driven.
-{
-  const PER = 2, W = 166, H = 64, D = 48
-  const k = (m, c = 0) => m | (c << 8)
-  const MAROON = k(STEEL, 16 + 0 * 10 + 6), CREAM = k(9, 16 + 3 * 10 + 0), BLUE = k(STEEL, 16 + 16 * 10 + 5), GOLD = k(STEEL, 16 + 3 * 10 + 4)
-  const WOOD = k(10, 16 + 2 * 10 + 8), DARK = k(STEEL, 14), ROOF = k(14, 13), GLASS = k(11), LAMP = k(15, 1), FLOOR = k(10, 16 + 2 * 10 + 9), BRASS = k(STEEL, 16 + 3 * 10 + 5)
-  const cells = new Uint16Array(W * H * D)
-  const set = (x, y, z, v) => { if (x >= 0 && x < W && y >= 0 && y < H && z >= 0 && z < D) cells[x + W * (z + D * y)] = v }
-  const box = (x0, x1, y0, y1, z0, z1, v) => { for (let y = y0; y < y1; y++) for (let z = z0; z < z1; z++) for (let x = x0; x < x1; x++) set(x, y, z, v) }
-  // Trucks and wheels under each end.
-  for (const cx of [26, W - 27]) {
-    box(cx - 14, cx + 14, 4, 9, 6, D - 6, DARK)
-    for (const wx of [cx - 9, cx + 9]) for (const z of [5, D - 6]) for (let y = 0; y < 10; y++) for (let x = wx - 5; x <= wx + 5; x++) if (Math.hypot(x - wx, y - 4.8) < 5) set(x, y, z, DARK), set(x, y, z + 1, DARK)
-  }
-  // Floor and running boards.
-  box(0, W, 9, 12, 2, D - 2, FLOOR)
-  box(2, W - 2, 8, 10, 0, 2, WOOD); box(2, W - 2, 8, 10, D - 2, D, WOOD)
-  // The saloon in the middle: maroon below, cream and windows above, under the roof.
-  const s0 = 50, s1 = W - 50
-  for (let x = s0; x < s1; x++) for (let z = 2; z < D - 2; z++) for (let y = 12; y < 52; y++) {
-    const wall = z === 2 || z === 3 || z === D - 3 || z === D - 4 || x === s0 || x === s0 + 1 || x === s1 - 1 || x === s1 - 2
-    if (!wall) continue
-    const window = y >= 28 && y < 46 && ((x - s0) % 11 > 1)
-    set(x, y, z, y < 26 ? MAROON : y < 28 ? GOLD : window ? GLASS : CREAM)
-  }
-  // Open ends: a bench along each side facing out, posts to hold, a low wall at the very end with the car's number board.
-  for (const [a, b] of [[2, s0], [s1, W - 2]]) {
-    box(a, b, 12, 16, 3, 7, WOOD); box(a, b, 12, 16, D - 7, D - 3, WOOD)
-    box(a, b, 16, 20, 5, 7, WOOD); box(a, b, 16, 20, D - 7, D - 5, WOOD)
-    for (let x = a + 3; x < b - 2; x += 12) for (const z of [2, D - 3]) box(x, x + 1, 12, 52, z, z + 1, BRASS)
-  }
-  box(0, 2, 12, 26, 2, D - 2, MAROON); box(W - 2, W, 12, 26, 2, D - 2, MAROON)
-  box(0, 2, 26, 34, 10, D - 10, BLUE); box(W - 2, W, 26, 34, 10, D - 10, BLUE)
-  box(0, 1, 18, 21, D / 2 - 2, D / 2 + 2, LAMP); box(W - 1, W, 18, 21, D / 2 - 2, D / 2 + 2, LAMP)
-  // Roof over all of it, and the clerestory along its middle.
-  box(0, W, 52, 55, 0, D, ROOF)
-  box(6, W - 6, 55, 59, 10, D - 10, CREAM)
-  for (let x = 10; x < W - 10; x += 6) box(x, x + 3, 56, 58, 10, 11, GLASS), box(x, x + 3, 56, 58, D - 11, D - 10, GLASS)
-  box(6, W - 6, 59, 61, 8, D - 8, ROOF)
-  // Destination boards on the roof at each end.
-  box(2, 4, 55, 62, 14, D - 14, BLUE); box(W - 4, W - 2, 55, 62, 14, D - 14, BLUE)
-  const size = [W / PER, H / PER, D / PER].map(Math.ceil)
-  const fine = runsOf(cells), looks = [{ size: [W, H, D], per: PER, low: [0, 0, 0], ...fine }]
-  const c = coarser(cells, [W, H, D], 2)
-  looks.push({ size: c.size, per: 1, low: [0, 0, 0], ...runsOf(c.kinds) })
-  wrote('cable-car', { name: 'cable car', kind: 'cable', size, body: runsOf(c.kinds), looks, variants: [] })
+// ── The fleet, written by hand (sf/fleet.mjs): what no kept record has ──
+// Each look as written, then coarser by halves down to a cell of 10 cm, which is its body. The van and the truck are
+// driven like any kept car (a motor, seats); the rest are driven by the street.
+for (const [id, make, colours] of [['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
+  const v = make(), looks = [{ size: v.size, per: v.per, low: [0, 0, 0], ...runsOf(v.cells) }]
+  for (let by = 2; v.per / by >= 1; by *= 2) { const c = coarser(v.cells, v.size, by); looks.push({ size: c.size, per: v.per / by, low: [0, 0, 0], ...runsOf(c.kinds) }) }
+  const b = coarser(v.cells, v.size, v.per), body = runsOf(b.kinds), paint = paintOf(v.cells)
+  const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
+  wrote(id, { name: v.name, kind: v.kind, size: b.size, body, ...(v.motor ? { motor: v.motor, controls: 'drive', seats: v.seats } : {}), looks, variants })
 }
 
 writeFileSync(join(out, 'index.json'), JSON.stringify({ version: 1, cars: library }, null, 1))

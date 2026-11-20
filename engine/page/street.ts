@@ -123,6 +123,8 @@ export interface Street {
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
   enabled: boolean
+  /** One of every kept vehicle in a row along a heading from a place (cells, radians), standing still: for looking at them (the checks' line-up). Null clears it. */
+  lineup(at: readonly [number, number] | null, heading?: number): string[]
   /** What is on its way to life and which faces are made (for the checks). */
   readonly debug: unknown
   readonly red: unknown
@@ -1035,6 +1037,9 @@ export function street(o: {
     }
   }
 
+  /** The line-up's vehicles (`lineup`). */
+  const showcase: Car[] = []
+
   // ── Blasts ──
   /** How many of the shocks this has answered. A blast throws the few cars nearest it (they come to life, pushed away from it) and stops the traffic round it a while. */
   let heard = o.shocks.length
@@ -1099,6 +1104,7 @@ export function street(o: {
       for (const c of traffic) show(c, view)
       for (const c of cables) show(c, view)
       for (const c of trams) show(c, view)
+      for (const c of showcase) show(c, view)
       for (const c of pending.keys()) show(c, view)
       ms += (performance.now() - t0 - ms) * 0.1
     },
@@ -1160,6 +1166,18 @@ export function street(o: {
     },
     get debug() { return { pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get red() { return shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; return q.sig && lightFor(junctionOf(q.sig), q.cdx!, q.cdz!, o.clock()) === 'red' }).map((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }, j = junctionOf(q.sig!); return { seed: p.seed, node: q.sig, u: Math.round(cycleAt(j, o.clock())), phase: phaseOf(j, q.cdx!, q.cdz!), axis: [j.ax, j.az].map((v) => Math.round(v * 100) / 100), dir: [q.cdx!, q.cdz!].map((v) => Math.round(v * 100) / 100), at: [Math.round(p.at[0]), Math.round(p.at[2])], jat: [Math.round(j.x), Math.round(j.z)] } }) },
+    lineup(at, heading = 0) {
+      for (const c of showcase) hide(c)
+      showcase.length = 0
+      if (!at) return []
+      let along = 0
+      const fx = Math.cos(heading), fz = Math.sin(heading)
+      for (const m of library.map((c) => ready.get(c.id)).filter((m): m is Model => !!m)) {
+        const c: Car = { id: ids++, model: m, paint: -1, kind: 'parked', seed: ids, x: at[0] + fx * (along + m.long / 2), y: 0, z: at[1] + fz * (along + m.long / 2), heading, pitch: 0, v: 0, piece: null, shown: '' }
+        settle(c); showcase.push(c); along += m.long + 15
+      }
+      return showcase.map((c) => c.model.name)
+    },
     get enabled() { return on },
     set enabled(v: boolean) { on = v },
     get ms() { return ms + peopleMs },
