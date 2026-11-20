@@ -289,7 +289,11 @@ def build(args, lock_fd):
             raise ValueError("incorrect names file")
         return [pack, meta, report]
 
-    for name in dict.fromkeys(PILOT + names):
+    priority_file = root / "priority.json"
+    priority = json.loads(priority_file.read_text()) if priority_file.exists() else []
+    if not isinstance(priority, list) or any(name not in names for name in priority):
+        raise ValueError("priority.json must list square names in this run")
+    for name in dict.fromkeys(priority + PILOT + names):
         task("inputs-" + name, keep, name)
         observations = root / "inputs" / (name + ".json.gz")
 
