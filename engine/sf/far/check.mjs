@@ -30,7 +30,7 @@ const VIEWS = {
   park: { size: [2018, 864], fov: null },
   downtown: { size: [1280, 720], fov: 70, at: [52440, 150, 66990], look: [301.8, -6] },
   pyramid: { size: [1280, 720], fov: 50, at: [53330, 110, 67170], look: [299.8, -2.5] },
-  street: { size: [1280, 720], fov: 70, at: [52195, null, 66959.5], look: [80.53, -1.5] },
+  street: { size: [1280, 720], fov: 70, at: [51800, null, 67130], look: [80.6, -1.5] },
 }
 const only = arg('only', Object.keys(VIEWS).join(',')).split(',')
 

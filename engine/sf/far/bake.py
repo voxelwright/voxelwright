@@ -15,7 +15,7 @@ grid the square touches (sf/far/pack.mjs packs them into the release's far tiles
 Incremental: a square whose archive has not changed since it was baked (its size and time, and this bake's VERSION)
 is left alone, so the far model grows as the run finishes squares.
 
-    ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force]
+    ~/.village/engine/landing/ina/venv/bin/python engine/sf/far/bake.py [square ...] [--force] [--cell 0.5] [--out dir]
 """
 import io, json, math, os, sys, time, zipfile, zlib
 import numpy as np
@@ -42,10 +42,10 @@ def load(path):
     return frame, arr, feats
 
 
-def quarter_to_half(a, how):
-    """A quarter-metre grid to half a metre: each 2 x 2 by `how` (max, sum)."""
-    n = a.shape[0] // 2 * 2
-    b = a[:n, :n].reshape(n // 2, 2, n // 2, 2)
+def pool(a, k, how):
+    """A quarter-metre grid to cells k times as wide: each k x k by `how` (max, sum)."""
+    n = a.shape[0] // k * k
+    b = a[:n, :n].reshape(n // k, k, n // k, k)
     return b.max(axis=(1, 3)) if how == 'max' else b.sum(axis=(1, 3))
 
 
@@ -62,26 +62,26 @@ def named(frame, ids, cell):
     return out
 
 
-def bake(square, force=False):
+def bake(square, force=False, cell=0.5, out=OUT):
     src = f'{INPUTS}/{square}.zip'
     st = os.stat(src)
-    sig = f'{VERSION}:{st.st_size}:{int(st.st_mtime)}'
-    dest = f'{OUT}/{square}'
+    sig = f'{VERSION}:{cell}:{st.st_size}:{int(st.st_mtime)}'
+    dest = f'{out}/{square}'
     if not force and os.path.exists(f'{dest}/index.json') and json.load(open(f'{dest}/index.json')).get('inputs') == sig:
         return None
     began = time.time()
     frame, arr, feats = load(src)
     west, north = frame['west'], frame['north']
     e0, n0 = (float(v) * 1000 for v in square.split('_'))
-    cell = 0.5
+    k = int(round(cell / 0.25))
     # ── The surface at half a metre: the highest return; how many came back, and how many more than once.
     mm = arr('top_mm')
     hole = mm == np.iinfo(np.int32).min
-    top = quarter_to_half(np.where(hole, -1e9, mm / 1000.0).astype(np.float32), 'max')
-    count = quarter_to_half(arr('count').astype(np.float32), 'sum')
-    multi = quarter_to_half(arr('multi').astype(np.float32), 'sum')
-    bright = quarter_to_half(arr('intensity').astype(np.float32), 'max')
-    ids = quarter_to_half(arr('footprint'), 'max').astype(np.int32)
+    top = pool(np.where(hole, -1e9, mm / 1000.0).astype(np.float32), k, 'max')
+    count = pool(arr('count').astype(np.float32), k, 'sum')
+    multi = pool(arr('multi').astype(np.float32), k, 'sum')
+    bright = pool(arr('intensity').astype(np.float32), k, 'max')
+    ids = pool(arr('footprint'), k, 'max').astype(np.int32)
     del mm, hole
     # The ground at each half metre's middle, from the 1 m grid (a sample at each whole metre from the corner).
     g1 = arr('ground').astype(np.float32)
@@ -169,12 +169,12 @@ def bake(square, force=False):
                                'pos': [round((west + ca * cell * step - E0) * 10, 3), 0, round((N0 - north + ra * cell * step) * 10, 3)],
                                'c0': [1, 0, 0], 'c2': [0, 0, 1], 'size': [int(cb - ca), int(hs.max()) + 1, int(rb - ra)], 'low': int(hs.min())})
 
-    hq = 5
+    hq = int(round(cell * 10))
     h = np.maximum(np.round((top - SEA) * 10 / hq).astype(np.int64), 0)
     floor = np.maximum(np.round((ground - SEA) * 10 / hq).astype(np.int64), 0)
     write('far', h, own & stands & ~water, roof, walls, style, bid, floor, hq, 1)
     # The bare ground, every 4th cell (2 m), at its own height in metres; grey, a little green where it is leaf.
-    step, hq = 4, 10
+    step, hq = max(1, int(round(2.0 / cell))), 10
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))
     gh = np.maximum(np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64), 0)
     gc = np.where(leafy[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
@@ -188,10 +188,12 @@ def bake(square, force=False):
 
 def main():
     force = '--force' in sys.argv
-    asked = [a for a in sys.argv[1:] if not a.startswith('--')]
+    arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
+    cell, out = float(arg('--cell', '0.5')), os.path.expanduser(arg('--out', OUT))
+    asked = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith('--') and sys.argv[i - 1] not in ('--cell', '--out')]
     squares = asked or sorted(f[:-4] for f in os.listdir(INPUTS) if f.endswith('.zip') and not f.endswith('.part'))
     for s in squares:
-        said = bake(s, force)
+        said = bake(s, force, cell, out)
         print(json.dumps(said) if said else f'{s}: as it was', flush=True)
 
 

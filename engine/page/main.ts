@@ -39,6 +39,7 @@ import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { far as farOf } from './far.ts'
+import { fog } from './fog.ts'
 import { BAY, ON as BAY_ON, START as BAY_START, STREAM, near, open, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
@@ -127,6 +128,8 @@ async function main() {
   // The far model (#450, far.ts): the city past the cells' reach as faces, where the realm has one (its record's
   // `far`, a folder beside the page) or the address names one (`?far=/path/`).
   const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
+  const marine = await fog(device, gpu.format, march)
   // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
   const shade = await under(device, gpu.format)
   const folk = await people(device, gpu.format, march)
@@ -411,6 +414,7 @@ async function main() {
       march.draw(encoder, to, v, flags, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 0, endOfPassWriteIndex: 1 } : undefined)
       windowed = portalDraw?.(encoder, to, v, (now - started) / 1000, timed ? { querySet: clock.set, beginningOfPassWriteIndex: 2, endOfPassWriteIndex: 3 } : undefined) === true
       farModel.draw(encoder, to, v)
+      marine.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
@@ -1118,6 +1122,8 @@ async function main() {
     return { march: middle(alone), withFar: middle(both), size: [canvas.width, canvas.height], ...farModel.stats }
   }
   Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, far: farModel, farIds, farPasses, pause: (on: boolean) => { paused = on } })
+  // How thick the marine layer is, 0 to 1 (fog.ts): a property, as the hour and the rain are.
+  Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'fog', { get: () => marine.strength, set: (v: number) => { marine.strength = Math.max(0, Math.min(1, v)) } })
 
   // `?living=car`: a car to drive stands in the street ahead of where the page starts, with no console needed.
   // `?living=finecar`: the same car wearing a look in cells of 2.5 cm, with seats, a dash and a wheel inside (V from the seat).

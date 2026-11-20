@@ -155,7 +155,7 @@ export interface Listing {
   tiles: Record<string, ({ path: string; bytes: number; sha256: string } | null)[]>
   credit?: string
 }
-interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; lods: number[]; lo: number[]; hi: number[] }
+interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
 
 export interface Far {
@@ -172,12 +172,14 @@ export interface Far {
   readonly stats: { faces: number; sections: number; tiles: number; held: number; heldBytes: number; fetched: number; fetchedBytes: number; coming: number; covered: number; failed: number; error: string }
   /** Whether every band the view needs is here. */
   readonly whole: boolean
+  /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
+  readonly depth: GPUTextureView | null
 }
 
 /** The far model whose listing is at `base`far.json (a folder beside the page), or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, detail: 1, stats, whole: true, depth: null }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   const listing = await fetch(`${base}far.json`).then((r) => (r.ok ? (r.json() as Promise<Listing>) : null)).catch(() => null)
@@ -275,6 +277,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     }
     return true
   }
+  /** Whether any face of a run that looks `way` (1 up, 2 to 5 the walls) could face the eye: its plane is in front of the eye at some corner of the section's box. */
+  const facing = (way: number, s: Section, eye: readonly number[]) => {
+    if (way === 1) return eye[1] > s.lo[1]
+    const axis = way < 4 ? s.c0 : s.c2, sign = way % 2 ? 1 : -1
+    let most = -Infinity
+    for (const x of [s.lo[0], s.hi[0]]) for (const y of [s.lo[1], s.hi[1]]) for (const z of [s.lo[2], s.hi[2]]) most = Math.max(most, sign * (axis[0] * (eye[0] - x) + axis[1] * (eye[1] - y) + axis[2] * (eye[2] - z)))
+    return most > 0
+  }
   /** The bands a tile `d` cells off needs: band k holds faces from bands[k] metres, which are `detail` pixels across out to bands[k] * focal / detail. */
   const needs = (d: number, focal: number, detail: number) => bands.map((least, k) => k === 0 || (d / 10) * detail < bands[k - 1] * focal)
   /** Faces held at most: past this the furthest tiles' finer bands are let go. */
@@ -287,6 +297,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const self: Far = {
     listing, reach: reachAsked, detail: Number(query.get('fardetail') ?? 0.75), stats,
     get whole() { return whole },
+    get depth() { return own?.view ?? null },
     draw(encoder, to, view) { pass(encoder, to.color, to.depth, to.size, view, picture, false) },
     drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
   }
@@ -295,7 +306,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const ownDepth = (s: readonly [number, number]) => {
     if (own && own.size[0] === s[0] && own.size[1] === s[1]) return own.view
     own?.texture.destroy()
-    const texture = device.createTexture({ label: 'far depth', size: [s[0], s[1]], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT })
+    const texture = device.createTexture({ label: 'far depth', size: [s[0], s[1]], format: 'depth32float', usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING })
     own = { texture, view: texture.createView(), size: [s[0], s[1]] }
     return own.view
   }
@@ -342,7 +353,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const out = encoder.beginRenderPass({
       label: 'far',
       colorAttachments: [{ view: colour, loadOp: clear ? 'clear' : 'load', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
-      depthStencilAttachment: { view: ownDepth(sz), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'discard' },
+      depthStencilAttachment: { view: ownDepth(sz), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
     })
     out.setPipeline(pipeline)
     out.setBindGroup(0, bind)
@@ -363,11 +374,18 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
           if (!inView(view, aspect, s.lo, s.hi)) continue
           const least = (self.detail * ds) / 10 / focal
           // lods run from big to small: every face at least the first of them under `least` metres.
-          const k = lods.findIndex((l) => l <= least), count = k < 0 ? s.count : s.lods[k]
-          if (!count) continue
-          out.setBindGroup(1, b)
-          out.draw(4, count, 0, s.start)
-          faces += count; sections++
+          const k = lods.findIndex((l) => l <= least)
+          let bound = false
+          for (const run of s.runs) {
+            // A run of faces all looking away from the eye (it is behind their plane at every corner of the section) is not drawn.
+            if (!facing(run.way, s, eye)) continue
+            const count = k < 0 ? run.count : run.lods[k]
+            if (!count) continue
+            if (!bound) { out.setBindGroup(1, b); bound = true }
+            out.draw(4, count, 0, run.start)
+            faces += count
+          }
+          if (bound) sections++
         }
       }
     }
