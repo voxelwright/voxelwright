@@ -56,15 +56,11 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   `gcloud` and related tools. Never work around it (for example with an
   app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
   until the owner authorizes a specific use.
-- For now, use GPT-6.2 Astra at high or xhigh effort for ambitious work such as a
-  redesign, an architectural change or a difficult diagnosis. Use GPT-6.2 Sol for
-  straightforward implementation, lookups and small fixes. Prefer this pair when
-  the owner's personal Claude usage is low.
-- On Thursday night in the owner's local time, before the Friday reset, prefer
-  the owner's personal Claude allocation for remaining project work until its
-  weekly limit is exhausted. Use Opus for ambitious work and Sonnet for routine
-  changes. Once the limit is reached or the reset occurs, resume the Astra/Sol
-  default. Keep each dispatch tied to a real unit of work.
+- Use Claude Opus for every dispatch (owner, November 20, 2026), with effort
+  set by the task: low or medium for lookups, merges and mechanical fixes, high
+  for ordinary building, and xhigh for diagnosis, design and retrospectives.
+- Start each unit of work in a fresh thread with a self-contained brief. Do not
+  hand new work to a long, finished lane thread.
 - Give each unit a clear stop condition and a time box. For UI and 3D, use the
   UI Craft screenshot and review loop with its cross-model target of 9/10 or better.
 - Keep subagents short-lived. Give each one unit of work, end it when the work
