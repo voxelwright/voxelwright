@@ -30,8 +30,16 @@ const wait = (ask, ms) => new Promise((done, fail) => { const t0 = performance.n
 onerror = (m) => say({ error: String(m) })
 ;(async () => {
   try {
-    const w = document.getElementById('realm').contentWindow
-    w.addEventListener('error', (e) => say({ error: e.message }))
+    const frame = document.getElementById('realm')
+    // The realm's own errors, caught as soon as its document is there (its module waits on the GPU before it can fail).
+    const caught = []
+    await wait(() => { const d = frame.contentDocument; return d && d.URL.endsWith('/sf/index.html') }, 30000)
+    const w = frame.contentWindow
+    w.addEventListener('error', (e) => { caught.push(String(e.message)); say({ caught: String(e.message) }) })
+    w.addEventListener('unhandledrejection', (e) => { caught.push(String(e.reason?.message ?? e.reason)); say({ caught: String(e.reason?.stack ?? e.reason) }) })
+    for (const kind of ['error', 'warn']) { const was = w.console[kind].bind(w.console); w.console[kind] = (...a) => { say({ [kind]: a.map(String).join(' ').slice(0, 400) }); was(...a) } }
+    const where = () => ({ engine: !!w.engine, seen: w.engine?.seen, stats: w.engine?.world?.stats && { ready: w.engine.world.stats.ready, wanted: w.engine.world.stats.wanted, made: w.engine.world.stats.made }, tally: w.engine?.tiles?.tally, body: w.document.body?.innerText?.slice(0, 300) })
+    setInterval(() => say({ where: where() }), 15000)
     say({ gpu: !!navigator.gpu, ua: navigator.userAgent, screen: [innerWidth, innerHeight, devicePixelRatio] })
     const e = await wait(() => w.engine?.seen?.first > 0 && w.engine, 180000)
     await wait(() => e.seen.whole > 0, 240000)
@@ -81,7 +89,11 @@ try {
   while (!report && Date.now() - began < 10 * 60_000) await new Promise((r) => setTimeout(r, 1000))
   try { sim('io', id, 'screenshot', join(shots, 'phone-webkit.png')) } catch { /* no picture */ }
 } finally { stop() }
-writeFileSync(join(shots, 'phone-webkit.json'), JSON.stringify({ device, said }, null, 1))
+writeFileSync(join(shots, 'phone-webkit.json'), JSON.stringify({ device, said, asked: site.asked }, null, 1))
+// How far the page came, by what it asked for.
+const kinds = {}
+for (const a of site.asked) { const k = `${a.path.includes('/tiles/') ? 'tile' : a.path.split('/').slice(0, 3).join('/')} ${a.status}`; kinds[k] = (kinds[k] ?? 0) + 1 }
+console.log(`  asked: ${JSON.stringify(kinds)}`)
 const gpu = said.find((s) => 'gpu' in s)
 check(!!gpu?.gpu, `WebGPU in WebKit (${gpu?.ua ?? 'no word from the page'})`)
 check(!!report?.done, report?.done ? `the realm drew in WebKit: park shown ${report.load.near} ms, whole ${report.load.whole} ms (on localhost)` : `the realm did not finish in WebKit: ${report?.error ?? 'no answer in 10 minutes'}`)

@@ -1299,6 +1299,14 @@ async function main() {
 main().catch(async (e: unknown) => {
   const text = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
   over.status(`This did not work here: ${text.split('\n')[0]}`)
+  // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
+  if (LOCAL) {
+    document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
+    const told = document.createElement('p')
+    told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'
+    told.textContent = /webgpu/i.test(text) ? `${LOCAL.name} is drawn with WebGPU, which this browser does not offer here. It opens in a recent Safari, Chrome or Edge.` : `${LOCAL.name} could not open here. Reloading the page may help.`
+    document.body.append(told)
+  }
   console.error(e)
   report.notes.push(`failed: ${text}`)
   await post('error')
