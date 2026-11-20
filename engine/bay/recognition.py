@@ -29,48 +29,52 @@ WIDTH, HEIGHT, FOV = 960, 540, 70
 ENGINE = Path(__file__).resolve().parents[1]
 
 
-def reference(inputs, out, label, square, id_, yaw):
+def perspective(p, photo, yaw):
+    img = np.asarray(Image.open(io.BytesIO(photo)).convert("RGB"))
+    scale = math.tan(math.radians(FOV / 2))
+    focal = HEIGHT / 2 / scale
+    u, v = np.meshgrid(
+        np.arange(WIDTH) + 0.5 - WIDTH / 2, np.arange(HEIGHT) + 0.5 - HEIGHT / 2
+    )
+    a = math.radians(yaw)
+    rays = np.stack(
+        (
+            math.sin(a) * focal + math.cos(a) * u,
+            math.cos(a) * focal - math.sin(a) * u,
+            -v,
+        ),
+        axis=2,
+    )
+    rays = rays @ rotation(np.array(p["computed_rotation"])).T
+    col = (
+        (np.arctan2(rays[:, :, 0], rays[:, :, 2]) / (2 * np.pi) + 0.5)
+        % 1
+        * img.shape[1]
+    ).astype(int)
+    row = (
+        (
+            0.5
+            + np.arctan2(rays[:, :, 1], np.hypot(rays[:, :, 0], rays[:, :, 2])) / np.pi
+        )
+        * img.shape[0]
+    ).astype(int)
+    return Image.fromarray(img[row.clip(0, img.shape[0] - 1), col])
+
+
+def reference(inputs, out, label, square, id_, yaw, external=None):
     with zipfile.ZipFile(inputs / (square + ".zip")) as archive:
-        p = next(
-            p for p in json.loads(archive.read("photos/cameras.json")) if p["id"] == id_
-        )
-        img = np.asarray(
-            Image.open(io.BytesIO(archive.read("photos/" + id_ + ".jpg"))).convert(
-                "RGB"
+        if external:
+            p, photo = external
+        else:
+            p = next(
+                p
+                for p in json.loads(archive.read("photos/cameras.json"))
+                if p["id"] == id_
             )
-        )
+            photo = archive.read("photos/" + id_ + ".jpg")
         x, z = cells(*p["computed_geometry"]["coordinates"])
+        perspective(p, photo, yaw).save(out / (label + ".jpg"), quality=90)
         scale = math.tan(math.radians(FOV / 2))
-        focal = HEIGHT / 2 / scale
-        u, v = np.meshgrid(
-            np.arange(WIDTH) + 0.5 - WIDTH / 2, np.arange(HEIGHT) + 0.5 - HEIGHT / 2
-        )
-        a = math.radians(yaw)
-        rays = np.stack(
-            (
-                math.sin(a) * focal + math.cos(a) * u,
-                math.cos(a) * focal - math.sin(a) * u,
-                -v,
-            ),
-            axis=2,
-        )
-        rays = rays @ rotation(np.array(p["computed_rotation"])).T
-        col = (
-            (np.arctan2(rays[:, :, 0], rays[:, :, 2]) / (2 * np.pi) + 0.5)
-            % 1
-            * img.shape[1]
-        ).astype(int)
-        row = (
-            (
-                0.5
-                + np.arctan2(rays[:, :, 1], np.hypot(rays[:, :, 0], rays[:, :, 2]))
-                / np.pi
-            )
-            * img.shape[0]
-        ).astype(int)
-        Image.fromarray(img[row.clip(0, img.shape[0] - 1), col]).save(
-            out / (label + ".jpg"), quality=90
-        )
         aerial = Image.open(archive.open("naip.png"))
         e, n = (float(k) * 1000 for k in square.split("_"))
         cx, cy = (500000 + x / 10 - e + 120) * 2, (n + 1120 - 4250000 + z / 10) * 2
@@ -87,8 +91,9 @@ def reference(inputs, out, label, square, id_, yaw):
     return x / 10, z / 10
 
 
-def shoot(root, phase, port, square, label, x, z, yaw):
-    ground = CONTROL_GROUND[label]
+def shoot(root, phase, port, square, label, x, z, yaw, ground=None):
+    if ground is None:
+        ground = CONTROL_GROUND[label]
     views = f"{x},{ground+2.5:.1f},{z},{yaw},0;{x},{ground+100:.1f},{z},0,-90"
     subprocess.run(
         [
