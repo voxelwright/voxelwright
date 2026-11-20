@@ -45,6 +45,7 @@ import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker } from './ask.ts'
 import { LOCAL, RULES } from './local.ts'
+import { realmControls } from './realm-ui.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { gather } from './gather.ts'
@@ -1218,11 +1219,8 @@ async function main() {
   }))
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
-    const button = document.createElement('button')
-    button.type = 'button'; button.textContent = 'Reset'; button.title = 'Put the world back as it was (Backspace)'
-    button.style.cssText = 'position:fixed;right:16px;top:16px;font:600 14px system-ui;padding:10px 14px;border-radius:999px;border:0;background:rgba(20,22,28,.72);color:#fff;z-index:6'
-    button.onclick = () => void reset()
-    document.body.append(button)
+    // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) }) })
   }
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
