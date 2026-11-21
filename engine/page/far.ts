@@ -121,8 +121,8 @@ fn hashf(p: vec2f, k: u32) -> f32 {
   h = (h ^ (h >> 13u)) * 0x5bd1e995u;
   return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
-// Whether this point is the far model's to draw: not behind what the march met, and past the reach; or nearer,
-// on a look where the march met the ground or the sea only past the reach (the cells' coarse boxes and the faces do
+// Whether this point is the far model's to draw: not behind what the march met, and past the reach; or a tenth nearer
+// at most, on a look where the march met the ground or the sea only past the reach (the cells' coarse boxes and the faces do
 // not agree to the metre where they meet, and a look the march hands over must find the far model's faces). Never
 // nearer than the reach against the sky: what stands near the eye is the cells' to say.
 fn ours(in: Out) -> bool {
@@ -132,10 +132,12 @@ fn ours(in: Out) -> bool {
   if (z >= 1.0) { return dist >= reach; }
   let along = dot(in.seen, v.forward);
   let met = NEAR / max(1.0 - z * (FAR - NEAR) / FAR, 1e-9);
-  // Where the march met something on this look, and the reach there: a look that leaves the wedge for the cells, which
-  // are kept to 500 m, had drawn a wall beside the eye over the street they drew 300 m up it.
+  // Nearer than the reach, only a tenth short of it, and only on a look the march met nothing on before the reach where
+  // it met something (a look it hands over meets the sea, kilometres off). Nearer, what the cells lack is not the far
+  // model's to add: up Grant Ave, past where the far model begins 100 m off, the march had handed the street over and
+  // the far model drew a building's columns 15 m off across it.
   let metAt = in.seen * (met / max(along, 1e-3));
-  if (dist < reach && length(metAt) < reachAt(metAt, v.reach, v.wedge, v.bear)) { return false; }
+  if (dist < reach && (dist < reach * 0.9 || length(metAt) < reachAt(metAt, v.reach, v.wedge, v.bear))) { return false; }
   return along < met;
 }
 struct Drawn { @location(0) colour: vec4f }
