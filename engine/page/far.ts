@@ -191,8 +191,9 @@ struct Drawn { @location(0) colour: vec4f }
     // brighter made a tower a lantern. Not the same share everywhere, which made every tower from the park one flat
     // orange slab: offices are lit a run of a floor at a time, so the share is by runs of three bays of a storey, most
     // of them dark and a third lit.)
-    let run = hashf(floor(vec2f(fx / 3.0, fy)), in.id + in.way * 7919u + 31u);
-    let lamp = mix(one * pane, pane * (0.07 + 0.42 * smoothstep(0.62, 0.74, run)), blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
+    var share = 0.2;
+    if (blur > 0.0) { share = 0.07 + 0.42 * smoothstep(0.62, 0.74, hashf(floor(vec2f(fx / 3.0, fy)), in.id + in.way * 7919u + 31u)); }
+    let lamp = mix(one * pane, pane * share, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
     // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
     // own lamps as much as it leaves on.
     let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));

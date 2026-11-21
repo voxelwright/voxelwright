@@ -120,10 +120,11 @@ def bake(square, force=False, cell=0.5, out=OUT):
     del things, several, clear
     # Trees are crowns on trunks, as in the wedge (matte.py `crown_rule`, the one owner of the rule): under a crown
     # stands what it hangs over (the ground, or the roof of the building it was baked as a wall of) and its trunk,
-    # and the crown is a layer of its own (`far-crown0`), with its gaps left out.
+    # and the crown is a layer of its own (`far-crown0`).
     tree = crown_rule(top, ground, ids, leafy, multi, count, cell, raw)
     crown, trunk = tree['crown'], tree['trunk']
-    top_all = np.where(crown, tree['rough'], top)
+    # (The crown's top as the surface has it, and no gaps: its own ragged top and its gaps are the wedge's near layer's, 25 cm a cell within 700 m.)
+    top_all = top
     top = np.where(crown, np.where(trunk, np.maximum(tree['under'] + 1.0, tree['base']), tree['base']), top)
     leafy = leafy & ~crown
     over = top - ground
@@ -205,7 +206,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
     # a crown is a few pixels: the wedge's three slabs and three greens are for 25 cm).
     upper = np.maximum(np.round((top_all - SEA) * 10 / hq).astype(np.int64), 0)
     lower = np.maximum(np.minimum(np.round((tree['under'] - SEA) * 10 / hq).astype(np.int64), upper - 1), 0)
-    write('far-crown0', upper, crown & ~tree['gap'] & ~water, own, LEAF_TOP(top.shape), LEAF_SIDE(top.shape), zeros, zeros, lower, hq, 1)
+    write('far-crown0', upper, crown & ~water, own, LEAF_TOP(top.shape), LEAF_SIDE(top.shape), zeros, zeros, lower, hq, 1)
     # The bare ground, every 4th cell (2 m), at its own height in metres; grey, a little green where it is leaf.
     step, hq = max(1, int(round(2.0 / cell))), 10
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))

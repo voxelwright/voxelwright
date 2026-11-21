@@ -1060,7 +1060,9 @@ fn sky(rd: vec3f) -> vec3f {
     // 25 degree lens is seven pixels, and the stars were grey specks with corners floating over the towers (#450).
     let cell = rd * 220.0;
     let square = vec3i(floor(cell));
-    let star = hash3i(square, 19u) * (1.0 - smoothstep(0.6, 1.4, length(cell - normalize(vec3f(square) + 0.5) * 220.0) / (220.0 * g.pixel)));
+    var star = hash3i(square, 19u);
+    // (Only in a square that has one: three in a thousand.)
+    if (star > 0.9965) { star *= 1.0 - smoothstep(0.6, 1.4, length(cell - normalize(vec3f(square) + 0.5) * 220.0) / (220.0 * g.pixel)); }
     // Fewer the brighter the sky overhead is, and none under a sky of rain (which is told by that brightness: the
     // weather itself is not read here, see the globals).
     col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);

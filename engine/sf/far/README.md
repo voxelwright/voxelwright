@@ -24,8 +24,11 @@ is 43, 55, 27).
 
 The wedge bakes a crown as its own layers (`near-crown0` to `2`, `far-crown0`: slabs that hang lower the further
 inside the crown they are, each darker; the gaps are in the top slab), with a trunk under each top and the building's
-own roof under what hangs over it. The square bake writes one slab a crown (`far-crown0`): at a metre a cell past
-500 m a crown is a few pixels. The squares in the pinned release were baked before the rule was `bake.py`'s: they
+own roof under what hangs over it. The ragged top, the gaps and a slender crown's wider lower slabs are for crowns
+within 400 m of the eye (`DETAILED`), where a tree is tens of pixels across. Given to every crown they were 110,000
+faces more in the near layer and half a million in the far one, for nothing seen, and the park's frame at scale 0.75,
+which is at 60 a second's time as it is, went past it. The square bake writes one slab a crown (`far-crown0`), smooth
+and whole, for the same reason. The squares in the pinned release were baked before the rule was `bake.py`'s: they
 have leaf as columns until the city's far model is baked and packed again (`bake.py`'s `VERSION` is raised, so
 `grow.sh` bakes every square again).
 

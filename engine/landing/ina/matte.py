@@ -161,7 +161,8 @@ def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, 
                            'size': [int(cb - ca), int(hs.max()) + 1, int(rb - ra)], 'low': int(hs.min())})
 
 
-CROWNS = 7  # raised when what `crowns` works out changes
+CROWNS = 8  # raised when what `crowns` works out changes
+DETAILED = float(os.environ.get('CROWNS_DETAILED', 400))  # metres from the eye within which a crown has its ragged top and its gaps
 PREPARED = 9  # raised when what `prepared` works out changes: its files are made again
 
 
@@ -361,7 +362,7 @@ def crown_rule(top, ground, ids, leafy, multi, returns, cell, raw):
     rim = np.clip(1.0 - inside / 2.0, 0.0, 1.0)
     by_trunk = ndimage.binary_dilation(trunk, iterations=max(1, int(round(1.0 / cell))))
     gap = crown & ~by_trunk & (rank < 0.05 + 0.12 * thin + 0.2 * rim)
-    return {'crown': crown, 'hung': hung, 'base': base, 'under': under, 'trunk': trunk, 'rough': rough, 'gap': gap,
+    return {'crown': crown, 'hung': hung, 'base': base, 'under': under, 'trunk': trunk, 'rough': rough, 'gap': gap, 'slender': np.clip(slender, 0.0, 1.0).astype(np.float32),
             'said': f'{int(crown.sum() * cell * cell)} m2 of crown, {int(hung.sum() * cell * cell)} m2 of it over outlines, {int(gap.sum() * cell * cell)} m2 of gaps, {k} trunks'}
 
 
@@ -420,8 +421,12 @@ def main():
         tree = crowns(g, grid) if standing else None
         if standing:
             crown, trunk = tree['crown'], tree['trunk']
-            # (A crown's own top is the lidar's, ragged; some of its columns are gaps.)
-            top_all = np.where(crown, tree['rough'], top)
+            # (A crown's own top is the lidar's, ragged, and some of its columns are gaps: within DETAILED metres of the
+            # eye, where a tree is tens of pixels across. Everywhere in the near layer they were 110,000 faces more than
+            # smooth whole crowns, and in the far layer half a million: with those the park's frame at scale 0.75 went
+            # past 60 a second's time by night, and a second page on the same GPU never got its turn.)
+            detailed = (np.hypot(uu[None, :] - eu, ww[:, None] - ew) < DETAILED) if cell_out < 0.5 else np.zeros(top.shape, bool)
+            top_all = np.where(crown & detailed, tree['rough'], top)
             top = np.where(crown, np.where(trunk, np.maximum(tree['under'] + 1.0, tree['base']), tree['base']), top)
             leafy = leafy & ~crown
         over = top - ground
@@ -511,7 +516,7 @@ def main():
             # crown's own top down a quarter of its depth; the next hang from it, to half and to all of it.
             # (A gap is in the crown's top slab: at its rim, where that is all there is, the gap is seen through; further
             # in it is a dark slot down to the slab under it, as between two clumps of leaf.)
-            leaf = crown & ~tree['gap']
+            leaf = crown & ~(tree['gap'] & detailed)
             held = domain & crown & (dist > 40.0)
             reach = ndimage.distance_transform_edt(crown) * cell
             depth = top_all - tree['under']
@@ -521,9 +526,10 @@ def main():
             near = cell_out < 0.5
             if not near:
                 leaf_top, leaf_side = LEAF_TOP(top.shape), LEAF_SIDE(top.shape)
-            for nth, (share_, far_in) in enumerate(((0.3, 0.0), (0.65, 0.5), (1.0, 1.1)) if near else ((1.0, 0.0),)):
+            for nth, (share_, far_in) in enumerate(((0.3, 0.0), (0.65, 0.8), (1.0, 1.8)) if near else ((1.0, 0.0),)):
                 lower = np.minimum(np.round((top_all - depth * share_ - SEA) * 10 / hq).astype(np.int64), upper - 1)
-                part = held & (reach >= far_in) & (leaf if nth == 0 else True)
+                # (A slender crown's lower slabs begin nearer its rim, by up to half: it is as wide low as high.)
+                part = held & (reach >= far_in * (1.0 - 0.45 * tree['slender'] * detailed)) & (leaf if nth == 0 else True)
                 # (What hangs lower is in the crown's own shade: each slab a little darker than the one over it.)
                 dim = lambda c, by=1 - 0.2 * nth: rgb24(((c >> 16) & 255) * by, ((c >> 8) & 255) * by, (c & 255) * by)
                 write(out, blocks, f'{layer}-crown{nth}', np.maximum(upper, 0), part, leaf_top, dim(leaf_side), np.zeros(top.shape, np.int64), nothing, np.maximum(shade, 0), np.maximum(lower, 0), hq, u0, w0, cell)
