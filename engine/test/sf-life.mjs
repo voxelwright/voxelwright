@@ -599,13 +599,30 @@ try {
   results.left = await page.evaluate(() => globalThis.engine.street.audit(0).left)
   const leftOn = { turns: results.left.turns - results.leftOff.turns, conflicts: results.left.conflicts - results.leftOff.conflicts }
   check(leftOn.turns > 0 && leftOn.conflicts === 0, `left turns on green wait for oncoming traffic: ${leftOn.turns} turned with the yield, ${leftOn.conflicts} with something coming (${results.leftOff.conflicts} of ${results.leftOff.turns} in 40 s without it)`)
+  // (Over the whole run, reported: a bus first stood at a stop a minute or more after it was set down, and the run is a
+  // few seconds at each place, so this was 0 in two of three runs on either branch, #450.)
   results.busStops = await page.evaluate(() => globalThis.engine.street.audit(0).buses.stops)
-  check(results.busStops > 0, `buses stood at ${results.busStops} of their stops`)
+  console.log(`  (report) buses stood at ${results.busStops} of their stops over the run`)
   // Reset puts the street back.
   await page.evaluate(() => globalThis.engine.reset())
   await page.waitForTimeout(3000)
   results.afterReset = await page.evaluate(() => globalThis.engine.street.count(globalThis.engine.view(), 1500))
   check(results.afterReset.parked > 0, `after reset the parked cars are back (${results.afterReset.parked})`)
+  // Buses at their stops, watched from when one is on its route: at Columbus and Broadway, up to 8 minutes (a Muni
+  // line's headway, page/street.ts busSpawn) for a bus to be set down on its route near the eye, then up to 240 s for
+  // one to stand at a stop (pull up, dwell 10 to 22 s, go). Six runs: on its route 1 to 21 s after the eye came, or not
+  // in the first minute; at a stop 14 to 150 s after that.
+  results.bus = await page.evaluate(async ([x, z]) => {
+    const e = globalThis.engine, wait = (ms) => new Promise((r) => setTimeout(r, ms)), buses = () => e.street.audit(0).buses
+    Object.assign(e.pose, { x: x / 10, z: z / 10, y: e.ground(x / 10, z / 10) + 1.7 })
+    let t = 0
+    while (buses().onRoute === 0 && t < 480) { await wait(1000); t++ }
+    if (buses().onRoute === 0) return { onRouteAfter: null, served: 0, seconds: null }
+    const from = buses().stops, started = t
+    while (buses().stops === from && t < started + 240) { await wait(1000); t++ }
+    return { onRouteAfter: started, served: buses().stops - from, seconds: t - started }
+  }, SPOTS[0].at)
+  check(results.bus.served > 0, `a bus stood at a stop at Columbus and Broadway: ${results.bus.served} served, ${results.bus.seconds} s after one was on its route (${results.bus.onRouteAfter} s after the eye came)`)
   check(errors.length === 0, `no page errors${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`)
 } finally {
   await browser.close()

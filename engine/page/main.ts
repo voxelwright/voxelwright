@@ -41,7 +41,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -513,6 +513,13 @@ async function main() {
   }
   /** When the first picture was drawn and when the world round the eye was first whole: ms since the page was asked for. */
   const seen = { first: 0, near: 0, whole: 0 }
+  // The road's paint and rails (#450): lines the march draws over the asphalt (marks.ts), asked for once the place is
+  // shown round the eye, so the first picture waits on none of their bytes. Until then a road is bare asphalt.
+  // One that fails is asked for again, four times at most, 15 s apart.
+  const markRoads = (tries: number): void => void roadMarks().then((bytes) => {
+    if (bytes) { if (march.marks(bytes) < 0) console.error('marks.bin is not marks') } else if (tries > 1) setTimeout(() => markRoads(tries - 1), 15_000)
+  })
+  if (BAY_ON) { const later = setInterval(() => { if (!seen.near) return; clearInterval(later); markRoads(4) }, 250) }
   requestAnimationFrame(frame)
 
   // ── Breaking ────────────────────────────────────────────────────────────

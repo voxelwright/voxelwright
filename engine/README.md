@@ -1574,6 +1574,20 @@ node test/sf-life.mjs [--no-build] [--hour 12.5] [--no-pairs]
 
 The check counts people and vehicles at Columbus and Broadway, Powell St, the Embarcadero and Russian Hill. It times frames with street life on and off and checks the budgets. It drives a car 60 s through a turn and up a hill, sets off charges among people and cars, and saves a contact sheet to `~/.village/engine/sf/life`. Where a kept Mapillary panorama is near, the sheet sets the engine's view beside the photograph (`sf/pairs.py`).
 
+## San Francisco's streets: paint, rails and ramps (#450)
+
+Lane lines, centre lines, crossings and rails are lines the march draws over the asphalt (`page/marks.ts`), filtered to each pixel's footprint on the road, not 10 cm cells. They come from `bay/marks.bin`, which `node sf/build.mjs` writes for the whole city from the city run's street graphs (`~/.village/engine/bay/sf-450-city/packs/graph`; the build fails without them) and the page server writes the same for `?bay=1`. Every core reads only `bay/marks-squares.bin` (the squares covered, 2.5 KB) before it makes a sector; the page asks for `marks.bin` (0.4 MB as Brotli) once the place is shown round the eye, so the first picture pays nothing for it. Two files in the repo hold what those graphs do not keep. `sf/street-tags.json` holds the rails by gauge, the grid's ways and those in tunnels or on bridges: `~/.village/engine/bay/venv/bin/python -I engine/sf/street-tags.py`, which asks Overpass once. `sf/crossing-colours.json` holds the yellow and rainbow crossings: `node sf/crossing-colours.mjs`. Roads, pavements (over their kerbs) and banks have a ramp of 2.5 cm cells on the finest level (`bay.rs` `grade_rows`).
+
+```
+node test/street.mjs [--parts cars,marks,shots] [--no-build] [--places "Powell,Castro"]   # npm run check's `street`
+node sf/street-shots.mjs --out ~/.village/engine/sf/street-2/new [--only city|realm]
+~/.village/engine/bay/venv/bin/python -I sf/street_checks.py ~/.village/engine/sf/street-2/new
+~/.village/engine/bay/venv/bin/python -I sf/street_sheet.py photos ~/.village/engine/sf/street-2/new
+~/.village/engine/bay/venv/bin/python -I sf/street_sheet.py sheet <old> <new> <out>
+```
+
+The suite checks that no repainted car keeps its own paint, that the marks cover the whole city with centre lines, yellow crossings and streetcar rails, and measures the shots: asphalt against pavement, road and pavement terraces on hills, paint where the graph puts it, yellow crossings, how far rails wander from straight lines, and how far-off marks alias against a render at twice the size.
+
 ## San Francisco signs, the banner plane and the first view (#450)
 
 The site's navigation stands in the SF realm as things of the city seen from the park: a BLOG billboard on a rooftop, the mark of each network the owner is on as a company's sign on a tower's crown, and a small plane towing a banner across the sky before the towers. Where each stands and what it is are data: `sf/boards.json` (`page/boards.ts` `SignsFile`), which `node sf/build.mjs` puts in the page's own record, so nothing more is fetched.

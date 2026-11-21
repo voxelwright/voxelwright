@@ -90,6 +90,7 @@ const checks = [
   ['helper', 'node', ['test/helper.mjs'], true],
   ['kept', 'node', ['test/kept.mjs'], true],
   ['kept-car', 'node', ['test/kept-car.mjs'], true],
+  ['street', 'node', ['test/street.mjs'], true],
   ['made-cars', 'node', ['test/made-cars.mjs'], true],
   ['drawn', 'node', ['test/drawn.mjs'], true],
   ['drivable', 'node', ['test/drivable.mjs'], false],

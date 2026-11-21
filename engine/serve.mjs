@@ -1061,6 +1061,8 @@ function gapsAll() {
 }
 
 let topsAsked = 0, topsSince = Date.now()
+/** The road's marks (/bay/marks.bin), once made. */
+let roadMarks = null
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
@@ -1129,6 +1131,13 @@ const server = createServer((req, res) => {
     const none = (e) => send(res, 503, `no tile: ${String(e?.message ?? e).slice(0, 200)}`)
     if (existsSync(path)) { try { return answer() } catch (e) { return none(e) } }
     return void earth(`${frame} ${level} ${tx} ${tz}`).then(answer).catch(none)
+  }
+  // The road's marks for the whole city (#450, sf/marks.mjs over the city run's street graphs), as sf/build.mjs writes
+  // them beside a realm's tiles: made once, the first time they are asked for.
+  if (url.pathname === '/bay/marks.bin' || url.pathname === '/bay/marks-squares.bin') {
+    const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
+    roadMarks ??= import('./sf/marks.mjs').then((m) => { const made = m.marksIn(graphs); return { '/bay/marks.bin': m.marksBytes(made), '/bay/marks-squares.bin': m.squaresBytes(made) } })
+    return void roadMarks.then((files) => send(res, 200, files[url.pathname], 'application/octet-stream'), (e) => { roadMarks = null; console.error(`no road marks from ${graphs}: ${e.message}`); send(res, 404, 'no road marks') })
   }
   // The Bay's packs and their names (#373): baked outside the repo by bay/bake.py, read by page/bay.ts.
   if (url.pathname.startsWith('/bay/')) {

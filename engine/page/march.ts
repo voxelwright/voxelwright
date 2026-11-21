@@ -5,6 +5,7 @@
 import { shader, type Target } from '../probe/gpu.ts'
 import { SUN_SIDE, SUN_TILE, SunMaps } from './sun.ts'
 import { SIDE, type World } from './world.ts'
+import { grid as marksGrid, MARKS } from './marks.ts'
 
 // One more than as things are only where `?fine=2` (#259, finer boxes round the eye) asks for an eleventh box.
 export const MAX_LEVELS = 10 + Math.max(0, Number(new URLSearchParams(globalThis.location?.search ?? '').get('fine') ?? 0) - 1)
@@ -676,6 +677,7 @@ struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: v
 @group(0) @binding(3) var<uniform> looks: Looks;
 @group(0) @binding(4) var sunMap: texture_2d_array<f32>;
 @group(0) @binding(5) var screen: texture_2d<f32>;
+${world.options.surveyedWalls ? MARKS : ''}
 @group(1) @binding(0) var<uniform> sunTile: SunTile;
 ${SCREEN}
 // The window screen where a point of the world is in the view (the middle of a pane, for a pane to be one pixel of it).
@@ -1333,7 +1335,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       slope = true;
     }
   }` : ''}
-  let albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), face, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
+  var albedo = paint(hit.kind, hit.cell * i32(1u << hit.level), face, select(0.0, 1.0, hit.level == 0u && faced), qc, select(0.0, 1.0 / (max(hit.t, 1.0) * g.pixel), hit.level == 0u && faced));
+  ${world.options.surveyedWalls ? '// The road\'s paint and rails as lines (marks.ts).\n  if (stuff == 6u) { albedo = marked(albedo, ro, rd, hit.t); }' : ''}
   var direct = max(dot(n, g.sun), 0.0);
   if (shadows > 0u && direct > 0.0) {
     var sunny = -1.0;
@@ -1819,6 +1822,8 @@ export interface Marcher {
   draw(encoder: GPUCommandEncoder, to: Target, view: View, flags: number, time: number, timing?: GPURenderPassTimestampWrites, /** Only these pixels of `to` are drawn: x, y, width, height. */ only?: readonly [number, number, number, number], /** Looks begin at this plane and not at the eye: its normal (pointing the way the looks go) and how far along it the plane is, in the world's finest cells. */ starts?: readonly [number, number, number, number]): void
   /** The world's buffers on the GPU are others than they were (world.ts `trade`): they are bound again. */
   rebind(): void
+  /** The road's paint and rails (#450, marks.ts `grid`: marks.bin as sf/marks.mjs writes it), drawn by a Bay world's march from now on. Returns how many segments, or -1 where the bytes are not marks. */
+  marks(bytes: ArrayBuffer): number
   /**
    * Where the far model (far.ts) takes over: past `reach` (finest cells from the eye), in the tiles `held` marks, what
    * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
@@ -1894,7 +1899,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The pipelines of a shader module: the march with mirrors and without (MIRRORS), and the sun's maps. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
   // One layout for both, so that one binding serves either.
   const F = GPUShaderStage.FRAGMENT
-  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }] })] })
+  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }, { binding: 6, visibility: F, buffer: { type: 'read-only-storage' } }] })] })
   const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
   const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
@@ -1931,9 +1936,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
   const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
   const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0 }
+  // The road's marks (marks.ts), empty until `marks` is told them.
+  let marksBuffer = device.createBuffer({ label: 'marks', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   const binding = () => device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }],
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }, { binding: 6, resource: { buffer: marksBuffer } }],
   })
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
@@ -2115,6 +2122,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
+    marks(bytes) {
+      const words = marksGrid(bytes)
+      if (!words) return -1
+      marksBuffer.destroy()
+      marksBuffer = device.createBuffer({ label: 'marks', size: Math.max(32, words.byteLength), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
+      device.queue.writeBuffer(marksBuffer, 0, words)
+      bind = binding()
+      return words.length > 8 ? words[7] : 0
+    },
     farCover(corner, size, reach, held, wedge = null, keep = null) {
       farMap = [corner[0] * size, corner[1] * size, size, reach]
       farWedge = wedge

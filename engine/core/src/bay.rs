@@ -25,101 +25,30 @@ thread_local! {
 }
 
 /// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
-/// and tracks, drawn in the road's top cell at 10 cm. Where the graph covers a place, the bake's own paint and rails
-/// (class bits 32 and 64, settled per 50 cm sample from the aerial) are not drawn: they were blocks and bands.
+/// and tracks. The march draws them as lines over the asphalt (page/marks.ts); the core needs only where they are
+/// drawn, for there the bake's own paint and rails (class bits 32 and 64, settled per 50 cm sample from the aerial)
+/// are not: they were blocks and bands. Drawn as 10 cm cells here, a line at an angle to the cells was a staircase.
 #[derive(Default)]
 struct Marks {
     covers: Vec<[i32; 4]>,
-    /// x0, z0, x1, z1 (cells) and a style (`mark_at`).
-    segs: Vec<[i32; 5]>,
-    /// The segments that come within reach of each square of 256 cells.
-    grid: std::collections::HashMap<(i32, i32), Vec<u32>>,
 }
-const MARK_CELL: i32 = 256;
-/// How far a mark reaches from its line, in cells: a crossing's bars run 1.5 m either side.
-const MARK_REACH: i32 = 16;
-const WHITE_LINE: u8 = 1;
-const WHITE_DASH: u8 = 2;
-const YELLOW_DOUBLE: u8 = 3;
-const CROSS_BARS: u8 = 4;
-const CROSS_LINES: u8 = 5;
-const RAILS_CABLE: u8 = 6;
-const RAILS: u8 = 7;
-/// A rail's worn top and the cable's slot, as greys of the road (`mark_at`).
-const RAIL: u8 = grey(5);
-const SLOT: u8 = grey(13);
 
 /// Takes the marks in the room (`room`): little-endian words, `MARK`, how many covered squares and how many segments,
-/// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments held, or -1.
+/// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments, or -1.
 pub fn marks() -> i32 {
     let bytes = ROOM.with_borrow_mut(std::mem::take);
     let w: Vec<i32> = bytes.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
     if w.len() < 3 || w[0] != 0x4b52_414d { return -1; }
     let (nc, ns) = (w[1] as usize, w[2] as usize);
     if w.len() != 3 + nc * 4 + ns * 5 { return -1; }
-    let mut m = Marks::default();
-    for c in w[3..3 + nc * 4].chunks_exact(4) { m.covers.push([c[0], c[1], c[2], c[3]]); }
-    for (i, s) in w[3 + nc * 4..].chunks_exact(5).enumerate() {
-        m.segs.push([s[0], s[1], s[2], s[3], s[4]]);
-        let (x0, x1) = (s[0].min(s[2]) - MARK_REACH, s[0].max(s[2]) + MARK_REACH);
-        let (z0, z1) = (s[1].min(s[3]) - MARK_REACH, s[1].max(s[3]) + MARK_REACH);
-        for gz in z0.div_euclid(MARK_CELL)..=z1.div_euclid(MARK_CELL) {
-            for gx in x0.div_euclid(MARK_CELL)..=x1.div_euclid(MARK_CELL) {
-                m.grid.entry((gx, gz)).or_default().push(i as u32);
-            }
-        }
-    }
-    let n = m.segs.len() as i32;
-    MARKS.with_borrow_mut(|held| *held = m);
-    n
+    let covers = w[3..3 + nc * 4].chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect();
+    MARKS.with_borrow_mut(|held| *held = Marks { covers });
+    ns as i32
 }
 
 /// Whether the graph's marks are drawn at a column: then the bake's paint and rails are not.
 fn marked_place(x: i32, z: i32) -> bool {
     MARKS.with_borrow(|m| m.covers.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]))
-}
-
-/// The paint or rail in the road's top cell at a column (cells `size` wide, its middle at x, z), if any. A line is a
-/// cell wide, or the cell's own width where cells are coarser, so a coarse cell does not lose it between samples.
-fn mark_at(x: i32, z: i32, size: i32) -> Option<Kind> {
-    MARKS.with_borrow(|m| {
-        let list = m.grid.get(&(x.div_euclid(MARK_CELL), z.div_euclid(MARK_CELL)))?;
-        // The graph's points name cells, as the column's x and z do (a coarse column's are its middle).
-        let (px, pz) = (x as f32, z as f32);
-        let half = 0.5 * size as f32;
-        let mut found = None;
-        for &i in list {
-            let s = m.segs[i as usize];
-            let (dx, dz) = ((s[2] - s[0]) as f32, (s[3] - s[1]) as f32);
-            let long = (dx * dx + dz * dz).sqrt();
-            if long < 1.0 { continue; }
-            let (ux, uz) = (dx / long, dz / long);
-            let (rx, rz) = (px - s[0] as f32, pz - s[1] as f32);
-            let t = rx * ux + rz * uz;
-            let d = (rz * ux - rx * uz).abs();
-            let within = |lo: f32, hi: f32| d >= lo - half + 0.5 && d < hi + half - 0.5;
-            let on = |w: f32| t >= -w && t <= long + w;
-            let k = match s[4] as u8 {
-                WHITE_LINE if on(0.0) && within(0.0, 0.6) => kind(ASPHALT, grey(1)),
-                WHITE_DASH if on(0.0) && within(0.0, 0.6) && t.rem_euclid(90.0) < 30.0 => kind(ASPHALT, grey(1)),
-                YELLOW_DOUBLE if on(0.0) && within(0.4, 1.6) => kind(ASPHALT, colour(4, 3)),
-                // Continental bars: 60 cm wide and 60 cm apart along the crossing, 3 m long across it.
-                CROSS_BARS if on(-2.0) && within(0.0, 15.0) && (t - 2.0).rem_euclid(12.0) < 6.0 => kind(ASPHALT, grey(1)),
-                CROSS_LINES if on(0.0) && within(13.0, 15.0) => kind(ASPHALT, grey(1)),
-                // A cable car's rails 1067 mm apart with the cable's slot between; a streetcar's 1435 mm. Set flush in the
-                // road and climbing with it, they are its surface (asphalt) in the rail's worn grey and the slot's dark:
-                // as steel they stood apart from the road's grade and were a stair of dark steps up Powell.
-                RAILS_CABLE if on(0.0) && within(4.8, 5.9) => kind(ASPHALT, RAIL),
-                RAILS_CABLE if on(0.0) && within(0.0, 0.5) => kind(ASPHALT, SLOT),
-                RAILS if on(0.0) && within(6.7, 7.8) => kind(ASPHALT, RAIL),
-                _ => continue,
-            };
-            // Rails over paint: a crossing's bars stop at the track.
-            if k >> 8 == RAIL as Kind || k >> 8 == SLOT as Kind { return Some(k); }
-            found = Some(k);
-        }
-        found
-    })
 }
 
 /// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
@@ -942,11 +871,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
         })
     } else { None };
-    let road_top4 = (size == 1 && asphalt.is_some()).then(|| ((ground_height+1.0)*4.0).round() as i32);
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
-        ROAD => (if graphed && size <= 2 { mark_at(x, z, size) } else { None }.unwrap_or(kind(ASPHALT, asphalt.unwrap_or(OWN))), 0),
+        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
         // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
         PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
@@ -1028,6 +956,11 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         },
         _ => What::Open,
     };
+    // The ground's top in quarter cells, for the finest cells' ramp (`grade_rows`): a road's, a pavement's (over its
+    // kerb, so the kerb keeps its height up a hill) and a bank's, wherever the ground is open to the sky. Only the
+    // measured asphalt had it, and every pavement and bank up Nob Hill and Telegraph Hill was a stair of 10 cm (#450).
+    let ramped = size == 1 && class & 7 != WATER_HERE && !matches!(what, What::In(..) | What::Mass(..));
+    let road_top4 = ramped.then(|| ((ground_height + 1.0 + kerb as f32) * 4.0).round() as i32);
     Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
 }
 
@@ -1275,14 +1208,19 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
     ((lo - DEEP).div_euclid(size), (hi + 4).div_euclid(size))
 }
 
-/// At eye level, carry the interpolated road grade into the top 10 cm cell.
+/// At eye level, carry the interpolated grade of the ground (a road's, a pavement's, a bank's) into its top 10 cm cell.
 fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
     let Some(top4) = c.road_top4 else { return };
     let y = top4.div_euclid(4);
     let fill = top4.rem_euclid(4);
     if fill == 0 || y < low_y || y >= low_y + SIDE as i32 ||
         c.fixtures.iter().any(|s| s.low <= y && y <= s.high) { return; }
-    let (lo, hi, kind) = if y <= c.g { (fill, 4, 0) } else { (0, fill, c.ground) };
+    // Its top cell is the ground's, or a pavement's kerb over it. The grade is carved only from that ground and laid
+    // only into air: not into a tree's trunk, a stoop's step or a landmark's foot, which stand in the same cells.
+    let (lo, hi, kind) = if y <= c.g + c.kerb { (fill, 4, 0) } else { (0, fill, c.ground) };
+    // (Carving, the cell over it must be air too: kind_at answers the ground for every cell at or under its top, so a
+    // landmark, a bush or a stoop standing on it is seen only from there.)
+    if kind_at(c, x, y, z, 1) != if kind == 0 { c.ground } else { 0 } || kind == 0 && kind_at(c, x, y + 1, z, 1) != 0 { return; }
     for sy in lo..hi {
         for sz in 0..4 {
             rows.push(Run { x0:x*4, x1:x*4+4, y:y*4+sy, z:z*4+sz, kind });
@@ -1391,32 +1329,14 @@ mod tests {
     }
 
     #[test]
-    fn marks_are_drawn_a_cell_wide_where_the_graph_puts_them() {
-        // A dashed lane line along x at z = 100, a double yellow at z = 200, a crossing's bars across x at x = 500,
-        // a cable car's rails along x at z = 300.
-        assert_eq!(take_marks(&[[0, 100, 400, 100, 2], [0, 200, 400, 200, 3], [500, 50, 500, 250, 4], [0, 300, 400, 300, 6]]), 4);
-        assert!(marked_place(10, 10) && !marked_place(-1, 10));
-        let white = kind(ASPHALT, grey(1));
-        // Dashes: 3 m of paint, 6 m of none, on the line's own cell and not the next.
-        assert_eq!(mark_at(10, 100, 1), Some(white));
-        assert_eq!(mark_at(10, 101, 1), None);
-        assert_eq!(mark_at(50, 100, 1), None);
-        assert_eq!(mark_at(95, 100, 1), Some(white));
-        // Two yellow lines a cell either side of the middle, nothing on it.
-        assert_eq!(mark_at(10, 200, 1), None);
-        assert_eq!(mark_at(10, 201, 1), Some(kind(ASPHALT, colour(4, 3))));
-        assert_eq!(mark_at(10, 199, 1), Some(kind(ASPHALT, colour(4, 3))));
-        // Bars 60 cm wide and 60 cm apart along the crossing, 3 m across it.
-        let bars: Vec<bool> = (52..76).map(|z| mark_at(500, z, 1).is_some()).collect();
-        assert!(bars[..6].iter().all(|&b| b) && bars[6..12].iter().all(|&b| !b) && bars[12..18].iter().all(|&b| b));
-        assert!(mark_at(514, 54, 1).is_some() && mark_at(517, 54, 1).is_none());
-        // Rails 1067 mm apart with the slot between them.
-        assert_eq!(mark_at(10, 305, 1), Some(kind(ASPHALT, RAIL)));
-        assert_eq!(mark_at(10, 295, 1), Some(kind(ASPHALT, RAIL)));
-        assert_eq!(mark_at(10, 300, 1), Some(kind(ASPHALT, SLOT)));
-        assert_eq!(mark_at(10, 302, 1), None);
-        // Coarser cells keep a line: a 20 cm cell whose middle is a cell off the line still has it.
-        assert_eq!(mark_at(10, 101, 2), Some(white));
+    fn marks_say_where_the_bakes_paint_is_not_drawn() {
+        // A dashed lane line along x at z = 100 in a square from 0 to 1000: the square is covered, nothing else is.
+        assert_eq!(take_marks(&[[0, 100, 400, 100, 2]]), 1);
+        assert!(marked_place(10, 10) && marked_place(999, 999));
+        assert!(!marked_place(-1, 10) && !marked_place(10, 1000));
+        // Bytes that are not marks are refused, and leave what was held.
+        ROOM.with_borrow_mut(|r| *r = vec![1, 2, 3, 4]);
+        assert_eq!(marks(), -1);
         take_marks(&[]);
     }
 
@@ -1479,6 +1399,35 @@ mod tests {
         grade_rows(&c, 4, 2, -64, &mut rows);
         assert_eq!(rows.len(), 4);
         assert!(rows.iter().all(|r| r.y == -5 && r.kind == 0));
+        // A pavement a cell over the ground: its ramp is over its kerb, carved from the kerb's top cell when the grade
+        // is under it and laid on it when over.
+        c.g = 3;
+        c.kerb = 1;
+        c.road_top4 = Some(4 * 4 + 1);
+        rows.clear();
+        grade_rows(&c, 4, 2, 0, &mut rows);
+        assert_eq!(rows.len(), 12);
+        assert!(rows.iter().all(|r| r.y >= 17 && r.y < 20 && r.kind == 0));
+        c.road_top4 = Some(5 * 4 + 2);
+        rows.clear();
+        grade_rows(&c, 4, 2, 0, &mut rows);
+        assert_eq!(rows.len(), 8);
+        assert!(rows.iter().all(|r| (r.y == 20 || r.y == 21) && r.kind == ground));
+        // A tree's trunk stands in the kerb's top cell: the grade is not carved through it, nor laid over a trunk. A bush
+        // standing on the ground's top cell keeps its foot too.
+        c.what = What::Crown { foot: 25, top: 70, trunk: Some(40), tint: 0, edge: 0.0 };
+        for top4 in [4 * 4 + 2, 5 * 4 + 2] {
+            c.road_top4 = Some(top4);
+            rows.clear();
+            grade_rows(&c, 4, 2, 0, &mut rows);
+            assert!(rows.is_empty(), "{top4}: {} rows", rows.len());
+        }
+        c.kerb = 0;
+        c.what = What::Crown { foot: 4, top: 20, trunk: None, tint: 0, edge: 0.6 };
+        c.road_top4 = Some(3 * 4 + 2);
+        rows.clear();
+        grade_rows(&c, 4, 2, 0, &mut rows);
+        assert!(rows.is_empty(), "a bush's foot: {} rows", rows.len());
     }
 
     #[test]

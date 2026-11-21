@@ -277,8 +277,9 @@ export async function open<T>(url: string): Promise<T> {
   // `?heroes=0` leaves them out (as the tiles have the place), for what they cost.
   if (query.get('heroes') === '0') core.bay_landmarks(0)
   for (const h of await heroes()) { const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
-  // The road's paint and rails from the street graph (#450, sf/marks.mjs), where the world has one.
-  const lines = await marks()
+  // Which squares the road's marks cover (#450, sf/marks.mjs): there the bake's own paint is not drawn. The marks
+  // themselves come later, for the march alone (`marks`).
+  const lines = await markedSquares()
   if (lines) { const at = core.bay_room(lines.byteLength); new Uint8Array(core.memory.buffer, at, lines.byteLength).set(new Uint8Array(lines)); if (core.bay_marks() < 0) throw new Error('marks this core does not read') }
   for (const name of SQUARES) await take(core, await whole(`${BASE}${name}.bay`))
   return core as unknown as T
@@ -289,9 +290,33 @@ export interface Landmark { name: string; sort: number; at: [number, number]; to
 let landmarks: Promise<Landmark[]> | null = null
 const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
 
-/** The road's marks a Bay world has (sf/marks.mjs, written beside the tiles as marks.bin), or null. */
-let marking: Promise<ArrayBuffer | null> | null = null
-const marks = () => (marking ??= (ON ? fetch(`${BASE}marks.bin`).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : Promise.resolve(null)))
+/**
+ * A file of the road's marks a Bay world has beside its tiles (sf/marks.mjs), or null: San Francisco's alone (its cells
+ * are counted in frame 10n4250), so a world in another frame asks for none. Where it is missing or cannot be had, what
+ * the roads look like for it is said, not left to be noticed.
+ */
+const markFile = (name: string, without: string) => (ON && FRAME === '10n4250' ? fetch(`${BASE}${name}`).then((r) => {
+  if (r.ok) return r.arrayBuffer()
+  console.error(`no road marks (${BASE}${name}: ${r.status}): ${without}`)
+  return null
+}).catch((e: Error) => { console.error(`no road marks (${BASE}${name}: ${e.message}): ${without}`); return null }) : Promise.resolve(null))
+/** The squares the marks cover, and no segments (marks-squares.bin, 2.5 KB): what every core needs before it makes a sector. */
+let squaring: Promise<ArrayBuffer | null> | null = null
+// Asked three times, a second apart, before a core goes on without them: a core that missed them keeps the bake's paint
+// under the page's lines in its own sectors.
+const markedSquares = () => (squaring ??= (async () => {
+  for (let tries = 3; ; tries--) {
+    const bytes = await markFile('marks-squares.bin', tries > 1 ? 'asking again' : "this core keeps the bake's 50 cm paint")
+    if (bytes || tries <= 1 || !(ON && FRAME === '10n4250')) return bytes
+    await new Promise((r) => setTimeout(r, 1000))
+  }
+})())
+/**
+ * The marks themselves (marks.bin, 1.5 MB, 0.4 MB as Brotli), for the march (marks.ts): asked for once the place is
+ * shown round the eye (main.ts), not before, so they cost the first picture nothing. The cores have stopped drawing
+ * the bake's paint by then, so until they come the roads are bare; one that failed is asked for again on the next call.
+ */
+export const marks = () => markFile('marks.bin', 'the roads are bare asphalt until they come')
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {

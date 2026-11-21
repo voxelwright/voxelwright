@@ -1,15 +1,17 @@
 // Street-level pictures of San Francisco (#450), each with what the march hit under a grid of its pixels, so that
 // sf/street-checks.py can measure the road in the picture itself.
 //
-//   node sf/street-shots.mjs --out ~/.village/engine/sf/street/new [--only city|realm] [--places "Castro,Powell"] [--dist dist-sf] [--no-build] [--query "&shadows=0"]
+//   node sf/street-shots.mjs --out ~/.village/engine/sf/street/new [--only city|realm] [--places "Castro,Powell"] [--dist dist-sf] [--no-build] [--query "&shadows=0"] [--marks <marks.bin to find the yellow crossing in>]
 //
 // city: the panel's sixteen street cameras (~/.village/engine/bay/450-panel/fixed-poses.json), drawn by the page
 // server from the same packs the panel draws them from (bay/city_panel.py), at 960 x 540 and 15h.
-// realm: Powell St, California St and Filbert St at its steepest, in the SF realm's static folder at 12.5h with
-// street life off (a parked car would hide the road from the grid); and the panel's cameras in the places the
-// realm's street graph covers, as realm-<place>.
-// Beside each <name>.png goes <name>.json: the camera and, for a grid of pixels below the horizon, the material and
-// colour the march's own pick found there and how far off it was.
+// realm: Powell St, California St and Filbert St at its steepest, and the longest crossing OSM says is yellow in the
+// realm's pilot squares (School crossing), in the SF realm's static folder at 12.5h with street life off (a parked
+// car would hide the road from the grid) and every pixel drawn (scale=1); and the panel's cameras in the places the
+// realm's street graph covers, as realm-<place>. Each view is drawn again at twice the size, as <name>@2x.png.
+// Beside each <name>.png goes <name>.json: the camera (and its view as the page had it: eye, forward, right, up,
+// tanHalf) and, for a grid of pixels below the horizon, the material and colour the march's own pick found there,
+// how far off it was and where (x, z in cells).
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -36,9 +38,10 @@ const label = (page) => page.evaluate(async ({ W, H }) => {
     let d = add(add(v.forward, v.right, u * v.tanHalf * aspect), v.up, -w * v.tanHalf)
     const l = Math.hypot(...d); d = d.map((c) => c / l)
     const hit = await e.march.pick({ ...v, forward: d })
-    if (hit) grid.push([px, py, hit.material, hit.colour, Math.round(hit.t * 100) / 100])
+    // And where it met it, x and z in cells: what of the road's marks (marks.bin) is there is read from that.
+    if (hit) grid.push([px, py, hit.material, hit.colour, Math.round(hit.t * 100) / 100, Math.round((v.eye[0] + d[0] * hit.t) * 100) / 100, Math.round((v.eye[2] + d[2] * hit.t) * 100) / 100])
   }
-  return grid
+  return { grid, eye: v.eye, forward: v.forward, right: v.right, up: v.up, tanHalf: v.tanHalf }
 }, { W, H })
 
 const settle = (page) => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000, polling: 250 }).catch(() => console.log('  not all made in two minutes'))
@@ -53,8 +56,16 @@ const save = async (name, camera) => {
   await page.addStyleTag({ content: HIDE })
   await page.waitForTimeout(800)
   await page.screenshot({ path: join(out, `${name}.png`) })
-  const grid = await label(page)
-  writeFileSync(join(out, `${name}.json`), JSON.stringify({ camera, grid }))
+  const { grid, ...view } = await label(page)
+  writeFileSync(join(out, `${name}.json`), JSON.stringify({ camera: { ...camera, view }, grid }))
+  // The same view drawn at twice the size (sf/street_checks.py halves it, for how far off marks alias).
+  await page.setViewportSize({ width: 2 * W, height: 2 * H })
+  await page.waitForTimeout(1500)
+  await settle(page)
+  await page.waitForTimeout(2500)
+  await page.screenshot({ path: join(out, `${name}@2x.png`) })
+  await page.setViewportSize({ width: W, height: H })
+  await page.waitForTimeout(1500)
   console.log(`  ${name}: ${grid.length} labelled pixels`)
 }
 
@@ -86,7 +97,7 @@ try {
     const graphs = readdirSync(join(here, 'sf/pilot-graph')).map((f) => JSON.parse(readFileSync(join(here, 'sf/pilot-graph', f), 'utf8')))
     const segments = (name) => graphs.flatMap((g) => g.roads.filter((r) => r.name === name).flatMap((r) => r.line.slice(1).map((b, i) => [r.line[i], b])))
     const site = await plain(dist, '127.0.0.1', 0, {})
-    await page.goto(`${site.url}/sf/index.html?hour=12.5&street=0&people=0&knock=0&first=0${extra}`)
+    await page.goto(`${site.url}/sf/index.html?hour=12.5&street=0&people=0&knock=0&first=0&scale=1${extra}`)
     await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 300_000 })
     const STREETS = [
       // Powell at Washington (sf-life's place), looking up the hill to the north; California by Powell, looking down to
@@ -94,8 +105,27 @@ try {
       { name: 'Powell', street: 'Powell Street', at: [519580, 668046] },
       { name: 'California', street: 'California Street', at: [519200, 668950] },
       { name: 'Filbert', street: 'Filbert Street', steepest: true },
+      { name: 'School crossing', yellow: true },
     ]
+    // The road's marks the realm draws (sf/marks.mjs): the yellow crossings in the pilot's squares.
+    const w = new Int32Array(new Uint8Array(readFileSync(arg('marks', join(dist, 'bay/marks.bin')))).buffer), nc = w[1]
+    const pilot = new Set(graphs.map((g) => g.square)), inPilot = ([x, z]) => { const e = 500 + x / 10000, n = 4250 - z / 10000; return pilot.has(`${(Math.floor(e - 0.7) + 0.7).toFixed(1)}_${(Math.floor(n - 0.5) + 0.5).toFixed(1)}`) }
+    const yellows = []
+    for (let i = 0; i < w[2]; i++) { const s = w.subarray(3 + nc * 4 + i * 5, 3 + nc * 4 + i * 5 + 5); if ((s[4] & 15) === 4 && s[4] >> 4 === 1) yellows.push([[s[0], s[1]], [s[2], s[3]]]) }
     for (const s of STREETS.filter((s) => !places.length || places.includes(s.name))) {
+      // A crossing: looked at along the road, 10 m back from its middle (the road runs across the crossing's line).
+      if (s.yellow) {
+        const [a, b] = yellows.filter((c) => inPilot(c[0])).sort((p, q) => Math.hypot(q[1][0] - q[0][0], q[1][1] - q[0][1]) - Math.hypot(p[1][0] - p[0][0], p[1][1] - p[0][1]))[0] ?? []
+        if (!a) { console.log('  no yellow crossing in the pilot'); continue }
+        const l = Math.hypot(b[0] - a[0], b[1] - a[1]), rx = -(b[1] - a[1]) / l, rz = (b[0] - a[0]) / l, mx = (a[0] + b[0]) / 2, mz = (a[1] + b[1]) / 2
+        const pick = { x: (mx - rx * 100) / 10, z: (mz - rz * 100) / 10, yaw: Math.atan2(rx, -rz), grade: 0 }
+        await page.evaluate((p) => { const e = globalThis.engine; Object.assign(e.pose, { x: p.x, z: p.z, y: e.ground(p.x, p.z) + 1.7, yaw: p.yaw, pitch: -0.15 }) }, pick)
+        await page.waitForTimeout(1500)
+        await settle(page)
+        await page.waitForTimeout(3000)
+        await save(s.name, { ...pick, hour: 12.5 })
+        continue
+      }
       const all = segments(s.street)
       const pick = await page.evaluate(({ all, s }) => {
         const e = globalThis.engine, mid = ([a, b]) => [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]

@@ -69,9 +69,18 @@ function coarser(kinds, size, by) {
 }
 
 // ── Paint ──
-const STEEL = 12
+const STEEL = 12, PLASTER = 9, ROOFING_ = 14
 const material = (k) => k & 15, colourOf = (k) => (k >> 8) & 255
-/** Which kinds of a look are its paint: steel of the colour most of its steel is, a range of greys or one hue. */
+/** The hue of a colour of the palette (0 to 23 round the wheel), or -1 for a grey. */
+const hueOf = (c) => (c >= 16 ? Math.floor((c - 16) / 10) : -1)
+/** How far apart two hues are round the wheel of 24. */
+const hueApart = (a, b) => { const d = Math.abs(a - b) % 24; return Math.min(d, 24 - d) }
+/**
+ * Which kinds of a look are its paint: steel of the colour most of its steel is, a range of greys or one hue. A hue's
+ * paint is that hue and the two beside it round the wheel, in steel, plaster or roofing: the kept saloon's red is hue 0
+ * in its sun and hue 23 in its shade (steel 250 to 252), and its sills and bumpers are red plaster and roofing. Only
+ * hue 0 in steel was repainted, so a silver or white saloon kept streaks of red (#450).
+ */
 function paintOf(kinds) {
   const n = new Map()
   for (const k of kinds) if (k && material(k) === STEEL) n.set(k, (n.get(k) ?? 0) + 1)
@@ -79,8 +88,8 @@ function paintOf(kinds) {
   if (top === undefined) return () => false
   const c = colourOf(top)
   if (c >= 1 && c <= 15) return (k) => material(k) === STEEL && colourOf(k) >= 1 && colourOf(k) <= 15 && Math.abs(colourOf(k) - c) <= 4 && colourOf(k) <= 13
-  const hue = Math.floor((c - 16) / 10)
-  return (k) => material(k) === STEEL && colourOf(k) >= 16 && Math.floor((colourOf(k) - 16) / 10) === hue
+  const hue = hueOf(c)
+  return (k) => [STEEL, PLASTER, ROOFING_].includes(material(k)) && colourOf(k) >= 16 && hueApart(hueOf(colourOf(k)), hue) <= 1
 }
 /** A paint colour for a step of grey (0 white to 14 black) or a tone of the hue it was: the same light in a new colour. */
 const COLOURS = {

@@ -383,7 +383,7 @@ try {
   const tilesAsked = site.asked.filter((a) => isTile(a.path))
   const tileFiles = new Set(tilesAsked.map((a) => a.path))
   const failedOnPurpose = tilesAsked.filter((a) => a.status === 503).length
-  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path === '/sf/index.html' || a.path === '/bay/heroes.json' || a.path === '/bay/marks.bin' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
+  const outside = site.asked.filter((a) => !(a.path.startsWith('/page/') || a.path.startsWith('/probe/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') || a.path === '/sf/index.html' || a.path === '/bay/heroes.json' || a.path === '/bay/marks.bin' || a.path === '/bay/marks-squares.bin' || a.path === '/sf/current.json' || a.path.startsWith('/sf/kept/') || listed.has(a.path)))
   const pointerAsked = site.asked.filter((a) => a.path === '/sf/current.json').length
   const notFound = site.asked.filter((a) => a.status === 404)
   results.asked = { requests: site.asked.length, tileRequests: tilesAsked.length - failedOnPurpose, tileFiles: tileFiles.size, perFile: round((tilesAsked.length - failedOnPurpose) / tileFiles.size, 2), pointer: pointerAsked, outside: outside.map((a) => a.path), notFound: notFound.map((a) => a.path) }
