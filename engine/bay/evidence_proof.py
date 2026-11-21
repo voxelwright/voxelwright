@@ -8,6 +8,16 @@ before (the bake's row, or PR 474's paint majority) and after. Chroma (CIELAB a*
 apart, because a bias shared by every photograph (an exposure that reads walls dark) would favour the records.
 
     evidence-venv/bin/python engine/bay/evidence_proof.py stage|render|compare
+
+Evidence-2 (November 21) compares several staged sets in one render: `off` (the round-2 tiles), and each set staged
+with `stage --set NAME --records DIR...` under `--proof` (proof-2 for it). `versus` reads what each set wrote into its
+tiles and scores every changed wall against the held-out photograph read through the exposure normaliser (albedo, not
+pixels: in raw pixels a sunlit cream front reads sRGB 140, which rewards charcoal) and against the walls classed by eye
+(evidence_eye.json), which share nothing with either pipeline.
+
+    evidence-venv/bin/python engine/bay/evidence_proof.py --proof proof-2 stage --set ours --records records-2/panel records-2/sample
+    node bay/quiet.mjs evidence-venv/bin/python engine/bay/evidence_proof.py --proof proof-2 render --sets off pr484 ours
+    evidence-venv/bin/python engine/bay/evidence_proof.py --proof proof-2 versus --sets pr484 ours
 """
 
 import argparse
@@ -28,20 +38,21 @@ PROOF = fe.HOME / "proof"
 GROUPS = json.loads((fe.BAY / "450-paint/evidence.json").read_text())["views"]
 
 
-def records(sets=("panel", "sample")):
+def records(sets=("panel", "sample"), root="records"):
     out = {}
     for s in sets:
-        folder = fe.HOME / "records" / s
+        folder = fe.HOME / root / s
         if folder.is_dir():
             out.update(evidence_tile.load(str(folder)))
     return out
 
 
-def stage():
-    recs = records()
+def stage(name="after", recs=None, tile=evidence_tile):
+    """The round-2 panel tiles with `recs` written in by `tile.apply`, under PROOF/name."""
+    recs = records() if recs is None else recs
     stats = {}
     for group in sorted({v["group"] for v in GROUPS.values()}):
-        src, dst = BASE / group / "packs", PROOF / "after" / group / "packs"
+        src, dst = BASE / group / "packs", PROOF / name / group / "packs"
         if dst.exists():
             shutil.rmtree(dst)
         dst.mkdir(parents=True)
@@ -54,7 +65,7 @@ def stage():
             out = dst / "tiles" / f.relative_to(src / "tiles")
             out.parent.mkdir(parents=True, exist_ok=True)
             data = f.read_bytes()
-            new = evidence_tile.apply(data, recs, stats) if f.suffix == ".bay" else data
+            new = tile.apply(data, recs, stats) if f.suffix == ".bay" else data
             if new == data:
                 out.symlink_to(f.resolve())
             else:
@@ -63,12 +74,13 @@ def stage():
     print(json.dumps(stats))
 
 
-def render():
-    """The 32 views twice with one renderer: before (the round-2 tiles) and after (the same with the records written
-    in). Take every GPU turn first (test/kit.mjs `quiet`; bay/quiet.mjs runs this under it)."""
+def render(sets=("before", "after")):
+    """The 32 views of each set with one renderer: `before` or `off` is the round-2 tiles, any other name the set staged
+    under PROOF. Take every GPU turn first (test/kit.mjs `quiet`; bay/quiet.mjs runs this under it)."""
     from city_panel import shot
 
-    for name, root in (("before", BASE), ("after", PROOF / "after")):
+    for name in sets:
+        root = BASE if name in ("before", "off") else PROOF / name
         dest = PROOF / "shots" / name
         dest.mkdir(parents=True, exist_ok=True)
         for group in sorted({v["group"] for v in GROUPS.values()}):
@@ -89,12 +101,13 @@ def painted_majority(tail, first, count):
     return best if total >= 24 and count_[best] * 10 >= total * 3 and best > 2 else None
 
 
-def tile_rows(group):
-    """Every level-0 building row of a group's tiles as the renderer reads its wall: key -> (kind before, painted)."""
+def tile_rows(group, root=BASE):
+    """Every level-0 building row of a group's tiles as the renderer reads its wall: key -> (kind, painted, measured),
+    measured when the row's evidence bit says its kind wins over the paint (bay.rs `Evidence`)."""
     from paint_tile import records as sfpt
 
     out = {}
-    for f in (BASE / group / "packs/tiles/0").glob("*.bay"):
+    for f in (root / group / "packs/tiles/0").glob("*.bay"):
         b = f.read_bytes()
         h = struct.unpack_from("<16i", b)
         at = evidence_tile.rows_at(h)
@@ -105,9 +118,9 @@ def tile_rows(group):
             end += 8 + 32 * struct.unpack_from("<I", b, end + 4)[0]
         tail = {e: v[8:] for e, v in sfpt(b[end:])} if b[end : end + 4] == b"SFPT" else {}
         for n in range(h[12]):
-            first, count, wall = struct.unpack_from("<2iI", b, at + 24 * n)
+            first, count, wall, trim = struct.unpack_from("<2iIi", b, at + 24 * n)
             key = ";".join(f"{x},{z}" for x, z, _ in verts[first : first + count])
-            out[key] = (wall, painted_majority(tail, first, count))
+            out[key] = (wall, painted_majority(tail, first, count), bool(trim >> 16 & 1))
     return out
 
 
@@ -193,7 +206,7 @@ def compare():
             if key not in before:
                 continue
             s["inTiles"] += 1
-            wall, painted = before[key]
+            wall, painted, _ = before[key]
             if painted:
                 s["paintWhite" if is_white(table[painted]) else "paintColour"] += 1
             rec = recs.get(key)
@@ -231,6 +244,93 @@ def compare():
     out = PROOF / "compare.json"
     out.write_text(json.dumps(dict(total=total, summary=summary, buildings=rows), indent=1))
     print(json.dumps(total, indent=1))
+
+
+OWN = {k: np.array([int(h[i : i + 2], 16) for i in (0, 2, 4)]) / 255 for k, h in {7: "a9a69f", 8: "a4553d", 9: "cfc6b4", 10: "b98a5a", 11: "9fc3d6"}.items()}
+
+
+def drawn(entry):
+    """The kind the renderer draws a wall in, from a tile row (kind, painted majority, measured)."""
+    wall, painted, measured = entry
+    return wall if measured or not painted else (wall & 15) | (painted << 8)
+
+
+def drawn_lab(kind):
+    """CIELAB of the colour a kind draws (march.ts `palette` is in the eye's terms: sRGB-like, before the light)."""
+    c = OWN.get(kind & 15, OWN[7]) if kind >> 8 == 0 else palette()[kind >> 8]
+    return fe.lab(fe.linear(np.asarray(c) * 255))
+
+
+def versus(sets=("pr484", "ours")):
+    """Each panel building within 45 m of its place that a set changed from `off`: towards or away from the held-out
+    photograph (read through the exposure normaliser) in chroma (a*, b*) and in lightness (L*), and, where the wall
+    was classed by eye, whether its lightness lands in that class (light >= 68, dark <= 52, mid between 45 and 75)."""
+    from tiles import read
+
+    eye = {(e["square"], e["row"]): e["eye"] for e in json.loads(Path(__file__).with_name("evidence_eye.json").read_text())}
+    band = dict(light=(68, 101), mid=(45, 75), dark=(-1, 52))
+    ref = Reference()
+    faces = fe.Faces(ref, fe.Segmenter())
+    poses = json.loads((fe.BAY / "450-panel/fixed-poses.json").read_text())
+    count = lambda: dict(changed=0, colour=0, material=0, seen=0, chroma_towards=0, chroma_away=0, light_towards=0, light_away=0, eyed=0, eye_in=0, eye_in_off=0)
+    totals = {s: count() for s in sets}
+    per_place, rows = {}, []
+    for r in fe.PANEL:
+        place, square, group = r["place"], r["square"], GROUPS[r["place"]]["group"]
+        cam = ref.fetch(r["image"])
+        fe.cameras()["meta"][r["image"]] = cam
+        off = tile_rows(group)
+        staged = {s: tile_rows(group, PROOF / s) for s in sets}
+        p = read(fe.CITY / "packs" / (square + ".bay"))
+        a, b = cam[1], cam[2]
+        i, j = int(round((a - p["gx0"]) / 10)), int(round((b - p["gz0"]) / 10))
+        eye_h = int(p["ground"][j, i]) + 25
+        x, _, z, *_ = poses[place]["street"]
+        place_counts = per_place.setdefault(place, {s: count() for s in sets})
+        for n in fe.near(square, x, z, 45):
+            verts, row = p["buildings"][n]
+            key = fe.key_of(verts)
+            if key not in off:
+                continue
+            k0 = drawn(off[key])
+            photo = None
+            entry = dict(place=place, row=n, off=k0)
+            for s in sets:
+                k1 = drawn(staged[s][key]) if key in staged[s] else k0
+                entry[s] = k1
+                if k1 == k0:
+                    continue
+                if photo is None:
+                    v = fe.view(p, fe.walls_of(p, verts, row), (0, r["image"], a, b, eye_h), faces)
+                    c = fe.view_colour(v) if v else None
+                    photo = fe.lab(c[0]) if c is not None and c[2] <= fe.CLIPPED else False
+                    if photo is not False:
+                        entry["photo"] = [round(float(q), 1) for q in photo]
+                for t in (totals[s], place_counts[s]):
+                    t["changed"] += 1
+                    t["colour"] += k1 >> 8 != k0 >> 8
+                    t["material"] += k1 & 15 != k0 & 15
+                l0, l1 = drawn_lab(k0), drawn_lab(k1)
+                if photo is not False:
+                    dc0, dc1 = np.hypot(*(l0 - photo)[1:]), np.hypot(*(l1 - photo)[1:])
+                    dl0, dl1 = abs(l0[0] - photo[0]), abs(l1[0] - photo[0])
+                    for t in (totals[s], place_counts[s]):
+                        t["seen"] += 1
+                        t["chroma_towards"] += int(dc1 < dc0 - 2)
+                        t["chroma_away"] += int(dc1 > dc0 + 2)
+                        t["light_towards"] += int(dl1 < dl0 - 2)
+                        t["light_away"] += int(dl1 > dl0 + 2)
+                e = eye.get((square, n))
+                if e:
+                    lo, hi = band[e]
+                    for t in (totals[s], place_counts[s]):
+                        t["eyed"] += 1
+                        t["eye_in"] += int(lo <= l1[0] <= hi)
+                        t["eye_in_off"] += int(lo <= l0[0] <= hi)
+            rows.append(entry)
+    out = PROOF / "versus.json"
+    out.write_text(json.dumps(dict(totals=totals, places=per_place, buildings=rows), indent=1))
+    print(json.dumps(totals, indent=1))
 
 
 def summary():
@@ -333,7 +433,20 @@ def spot(n=20, seed=451):
 
 
 if __name__ == "__main__":
-    cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("action", choices=["stage", "render", "compare", "spot", "summary"])
+    cli = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    cli.add_argument("--proof", default="proof", help="the folder under the evidence home that staging and shots go to")
+    cli.add_argument("action", choices=["stage", "render", "compare", "versus", "spot", "summary"])
+    cli.add_argument("--set", default="after", help="stage: the staged set's name")
+    cli.add_argument("--records", nargs="*", help="stage: records folders under the evidence home (default records/panel, records/sample)")
+    cli.add_argument("--sets", nargs="*", help="render: sets to draw (off is the round-2 tiles); versus: sets to score")
     a = cli.parse_args()
-    {"stage": stage, "render": render, "compare": compare, "spot": spot, "summary": summary}[a.action]()
+    PROOF = fe.HOME / a.proof
+    if a.action == "stage":
+        recs = {}
+        for folder in a.records or ("records/panel", "records/sample"):
+            recs.update(evidence_tile.load(str(fe.HOME / folder)))
+        stage(a.set, recs)
+    elif a.action in ("render", "versus"):
+        {"render": render, "versus": versus}[a.action](*([a.sets] if a.sets else []))
+    else:
+        {"compare": compare, "spot": spot, "summary": summary}[a.action]()
