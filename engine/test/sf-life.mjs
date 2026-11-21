@@ -366,20 +366,21 @@ try {
   const start = onStreet('Taylor Street', 515900, 663000)
   await look({ x: start.x / 10, z: start.z / 10, h: 1.7, yaw: Math.atan2(start.dx, -start.dz), pitch: -0.1 })
   await page.waitForTimeout(1500); await settle()
-  // A car with no other parked within 9 m: E takes the living thing nearest, and a van beside the car was taken.
+  // A car with no other parked within 16 m (beside someone on foot, the parked within 12 m wake): E takes the living thing nearest, and a van beside the car was taken.
   // (And none of the living things near: the realm sets its own van down on this street.)
-  const car = await page.evaluate(({ x, z }) => { const e = globalThis.engine, all = e.street.cars(x, z, 1500).filter((c) => c.kind === 'parked'), alive = e.alive.things.map((t) => e.alive.where(t)).filter(Boolean).map((w) => w.at); return all.filter((c) => c.model === 'car' && Math.hypot(c.x - x, c.z - z) < 1200 && all.every((o) => o === c || Math.hypot(o.x - c.x, o.z - c.z) > 90) && alive.every((a) => Math.hypot(a[0] - c.x, a[2] - c.z) > 150)).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null }, { x: start.x, z: start.z })
+  const car = await page.evaluate(({ x, z }) => { const e = globalThis.engine, all = e.street.cars(x, z, 1500).filter((c) => c.kind === 'parked'), alive = e.alive.things.map((t) => e.alive.where(t)).filter(Boolean).map((w) => w.at); return all.filter((c) => c.model === 'car' && Math.hypot(c.x - x, c.z - z) < 1200 && all.every((o) => o === c || Math.hypot(o.x - c.x, o.z - c.z) > 160) && alive.every((a) => Math.hypot(a[0] - c.x, a[2] - c.z) > 150)).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0] ?? null }, { x: start.x, z: start.z })
   check(!!car, `a parked car on Taylor St to get into${car ? ` (${car.name})` : ''}`)
   if (car) {
     // On foot beside it: it comes to life, and E gets in.
-    await page.evaluate((c) => { const e = globalThis.engine; e.me.walk(true); const side = c.heading + Math.PI / 2; Object.assign(e.pose, { x: (c.x + Math.cos(side) * 30) / 10, z: (c.z + Math.sin(side) * 30) / 10, y: e.ground((c.x + Math.cos(side) * 30) / 10, (c.z + Math.sin(side) * 30) / 10) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)) }) }, car)
+    // (The eye there first: on foot, the person is set down where the eye is, and moving the eye after leaves them.)
+    await page.evaluate((c) => { const e = globalThis.engine; e.me.walk(false); const side = c.heading + Math.PI / 2; Object.assign(e.pose, { x: (c.x + Math.cos(side) * 30) / 10, z: (c.z + Math.sin(side) * 30) / 10, y: e.ground((c.x + Math.cos(side) * 30) / 10, (c.z + Math.sin(side) * 30) / 10) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)) }); e.me.walk(true) }, car)
     await page.evaluate(() => { const e = globalThis.engine; globalThis.__gaps = []; globalThis.__stop = e.watch((g) => globalThis.__gaps.push(g)) })
     const woke = await page.waitForFunction(() => globalThis.engine.alive.near !== null, null, { timeout: 30_000 }).then(() => true, () => false)
     await page.waitForTimeout(1000)
     // What E would take is the living thing nearest; if that is another (a van woken beside it), from its other side.
     const isIt = () => page.evaluate((c) => { const e = globalThis.engine, w = e.alive.near && e.alive.where(e.alive.near); return !!w && Math.hypot(w.at[0] - c.x, w.at[2] - c.z) < 20 }, car)
     if (woke && !(await isIt())) {
-      await page.evaluate((c) => { const e = globalThis.engine, side = c.heading - Math.PI / 2, x = (c.x + Math.cos(side) * 30) / 10, z = (c.z + Math.sin(side) * 30) / 10; Object.assign(e.pose, { x, z, y: e.ground(x, z) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)) }) }, car)
+      await page.evaluate((c) => { const e = globalThis.engine, side = c.heading - Math.PI / 2, x = (c.x + Math.cos(side) * 30) / 10, z = (c.z + Math.sin(side) * 30) / 10; e.me.walk(false); Object.assign(e.pose, { x, z, y: e.ground(x, z) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)) }); e.me.walk(true) }, car)
       await page.waitForTimeout(2500)
     }
     results.nearIsChosen = woke && await isIt()
