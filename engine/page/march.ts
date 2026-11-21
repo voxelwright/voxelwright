@@ -1177,7 +1177,9 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var slope = false;
   if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
     let c = hit.cell - g.level[hit.level].cells;
-    if (!solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
+    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450.)
+    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && (kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u' : 'false'};
+    if (!kerb && !solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
       // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
@@ -1185,6 +1187,41 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       slope = true;
     }
   }
+  ${world.options.surveyedWalls ? `// A bank steeper than a cell a cell is a staircase of 10 cm cells: treads lit, risers dark and the corner of every
+  // step shut in, a chessboard across Telegraph Hill (#450). Ground on a step is lit on the slope that the solid round
+  // it makes, asked about the sun from over its cell, and not darkened in the step's corner.
+  if (ground && faced && hit.level <= 1u && (hit.kind & 64u) == 0u) {
+    let c = hit.cell - lvh.cells;
+    let up = vec3i(0, 1, 0);
+    // Only where the ground rises a cell a cell or more for two cells: a riser with the ground behind it rising so (a
+    // kerb has the pavement level behind it), a tread with ground beside it rising so (a wall beside a pavement stands
+    // higher yet). A gentler slope is lit flat, its risers as its treads (above): lit on the slope, the tread under
+    // each step of a lawn or a street stood out from the rest, a line at every step from 100 m.
+    var step = false;
+    if (abs(hit.n.y) < 0.5) {
+      let back = -vec3i(hit.n);
+      step = solidAt(c + back + up, hit.level) && solidAt(c + back * 2 + up * 2, hit.level);
+    } else if (!solidAt(c + up, hit.level)) {
+      let beside = array<vec3i, 4>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
+      for (var i = 0u; i < 4u && !step; i++) {
+        step = solidAt(c + beside[i] + up, hit.level) && solidAt(c + beside[i] * 2 + up * 2, hit.level)
+          && !solidAt(c + beside[i] + up * 4, hit.level);
+      }
+    }
+    if (step) {
+      let around = array<vec3i, 13>(vec3i(3,0,0), vec3i(0,3,0), vec3i(0,0,3), vec3i(2,2,0), vec3i(2,-2,0), vec3i(2,0,2),
+        vec3i(2,0,-2), vec3i(0,2,2), vec3i(0,2,-2), vec3i(2,2,2), vec3i(2,2,-2), vec3i(2,-2,2), vec3i(2,-2,-2));
+      var grad = vec3f(0.0);
+      for (var i = 0u; i < 13u; i++) {
+        grad += vec3f(around[i]) * (f32(solidAt(c - around[i], hit.level)) - f32(solidAt(c + around[i], hit.level)));
+      }
+      if (grad.y > 0.0) {
+        n = normalize(grad);
+        at = p + n * (1.0 / lvh.scale);
+        slope = true;
+      }
+    }
+  }` : ''}
   ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
   // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
   if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
@@ -1812,9 +1849,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     // where the others are clear, so a dry clear day is told exactly what it was told before.)
     const overcast = Math.max(rain, cloud, 0.2 * fog)
     const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
+    // The real city's shade is lit by its sky and by the sunlit fronts across the street, and a photograph's white
+    // balance takes the blue out of it: lit by the sky's blue alone, every shaded road and front came out navy where
+    // the panel's photographs are grey (#450, render_checks.py shade).
+    const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
-      ...wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
+      ...fill(wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7)), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
       ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - overcast),
       ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,

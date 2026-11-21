@@ -98,6 +98,32 @@ class PixelGate(unittest.TestCase):
             good = self.inspect(folder, self.street(folder, "clean.png"), photo)
             self.assertTrue(good["passed"], good["defects"])
 
+    def test_a_street_shaded_navy_fails_and_one_shaded_grey_passes(self):
+        import numpy as np
+        from PIL import Image
+
+        with TemporaryDirectory() as folder:
+            photo = self.street(folder, "photo.png")
+            for colour, passes in (((45, 58, 92), False), ((62, 64, 66), True)):
+                with self.subTest(colour=colour):
+                    rgb = np.asarray(Image.open(self.street(folder, "shade.png"))).copy()
+                    rgb[320:420, 100:860] = colour  # a shadow across the road
+                    path = Path(folder) / f"shade-{passes}.png"
+                    Image.fromarray(rgb).save(path)
+                    record = self.inspect(folder, path, photo)
+                    self.assertEqual(record["passed"], passes, record["defects"])
+                    self.assertEqual(record["checks"]["shade"]["render"], colour[2] - colour[0])
+
+    def test_a_judge_naming_battlements_twice_fails_the_view(self):
+        from types import SimpleNamespace
+
+        answer = json.dumps(dict(result=json.dumps(dict(defects=[dict(name="battlements", clear=True, where="roofs")], notes="")), is_error=False))
+        with TemporaryDirectory() as folder:
+            photo = self.street(folder, "photo.png")
+            record = self.inspect(folder, self.street(folder, "clean.png"), photo,
+                                  reply=lambda *a, **k: SimpleNamespace(stdout=answer, stderr="", returncode=0))
+            self.assertEqual(record["defects"], ["judge: battlements (roofs)"])
+
     def test_a_judge_that_cannot_answer_fails_the_view(self):
         with TemporaryDirectory() as folder:
             photo = self.street(folder, "photo.png")
