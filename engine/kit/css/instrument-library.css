@@ -1,0 +1,107 @@
+[data-shell] .vx-calendar-cell:is([data-vx-mark="one"], [data-vx-mark="start"], [data-vx-mark="end"]) > .vx-calendar-day,
+[data-shell] .vx-pagination-pages > li > a { color: var(--lit-legend); }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) { background: #414844; }
+[data-shell] .vx-pagination-gap { color: #f2eddd; }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) > li > a:is(:not([aria-current]), [aria-current="false"]) {
+  background: var(--vx-key);
+  box-shadow: inset 1px 1px #ffffff52, inset -2px -3px #252c2560, inset -3px -4px #0002;
+}
+
+[data-shell] .vx-date-float .vx-calendar-cell[data-vx-mark="mid"] > .vx-calendar-day { color: var(--vx-ink); }
+
+/* Reading. Set the article like the inside of a field manual. Only things
+   that actually display machine output get a window. */
+[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: var(--vx-serif); font-weight: 500; }
+[data-shell] .vx-prose h2 { font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: round(up, 1.12em, var(--vx)); letter-spacing: -.035em; }
+[data-shell] .vx-prose blockquote { font-style: italic; max-inline-size: 45ch; }
+[data-shell] .vx-prose blockquote footer { font: 400 .8125rem/1.25rem var(--vx-mono); margin-block-start: .5rem; }
+[data-shell] .vx-code pre {
+  --vx-ink-quiet: #a9bcad;
+  color: #e9f0df; background: linear-gradient(150deg, #26322e, #1d2522 68%);
+  box-shadow: inset 0 2px 4px #101713a6, inset 0 -1px #808f7c;
+}
+[data-shell] .vx-code[data-vx-lines] .vx-line::before {
+  inline-size: 3ch; padding-inline-end: .6em; margin-inline-end: .85em; border-inline-end: 1px solid #596960;
+}
+[data-shell] :is(.vx-figure figcaption, .vx-code figcaption) { padding-inline-start: .75rem; border-inline-start: 2px solid currentColor; }
+[data-shell] :is(.vx-table thead th, .vx-table .vx-num, .vx-data-table-count, .vx-avatar-initials, .vx-badge) { font-family: var(--vx-mono); }
+[data-shell] .vx-table tbody tr + tr > :is(th, td) { border-color: color-mix(in srgb, currentColor 21%, transparent); }
+[data-shell] .vx-data-table tbody tr:has(input:checked) { background: color-mix(in srgb, var(--vx-ink) 9%, transparent); }
+[data-shell] .vx-breadcrumb [aria-current="page"] { text-decoration: underline; text-underline-offset: .35em; }
+
+[data-shell] .vx-scroll-bar::before {
+  background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 12.5%) left center / 3px 100% no-repeat;
+  opacity: .6;
+}
+[data-shell] .vx-list-group > li + li { box-shadow: inset 0 1px color-mix(in srgb, currentColor 22%, transparent); }
+[data-shell] :is(.vx-item-trail, .vx-separator:not(.vx-groove)) { font-family: var(--vx-mono); }
+[data-shell] .vx-callout-title { font-weight: 650; letter-spacing: -.012em; }
+[data-shell] .vx-empty-title { font: 500 1.5rem/1.25 Georgia, "Times New Roman", serif; }
+
+/* Navigation. An engraved registration mark stays at each stop on the rail;
+   the existing moving indicator identifies the selected stop. */
+[data-shell] :is(.vx-nav[data-vx-mark="groove"], .vx-spy) a {
+  background: linear-gradient(currentColor, currentColor) left .5rem bottom / 1px .25rem no-repeat;
+}
+[data-shell] :is(.vx-nav[data-vx-way="down"], .vx-spy:not([data-vx-way="across"])) a {
+  background-position: left center; background-size: .25rem 1px;
+}
+[data-shell] :is(.vx-nav[data-vx-way="down"], .vx-spy:not([data-vx-way="across"])) a:dir(rtl) { background-position: right center; }
+[data-shell] .vx-nav[data-vx-mark="seats"]:not([data-vx-live]) { background-color: #505653; }
+[data-shell] .vx-nav[data-vx-mark="seats"] a:is(:not([aria-current]), [aria-current="false"]):not([aria-disabled="true"]) { color: #fff9e9; }
+[data-shell] :is(.vx-nav-title, .vx-command-title, .vx-combobox-title, .vx-option-trail, .vx-nav-trail) { font-family: var(--vx-mono); }
+[data-shell] :is(.vx-menubar, .vx-navigation-menu) { border-block-end: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+[data-shell] :is(.vx-menubar, .vx-navigation-menu) [aria-expanded="true"],
+[data-shell] :is(.vx-command, .vx-combobox-float) [role="option"][data-vx-active] { font-weight: 650; }
+
+/* Data. The scale and the readout share a smoked face behind the glass.
+   Place every tick on the chart's actual axis label, including sparse axes. */
+[data-shell] :is(.vx-chart, .vx-command-scroll) {
+  --vx-ink: #eef3e6; --vx-ink-quiet: #c1cfc2;
+  background: linear-gradient(135deg, #35433c, #242e2b 62%, #26312e);
+}
+[data-shell] .vx-command-scroll { box-shadow: inset 0 2px 4px #10171394, inset 0 -1px #8a9587; }
+[data-shell] .vx-chart {
+  padding: 1rem; border: 1px solid #282e29; border-radius: 4px;
+  box-shadow: inset 0 1px #667367, inset 0 0 0 3px #313b36, 0 1px 0 #ffffff45;
+}
+[data-shell] .vx-chart > figcaption { font-size: 1.125rem; font-weight: 600; }
+[data-shell] :is(.vx-chart-x, .vx-chart-y, .vx-chart-key) { font-family: var(--vx-mono); }
+[data-shell] .vx-chart-y > span::after {
+  content: ""; position: absolute; inset-inline-start: calc(100% + 3px); top: 50%; inline-size: 5px; border-top: 1px solid currentColor;
+}
+[data-shell] .vx-chart-x > span::before {
+  content: ""; position: absolute; left: 50%; bottom: calc(100% + 1px); height: 4px; border-left: 1px solid currentColor;
+}
+[data-shell] .vx-chart-window:not([data-vx-live]) { background: #232824; box-shadow: inset 1px 2px 4px #101713, inset 0 -1px #708273; }
+[data-shell] .vx-chart-marks [data-vx-light="stud"] { --_light: #555d58; }
+[data-shell] .vx-calendar-names { border-block: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
+[data-shell] :is(.vx-calendar-name, .vx-calendar-day, .vx-theme-picker-name) { font-family: var(--vx-mono); }
+[data-shell] .vx-carousel-lamps { outline: 1px solid color-mix(in srgb, currentColor 28%, transparent); outline-offset: 2px; }
+
+[data-shell] .vx-chart-reading { background: #1b2621; box-shadow: inset 0 1px 2px #101811; }
+[data-shell] .vx-resizable[data-vx-on] > .vx-resizable-groove:not([aria-disabled="true"])::before {
+  content: ""; position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  inline-size: .65rem; block-size: 1.75rem; pointer-events: none;
+  border: 1px solid #4e544b; border-radius: 2px;
+  background: repeating-linear-gradient(0deg, #bdbbad 0 2px, #787c71 2px 3px, #d3d0bc 3px 4px);
+  box-shadow: inset 1px 1px #e9e7d3, 1px 2px 2px #15191180;
+}
+[data-shell] .vx-resizable[data-vx-way="down"] > .vx-resizable-groove::before { transform: translate(-50%, -50%) rotate(90deg); }
+[data-shell] .vx-resizable[data-vx-on] > [data-vx-held]::before { border-color: var(--vx-ink); }
+
+[data-shell] .vx-otp-cell::after {
+  content: ""; position: absolute; inset: auto 28% .4rem; height: 1px;
+  background: color-mix(in srgb, var(--vx-ink) 40%, transparent); pointer-events: none;
+}
+
+/* Conversation. Use one quiet typographic register for time, files and
+   machine state. Let people and their words occupy the foreground. */
+[data-shell] :is(.vx-message-when, .vx-attachment-size, .vx-marker, .vx-trace-state, .vx-questionnaire-note) {
+  font-family: var(--vx-mono); font-variant-numeric: tabular-nums;
+}
+[data-shell] .vx-message-head { column-gap: .75rem; }
+[data-shell] .vx-message-when { border-inline-start: 1px solid color-mix(in srgb, currentColor 40%, transparent); padding-inline-start: .75rem; }
+[data-shell] .vx-marker { letter-spacing: .025em; }
+[data-shell] .vx-attachment-tile { border-inline-start: 3px double currentColor; }
+[data-shell] .vx-trace > li[data-vx-state="failed"] .vx-trace-state { color: color-mix(in srgb, var(--vx-ink) 80%, #cd5430); }

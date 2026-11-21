@@ -6,7 +6,7 @@
 // The same gate for the type study's boards (both languages) is tools/type-board.mjs.
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5989;
-const path = process.argv[2] || 'showcase/';
+const path = process.argv[2] || 'showcase/principles.html';
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 const read = () => {
   const b = document.querySelector('.vx-sign:not([data-vx-board="none"])');
@@ -60,7 +60,7 @@ console.log('== resize: ' + seen.join(' | '));
 // that edge without changing scrollWidth. Phone and desktop use the same part builder.
 for (const width of [390, 1280]) {
   await page.setViewportSize({ width, height: 844 });
-  await page.goto(`http://127.0.0.1:${port}/kit/showcase/`);
+  await page.goto(`http://127.0.0.1:${port}/kit/showcase/principles.html`);
   await page.locator('.tabcard').scrollIntoViewIfNeeded();
   await page.waitForFunction(() => window.vx?.live(document.querySelector('.tabcard'))?.visible && !window.vx.stage.awake.size);
   const tabs = await page.evaluate(() => {

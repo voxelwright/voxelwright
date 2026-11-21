@@ -70,14 +70,25 @@ await p.waitForFunction(() => {
 });
 const held = await p.evaluate(() => {
   const l = window.vx.live(document.getElementById('close'));
-  return { height: l.faceZ, z: l.model.byName.cap.tz, socket: !!l.model.byName.socket };
+  const { cap, floor, socket } = l.model.byName;
+  const stemBottom = Math.min(...cap.rest.filter((_, i) => i % 3 === 2)) - 0.5 + cap.tz;
+  const bedTop = floor.rest[2] + 0.5;
+  return { travel: -cap.tz * l.vx, contact: stemBottom === bedTop, socket: socket.tz };
 });
-say(held.socket && held.height === 1 && held.z === -0.5,
-  `the one-course key presses a full course from its half-course hover inside the socket (z ${held.z})`);
+say(held.socket === 0 && held.travel === 4 && held.contact,
+  `the collar stays fixed and the stem reaches the bed after ${held.travel} px`);
 await p.mouse.move(x - 19, y + 150, { steps: 6 });
 await p.mouse.up();
 await p.waitForTimeout(500);
 say(await shown(p) && await p.evaluate(() => window.vx.live(document.getElementById('close')).model.byName.cap.tz) === 0, 'dragged off before letting go, nothing closes and the cap comes up');
+
+// Once the stroke has cancelled, crossing back over the cap cannot complete it.
+await p.mouse.move(x, y);
+await p.mouse.down();
+await p.mouse.move(x - 50, y, { steps: 4 });
+await p.mouse.move(x, y, { steps: 4 });
+await p.mouse.up();
+say(await shown(p), 'returning over the cap after dragging off needs a fresh press');
 
 // two targets that lie side by side do not lie on each other
 const rows = await p.evaluate(() => [...document.querySelectorAll('.files .vx-close')].map((b) => { const r = b.getBoundingClientRect(); return [r.top - 8, r.bottom + 8]; }));
@@ -91,9 +102,9 @@ await p.keyboard.press('Shift+Tab'); await p.keyboard.press('Tab'); // arrive by
 const ring = await p.evaluate(() => { const c = getComputedStyle(document.activeElement); return document.activeElement.matches(':focus-visible') && c.outlineStyle === 'solid' && parseFloat(c.outlineWidth) >= 2; });
 say(ring, 'focus from the keyboard shows a ring');
 await p.keyboard.press('Enter');
-say(!(await shown(p)), 'Enter closes');
+say(!(await shown(p)) && await p.locator('#open:focus').count() === 1, 'Enter closes and focuses the opener');
 await reopen(p);
-await p.focus('#close');
+say(await p.locator('#close:focus').count() === 1, 'reopening returns focus to the close key');
 await p.keyboard.press('Space');
 say(!(await shown(p)), 'Space closes');
 await reopen(p);

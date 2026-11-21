@@ -12,8 +12,8 @@ cd engine/kit
 PORT=5989 node tools/serve.mjs
 ```
 
-Open [the showcase](http://127.0.0.1:5989/kit/showcase/). The bare server address redirects there.
-Run `PORT=5989 node tools/links.mjs` from the same directory to check all the pages.
+Open [the showcase](http://127.0.0.1:5989/kit/showcase/). Signal Desk opens at the bare server address. Turn its dial, press a lamp key or change the enclosure. The build follows you through the parts catalog in the same tab. The original interactive rules are under Design notes.
+Run `PORT=5989 node tools/links.mjs` to check every page. Run `PORT=5989 node tools/instrument.mjs` to exercise the build controls, lighting, phone navigation and renderer preference.
 
 ## Use
 
@@ -49,13 +49,14 @@ backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`
 
 | Name | What it does |
 |---|---|
+| `fitInstrument({ shell, caps, profile, lamp, level, rail })` | Fit the enclosure, caps, profile and backlight to the lit kit. Signal Desk displays the case light as `steady` or `spectrum`. |
 | `adopt(root?)` | Turn every part under `root` into voxels |
 | `release(root?)` | Give them back to plain CSS |
 | `live(el)` | The live model behind an element: `play('assemble' \| 'crumble')`, `spring()`, `rebuild()` |
 | `define(def)` | Register a part of your own |
 | `toast(text, { kind, duration })` | Show a toast; returns a function that dismisses it |
 | `closeDialog(el, value)` | Close a dialog the way its own buttons do |
-| `sound(on)`, `cue(name)` | Turn sound on from a user gesture; play a cue |
+| `sound(on)`, `cue(name, { mass }?)` | Turn sound on from a user gesture; play a cue. A press or release is voiced for the cap the hand touched, or for `mass` square voxels |
 | `plant(part, opts)`, `pot(part, …)`, `stageOf(g)` | The plant generator |
 | `refresh(el)` | Redraw a part after changing what it is drawn from (values set from code are heard without it) |
 | `use(renderer)`, `ready()` | Hand the kit another renderer, or `null` for none; know when the page is live |

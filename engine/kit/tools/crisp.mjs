@@ -2,7 +2,7 @@
 // is sharp only when its text box starts on a whole pixel. node tools/crisp.mjs [page]
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5985;
-const path = process.argv[2] || 'showcase/index.html';
+const path = process.argv[2] || 'showcase/principles.html';
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let bad = 0;
 for (const w of [390, 768, 1280]) for (const mode of ['plain', 'live']) {

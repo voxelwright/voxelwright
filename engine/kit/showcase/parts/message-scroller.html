@@ -12,6 +12,35 @@
   .chat-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 calc(var(--vx) * 5); }
   .chat-head h3 { font-size: 1.125rem; line-height: 1.3; }
   .chat-head span { color: var(--vx-ink-quiet); font-size: 0.9375rem; }
+  #chat {
+    position: relative; isolation: isolate;
+    grid-template-columns: minmax(0, 1fr) calc(6 * var(--vx));
+    column-gap: calc(4 * var(--vx));
+    padding: calc(3 * var(--vx)) calc(3 * var(--vx)) calc(5 * var(--vx));
+  }
+  #chat .vx-scroll-view { padding-inline: calc(3 * var(--vx)); }
+  #chat .vx-scroll-bar { --vx: 2px; margin-block: calc(2 * var(--vx)); }
+  #chat .vx-scroll-bar::before { inset-inline: -10px; background: none; }
+  #chat .vx-scroll-well:has(> :focus-visible) { outline-offset: 0; }
+  #chat:not([data-vx-live]) {
+    background: var(--vx-slate);
+    box-shadow: inset 0 -2px var(--vx-steel);
+  }
+  #chat .vx-scroll-bar:not([data-vx-live]) {
+    background: #303836;
+    box-shadow: inset 2px 0 var(--vx-steel), inset -2px 0 var(--vx-steel);
+  }
+  #chat:not([data-vx-live]) .vx-scroll-well {
+    background: var(--vx-reading-plate, var(--vx-chalk));
+    box-shadow: 0 0 0 var(--vx) var(--vx-steel);
+  }
+  #chat:not([data-vx-live])::after {
+    content: ""; position: absolute; pointer-events: none;
+    inset-inline-end: calc(4 * var(--vx)); inset-block-end: calc(2 * var(--vx));
+    inline-size: calc(4 * var(--vx)); block-size: var(--vx);
+    background: #706f63; outline: 2px solid #30342f;
+  }
+  #chat:not([data-vx-live]):has(.vx-thread-new:not([hidden]))::after { background: #f1d9a8; }
   .composer { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: calc(var(--vx) * 4); }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
   .state { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); align-content: start; justify-items: start; }
@@ -164,6 +193,48 @@
   import { trace } from '../../src/components/trace.js';
   import { messageScroller } from '../../src/components/message-scroller.js';
 
+  // A fixed carrier for the reading plate and its scroll rail. The open back
+  // exposes the desk plate, so the messages still sit on their original surface.
+  const chatHousing = {
+    name: 'chat-housing', selector: '#chat', pad: 3,
+    glowRadius: 1.5, glowStrength: 0.055,
+    build(live, model) {
+      const { W, H, vx, el } = live;
+      const well = el.querySelector('.vx-scroll-well');
+      const left = Math.round(well.offsetLeft / vx), top = Math.round(well.offsetTop / vx);
+      const width = Math.round(well.offsetWidth / vx), height = Math.round(well.offsetHeight / vx);
+      const body = model.part('casting');
+      body.slab(0, 0, 0, W, H, 2, 'chalk', 2)
+        .carve(left, top, 0, width, height, 2);
+      // One course of graphite over the case return, cut on the same grid as the opening.
+      body.slab(0, 0, 2, W, H, 1, 'slate', 2)
+        .carve(left - 1, top - 1, 2, width + 2, height + 2, 1);
+      const bar = el.querySelector('.vx-scroll-bar');
+      // The fader's own model supplies its walls and bed below the case face.
+      body.carve(Math.round(bar.offsetLeft / vx), Math.round(bar.offsetTop / vx), 0,
+        Math.round(bar.offsetWidth / vx), Math.round(bar.offsetHeight / vx), 3);
+      const rail = Math.round((bar.offsetLeft + bar.offsetWidth / 2) / vx);
+      const y = H - 3;
+      body.box(rail - 3, y - 1, 2, 6, 3, 1, 'gasket')
+        .carve(rail - 2, y, 2, 4, 1, 1);
+      model.part('unlit').box(rail - 2, y, 2, 4, 1, 1, 'lens');
+      model.part('unread').box(rail - 2, y, 2, 4, 1, 1, 'light-warm');
+      live.faceZ = 3;
+    },
+    bind(live) {
+      const slot = live.el.querySelector('.vx-thread-new');
+      live.state.slot = slot;
+      const observer = new MutationObserver(() => live.invalidate());
+      observer.observe(slot, { attributes: true, attributeFilter: ['hidden'] });
+      return () => observer.disconnect();
+    },
+    pose(live) {
+      const { unlit, unread } = live.model.byName;
+      unread.hidden = live.state.slot.hidden;
+      unlit.hidden = !unread.hidden;
+    },
+  };
+
   // the page's own: messages to fill the small threads with, and to let arrive
   const said = [
     ['Mina Okafor', 'MO', 'Build 212 is out.'], ['Ada Lindqvist', 'AL', 'The cache is keyed on the lockfile now.'],
@@ -219,7 +290,7 @@
   });
   document.getElementById('keep').addEventListener('vx-answer', (e) => setTimeout(() => window.reply(e.detail.values[0] === 'keep' ? 'Build 213 stays until the 24th.' : 'Build 213 is removed.'), 700));
 
-  show(bubble, attachment, questionnaire, trace, messageScroller).then(() => {
+  show(bubble, attachment, questionnaire, trace, messageScroller, chatHousing).then(() => {
     // the second thread is shown as it is while reading back: scrolled up, and two have come
     const v = viewOf('back');
     v.scrollTop = 0;

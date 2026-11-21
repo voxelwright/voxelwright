@@ -50,6 +50,14 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 390]) {
   if (mode === 'voxels') {
     say(rule.every((r) => Math.abs(r.off) < 0.51 && r.tall === 4 && r.wide === 0), `${tag} the groove is cut where the head ends, one voxel tall, as wide as the table's place (off by ${rule.map((r) => r.off.toFixed(2)).join(', ')} px)`);
     say(rule.every((r) => r.grid === 0), `${tag} and the head ends on a whole voxel (${rule.map((r) => r.grid).join(', ')} px over)`);
+    const opening = await p.locator('#use').evaluate(el => {
+      const l = window.vx.live(el), face = l.model.byName.faceplate;
+      const row = Math.round(l.well[1] - face.ty);
+      const inset = Math.round(parseFloat(getComputedStyle(el).paddingInlineStart) / l.vx);
+      for (let x = inset; x < l.W - inset; x++) if (face.has(x, row, 0)) return false;
+      return face.has(inset, row - 1, 0) && face.has(inset, row + 1, 0) && face.tz + 1 === 0;
+    });
+    say(opening, tag + ' the faceplate has an open channel between flush edges');
     say(rule.every((r) => r.clear), `${tag} the painted line under the head is cleared, so the groove is not drawn twice`);
   } else say(rule.every((r) => r.off === 0 && r.painted), `${tag} with no voxels the head's own border is the line, one voxel thick`);
 

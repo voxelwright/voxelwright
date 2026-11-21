@@ -14,6 +14,7 @@ export const OWN: Readonly<Record<string, string>> = {
   // On foot V is the eye's, and the foot's mode is put over the offers whenever the body is taken up again (after a
   // ride, through the portal): an offer on V worked or not by what the person had done since the page opened.
   KeyV: 'where the eye rides, on foot',
+  KeyO: 'open the billboard ahead',
 }
 
 /**
@@ -27,4 +28,4 @@ export const YIELDED: Readonly<Record<string, string>> = {
 }
 
 /** Handed, in order, to offers that asked for no key: letters the page never listens for. */
-export const FREE: readonly string[] = ['KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyO', 'KeyJ', 'KeyN']
+export const FREE: readonly string[] = ['KeyY', 'KeyZ', 'KeyU', 'KeyI', 'KeyJ', 'KeyN']

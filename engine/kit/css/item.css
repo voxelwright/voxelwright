@@ -37,6 +37,15 @@
 
 .vx-item[data-vx-clip] :is(.vx-item-title, .vx-item-line) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
+/* a row that is read (a list of articles): a larger title */
+.vx-item[data-vx-size="large"] .vx-item-title { font-size: 1.25rem; line-height: 1.3; }
+.vx-item[data-vx-size="large"] .vx-item-line { font-size: 0.9375rem; }
+.vx-item[data-vx-size="large"] > .vx-item-trail { align-self: start; padding-block-start: calc(var(--vx) * 1); }
+
+/* where the row is too narrow for both, what trails goes onto a line of its own under the words */
+.vx-item:not([data-vx-clip]) { flex-wrap: wrap; }
+.vx-item:not([data-vx-clip]) > .vx-item-text { flex: 1 1 calc(var(--vx) * 50); }
+
 /* a row you can press: still words. The title is underlined under the pointer, and the row
    takes the browser's focus ring, since there is no light in it to brighten. */
 :is(a, button).vx-item { cursor: pointer; -webkit-tap-highlight-color: transparent; }

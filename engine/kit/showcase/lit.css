@@ -35,6 +35,13 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .stage[data-own] { cursor: none; }
 .stage[data-own] :is(button, a, input, label) { cursor: none; }
 
+.vx-cursor[data-demo-pointer] {
+  inline-size: calc(var(--vx) * 7);
+  block-size: calc(var(--vx) * 10);
+  transition: none;
+}
+.vx-cursor[data-demo-pointer][data-vx-surface="courses"] { opacity: 1; }
+
 .window { display: grid; padding: 0; line-height: 1.55; }
 .window > * + * { margin-block-start: 0; }
 .window > .vx-groove { margin-inline: calc(var(--vx) * 6); }
@@ -56,10 +63,41 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .projects li[aria-current] { color: var(--vx-ink); font-weight: 650; }
 .projects .mark { position: absolute; inset-inline-start: calc(var(--vx) * 1); inset-block: calc(var(--vx) * 2); block-size: auto; }
 
+/* A fine grid lets the smoked ends and the cut wall share the row's original gutter. */
+.projects .mark[data-vx-lens="flush"] {
+  --vx: 2px;
+  inline-size: calc(var(--vx) * 4);
+  inset-block: calc(var(--vx) * 4);
+}
+.projects .mark[data-vx-lens="flush"]:not([data-vx-live]) {
+  border: var(--vx) solid var(--vx-steel);
+  border-block-color: var(--vx-slate);
+}
+
+@media (forced-colors: active) {
+  #deploy .projects .mark:not([data-vx-live]) { forced-color-adjust: none; background: Canvas; }
+  #deploy .projects [aria-current]:not([aria-current="false"]) > .mark:not([data-vx-live]) { background: Highlight; border: 2px solid CanvasText; }
+}
 .main { display: grid; gap: calc(var(--vx) * 7); align-content: start; padding: calc(var(--vx) * 7) calc(var(--vx) * 3) calc(var(--vx) * 12) calc(var(--vx) * 8); min-inline-size: 0; }
 .head { display: flex; align-items: center; gap: calc(var(--vx) * 5); flex-wrap: wrap; }
 .name { font-size: 1.875rem; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
 .state { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2.5); color: var(--vx-ink-quiet); font-weight: 600; font-size: 0.9375rem; }
+#deploy-pilot {
+  --vx-look: deploy-pilot;
+  --vx: 2px;
+  inline-size: calc(9 * var(--vx));
+  block-size: calc(5 * var(--vx));
+}
+#deploy-pilot:not([data-vx-live]) {
+  border: var(--vx) solid var(--vx-steel);
+  background: #49534e;
+}
+#deploy-pilot[data-vx-light="go"]:not([data-vx-live]) {
+  background: radial-gradient(ellipse at 22% 50%, var(--lit-go) 10%, #49534e 80%);
+}
+#deploy-pilot[data-vx-light="accent"]:not([data-vx-live]) {
+  background: radial-gradient(ellipse at 78% 50%, var(--lit-accent) 10%, #49534e 80%);
+}
 .state-word { transition: opacity 160ms var(--vx-ease-out); }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: calc(var(--vx) * 5); }
 .actions .auto { margin-inline-start: calc(var(--vx) * 3); font-size: 0.9375rem; }
@@ -67,10 +105,12 @@ main { display: grid; gap: calc(var(--vx) * 24); justify-items: center; }
 .build-top { display: flex; justify-content: space-between; font-weight: 600; font-size: 0.9375rem; }
 .build-num { font-variant-numeric: tabular-nums; color: var(--vx-ink-quiet); }
 .build .vx-meter { display: block; block-size: calc(var(--vx) * 5); }
-.log { display: grid; align-content: start; gap: calc(var(--vx) * 1); padding: calc(var(--vx) * 4) calc(var(--vx) * 5); min-block-size: calc(var(--vx) * 27); font: 400 0.8125rem/1.5 var(--vx-mono); }
+.log { display: grid; padding: calc(var(--vx) * 3) calc(var(--vx) * 4); block-size: calc(var(--vx) * 27); font: 400 0.8125rem/1.5 var(--vx-mono); }
+.log-view { min-block-size: 0; min-inline-size: 0; overflow: auto; display: grid; align-content: start; gap: var(--vx); padding: var(--vx); cursor: text; }
+.log-view:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 0; }
 .log .line { transition: opacity 260ms var(--vx-ease-out), translate 260ms var(--vx-ease-out); }
 .log .line[data-out] { opacity: 0; translate: 0 6px; }
-.log .at { color: var(--vx-ink-quiet); margin-inline-end: calc(var(--vx) * 4); }
+.log .at { color: color-mix(in srgb, var(--vx-ink-quiet) 75%, var(--vx-ink)); margin-inline-end: calc(var(--vx) * 4); }
 
 #deploy .vx-toast { position: absolute; inset-inline-end: calc(var(--vx) * 9); inset-block-end: calc(var(--vx) * -5); z-index: 5; margin: 0; padding: calc(var(--vx) * 3.5) calc(var(--vx) * 6); font: 600 0.9375rem/1.35 var(--vx-font); visibility: hidden; }
 #deploy .vx-toast[data-shown] { visibility: visible; }

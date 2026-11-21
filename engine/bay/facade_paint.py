@@ -107,18 +107,23 @@ def unoccluded(p, a, b, eye, x, z, y, dist, allowed=None):
     return visible if allowed is None else visible & allowed
 
 
-def project(pack, catalog, center, photos=None, radius=RADIUS):
-    began = time.monotonic()
-    p = read(pack)
+@lru_cache(maxsize=1)
+def colour_lookup():
     table = (palette()[1:] * 255).astype("f4")
     axis = np.arange(32) * 8 + 4
     buckets = np.stack(np.meshgrid(axis, axis, axis, indexing="ij"), axis=-1).astype(
         "f4"
     )
-    lut = np.array(
+    return np.array(
         [1 + ((slab[:, :, None, :] - table) ** 2).sum(3).argmin(2) for slab in buckets],
         dtype="u1",
     )
+
+
+def project(pack, catalog, center, photos=None, radius=RADIUS):
+    began = time.monotonic()
+    p = read(pack)
+    lut = colour_lookup()
     cameras = []
     excluded = {
         r["image"]

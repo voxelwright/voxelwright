@@ -23,6 +23,36 @@
   .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
   .row { align-items: start; }
+  #times {
+    --vx: 2px;
+    --legend: #dce0d8;
+    --pilot: #545954;
+    position: relative; isolation: isolate; display: inline-grid; place-items: center;
+    box-sizing: border-box; min-height: 44px; padding: 0 42px 8px 12px; margin-inline-end: 6px;
+    border: 0; background: transparent; color: var(--legend);
+    font: 600 1rem/1 var(--vx-font); cursor: pointer; touch-action: manipulation;
+  }
+  #times[aria-pressed="true"]:not(:disabled,[aria-disabled="true"]) { --legend: #ffe295; --pilot: #ffc558; }
+  #times:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 4px; }
+  #times:not([data-vx-live]) {
+    background: #4b5254; border-block: 3px solid var(--vx-chalk);
+    padding: 0 30px 0 0;
+  }
+  #times:not([data-vx-live]) .vx-label {
+    padding: 6px 12px; background: #282c2c;
+    box-shadow: 1px 3px #171b1b;
+  }
+  #times:not([data-vx-live])[aria-pressed="true"] .vx-label {
+    transform: translate(-2px,-2px); box-shadow: 0 1px #171b1b;
+  }
+  #times:not([data-vx-live],:disabled,[aria-disabled="true"])[data-held] .vx-label {
+    transform: translate(-3px,-3px); box-shadow: none;
+  }
+  #times:is(:disabled,[aria-disabled="true"]) { cursor: default; }
+  #times:not([data-vx-live])::after {
+    content: ""; position: absolute; right: 8px; top: calc(50% - 3px);
+    width: 6px; height: 6px; background: var(--pilot); box-shadow: 0 0 0 2px #343938;
+  }
 </style>
 </head>
 <body>
@@ -36,7 +66,7 @@
     <h2>In use: how a build log is shown</h2>
     <div class="log-head">
       <span class="name">Build 214 of harbor-api</span>
-      <button class="vx-toggle-button" type="button" aria-pressed="true" id="times" aria-controls="log">Times</button>
+      <button type="button" aria-pressed="true" id="times" aria-controls="log"><span class="vx-label">Times</span></button>
       <button class="vx-toggle-button" type="button" aria-pressed="false" id="wrap" aria-controls="log">Wrap</button>
       <button class="vx-button" type="button" id="copy">Copy</button>
     </div>
@@ -61,11 +91,11 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  import { toggleButton } from '../../src/components/toggle-button.js';
+  import { timesKey } from './times-key.js';
   const log = document.getElementById('log');
   document.getElementById('times').addEventListener('vx-change', (e) => log.toggleAttribute('data-times', e.detail.pressed));
   document.getElementById('wrap').addEventListener('vx-change', (e) => log.toggleAttribute('data-wrap', e.detail.pressed));
-  show(toggleButton);
+  show(timesKey);
 </script>
 </body>
 </html>

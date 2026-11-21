@@ -1,5 +1,5 @@
 // A person on the breadcrumb page: real keys walk the trail, a real mouse follows a link, and a
-// long trail is measured on a phone. In voxels and plain (the breadcrumb itself is words either way).
+// long trail is measured on a phone. In voxels and plain (the last location stays passive in both).
 //   PORT=5989 node tools/parts/breadcrumb.mjs
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
@@ -21,6 +21,8 @@ async function open({ width = 1180, plain = false, reduced = false } = {}) {
   await p.waitForFunction(() => document.documentElement.dataset.ready === '1');
   await p.evaluate(() => document.fonts.ready);
   await p.waitForTimeout(600);
+  const fitted = await p.locator('#trail [data-vx-live]').count();
+  say(fitted === (plain ? 0 : 5), plain ? 'the breadcrumb uses CSS throughout' : 'the rail, locator and three keys use the shared renderer');
   return p;
 }
 const press = async (p, sel) => { await p.locator(sel).first().scrollIntoViewIfNeeded(); const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
@@ -56,7 +58,10 @@ for (const plain of [false, true]) {
   await p.evaluate(() => document.querySelector('#trail a').focus());
   const order = [await p.evaluate(() => document.activeElement.textContent)];
   for (let i = 0; i < 3; i++) { await p.keyboard.press('Tab'); order.push(await p.evaluate(() => document.activeElement.textContent)); }
-  say(order.join(' > ') === 'fogline > Projects > harbor-api > Domains', `${tag}: Tab walks the trail in order (${order.join(' > ')})`);
+  const leftTrail = await p.evaluate(() => !document.activeElement.closest('#trail'));
+  const passive = await p.locator('#trail [aria-current]').evaluate(el => el.tagName === 'SPAN' && el.tabIndex < 0);
+  say(order.slice(0, 3).join(' > ') === 'fogline > Projects > harbor-api' && leftTrail && passive,
+    `${tag}: Tab visits three ancestor links and skips the passive current location`);
   await p.keyboard.press('Shift+Tab');
   await p.keyboard.press('Shift+Tab');
   const ring = await p.evaluate(() => { const a = document.activeElement, cs = getComputedStyle(a); return a.textContent + ': ' + (a.matches(':focus-visible') && cs.outlineStyle !== 'none' && parseFloat(cs.outlineWidth) >= 2); });
@@ -77,7 +82,7 @@ for (const plain of [false, true]) {
 
   // the chevrons are drawn, not written
   const chev = await p.evaluate(() => { const li = document.querySelectorAll('#trail li'), b = (n) => getComputedStyle(n, '::before'); return [b(li[0]).content, b(li[1]).content, b(li[1]).width, b(li[1]).height, document.querySelector('#trail').innerText.replace(/\s+/g, ' ').trim()]; });
-  say(chev[0] === 'none' && chev[1] === '""' && chev[2] === '8px' && chev[3] === '14px', `${tag}: a chevron before every level but the first, 8 by 14 px, with no words in it`);
+  say(chev[0] === 'none' && chev[1] === '""' && chev[2] === '4px' && chev[3] === '7px', `${tag}: a chevron before every level but the first, 4 by 7 px, with no words in it`);
   say(chev[4] === 'fogline Projects harbor-api Domains', `${tag}: the trail's own words are only the levels (${chev[4]})`);
   await p.evaluate(() => document.querySelector('#trail').setAttribute('dir', 'rtl'));
   const rtl = await p.evaluate(() => { const li = document.querySelectorAll('#trail li'); return [getComputedStyle(li[1], '::before').transform, li[0].getBoundingClientRect().left > li[3].getBoundingClientRect().left]; });
@@ -95,6 +100,10 @@ for (const plain of [false, true]) {
   say(m[1] === 1, `${tag}: a short one stays on one`);
   say(m[2] >= 2, `${tag}: one long name breaks inside itself (${m[2]} lines)`);
   await p.locator('#long').screenshot({ path: `shots/parts/breadcrumb/hand-${tag.replace(', ', '-')}-long.png` });
+  await p.setViewportSize({ width: 320, height: 800 });
+  await fits(p, '#trail', tag + ' at 320 px');
+  const rows = await p.locator('#trail li').evaluateAll(items => items.map(item => item.offsetTop));
+  say(rows[0] === rows[1] && rows[1] < rows[2] && rows[2] === rows[3], `${tag}: four levels wrap into two ordered pairs`);
   noErrors(p, tag);
   await p.context().close();
 }

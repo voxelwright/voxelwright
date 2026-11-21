@@ -82,6 +82,23 @@ villager and plan tests, the route check and the one page check (babble) that pa
 run the other page checks (too slow or past their time bounds without a GPU), the host regressions
 (macOS sandbox), the perf gates or anything with a model. Those run on your Mac.
 
+## Machine hygiene
+
+```sh
+scripts/hygiene.sh --dry-run     # which finished worktrees under ~/.t3/worktrees/Village would go
+scripts/hygiene.sh --install     # copy to ~/.village/bin and run it hourly with launchd (village.hygiene)
+```
+
+It removes a worktree only when it is clean (untracked node_modules, dist, target, .venv and
+`__pycache__` aside), unchanged for 2 hours, not open in any process and not under `feature-450-*`,
+and its HEAD is merged into origin/main, on a branch deleted on the remote, or pushed and untouched
+for 3 days. A HEAD no branch contains is kept as `refs/backup/wt-<name>`. Below 60 GiB free
+it posts a notification. Everything it does goes to `~/.village/hygiene.log`. Rerun `--install`
+after changing the script.
+
+A PostToolUse hook in `.claude/settings.json` appends a row to `.agents/dispatch-log.jsonl` for
+every `delegate_task` and `t3_thread_launch` call made from a Claude Code session in this repo.
+
 ## Handbook
 
 `docs/` has the quickstart, current status, decisions and change log.

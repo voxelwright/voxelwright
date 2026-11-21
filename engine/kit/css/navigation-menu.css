@@ -68,7 +68,7 @@
   background: var(--lit-accent, var(--vx-enamel));
 }
 .vx-navigation-menu-float:not([data-vx-live]) {
-  background: var(--vx-key, var(--vx-chalk));
+  background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk)));
   box-shadow: calc(var(--vx) * -0.5) calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 .vx-navigation-menu-float:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {

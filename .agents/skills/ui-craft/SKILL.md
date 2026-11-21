@@ -17,7 +17,25 @@ bar. His whole skill was "look at the new screenshot, compare it to the other
 products and the old screenshot, score it, do it again" (25:47-25:59), "very,
 very basic" (25:37).
 
+**Read screenshot feedback as a diagnosis.** Name what feels wrong and judge the repair in the
+working control. If an LED seems to appear out of nowhere, inspect the same fitting before and
+after activation. Its housing can differ between an aluminum plate and a translucent case.
+This keeps the reference useful across the kit while leaving room for a better mechanism.
+<!-- 2026-11-18: “I'm just saying what feels wrong, not how to solve it” -->
+
 ## Loop
+
+For every new physical control family, finish one working specimen before applying its design
+to siblings. Pair a close-up of the stationary specimen with the physical reference. Magnify
+the silhouette until the cells are visible, and verify the specimen uses the kit's shared
+voxel stage. Then operate it at normal size beside its siblings. For a recessed control,
+compare rest and full travel from the same view. Check which parts stay fixed, what clears
+the lip, and which surfaces catch light from the fitting. A detail can look convincing up
+close while the whole control still appears to float above its mount.
+The specimen's browser test calls `assertNativeVoxels(locator)` on the model host. The
+[specimen runner](../../../engine/kit/tools/physical-specimens.mjs) exercises real controls
+and their plain fallbacks. Run it with `--audit` to check visible hosts across the showcase.
+<!-- 2026-11-18: “one specimen for every new physical control family” -->
 
 1. Capture the real thing. Drive the app with Playwright and take screenshots at
    desktop and narrow widths, light and dark where they exist, and the
@@ -27,10 +45,9 @@ very basic" (25:37).
 2. Capture a baseline first and keep it. Always show before and after side by
    side (11:42-12:02: the agent made annotated before/after images with arrows
    because the owner could not see the subtle changes).
-3. Get a council of reviewers. One strong model from each provider, read only,
-   each given the screenshots plus the request, each returning a score out of 10
-   per category (6:54-8:08). For Village use Claude Opus and GPT-6.1 Sol at
-   minimum. A new review after fixes is a new round; log scores per round (12:37).
+3. Get independent visual scores from different models. Choose reviewers using the current
+   routing in `AGENTS.md`. Each gets the screenshots and request, works read-only, and returns
+   a score out of 10 per category (6:54-8:08). Log a fresh round after fixes (12:37).
 4. Fix what the reviewers found, then re-review with fresh context.
 5. Stop only when every reviewer clears the bar in every category, or say plainly
    that you stopped on cost or time. Early rounds typically jump (6 to 8 to 9 in

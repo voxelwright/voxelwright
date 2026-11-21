@@ -9,7 +9,7 @@
 // alone and with the far model (paired at full size). Pictures go to ~/.village/engine/sf/far/.
 //
 //   node sf/far/check.mjs [--no-build] [--far <dir>] [--only park,street] [--name run] [--query "&farreach=800"] [--night] [--quiet]
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -45,11 +45,27 @@ const VIEWS = {
   'hall-far': { size: [1280, 720], fov: 50, at: [49790, 105, 68850], look: [76.1, -1] },
   'palace-near': { size: [1280, 720], fov: 70, at: [48740, null, 65930], look: [270, 8] },
   'palace-far': { size: [1280, 720], fov: 50, at: [50200, 40, 65600], look: [258.7, -0.5] },
+  // The foreground (#450): in #423's wedge through the realm's own 25 degree lens, where the far model begins 100 m off
+  // (far.ts `farnear`): Grant Ave at a person's height, Chinatown from over it, and the park turned to each side of
+  // the wedge (bearings 87 and 152 from its apex). The 100 m panel views (bay/neighbourhoods.json, fixed-poses.json)
+  // at 70 degrees, where it does not.
+  'grant-25': { size: [1280, 720], fov: 25, at: [52249.2, null, 66692.0], look: [340, 0] },
+  'chinatown-over-25': { size: [1280, 720], fov: 25, at: [52249.2, 119.8, 66692.0], look: [300, -35] },
+  'park-87': { size: [1280, 720], fov: 25, at: [51646.66, 85.98, 66402.26], look: [87, -3] },
+  'park-152': { size: [1280, 720], fov: 25, at: [51646.66, 85.98, 66402.26], look: [152, -3] },
+  'fidi-100m': { size: [960, 540], fov: 70, at: [52582.4, 103.7, 66777.5], look: [0, -90] },
+  'chinatown-100m': { size: [960, 540], fov: 70, at: [52249.2, 119.8, 66692.0], look: [0, -90] },
+  'russian-100m': { size: [960, 540], fov: 70, at: [51399.6, 138.0, 66113.0], look: [0, -90] },
 }
 const squeezed = new Map()
-const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(dist, 'sf', path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
-// The four of round one unless asked: `--only landmarks` for the twelve landmark views, `--only all` for every one.
-const only = { landmarks: Object.keys(VIEWS).filter((k) => k.includes('-')), all: Object.keys(VIEWS) }[arg('only', '')] ?? arg('only', 'park,downtown,pyramid,street').split(',')
+// The far model's paths are its listing's: beside the page (sf/far.json), or in the pinned release beside its manifest.
+const pointer = JSON.parse(readFileSync(join(dist, 'sf', 'current.json'), 'utf8'))
+const farBase = existsSync(join(dist, 'sf', 'far.json')) ? join(dist, 'sf') : join(dist, 'sf', pointer.manifest, '..')
+const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(farBase, path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
+// The four of round one unless asked: `--only landmarks` for the twelve landmark views, `--only foreground` for the
+// foreground's, `--only all` for every one.
+const FOREGROUND = ['park', 'street', 'grant-25', 'chinatown-over-25', 'park-87', 'park-152', 'fidi-100m', 'chinatown-100m', 'russian-100m']
+const only = { landmarks: Object.keys(VIEWS).filter((k) => /-(near|far)$/.test(k)), foreground: FOREGROUND, all: Object.keys(VIEWS) }[arg('only', '')] ?? arg('only', 'park,downtown,pyramid,street').split(',')
 
 const site = await plain(dist, '127.0.0.1')
 // `--quiet`: every turn on the GPU, so that no other lane's check draws beside the timing (kit.mjs `quiet`).
@@ -76,7 +92,7 @@ for (const key of only) {
   const whole = await page.waitForFunction(() => engine.world.stats.wanted === 0 && engine.world.stats.stale === 0 && engine.far.whole && engine.far.stats.coming === 0, null, { timeout: 420_000 }).then(() => true, () => false)
   const ready = Date.now() - began
   await page.waitForTimeout(2500)
-  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over, #where, #credit { display: none }' })
+  await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over, #where, #credit, #realm { display: none !important }' })
   await page.waitForTimeout(600)
   await page.screenshot({ path: join(out, 'shots', `${name}-${key}.png`) })
   const said = await page.evaluate(async (size) => {

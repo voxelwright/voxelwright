@@ -1,6 +1,7 @@
 // A person at the collapsible's page: a real mouse and real keys. Says ok or FAIL for each thing
 // that must hold.
 //   PORT=5989 node tools/parts/collapsible.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 
@@ -56,8 +57,8 @@ async function visit({ width = 1180, height = 900, plain = false, reduced = fals
   say(!(await isOpen('#older')) && Math.abs(await tall('#older') - closed) < 0.5 && Math.abs(await top('#after') - a0) < 0.5 && await p.evaluate(() => document.querySelector('.sheet').style.minBlockSize) === '', 'a second press closes it, to exactly its row, and everything is where it began');
 
   // keys
-  await p.mouse.move(16, 16); await p.mouse.down(); await p.mouse.up(); // a press on the bare ground: Tab starts from the top
-  await p.keyboard.press('Tab');
+  await p.locator('main').evaluate(el => { el.tabIndex = -1; el.focus(); });
+  await reachByTab(p, 'summary');
   say(await focus() === 'older', 'Tab reaches the row');
   say(await p.evaluate(() => { const s = getComputedStyle(document.activeElement); return s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2; }), 'the row that has the focus shows a focus ring');
   await p.keyboard.press('Enter');

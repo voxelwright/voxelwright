@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "banner": {
+    "content": {
+      "text": "zahynailo.dev"
+    },
+    "around": [
+      519375,
+      664986
+    ],
+    "radius": [
+      105,
+      70
+    ],
+    "bearing": 120,
+    "height": 127,
+    "rise": -14,
+    "speed": 12,
+    "size": [
+      40,
+      6.5
+    ],
+    "start": 0.14,
+    "upright": {
+      "around": [
+        522096,
+        667273
+      ],
+      "radius": [
+        62,
+        45
+      ],
+      "height": 180,
+      "rise": 0,
+      "speed": 10,
+      "start": 0.2
+    }
+  },
+  "boards": [
+    {
+      "id": "blog",
+      "name": "Blog",
+      "type": "lettering",
+      "building": [
+        518048,
+        664928
+      ],
+      "at": [
+        518048,
+        529,
+        664928
+      ],
+      "facing": 0,
+      "size": 4,
+      "content": {
+        "text": "BLOG"
+      },
+      "to": "/blog/"
+    },
+    {
+      "id": "x",
+      "name": "X",
+      "type": "logo",
+      "logo": "x",
+      "building": [
+        527579,
+        670244
+      ],
+      "at": [
+        527579,
+        1662,
+        670244
+      ],
+      "facing": 0,
+      "turn": 305,
+      "size": 19,
+      "content": {
+        "text": "X"
+      },
+      "to": "https://x.com/pasha_knz"
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "type": "logo",
+      "logo": "linkedin",
+      "building": [
+        528848,
+        672403
+      ],
+      "at": [
+        528848,
+        1492,
+        672403
+      ],
+      "facing": 0,
+      "turn": 314.5,
+      "size": 14.8,
+      "content": {
+        "text": "LinkedIn"
+      },
+      "to": "https://www.linkedin.com/in/pavlo-zahynailo/"
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "type": "logo",
+      "logo": "twitch",
+      "building": [
+        525110,
+        674099
+      ],
+      "at": [
+        525110,
+        1358,
+        674099
+      ],
+      "facing": 0,
+      "turn": 260.4,
+      "size": 30,
+      "content": {
+        "text": "Twitch"
+      },
+      "to": "https://www.twitch.tv/p_bender"
+    }
+  ]
+}

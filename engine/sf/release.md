@@ -20,6 +20,26 @@ Supply `--far /local/build/far.json` to include face objects in the pin. The far
 
 The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in metres. Each `far.tiles[x_z]` is a three-element array of object records or null. Each FAR1 object contains its section headers and face payload. Fetch coarse band 0 first and add finer bands toward the eye. Unlisted keys have no far coverage.
 
+`far.landing` is optional: the faces seen from the landing's eye (`sf/far/landing.mjs`), so that the first picture has the skyline in about half a megabyte. It holds that `eye` in cells and `tiles[x_z]`, one object record each at `far/landing/<x>_<z>.far`, in the bands' FAR1 layout. While the eye is within 20 m of it, the page fetches these before anything else of the far model and holds the place's first show for them. Cut it again whenever the far tiles or the landing's camera in `sf/realm.json` change.
+
+## New street life or vehicles
+
+`--life` and `--cars` add the `life.py` and `cars.mjs` outputs as the `life` and `cars` objects, each with its producer's `index.json`. The life objects are one per square (with its signal heads) plus `transit`, the streetcar and cable car routes and the bus and trolleybus routes with their stops. When only these change, restage the pinned release with them and keep every other object:
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --life <life dir> --cars <cars dir> - ~/.village/engine/bay/450-city-paint/sf
+```
+
+A new landing cut is restocked the same way, with `--landing <dir>` (the folder `sf/far/landing.mjs` wrote, `landing.json` and `far/landing/`). It becomes `far.landing`; every far band stays as it was. `--base <digest>` starts from another release staged in the same folder instead of its `current.json`:
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --landing ~/.village/engine/sf/far/landing --base <digest> - ~/.village/engine/bay/450-city-paint/sf
+```
+
+New far tiles are restocked the same way, with `--far <far.json>`: a listing in `pack.mjs`'s layout, beside its `far/<band>/` objects, that holds only the tiles to replace. Each replaces the base's tile of the same key, checked as a full stage checks it, and the listing's `wedge` (#423's wedge: its apex in cells, its bearings and its reach in metres) and `light` (the faces' fitted light: `fill` and `gain`) replace the base's. Restock `--far` first, then cut the landing from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
+
+It checks the base manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
+
 ## Promotion after a visual pass
 
 The generator stages a local candidate and prints its digest. Score each fixed camera from `engine/bay/neighbourhoods.json` at street level and at 100 m. Run the same command with `--panel /path/to/panel.json` to move `current.json`. The receipt contains the candidate `release`, the `previousRelease` currently pinned in this output directory (JSON null for a first release), the SHA-256 of the tested Wasm in `coreSha256`, the SHA-256 of `neighbourhoods.json` in `panelSpecSha256`, and a `scores` object keyed by all sixteen place names. The default Wasm comes from `engine/page/core.wasm` by default. Pass `--core` for a staged build. Each value is a pair of numbers ordered street, 100 m. Every value must equal or exceed the preceding pin and the committed visual floors. A stale receipt or one lower score leaves the existing pointer in place. Inventory-only output stages metadata for inspection.

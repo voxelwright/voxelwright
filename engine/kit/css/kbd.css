@@ -1,5 +1,5 @@
 /* ---------- Kbd ----------
-   The name of a key. An inscription set into the surface.
+   The name of a key. A small keycap standing in the line of words, its legend on its top.
      <kbd class="vx-kbd">K</kbd>
      <kbd class="vx-keys"><kbd class="vx-kbd">Ctrl</kbd>+<kbd class="vx-kbd">K</kbd></kbd>   held together
    Its legend is in the key face, as on a key, at the key face's one size. It is seven voxels
@@ -29,8 +29,11 @@
 .vx-kbd abbr { text-decoration: none; cursor: inherit; }
 .vx-kbd > .vx-label { display: inline-block; } /* the script wraps the legend, to keep it on whole pixels */
 
-/* Plain inset for the engraved legend. */
-.vx-kbd:not([data-vx-live]) { background: var(--vx-slate); box-shadow: inset 1px 1px 0 var(--vx-slate-side); }
+/* Plain: a cap with a lit top edge and a sidewall below and to the right, as the voxels draw it. */
+.vx-kbd:not([data-vx-live]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: inset 1px 1px 0 var(--vx-chalk-top, rgb(255 255 255 / 0.5)), inset -1px -2px 0 var(--vx-chalk-side, rgb(0 0 0 / 0.18)), 1px 2px 0 var(--vx-shadow, rgb(0 0 0 / 0.18));
+}
 
 /* keys held together, or pressed one after another: caps a voxel apart, with the word between */
 .vx-keys { display: inline-flex; align-items: center; gap: calc(var(--vx) * 1.5); margin-block: calc(var(--vx) * -1); vertical-align: middle; font: 500 0.875em/1 var(--vx-font); color: var(--vx-ink-quiet); white-space: nowrap; }

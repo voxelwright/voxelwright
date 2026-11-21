@@ -36,7 +36,7 @@
 import { halo, byTheme } from '../core/light.js';
 import { listeners } from './util.js';
 import { optionsOf, shownOf, valueOf, sift, nameOptions, sayEmpty } from './combobox.js';
-import { mark as markOf } from './navs.js';
+import { boxOf, mark as markOf } from './navs.js';
 
 const mac = () => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 /** Does a key event match a chord such as "mod+k" or "shift+mod+p"? */
@@ -53,6 +53,7 @@ function wire(el, on, live) {
   const input = el.id && document.querySelector(`[aria-controls~="${CSS.escape(el.id)}"]`);
   if (!input) return;
   const dialog = el.closest('dialog');
+  const deck = dialog?.hasAttribute('data-vx-command-deck');
   const empty = dialog?.querySelector('.vx-command-empty') ?? null;
   nameOptions(el);
   const active = () => { const id = input.getAttribute('aria-activedescendant'); return (id && el.contains(document.getElementById(id)) && document.getElementById(id)) || null; };
@@ -74,6 +75,8 @@ function wire(el, on, live) {
   const filter = () => {
     const n = sift(el, input.value);
     sayEmpty(empty, input.value, n);
+    // Filtering can rearrange the fitted windows while keeping the same active option.
+    if (live && deck) live.state.at = undefined;
     mark(shownOf(el)[0] ?? null);
     const scroller = el.parentElement;
     if (scroller && !active()) scroller.scrollTop = 0;
@@ -84,8 +87,10 @@ function wire(el, on, live) {
     const d = live?.stage.lives.get(dialog);
     if (d?.state.leave) d.state.leave(value); else dialog.close(value);
   };
+  let executed = false;
   const choose = (o) => {
-    if (!o || o.getAttribute('aria-disabled') === 'true') return;
+    if ((deck && !dialog.open) || !o || o.getAttribute('aria-disabled') === 'true') return;
+    executed = true;
     const value = valueOf(o);
     el.dispatchEvent(new CustomEvent('vx-choose', { bubbles: true, detail: { option: o, value } }));
     close(value);
@@ -96,10 +101,14 @@ function wire(el, on, live) {
     const i = all.indexOf(active());
     mark(all[i < 0 ? (by > 0 ? 0 : all.length - 1) : (i + by + all.length) % all.length]);
   };
+  let reversing = false;
   const begin = () => {
-    // it opens empty, with every row and the first marked
-    input.value = '';
-    filter();
+    if (!reversing || executed) {
+      input.value = '';
+      filter();
+    }
+    reversing = false;
+    executed = false;
     input.focus({ preventScroll: true });
   };
 
@@ -121,6 +130,11 @@ function wire(el, on, live) {
   });
 
   if (dialog) {
+    // A reversal keeps the current query, selection and measured display height.
+    // Capture before nativeRelease removes the closing pose.
+    if (deck) on(dialog, 'beforetoggle', e => {
+      reversing = e.newState === 'open' && dialog.hasAttribute('data-vx-native-exit');
+    }, true);
     // each time it opens it begins again; the dialog's own open is heard, whoever opened it
     on.watch(dialog, { attributes: true, attributeFilter: ['open'] }, () => { if (dialog.open) begin(); });
     // the chord: from anywhere on the page, to open it, and again to close it
@@ -159,6 +173,20 @@ export const commandPalette = {
   // the mark of the marked row: an accent groove at its start
   build(live, m) {
     const a = live.state.at;
+    if (live.el.closest('[data-vx-command-deck]')) {
+      const sockets = m.part('sockets');
+      const x = getComputedStyle(live.el).direction === 'rtl' ? live.W - 4 : 1;
+      const glass = m.part('windows');
+      for (const option of optionsOf(live.el)) {
+        const box = boxOf(live, option);
+        if (!box) continue;
+        // The frosted face sits in the same stepped collar on every row.
+        const y = box[1] + Math.floor((box[3] - 4) / 2);
+        sockets.slab(x, y, 0, 3, 4, 1, 'slate', 1).carve(x + 1, y + 1, 0, 1, 2, 1);
+        glass.box(x + 1, y + 1, 0, 1, 2, 1, option === a ? 'light' : 'lens');
+      }
+      return;
+    }
     if (a && !a.closest('[hidden]')) markOf(live, m, a, { way: 'beside' });
   },
 

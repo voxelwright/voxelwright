@@ -51,6 +51,10 @@ import { LOCAL, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
+import { boards } from './boards.ts'
+import { firstView } from './first.ts'
+import { tell } from './host.ts'
+import { signs } from './signs.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
@@ -170,7 +174,11 @@ async function main() {
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [])
+  // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
+  const first = LOCAL ? firstView(canvas, query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  // The line of numbers is for whoever measures: a realm the page runs alone shows it only when asked (`?debug=1`; first.ts hides it).
+  if (LOCAL && query.get('debug') !== '1') document.documentElement.classList.add('plain')
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -267,6 +275,8 @@ async function main() {
   // The town's residents (#218): by rule from place and from the clock every page of a world shares. `?people=0` leaves them out.
   const folkClock = { now: () => Date.now() / 1000 }
   const shocks: Shock[] = []
+  /** Where the cutter cut (street life closes the roads it broke, as a blast's). */
+  const cuts: { at: [number, number, number]; radius: number }[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
@@ -306,9 +316,17 @@ async function main() {
     water.light(sun, day)
   }
   // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
+  /** The realm's own light (#450): the sun and grade of the afternoon it is seen in, the hour unset (the eggs give it back, eggs.ts). */
+  const ownLight = () => {
+    if (!LOCAL?.air?.sun) return setHour(null)
+    hour = null
+    const sun = LOCAL.air.sun
+    march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1)
+    if (LOCAL.air.grade) grade = LOCAL.air.grade
+  }
   if (LOCAL?.air) {
     march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
-    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) { const sun = LOCAL.air.sun; march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1); if (LOCAL.air.grade) grade = LOCAL.air.grade }
+    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) ownLight()
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
@@ -318,6 +336,20 @@ async function main() {
   // place of the hour's and its tint multiplies the finished picture (glow.ts), until the page is in another realm.
   const ownLook = { hour, rain: march.rain }
   const realmLook: { grade: [number, number] | null; tint: [number, number, number] } = { grade: null, tint: [1, 1, 1] }
+  /**
+   * An egg's mood (eggs.ts): a grade and a tint that come over the picture, not at once. The hour an egg goes to is
+   * glided to in about a second, and its mood set in one frame was a night's green laid over a day's sky: a frame or
+   * two washed pale green (#450). It comes over two seconds, the first half of one held back for the dark, and goes in half of one, before the day is back.
+   */
+  const mood: { of: { grade: [number, number] | null; tint: [number, number, number] } | null; on: boolean; t: number } = { of: null, on: false, t: 0 }
+  const easeMood = (dt: number, own: readonly [number, number]) => {
+    if (!mood.of) return
+    mood.t = mood.on ? Math.min(1, mood.t + dt / 2) : Math.max(0, mood.t - dt / 0.5)
+    const k = Math.max(0, Math.min(1, (mood.t - 0.25) / 0.75)), mix = k * k * (3 - 2 * k), of = mood.of
+    realmLook.tint = [1 + (of.tint[0] - 1) * mix, 1 + (of.tint[1] - 1) * mix, 1 + (of.tint[2] - 1) * mix]
+    realmLook.grade = of.grade && mix > 0 ? [own[0] + (of.grade[0] - own[0]) * mix, own[1] + (of.grade[1] - own[1]) * mix] : null
+    if (!mood.on && mood.t === 0) mood.of = null
+  }
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
@@ -445,6 +477,7 @@ async function main() {
       pluginDraws.draw(encoder, to, v, (now - started) / 1000)
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
+    easeMood(Math.min(frameMs, 100) / 1000, grade)
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
@@ -471,7 +504,9 @@ async function main() {
     // For whoever measures (test/sf.mjs): the first picture handed to the GPU, and the first with every box of the world made.
     if (!seen.first) seen.first = performance.now()
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
-    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) seen.near = performance.now()
+    // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
+    // view, so that the skyline is in the first picture; only then does the far model fetch the rest.
+    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
@@ -536,7 +571,8 @@ async function main() {
   // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  /** `farToo` false: the far model keeps the tile (#450, the billboards: laid in every world, they are no reason to draw their whole tiles as cells from far off). */
+  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -770,7 +806,7 @@ async function main() {
       shadow?.postMessage({ forget: true })
       for (const piece of moving.values()) piece.destroy()
       for (const l of lying) l.piece.destroy()
-      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
       heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
       for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
       // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
@@ -829,6 +865,7 @@ async function main() {
       runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
     }
     make(rows(Int32Array.from(runs), [at[0] - reach, at[1], at[2] - reach, at[0] + reach + 1, at[1] + 2, at[2] + reach + 1]), at)
+    cuts.push({ at, radius: reach })
     return { at, ...hit }
   }
 
@@ -1245,18 +1282,58 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
+  // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
+  // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
+  const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
+    file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
+    lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
+    kept: (box) => farModel.keep(box),
+    reach: () => farModel.reach * M, handover: (x, z) => (farModel.reach > 0 ? farModel.handover(x, z) : Infinity),
+    done: () => world.done().length,
+    kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
+    pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
+    aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
+  }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
+  // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
+  // the picture (boards.ts `call`), and after that it goes round as it will, unless an egg has something to say on it.
+  if (first && !first.engaged && signboards?.plane) { const plane = signboards.plane; plane.call(true); first.onEngage(() => plane.call(false)) }
+  // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
+  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); signboards?.plane?.begin(); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
+  /**
+   * What the signs' screens cost the GPU here (#450): the march and the far model alone, and with the pass that draws
+   * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
+   */
+  const signPasses = async (rounds = 5) => {
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = []
+    paused = true
+    for (let i = 0; i < rounds; i++) {
+      alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
+      both.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v); pluginDraws.draw(encoder, target, v, 0) }, 100)).ms)
+    }
+    paused = false
+    to.destroy()
+    const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
+    return { world: middle(alone), withSigns: middle(both), size: [canvas.width, canvas.height] }
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { signPasses })
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
    * core): letting go of the edits is the whole of it, and nothing is sent anywhere. The eye goes back to where the
    * realm begins, on foot if it was, and the kept things are set down again.
    */
+  /** What else is put back with the world (the eggs, eggs.ts). */
+  const resetting = new Set<() => void>()
   const reset = async () => {
     if (far) return over.notice('A shared world is put back by its keeper, not by one page', 5000)
+    for (const each of resetting) each()
     const afoot = me.on
     alive.forget()
     if (afoot) me.walk(false)
@@ -1264,7 +1341,7 @@ async function main() {
     moverAge++
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
-    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
     farModel.forget()
@@ -1273,6 +1350,7 @@ async function main() {
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
+    signboards?.relay()
     over.notice('The world is as it was', 3000)
   }
   /**
@@ -1307,7 +1385,32 @@ async function main() {
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) }) })
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
+    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
+    // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
+    let hushed: AudioContext | null = null
+    const hatch = () => {
+      if (!seen.near) return
+      watchers.delete(hatch)
+      void import('./eggs.ts').then(({ eggs }) => {
+        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
+          device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.readable ?? true,
+          mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
+          notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
+          watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          // The city's sound steps aside for an egg's: taken off the speakers, and put back.
+          hush: (on) => {
+            const voice = ears?.voice
+            if (!voice) return
+            if (on && !hushed) { try { voice.out.disconnect(voice.context.destination); hushed = voice.context } catch { /* not connected */ } }
+            else if (!on && hushed) { voice.out.connect(hushed.destination); hushed = null }
+          },
+        }) })
+      })
+    }
+    watchers.add(hatch)
   }
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
@@ -1388,6 +1491,7 @@ main().catch(async (e: unknown) => {
   over.status(`This did not work here: ${text.split('\n')[0]}`)
   // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
   if (LOCAL) {
+    tell('error', { message: text.split('\n')[0] })
     document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
     const told = document.createElement('p')
     told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'

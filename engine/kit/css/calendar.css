@@ -7,7 +7,8 @@
    with no script the input is the browser's own. */
 .vx-calendar {
   display: inline-grid;
-  grid-template-columns: calc(var(--vx) * 77);
+  max-inline-size: 100%;
+  grid-template-columns: minmax(0, calc(var(--vx) * 77));
   gap: calc(var(--vx) * 3);
   font-family: var(--vx-font);
   color: var(--vx-ink);
@@ -32,15 +33,15 @@
 .vx-calendar-head:dir(rtl) > [data-vx-step="next"] .vx-calendar-chevron { transform: scaleX(-1); }
 
 /* the grid: the names of the days, then six weeks of seven cells */
-.vx-calendar-grid { display: grid; }
+.vx-calendar-grid { display: grid; grid-template-columns: minmax(0, 1fr); }
 .vx-calendar-names, .vx-calendar-week { display: flex; }
 .vx-calendar-name {
-  flex: none; inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 7);
+  flex: 1 1 0; min-inline-size: 0; block-size: calc(var(--vx) * 7);
   display: grid; place-items: center;
   font-size: 0.8125rem; line-height: 1; color: var(--vx-ink-quiet);
 }
 .vx-calendar-week { position: relative; isolation: isolate; }
-.vx-calendar-cell { flex: none; display: grid; inline-size: calc(var(--vx) * 11); block-size: calc(var(--vx) * 11); position: relative; }
+.vx-calendar-cell { flex: 1 1 0; min-inline-size: 0; display: grid; block-size: calc(var(--vx) * 11); position: relative; }
 .vx-calendar-day {
   position: relative;
   margin: 0; padding: 0; border: 0; border-radius: 0;

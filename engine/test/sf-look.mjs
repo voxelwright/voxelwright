@@ -50,6 +50,8 @@ const open = async (site, context) => {
   page.on('console', (m) => { if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) errors.push(m.text()) })
   await page.goto(`${site.url}/sf/index.html`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 })
+  // The controls are these checks' business: shown as a visitor's first move shows them (page/first.ts).
+  await page.evaluate(() => globalThis.engine.first?.engage())
   page.errors = errors
   return page
 }
@@ -127,7 +129,9 @@ try {
     const sky = (w) => page.evaluate((w) => globalThis.engine.realmControls.sky.set(w), w)
     const calm = () => until(page, () => !globalThis.engine.realmControls.sky.moving)
     await at(PARK, 25.05)
-    await page.evaluate(() => { globalThis.engine.hour = 15 })
+    // The banner plane is held where it is out of the park's picture: on its near pass its cloth covers 3% of the
+    // sky, and the share of the picture that is bright moved by 1.2 points with where the plane happened to be (#450).
+    await page.evaluate(() => { globalThis.engine.hour = 15; const plane = globalThis.engine.boards?.plane; if (plane) plane.hold = 0.52 })
     await page.waitForTimeout(1500); await settle(page)
     const seen = {}
     for (const w of ['clear', 'overcast', 'fog', 'rain']) {
@@ -234,7 +238,7 @@ try {
     const liveDrag = await drag(page)
     check(liveDrag.hour > 18, `the fader dragged to the right: the hour asked for is ${round(liveDrag.hour)}`)
     const stats = await page.evaluate(async () => { const k = globalThis.engine.realmControls.kit; const s = k ? await k.ready() : null; return s?.renderer?.stage?.stats ?? null })
-    const plainPage = await (async () => { const p = await desk.newPage(); await p.goto(`${site.url}/sf/index.html?kit=plain`); await p.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 }); await p.waitForTimeout(1500); await p.evaluate(() => { globalThis.engine.scale = 0.75 }); return p })()
+    const plainPage = await (async () => { const p = await desk.newPage(); await p.goto(`${site.url}/sf/index.html?kit=plain`); await p.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 }); await p.waitForTimeout(1500); await p.evaluate(() => { globalThis.engine.first?.engage(); globalThis.engine.scale = 0.75 }); return p })()
     await page.evaluate(() => { globalThis.engine.resting = true })
     const plainDrag = await drag(plainPage)
     await plainPage.screenshot({ path: join(shots, 'controls-plain.png') })
@@ -245,10 +249,12 @@ try {
     // Reset from its key: a blast, then the key, and the world is as it was.
     await page.evaluate(async () => { await globalThis.engine.blast(12) })
     await page.waitForTimeout(1500)
-    const edits = await page.evaluate(() => globalThis.engine.world.done().length)
+    // The billboards are edits that reset lays again (boards.ts): what is counted is beyond them.
+    const beyond = () => page.evaluate(() => globalThis.engine.world.done().length - (globalThis.engine.boards?.edits ?? 0))
+    const edits = await beyond()
     await roles.reset.click()
     await page.waitForTimeout(1500)
-    const after = await page.evaluate(() => globalThis.engine.world.done().length)
+    const after = await beyond()
     check(edits > 0 && after === 0, `reset from its key: ${edits} edits, then ${after}`)
     if (page.errors.length) check(false, `page errors: ${page.errors.slice(0, 3).join(' | ')}`)
     await desk.close()
@@ -290,7 +296,7 @@ try {
     await tp.waitForTimeout(1500)
     const e0 = await tp.evaluate(() => globalThis.engine.world.done().length)
     await tp.locator('#realm .use').tap()
-    const used = await until(tp, (n) => globalThis.engine.world.done().length > 0, 8000)
+    const used = await until(tp, () => globalThis.engine.world.done().length > (globalThis.engine.boards?.edits ?? 0), 8000)
     check(used, `Use, tapped: the world has ${await tp.evaluate(() => globalThis.engine.world.done().length)} edits (${e0} before)`)
     // The sky's panel, opened by its key; a weather by a tap.
     await tp.locator('#realm .fold').tap()

@@ -22,7 +22,7 @@ const open = async (browser, { w = 1280, plain = false, reduced = false, touch =
   const page = await ctx.newPage();
   if (plain) await page.addInitScript(() => { new MutationObserver((_, o) => { if (document.documentElement) { document.documentElement.setAttribute('data-vx-plain', ''); o.disconnect(); } }).observe(document, { childList: true }); });
   await page.addInitScript(() => { window.__pokes = 0; addEventListener('vx-poke', () => window.__pokes++); });
-  await page.goto(base + 'showcase/');
+  await page.goto(base + 'showcase/principles.html');
   await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(400);
@@ -207,7 +207,7 @@ for (const [name, kind, args] of [['chromium', chromium, ['--use-angle=metal', '
   }
 
   // ---- every piece of lettering on the pages people are sent to, in both languages and at phone width
-  for (const [path, w] of [['showcase/', 1280], ['showcase/', 320], ['showcase/type.html?pair=vox&faces=none', 1280], ['showcase/type.html?pair=vox&faces=none', 320], ['showcase/type.html?pair=vox&faces=none&lang=uk', 1280], ['showcase/type.html?pair=vox&faces=none&lang=uk', 360], ['showcase/type.html?pair=vox&faces=none&lang=uk', 320]]) {
+  for (const [path, w] of [['showcase/principles.html', 1280], ['showcase/principles.html', 320], ['showcase/type.html?pair=vox&faces=none', 1280], ['showcase/type.html?pair=vox&faces=none', 320], ['showcase/type.html?pair=vox&faces=none&lang=uk', 1280], ['showcase/type.html?pair=vox&faces=none&lang=uk', 360], ['showcase/type.html?pair=vox&faces=none&lang=uk', 320]]) {
     const page = await (await browser.newContext({ viewport: { width: w, height: 900 }, deviceScaleFactor: 1 })).newPage();
     await page.goto(base + path);
     await page.waitForFunction(() => document.documentElement.dataset.ready === '1', null, { timeout: 12000 });

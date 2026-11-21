@@ -7,7 +7,37 @@
 <link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
 <style>
-  /* this page's own */
+  .dispatch-plate {
+    position: relative;
+    isolation: isolate;
+    box-sizing: border-box;
+    inline-size: calc(var(--vx) * 88);
+    padding: calc(var(--vx) * 4) calc(var(--vx) * 6);
+    margin-block: calc(var(--vx) * 2);
+  }
+  .dispatch-plate:not([data-vx-live]) { background: #343c39; }
+  #when > legend { color: #fff6df; padding-inline-end: calc(var(--vx) * 9); padding-block-end: calc(var(--vx) * 5); }
+  #when > .vx-toggle-group { display: grid; margin-inline: var(--vx); }
+  #when .vx-toggle-group[data-vx-live] > label { color: var(--lit-legend); }
+  #when .vx-toggle-group:not([data-vx-live]) label { background: var(--vx-key); color: var(--lit-legend); }
+  #when .vx-toggle-group:not([data-vx-live]) label:has(input:checked) { text-decoration: underline; }
+  #when .vx-toggle-group:not([data-vx-live]) label:has(input:disabled) { background: var(--vx-steel); color: #202822; }
+  #when .vx-toggle-group[data-vx-live] label:has(input:disabled) { color: #202822; }
+  #when .dispatch-footer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: calc(var(--vx) * 3);
+    min-block-size: calc(var(--vx) * 11);
+    margin-block-start: calc(var(--vx) * 8);
+  }
+  #when .vx-questionnaire-send { margin-inline-start: calc(var(--vx) * 4); }
+  #when .vx-questionnaire-note { color: #fff6df; margin: 0; }
+  #when[data-vx-answered] .vx-questionnaire-note { grid-column: 1 / -1; }
+  @media (max-width: 30rem) {
+    #when .dispatch-footer { min-block-size: max(44px, 3lh); }
+  }
+  #when .vx-questionnaire-note:focus-visible { outline-color: #f2d698; }
   .talk { inline-size: 100%; max-inline-size: calc(var(--vx) * 150); }
   .said { color: var(--vx-ink-quiet); font-size: 0.875rem; min-block-size: 1.55em; }
   .states { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, calc(var(--vx) * 76)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; }
@@ -34,16 +64,20 @@
         <div class="vx-message-body">
           <header class="vx-message-head"><span class="vx-message-who" id="a1-who">Deploy agent</span><time class="vx-message-when" id="a1-when" datetime="2026-11-17T16:02">16:02</time></header>
           <div class="vx-message-text"><p>Build 214 of harbor-api is green and ready. One thing is yours to decide.</p></div>
-          <fieldset class="vx-questionnaire" id="when">
-            <legend>When should it go out?</legend>
-            <div class="vx-toggle-group" data-vx-way="down">
-              <label><input type="radio" name="when" value="now">Now</label>
-              <label><input type="radio" name="when" value="tonight">Tonight, after the backup</label>
-              <label><input type="radio" name="when" value="monday">On Monday</label>
-            </div>
-            <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
-            <p class="vx-questionnaire-note" role="status"></p>
-          </fieldset>
+          <div class="dispatch-plate">
+            <fieldset class="vx-questionnaire" id="when">
+              <legend>When should it go out?</legend>
+              <div class="vx-toggle-group" data-vx-way="down">
+                <label><input type="radio" name="when" value="now">Now</label>
+                <label><input type="radio" name="when" value="tonight">Tonight, after the backup</label>
+                <label><input type="radio" name="when" value="monday">On Monday</label>
+              </div>
+              <div class="dispatch-footer">
+                <button class="vx-button vx-questionnaire-send" data-vx-kind="main" type="button">Answer</button>
+                <p class="vx-questionnaire-note" role="status"></p>
+              </div>
+            </fieldset>
+          </div>
         </div>
       </article>
     </div>
@@ -135,6 +169,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
+  import { dispatchPlate } from './questionnaire-plate.js';
   import { questionnaire } from '../../src/components/questionnaire.js';
   const said = document.getElementById('said');
   window.answers = [];
@@ -142,7 +177,7 @@
     window.answers.push({ id: e.target.id, ...e.detail });
     if (e.target.id === 'when') said.textContent = `The page heard: ${e.detail.values.join(', ')}`;
   });
-  show(questionnaire);
+  show(questionnaire, dispatchPlate);
 </script>
 </body>
 </html>
