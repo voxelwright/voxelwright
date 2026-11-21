@@ -82,7 +82,8 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
  */
 export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
   const [nx, nz] = NORMALS[b.facing], rx = nz, rz = -nx, snap = (v: number) => Math.round(v / 8) * 8
-  const cx = snap(b.at[0]), cz = snap(b.at[2]), foot = Math.round(b.at[1]), y0 = Math.ceil((foot + (b.lift ?? 1.6) * M) / 8) * 8
+  // (Its face on a plane of 16: the coarsest cells it is seen in, on a phone, are that big.)
+  const cx = nx ? Math.round(b.at[0] / 16) * 16 : snap(b.at[0]), cz = nz ? Math.round(b.at[2] / 16) * 16 : snap(b.at[2]), foot = Math.round(b.at[1]), y0 = Math.ceil((foot + (b.lift ?? 1.6) * M) / 8) * 8
   const cells: number[][] = []
   /** A cell `k` along the face from its left edge, `d` behind it, at height `y`, when the face is `wide` across. */
   const put = (wide: number, k: number, d: number, y: number, kind: number) => {
@@ -145,6 +146,8 @@ function plane(): { kinds: Uint16Array; size: [number, number, number] } {
 
 export interface Boards {
   readonly records: readonly Board[]
+  /** Every board as the host page is told of it. */
+  listed(): { id: string; name: string; type: Board['type']; to: string | null }[]
   /** How many edits the boards have laid in the world as it is now: what a world with nothing done to it holds (the checks). */
   readonly edits: number
   /** Lays every board again: the world was put back as it came (reset). */
@@ -192,8 +195,8 @@ export interface Needs {
   pick(): Promise<{ t: number } | null>
   /** Up off one's feet: a flight to a board is flown. */
   aloft(): void
-  /** Whether the place is shown round the eye: the host is told the realm is ready. */
-  shown(): boolean
+  /** How far from the eye the far model's faces take over from cells (0: never), cells. */
+  reach(): number
   edit: boolean
 }
 
@@ -202,7 +205,12 @@ const CLOTH: Style = { ground: '#f6f1e4', ink: '#c2261c', glows: false }
 
 export async function boards(o: Needs): Promise<Boards> {
   const drawn = await screensOf(o.device, o.format)
-  o.passes.add('signs', (encoder, to, view, time) => drawn.draw(encoder, to, view, time, o.day()))
+  o.passes.add('signs', (encoder, to, view, time) => {
+    // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
+    const reach = o.reach()
+    for (const s of stood.values()) if (s.screen && s.shape) s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+    drawn.draw(encoder, to, view, time, o.day())
+  })
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
   interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void }
@@ -454,10 +462,9 @@ export async function boards(o: Needs): Promise<Boards> {
   listLinks()
   document.body.prepend(links)
 
-  // ── The host page: told when the realm is ready and where to go; it may fly the eye and set a sign ──
+  // ── The host page: it may fly the eye and set a sign (main.ts tells it when the realm is ready) ──
   const listed = () => records.map((b) => ({ id: b.id, name: b.name, type: b.type, to: b.to ?? null }))
   if (embedded) {
-    const ready = setInterval(() => { if (!o.shown()) return; clearInterval(ready); tell('ready', { boards: listed(), signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100)
     hear((m) => {
       if (m.type === 'fly' && typeof m.board === 'string') void fly(m.board)
       else if (m.type === 'open' && typeof m.board === 'string') void visit(m.board)
@@ -539,7 +546,7 @@ export async function boards(o: Needs): Promise<Boards> {
     records,
     get edits() { return laid },
     relay() { laid = 0; for (const s of stood.values()) stand(s, true); seenEdits = -1 },
-    fly, open, where, marks, standing, propose,
+    fly, open, where, marks, standing, propose, listed,
     get plane() { return flown },
     editor,
   }

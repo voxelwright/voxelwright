@@ -53,6 +53,7 @@ import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { boards } from './boards.ts'
 import { tell } from './host.ts'
+import { signs } from './signs.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
@@ -538,7 +539,8 @@ async function main() {
   // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  /** `farToo` false: the far model keeps the tile (#450, the billboards: laid in every world, they are no reason to draw their whole tiles as cells from far off). */
+  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -1256,13 +1258,33 @@ async function main() {
   // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
   const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
     file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
-    lay: (edit) => { put(); change(edit); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    reach: () => farModel.reach * M,
     done: () => world.done().length,
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
     pose, began, view, canvas, input: controls, hud: over, day: () => march.day, pick: () => march.pick(view()),
-    aloft: () => { if (me.on) me.walk(false) }, shown: () => seen.near > 0, edit: query.get('boards') === 'edit',
+    aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards })
+  // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
+  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
+  /**
+   * What the signs' screens cost the GPU here (#450): the march and the far model alone, and with the pass that draws
+   * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
+   */
+  const signPasses = async (rounds = 5) => {
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = []
+    paused = true
+    for (let i = 0; i < rounds; i++) {
+      alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
+      both.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v); pluginDraws.draw(encoder, target, v, 0) }, 100)).ms)
+    }
+    paused = false
+    to.destroy()
+    const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
+    return { world: middle(alone), withSigns: middle(both), size: [canvas.width, canvas.height] }
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { signPasses })
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every

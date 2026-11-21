@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, turn } from './kit.mjs'
+import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'boards')), mbit = Number(arg('mbit', '25')), seconds = Number(arg('seconds', '8'))
@@ -36,7 +36,7 @@ if (!has('no-build')) {
 mkdirSync(shots, { recursive: true })
 const file = JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8'))
 // The host: a page with the realm in a frame over the whole of it, keeping what the realm tells it.
-const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
+const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
 <iframe id="realm" src="/sf/index.html" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
 const site = await plain(dist, '127.0.0.1', 0, { extra: (req, res) => { if (new URL(req.url, 'http://x').pathname !== '/host.html') return false; res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(HOST); return true } })
 const back = await turn()
@@ -70,7 +70,11 @@ try {
   await bare.evaluate(() => { globalThis.engine.scale = 1 }); await bare.waitForTimeout(4000)
   await bare.screenshot({ path: join(shots, 'park-before.png') })
   check(await bare.evaluate(() => globalThis.engine.boards === null && globalThis.engine.world.done().length === 0), '?boards=0 leaves the boards out: no board, no edit in the world')
-  await plainContext.close()
+  // (It rests, not drawing, until its turn in the timing below: the next page loads as a visitor's would, alone.)
+  await bare.evaluate(() => { globalThis.engine.resting = true })
+  // Each board's foot is on its roof as this release has it: the file was made against a release, and the pin moves.
+  const roofs = await bare.evaluate((boards) => boards.map((b) => ({ id: b.id, at: b.at[1], roof: globalThis.engine.feet(b.at[0], b.at[2]), ground: Math.round(globalThis.engine.ground(b.at[0] / 10, b.at[2] / 10) * 10) })), file.boards)
+  check(roofs.every((r) => Math.abs(r.roof - r.at) <= 2 && r.roof - r.ground >= 60), `every board's foot is on a roof of this release: ${roofs.map((r) => `${r.id} at ${r.at / 10} m on a roof at ${r.roof / 10} m, ${round((r.roof - r.ground) / 10)} m over the ground`).join('; ')}`)
 
   // ── The first visit, cold, in the host's frame ──
   console.log(`\nfirst visit (cold cache, ${mbit} Mbit/s, 40 ms), in a host's frame`)
@@ -115,6 +119,32 @@ try {
   // GPU), the boards are held to what that page did, and a margin of a tenth and a millisecond.
   const bound = Math.max(17.5, framesWithout.p50 * 1.1 + 1)
   check(f.p50 <= bound, `the park at picture scale 0.7 with the boards and the plane: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms; without boards in this run p50 ${framesWithout.p50} ms, march ${framesWithout.marchMs} ms (bound ${round(bound)} ms)`)
+
+  // What the boards cost the GPU, which a frame gap held to 60 Hz cannot say: this page and the one without boards
+  // turn about, each resting while the other is timed (the march and the far model at the canvas's full size, at
+  // the GPU's own pace), and in this page the pass that draws the screens beside them. With every turn on the GPU
+  // where they can be had in three minutes.
+  {
+    const give = await Promise.race([quiet(), new Promise((r) => setTimeout(() => r(null), 180_000))])
+    const rest = (target, on) => target.evaluate((on) => { globalThis.engine.resting = on }, on)
+    // The least of the turns: whatever else draws on this GPU only ever adds to a turn.
+    const least = (xs) => Math.min(...xs)
+    const without = [], withBoards = [], screensMs = []
+    try {
+      for (let turnAbout = 0; turnAbout < 5; turnAbout++) {
+        await rest(realm, true); await rest(bare, false); await bare.waitForTimeout(500)
+        without.push((await bare.evaluate(() => globalThis.engine.farPasses(3))).withFar ?? 0)
+        await rest(bare, true); await rest(realm, false); await page.waitForTimeout(500)
+        const s = await realm.evaluate(() => globalThis.engine.signPasses(3))
+        withBoards.push(s.world); screensMs.push(s.withSigns - s.world)
+      }
+    } finally { await rest(realm, false); give?.() }
+    const c = (results.cost = { worldWithoutMs: round(least(without), 2), worldWithMs: round(least(withBoards), 2), screensMs: round(least(screensMs.filter((v) => v > 0).concat(Math.max(...screensMs))), 2), alone: !!give, tries: { without: without.map((v) => round(v, 2)), with: withBoards.map((v) => round(v, 2)) } })
+    c.addedMs = round(c.worldWithMs - c.worldWithoutMs + c.screensMs, 2)
+    const what = `the boards add ${c.addedMs} ms a frame on the GPU at the park, every pixel drawn: the world ${c.worldWithoutMs} ms without them and ${c.worldWithMs} ms with their cells, their screens and the banner ${c.screensMs} ms (bound 1.5 ms)`
+    if (c.addedMs > 1.5 && !give) console.log(`  WARN ${what}, beside other browsers drawing`); else check(c.addedMs <= 1.5, what)
+  }
+  await plainContext.close()
 
   // ── From the park: present, in the picture, seen, read ──
   console.log('\nfrom the park')
@@ -213,6 +243,33 @@ try {
   nav = (await told('navigate')).at(-1)
   results.free = free
   check(free.left <= 55 && free.flown > 50 && (await told('navigate')).length === n + 1 && nav?.board === last.id && nav.to === last.to, `flying free: W flew ${free.flown} m from the park to ${free.left} m before ${last.id}, and O told the host to go to ${nav?.to}`)
+
+  // ── A phone: a tap ──
+  console.log('\na phone (390 x 844, touch)')
+  {
+    const handheld = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
+    const small = await handheld.newPage()
+    small.on('pageerror', (e) => errors.push(`phone: ${e.message}`))
+    await small.goto(`${site.url}/host.html`)
+    await small.waitForFunction(() => window.told.some((m) => m.type === 'ready'), null, { timeout: 300_000 })
+    const held = small.frames().find((f) => f.url().includes('/sf/index.html'))
+    await held.waitForFunction(() => globalThis.engine.seen.whole > 0, null, { timeout: 300_000 })
+    await small.waitForTimeout(4000)
+    const inView = await held.evaluate(() => { const b = globalThis.engine.boards; return b.records.map((r) => ({ id: r.id, w: b.where(r.id), standing: b.standing(r.id) })).map((r) => ({ ...r, inside: !!r.w && r.w.x - r.w.wide / 2 > 0 && r.w.x + r.w.wide / 2 < innerWidth && r.w.y > 0 && r.w.y < innerHeight })) })
+    await small.screenshot({ path: join(shots, 'phone.png') })
+    const target = inView.find((r) => r.inside)
+    results.phone = { inPicture: inView.filter((r) => r.inside).map((r) => r.id), of: inView.length }
+    console.log(`  (report) in an upright phone's picture from the park: ${results.phone.inPicture.join(', ') || 'no board'} of ${inView.length} (the picture is ${round((Math.atan(Math.tan((25.05 * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)} degrees across)`)
+    if (target) {
+      await small.touchscreen.tap(target.w.x, target.w.y)
+      await small.waitForFunction(() => window.told.some((m) => m.type === 'navigate'), null, { timeout: 15_000 }).catch(() => null)
+      const nav = await small.evaluate(() => window.told.find((m) => m.type === 'navigate'))
+      await small.waitForTimeout(2500)
+      await small.screenshot({ path: join(shots, 'phone-tapped.png') })
+      check(nav?.board === target.id, `a tap on ${target.id} on a phone flew to it and told the host to go to ${nav?.to}`)
+    } else check(false, 'a board to tap in a phone\'s picture from the park')
+    await handheld.close()
+  }
 
   // ── What the signs say ──
   console.log('\nrealm.signs')

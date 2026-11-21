@@ -30,7 +30,8 @@ export interface Signs {
   add(sign: Shown): () => void
 }
 
-const kindOf = (content: Content): Accepts | null => (typeof (content as { text?: unknown }).text === 'string' ? 'text' : typeof (content as { image?: unknown }).image === 'string' ? 'image' : (content as { video?: unknown }).video instanceof HTMLVideoElement ? 'video' : null)
+// (A video by its tag: one made in the host page's document is no instance of this page's HTMLVideoElement.)
+const kindOf = (content: Content): Accepts | null => (typeof (content as { text?: unknown }).text === 'string' ? 'text' : typeof (content as { image?: unknown }).image === 'string' ? 'image' : (content as { video?: { tagName?: unknown } }).video?.tagName === 'VIDEO' ? 'video' : null)
 
 function make(): Signs {
   const shown = new Map<string, Shown>(), set = new Map<string, Content>()
@@ -57,4 +58,5 @@ function make(): Signs {
 
 /** The page's signs: one registry, also at `realm.signs` for scripts that are not modules of this page. */
 export const signs: Signs = make()
-if (typeof globalThis !== 'undefined') { const g = globalThis as unknown as { realm?: { signs?: Signs } }; g.realm = { ...g.realm, signs } }
+// (Until this module has run, `window.realm` is the page's record, the script element of that id: a caller waits for the host's `ready`.)
+if (typeof window !== 'undefined') { const g = window as unknown as { realm?: object }; g.realm = { ...(g.realm && !(g.realm instanceof Element) ? g.realm : {}), signs } }
