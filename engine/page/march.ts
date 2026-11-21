@@ -258,16 +258,19 @@ fn glassMirror(rd: vec3f, n: vec3f) -> f32 {
 
 /**
  * Where the far model takes over from the cells at a point p (far.ts), the same for both: past `reach` from the eye,
- * or past `wedge.w` in #423's wedge, whose faces are finer than the cells from there (`wedge`: its apex (x, z) from
+ * or past `wedge.w` in #423's wedge (`inWedge`), whose faces are finer than the cells from there (`wedge`: its apex (x, z) from
  * where p is measured and how far it reaches, finest cells, 0 where there is none; `bear`: the compass bearings it
  * lies between, radians).
  */
 export const HANDOVER = /* wgsl */ `
-fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f) -> f32 {
+fn inWedge(p: vec3f, wedge: vec4f, bear: vec4f) -> bool {
   let d = p.xz - wedge.xy;
   let b = atan2(d.x, -d.y);
   let bearing = select(b, b + 6.2831853, b < 0.0);
-  return select(reach, min(reach, wedge.w), wedge.z > 0.0 && bearing > bear.x && bearing < bear.y && dot(d, d) < wedge.z * wedge.z);
+  return wedge.z > 0.0 && bearing > bear.x && bearing < bear.y && dot(d, d) < wedge.z * wedge.z;
+}
+fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f) -> f32 {
+  return select(reach, min(reach, wedge.w), inWedge(p, wedge, bear));
 }
 `
 

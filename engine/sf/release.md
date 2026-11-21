@@ -36,6 +36,8 @@ A new landing cut is restocked the same way, with `--landing <dir>` (the folder 
 ~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --landing ~/.village/engine/sf/far/landing --base <digest> - ~/.village/engine/bay/450-city-paint/sf
 ```
 
+New far tiles are restocked the same way, with `--far <far.json>`: a listing in `pack.mjs`'s layout, beside its `far/<band>/` objects, that holds only the tiles to replace. Each replaces the base's tile of the same key, checked as a full stage checks it, and the listing's `wedge` (#423's wedge: its apex in cells, its bearings and its reach in metres) and `light` (the faces' fitted light: `fill` and `gain`) replace the base's. Restock `--far` first, then cut the landing from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
+
 It checks the base manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
 
 ## Promotion after a visual pass

@@ -80,8 +80,10 @@ def cut(source, far, record):
     return listing
 
 
-def restock(out, life=None, cars=None, landing=None, base=None):
-    """Stage a pinned release again with new street life, vehicles or landing cut; every other object stays as it is.
+def restock(out, life=None, cars=None, landing=None, base=None, far=None):
+    """Stage a pinned release again with new street life, vehicles, far tiles or landing cut; every other object stays
+    as it is. `far` is a far.json whose tiles replace the base's tiles of the same keys (each checked as `generate`
+    checks them), and whose `wedge` and `light`, where it has them, replace the base's.
 
     The candidate's tiles, names, graphs and far bands are the base release's own (OUT's pin unless --base names
     another), so its panel scores carry over unchanged; it is staged beside it (APFS clones, the old release untouched)
@@ -103,12 +105,31 @@ def restock(out, life=None, cars=None, landing=None, base=None):
     replaced = [kind for kind, source in (("life", life), ("cars", cars)) if source]
     for kind in replaced:
         inventory[kind] = library(kind, life if kind == "life" else cars, inventory, record)
+    gone = []
+    if far:
+        listing = json.loads(far.read_text())
+        mine = inventory.get("far")
+        if not mine or any(listing.get(k) != mine[k] for k in ("version", "size", "bands", "lods")):
+            raise ValueError("far tiles need a release with the same far model")
+        for key, bands in listing["tiles"].items():
+            if key not in mine["tiles"] or len(bands) != 3:
+                raise ValueError(f"far tile {key} is not the base's")
+            for band, row in enumerate(bands):
+                path = f"far/{band}/{key}.far"
+                if row is None:
+                    gone.append(path)
+                elif row["path"] != path or record(far.parent / path, path) != row:
+                    raise ValueError(f"invalid far object: {path}")
+            mine["tiles"][key] = bands
+        for key in ("wedge", "light"):
+            if key in listing:
+                mine[key] = listing[key]
     if landing:
         if "far" not in inventory:
             raise ValueError("a landing cut needs a release with a far model")
         inventory["far"]["landing"] = cut(landing, inventory["far"], record)
     if not files:
-        raise ValueError("nothing to restock: pass --life, --cars or --landing")
+        raise ValueError("nothing to restock: pass --life, --cars, --far or --landing")
     manifest = encode(inventory)
     digest = hashlib.sha256(manifest).hexdigest()
     dest = out / "releases" / digest
@@ -123,10 +144,13 @@ def restock(out, life=None, cars=None, landing=None, base=None):
         subprocess.run(["/bin/cp", "-cR", entry, tmp / entry.name], check=True)
     if landing:
         shutil.rmtree(tmp / "far" / "landing", ignore_errors=True)
+    for path in gone:
+        (tmp / path).unlink(missing_ok=True)
     if (old / ".bay-store").is_symlink():
         (tmp / ".bay-store").symlink_to(os.readlink(old / ".bay-store"))
     for name, source in files.items():
         (tmp / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp / name).unlink(missing_ok=True)
         shutil.copyfile(source, tmp / name)
     (tmp / "manifest.json").write_bytes(manifest)
     tmp.rename(dest)
@@ -430,13 +454,13 @@ if __name__ == "__main__":
     cli.add_argument(
         "--restock",
         action="store_true",
-        help="stage OUT's pinned release again with only --life, --cars or --landing new (ROOT unused)",
+        help="stage OUT's pinned release again with only --life, --cars, --far or --landing new (ROOT unused)",
     )
     cli.add_argument("--landing", type=Path, help="sf/far/landing.mjs directory with its landing.json")
     cli.add_argument("--base", help="with --restock, the staged release to start from instead of OUT's pin")
     args = cli.parse_args()
     if args.restock:
-        restock(args.out, args.life, args.cars, args.landing, args.base)
+        restock(args.out, args.life, args.cars, args.landing, args.base, args.far)
         sys.exit()
     generate(
         args.root,

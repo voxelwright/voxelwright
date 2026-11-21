@@ -6,7 +6,9 @@
 // Each face the page would draw from that eye is drawn into a depth buffer `--over` times finer than the screen each
 // way, and a face that is the nearest at any sample is kept: one that looks toward the eye, lies past the far model's
 // reach, is in the view (as wide as `--size`, with the eye's own roll), is in a band the page fetches at its distance
-// and is at least `fardetail` pixels across there (far.ts `needs` and the runs' `lods`). A face the page leaves out
+// and is at least `fardetail` pixels across there (far.ts `needs` and the runs' `lods`); of a landmark's section (layer
+// `hero`), every face, each grown about its middle to a pixel each way, as far.ts `vs` grows it, and kept if it is as
+// near as what is drawn anywhere within a pixel of it (edge-on, it is a sliver the samples miss). A face the page leaves out
 // must hide nothing here, or what it shows through would be lost. Faces that tie at a sample (a landmark's glass and
 // the bars on it lie in one plane) are all kept: which one the GPU shows there is its own order's to say. The page's pixels depend on how tall its picture
 // is (the size of the window and the scale it draws at), so this is done for each of `--heights` and the faces any
@@ -105,7 +107,7 @@ const triangle = (a, b, c, face) => {
 }
 const kept = new Uint8Array(total)
 for (const h of heights) {
-  const focal = h / (2 * tanHalf)
+  const focal = h / (2 * tanHalf), pixel = (2 * tanHalf) / h
   W = Math.round(h * aspect) * over; H = h * over
   depth = new Float32Array(W * H)
   // Twice: the nearest at each sample, then every face as near as it.
@@ -117,21 +119,29 @@ for (const h of heights) {
     if (o.band > 0 && !((dt / 10) * detail < far.bands[o.band - 1] * focal)) continue
     for (const s of o.head.sections) {
       const { pos, cell, c0, c2 } = s
-      // Each run's prefix the page draws at this section's distance: faces at least `detail` pixels across.
-      const least = (detail * away(s.lo, s.hi)) / 10 / focal, k = LODS.findIndex((l) => l <= least)
+      // Each run's prefix the page draws at this section's distance: faces at least `detail` pixels across. A
+      // landmark's every face (far.ts `draw`), grown to a pixel (far.ts `vs`): left out, the sky showed through it.
+      const hero = s.layer === 'hero'
+      const least = (detail * away(s.lo, s.hi)) / 10 / focal, k = hero ? -1 : LODS.findIndex((l) => l <= least)
       const drawn = new Set()
       for (const run of s.runs) { const c = k < 0 ? run.count : run.lods[k]; for (let i = run.start; i < run.start + c; i++) drawn.add(i) }
       for (let i = s.start; i < s.start + s.count; i++) {
         if (!drawn.has(i)) continue
         const w0 = w[i * 5], w1 = w[i * 5 + 1], w2 = w[i * 5 + 2]
         const x = w0 & 0x7ff, z = (w0 >>> 11) & 0x7ff, lu = w0 >>> 22, y0 = w1 & 0xffff, y1 = w1 >>> 16, lw = w2 & 0x3ff, axis = (w2 >>> 10) & 3, side = (w2 >>> 12) & 1
-        let n
+        let n, gu = 0, gv = 0
+        if (hero) {
+          const mid = [0, 1, 2].map((a) => pos[a] + c0[a] * (x + lu * 0.5) * cell + (a === 1 ? (y0 + y1) * 0.5 : 0) + c2[a] * (z + lw * 0.5) * cell - eye[a])
+          const most = Math.max(dot(mid, f), 1) * pixel
+          const across = axis === 0 ? [lu * cell, lw * cell] : axis === 1 ? [lw * cell, y1 - y0] : [lu * cell, y1 - y0]
+          gu = Math.max(most - across[0], 0); gv = Math.max(most - across[1], 0)
+        }
         for (let v = 0; v < 4; v++) {
-          const cu = v & 1, cv = v >> 1
+          const cu = v & 1, cv = v >> 1, eu = gu * (cu - 0.5), ev = gv * (cv - 0.5)
           let px, py, pz
-          if (axis === 0) { px = x + cu * lu; py = y1; pz = z + cv * lw; n = [0, 1, 0] }
-          else if (axis === 1) { px = x + side; py = y0 + (y1 - y0) * cv; pz = z + cu * lw; n = c0.map((c) => c * (side * 2 - 1)) }
-          else { px = x + cu * lu; py = y0 + (y1 - y0) * cv; pz = z + side; n = c2.map((c) => c * (side * 2 - 1)) }
+          if (axis === 0) { px = x + cu * lu + eu / cell; py = y1; pz = z + cv * lw + ev / cell; n = [0, 1, 0] }
+          else if (axis === 1) { px = x + side; py = y0 + (y1 - y0) * cv + ev; pz = z + cu * lw + eu / cell; n = c0.map((c) => c * (side * 2 - 1)) }
+          else { px = x + cu * lu + eu / cell; py = y0 + (y1 - y0) * cv + ev; pz = z + side; n = c2.map((c) => c * (side * 2 - 1)) }
           for (let a = 0; a < 3; a++) corner[v * 3 + a] = pos[a] + c0[a] * px * cell + (a === 1 ? py : 0) + c2[a] * pz * cell - eye[a]
         }
         // Looking away from the eye, or any of it nearer than the reach (the cells' there): not drawn, hides nothing.
@@ -147,6 +157,16 @@ for (const h of heights) {
         if (skip) continue
         if (Math.max(sx[0], sx[1], sx[2], sx[3]) < 0 || Math.min(sx[0], sx[1], sx[2], sx[3]) > W || Math.max(sy[0], sy[1], sy[2], sy[3]) < 0 || Math.min(sy[0], sy[1], sy[2], sy[3]) > H) continue
         const face = base[oi] + i
+        if (marking && hero) {
+          // A landmark's face, grown to a pixel, still lies edge-on as a sliver under a pixel across, which the page's
+          // pixels meet where this buffer's samples (a quarter of a pixel off them) do not: the sky showed through the
+          // tower there. So it is kept if it is as near as what is drawn anywhere within a pixel of it.
+          const nearest = Math.max(iz[0], iz[1], iz[2], iz[3])
+          const x0 = Math.max(0, Math.floor(Math.min(sx[0], sx[1], sx[2], sx[3])) - over), x1 = Math.min(W - 1, Math.ceil(Math.max(sx[0], sx[1], sx[2], sx[3])) + over)
+          const y0 = Math.max(0, Math.floor(Math.min(sy[0], sy[1], sy[2], sy[3])) - over), y1 = Math.min(H - 1, Math.ceil(Math.max(sy[0], sy[1], sy[2], sy[3])) + over)
+          for (let py = y0; py <= y1 && !kept[face]; py++) for (let px = x0; px <= x1; px++) if (nearest >= depth[py * W + px] * (1 - TIE)) { kept[face] = 1; break }
+          continue
+        }
         triangle(0, 1, 2, face)
         triangle(1, 3, 2, face)
       }

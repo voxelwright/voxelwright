@@ -38,8 +38,13 @@ $PY sf/far/measure.py ~/.village/engine/sf/far/shots/<name>-park-ids.rgba 2018x8
 
 The faces' colours are #423's, fitted to the photograph under its light (`landing/ina/light.json`: the sky's and the
 ground's light 3.44 times the engine's, the whole 1.23 times brighter). The listing's `light` says so, and `far.ts`
-draws every face in it. In the engine's own light the far model's walls were a quarter to a third darker than the
-photograph. Faces also take the march's fog, as the cells do.
+draws the faces in it only where the wedge applies (a lens under 50 degrees, inside the wedge), which is all the
+photograph vouches for. In the engine's own light the wedge's walls were a quarter to a third darker than the
+photograph. Lit everywhere, downtown's faces stood at 150 against the cells' 89 beside them. Faces also take the
+march's fog, as the cells do.
+
+The landing's cut keeps every face of a landmark (layer `hero`) that faces its eye, grown to a pixel as `far.ts`
+grows it. Cut without them, about 1% of Salesforce Tower showed sky in the first picture.
 
 Address switches: `?farreach=500` sets the metres from the eye where faces begin (0 means no far model),
 `?farnear=100` where they begin in the wedge, and `?farlight=fill,gain` the faces' light.

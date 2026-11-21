@@ -167,8 +167,14 @@ struct Drawn { @location(0) colour: vec4f }
   var col = shade(paint, in.n, rd, v.sun, direct, 1.0, rough, 0.0);
   // The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light fill times the
   // engine's, the whole gain times brighter. Drawn in the engine's own, the wedge's walls were a third darker than
-  // the photograph, and its foreground (100 m on, through the park's lens) darker still.
-  col = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+  // the photograph, and its foreground (100 m on, through the park's lens) darker still. Only in the wedge, where the
+  // faces take over at 100 m (HANDOVER): the photograph vouches for no more. Out of it (or through a wider lens),
+  // downtown's faces lit so stood at 150 against the cells' 89 beside them.
+  if (v.light.x != 1.0 || v.light.y != 1.0) {
+    if (inWedge(in.seen, v.wedge, v.bear)) {
+      col = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
+    }
+  }
   if (in.style == 15u) {
     // A landmark's glass shows what is across from it, which from far is the sky a little darker.
     let facing = 1.0 - max(dot(-rd, in.n), 0.0);
