@@ -46,29 +46,60 @@ export const MARKS: Record<string, Mark> = {
     },
   },
   // Its wordmark: "Linked" in white and the "in" in its blue square, as its offices carry it. The square is the
-  // sign's height; the word is set to its width, its letters four fifths as tall.
+  // sign's height; the word is set to its width, its letters four fifths as tall. A keyline of the blue's own navy
+  // runs round the word and the square: white letters with nothing round them were lost on the sky and on a pale
+  // tower, and the line is what a channel letter's dark sides are from before it.
   linkedin: {
     name: 'LinkedIn', wide: 3.7,
     draw: (pen, w, h) => {
-      const box = h, gap = h * 0.07, room = w - box - gap
+      const line = h * 0.075, edge = line / 2, box = h - 2 * edge, gap = h * 0.06, room = w - box - gap - 2 * edge - line
+      pen.lineJoin = 'round'; pen.lineWidth = line; pen.strokeStyle = '#04294f'
+      pen.beginPath(); pen.roundRect(w - edge - box, edge, box, box, box * 0.09); pen.stroke()
       pen.fillStyle = '#ffffff'
-      pen.fillRect(w - box + box * 0.07, box * 0.07, box * 0.86, box * 0.86)
-      glyph(pen, IN, '#0a66c2', w - box, 0, box)
+      pen.fillRect(w - edge - box + box * 0.07, edge + box * 0.07, box * 0.86, box * 0.86)
+      glyph(pen, IN, '#0a66c2', w - edge - box, edge, box)
       let size = h * 1.02
       pen.font = `800 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`
       size *= Math.min(1, room / pen.measureText('Linked').width)
       pen.font = `800 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`
       pen.textAlign = 'right'; pen.textBaseline = 'alphabetic'
+      pen.strokeText('Linked', w - edge - box - gap - edge, h * 0.852)
       pen.fillStyle = '#ffffff'
-      pen.fillText('Linked', w - box - gap, h * 0.852)
+      pen.fillText('Linked', w - edge - box - gap - edge, h * 0.852)
     },
   },
-  // Its mark alone: the purple outline with its white face.
-  twitch: { name: 'Twitch', wide: 0.9, draw: (pen, w, h) => { glyph(pen, GLITCH_FACE, '#ffffff', (w - h) / 2, 0, h); glyph(pen, GLITCH, '#9146ff', (w - h) / 2, 0, h) } },
+  // Its mark alone: the purple outline with its white face, and a keyline of its own deep purple round it (the
+  // outline is thin, and on a pale tower or the sky the white face had no edge).
+  twitch: {
+    name: 'Twitch', wide: 0.94,
+    draw: (pen, w, h) => {
+      const side = h * 0.93, x = (w - side) / 2, y = (h - side) / 2
+      pen.save(); pen.translate(x, y); pen.scale(side / 24, side / 24)
+      pen.lineJoin = 'round'; pen.lineWidth = 1.5; pen.strokeStyle = '#2b0a66'
+      pen.stroke(new Path2D('M6 0L1.714 4.286v15.428h5.143V24l4.286-4.286h3.428L22.286 12V0z'))
+      pen.restore()
+      glyph(pen, GLITCH_FACE, '#ffffff', x, y, side); glyph(pen, GLITCH, '#9146ff', x, y, side)
+    },
+  },
 }
 
-/** A mark as the sign a tower carries, on a picture that is clear wherever the sign is not. */
-export function sign(pen: Pen, mark: Mark, w: number, h: number): void {
-  pen.clearRect(0, 0, w, h)
+/**
+ * A mark as the sign a tower carries, on a picture that is clear wherever the sign is not. `legs` more rows under it
+ * are a roof sign's frame (boards.ts `mount: 'roof'`): a steel beam under the sign and legs braced to one another, as
+ * a roof carries letters taller than a storey. The legs stand under its middle (no wider than twice its height: a
+ * wordmark is wider than its tower, and its ends are carried by the beam). Dark, so that it is no part of the mark and is not lit by night.
+ */
+export function sign(pen: Pen, mark: Mark, w: number, h: number, legs = 0): void {
+  pen.clearRect(0, 0, w, h + legs)
+  if (legs > 0) {
+    const steel = '#23272e', beam = Math.max(4, h * 0.035), post = Math.max(4, h * 0.03), span = Math.min(w * 0.84, h * 1.9), bays = Math.max(1, Math.round(span / h / 0.9)), inset = (w - span) / 2
+    pen.fillStyle = steel; pen.strokeStyle = steel; pen.lineWidth = post * 0.6
+    pen.fillRect(inset - post, h - beam * 0.5, w - 2 * (inset - post), beam)
+    for (let i = 0; i <= bays; i++) {
+      const x = inset + ((w - 2 * inset) * i) / bays
+      pen.fillRect(x - post / 2, h, post, legs)
+      if (i < bays) { const next = inset + ((w - 2 * inset) * (i + 1)) / bays, foot = h + Math.min(legs, h * 0.16); pen.beginPath(); pen.moveTo(x, h + beam * 0.5); pen.lineTo(next, foot); pen.moveTo(next, h + beam * 0.5); pen.lineTo(x, foot); pen.stroke() }
+    }
+  }
   mark.draw(pen, w, h)
 }
