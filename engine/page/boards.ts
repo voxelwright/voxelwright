@@ -211,8 +211,12 @@ export interface Boards {
   standing(id: string): { letters: string; whole: boolean }
   /** Roofs a board could stand on, seen from where the realm begins, best first. An offer to the editor: the file decides. */
   propose(count?: number, size?: number): Omit<Board, 'id' | 'name' | 'content' | 'to'>[]
-  /** The plane: where it is (cells), and its place on its round (0 to 1), which the checks may hold still. */
-  readonly plane: { at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen } | null
+  /**
+   * The plane: where it is (cells), and its place on its round (0 to 1), which the checks may hold still. `call(true)`
+   * keeps it in the picture for whoever has something to say on its banner (the eggs): whenever it is out of sight, it
+   * is put, unseen, just short of where it comes into the picture on its nearest pass, and flies in. `call(false)` lets it go round.
+   */
+  readonly plane: { at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean } | null
   /** The editor, in `?boards=edit`. */
   readonly editor: { add(b: Board): void; change(id: string, to: Partial<Board>): void; remove(id: string): void; file(): SignsFile; save(): Promise<string>; select(id: string): void; readonly selected: string | null } | null
 }
@@ -254,7 +258,8 @@ export interface Needs {
 
 /** A panel showing words with no colours of its own: a deep blue running to violet, as a board between two bookings shows its owner's. */
 const SCREEN: Style = { ground: '#1038ff', ground2: '#7a1cff', ink: '#ffffff', glows: true }
-const CLOTH: Style = { ground: '#f6f1e4', ink: '#c2261c', glows: false }
+// (Lit by night as from the plane: an egg speaks on it in the dark, eggs.ts; 0.5 reads from the park, 0.2 did not.)
+const CLOTH: Style = { ground: '#f6f1e4', ink: '#c2261c', glows: false, least: 0.5 }
 /** An LED every 10 cm: a cell each, which from before the board (where a flight to it ends) is some five pixels. */
 const LED = 1
 /** The rim of the cabinet round its panel, cells. */
@@ -367,7 +372,9 @@ export async function boards(o: Needs): Promise<Boards> {
 
   // ── The plane and its banner ──
   const towed = o.file.banner ?? null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null } | null = null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean } | null = null
+  /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
+  let summon: (() => void) | null = null
   if (towed) {
     const model = plane(), born = thing(model.kinds, model.size)
     born.com = [model.size[0] / 2, model.size[1] / 2, model.size[2] / 2]
@@ -378,7 +385,7 @@ export async function boards(o: Needs): Promise<Boards> {
     cloth.wave = 5
     const line = drawn.add({ pixels: [4, 4], both: true, style: { ground: '#2a2a2a', ink: '#2a2a2a', glows: false } })
     line.show(null)
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null }
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, call(on) { this.called = on } }
     signs.add({ id: 'banner', kind: 'banner', name: 'The banner a plane tows', accepts: ['text', 'image', 'video'], own: towed.content, show: (content) => cloth.show(content) })
     // Its round: a circle, or a long round (an ellipse) lying along `bearing`, higher on one long side than the other.
     // Flown at one speed: where it is after so many metres is looked up in the round's own lengths.
@@ -395,9 +402,45 @@ export async function boards(o: Needs): Promise<Boards> {
       return on(((lo + (d - lengths[lo]) / Math.max(1e-6, lengths[hi] - lengths[lo])) / STEPS) * 2 * Math.PI)
     }
     const began = performance.now(), gap = 12 * M, half = (long * M) / 2, body = (model.size[0] * piece.cell) / 2
+    /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
+    const parts = (phase: number) => { const s = phase * whole; return [along(s), along(s - body - gap), along(s - body - gap - 2 * half)] }
+    /** How far round it has been put on (summoned), laps. */
+    let shift = 0, looked = 0
+    // (Run from its flight, which first runs before `onPicture` below is made: it is not called before an egg calls it.)
+    summon = () => {
+      const f = flown!
+      if (!f.called || f.hold !== null) { f.inView = false; return }
+      const rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
+      /** How much of it is on the picture at a place on its round: the plane, the cloth's ends, its middle. */
+      const seen = (phase: number, edge: number) => { const [p, a, b] = parts(phase); return [p, a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number]].filter((q) => { const at = onPicture([q[0], q[1] - 12, q[2]], v, aspect); return at && Math.abs(at.x) < edge && Math.abs(at.y) < edge }).length }
+      f.inView = seen(f.phase, 1) > 0
+      // Out of sight, and not looked for in the last second (from where nothing of the round is seen, it waits).
+      if (f.inView || performance.now() - looked < 1000) return
+      looked = performance.now()
+      // Each stretch of the round where its cloth is whole in the picture, and how near it passes there: the nearest.
+      const STEP = 1 / 360
+      let best: { from: number; far: number } | null = null
+      for (let i = 0; i < 360; i++) {
+        const phase = (f.phase + i * STEP) % 1
+        if (seen(phase, 0.9) < 4) continue
+        const [, a, b] = parts(phase), far = Math.hypot((a[0] + b[0]) / 2 - v.eye[0], (a[1] + b[1]) / 2 - v.eye[1], (a[2] + b[2]) / 2 - v.eye[2])
+        // Back along the round to where nothing of it was in the picture yet, and a second more.
+        if (!best || far < best.far * 0.8) {
+          let from = phase
+          for (let k = 0; k < 360 && seen(from, 1.05) > 0; k++) from = (from - STEP + 1) % 1
+          best = { from: (from - (towed.speed * M) / whole + 1) % 1, far }
+        }
+      }
+      if (!best) return
+      shift += best.from - f.phase
+      f.phase = best.from
+      // It is out of sight there and comes in within a second or two: not looked for again until it has.
+      looked = performance.now() + 5000
+    }
     const fly = () => {
       const f = flown!
-      f.phase = f.hold ?? (((towed.start ?? 0) + (performance.now() - began) / 1000 / lap) % 1 + 1) % 1
+      f.phase = f.hold ?? (((towed.start ?? 0) + (performance.now() - began) / 1000 / lap + shift) % 1 + 1) % 1
+      summon?.()
       const s = f.phase * whole, ahead = along(s + 20), heading = [ahead[0] - along(s)[0], ahead[2] - along(s)[2]], turn = Math.atan2(-heading[1], heading[0])
       f.at = along(s)
       piece.pos = f.at

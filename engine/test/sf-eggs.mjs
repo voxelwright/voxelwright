@@ -61,6 +61,21 @@ const still = async (page) => {
   await page.waitForTimeout(600)
 }
 const state = (page) => page.evaluate(() => ({ ...globalThis.engine.eggs.state, status: document.querySelector('.egg-status')?.textContent, hour: globalThis.engine.hour, weather: globalThis.engine.realmControls.sky.weather, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.own || !s.content ? null : 'text' in s.content ? s.content.text : 'video' in s.content ? 'video' : 'image'])) }))
+/**
+ * Until the banner's plane has brought what an egg says into the picture (boards.ts `plane.call`): the cloth's middle
+ * and both its ends in front of the eye and inside the canvas. Resolves with how long that took, ms, and where it is.
+ */
+const bannerSeen = (page, ms = 12_000) => page.evaluate(async (ms) => {
+  const e = globalThis.engine, p = e.boards?.plane, rect = document.querySelector('canvas').getBoundingClientRect(), from = performance.now()
+  if (!p) return { seen: false, why: 'no plane' }
+  const on = (c) => { const v = e.view(), d = [c[0] - v.eye[0], c[1] - v.eye[1], c[2] - v.eye[2]], far = d[0] * v.forward[0] + d[1] * v.forward[1] + d[2] * v.forward[2]; return far > 1 && { x: (d[0] * v.right[0] + d[1] * v.right[1] + d[2] * v.right[2]) / (v.tanHalf * (rect.width / rect.height) * far), y: (d[0] * v.up[0] + d[1] * v.up[1] + d[2] * v.up[2]) / (v.tanHalf * far), far } }
+  for (;;) {
+    const c = p.cloth, pts = [-1, 0, 1].map((k) => on([c.at[0] + c.hu[0] * k, c.at[1] + c.hu[1] * k, c.at[2] + c.hu[2] * k]))
+    if (pts.every((q) => q && Math.abs(q.x) < 1 && Math.abs(q.y) < 1)) return { seen: true, ms: Math.round(performance.now() - from), metres: Math.round(pts[1].far / 10), x: Math.round(((pts[1].x + 1) / 2) * rect.width), y: Math.round(((1 - pts[1].y) / 2) * rect.height), called: p.called }
+    if (performance.now() - from > ms) return { seen: false, ms, called: p.called, phase: p.phase }
+    await new Promise((r) => requestAnimationFrame(r))
+  }
+}, ms)
 /** Until an egg is running (a picture or a video is fetched when it starts). */
 const started = (page, egg) => page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, egg, { timeout: 30_000 }).catch(() => null)
 /** Says something on the line, as a visitor does: Enter, the words, Enter. */
@@ -144,19 +159,23 @@ try {
   }
   await still(page)
 
-  // ── The Matrix, from the line: the board shows what is typed; code rain on the windows, a green night in fog ──
+  // ── The Matrix, from the line: the banner shows what is typed; code rain on the windows, a green night in fog ──
   console.log('\nthe Matrix')
   await page.keyboard.press('Enter')
   await page.keyboard.type('wake up', { delay: 25 })
   s = await state(page)
-  check(s.typing && s.signs.support === '> wake up_', `what is typed shows on the board as it is typed ("${s.signs.support}")`)
+  check(s.typing && s.signs.banner === '> wake up_', `what is typed shows on the banner as it is typed ("${s.signs.banner}")`)
   const walked = await page.evaluate(() => globalThis.engine.pose.x)
   await page.keyboard.press('Enter')
   check(await page.evaluate((x) => globalThis.engine.pose.x === x, walked), 'typing on the line moves nobody (W, A, S and D were letters)')
   await started(page, 'matrix')
+  s = await state(page)
+  let seen = await bannerSeen(page)
+  results.matrix = { banner: seen }
+  check(s.signs.banner === 'The Matrix has you' && seen.seen, `the banner says "${s.signs.banner}" and its plane brings it into the picture: ${JSON.stringify(seen)}`)
   await still(page)
   s = await state(page)
-  check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22, `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; banner "${s.signs.banner}", board "${s.signs.support}"`)
+  check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
   const m1 = await grid(page, 'matrix'), m2 = (await page.waitForTimeout(400), await grid(page))
   const city0 = cells(before, CITY), city1 = cells(m1, CITY), city2 = cells(m2, CITY)
   const green = (cs) => mean(cs, (c) => c[1] - (c[0] + c[2]) / 2)
@@ -214,7 +233,9 @@ try {
   console.log('\nknock knock, and the Rickroll')
   await page.evaluate(() => globalThis.engine.eggs.knock())
   s = await state(page)
-  check(s.signs.banner === 'Knock knock', `the banner asks: "${s.signs.banner}"`)
+  seen = await bannerSeen(page)
+  results.knock = { banner: seen }
+  check(s.signs.banner === 'Knock knock' && seen.seen, `the banner asks: "${s.signs.banner}", and its plane brings it into the picture: ${JSON.stringify(seen)}`)
   await sayTo(page, "who's there?")
   s = await state(page)
   check(s.signs.banner === 'Never gonna', `"who's there?" and the banner says "${s.signs.banner}"`)
@@ -316,12 +337,26 @@ try {
   await page.evaluate((y) => { globalThis.engine.pose.yaw = y }, yaw0)
   await sayTo(page, 'open sesame')
   s = await state(page)
-  check(s.running === null && /no such thing/.test(s.signs.support ?? ''), `a line it does not know is answered on the board ("${s.signs.support}")`)
+  check(s.running === null && /Not here/.test(s.signs.banner ?? ''), `a line it does not know is answered on the banner ("${s.signs.banner}")`)
   await sayTo(page, 'xyzzy')
   s = await state(page)
-  check(/Try: wake up/.test(s.signs.support ?? ''), `two misses and the board gives a hint ("${s.signs.support}")`)
+  check(/Try: wake up/.test(s.signs.banner ?? ''), `two misses and the banner gives a hint ("${s.signs.banner}")`)
+  await page.keyboard.press('Escape')
+  s = await state(page)
+  const own = await page.evaluate(() => globalThis.realm.signs.list().find((x) => x.id === 'banner'))
+  check(s.signs.banner === null && !(await page.evaluate(() => globalThis.engine.boards.plane.called)) && own.content.text === 'zahynailo.dev', `Esc gives the banner its own words back ("${own.content.text}") and lets its plane go round`)
 
   check(page.errors.length === 0, `no errors on the page${page.errors.length ? `: ${page.errors.slice(0, 3).join(' | ')}` : ''}`)
+  await page.close()
+
+  // ── On a phone: the knock-knock's banner comes into a narrow picture too ──
+  console.log('\non a phone, 390 x 844')
+  const phone = await open(await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true }))
+  await phone.evaluate(() => globalThis.engine.eggs.knock())
+  const onPhone = await bannerSeen(phone, 15_000)
+  results.phone = { banner: onPhone }
+  check(onPhone.seen, `the knock-knock's banner comes into the phone's picture: ${JSON.stringify(onPhone)}`)
+  if (onPhone.seen) await phone.screenshot({ path: join(shots, 'knock-phone.png') })
 } catch (e) {
   console.error(e)
   failures.push(String(e))

@@ -1,9 +1,9 @@
 // The landing's easter eggs in the San Francisco realm (#450), from the site's (static/landing/eggs.js, November 19).
 // The realm is the landing now, so they are its own: the city's lit windows are the screen (march.ts and far.ts
 // SCREEN, the realm's own window lighting), the hour and the weather are the realm's controls (realm-ui.ts, weather.ts),
-// and what the city says it says on its signs (signs.ts, for now signs-stand-in.ts: the towed banner and the digital boards).
+// and what the city says it says on the banner its plane tows (signs.ts, boards.ts), which comes into the picture to say it.
 //
-//   Enter or /           a line to say something to the city on; what is typed shows on a board as it is typed
+//   Enter or /           a line to say something to the city on; what is typed shows on the banner as it is typed
 //   wake up, neo, red pill, follow the white rabbit       the Matrix: code rain on the windows, fog, night, green
 //   blue pill, Esc       out of the Matrix (Esc ends any egg; reset ends them all and puts the sky back)
 //   rickroll, never gonna give you up                     Rick Astley on every window, with his sound
@@ -20,7 +20,7 @@
 import type { Input } from './input.ts'
 import type { Marcher, View } from './march.ts'
 import type { Skies, Weather } from './weather.ts'
-import type { Content, Signs } from './signs-stand-in.ts'
+import type { Signs } from './signs.ts'
 import type { Picture } from './eggs-pictures.ts'
 
 export interface EggsPage {
@@ -49,6 +49,8 @@ export interface EggsPage {
   /** Called when the world is put back (Backspace, Reset world). */
   onReset(each: () => void): void
   signs: Signs
+  /** Keeps the banner's plane in the picture while an egg has something on it (true), or lets it go round (false). */
+  callPlane(on: boolean): void
   /** The realm's controls (realm-ui.ts), which the line and the player join. */
   ui: HTMLElement
   /** Where the page's folder is: the videos are under eggs/ there. */
@@ -100,15 +102,20 @@ export const words = (text: string) => text.toLowerCase().replace(/[‘’]/g, "
 
 export function eggs(page: EggsPage) {
   const { march, device } = page
-  // What the eggs put on the signs, by id: Esc gives each back.
-  const owned = new Set<string>()
-  const signs = {
-    // (A sign that cannot show something says so by throwing: the egg goes on without it.)
-    set: (id: string, content: Content | null) => { if (content) owned.add(id); else owned.delete(id); try { page.signs.set(id, content) } catch { owned.delete(id) } },
-    list: () => page.signs.list(),
+  // What the eggs say on the banner, and what they said last that was not the line's echo (the line gives it back as it
+  // closes). Esc gives the banner its own words back. While an egg has something on it, its plane is kept in sight.
+  let onBanner: string | null = null, saying = false
+  const show = (text: string | null) => {
+    saying = text !== null
+    page.callPlane(saying)
+    // (A banner that is not there, `?boards=0`, keeps what it is set to for when it comes: signs.ts.)
+    page.signs.set('banner', text === null ? null : { text })
   }
+  const banner = (text: string | null) => { onBanner = text; brief = 0; show(text) }
+  /** Words on the banner for a while, then what the eggs had on it before. */
+  let brief = 0
+  const briefly = (text: string, ms = 6000) => { const mine = ++brief; show(text); setTimeout(() => { if (brief === mine && !typing) show(onBanner) }, ms) }
   console.info(GREETING)
-  const board = () => signs.list().find((s) => s.kind === 'digital')?.id ?? null
   const say = (text: string, ms = 5000) => { page.notice(text, ms); status.textContent = text }
 
   // ── What is running, and the sky as it was before the first egg ──
@@ -152,9 +159,10 @@ export function eggs(page: EggsPage) {
     if (started !== clock) return
     running = { egg: 'matrix', picture: codeRain(), started: performance.now() }
     dress('matrix')
-    signs.set('banner', { text: 'The Matrix has you' })
-    const b = board()
-    if (b) signs.set(b, { text: 'Red pill or blue pill?' })
+    // Two lines, one after the other: the banner has room for one.
+    banner('The Matrix has you')
+    const mine = running
+    setTimeout(() => { if (running === mine && onBanner === 'The Matrix has you') banner('Red pill or blue pill?') }, 6000)
     say('Wake up, Neo… The windows are code now. Esc, or say “blue pill”, to leave.')
   }
 
@@ -218,9 +226,7 @@ export function eggs(page: EggsPage) {
     dress(egg)
     page.hush(true)
     showPlayer()
-    signs.set('banner', { text: `Now playing: ${v.title}` })
-    const b = board()
-    if (b) signs.set(b, { video: m })
+    banner(`Now playing: ${v.title}`)
     say(`Tuning in: ${v.title}…`)
     try {
       const [{ videoPicture }, url] = await Promise.all([import('./eggs-pictures.ts'), fetchVideo(v.file)])
@@ -251,9 +257,7 @@ export function eggs(page: EggsPage) {
       page.hush(false)
     }
     hidePlayer()
-    signs.set('banner', null)
-    const b = board()
-    if (b) signs.set(b, null)
+    banner(shield ? 'God mode' : null)
     if (!staying) undress()
     if (!quiet) {
       if (was.egg === 'matrix') say('Blue pill. Back in the park.')
@@ -261,7 +265,7 @@ export function eggs(page: EggsPage) {
     }
   }
 
-  // ── The player: what a video shows on the page beside the board, with a native button for each thing it does ──
+  // ── The player: what a video shows on the page, with a native button for each thing it does ──
   const realm = page.ui
   const player = document.createElement('div')
   player.className = 'vx-card egg-player'
@@ -332,7 +336,6 @@ export function eggs(page: EggsPage) {
 
   // ── The knock-knock on the banner: a joke the city starts, or the visitor does, ends one way only ──
   let knock: { stage: 'asked' | 'never' | 'who' | 'whowho'; said?: string; until: number } | null = null
-  const banner = (text: string | null) => signs.set('banner', text ? { text } : null)
   const knocking = (start: 'city' | 'visitor') => {
     knock = { stage: start === 'city' ? 'asked' : 'who', until: performance.now() + 60_000 }
     banner(start === 'city' ? 'Knock knock' : "Who's there?")
@@ -375,7 +378,7 @@ export function eggs(page: EggsPage) {
       case 'stop': return running ? stop() : say('Nothing is playing.')
       case 'god':
         shield = !shield
-        signs.set('banner', shield ? { text: 'God mode' } : null)
+        if (!running) banner(shield ? 'God mode' : null)
         return say(shield ? 'IDDQD on. The city cannot be broken.' : 'IDDQD off. The city can break again.')
       case 'moon': return moonUp()
       case 'roll':
@@ -384,15 +387,14 @@ export function eggs(page: EggsPage) {
         return say('Barrel roll.')
       case 'knock': return knocking('visitor')
       case 'lives':
-        signs.set('banner', { text: '+30 lives' })
+        briefly('+30 lives', 8000)
         return say('Tow banner: +30 lives')
       case 'help': return hint()
     }
   }
   const hint = () => {
-    const b = board()
     const text = 'Try: wake up · bad apple · iddqd · moon · knock knock'
-    if (b) signs.set(b, { text })
+    briefly('Try: wake up · knock knock', 7000)
     say(text, 7000)
   }
   /** Something said to the city on the line. */
@@ -403,13 +405,12 @@ export function eggs(page: EggsPage) {
     const action = PHRASES.get(said)
     if (action) { misses = 0; return act(action) }
     misses++
-    const b = board()
-    if (b) signs.set(b, { text: `> ${text.slice(0, 40)}: no such thing here.` })
-    if (misses >= 2) hint()
-    else say('The city didn’t catch that.', 3000)
+    if (misses >= 2) return hint()
+    briefly(`${text.trim().slice(0, 24)}? Not here.`, 5000)
+    say('The city didn’t catch that.', 3000)
   }
 
-  // ── The line: Enter or / opens it; what is typed shows on the board as it is typed ──
+  // ── The line: Enter or / opens it; what is typed shows on the banner as it is typed ──
   const line = document.createElement('label')
   line.className = 'vx-card egg-line'
   line.hidden = true
@@ -418,7 +419,7 @@ export function eggs(page: EggsPage) {
   realm.append(line)
   const field = line.querySelector('input')!
   let typing: (() => void) | null = null
-  const echo = () => { const b = board(); if (b) signs.set(b, { text: `> ${field.value}_` }) }
+  const echo = () => { brief++; show(`> ${field.value.slice(-24)}_`) }
   const open = () => {
     if (typing) return
     typing = page.controls.push({ name: 'saying', solid: true, text: true })
@@ -432,8 +433,7 @@ export function eggs(page: EggsPage) {
     typing = null
     line.hidden = true
     field.blur()
-    const b = board()
-    if (b && !running) signs.set(b, null)
+    show(onBanner)
   }
   field.addEventListener('input', echo)
   field.addEventListener('keydown', (e) => {
@@ -450,7 +450,7 @@ export function eggs(page: EggsPage) {
   addEventListener('keydown', (e) => {
     if (typing || e.repeat || (e.target instanceof HTMLElement && e.target.closest('input,textarea,select,[contenteditable]'))) return
     if (e.key === 'Escape') {
-      if (running || shield || moon || knock || owned.size) { e.preventDefault(); undo() }
+      if (running || shield || moon || knock || saying) { e.preventDefault(); undo() }
       return
     }
     if (e.code === KONAMI[konami]) {
@@ -463,15 +463,13 @@ export function eggs(page: EggsPage) {
 
   /** Every egg undone: what runs stops, the shield drops, the moon is its own size, the joke is over, the sky as it was. */
   const undo = (quiet = false) => {
-    const any = running || shield || moon || knock || owned.size
+    const any = running || shield || moon || knock || saying
     stop(true)
     shield = false
     moon = 0
     march.screen.moon = 0
     knock = null
-    signs.set('banner', null)
-    const b = board()
-    if (b) signs.set(b, null)
+    banner(null)
     undress()
     if (any && !quiet) say('Back in the park.')
   }
@@ -516,7 +514,7 @@ export function eggs(page: EggsPage) {
   // The city starts the joke once, 45 s after the visitor first presses or taps anything, if nothing else is going on.
   const first = () => {
     removeEventListener('keydown', first, true); removeEventListener('pointerdown', first, true)
-    setTimeout(() => { if (!running && !knock && !typing && !owned.size) knocking('city') }, 45_000)
+    setTimeout(() => { if (!running && !knock && !typing && !saying) knocking('city') }, 45_000)
   }
   // (`?knock=0` leaves it to the visitor: the checks start it themselves.)
   if (new URLSearchParams(location.search).get('knock') !== '0') { addEventListener('keydown', first, true); addEventListener('pointerdown', first, true) }
