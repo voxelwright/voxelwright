@@ -365,7 +365,7 @@ export const names = async (): Promise<Names[]> => Promise.all((STREAM ? (await 
  * Where one is, said as a map would: the street underfoot and the nearest address, bottom left, with whose data the
  * place is made from. `at` is the eye's place in cells. Nothing here says who lives anywhere: the data does not.
  */
-export async function whereabouts(at: () => [number, number], /** Whose else the place is made from (the far model's, far.ts). */ more: readonly string[] = []): Promise<void> {
+export async function whereabouts(at: () => [number, number], /** Whose else the place is made from (the far model's, far.ts). */ more: readonly string[] = [], /** Who shows the credits instead of the line under the street's name (first.ts): given each, said once. */ said?: (credits: string[]) => void): Promise<void> {
   const squares = await names()
   const label = document.createElement('div')
   label.id = 'where'
@@ -376,9 +376,10 @@ export async function whereabouts(at: () => [number, number], /** Whose else the
   // The release's credits where there is one (they name every source in it), else the squares' and the planet's;
   // with whose else the place is made from (`more`), each said once.
   const credits = STREAM ? (await where()).credits : null
-  credit.textContent = [...new Set([...(credits ?? [...squares.map((s) => s.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])]), ...more].flatMap((c) => c.split('; ')))].join('; ')
+  const each = [...new Set([...(credits ?? [...squares.map((s) => s.credit), ...(STREAM ? ['© OpenStreetMap contributors, Overture Maps Foundation; terrain: Mapterhorn'] : [])]), ...more].flatMap((c) => c.split('; ')))]
+  if (said) said(each); else credit.textContent = each.join('; ')
   const line = document.createElement('div')
-  label.append(line, credit)
+  label.append(line, ...(said ? [] : [credit]))
   document.body.append(label)
   // Addresses by the patch of 25.6 m they are in.
   const near = new Map<string, Names['addresses']>()

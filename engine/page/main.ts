@@ -52,6 +52,7 @@ import { realmControls } from './realm-ui.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { boards } from './boards.ts'
+import { firstView } from './first.ts'
 import { tell } from './host.ts'
 import { signs } from './signs.ts'
 import { gather } from './gather.ts'
@@ -173,7 +174,9 @@ async function main() {
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [])
+  // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
+  const first = LOCAL ? firstView(canvas, query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -1262,10 +1265,10 @@ async function main() {
     reach: () => farModel.reach * M,
     done: () => world.done().length,
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
-    pose, began, view, canvas, input: controls, hud: over, day: () => march.day, pick: () => march.pick(view()),
+    pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
     aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
-  Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
   // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
   if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
   /**

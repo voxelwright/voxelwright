@@ -7,9 +7,16 @@
 //   lettering   letters of lamp on panels of wood, one panel and one steel post a letter, all cells of the world:
 //               every tool breaks them as it breaks a wall, a letter whose post is cut falls by itself, and the
 //               march lights them by night as it lights any sign (march.ts: lamp in a colour of its own).
-//   digital     a housing of cells on steel posts, and on its face a screen (screens.ts) that shows words, an image or
-//               a video; the part of the screen whose housing is gone is dark.
-//   banner      a small plane flying a round over the park's view, towing a strip of cloth with words or a picture.
+//   digital     an LED billboard as a roof carries one: a dark cabinet of cells with a rim round its face, on steel
+//               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
+//               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
+//               of the panel whose cabinet is gone is dark.
+//   logo        the mark of a network the owner is on, standing on a tower's crown as a company's sign stands on its
+//               head office: lit of itself, on a frame of dark steel, turned whichever way its record says. It is a
+//               face and no cells (the towers of the skyline are past the cells' reach, where the far model draws
+//               them: far.ts), so no tool breaks it; it leads to the owner's page on that network.
+//   banner      a small plane flying a long round across the park's sky, before the towers, towing a strip of cloth
+//               with words or a picture.
 //
 // What each says is set through signs.ts (`realm.signs.set`), which this file brings every sign to.
 // A click or tap on a board from where the pointer is free flies the eye to it and then tells the host page where to
@@ -24,34 +31,61 @@ import type { View } from './march.ts'
 import type { Piece, Pieces } from './pieces.ts'
 import { screens as screensOf, type Screen, type Style } from './screens.ts'
 import { signs, type Content } from './signs.ts'
+import { LEGS, MARKS, sign as signOf } from './logos.ts'
 import type { Target } from '../probe/gpu.ts'
 
 export interface Board {
   id: string
   /** Its accessible name: what a link to it is called. */
   name: string
-  type: 'lettering' | 'digital'
+  type: 'lettering' | 'digital' | 'logo'
   /** Its building: a point on its roof, in the frame's cells (x east, z south). */
   building: [number, number]
   /** Where it stands: the middle of its foot on that roof, cells. */
   at: [number, number, number]
-  /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. */
+  /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. A logo turns freely: `turn` is where its face looks, degrees clockwise from north. */
   facing: 0 | 1 | 2 | 3
-  /** Lettering: how tall a letter is, metres. Digital: how wide and how tall its housing is, metres. */
+  turn?: number
+  /** A logo's mark: one of logos.ts `MARKS`. */
+  logo?: string
+  /** Lettering: how tall a letter is, metres. Digital: how wide and how tall its housing is, metres. A logo: how tall its mark is, metres. */
   size: number | [number, number]
   /** How far its foot is over the roof, metres. */
   lift?: number
   content: { text: string } | { image: string }
-  /** Where the host page goes when it is opened: a path of the site. A board with none is only looked at. */
+  /** A digital board's own colours for words: its ground (one, or two for a wash from left to right) and its letters. */
+  colors?: { ground: string | [string, string]; ink: string }
+  /** Where the host page goes when it is opened: a path of the site, or for a logo the address of the owner's page on that network. A board with none is only looked at. */
   to?: string
 }
-export interface Banner { content: { text: string } | { image: string }; /** The middle of the plane's round, cells, how wide the round is (m), how high over the sea it flies (m) and how fast (m/s). */ around: [number, number]; radius: number; height: number; speed: number; /** How long and how high the cloth is, m. */ size: [number, number] }
+export interface Banner {
+  content: { text: string } | { image: string }
+  /** The middle of the plane's round, cells. */
+  around: [number, number]
+  /** How wide the round is, m: a circle's radius, or half the length and half the breadth of a long round. */
+  radius: number | [number, number]
+  /** Which way a long round's length lies, degrees from east towards south. */
+  bearing?: number
+  /** How high over the sea it flies, m, and how much higher on the one long side and lower on the other. */
+  height: number
+  rise?: number
+  /** How fast, m/s. */
+  speed: number
+  /** How long and how high the cloth is, m. */
+  size: [number, number]
+  /** Where on its round it is as the page opens, 0 to 1. */
+  start?: number
+}
 export interface SignsFile { version: 1; banner?: Banner; boards: Board[] }
 
 const M = 10
 const PLASTER = 9, WOOD = 10, STEEL = 12, LAMP = 15
 /** Panels near black, posts dark grey, letters pale grey: white lamp blooms into a blot by night (tried, #450). */
-const PANEL = WOOD | (14 << 8), POST = STEEL | (11 << 8), HOUSING = PLASTER | (14 << 8), LETTER = LAMP | (6 << 8)
+const PANEL = WOOD | (14 << 8), POST = STEEL | (11 << 8), HOUSING = PLASTER | (14 << 8), LETTER = LAMP | (6 << 8), GRATING = STEEL | (13 << 8)
+/** How far a digital board's foot is over its roof where its record does not say, m: room for the walkway and a person under it. */
+export const DIGITAL_LIFT = 3.2
+/** How deep a digital board's cabinet is, cells. */
+const DEEP = 6
 const NORMALS = [[-1, 0], [0, -1], [1, 0], [0, 1]] as const
 /** Three across and five up, a row a digit (4, 2, 1 from the left), from the top. */
 const FONT: Record<string, string> = {
@@ -81,9 +115,14 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
  * world's coarser copies of it, which is what a far eye is shown, hold whole letters and not a smear of them.
  */
 export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
+  if (b.type === 'logo') {
+    // A face alone: its mark over the frame it stands on, its foot on the roof.
+    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = ((b.size as number) * M) / (1 - LEGS), wide = (b.size as number) * M, y0 = b.at[1] + (b.lift ?? 0) * M
+    return { runs: new Int32Array(0), box: [b.at[0], y0, b.at[2], b.at[0] + 1, y0 + 1, b.at[2] + 1], middle: [b.at[0], y0 + high / 2, b.at[2]], right: [n[2], 0, -n[0]], normal: n, wide, high }
+  }
   const [nx, nz] = NORMALS[b.facing], rx = nz, rz = -nx, snap = (v: number) => Math.round(v / 8) * 8
   // (Its face on a plane of 16: the coarsest cells it is seen in, on a phone, are that big.)
-  const cx = nx ? Math.round(b.at[0] / 16) * 16 : snap(b.at[0]), cz = nz ? Math.round(b.at[2] / 16) * 16 : snap(b.at[2]), foot = Math.round(b.at[1]), y0 = Math.ceil((foot + (b.lift ?? 1.6) * M) / 8) * 8
+  const cx = nx ? Math.round(b.at[0] / 16) * 16 : snap(b.at[0]), cz = nz ? Math.round(b.at[2] / 16) * 16 : snap(b.at[2]), foot = Math.round(b.at[1]), y0 = Math.ceil((foot + (b.lift ?? (b.type === 'digital' ? DIGITAL_LIFT : 1.6)) * M) / 8) * 8
   const cells: number[][] = []
   /** A cell `k` along the face from its left edge, `d` behind it, at height `y`, when the face is `wide` across. */
   const put = (wide: number, k: number, d: number, y: number, kind: number) => {
@@ -112,10 +151,19 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
   } else {
     const [w, h] = b.size as [number, number]
     wide = Math.max(16, Math.round((w * M) / 8) * 8); high = Math.max(16, Math.round((h * M) / 8) * 8)
-    // Its face breaks as a wall does (steel would barely give); the beam it rests on is steel.
-    for (let k = 0; k < wide; k++) for (let y = -2; y < high; y++) for (let d = 0; d < 2; d++) put(wide, k, d, y0 + y, y < 0 ? POST : HOUSING)
-    // A post under each quarter (one in the middle of a narrow one).
-    for (const at of wide >= 64 ? [wide / 4, (wide * 3) / 4] : [wide / 2]) for (let k = at - 2; k < at + 2; k++) for (let d = 0; d < 2; d++) for (let y = foot - 2; y < y0 - 2; y++) put(wide, k, d, y, POST)
+    // Its cabinet breaks as a wall does (steel would barely give); the beam it rests on is steel.
+    for (let k = 0; k < wide; k++) for (let y = -2; y < high; y++) for (let d = 0; d < DEEP; d++) put(wide, k, d, y0 + y, y < 0 ? POST : HOUSING)
+    // A walkway before its foot, as wide as it: grating on the beam, for whoever mends it.
+    for (let k = 0; k < wide; k++) for (let d = -6; d < 0; d++) put(wide, k, d, y0 - 2, GRATING)
+    // Posts under it (two under a narrow one, more under a wide), each braced back and down to the roof, with a tie between them half way up.
+    const posts = wide >= 160 ? [wide / 8, (wide * 3) / 8, (wide * 5) / 8, (wide * 7) / 8] : wide >= 64 ? [wide / 4, (wide * 3) / 4] : [wide / 2], tall = y0 - 2 - (foot - 2)
+    for (const at of posts) {
+      for (let k = at - 2; k < at + 2; k++) for (let d = 1; d < 5; d++) for (let y = foot - 2; y < y0 - 2; y++) put(wide, k, d, y, POST)
+      // The brace: from the cabinet's back, half way up it, down to the roof as far behind as it is high.
+      const from = y0 + Math.floor(high / 2), run = from - foot
+      for (let i = 0; i <= run; i++) for (let k = at - 1; k < at + 1; k++) for (let t = 0; t < 2; t++) put(wide, k, DEEP + i + t, from - i, POST)
+    }
+    if (tall >= 16) for (let k = posts[0]; k < posts[posts.length - 1]; k++) for (let d = 2; d < 4; d++) for (let y = 0; y < 2; y++) put(wide, k, d, foot - 2 + Math.floor(tall / 2) + y, POST)
   }
   const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
   for (const [x, y, z] of cells) { box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.min(box[2], z); box[3] = Math.max(box[3], x + 1); box[4] = Math.max(box[4], y + 1); box[5] = Math.max(box[5], z + 1) }
@@ -191,6 +239,10 @@ export interface Needs {
   input: Input
   hud: Hud
   day(): number
+  /** The far model's depth as its last draw left it, if there is one (far.ts). */
+  faced(): GPUTextureView | null
+  /** How far cloud, rain or fog take the daylight off what the day lights, 0 to 1. */
+  dull(): number
   /** How far off what is straight ahead is, cells. */
   pick(): Promise<{ t: number } | null>
   /** Up off one's feet: a flight to a board is flown. */
@@ -200,16 +252,21 @@ export interface Needs {
   edit: boolean
 }
 
-const SCREEN: Style = { ground: '#0b1020', ink: '#f4f1e6', glows: true }
+/** A panel showing words with no colours of its own: a deep blue running to violet, as a board between two bookings shows its owner's. */
+const SCREEN: Style = { ground: '#1038ff', ground2: '#7a1cff', ink: '#ffffff', glows: true }
 const CLOTH: Style = { ground: '#f6f1e4', ink: '#c2261c', glows: false }
+/** An LED every 10 cm: a cell each, which from before the board (where a flight to it ends) is some five pixels. */
+const LED = 1
+/** The rim of the cabinet round its panel, cells. */
+const RIM = 4
 
 export async function boards(o: Needs): Promise<Boards> {
   const drawn = await screensOf(o.device, o.format)
   o.passes.add('signs', (encoder, to, view, time) => {
     // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
     const reach = o.reach()
-    for (const s of stood.values()) if (s.screen && s.shape) s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
-    drawn.draw(encoder, to, view, time, o.day())
+    for (const s of stood.values()) if (s.screen && s.shape && s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+    drawn.draw(encoder, to, view, time, o.day(), o.dull(), o.faced())
   })
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
@@ -226,10 +283,11 @@ export async function boards(o: Needs): Promise<Boards> {
   const place = (s: Stood) => {
     const sh = s.shape!, sc = s.screen
     if (!sc) return
-    // Its screen: on the housing's face, inside a rim of two cells.
-    sc.at = [sh.middle[0] + sh.normal[0] * 0.5, sh.middle[1] - 1, sh.middle[2] + sh.normal[2] * 0.5]
-    sc.hu = [sh.right[0] * (sh.wide / 2 - 2), 0, sh.right[2] * (sh.wide / 2 - 2)]
-    sc.hv = [0, sh.high / 2 - 2, 0]
+    if (s.b.type === 'logo') { sc.at = [...sh.middle]; sc.hu = [sh.right[0] * sh.wide / 2, 0, sh.right[2] * sh.wide / 2]; sc.hv = [0, sh.high / 2, 0]; return }
+    // Its panel: on the cabinet's face, inside a rim of four cells.
+    sc.at = [sh.middle[0] + sh.normal[0] * 0.5, sh.middle[1], sh.middle[2] + sh.normal[2] * 0.5]
+    sc.hu = [sh.right[0] * (sh.wide / 2 - RIM), 0, sh.right[2] * (sh.wide / 2 - RIM)]
+    sc.hv = [0, sh.high / 2 - RIM, 0]
   }
   const stand = (s: Stood, again = false) => {
     const b = s.b, text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '') : ''
@@ -241,10 +299,21 @@ export async function boards(o: Needs): Promise<Boards> {
   }
   const bring = (b: Board) => {
     const s: Stood = { b, shape: null, text: '', screen: null, content: null, tiles: [1, 1], gone: () => {} }
+    if (b.type === 'logo') {
+      const mark = MARKS[b.logo ?? '']
+      if (!mark) throw new Error(`the logo "${b.logo}" of the board ${b.id} is none of ${Object.keys(MARKS).join(', ')}`)
+      s.screen = drawn.add({ pixels: [320, Math.round(320 / (1 - LEGS))], style: { ground: '#000', ink: '#fff', glows: true } })
+      s.screen.paint((pen, w, h) => signOf(pen, mark, w, h))
+      stood.set(b.id, s)
+      stand(s)
+      return
+    }
     if (b.type === 'digital') {
       const [w, h] = b.size as [number, number]
       s.tiles = [Math.max(1, Math.min(8, Math.round(w / 1.6))), Math.max(1, Math.min(4, Math.round(h / 1.6)))]
-      s.screen = drawn.add({ pixels: [512, Math.max(64, Math.min(512, Math.round((512 * h) / w / 4) * 4))], tiles: s.tiles, style: SCREEN })
+      // A pixel of its picture an LED: as many as its panel has, inside the rim.
+      const wide = Math.max(16, Math.round((w * M) / 8) * 8), high = Math.max(16, Math.round((h * M) / 8) * 8), c = b.colors
+      s.screen = drawn.add({ pixels: [Math.round((wide - 2 * RIM) / LED), Math.round((high - 2 * RIM) / LED)], tiles: s.tiles, leds: true, style: c ? { ground: typeof c.ground === 'string' ? c.ground : c.ground[0], ground2: typeof c.ground === 'string' ? undefined : c.ground[1], ink: c.ink, glows: true } : SCREEN })
     }
     stood.set(b.id, s)
     s.gone = signs.add({ id: b.id, kind: b.type, name: b.name, accepts: b.type === 'lettering' ? ['text'] : ['text', 'image', 'video'], own: b.content, show: (content) => { s.content = content; if (b.type === 'lettering') stand(s); else { if (!s.shape) stand(s); s.screen!.show(content) } } })
@@ -268,6 +337,7 @@ export async function boards(o: Needs): Promise<Boards> {
     const s = stood.get(id)
     if (!s?.shape) return { letters: '', whole: false }
     if (s.b.type === 'lettering') { const letters = [...s.text].filter((_, i) => letterStands(s, i)).join(''); return { letters, whole: letters === s.text } }
+    if (s.b.type === 'logo') return { letters: s.b.logo ?? '', whole: true }
     const n = s.tiles[0] * s.tiles[1]
     let lit = 0
     for (let i = 0; i < n; i++) if ((s.screen!.mask >>> i) & 1) lit++
@@ -276,7 +346,7 @@ export async function boards(o: Needs): Promise<Boards> {
   /** Each tile of a screen shows while the housing behind its middle is there. */
   const masks = () => {
     for (const s of stood.values()) {
-      if (!s.screen || !s.shape) continue
+      if (!s.screen || !s.shape || s.b.type !== 'digital') continue
       const sh = s.shape, [cols, rws] = s.tiles
       let mask = 0
       for (let j = 0; j < rws; j++) for (let i = 0; i < cols; i++) {
@@ -305,30 +375,43 @@ export async function boards(o: Needs): Promise<Boards> {
     piece.cell = 2
     const [long, tall] = towed.size
     const cloth = drawn.add({ pixels: [1024, Math.max(64, Math.round((1024 * tall) / long / 4) * 4)], both: true, style: CLOTH })
-    cloth.wave = 6
+    cloth.wave = 5
     const line = drawn.add({ pixels: [4, 4], both: true, style: { ground: '#2a2a2a', ink: '#2a2a2a', glows: false } })
     line.show(null)
     flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null }
     signs.add({ id: 'banner', kind: 'banner', name: 'The banner a plane tows', accepts: ['text', 'image', 'video'], own: towed.content, show: (content) => cloth.show(content) })
-    const began = performance.now(), lap = (2 * Math.PI * towed.radius) / towed.speed, R = towed.radius * M, gap = 14 * M, half = (long * M) / 2
-    const on = (a: number): [number, number, number] => [towed.around[0] + R * Math.cos(a), towed.height * M, towed.around[1] + R * Math.sin(a)]
+    // Its round: a circle, or a long round (an ellipse) lying along `bearing`, higher on one long side than the other.
+    // Flown at one speed: where it is after so many metres is looked up in the round's own lengths.
+    const [A, B] = (typeof towed.radius === 'number' ? [towed.radius, towed.radius] : towed.radius).map((r) => r * M), lie = ((towed.bearing ?? 0) * Math.PI) / 180, rise = (towed.rise ?? 0) * M
+    const on = (a: number): [number, number, number] => { const u = A * Math.cos(a), v = B * Math.sin(a); return [towed.around[0] + u * Math.cos(lie) - v * Math.sin(lie), towed.height * M + rise * Math.sin(a), towed.around[1] + u * Math.sin(lie) + v * Math.cos(lie)] }
+    const STEPS = 720, lengths = new Float64Array(STEPS + 1)
+    for (let i = 1, last = on(0); i <= STEPS; i++) { const p = on((i / STEPS) * 2 * Math.PI); lengths[i] = lengths[i - 1] + Math.hypot(p[0] - last[0], p[2] - last[2]); last = p }
+    const whole = lengths[STEPS], lap = whole / (towed.speed * M)
+    /** Where it is `s` cells along its round. */
+    const along = (s: number): [number, number, number] => {
+      const d = ((s % whole) + whole) % whole
+      let lo = 0, hi = STEPS
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lengths[mid] <= d) lo = mid; else hi = mid }
+      return on(((lo + (d - lengths[lo]) / Math.max(1e-6, lengths[hi] - lengths[lo])) / STEPS) * 2 * Math.PI)
+    }
+    const began = performance.now(), gap = 12 * M, half = (long * M) / 2, body = (model.size[0] * piece.cell) / 2
     const fly = () => {
       const f = flown!
-      f.phase = f.hold ?? ((((performance.now() - began) / 1000 / lap) % 1) + 1) % 1
-      const a = f.phase * 2 * Math.PI, heading = [-Math.sin(a), Math.cos(a)], turn = Math.atan2(-heading[1], heading[0])
-      f.at = on(a)
+      f.phase = f.hold ?? (((towed.start ?? 0) + (performance.now() - began) / 1000 / lap) % 1 + 1) % 1
+      const s = f.phase * whole, ahead = along(s + 20), heading = [ahead[0] - along(s)[0], ahead[2] - along(s)[2]], turn = Math.atan2(-heading[1], heading[0])
+      f.at = along(s)
       piece.pos = f.at
-      // Its nose along its way, banked a little into the round.
-      const bank = 0.12, s = Math.sin(turn / 2), c = Math.cos(turn / 2), sb = Math.sin(bank / 2), cb = Math.cos(bank / 2)
-      piece.rot = [c * sb, s * cb, -s * sb, c * cb]
-      // The cloth behind it along the round, its leading edge first; the line from the tail to that edge.
-      const back = a - (gap + half + model.size[0] * 1) / R, lead = a - (gap + model.size[0] * 1) / R, tail = a - (model.size[0] * 1) / R
-      const mid = on(back), from = on(tail), to = on(lead)
-      cloth.at = [mid[0], mid[1] - 10, mid[2]]
-      cloth.hu = [Math.sin(back) * half, 0, -Math.cos(back) * half]
+      // Its nose along its way, banked into the round by how hard it is turning there.
+      const next = along(s + 200), bend = Math.atan2(next[2] - ahead[2], next[0] - ahead[0]) - Math.atan2(heading[1], heading[0])
+      const bank = Math.max(-0.5, Math.min(0.5, Math.atan2(Math.sin(bend), Math.cos(bend)) * 1.6)), sn = Math.sin(turn / 2), c = Math.cos(turn / 2), sb = Math.sin(bank / 2), cb = Math.cos(bank / 2)
+      piece.rot = [c * sb, sn * cb, -sn * sb, c * cb]
+      // The cloth behind it along the round, its leading edge first, a little under its tail; the line from the tail to that edge.
+      const from = along(s - body), to = along(s - body - gap), end = along(s - body - gap - 2 * half), drop = 12
+      cloth.at = [(to[0] + end[0]) / 2, (to[1] + end[1]) / 2 - drop, (to[2] + end[2]) / 2]
+      cloth.hu = [(to[0] - end[0]) / 2, (to[1] - end[1]) / 2, (to[2] - end[2]) / 2]
       cloth.hv = [0, (tall * M) / 2, 0]
-      line.at = [(from[0] + to[0]) / 2, from[1] - 5, (from[2] + to[2]) / 2]
-      line.hu = [(to[0] - from[0]) / 2, -5, (to[2] - from[2]) / 2]
+      line.at = [(from[0] + to[0]) / 2, (from[1] + to[1] - drop) / 2, (from[2] + to[2]) / 2]
+      line.hu = [(to[0] - from[0]) / 2, (to[1] - drop - from[1]) / 2, (to[2] - from[2]) / 2]
       line.hv = [0, 0.8, 0]
       requestAnimationFrame(fly)
     }
@@ -390,7 +473,7 @@ export async function boards(o: Needs): Promise<Boards> {
     if (!s?.shape) return Promise.resolve(false)
     const sh = s.shape, rect = o.canvas.getBoundingClientRect(), v = o.view(), across = Math.atan(v.tanHalf * (rect.width / Math.max(1, rect.height)))
     // Far enough off that the whole face is in the picture, and not further than 90 m: a narrow picture sees less of it.
-    const off = Math.min(900, Math.max(80, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
+    const off = Math.min(s.b.type === 'logo' ? 1800 : 900, Math.max(80, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
     const to = { x: (sh.middle[0] + sh.normal[0] * off) / M, y: sh.middle[1] / M, z: (sh.middle[2] + sh.normal[2] * off) / M, yaw: Math.atan2(-sh.normal[0], sh.normal[2]), pitch: 0 }
     const from = { ...o.pose }, mine = ++flight, began = performance.now(), ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2200
     o.aloft()

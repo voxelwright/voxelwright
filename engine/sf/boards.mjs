@@ -32,16 +32,24 @@ export function wrong(file) {
     else if (ids.has(b.id)) say('its id is taken')
     ids.add(b?.id)
     if (typeof b.name !== 'string' || !b.name.trim()) say('it has no name for a link to say')
-    if (b.type !== 'lettering' && b.type !== 'digital') say('its type is lettering or digital')
+    if (!['lettering', 'digital', 'logo'].includes(b.type)) say('its type is lettering, digital or logo')
     if (!whole(b.building) || b.building.length !== 2) say('its building is a point on a roof: [x, z] in cells')
     if (!whole(b.at) || b.at.length !== 3) say('it stands at [x, y, z] in cells')
     if (![0, 1, 2, 3].includes(b.facing)) say('it faces 0 west, 1 north, 2 east or 3 south')
+    if (b.type === 'logo') {
+      if (typeof b.logo !== 'string' || !/^[a-z]+$/.test(b.logo)) say('a logo names its mark (page/logos.ts)')
+      if (!(b.size > 0 && b.size <= 40)) say('a logo\'s size is how tall its mark is, metres')
+      if (b.turn !== undefined && !Number.isFinite(b.turn)) say('a logo\'s turn is where its face looks, degrees clockwise from north')
+      if (typeof b.to !== 'string' || !/^https:\/\//.test(b.to)) say('a logo leads to an https address')
+      continue
+    }
     if (b.type === 'lettering' ? !(b.size > 0 && b.size <= 12) : !(whole(b.size) && b.size.length === 2 && b.size.every((v) => v >= 1.6 && v <= 40))) say('its size is a letter\'s height in metres (lettering) or [wide, high] in metres (digital)')
     if (b.type === 'lettering' ? typeof b.content?.text !== 'string' : typeof b.content?.text !== 'string' && typeof b.content?.image !== 'string') say('lettering shows { text }; a digital board { text } or { image }')
+    if (b.colors !== undefined && !(b.type === 'digital' && typeof b.colors?.ink === 'string' && (typeof b.colors.ground === 'string' || (Array.isArray(b.colors.ground) && b.colors.ground.length === 2)))) say('colors are a digital board\'s: { ground: a colour or two, ink: a colour }')
     if (b.to !== undefined && (typeof b.to !== 'string' || !b.to.startsWith('/'))) say('it leads to a path of the site, from /')
   }
   const t = file.banner
-  if (t && !(whole(t.around) && t.radius > 0 && t.height > 0 && t.speed > 0 && whole(t.size) && (typeof t.content?.text === 'string' || typeof t.content?.image === 'string'))) out.push('the banner needs content, around [x, z], radius, height, speed and size [long, high]')
+  if (t && !(whole(t.around) && (t.radius > 0 || (whole(t.radius) && t.radius.length === 2 && t.radius.every((v) => v > 0))) && t.height > 0 && t.speed > 0 && whole(t.size) && (typeof t.content?.text === 'string' || typeof t.content?.image === 'string'))) out.push('the banner needs content, around [x, z], radius (one, or [half its length, half its breadth] with a bearing), height, speed and size [long, high]')
   return out
 }
 

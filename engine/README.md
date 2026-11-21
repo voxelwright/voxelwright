@@ -1574,13 +1574,14 @@ node test/sf-life.mjs [--no-build] [--hour 12.5] [--no-pairs]
 
 The check counts people and vehicles at Columbus and Broadway, Powell St, the Embarcadero and Russian Hill. It times frames with street life on and off and checks the budgets. It drives a car 60 s through a turn and up a hill, sets off charges among people and cars, and saves a contact sheet to `~/.village/engine/sf/life`. Where a kept Mapillary panorama is near, the sheet sets the engine's view beside the photograph (`sf/pairs.py`).
 
-## San Francisco billboards and the banner plane (#450)
+## San Francisco signs, the banner plane and the first view (#450)
 
-The site's navigation stands in the SF realm as billboards on rooftops seen from the park, and a small plane tows a banner round the view. Where each board stands and what it is are data: `sf/boards.json` (`page/boards.ts` `SignsFile`), which `node sf/build.mjs` puts in the page's own record, so nothing more is fetched. A board names its building by a point on its roof, its type, its size, which way it faces, what it shows and where it leads.
+The site's navigation stands in the SF realm as things of the city seen from the park: a BLOG billboard on a rooftop, the mark of each network the owner is on as a company's sign on a tower's crown, and a small plane towing a banner across the sky before the towers. Where each stands and what it is are data: `sf/boards.json` (`page/boards.ts` `SignsFile`), which `node sf/build.mjs` puts in the page's own record, so nothing more is fetched.
 
 - A `lettering` board is cells of the world: one panel and one post a letter, lamp letters that the march lights at night. Every tool breaks it and reset lays it again.
-- A `digital` board is a housing of cells with a screen on its face (`page/screens.ts`) that shows words, an image or a video. The part of the screen whose housing is gone goes dark.
-- The banner is cloth behind the plane, with words or a picture.
+- A `logo` is a lit face on a frame, standing on a roof and turned whichever way its record says (`turn`, degrees clockwise from north). Its mark is one of `page/logos.ts` (`x`, `linkedin`, `twitch`), and it leads to an `https` address. It is no cells, since the skyline's towers are the far model's, so no tool breaks it; the far model's depth hides it behind a tower as cells would.
+- A `digital` board is an LED billboard: a cabinet of cells on braced posts with a walkway, and a panel of LEDs (`page/screens.ts`), one every 10 cm, that shows words, an image or a video and glows at night. The file has none now; the kind is kept.
+- The banner is cloth behind the plane, with words or a picture. The plane flies a long round (`radius: [half its length, half its breadth]`, `bearing`, `height`, `rise`), nearest the park on one long side.
 
 What a sign shows is set through one API, `page/signs.ts`, also at `realm.signs` for scripts outside the page's modules:
 
@@ -1589,7 +1590,9 @@ realm.signs.set('banner', { text: 'NEW POST' })   // or { image: url }, { video:
 realm.signs.list()                                 // every sign: id, kind, name, accepts, content, own
 ```
 
-Lettering boards take `{ text }` only and throw a TypeError for anything else. A click or tap on a board while the pointer is free flies the eye to it, then tells the host page where to go; flying free, O opens the board ahead; each board is also a link in the page for a keyboard and a screen reader. `page/host.ts` lists the messages a host page in a frame gets (`ready`, `error`, `navigate`) and may send (`fly`, `open`, `signs.set`). `?boards=0` leaves the boards out.
+Lettering boards take `{ text }` only and throw a TypeError for anything else; logos are not signs to set. A click or tap on a board or a logo while the pointer is free flies the eye to it, then tells the host page where to go; flying free, O opens the board ahead; each is also a link in the page for a keyboard and a screen reader. `page/host.ts` lists the messages a host page in a frame gets (`ready`, `error`, `navigate`, `engaged`) and may send (`fly`, `open`, `signs.set`, `explore`). `?boards=0` leaves the signs out.
+
+The realm opens on its picture (`page/first.ts`): until the visitor presses a key, drags on the picture, takes the pointer or presses Explore, there is no line of numbers, no aim, no hour and weather, no tools and no street name, only the Explore key and a small Credits key that holds every source. `?first=0` shows the controls from the start; a check that works the controls calls `engine.first.engage()`.
 
 To add, move, size, turn or reword a board:
 
@@ -1600,7 +1603,7 @@ node sf/boards.mjs check       # what is wrong with sf/boards.json, if anything
 node test/sf-boards.mjs [--no-build]
 ```
 
-In the editor, fly to a roof and press `new here`, or `propose` for the next roof the rule offers; every change is laid at once, and `save` writes `sf/boards.json`. The check covers the boards from the park (in the picture, read from its pixels), every way of opening one, the signs API, breaking and reset, the plane, and the bytes and frames they cost; it keeps pictures in `~/.village/engine/sf/boards/`.
+In the editor, fly to a roof and press `new here`, or `propose` for the next roof the rule offers; every change is laid at once, and `save` writes `sf/boards.json`. A logo's place on a far tower is written in the file by hand: the editor moves, sizes and removes it, and cannot yet pick a far roof. The check covers the first view and the controls coming, the signs from the park at 1280 x 720 and on an upright phone (in the picture, read from its pixels), every way of opening one, the signs API, breaking and reset, the banner's words in pixels on the plane's near pass, and the bytes and frames they cost; it keeps pictures in `~/.village/engine/sf/boards/r2/`.
 
 ## Checks and tools
 

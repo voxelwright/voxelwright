@@ -2,19 +2,25 @@
   "version": 1,
   "banner": {
     "content": {
-      "text": "YOUR AD HERE"
+      "text": "NEW POST"
     },
     "around": [
-      520354,
-      666286
+      519065,
+      665523
     ],
-    "radius": 220,
-    "height": 116,
-    "speed": 22,
+    "radius": [
+      260,
+      70
+    ],
+    "bearing": 120,
+    "height": 131,
+    "rise": -19,
+    "speed": 14,
     "size": [
-      36,
-      6
-    ]
+      40,
+      6.5
+    ],
+    "start": 0.15
   },
   "boards": [
     {
@@ -22,13 +28,13 @@
       "name": "Blog",
       "type": "lettering",
       "building": [
-        517952,
-        665272
+        518048,
+        664928
       ],
       "at": [
-        517952,
-        619,
-        665272
+        518048,
+        529,
+        664928
       ],
       "facing": 0,
       "size": 4,
@@ -38,70 +44,70 @@
       "to": "/blog/"
     },
     {
-      "id": "tags",
-      "name": "Tags",
-      "type": "lettering",
+      "id": "x",
+      "name": "X",
+      "type": "logo",
+      "logo": "x",
       "building": [
-        517384,
-        664944
+        529441,
+        667506
       ],
       "at": [
-        517384,
-        646,
-        664944
+        529441,
+        1280,
+        667506
       ],
       "facing": 0,
-      "size": 4,
+      "turn": 285,
+      "size": 28,
       "content": {
-        "text": "TAGS"
+        "text": "X"
       },
-      "to": "/tags/"
+      "to": "https://x.com/pasha_knz"
     },
     {
-      "id": "social",
-      "name": "Social links",
-      "type": "digital",
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "type": "logo",
+      "logo": "linkedin",
       "building": [
-        519320,
-        665128
+        525313,
+        673957
       ],
       "at": [
-        519320,
-        477,
-        665128
+        525313,
+        1682,
+        673957
       ],
       "facing": 0,
-      "size": [
-        14.4,
-        5.6
-      ],
+      "turn": 318.3,
+      "size": 28,
       "content": {
-        "text": "SOCIAL"
+        "text": "LinkedIn"
       },
-      "to": "/social/"
+      "to": "https://www.linkedin.com/in/pavlo-zahynailo/"
     },
     {
-      "id": "support",
-      "name": "Support",
-      "type": "digital",
+      "id": "twitch",
+      "name": "Twitch",
+      "type": "logo",
+      "logo": "twitch",
       "building": [
-        519000,
-        665744
+        528916,
+        672507
       ],
       "at": [
-        519000,
-        534,
-        665744
+        528916,
+        1646,
+        672507
       ],
       "facing": 0,
-      "size": [
-        14.4,
-        5.6
-      ],
+      "turn": 304.3,
+      "size": 30,
       "content": {
-        "text": "SUPPORT"
+        "text": "Twitch"
       },
-      "to": "/support/"
+      "to": "https://www.twitch.tv/p_bender"
     }
   ]
 }
