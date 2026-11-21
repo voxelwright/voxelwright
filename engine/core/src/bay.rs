@@ -21,6 +21,105 @@ thread_local! {
     static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
+    static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
+}
+
+/// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
+/// and tracks, drawn in the road's top cell at 10 cm. Where the graph covers a place, the bake's own paint and rails
+/// (class bits 32 and 64, settled per 50 cm sample from the aerial) are not drawn: they were blocks and bands.
+#[derive(Default)]
+struct Marks {
+    covers: Vec<[i32; 4]>,
+    /// x0, z0, x1, z1 (cells) and a style (`mark_at`).
+    segs: Vec<[i32; 5]>,
+    /// The segments that come within reach of each square of 256 cells.
+    grid: std::collections::HashMap<(i32, i32), Vec<u32>>,
+}
+const MARK_CELL: i32 = 256;
+/// How far a mark reaches from its line, in cells: a crossing's bars run 1.5 m either side.
+const MARK_REACH: i32 = 16;
+const WHITE_LINE: u8 = 1;
+const WHITE_DASH: u8 = 2;
+const YELLOW_DOUBLE: u8 = 3;
+const CROSS_BARS: u8 = 4;
+const CROSS_LINES: u8 = 5;
+const RAILS_CABLE: u8 = 6;
+const RAILS: u8 = 7;
+/// A rail's worn top and the cable's slot, as greys of the road (`mark_at`).
+const RAIL: u8 = grey(5);
+const SLOT: u8 = grey(13);
+
+/// Takes the marks in the room (`room`): little-endian words, `MARK`, how many covered squares and how many segments,
+/// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments held, or -1.
+pub fn marks() -> i32 {
+    let bytes = ROOM.with_borrow_mut(std::mem::take);
+    let w: Vec<i32> = bytes.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    if w.len() < 3 || w[0] != 0x4b52_414d { return -1; }
+    let (nc, ns) = (w[1] as usize, w[2] as usize);
+    if w.len() != 3 + nc * 4 + ns * 5 { return -1; }
+    let mut m = Marks::default();
+    for c in w[3..3 + nc * 4].chunks_exact(4) { m.covers.push([c[0], c[1], c[2], c[3]]); }
+    for (i, s) in w[3 + nc * 4..].chunks_exact(5).enumerate() {
+        m.segs.push([s[0], s[1], s[2], s[3], s[4]]);
+        let (x0, x1) = (s[0].min(s[2]) - MARK_REACH, s[0].max(s[2]) + MARK_REACH);
+        let (z0, z1) = (s[1].min(s[3]) - MARK_REACH, s[1].max(s[3]) + MARK_REACH);
+        for gz in z0.div_euclid(MARK_CELL)..=z1.div_euclid(MARK_CELL) {
+            for gx in x0.div_euclid(MARK_CELL)..=x1.div_euclid(MARK_CELL) {
+                m.grid.entry((gx, gz)).or_default().push(i as u32);
+            }
+        }
+    }
+    let n = m.segs.len() as i32;
+    MARKS.with_borrow_mut(|held| *held = m);
+    n
+}
+
+/// Whether the graph's marks are drawn at a column: then the bake's paint and rails are not.
+fn marked_place(x: i32, z: i32) -> bool {
+    MARKS.with_borrow(|m| m.covers.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]))
+}
+
+/// The paint or rail in the road's top cell at a column (cells `size` wide, its middle at x, z), if any. A line is a
+/// cell wide, or the cell's own width where cells are coarser, so a coarse cell does not lose it between samples.
+fn mark_at(x: i32, z: i32, size: i32) -> Option<Kind> {
+    MARKS.with_borrow(|m| {
+        let list = m.grid.get(&(x.div_euclid(MARK_CELL), z.div_euclid(MARK_CELL)))?;
+        // The graph's points name cells, as the column's x and z do (a coarse column's are its middle).
+        let (px, pz) = (x as f32, z as f32);
+        let half = 0.5 * size as f32;
+        let mut found = None;
+        for &i in list {
+            let s = m.segs[i as usize];
+            let (dx, dz) = ((s[2] - s[0]) as f32, (s[3] - s[1]) as f32);
+            let long = (dx * dx + dz * dz).sqrt();
+            if long < 1.0 { continue; }
+            let (ux, uz) = (dx / long, dz / long);
+            let (rx, rz) = (px - s[0] as f32, pz - s[1] as f32);
+            let t = rx * ux + rz * uz;
+            let d = (rz * ux - rx * uz).abs();
+            let within = |lo: f32, hi: f32| d >= lo - half + 0.5 && d < hi + half - 0.5;
+            let on = |w: f32| t >= -w && t <= long + w;
+            let k = match s[4] as u8 {
+                WHITE_LINE if on(0.0) && within(0.0, 0.6) => kind(ASPHALT, grey(1)),
+                WHITE_DASH if on(0.0) && within(0.0, 0.6) && t.rem_euclid(90.0) < 30.0 => kind(ASPHALT, grey(1)),
+                YELLOW_DOUBLE if on(0.0) && within(0.4, 1.6) => kind(ASPHALT, colour(4, 3)),
+                // Continental bars: 60 cm wide and 60 cm apart along the crossing, 3 m long across it.
+                CROSS_BARS if on(-2.0) && within(0.0, 15.0) && (t - 2.0).rem_euclid(12.0) < 6.0 => kind(ASPHALT, grey(1)),
+                CROSS_LINES if on(0.0) && within(13.0, 15.0) => kind(ASPHALT, grey(1)),
+                // A cable car's rails 1067 mm apart with the cable's slot between; a streetcar's 1435 mm. Set flush in the
+                // road and climbing with it, they are its surface (asphalt) in the rail's worn grey and the slot's dark:
+                // as steel they stood apart from the road's grade and were a stair of dark steps up Powell.
+                RAILS_CABLE if on(0.0) && within(4.8, 5.9) => kind(ASPHALT, RAIL),
+                RAILS_CABLE if on(0.0) && within(0.0, 0.5) => kind(ASPHALT, SLOT),
+                RAILS if on(0.0) && within(6.7, 7.8) => kind(ASPHALT, RAIL),
+                _ => continue,
+            };
+            // Rails over paint: a crossing's bars stop at the track.
+            if k >> 8 == RAIL as Kind || k >> 8 == SLOT as Kind { return Some(k); }
+            found = Some(k);
+        }
+        found
+    })
 }
 
 /// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
@@ -826,21 +925,30 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     };
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
-    let (class, tint) = p.surface(x, z);
+    let (mut class, tint) = p.surface(x, z);
+    // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
+    let graphed = class & 7 == ROAD && marked_place(x, z);
+    if graphed { class &= !96; }
+    // A measured asphalt's byte is the aerial's daylight brightness of the road as a step of the palette's greys
+    // (bay/surface_detail.py: 4 the palest to 11 the darkest). The aerial is stretched bright: read as the road's own
+    // colour it made every street as pale as its pavement (#450). As colour, the same range runs from the grey of worn
+    // asphalt (8) to fresh (12), so the street photographs' road against pavement holds (sf/street_checks.py).
+    let road_grey = |t: u8| 8 + ((t.clamp(4, 11) - 4) * 4 + 3) / 7;
     let asphalt = if class & 159 == 128 && (1..=15).contains(&tint) {
-        Some(tint)
+        Some(road_grey(tint))
     } else if class & 31 == CANOPY && measured_foliage(tint) && !p.under_leaf_road.is_empty() {
         p.cell(x,z).map(|i| {
             let w = p.tw as usize;
-            p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16]
+            road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
         })
     } else { None };
     let road_top4 = (size == 1 && asphalt.is_some()).then(|| ((ground_height+1.0)*4.0).round() as i32);
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
-        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
-        PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        ROAD => (if graphed && size <= 2 { mark_at(x, z, size) } else { None }.unwrap_or(kind(ASPHALT, asphalt.unwrap_or(OWN))), 0),
+        // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
+        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
         WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
@@ -1271,6 +1379,56 @@ mod tests {
         }
         b.extend(std::iter::repeat_n(300i16.to_le_bytes(), 25).flatten());
         b
+    }
+
+    /// Marks as the page hands them over (sf/marks.mjs): one covered square and the segments given.
+    fn take_marks(segs: &[[i32; 5]]) -> i32 {
+        let mut words = vec![0x4b52_414d, 1, segs.len() as i32, 0, 0, 1000, 1000];
+        for s in segs { words.extend(s); }
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()); }
+        marks()
+    }
+
+    #[test]
+    fn marks_are_drawn_a_cell_wide_where_the_graph_puts_them() {
+        // A dashed lane line along x at z = 100, a double yellow at z = 200, a crossing's bars across x at x = 500,
+        // a cable car's rails along x at z = 300.
+        assert_eq!(take_marks(&[[0, 100, 400, 100, 2], [0, 200, 400, 200, 3], [500, 50, 500, 250, 4], [0, 300, 400, 300, 6]]), 4);
+        assert!(marked_place(10, 10) && !marked_place(-1, 10));
+        let white = kind(ASPHALT, grey(1));
+        // Dashes: 3 m of paint, 6 m of none, on the line's own cell and not the next.
+        assert_eq!(mark_at(10, 100, 1), Some(white));
+        assert_eq!(mark_at(10, 101, 1), None);
+        assert_eq!(mark_at(50, 100, 1), None);
+        assert_eq!(mark_at(95, 100, 1), Some(white));
+        // Two yellow lines a cell either side of the middle, nothing on it.
+        assert_eq!(mark_at(10, 200, 1), None);
+        assert_eq!(mark_at(10, 201, 1), Some(kind(ASPHALT, colour(4, 3))));
+        assert_eq!(mark_at(10, 199, 1), Some(kind(ASPHALT, colour(4, 3))));
+        // Bars 60 cm wide and 60 cm apart along the crossing, 3 m across it.
+        let bars: Vec<bool> = (52..76).map(|z| mark_at(500, z, 1).is_some()).collect();
+        assert!(bars[..6].iter().all(|&b| b) && bars[6..12].iter().all(|&b| !b) && bars[12..18].iter().all(|&b| b));
+        assert!(mark_at(514, 54, 1).is_some() && mark_at(517, 54, 1).is_none());
+        // Rails 1067 mm apart with the slot between them.
+        assert_eq!(mark_at(10, 305, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 295, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 300, 1), Some(kind(ASPHALT, SLOT)));
+        assert_eq!(mark_at(10, 302, 1), None);
+        // Coarser cells keep a line: a 20 cm cell whose middle is a cell off the line still has it.
+        assert_eq!(mark_at(10, 101, 2), Some(white));
+        take_marks(&[]);
+    }
+
+    #[test]
+    fn measured_asphalt_reads_darker_than_pavement() {
+        // The aerial's brightest road (4) and its darkest (11), as the column draws them: darker than the concrete of
+        // a pavement, and darkest for the darkest.
+        let pale = 8 + ((4u8 - 4) * 4 + 3) / 7;
+        let dark = 8 + ((11u8 - 4) * 4 + 3) / 7;
+        assert_eq!((pale, dark), (8, 12));
+        // Palette grey 8 is 0.86 - 7/14 * 0.8 = 0.46 of white; the concrete material is #a9a69f, 0.66 (march.ts).
+        assert!(0.86 - (pale as f32 - 1.0) / 14.0 * 0.8 < 0.66 * 0.75);
     }
 
     #[test]

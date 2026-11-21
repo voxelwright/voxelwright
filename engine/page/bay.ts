@@ -51,7 +51,7 @@ export const START: [number, number] | null = there ? [there.x, there.z] : null
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
 
-interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
+interface Core { memory: WebAssembly.Memory; bay_room(bytes: number): number; bay_load(): number; bay_marks(): number; bay_begin(): void; bay_drop(x0: number, z0: number, gstep: number): number; bay_hero(sort: number, x: number, z: number, foot: number, turn: number): number; bay_landmarks(on: number): void }
 
 /** A level of the tiles: `size` cells a side, with a ground sample every `gstep`. */
 export interface Level { size: number; gstep: number }
@@ -277,6 +277,9 @@ export async function open<T>(url: string): Promise<T> {
   // `?heroes=0` leaves them out (as the tiles have the place), for what they cost.
   if (query.get('heroes') === '0') core.bay_landmarks(0)
   for (const h of await heroes()) { const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
+  // The road's paint and rails from the street graph (#450, sf/marks.mjs), where the world has one.
+  const lines = await marks()
+  if (lines) { const at = core.bay_room(lines.byteLength); new Uint8Array(core.memory.buffer, at, lines.byteLength).set(new Uint8Array(lines)); if (core.bay_marks() < 0) throw new Error('marks this core does not read') }
   for (const name of SQUARES) await take(core, await whole(`${BASE}${name}.bay`))
   return core as unknown as T
 }
@@ -285,6 +288,10 @@ export async function open<T>(url: string): Promise<T> {
 export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number }
 let landmarks: Promise<Landmark[]> | null = null
 const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
+
+/** The road's marks a Bay world has (sf/marks.mjs, written beside the tiles as marks.bin), or null. */
+let marking: Promise<ArrayBuffer | null> | null = null
+const marks = () => (marking ??= (ON ? fetch(`${BASE}marks.bin`).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null) : Promise.resolve(null)))
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {

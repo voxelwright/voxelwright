@@ -526,7 +526,7 @@ fn fineWord(entry: u32, c: vec3i) -> u32 {
 
 const REFINE = /* wgsl */ `
 // What a ray met inside a cell of finer cells: kind 0 where it passed between them, and where it leaves the cell.
-struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32 }
+struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32, side: vec3f }
 fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   let lv = g.level[hit.level];
   let c = hit.cell - lv.cells;
@@ -538,6 +538,8 @@ fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   var r: Fine;
   r.kind = 0u;
   r.leave = min(out.x, min(out.y, out.z)) + 0.002 / lv.scale;
+  // The face of the next cell a ray that leaves this one meets, if that cell is solid.
+  r.side = select(select(vec3f(0.0, 0.0, -f32(toward.z)), vec3f(0.0, -f32(toward.y), 0.0), out.y <= out.z), vec3f(-f32(toward.x), 0.0, 0.0), out.x <= out.y && out.x <= out.z);
   let entry = sectorOf(c, hit.level);
   let word = fineWord(entry, c);
   if (word == 0u) { return r; }
@@ -584,7 +586,12 @@ fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rou
     let f = finer(ro, rd, hit);
     if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; hit.out = f.out; break; }
     // Between them: on from the cell's far side. The last of many such cells is taken whole.
-    hit = march(ro, rd, f.leave, hit.level, most, wide, spread, rough, false, eyed);
+    let leave = f.leave;
+    hit = march(ro, rd, leave, hit.level, most, wide, spread, rough, false, eyed);
+    // A march begun in a solid cell says no face (its normal is nought, and it was lit as facing the eye): it met that
+    // cell's face as it left this one. Through the carved quarter cells of a road's grade (bay.rs grade_rows) into the
+    // ground beside, every step up Filbert and Powell was a black line (#450).
+    if (hit.t >= 0.0 && hit.t <= leave + 0.5 / g.level[hit.level].scale && dot(hit.n, hit.n) < 0.5) { hit.n = f.side; }
     if ((hit.kind & 64u) == 0u) { break; }
   }
   return hit;
@@ -1253,6 +1260,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
       n = vec3f(0.0, 1.0, 0.0);
+      // And worn as the tread is: a riser in a wall's pattern was a grey dash at every step.
+      face = n;
       slope = true;
     }
   }
