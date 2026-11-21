@@ -41,6 +41,7 @@ struct V {
   sun: vec3f, pixel: f32,
   wedge: vec4f, bear: vec4f,
   light: vec4f,
+  keep0: vec4f, keep1: vec4f,
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
@@ -133,7 +134,7 @@ fn hashf(p: vec2f, k: u32) -> f32 {
 // nearer than the reach against the sky: what stands near the eye is the cells' to say.
 fn ours(in: Out) -> bool {
   let dist = length(in.seen);
-  let reach = reachAt(in.seen, v.reach, v.wedge, v.bear);
+  let reach = reachAt(in.seen, v.reach, v.wedge, v.bear, v.keep0, v.keep1);
   let z = textureLoad(marched, vec2i(in.pos.xy), 0);
   if (z >= 1.0) { return dist >= reach; }
   let along = dot(in.seen, v.forward);
@@ -143,7 +144,7 @@ fn ours(in: Out) -> bool {
   // model's to add: up Grant Ave, past where the far model begins 100 m off, the march had handed the street over and
   // the far model drew a building's columns 15 m off across it.
   let metAt = in.seen * (met / max(along, 1e-3));
-  if (dist < reach && (dist < reach * 0.9 || length(metAt) < reachAt(metAt, v.reach, v.wedge, v.bear))) { return false; }
+  if (dist < reach && (dist < reach * 0.9 || length(metAt) < reachAt(metAt, v.reach, v.wedge, v.bear, v.keep0, v.keep1))) { return false; }
   return along < met;
 }
 struct Drawn { @location(0) colour: vec4f }
@@ -269,6 +270,8 @@ export interface Far {
    */
   edited(box: readonly [number, number, number, number, number, number]): void
   forget(): void
+  /** A box (finest cells, low and high corners) that stays the cells' out to the reach in the wedge, or null: a lettering board's (boards.ts). */
+  keep(box: readonly number[] | null): void
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -276,7 +279,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {} }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {} }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -308,7 +311,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: 'less' },
   })
   const mergeBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
-  const uniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const uniforms = device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const windows = device.createBuffer({ size: 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   let styled = false
   let sunBaked: [number, number, number] | null = null
@@ -440,6 +443,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   let ready = false
   /** Tiles the world was changed in since the last reset: the cells' (edited). */
   const changed = new Set<string>()
+  let kept: readonly number[] | null = null
 
   const self: Far = {
     listing, reach: reachAsked, near: Number(query.get('farnear') ?? 100), detail: Number(query.get('fardetail') ?? 0.75), stats,
@@ -450,6 +454,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
     },
     forget() { changed.clear() },
+    keep(box) { kept = box },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) {
@@ -549,9 +554,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0]))
-    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}`
-    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}:${kept}`
+    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
     if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }] }); viewBinds.set(depth, bind) }

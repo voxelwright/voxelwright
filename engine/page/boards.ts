@@ -229,6 +229,11 @@ export interface Needs {
   pieces: Pieces
   /** Puts an edit in the world and tells whoever moves things. */
   lay(edit: Edit): void
+  /**
+   * Told the box round the lettering boards' letters whenever they are laid (finest cells, low and high corners), or
+   * null: what the far model's wedge, which takes over from 100 m, must leave to the cells they are (far.ts `keep`).
+   */
+  kept?(box: number[] | null): void
   /** How many edits the world holds. */
   done(): number
   kind(x: number, y: number, z: number): number
@@ -294,6 +299,11 @@ export async function boards(o: Needs): Promise<Boards> {
     sc.hu = [sh.right[0] * (sh.wide / 2 - RIM), 0, sh.right[2] * (sh.wide / 2 - RIM)]
     sc.hv = [0, sh.high / 2 - RIM, 0]
   }
+  /** The lettering boards' box, grown by two of the coarsest cells the march meets them in from the park (80 cm). */
+  const keep = () => {
+    const boxes = [...stood.values()].filter((s) => s.b.type === 'lettering' && s.shape).map((s) => s.shape!.box), grow = 16
+    o.kept?.(boxes.length ? [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b[k])) - grow).concat([3, 4, 5].map((k) => Math.max(...boxes.map((b) => b[k])) + grow)) : null)
+  }
   const stand = (s: Stood, again = false) => {
     const b = s.b, text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '') : ''
     if (!again && s.shape && s.text === text) return
@@ -301,6 +311,7 @@ export async function boards(o: Needs): Promise<Boards> {
     s.shape = shape(b, text); s.text = text
     if (s.shape.runs.length) lay(rows(s.shape.runs, s.shape.box))
     place(s)
+    if (b.type === 'lettering') keep()
   }
   const bring = (b: Board) => {
     const s: Stood = { b, shape: null, text: '', screen: null, content: null, tiles: [1, 1], gone: () => {} }
@@ -323,7 +334,7 @@ export async function boards(o: Needs): Promise<Boards> {
     stood.set(b.id, s)
     s.gone = signs.add({ id: b.id, kind: b.type, name: b.name, accepts: b.type === 'lettering' ? ['text'] : ['text', 'image', 'video'], own: b.content, show: (content) => { s.content = content; if (b.type === 'lettering') stand(s); else { if (!s.shape) stand(s); s.screen!.show(content) } } })
   }
-  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.gone(); stood.delete(id) }
+  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.gone(); stood.delete(id); keep() }
   for (const b of records) bring(b)
 
   // ── What still stands: a letter by its lamp, a screen's tile by the housing behind it ──
@@ -677,6 +688,7 @@ export async function boards(o: Needs): Promise<Boards> {
     get edits() { return laid },
     relay() { laid = 0; for (const s of stood.values()) stand(s, true); seenEdits = -1 },
     fly, open, where, marks, standing, propose, listed,
+
     get plane() { return flown },
     editor,
   }

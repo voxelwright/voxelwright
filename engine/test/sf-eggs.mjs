@@ -50,7 +50,8 @@ const open = async (context) => {
   page.on('console', (m) => { page.said.push(m.text()); if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) page.errors.push(m.text()) })
   await page.goto(`${site.url}/sf/index.html?knock=0`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.eggs, null, { timeout: 180_000 })
-  await page.evaluate(() => { globalThis.engine.scale = 1 })
+  // The visitor has engaged (first.ts): the realm's controls, which the eggs' line and player join, are shown.
+  await page.evaluate(() => { globalThis.engine.scale = 1; globalThis.engine.first?.engage() })
   return page
 }
 const settle = (page) => page.waitForFunction(() => { const e = globalThis.engine, s = e.world.stats; return s.wanted === 0 && s.stale === 0 && e.march.sun.undrawn === 0 }, null, { timeout: 60_000, polling: 250 }).catch(() => null)
@@ -305,8 +306,10 @@ try {
   await page.waitForTimeout(300)
   s = await state(page)
   check(s.running === null && s.weather === 'clear', `Backspace (reset) ends the Matrix and asks the weather back (${s.weather})`)
-  await page.waitForFunction(() => globalThis.engine.hour === null && globalThis.engine.world.done().length === 0, null, { timeout: 20_000 }).catch(() => null)
-  check(await page.evaluate(() => globalThis.engine.hour === null && globalThis.engine.world.done().length === 0), 'the world is as it was and lit by its own light')
+  // (As it was: what lays the boards, boards.ts, and nothing more.)
+  const asWas = () => globalThis.engine.hour === null && globalThis.engine.world.done().length === (globalThis.engine.boards?.edits ?? 0)
+  await page.waitForFunction(asWas, null, { timeout: 20_000 }).catch(() => null)
+  check(await page.evaluate(asWas), 'the world is as it was and lit by its own light')
   await still(page)
 
   // ── The Konami code: +30 lives on the banner; its B does not put the eye on foot ──

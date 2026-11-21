@@ -286,8 +286,13 @@ fn inWedge(p: vec3f, wedge: vec4f, bear: vec4f) -> bool {
   let bearing = select(b, b + 6.2831853, b < 0.0);
   return wedge.z > 0.0 && bearing > bear.x && bearing < bear.y && dot(d, d) < wedge.z * wedge.z;
 }
-fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f) -> f32 {
-  return select(reach, min(reach, wedge.w), inWedge(p, wedge, bear));
+// A box the wedge's nearer reach leaves to the cells (a lettering board's, #450: its letters are cells, which the
+// wedge's faces past 100 m know nothing of): its low and high corners, measured as p is; none where k1.w is 0.
+fn kept(p: vec3f, k0: vec4f, k1: vec4f) -> bool {
+  return k1.w > 0.0 && all(p >= k0.xyz) && all(p <= k1.xyz);
+}
+fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f, k0: vec4f, k1: vec4f) -> f32 {
+  return select(reach, min(reach, wedge.w), inWedge(p, wedge, bear) && !kept(p, k0, k1));
 }
 `
 
@@ -654,7 +659,7 @@ struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32
 // far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
 // is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
 // 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER).
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f }
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f }
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
@@ -991,7 +996,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   // what it edits nearer is in the cells.
   if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
     let p = ro + rd * hit.t;
-    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p)) { hit.t = -1.0; hit.left = true; }
+    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p)) { hit.t = -1.0; hit.left = true; }
   }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
@@ -1796,9 +1801,10 @@ export interface Marcher {
    * Where the far model (far.ts) takes over: past `reach` (finest cells from the eye), in the tiles `held` marks, what
    * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
    * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn. In `wedge`
-   * (HANDOVER: its apex x and z, how far it reaches and the reach in it, cells; its bearings, radians) the reach is its own.
+   * (HANDOVER: its apex x and z, how far it reaches and the reach in it, cells; its bearings, radians) the reach is its own,
+   * except in `keep` (low and high corners, cells), which is the cells' out to the reach.
    */
-  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null): void
+  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null, keep?: readonly number[] | null): void
   /**
    * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
    * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
@@ -1897,7 +1903,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
@@ -1962,12 +1968,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let farMap = [0, 0, 1, 0]
   /** Its wedge (farCover): the apex (cells from the frame's corner, x and z), how far it reaches and the reach in it (cells), its bearings (radians). */
   let farWedge: readonly number[] | null = null
+  /** The box the wedge leaves to the cells (farCover's `keep`): low and high corners, cells from the frame's corner. */
+  let farKeep: readonly number[] | null = null
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
       // The far model's map is measured from the same corner (farCover).
       if (farMap[3] > 0) device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, new Float32Array([farMap[0] - anchor[0], farMap[1] - anchor[2], farMap[2], farMap[3]]))
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, farWedge ? new Float32Array([farWedge[0] - anchor[0], farWedge[1] - anchor[2], farWedge[2], farWedge[3], farWedge[4], farWedge[5], 0, 0]) : new Float32Array(8))
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, farKeep ? new Float32Array([farKeep[0] - anchor[0], farKeep[1] - anchor[1], farKeep[2] - anchor[2], 0, farKeep[3] - anchor[0], farKeep[4] - anchor[1], farKeep[5] - anchor[2], 1]) : new Float32Array(8))
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
       f.set([...view.up, time], 8)
@@ -2084,9 +2093,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
-    farCover(corner, size, reach, held, wedge = null) {
+    farCover(corner, size, reach, held, wedge = null, keep = null) {
       farMap = [corner[0] * size, corner[1] * size, size, reach]
       farWedge = wedge
+      farKeep = keep
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
     },
     async reshade(change) {

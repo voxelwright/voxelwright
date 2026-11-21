@@ -1275,6 +1275,8 @@ async function main() {
   const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
     file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
     lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
+    kept: (box) => farModel.keep(box),
     reach: () => farModel.reach * M,
     done: () => world.done().length,
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
