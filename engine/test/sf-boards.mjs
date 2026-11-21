@@ -23,7 +23,7 @@
 //     as the picture's own pixels have them, at 1280 x 720 and on the phone;
 //   - the park holds 60 fps at picture scale 0.7 with the boards in view.
 // Pictures are kept: the first view at both sizes, the controls coming, the park before and after, by night, a
-// flight to a board and to a logo, a broken board, the banner passing at both sizes.
+// flight to a board and to each logo, a broken board, the banner passing at both sizes.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -45,6 +45,13 @@ const file = JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8'))
 /** The boards that are cells of the world (a logo is a face alone), and the logos. */
 const built = file.boards.filter((b) => b.type !== 'logo'), logos = file.boards.filter((b) => b.type === 'logo')
 /** Each mark's two colours as its sign shows them (page/logos.ts). */
+/** How much of a logo's box in a picture is each of its brand's two colours: [the mark's, what it stands on]. `w` is where the logo is (boards.where), `scale` the picture's pixels to a px. */
+const brandShare = (picture, w, logo, scale = 1) => {
+  const brand = BRAND[logo], near = [0, 0]
+  let n = 0
+  for (let y = Math.round((w.y - w.tall / 2) * scale); y <= (w.y + w.tall / 2) * scale; y++) for (let x = Math.round((w.x - w.wide / 2) * scale); x <= (w.x + w.wide / 2) * scale; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < 90) near[k]++ }) }
+  return [near[0] / Math.max(1, n), near[1] / Math.max(1, n)]
+}
 const BRAND = { x: [[255, 255, 255], [0, 0, 0]], linkedin: [[10, 102, 194], [255, 255, 255]], twitch: [[145, 70, 255], [255, 255, 255]] }
 /** How tall the words on the banner are in a picture of it, px of that picture: the run of ink down a column, at the ninth tenth of the columns that have any (a letter's stem; a stray pixel of the plane's red is left out). The cloth's ink is red on a pale ground. */
 const inkTall = (picture, box) => {
@@ -226,9 +233,7 @@ try {
     check(inside && s.clear && s.standing.whole && letter >= (s.type === 'logo' ? 24 : 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its mark' : 'a letter'} ${r.letterPx} px tall, nothing between the eye and it`)
     if (s.type === 'logo') {
       // The picture where its mark is: how much of it is one of its brand's two colours, and whether both are there.
-      const brand = BRAND[s.logo], half = letter / 2, cy = w.y, near = [0, 0]
-      let n = 0
-      for (let y = Math.round(cy - half); y <= cy + half; y++) for (let x = Math.round(w.x - w.wide / 2); x <= w.x + w.wide / 2; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < 90) near[k]++ }) }
+      const share = brandShare(picture, w, s.logo), near = share, n = 1
       r.read = { ink: round(near[0] / n, 2), ground: round(near[1] / n, 2) }
       check(near[0] / n > 0.05 && near[1] / n > 0.05 && (near[0] + near[1]) / n > 0.5, `${s.id} reads in the picture at scale 0.7: ${Math.round((near[0] / n) * 100)}% of its mark is its brand's colour and ${Math.round((near[1] / n) * 100)}% what that stands on`)
     }
@@ -269,6 +274,12 @@ try {
   }
   // ── Navigation ──
   console.log('\nnavigation')
+  /** After a flight to a logo: whether the picture before the eye has its mark, by its brand's colours (a mark sunk in its wall, or hidden by it, has none). */
+  const markSeen = async (logo) => {
+    await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2500)
+    const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), logo.id), share = brandShare(await pixelsOf(await page.screenshot({ path: join(shots, `fly-to-${logo.id}.png`) })), w, logo.logo)
+    check(share[0] > 0.05 && share[1] > 0.05 && share[0] + share[1] > 0.6, `before the ${logo.id} logo after the flight, its mark is in the picture: ${Math.round(share[0] * 100)}% its brand's colour and ${Math.round(share[1] * 100)}% what that stands on (${Math.round(w.tall)} px tall)`)
+  }
   const told = (type) => page.evaluate((type) => window.told.filter((m) => m.type === type), type)
   /** Whether the eye is before a board, looking at it. */
   const before = (id) => realm.evaluate((id) => { const e = globalThis.engine, w = e.boards.where(id), rect = document.querySelector('canvas').getBoundingClientRect(); return w && { metres: Math.round(w.far), share: Math.round((w.wide / rect.width) * 100) / 100, centred: Math.abs(w.x - rect.width / 2) < rect.width * 0.1 && Math.abs(w.y - rect.height / 2) < rect.height * 0.15 } }, id)
@@ -293,9 +304,7 @@ try {
   await page.keyboard.press('Enter')
   await page.waitForFunction((n) => window.told.filter((m) => m.type === 'navigate').length > n, n, { timeout: 15_000 }).catch(() => null)
   nav = (await told('navigate')).at(-1); there = await before(second.id)
-  await page.waitForTimeout(1500); await realm.evaluate(() => { globalThis.engine.scale = 1 }); await settle(); await page.waitForTimeout(3000)
-  await page.screenshot({ path: join(shots, 'fly-to-logo.png') })
-  await realm.evaluate(() => { globalThis.engine.scale = 0.7 })
+  await markSeen(second)
   check(second.type === 'logo' && /^https:/.test(second.to) && shownLink && (await told('navigate')).length === n + 1 && nav?.board === second.id && nav.to === second.to && there?.centred, `Enter on the link "${second.name}" (seen while it has the focus) flew to the logo, ${there?.metres} m before it, and told the host to go to ${nav?.to}`)
   // The host's own ask.
   const third = file.boards[2]
@@ -304,6 +313,7 @@ try {
   await page.waitForFunction((n) => window.told.filter((m) => m.type === 'navigate').length > n, n, { timeout: 15_000 }).catch(() => null)
   nav = (await told('navigate')).at(-1); there = await before(third.id)
   check(nav?.board === third.id && nav.to === third.to && there?.centred, `the host's "open" flew to ${third.id} and was told to go to ${nav?.to}`)
+  if (third.type === 'logo') await markSeen(third)
   // A click on each of the other logos, from the park.
   for (const logo of logos.filter((l) => l.id !== second.id && l.id !== third.id)) {
     await toPark()
@@ -313,6 +323,7 @@ try {
     await page.waitForFunction((n) => window.told.filter((m) => m.type === 'navigate').length > n, n, { timeout: 15_000 }).catch(() => null)
     nav = (await told('navigate')).at(-1)
     check((await told('navigate')).length === n + 1 && nav?.board === logo.id && nav.to === logo.to, `a click on the ${logo.id} logo in the park's picture flew to it and told the host to go to ${nav?.to}`)
+    await markSeen(logo)
   }
   // Flying free: from the park by the keys towards a board, then O.
   const last = built.at(-1)
@@ -437,17 +448,17 @@ try {
   check(said.refused === true, 'a lettering board refuses an image with a TypeError')
   check(said.image.length === (digital ? 2 : 1) && said.image.every(Boolean) && said.bannerReady.kind === 'image' && said.bannerReady.ready && said.video.state >= 2 && said.unknown, `the banner${digital ? ' and a digital board' : ''} took an image (its picture came), then ${digital ? 'the board' : 'the banner'} a video (readyState ${said.video.state}); a sign not there yet is kept for`)
   // And from the host.
-  await page.evaluate(() => { window.ask({ type: 'signs.set', id: 'banner', content: { text: 'NEW POST' } }); window.ask({ type: 'signs.set', id: 'blog', content: { image: 'x.png' } }) })
+  await page.evaluate(() => { window.ask({ type: 'signs.set', id: 'banner', content: { text: 'FROM THE HOST' } }); window.ask({ type: 'signs.set', id: 'blog', content: { image: 'x.png' } }) })
   await page.waitForTimeout(600)
   const hosted = await realm.evaluate(() => globalThis.realm.signs.list().find((s) => s.id === 'banner').content), refusedHost = (await told('error')).at(-1)
-  check(hosted.text === 'NEW POST' && refusedHost?.fatal === false, `the host set the banner to "${hosted.text}", and was told its picture for a lettering board was refused`)
+  check(hosted.text === 'FROM THE HOST' && file.banner.content.text !== 'FROM THE HOST' && refusedHost?.fatal === false, `the host set the banner to "${hosted.text}", and was told its picture for a lettering board was refused`)
   if (digital) await realm.evaluate((id) => { globalThis.realm.signs.set(id, null) }, digital.id)
 
   // ── The plane ──
   console.log('\nthe plane')
   await toPark()
   const moved = await realm.evaluate(async () => { const p = globalThis.engine.boards.plane, a = [...p.at]; await new Promise((r) => setTimeout(r, 1000)); return Math.round(Math.hypot(p.at[0] - a[0], p.at[2] - a[2]) / 10) })
-  await realm.evaluate(() => { globalThis.engine.scale = 1 })
+  await realm.evaluate(() => { globalThis.realm.signs.set('banner', { text: 'NEW POST' }); globalThis.engine.scale = 1 })
   const pass = await realm.evaluate(PASS)
   await page.waitForTimeout(3000)
   const sky = await pixelsOf(await page.screenshot({ path: join(shots, 'banner.png') }))
