@@ -45,11 +45,12 @@ const file = JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8'))
 /** The boards that are cells of the world (a logo is a face alone), and the logos. */
 const built = file.boards.filter((b) => b.type !== 'logo'), logos = file.boards.filter((b) => b.type === 'logo')
 /** Each mark's two colours as its sign shows them (page/logos.ts). */
-/** How much of a logo's box in a picture is each of its brand's two colours: [the mark's, what it stands on]. `w` is where the logo is (boards.where), `scale` the picture's pixels to a px. */
-const brandShare = (picture, w, logo, scale = 1) => {
+/** How much of a logo's box in a picture is each of its brand's two colours: [the mark's, what it stands on]. `w` is where the logo is (boards.where), `within` how near a colour counts (from near, by day, a lit mark spreads into a glow that pales its colour: a wider measure there). */
+const brandShare = (picture, w, logo, within = 90) => {
+  const scale = 1
   const brand = BRAND[logo], near = [0, 0]
   let n = 0
-  for (let y = Math.round((w.y - w.tall / 2) * scale); y <= (w.y + w.tall / 2) * scale; y++) for (let x = Math.round((w.x - w.wide / 2) * scale); x <= (w.x + w.wide / 2) * scale; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < 90) near[k]++ }) }
+  for (let y = Math.round((w.y - w.tall / 2) * scale); y <= (w.y + w.tall / 2) * scale; y++) for (let x = Math.round((w.x - w.wide / 2) * scale); x <= (w.x + w.wide / 2) * scale; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < within) near[k]++ }) }
   return [near[0] / Math.max(1, n), near[1] / Math.max(1, n)]
 }
 const BRAND = { x: [[255, 255, 255], [0, 0, 0]], linkedin: [[10, 102, 194], [255, 255, 255]], twitch: [[145, 70, 255], [255, 255, 255]] }
@@ -277,7 +278,7 @@ try {
   /** After a flight to a logo: whether the picture before the eye has its mark, by its brand's colours (a mark sunk in its wall, or hidden by it, has none). */
   const markSeen = async (logo) => {
     await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2500)
-    const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), logo.id), share = brandShare(await pixelsOf(await page.screenshot({ path: join(shots, `fly-to-${logo.id}.png`) })), w, logo.logo)
+    const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), logo.id), share = brandShare(await pixelsOf(await page.screenshot({ path: join(shots, `fly-to-${logo.id}.png`) })), w, logo.logo, 130)
     check(share[0] > 0.05 && share[1] > 0.05 && share[0] + share[1] > 0.6, `before the ${logo.id} logo after the flight, its mark is in the picture: ${Math.round(share[0] * 100)}% its brand's colour and ${Math.round(share[1] * 100)}% what that stands on (${Math.round(w.tall)} px tall)`)
   }
   const told = (type) => page.evaluate((type) => window.told.filter((m) => m.type === type), type)

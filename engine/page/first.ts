@@ -20,7 +20,8 @@ export interface First {
 
 const STYLE = /* css */ `
 /* Until the visitor engages, nothing of the page's own is over the picture. */
-html.first :is(#hud, #aim, #realm, #where, #over) { visibility: hidden; opacity: 0; }
+/* (#signs-stand-in is the eggs' strip that stands in for the city's signs, eggs.ts: the city may start a joke on it before anyone has moved.) */
+html.first :is(#hud, #aim, #realm, #where, #over, #signs-stand-in) { visibility: hidden; opacity: 0; }
 html.first #realm .sky { translate: 0 -10px; }
 html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 /* They come as one: the picture's own marks first, the hardware a moment after, settling into place. */
