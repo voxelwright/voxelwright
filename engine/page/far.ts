@@ -531,12 +531,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       loose.sort((a, b) => a.h.used - b.h.used || b.k - a.k)
       for (const e of loose) { if (held <= BUDGET * 0.9) break; e.h.buffer.destroy(); e.t.held[e.k] = null; held -= e.h.bytes / 20 }
     }
+    // The faces' light was read off a clear afternoon: it is theirs as far as the day is clear (the march's own overcast).
+    const fair = Math.max(0, Math.min(1, march.day)) * (1 - Math.max(march.rain, march.cloud, 0.2 * march.fog))
     // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
     // While a tile draws the landing's cut, no nearer than the reach the cut was made for: nearer it has no faces.
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), light.fill, light.gain, 0, 0]))
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0]))
     const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}`
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
