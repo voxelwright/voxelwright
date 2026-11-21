@@ -286,6 +286,13 @@ pub extern "C" fn bay_begin() {
     bay::begin()
 }
 
+/// Takes the road's marks from the street graph in the room (`bay_room`; bay.rs `marks`): every core of a world is told
+/// the same before its sectors are made. Returns how many segments it holds, or -1 where the bytes are not marks.
+#[unsafe(no_mangle)]
+pub extern "C" fn bay_marks() -> i32 {
+    bay::marks()
+}
+
 /// Lets go of one pack, named by where its ground starts and how far apart its samples are. Returns how many are held.
 #[unsafe(no_mangle)]
 pub extern "C" fn bay_drop(x0: i32, z0: i32, gstep: i32) -> i32 {

@@ -7,10 +7,10 @@
 // Each file is a record's own cells as runs (make/cells.mjs), with its palette as the core's kinds so the page needs
 // no table of names:
 //
-//   { name, kind, size, body: { palette, runs }, motor?, controls?, seats?, eye?, looks, variants }
+//   { name, kind, size, body: { palette, roles, runs }, motor?, controls?, seats?, eye?, looks, variants }
 //
 // (the shape sf/kept.mjs writes, #459). size is the body in 10 cm cells; palette [0, k1, ...] and runs (base64 of LEB128 count and palette index pairs, x
-// fastest, then z, then y) are its cells. `looks` are its look in finer cells, finest first: the record's own (4 or 8
+// fastest, then z, then y) are its cells; roles say what each palette entry is on the vehicle (`rolesOf`). `looks` are its look in finer cells, finest first: the record's own (4 or 8
 // to a body cell, the inside of a car as well as its outside) and then its outside made coarser (2 and 1 to a body
 // cell) for drawing it far off. `variants` are colours it is also seen in: for each, the palette of the body and of
 // every look with its paint changed. A thing with no motor (the cable car) is drawn, not driven.
@@ -95,6 +95,15 @@ const COLOURS = {
   taxi: (g) => 16 + 4 * 10 + (g < 9 ? 4 : 5),
 }
 const greyOf = (k) => { const c = colourOf(k); if (c >= 1 && c <= 15) return c - 1; const tone = (c - 16) % 10; return [1, 3, 5, 7, 8, 10, 12, 4, 7, 10][tone] }
+/**
+ * What each entry of a palette is on a vehicle (the parts-and-kits report's roles, #450): paint (its body's colour,
+ * drawn as car paint, page/pieces.ts), glass, lamp, tyre (and dark rubber), or trim (all else: hubs, poles, brass,
+ * lining, seats). By material for glass and lamps; paint and tyres as the vehicle says, or as `paintOf` and dark
+ * roofing find them on a kept record. Kept beside each palette, so a repainted variant keeps them.
+ */
+const GLASS = 11, LAMP = 15, ROOFING = 14
+const rolesOf = (palette, paint, tyre) => palette.map((k) => !k ? '' : material(k) === GLASS ? 'glass' : material(k) === LAMP ? 'lamp' : paint(k) ? 'paint' : tyre(k) ? 'tyre' : 'trim')
+const darkRubber = (k) => material(k) === ROOFING && colourOf(k) >= 13 && colourOf(k) <= 15
 const repaint = (kinds, paint, name) => kinds.map((k) => (k && paint(k) ? material(k) | (COLOURS[name](greyOf(k)) << 8) : k))
 
 // ── The library ──
@@ -115,6 +124,8 @@ function kept(id, file, name, kind, colours) {
   const outside = t.living.look?.[0]
   if (outside) for (const by of [2, 4]) { const c = coarser(outside.kinds, outside.size, by); looks.push({ size: c.size, per: outside.per / by, low: outside.low, ...runsOf(c.kinds) }) }
   const paint = paintOf(outside?.kinds ?? t.cells)
+  body.roles = rolesOf(body.palette, paint, darkRubber)
+  for (const l of looks) l.roles = rolesOf(l.palette, paint, darkRubber)
   const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
   wrote(id, { name, kind, size: t.size, body, motor: t.living.motor, controls: t.living.scheme ?? 'drive', ...(t.living.seats ? { seats: t.living.seats } : {}), ...(t.living.eye ? { eye: t.living.eye } : {}), looks, variants })
 }
@@ -128,7 +139,9 @@ kept('hatch', join(root, 'make/kept/0782ba87f3267813204077d0.json'), 'blue saloo
 for (const [id, make, colours] of [['streetcar', streetcar, []], ['bus', cityBus, []], ['trolley', trolleybus, []], ['van', van, ['silver', 'black', 'navy', 'red']], ['truck', boxTruck, ['beige', 'white']], ['cable-car', cableCar, []]]) {
   const v = make(), looks = [{ size: v.size, per: v.per, low: [0, 0, 0], ...runsOf(v.cells) }]
   for (let by = 2; v.per / by >= 1; by *= 2) { const c = coarser(v.cells, v.size, by); looks.push({ size: c.size, per: v.per / by, low: [0, 0, 0], ...runsOf(c.kinds) }) }
-  const b = coarser(v.cells, v.size, v.per), body = runsOf(b.kinds), paint = paintOf(v.cells)
+  const b = coarser(v.cells, v.size, v.per), body = runsOf(b.kinds), paint = (k) => v.paint.includes(k), tyre = (k) => v.tyre.includes(k)
+  body.roles = rolesOf(body.palette, paint, tyre)
+  for (const l of looks) l.roles = rolesOf(l.palette, paint, tyre)
   const variants = colours.map((c) => ({ name: c, body: repaint(body.palette, paint, c), looks: looks.map((l) => repaint(l.palette, paint, c)) }))
   wrote(id, { name: v.name, kind: v.kind, size: b.size, body, ...(v.motor ? { motor: v.motor, controls: 'drive', seats: v.seats } : {}), looks, variants })
 }

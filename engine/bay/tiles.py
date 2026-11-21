@@ -226,6 +226,10 @@ def cut(paths, wanted=None):
                     blob += encode(near)
                 from paint_tile import without_eye_trees
                 blob = without_eye_trees(blob)
+                if os.environ.get('VILLAGE_FACADE_EVIDENCE'):
+                    # What the photographs say of each building, where a records folder is named (evidence_tile.py).
+                    import evidence_tile
+                    blob = evidence_tile.apply(blob, evidence_tile.load(os.environ['VILLAGE_FACADE_EVIDENCE']))
                 path = f'{PACKS}/tiles/{level}/{tx}_{tz}.bay'
                 with open(path + '.part', 'wb') as f:
                     f.write(blob)

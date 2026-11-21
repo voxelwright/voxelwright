@@ -140,7 +140,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
     tall = ndimage.median(over, ids, index=np.arange(most + 1)) if most else np.zeros(1)
     names = named(frame, ids, cell)
     table = [{'id': i, 'city': str((feats[i - 1]['properties'].get('sf16_bldgid') or feats[i - 1]['properties'].get('globalid') or i)), 'stands': float(tall[i]), 'name': names.get(i, '')} for i in range(1, most + 1)]
-    wall_of, style_of = looks.walls(table, most)
+    wall_of, style_of = looks.walls(table, most, looks.evidence())
     lum = np.round(np.clip(55 + grey * 0.75, 60, 230) / 12) * 12
     roof = np.where(leafy, rgb24(np.full(top.shape, 62), np.full(top.shape, 98), np.full(top.shape, 46)), rgb24(lum, lum, lum * 0.98))
     green = rgb24(np.full(top.shape, 46), np.full(top.shape, 74), np.full(top.shape, 36))
