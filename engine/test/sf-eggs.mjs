@@ -168,6 +168,20 @@ try {
   check(s.typing && s.signs.banner === '> wake up_', `what is typed shows on the banner as it is typed ("${s.signs.banner}")`)
   const walked = await page.evaluate(() => globalThis.engine.pose.x)
   await page.keyboard.press('Enter')
+  // From here until the banner's second line: how long its first could be read (boards.ts `readable`: the whole cloth
+  // in the picture, seen from before it, under nothing the page lays over the picture). Watched in the page, every frame.
+  const firstLine = page.evaluate(async () => {
+    const p = globalThis.engine.boards.plane, text = () => globalThis.realm.signs.list().find((x) => x.id === 'banner')?.content?.text, from = performance.now()
+    let read = 0, last = from
+    while (text() !== 'Red pill or blue pill?' && performance.now() - from < 60_000) { await new Promise((r) => requestAnimationFrame(r)); const now = performance.now(); if (text() === 'The Matrix has you' && p.readable) read += now - last; last = now }
+    return { readMs: Math.round(read), afterMs: Math.round(performance.now() - from), came: text() === 'Red pill or blue pill?' }
+  })
+  // The sky as it changes over, eight pictures a second for three seconds: none of them a day's sky in the night's green.
+  const over = []
+  for (let i = 0; i < 20; i++) { const g = await grid(page, i % 4 === 0 ? `matrix-over-${i}` : null), sky = cells(g, SKY); over.push({ light: Math.round(mean(sky, light)), green: Math.round(mean(sky, (c) => c[1] - (c[0] + c[2]) / 2)) }) }
+  results.matrixOver = over
+  const daySky = mean(cells(before, SKY), light), washed = over.filter((o) => o.light > daySky * 0.5 && o.green > 10)
+  check(washed.length === 0, `as the Matrix comes over, no picture of twenty is a day's sky gone green (light over half the day's ${Math.round(daySky)} and green 10 over red and blue): light ${over.map((o) => o.light).join(' ')}; green ${over.map((o) => o.green).join(' ')}`)
   check(await page.evaluate((x) => globalThis.engine.pose.x === x, walked), 'typing on the line moves nobody (W, A, S and D were letters)')
   await started(page, 'matrix')
   s = await state(page)
@@ -175,8 +189,9 @@ try {
   results.matrix = { banner: seen }
   check(s.signs.banner === 'The Matrix has you' && seen.seen, `the banner says "${s.signs.banner}" and its plane brings it into the picture: ${JSON.stringify(seen)}`)
   await still(page)
-  // (Its second line once the first has been in the picture 8 s.)
-  await page.waitForFunction(() => globalThis.realm.signs.list().find((x) => x.id === 'banner')?.content?.text === 'Red pill or blue pill?', null, { timeout: 30_000 }).catch(() => null)
+  // (Its second line once the first could be read for 8 s.)
+  results.matrix.firstLine = await firstLine
+  check(results.matrix.firstLine.came && results.matrix.firstLine.readMs >= 7500, `the banner's first line could be read for ${round(results.matrix.firstLine.readMs / 1000)} s before the second replaced it, ${round(results.matrix.firstLine.afterMs / 1000)} s after it was said (asked: 7.5 s of it readable)`)
   s = await state(page)
   check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
   const m1 = await grid(page, 'matrix'), m2 = (await page.waitForTimeout(400), await grid(page))
@@ -187,6 +202,14 @@ try {
   check(moved > 0.4, `the code falls: the city's light moved ${round(moved)} a cell in 0.4 s`)
   check(await cost(page, 'matrix'), 'the Matrix costs no more than a quarter more than its sky without the screen')
   await sayTo(page, 'blue pill')
+  // On the way out too: the fog thins in the dark before the day is back, so no picture is a day washed pale under it
+  // (as light as half the day's city and with under a third of its contrast).
+  const spread = (cs) => { const m = mean(cs, light); return Math.sqrt(mean(cs, (c) => (light(c) - m) ** 2)) }
+  const out = []
+  for (let i = 0; i < 28; i++) { const g = await grid(page, i % 7 === 0 ? `matrix-out-${i}` : null), city = cells(g, CITY); out.push({ light: Math.round(mean(city, light)), spread: Math.round(spread(city)) }) }
+  results.matrixOut = out
+  const dayCity = cells(before, CITY), pale = out.filter((o) => o.light > mean(dayCity, light) * 0.5 && o.spread < spread(dayCity) / 3)
+  check(pale.length === 0, `as the Matrix leaves, no picture of twenty-eight is the day washed pale under its fog (the day's city: light ${Math.round(mean(dayCity, light))}, spread ${Math.round(spread(dayCity))}): light ${out.map((o) => o.light).join(' ')}; spread ${out.map((o) => o.spread).join(' ')}`)
   await page.waitForTimeout(400)
   s = await state(page)
   check(s.running === null && s.signs.banner === null, `"blue pill" leaves it (${s.running}), the signs are their own again`)

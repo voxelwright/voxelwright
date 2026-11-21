@@ -137,7 +137,14 @@ export function eggs(page: EggsPage) {
     // glided from on the next frame.
     if (page.hour() === null) { page.setHour(OWN_HOUR); pending = h } else page.sky.glide(h)
   }
-  const keep = () => { if (!before) before = { hour: page.hour(), weather: page.sky.weather } }
+  /** An egg just left in fog: the hour to go back to once the fog has thinned (the day back under a night's fog was a picture washed pale, #450), and since when. */
+  let leaving: { hour: number | null; since: number } | null = null
+  const home = (hour: number | null) => { if (hour === null) { page.sky.glide(OWN_HOUR); goingHome = true } else page.sky.glide(hour) }
+  const keep = () => {
+    // (Another egg before the last had gone home: what was before is still what the last one kept.)
+    if (leaving) { before = { hour: leaving.hour, weather: page.sky.weather }; leaving = null }
+    if (!before) before = { hour: page.hour(), weather: page.sky.weather }
+  }
   const dress = (egg: Egg) => {
     keep()
     const look = LOOKS[egg]
@@ -150,7 +157,7 @@ export function eggs(page: EggsPage) {
     if (!before) return
     pending = null
     page.sky.set(before.weather)
-    if (before.hour === null) { page.sky.glide(OWN_HOUR); goingHome = true } else page.sky.glide(before.hour)
+    leaving = { hour: before.hour, since: performance.now() }
     before = null
   }
 
@@ -493,6 +500,8 @@ export function eggs(page: EggsPage) {
     if (running?.picture) running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
     if (march.screen.up === 0 && fading) { fading.dispose(); fading = null }
     if (pending !== null) { page.sky.glide(pending); pending = null }
+    // The hour goes home once the fog an egg left has thinned, or after four seconds of waiting for it.
+    if (leaving && (march.fog < 0.12 || performance.now() - leaving.since > 4000)) { const hour = leaving.hour; leaving = null; home(hour) }
     if (goingHome && Math.abs((page.hour() ?? OWN_HOUR) - OWN_HOUR) < 0.02) { goingHome = false; page.ownLight() }
     // (The sky keeps an hour as `h % 24`: 13.45 comes back 13.450000000000003.)
     else if (goingHome && Math.abs((page.sky.hour ?? OWN_HOUR) - OWN_HOUR) > 0.02) goingHome = false

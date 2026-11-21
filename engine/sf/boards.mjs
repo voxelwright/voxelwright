@@ -9,6 +9,11 @@
 //   node sf/boards.mjs propose [--count 6] [--no-build]
 //       Prints the roofs the rule proposes from the park's camera (level roof, at its edge, seen whole, facing the
 //       eye), best first, as records without an id or content. An offer: nothing is written.
+//   node sf/boards.mjs seat <logo's id> --pixel x,y [--along metres] [--under 1.5] [--dist dist-sf]
+//       Seats a logo on a tower of the skyline: on the wall of the far model seen at that pixel of the first picture
+//       (1280 x 720, from the park), under the wall's top, in the middle of its level run, flush with it (30 cm proud
+//       of its outermost part). Worked out from the built release's far tiles as files (sf/far/strike.mjs), written to
+//       sf/boards.json as the logo's `at`, `turn` and `building`, with how the wall lies behind the sign. No GPU.
 //   node sf/boards.mjs check
 //       Says what is wrong with sf/boards.json, if anything.
 import { readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -38,7 +43,8 @@ export function wrong(file) {
     if (![0, 1, 2, 3].includes(b.facing)) say('it faces 0 west, 1 north, 2 east or 3 south')
     if (b.type === 'logo') {
       if (typeof b.logo !== 'string' || !/^[a-z]+$/.test(b.logo)) say('a logo names its mark (page/logos.ts)')
-      if (!(b.size > 0 && b.size <= 40)) say('a logo\'s size is how tall its mark is, metres')
+      if (!(b.size > 0 && b.size <= 40)) say('a logo\'s size is how tall its sign is, metres')
+      if (b.search !== undefined && !(b.search > 0 && b.search <= 20)) say('a logo\'s search is how far from its seat its wall as cells is looked for, metres')
       if (b.turn !== undefined && !Number.isFinite(b.turn)) say('a logo\'s turn is where its face looks, degrees clockwise from north')
       if (typeof b.to !== 'string' || !/^https:\/\//.test(b.to)) say('a logo leads to an https address')
       continue
@@ -49,6 +55,7 @@ export function wrong(file) {
     if (b.to !== undefined && (typeof b.to !== 'string' || !b.to.startsWith('/'))) say('it leads to a path of the site, from /')
   }
   const t = file.banner
+  if (t?.upright !== undefined && (typeof t.upright !== 'object' || 'content' in t.upright)) out.push('the banner\'s upright is the round flown where the picture is taller than wide: any of around, radius, bearing, height, rise, speed, size, start')
   if (t && !(whole(t.around) && (t.radius > 0 || (whole(t.radius) && t.radius.length === 2 && t.radius.every((v) => v > 0))) && t.height > 0 && t.speed > 0 && whole(t.size) && (typeof t.content?.text === 'string' || typeof t.content?.image === 'string'))) out.push('the banner needs content, around [x, z], radius (one, or [half its length, half its breadth] with a bearing), height, speed and size [long, high]')
   return out
 }
@@ -68,7 +75,20 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     console.log(said.length ? said.join('\n') : 'sf/boards.json can be laid')
     process.exit(said.length ? 1 : 0)
   }
-  if (what !== 'edit' && what !== 'propose') { console.error('node sf/boards.mjs edit | propose | check'); process.exit(1) }
+  if (what === 'seat') {
+    const id = process.argv[3], file = JSON.parse(readFileSync(FILE, 'utf8')), b = file.boards.find((b) => b.id === id && b.type === 'logo')
+    if (!b || !arg('pixel', null)) { console.error('node sf/boards.mjs seat <logo\'s id> --pixel x,y [--along metres] [--under 1.5]'); process.exit(1) }
+    const { striker, seat } = await import('./far/strike.mjs'), { MARKS } = await import('../page/logos.ts')
+    const pointer = JSON.parse(readFileSync(join(dist, 'sf', 'current.json'), 'utf8')), realm = JSON.parse(readFileSync(join(root, 'sf', 'realm.json'), 'utf8'))
+    const [px, py] = arg('pixel').split(',').map(Number)
+    const s = seat(striker(join(dist, 'sf', dirname(pointer.manifest))), realm, px, py, b.size, b.size * MARKS[b.logo].wide, { along: Number(arg('along', '0')), under: Number(arg('under', '1.5')) })
+    if (!s?.at) { console.error(s ? `the wall there is level for ${s.short} m under a top at ${s.top} m: too short for a sign ${b.size * MARKS[b.logo].wide} m wide` : 'no wall is seen at that pixel'); process.exit(1) }
+    Object.assign(b, { building: [s.at[0], s.at[2]], at: s.at, turn: s.turn })
+    writeFileSync(FILE, JSON.stringify(file, null, 2) + '\n')
+    console.log(`${id}: seated at ${s.at} looking ${s.turn} degrees, under a top at ${Math.round(s.top)} m on a run of ${s.run} m; the wall is ${(s.lies.least / 10).toFixed(2)} to ${(s.lies.most / 10).toFixed(2)} m behind it (the middle point ${(s.lies.middle / 10).toFixed(2)} m)`)
+    process.exit(0)
+  }
+  if (what !== 'edit' && what !== 'propose') { console.error('node sf/boards.mjs edit | propose | seat | check'); process.exit(1) }
   if (!has('no-build')) {
     const built = spawnSync(process.execPath, [join(root, 'sf', 'build.mjs'), '--out', dist], { cwd: root, encoding: 'utf8' })
     if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }

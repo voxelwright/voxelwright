@@ -5,22 +5,36 @@
       "text": "zahynailo.dev"
     },
     "around": [
-      519065,
-      665523
+      519375,
+      664986
     ],
     "radius": [
-      260,
+      105,
       70
     ],
     "bearing": 120,
-    "height": 131,
-    "rise": -19,
-    "speed": 14,
+    "height": 127,
+    "rise": -14,
+    "speed": 12,
     "size": [
       40,
       6.5
     ],
-    "start": 0.15
+    "start": 0.14,
+    "upright": {
+      "around": [
+        522096,
+        667273
+      ],
+      "radius": [
+        62,
+        45
+      ],
+      "height": 180,
+      "rise": 0,
+      "speed": 10,
+      "start": 0.2
+    }
   },
   "boards": [
     {
@@ -49,17 +63,17 @@
       "type": "logo",
       "logo": "x",
       "building": [
-        528767,
-        667125
+        527579,
+        670244
       ],
       "at": [
-        528767,
-        911,
-        667125
+        527579,
+        1662,
+        670244
       ],
       "facing": 0,
-      "turn": 261,
-      "size": 24,
+      "turn": 305,
+      "size": 19,
       "content": {
         "text": "X"
       },
@@ -71,17 +85,17 @@
       "type": "logo",
       "logo": "linkedin",
       "building": [
-        525375,
-        673848
+        528848,
+        672403
       ],
       "at": [
-        525375,
-        1433,
-        673848
+        528848,
+        1492,
+        672403
       ],
       "facing": 0,
-      "turn": 350.3,
-      "size": 24,
+      "turn": 314.5,
+      "size": 14.8,
       "content": {
         "text": "LinkedIn"
       },
@@ -93,17 +107,17 @@
       "type": "logo",
       "logo": "twitch",
       "building": [
-        528841,
-        672395
+        525110,
+        674099
       ],
       "at": [
-        528841,
-        1338,
-        672395
+        525110,
+        1358,
+        674099
       ],
       "facing": 0,
-      "turn": 316.6,
-      "size": 26,
+      "turn": 260.4,
+      "size": 30,
       "content": {
         "text": "Twitch"
       },

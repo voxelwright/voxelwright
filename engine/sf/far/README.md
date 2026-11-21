@@ -11,6 +11,16 @@ wedge and the squares' outside. Everywhere else they come from this folder's squ
 archives (`~/.village/engine/bay/450-inputs/<square>.zip`). The far model grows square by square as the city's run
 finishes them.
 
+Trees in the wedge are crowns on trunks (`landing/ina/matte.py` `crowns`). A column of the lidar's surface says a tree
+as a solid green mass from the ground up, and a crown that hangs over a building's outline was baked as part of that
+building: a block of wall with windows as tall as the tree, in colours fitted to the leaves that hid it (the big tree
+in the landing's left foreground was two houses' walls, 28 m high). Now every crown is found (leaf where no building is
+outlined, and a patch over a building's own roof that is leaf by its returns, ragged, no bigger than a tree and touching
+free leaf), baked as its own layers (`near-crown0` to `2`, `far-crown0`: slabs that hang lower the further inside the
+crown they are, in three greens), with a trunk under each top that stands on the ground and the building's own roof
+under what hangs over it. The square bake outside the wedge (`bake.py`) still bakes leaf as columns: at a metre a cell
+past 500 m a crown is a few pixels, and it has not been given the rule.
+
 In the wedge the faces are 25 cm out to 700 m from its apex and 50 cm past that, laid out with the streets (turned
 9.47 degrees), where the cells are 40 cm and more past 100 m and stepped along every street wall. So where the march's
 cells are over three pixels across (the realm's 25 degree lens: 3 to 7 pixels), faces begin 100 m from the eye in the
