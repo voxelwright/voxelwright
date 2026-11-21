@@ -45,27 +45,19 @@ export const MARKS: Record<string, Mark> = {
       pen.restore()
     },
   },
-  // Its wordmark: "Linked" in white and the "in" in its blue square, as its offices carry it. The square is the
-  // sign's height; the word is set to its width, its letters four fifths as tall. A keyline of the blue's own navy
-  // runs round the word and the square: white letters with nothing round them were lost on the sky and on a pale
-  // tower, and the line is what a channel letter's dark sides are from before it.
+  // Its mark: the white "in" in its blue square, as the top of its offices carries it. (Its wordmark was tried, #450:
+  // "Linked" beside the square is 3.7 times as wide as it is tall, so tall enough to be read from the park it was
+  // 96 m wide on a tower 63 m wide and hung over both sides; cut to the roof its letters were 15 px.) A keyline of
+  // the blue's own navy runs round the square: on the night sky the blue alone had no edge.
   linkedin: {
-    name: 'LinkedIn', wide: 3.7,
+    name: 'LinkedIn', wide: 1,
     draw: (pen, w, h) => {
-      const line = h * 0.075, edge = line / 2, box = h - 2 * edge, gap = h * 0.06, room = w - box - gap - 2 * edge - line
+      const line = h * 0.04, edge = line / 2, box = Math.min(w, h) - 2 * edge, x = (w - box) / 2
       pen.lineJoin = 'round'; pen.lineWidth = line; pen.strokeStyle = '#04294f'
-      pen.beginPath(); pen.roundRect(w - edge - box, edge, box, box, box * 0.09); pen.stroke()
+      pen.beginPath(); pen.roundRect(x, edge, box, box, box * 0.09); pen.stroke()
       pen.fillStyle = '#ffffff'
-      pen.fillRect(w - edge - box + box * 0.07, edge + box * 0.07, box * 0.86, box * 0.86)
-      glyph(pen, IN, '#0a66c2', w - edge - box, edge, box)
-      let size = h * 1.02
-      pen.font = `800 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`
-      size *= Math.min(1, room / pen.measureText('Linked').width)
-      pen.font = `800 ${size}px "Helvetica Neue", Helvetica, Arial, sans-serif`
-      pen.textAlign = 'right'; pen.textBaseline = 'alphabetic'
-      pen.strokeText('Linked', w - edge - box - gap - edge, h * 0.852)
-      pen.fillStyle = '#ffffff'
-      pen.fillText('Linked', w - edge - box - gap - edge, h * 0.852)
+      pen.fillRect(x + box * 0.07, edge + box * 0.07, box * 0.86, box * 0.86)
+      glyph(pen, IN, '#0a66c2', x, edge, box)
     },
   },
   // Its mark alone: the purple outline with its white face, and a keyline of its own deep purple round it (the

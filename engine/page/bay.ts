@@ -276,7 +276,7 @@ export async function open<T>(url: string): Promise<T> {
   // Landmarks by rule (#450, core/src/heroes.rs): every core is told where each stands before it makes a sector.
   // `?heroes=0` leaves them out (as the tiles have the place), for what they cost.
   if (query.get('heroes') === '0') core.bay_landmarks(0)
-  for (const h of await heroes()) { const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
+  for (const h of await heroes()) { if (h.only === 'night') continue; const at = place(h.at[0], h.at[1]), toward = place(h.toward[0], h.toward[1]); core.bay_hero(h.sort, Math.round(at.x), Math.round(at.z), Math.round(h.foot * 10), Math.round(Math.atan2(toward.z - at.z, toward.x - at.x) * 1e6)) }
   // Which squares the road's marks cover (#450, sf/marks.mjs): there the bake's own paint is not drawn. The marks
   // themselves come later, for the march alone (`marks`).
   const lines = await markedSquares()
@@ -286,9 +286,9 @@ export async function open<T>(url: string): Promise<T> {
 }
 
 /** The landmarks a Bay world has (sf/heroes.json, copied beside the tiles as heroes.json): where each stands. */
-export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number }
+export interface Landmark { name: string; sort: number; at: [number, number]; toward: [number, number]; foot: number; /** `night`: only its light by night is by rule (heroes.rs `night`); its shape is the map's building. */ only?: 'night' }
 let landmarks: Promise<Landmark[]> | null = null
-const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
+export const heroes = () => (landmarks ??= (ON ? fetch(`${BASE}heroes.json`).then((r) => (r.ok ? (r.json() as Promise<Landmark[]>) : [])).catch(() => []) : Promise.resolve([])))
 
 /**
  * A file of the road's marks a Bay world has beside its tiles (sf/marks.mjs), or null: San Francisco's alone (its cells

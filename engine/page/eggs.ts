@@ -51,7 +51,7 @@ export interface EggsPage {
   signs: Signs
   /** Keeps the banner's plane in the picture while an egg has something on it (true), or lets it go round (false). */
   callPlane(on: boolean): void
-  /** Whether the banner's plane is in the picture now. */
+  /** Whether the banner's words can be read now: its plane in the picture, and come in to its near round if it has one (its own round is far off, where a line someone must answer is too small). */
   planeSeen(): boolean
   /** The realm's controls (realm-ui.ts), which the line and the player join. */
   ui: HTMLElement

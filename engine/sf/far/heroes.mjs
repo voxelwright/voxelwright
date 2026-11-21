@@ -16,7 +16,8 @@ import { arg, here } from '../../test/kit.mjs'
 
 const out = arg('out', join(homedir(), '.village', 'engine', 'sf', 'far', 'heroes'))
 const core = (await WebAssembly.instantiate(readFileSync(join(here, 'page', 'core.wasm')), {})).instance.exports
-const listed = JSON.parse(readFileSync(join(here, 'sf', 'heroes.json'), 'utf8'))
+// (One whose light by night alone is by rule, `only`, is the map's building: no faces of its own.)
+const listed = JSON.parse(readFileSync(join(here, 'sf', 'heroes.json'), 'utf8')).filter((h) => h.only !== 'night')
 const colours = palette(), stuff = materials()
 const byte = (linear) => Math.max(0, Math.min(255, Math.round(255 * linear ** (1 / 2.2))))
 /** A block of a landmark is at most this many metres a side (a face's place in a block is 11 bits of cells). */

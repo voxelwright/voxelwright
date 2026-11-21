@@ -18,6 +18,16 @@
 //     where the tools are a column over the right of the skyline, what is under them is said;
 //   - by night, before a tower's lit windows from where a flight to a logo ends, under 2% of the picture is burnt out
 //     to white (it was 12.6% when a pane's light was spread as a lamp's);
+//   - by night from the park, at the first view's own scale: the towers' lit windows are rows (their light changes a
+//     quarter more up a wall than along it, or more: round 4's chessboard of blocks was 0.56), Salesforce
+//     Tower's crown is lit (its mean light 110 of 255 or more, and twice the sky's beside it), and BLOG reads as by
+//     day (lamp against panel, nine squares in ten right), at 1280 x 720 and on the phone;
+//   - by night Salesforce Tower's shaft is lit as the towers round it are (sf-towers.mjs: as much of it lit window as
+//     of the towers under the logos, from three quarters of the least to four thirds of the most, and as warm, within a
+//     tenth), at 1280 x 720 and on the phone: it was 8.6% lit against their 20%, and cold;
+//   - a roof sign is no wider than its tower: under both ends of its foot the tower is there, as seen from the park;
+//   - on an upright phone with the controls shown (390 x 844), no board is under any of them: the fold, the tools,
+//     the stick, the keys to fly and to use, the street's name;
 //   - a click on a board or a logo flies the eye to it and tells the host `navigate` with where it leads (a logo: the
 //     owner's page on that network); so does Enter on its link, the host's own `open`, and O flying free in front of it;
 //   - on an upright phone the lettering and a logo are in the park's picture, a tap on the logo navigates, and every
@@ -25,8 +35,9 @@
 //   - realm.signs sets words on a lettering board (and refuses a picture there), an image and a video on the banner
 //     (and on a digital board, if the file has one), from the page and from the host;
 //   - a charge breaks a letter and leaves the others, and reset puts every board back;
-//   - the plane goes round, and on its near pass its banner is in the park's picture with words 20 px tall or more
-//     as the picture's own pixels have them, at 1280 x 720 and on the phone;
+//   - the plane goes round far off, past the towers: its banner whole in the park's picture, small (the cloth 26 px
+//     tall at most) and its words 10 px tall or more; with something to say it comes in to its near round, words 20 px,
+//     and goes back out; on the phone its words are 11 px or more;
 //   - the park holds 60 fps at picture scale 0.7 with the boards in view.
 // Pictures are kept: the first view at both sizes, the controls coming, the park before and after, by night, a
 // flight to a board and to each logo, a broken board, the banner passing at both sizes.
@@ -37,6 +48,7 @@ import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
+import { TOWERS, framed, lit as litTower } from './sf-towers.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'boards', 'r4')), mbit = Number(arg('mbit', '25')), seconds = Number(arg('seconds', '8'))
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
@@ -60,23 +72,23 @@ const brandShare = (picture, w, logo, within = 90) => {
   return [near[0] / Math.max(1, n), near[1] / Math.max(1, n)]
 }
 /**
- * How big a logo must be on the picture to be read from the park, CSS px. Round 3's were 24 px (X) and 58 x 16 px
- * (LinkedIn's wordmark, its letters 11 px), and the owner could not read them.
- *   - A mark (X, Twitch) is 40 px or more each way at 1280 x 720: nearly three times round 3's area, the size of a
- *     small app icon. On a phone it is a thing to tap as well, so 44 px, the least a touch target should be (Apple's
- *     guidelines; WCAG 2.5.5).
- *   - A wordmark is 26 px tall or more (28 on the phone): its letters are four fifths of that, 21 px, half as tall
- *     again as the 14 px words on the page's own keys, which are read at once.
+ * How big a logo must be on the picture from the park, CSS px. Round 3's were 24 px (X) and 58 x 16 px (LinkedIn's
+ * wordmark, its letters 11 px), and the owner could not read them; round 4's marks were 45 px, which he read and
+ * then asked to have about 30% smaller (Nov 21): 31 px at 1280 x 720, and the phone's to match (37 px).
+ *   - A mark (X, Twitch, LinkedIn's square) is 28 px or more each way at 1280 x 720 and no more than 35: his size,
+ *     a tenth either way.
+ *   - On a phone 33 px or more and no more than 41. That is under the 44 px a touch target should be (Apple's
+ *     guidelines; WCAG 2.5.5): a tap is taken a little round a sign (boards.ts `under`), and each is a link by name too.
  */
-const READABLE = { wide: { mark: 40, word: 26 }, phone: { mark: 44, word: 28 } }
-/** Whether a logo `tall` by `wide` px is as big as `bounds` asks: a wordmark by its height, a mark by both. */
-const readable = (logo, tall, wide, bounds) => (logo === 'linkedin' ? tall >= bounds.word : Math.min(tall, wide) >= bounds.mark)
-/** In a page with its controls shown: each logo's box against what the page lays over the picture (boards.ts `overlays`: the hour's panel, the tools, a phone's fold and thumbs, a notice). */
+const READABLE = { wide: { mark: 28, most: 35 }, phone: { mark: 33, most: 41 } }
+/** Whether a logo `tall` by `wide` px is as big as `bounds` asks, each way. */
+const readable = (logo, tall, wide, bounds) => Math.min(tall, wide) >= bounds.mark && Math.max(tall, wide) <= bounds.most
+/** In a page with its controls shown: each board's box against what the page lays over the picture (the hour's panel, the tools, the line of numbers, the street's name; a phone's fold, its stick where it rests, its keys to fly and to use). `logos` are the logos' boxes, `boards` every board's. */
 const COVERED = () => {
-  const b = globalThis.engine.boards, laid = [...document.querySelectorAll('#realm .sky, #realm .fold, #realm .tools, #realm .thumbs, #hud, #where')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => ({ name: el.className || el.id, r: el.getBoundingClientRect() })).filter((l) => l.r.width > 0 && l.r.height > 0)
+  const b = globalThis.engine.boards, laid = [...document.querySelectorAll('#realm .sky, #realm .fold, #realm .tools, #realm .stick, #realm .fly, #realm .use, #hud, #where')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => ({ name: el.className || el.id, r: el.getBoundingClientRect() })).filter((l) => l.r.width > 0 && l.r.height > 0)
   const out = []
-  for (const rec of b.records.filter((r) => r.type === 'logo')) { const w = b.where(rec.id); if (!w) continue; for (const l of laid) if (w.x - w.wide / 2 < l.r.right && w.x + w.wide / 2 > l.r.left && w.y - w.high / 2 < l.r.bottom && w.y + w.high / 2 > l.r.top) out.push(`${rec.id} under ${l.name}`) }
-  return { under: out, laid: laid.map((l) => `${l.name} ${Math.round(l.r.left)},${Math.round(l.r.top)} to ${Math.round(l.r.right)},${Math.round(l.r.bottom)}`), logos: b.records.filter((r) => r.type === 'logo').map((r) => { const w = b.where(r.id); return w && `${r.id} ${Math.round(w.x - w.wide / 2)},${Math.round(w.y - w.high / 2)} to ${Math.round(w.x + w.wide / 2)},${Math.round(w.y + w.high / 2)}` }) }
+  for (const rec of b.records) { const w = b.where(rec.id); if (!w) continue; for (const l of laid) if (w.x - w.wide / 2 < l.r.right && w.x + w.wide / 2 > l.r.left && w.y - w.high / 2 < l.r.bottom && w.y + w.high / 2 > l.r.top) out.push(`${rec.id} under ${l.name}`) }
+  return { under: out, laid: laid.map((l) => `${l.name} ${Math.round(l.r.left)},${Math.round(l.r.top)} to ${Math.round(l.r.right)},${Math.round(l.r.bottom)}`), ...Object.fromEntries([['logos', (r) => r.type === 'logo'], ['boards', () => true]].map(([name, which]) => [name, b.records.filter(which).map((r) => { const w = b.where(r.id); return w && `${r.id} ${Math.round(w.x - w.wide / 2)},${Math.round(w.y - w.high / 2)} to ${Math.round(w.x + w.wide / 2)},${Math.round(w.y + w.high / 2)}` })])) }
 }
 // (A mark alone, cut out, no plate behind it: X's near-black face and its lit edge, LinkedIn's white word and its blue square, Twitch's purple and its white face.)
 const BRAND = { x: [[13, 13, 13], [255, 255, 255]], linkedin: [[255, 255, 255], [10, 102, 194]], twitch: [[145, 70, 255], [255, 255, 255]] }
@@ -118,6 +130,40 @@ const inkTall = (picture, box) => {
   }
   runs.sort((a, b) => a - b)
   return runs.length ? runs[Math.floor(runs.length * 0.9)] : 0
+}
+/**
+ * How much the light of lit windows changes up a wall against along it, in a box of a night picture: the sum of the
+ * steps in brightness from each pixel to the one under it over the sum to the one beside it, wherever one of them is
+ * a lit window (brighter than 90 of 255 and warm: a lamp's, not the sky's or a sign's blue). Rows of windows change
+ * from floor to floor and little along one: well over one. Blocks change both ways alike or more along: round 4's
+ * chessboard was 0.56.
+ */
+const windowRows = (picture, box) => {
+  const at = (x, y) => { const i = (y * picture.w + x) * 4, r = picture.data[i], g = picture.data[i + 1], b = picture.data[i + 2], l = (r + g + b) / 3; return [l, l > 90 && r > b * 1.15] }
+  let up = 0, along = 0, lit = 0
+  for (let y = box.y0; y < box.y1; y++) for (let x = box.x0; x < box.x1; x++) {
+    const [l, w] = at(x, y), [under, wu] = at(x, y + 1), [beside, wb] = at(x + 1, y)
+    if (w) lit++
+    if (w || wu || wb) { up += Math.abs(under - l); along += Math.abs(beside - l) }
+  }
+  return { ratio: round(up / Math.max(1, along), 2), litPct: round((lit / ((box.x1 - box.x0) * (box.y1 - box.y0))) * 100, 1) }
+}
+/** A lettering board as a picture has it: the mean light where its letters' lamp is and where its panel is, and how many squares of its letters are on the right side of half way between. `marks` are boards.marks (client px), `scale` the picture's pixels to one of those, `off` the picture's corner. */
+const lettersRead = (picture, marks, scale = 1, off = [0, 0]) => {
+  const light = (m) => { const i = (Math.round((m.y - off[1]) * scale) * picture.w + Math.round((m.x - off[0]) * scale)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
+  const lit = marks.filter((m) => m.lit).map(light), dark = marks.filter((m) => !m.lit).map(light), mean = (a) => a.reduce((n, v) => n + v, 0) / Math.max(1, a.length)
+  const cut = (mean(lit) + mean(dark)) / 2
+  return { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), right: lit.filter((v) => v > cut).length + dark.filter((v) => v <= cut).length, of: marks.length }
+}
+/** In a page: where Salesforce Tower's crown is on the picture (client px), from its light's own numbers (march.beacons, heroes.rs `night`): the box of its middle three fifths, and a box of sky beside it. */
+const CROWN = () => {
+  const e = globalThis.engine, rect = document.querySelector('canvas').getBoundingClientRect(), v = e.view()
+  const on = (c) => { const d = [c[0] - v.eye[0], c[1] - v.eye[1], c[2] - v.eye[2]], far = d[0] * v.forward[0] + d[1] * v.forward[1] + d[2] * v.forward[2]; return { x: (((d[0] * v.right[0] + d[1] * v.right[1] + d[2] * v.right[2]) / (v.tanHalf * (rect.width / rect.height) * far) + 1) / 2) * rect.width, y: ((1 - (d[0] * v.up[0] + d[1] * v.up[1] + d[2] * v.up[2]) / (v.tanHalf * far)) / 2) * rect.height, far } }
+  // (The one whose lit part has rings: the crown's screen.)
+  const b = e.march.beacons.find((b) => b.night[8] > 0)
+  if (!b) return null
+  const [y0, y1, , half] = b.night, low = on([b.at[0], b.at[1] + (y0 + (y1 - y0) * 0.2) * 10, b.at[2]]), high = on([b.at[0], b.at[1] + (y0 + (y1 - y0) * 0.8) * 10, b.at[2]]), wide = ((half * 10) / low.far / v.tanHalf / 2) * rect.height
+  return { x0: Math.round(low.x - wide), x1: Math.round(low.x + wide), y0: Math.round(high.y), y1: Math.round(low.y), sky: Math.round(wide * 8) }
 }
 // The host: a page with the realm in a frame over the whole of it, keeping what the realm tells it.
 const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
@@ -184,7 +230,7 @@ try {
   // What the boards themselves add is exact: their five modules as sent, and their data in the page's record. The
   // whole (which stops at a moment, so it moves by a tile or two from run to run) is held to the realm's 8 MB where
   // the realm without boards is within it; where that is over already, it is said and the boards' own share is the check.
-  check(own < 24 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 24 KB)`)
+  check(own < 25 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 25 KB: 24 until the plane had two rounds, its own far off and a near one to speak on)`)
   const whole = `${shown.wireMB} MB over the wire until the park is shown in ${shown.ms} ms; without boards ${without.wireMB} MB in ${without.ms} ms (the realm's bound 8 MB)`
   if (without.wireMB >= 8) console.log(`  WARN ${whole}: the realm is over its bound before any board`); else check(shown.wireMB < 8, whole)
   check(code.length === 5 && !site.asked.some((a) => a.path.endsWith('boards-edit.js')), `the boards' code is asked for (${code.length} modules) and the editor's is not`)
@@ -268,10 +314,18 @@ try {
     p.hold = best.phase; await frame()
     const c = p.cloth, ends = [-1, 1].map((k) => on([c.at[0] + c.hu[0] * k, c.at[1] + c.hu[1] * k, c.at[2] + c.hu[2] * k])), mid = on(c.at), top = on([c.at[0], c.at[1] + c.hv[1], c.at[2]]), nose = on(p.at)
     const high = Math.abs(top.y - mid.y)
-    // (The plane: 8.4 m long, as its cells are.)
-    return { phase: best.phase, metres: Math.round(mid.far / 10), box: { x0: Math.min(ends[0].x, ends[1].x), x1: Math.max(ends[0].x, ends[1].x), y0: mid.y - high - 2, y1: mid.y + high + 2 }, clothPx: Math.round(high * 2), planePx: Math.round(((84 / nose.far) / e.view().tanHalf / 2) * rect.height), showing: c.showing }
+    // (The plane: 42 of its cells long, whatever size they are on the round it is flying.)
+    return { phase: best.phase, metres: Math.round(mid.far / 10), box: { x0: Math.min(ends[0].x, ends[1].x), x1: Math.max(ends[0].x, ends[1].x), y0: mid.y - high - 2, y1: mid.y + high + 2 }, clothPx: Math.round(high * 2), planePx: Math.round((((42 * p.piece.cell) / nose.far) / e.view().tanHalf / 2) * rect.height), showing: c.showing }
   }
   const reader = await context.newPage()
+  /** Salesforce Tower's shaft by night against the towers under the logos (sf-towers.mjs): as much of it lit window, and as warm. `frame` is the realm's, `shown` the page a picture is taken of. */
+  const shaftLit = async (frame, shown, scale, where) => {
+    const t = await framed(shown, await frame.evaluate(TOWERS)), of = (k) => litTower(t.picture, t.boxes[k], t.signs, scale)
+    const tower = t.boxes.salesforce ? of('salesforce') : null, round_ = Object.keys(t.boxes).filter((k) => k.endsWith('tower')).map((k) => ({ name: k, ...of(k) }))
+    const lo = Math.min(...round_.map((r) => r.litPct)), hi = Math.max(...round_.map((r) => r.litPct)), cool = Math.min(...round_.map((r) => r.warmth)), warm = Math.max(...round_.map((r) => r.warmth))
+    check(!!tower && round_.length >= 2 && tower.litPct >= lo * 0.75 && tower.litPct <= hi * 1.35 && tower.warmth >= cool - 0.1 && tower.warmth <= warm + 0.1, `by night ${where} Salesforce Tower's shaft is lit as the towers round it are: ${tower?.litPct}% of it lit window, red over blue ${tower?.warmth}; ${round_.map((r) => `${r.name} ${r.litPct}%, ${r.warmth}`).join('; ')} (asked: ${round(lo * 0.75)}% to ${round(hi * 1.35)}%, and ${round(cool - 0.1, 2)} to ${round(warm + 0.1, 2)})`)
+    return { salesforce: tower, round: round_ }
+  }
   const pixelsOf = (png) => reader.evaluate(async (b64) => { const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob()), c = new OffscreenCanvas(bitmap.width, bitmap.height), g = c.getContext('2d'); g.drawImage(bitmap, 0, 0); return { w: bitmap.width, data: Array.from(g.getImageData(0, 0, bitmap.width, bitmap.height).data) } }, png.toString('base64'))
   // The realm's own panels are over the picture's edges; a board is read where they are not.
   await realm.evaluate(() => { globalThis.engine.scale = 0.7 }); await page.waitForTimeout(2500)
@@ -296,7 +350,7 @@ try {
     // A letter of lamp is five sevenths of its panel; a logo's mark is its whole face; a screen's words about half of it.
     const letter = w ? (s.type === 'lettering' ? (w.tall * 5) / 7 : s.type === 'logo' ? w.tall : w.tall * 0.5) : 0
     const r = (results.park[s.id] = { metres: w && round(w.far), at: w && [Math.round(w.x), Math.round(w.y)], widePx: w && Math.round(w.wide), letterPx: round(letter), clear: s.clear, standing: s.standing.letters })
-    check(inside && s.clear && s.standing.whole && (s.type === 'logo' ? readable(s.logo, w.tall, w.wide, READABLE.wide) : letter >= 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its sign' : 'a letter'} ${r.letterPx} px tall${s.type === 'logo' ? ` (to be read: ${s.logo === 'linkedin' ? `a wordmark ${READABLE.wide.word} px tall` : `a mark ${READABLE.wide.mark} px each way`})` : ''}, nothing between the eye and it`)
+    check(inside && s.clear && s.standing.whole && (s.type === 'logo' ? readable(s.logo, w.tall, w.wide, READABLE.wide) : letter >= 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its sign' : 'a letter'} ${r.letterPx} px tall${s.type === 'logo' ? ` (asked: a mark ${READABLE.wide.mark} to ${READABLE.wide.most} px each way)` : ''}, nothing between the eye and it`)
     if (s.type === 'logo') {
       // The picture where its mark is: how much of it is one of its brand's two colours, and whether both are there.
       const share = brandShare(picture, w, s.logo), near = share, n = 1
@@ -332,7 +386,10 @@ try {
           points++
           if (h && h.t < far - 20) hidden++
         }
-        results.flush[l.id] = { roofM: roof === null ? null : round((roof - l.at[1]) / 10, 2), points, hidden }
+        // And it is no wider than its tower: 6 m under the roof (under any parapet or step of it), a look from the park at each end of the sign's foot meets the tower there.
+        const ends = [-0.5, 0.5].map((u) => { const to = [l.at[0] + right[0] * u * wide, l.at[1] - 60, l.at[2] + right[2] * u * wide], d = to.map((c, i) => c - eye[i]), far = Math.hypot(...d), h = strike(eye, d.map((c) => c / far), far + 3000); return !!h && Math.abs(h.t - far) < 900 })
+        results.flush[l.id] = { roofM: roof === null ? null : round((roof - l.at[1]) / 10, 2), points, hidden, wideM: round(wide / 10, 1), endsOverTower: ends }
+        check(ends.every(Boolean), `${l.id}'s sign, ${round(wide / 10, 1)} m wide, is no wider than its tower: the tower is under ${ends.filter(Boolean).length} of the 2 ends of its foot as seen from the park`)
         check(roof !== null && Math.abs(roof - l.at[1]) <= 15 && hidden === 0, `${l.id} stands on its tower's roof as the far model has it (the roof is ${roof === null ? 'not there' : `${round((roof - l.at[1]) / 10, 2)} m from its foot`}; asked within 1.5 m), and from the park ${hidden} of ${points} points of the sign are behind a tower (asked: none)`)
         continue
       }
@@ -345,6 +402,30 @@ try {
   await page.screenshot({ path: join(shots, 'park-after.png') })
   await realm.evaluate(() => { globalThis.engine.hour = 21 }); await page.waitForTimeout(3500)
   await page.screenshot({ path: join(shots, 'park-night.png') })
+  // ── By night from the park, at the scale a first view is drawn at (0.75 of the page's pixels) ──
+  console.log('\nby night from the park')
+  {
+    await realm.evaluate(() => { globalThis.engine.hour = 21.5; globalThis.engine.scale = 0.75 }); await page.waitForTimeout(6000)
+    const night = await pixelsOf(await page.screenshot({ path: join(shots, 'park-night-first.png') }))
+    // The towers: the band of the picture under the logos' feet, 80 px of it, across the skyline.
+    const feet = Math.round(Math.max(...seen.filter((s) => s.type === 'logo' && s.where).map((s) => s.where.y + s.where.high / 2))), band = { x0: 240, x1: 1000, y0: feet + 5, y1: feet + 85 }
+    const rows = windowRows(night, band)
+    results.night = { band, windows: rows }
+    check(rows.litPct >= 2 && rows.ratio >= 1.25, `the towers' lit windows from the park are rows: their light changes ${rows.ratio} times as much up a wall as along it (bound 1.25; round 4's blocks were 0.56), ${rows.litPct}% of the band lit (band ${band.x0},${band.y0} to ${band.x1},${band.y1})`)
+    // Salesforce Tower's crown, where its own light's numbers say it is, against the sky beside it.
+    const crown = await realm.evaluate(CROWN)
+    const meanLight = (x0, y0, x1, y1) => { let n = 0, sum = 0; for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * night.w + x) * 4; sum += 0.2126 * night.data[i] + 0.7152 * night.data[i + 1] + 0.0722 * night.data[i + 2]; n++ } return sum / Math.max(1, n) }
+    const lit = crown ? meanLight(crown.x0, crown.y0, crown.x1, crown.y1) : 0, sky = crown ? meanLight(crown.x0 + crown.sky, crown.y0, crown.x1 + crown.sky, crown.y1) : 0
+    results.night.crown = { box: crown, light: round(lit), sky: round(sky) }
+    check(!!crown && lit >= 110 && lit >= sky * 2, `Salesforce Tower's crown is lit: its mean light ${round(lit)} of 255 against the sky's ${round(sky)} beside it (bound 110, and twice the sky; unlit it was 38)${crown ? `, at ${crown.x0},${crown.y0} to ${crown.x1},${crown.y1}` : ': the page has no light for it'}`)
+    results.night.towers = await shaftLit(realm, page, 1, 'at 1280 x 720')
+    // BLOG, as by day: lamp against panel in the picture's own pixels.
+    for (const s of seen.filter((s) => s.type === 'lettering')) {
+      const r = lettersRead(night, s.marks)
+      results.night[s.id] = r
+      check(r.lamp - r.panel > 40 && r.right >= r.of * 0.9, `${s.id} reads by night from the park: lamp ${r.lamp} against panel ${r.panel} of 255, ${r.right}/${r.of} squares of its letters as they should be (bounds: 40 apart, nine squares in ten)`)
+    }
+  }
   await realm.evaluate(() => { globalThis.engine.hour = 15; globalThis.engine.scale = 0.7 }); await page.waitForTimeout(1500)
 
   // ── The visitor engages: a key, and the controls come ──
@@ -369,7 +450,7 @@ try {
     await page.waitForTimeout(600)
     // And no logo is under any of them.
     results.first.covered = await realm.evaluate(COVERED)
-    check(results.first.covered.under.length === 0 && results.first.covered.logos.every(Boolean), `with the controls shown at 1280 x 720, no logo is under one (${results.first.covered.under.join(', ') || 'none'}): ${results.first.covered.logos.join('; ')} against ${results.first.covered.laid.join('; ')}`)
+    check(results.first.covered.under.length === 0 && results.first.covered.logos.every(Boolean), `with the controls shown at 1280 x 720, no board is under one (${results.first.covered.under.join(', ') || 'none'}): ${results.first.covered.logos.join('; ')} against ${results.first.covered.laid.join('; ')}`)
   }
   // ── Navigation ──
   console.log('\nnavigation')
@@ -498,8 +579,8 @@ try {
       const shot = await pixelsOf(await small.screenshot({ clip }))
       const tall = inkTall(shot, { x0: 0, x1: clip.width * dpr, y0: 0, y1: clip.height * dpr }) / dpr
       results.phone.banner = { ...pass, wordsPx: round(tall) }
-      // (A phone's round is flown 650 m off, so that the banner stays in its strip of the sky the whole lap: its words are smaller than on the near pass of a wide picture, which was in a phone's for two seconds a lap.)
-      check(pass.box.x0 >= 0 && pass.box.x1 <= 390 && tall >= 11, `on the phone the banner's pass is whole in the picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} of 390 px, ${pass.metres} m off) and its words are ${round(tall)} px tall as the picture has them (CSS px, three of the phone's own to each; bound 11)`)
+      // (A phone's own round is past the towers too, and as small as words can be and be read there: 11 px.)
+      check(pass.box.x0 >= 0 && pass.box.x1 <= 390 && pass.metres >= 2000 && tall >= 11, `on the phone the banner's pass is whole in the picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} of 390 px, ${pass.metres} m off) and its words are ${round(tall)} px tall as the picture has them (CSS px, three of the phone's own to each; bound 11)`)
       await held.evaluate(() => { globalThis.engine.boards.plane.hold = null })
     }
     if (target) {
@@ -524,7 +605,24 @@ try {
       return out
     }, { ids: logos.map((l) => l.id), park })
     results.phone.logos = turned
-    check(turned.every((t) => readable(logos.find((l) => l.id === t.id).logo, t.markPx, t.widePx, READABLE.phone)), `on the phone, the eye turned to each logo from the park: ${turned.map((t) => `${t.id} ${t.widePx} x ${t.markPx} px`).join(', ')} (to be read: a mark ${READABLE.phone.mark} px each way, a wordmark ${READABLE.phone.word} px tall)`)
+    check(turned.every((t) => readable(logos.find((l) => l.id === t.id).logo, t.markPx, t.widePx, READABLE.phone)), `on the phone, the eye turned to each logo from the park: ${turned.map((t) => `${t.id} ${t.widePx} x ${t.markPx} px`).join(', ')} (asked: a mark ${READABLE.phone.mark} to ${READABLE.phone.most} px each way)`)
+    // BLOG by night on the phone, as its own pixels have it (three to a px). A phone is shown the board in cells of
+    // 1.6 m, two of its letters' squares to a cell, so its squares are not where the letters' own are (they are read,
+    // not measured square by square): the lamp's light against the panel's, as the brightest and the darkest fifths
+    // of the board's face in the picture, and how much of the face is lamp (BLOG's own letters are 37% of its panels).
+    {
+      const blog = await held.evaluate(async (park) => { const e = globalThis.engine; Object.assign(e.pose, park); e.hour = 21.5; await new Promise((r) => setTimeout(r, 6000)); const id = e.boards.records.find((r) => r.type === 'lettering').id; return { id, w: e.boards.where(id) } }, park)
+      const clip = { x: Math.round(blog.w.x - blog.w.wide * 0.42), y: Math.round(blog.w.y - blog.w.tall * 0.36), width: Math.round(blog.w.wide * 0.84), height: Math.round(blog.w.tall * 0.72) }
+      await small.screenshot({ path: join(shots, 'night-phone.png') })
+      results.phone.towers = await shaftLit(held, small, 3, 'on the phone')
+      const face = await pixelsOf(await small.screenshot({ clip })), lights = []
+      for (let i = 0; i < face.data.length; i += 4) lights.push((face.data[i] + face.data[i + 1] + face.data[i + 2]) / 3)
+      lights.sort((a, b) => a - b)
+      const fifth = Math.floor(lights.length / 5), mean = (a) => a.reduce((n, v) => n + v, 0) / Math.max(1, a.length), panel = mean(lights.slice(0, fifth)), lamp = mean(lights.slice(-fifth)), share = lights.filter((v) => v > (panel + lamp) / 2).length / lights.length
+      results.phone.night = { lamp: Math.round(lamp), panel: Math.round(panel), lampShare: round(share, 2) }
+      check(lamp - panel > 80 && lamp < 235 && share > 0.2 && share < 0.6, `${blog.id} reads by night on the phone: lamp ${Math.round(lamp)} against panel ${Math.round(panel)} of 255 (the brightest and darkest fifths of its face; bound 80 apart, and the lamp not burnt out past 235), ${Math.round(share * 100)}% of the face lamp (bounds 20% to 60%)`)
+      await held.evaluate(() => { globalThis.engine.hour = 15 }); await small.waitForTimeout(1500)
+    }
     // The Explore key brings a thumb's controls.
     const key = await held.evaluate(() => { const r = document.querySelector('#first .explore').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
     await small.touchscreen.tap(key[0], key[1])
@@ -533,8 +631,8 @@ try {
     await small.screenshot({ path: join(shots, 'engaged-phone.png') })
     check(!afterPhone.first && afterPhone.fold && afterPhone.thumbs && afterPhone.tools && !afterPhone.explore && afterPhone.credits, 'a tap on the Explore key brought the phone its fold, its thumbs and its tools; the credits key stayed')
     results.phone.covered = await held.evaluate(COVERED)
-    // (Said, not failed: a phone's tools are a column down the right of its strip of the skyline, where the LinkedIn tower is, and were over its sign in round 3 too. On a phone a logo is tapped in the first view, which nothing is over.)
-    console.log(`  note on the phone with the controls shown: ${results.phone.covered.under.join(', ') || 'no logo under a control'} (${results.phone.covered.logos.filter(Boolean).join('; ')} against ${results.phone.covered.laid.join('; ')})`)
+    // (The tools were a column over the LinkedIn sign until round 5, and the keys to fly and the resting stick over BLOG.)
+    check(results.phone.covered.under.length === 0 && results.phone.covered.boards.filter(Boolean).length >= 3, `on the phone with the controls shown (390 x 844), no board is under one (${results.phone.covered.under.join(', ') || 'none'}): ${results.phone.covered.boards.filter(Boolean).join('; ')} against ${results.phone.covered.laid.join('; ')}`)
     results.phone.clear = await held.evaluate(CLEAR)
     check(results.phone.clear.under.length === 0 && results.phone.clear.read >= 40, `on the phone, with the controls shown, the banner passes under the fold (${results.phone.clear.laid.map((r) => r.join(' ')).join('; ')}) at ${results.phone.clear.under.length} of 120 places on its round, and can be read at ${results.phone.clear.read}`)
     await handheld.close()
@@ -584,15 +682,33 @@ try {
   // ── The plane ──
   console.log('\nthe plane')
   await toPark()
+  // (By now the city has started its knock-knock on the banner, eggs.ts, which brings the plane in to say it: it is
+  // sent back out to its own round, which is what is measured first.)
+  await realm.evaluate(async () => { const p = globalThis.engine.boards.plane; p.call(false); p.loud = false; for (const until = performance.now() + 12000; p.come > 0 && performance.now() < until; ) await new Promise((r) => setTimeout(r, 100)) })
   const moved = await realm.evaluate(async () => { const p = globalThis.engine.boards.plane, a = [...p.at]; await new Promise((r) => setTimeout(r, 1000)); return Math.round(Math.hypot(p.at[0] - a[0], p.at[2] - a[2]) / 10) })
   await realm.evaluate(() => { globalThis.realm.signs.set('banner', { text: 'NEW POST' }); globalThis.engine.scale = 1 })
-  const pass = await realm.evaluate(PASS)
+  let pass = await realm.evaluate(PASS)
   await page.waitForTimeout(3000)
   const sky = await pixelsOf(await page.screenshot({ path: join(shots, 'banner.png') }))
   const tall = inkTall(sky, pass.box)
   results.plane = { movedIn1s: moved, ...pass, wordsPx: tall }
-  check(moved > 8 && moved < 40, `the plane flew ${moved} m in a second`)
-  check(pass.box.x0 >= 0 && pass.box.x1 <= 1280 && pass.box.y0 >= 0 && pass.box.y1 <= 720 && pass.planePx >= 40 && tall >= 20 && pass.showing.kind === 'text', `on its near pass the banner is whole in the park's picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} px across, ${Math.round(pass.box.y0)} to ${Math.round(pass.box.y1)} down, ${pass.metres} m off), the plane ${pass.planePx} px long, and "NEW POST" ${tall} px tall as the picture's pixels have it (the cloth ${pass.clothPx} px; bound 20)`)
+  check(moved > 30 && moved < 80, `the plane flew ${moved} m in a second (far off: a degree a second on the picture)`)
+  // Its own round is a signature in a corner of the sky: past the towers (2 km and more), small (the cloth 26 px tall
+  // at most, where it was 43), and its words still read (10 px and more: the 14 px words on the page's keys are read at once).
+  check(pass.box.x0 >= 0 && pass.box.x1 <= 1280 && pass.box.y0 >= 0 && pass.box.y1 <= 720 && pass.metres >= 2000 && pass.clothPx <= 26 && pass.planePx >= 12 && tall >= 10 && pass.showing.kind === 'text', `on its own round the banner is whole in the park's picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} px across, ${Math.round(pass.box.y0)} to ${Math.round(pass.box.y1)} down), ${pass.metres} m off (bound 2000), the plane ${pass.planePx} px long (bound 12), the cloth ${pass.clothPx} px tall (26 at most) and "NEW POST" ${tall} px tall as the picture's pixels have it (bound 10)`)
+  // With something to say that must be read (an egg's line, `loud`), it comes in to its near round: as big as it was.
+  {
+    await realm.evaluate(async () => { const p = globalThis.engine.boards.plane; p.hold = null; p.loud = true; for (const until = performance.now() + 12000; p.come < 1 && performance.now() < until; ) await new Promise((r) => setTimeout(r, 100)) })
+    const near = await realm.evaluate(PASS)
+    await page.waitForTimeout(2000)
+    const nearTall = inkTall(await pixelsOf(await page.screenshot({ path: join(shots, 'banner-near.png') })), near.box)
+    results.plane.near = { ...near, wordsPx: nearTall }
+    check(near.box.x0 >= 0 && near.box.x1 <= 1280 && near.box.y0 >= 0 && near.box.y1 <= 720 && near.planePx >= 40 && nearTall >= 20, `with something to say it comes in: on its near pass the banner is whole in the picture (${Math.round(near.box.x0)} to ${Math.round(near.box.x1)} px across, ${near.metres} m off), the plane ${near.planePx} px long, and "NEW POST" ${nearTall} px tall (the cloth ${near.clothPx} px; bounds 40 and 20)`)
+    await realm.evaluate(async () => { const p = globalThis.engine.boards.plane; p.hold = null; p.loud = false; for (const until = performance.now() + 12000; p.come > 0 && performance.now() < until; ) await new Promise((r) => setTimeout(r, 100)) })
+    check((await realm.evaluate(() => globalThis.engine.boards.plane.come)) === 0, 'and goes back out to its own round when it has said it')
+    pass = await realm.evaluate(PASS)
+    await page.waitForTimeout(1500)
+  }
   // A picture on it: the page's own, red with white words. Where the cloth is, the picture is red.
   {
     await realm.evaluate(async () => { const c = document.createElement('canvas'); c.width = 640; c.height = 104; const g = c.getContext('2d'); g.fillStyle = '#d22'; g.fillRect(0, 0, 640, 104); g.fillStyle = '#fff'; g.font = '700 84px sans-serif'; g.fillText('PICTURE', 150, 82); globalThis.realm.signs.set('banner', { image: c.toDataURL() }); await new Promise((r) => setTimeout(r, 1200)) })

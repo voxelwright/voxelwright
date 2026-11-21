@@ -41,7 +41,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -88,7 +88,7 @@ async function main() {
   const context = canvas.getContext('webgpu')!
   context.configure({ device, format: gpu.format, alphaMode: 'opaque' })
 
-  type Core = { memory: WebAssembly.Memory; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
+  type Core = { memory: WebAssembly.Memory; hero_night(sort: number, which: number): number; hero_reach(sort: number, which: number): number; ground_at(x: number, z: number): number; top_at(x: number, z: number): number; feet_at(x: number, z: number): number; world_edit(after: number): void; world_forget(): void; paving_at(x: number, z: number): number; world_kind(x: number, y: number, z: number): number; edits_room(words: number): number; merge_rows(lod: number, x0: number, x1: number, z0: number, z1: number): number; merged_words(): number; fine_cells(on: number): void; fine_refused(): number; make_sector(sx: number, sy: number, sz: number, lod: number): number }
   // The page's own core, behind a handle that stays the same when the core is built again and swapped in (#264,
   // `recore` below): whoever was handed `core`, or one of its functions, goes on using the one that is in.
   let inner = await open<Core>(new URL('./core.wasm', import.meta.url).href)
@@ -324,6 +324,13 @@ async function main() {
     march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1)
     if (LOCAL.air.grade) grade = LOCAL.air.grade
   }
+  // The landmarks as the night knows them (#450, heroes.rs `night`): where each stands, and its rule's numbers from the core.
+  if (BAY_ON) void landmarksOf().then((list) => {
+    march.beacons = list.flatMap((h) => {
+      const night = Array.from({ length: 12 }, (_, i) => core.hero_night(h.sort, i)), box = Array.from({ length: 6 }, (_, i) => core.hero_reach(h.sort, i)), at = placeOf(h.at[0], h.at[1])
+      return night.some(Number.isNaN) ? [] : [{ at: [at.x, h.foot * 10, at.z] as const, night, reach: Math.hypot(Math.max(-box[0], box[3]), Math.max(-box[2], box[5])) }]
+    })
+  })
   if (LOCAL?.air) {
     march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
     if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) ownLight()
@@ -1403,7 +1410,7 @@ async function main() {
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
-          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.readable ?? true,
+          callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,

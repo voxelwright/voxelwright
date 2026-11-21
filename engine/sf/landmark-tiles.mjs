@@ -19,7 +19,7 @@ export const EARTH = join(homedir(), '.village', 'engine', 'bay', 'earth', 'tile
 /** Every tile round the landmarks: [level, x, z]. The Golden Gate's south end too, where one walks onto it. */
 export function landmarkTiles() {
   const listed = JSON.parse(readFileSync(join(root, 'sf', 'heroes.json'), 'utf8'))
-  const at = [...listed.map((h) => h.at), [37.8107, -122.4776]]
+  const at = [...listed.filter((h) => h.only !== 'night').map((h) => h.at), [37.8107, -122.4776]]
   const out = new Map()
   for (const [lat, lon] of at) {
     const p = place(lat, lon)

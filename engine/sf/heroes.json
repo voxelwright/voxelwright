@@ -18,6 +18,15 @@
     "from": "As #423 (PR 428): Overture Maps 2026-10-21.0 (© OpenStreetMap contributors, Overture Maps Foundation) for its place, turn and towers; the bridge district's published figures for spans, heights, cables and truss."
   },
   {
+    "name": "Transamerica Pyramid",
+    "sort": 3,
+    "at": [37.795171, -122.402786],
+    "toward": [37.795171, -122.401786],
+    "foot": 3.5,
+    "only": "night",
+    "from": "Its point, 263.5 m over the sea at this place: the release's own far tiles (USGS 3DEP lidar), which are what is drawn of it. Its 260 m as published, so its foot is 3.5 m. Only its light by night is by rule here (heroes.rs `night`: the spire and its beacon); its shape is the map's building."
+  },
+  {
     "name": "Bay Bridge, western span",
     "sort": 4,
     "at": [37.7981888, -122.3778586],

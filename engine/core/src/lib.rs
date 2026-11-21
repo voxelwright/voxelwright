@@ -332,6 +332,12 @@ pub extern "C" fn hero_reach(sort: u32, which: usize) -> f32 {
     heroes::reach(sort).and_then(|r| r.get(which).copied()).unwrap_or(f32::NAN)
 }
 
+/// One number of a landmark's own light by night (heroes.rs `night`). Not a number where it has none.
+#[unsafe(no_mangle)]
+pub extern "C" fn hero_night(sort: u32, which: usize) -> f32 {
+    heroes::night(sort).and_then(|r| r.get(which).copied()).unwrap_or(f32::NAN)
+}
+
 /// Whether a landmark's rule is all there is at (u, w) in its frame, metres (heroes.rs `owns`): 1, or 0.
 #[unsafe(no_mangle)]
 pub extern "C" fn hero_owns(sort: u32, u: f32, w: f32) -> i32 {

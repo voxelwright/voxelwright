@@ -5,35 +5,79 @@
       "text": "zahynailo.dev"
     },
     "around": [
-      519375,
-      664986
+      549457,
+      672248
     ],
     "radius": [
-      105,
-      70
+      300,
+      320
     ],
-    "bearing": 120,
-    "height": 139,
-    "rise": -14,
-    "speed": 12,
+    "bearing": 104,
+    "height": 485,
+    "rise": -40,
+    "speed": 50,
     "size": [
-      40,
-      6.5
+      246,
+      40
     ],
+    "craft": 11,
     "start": 0.14,
-    "upright": {
+    "near": {
       "around": [
-        522096,
-        667273
+        519375,
+        664986
       ],
       "radius": [
-        62,
-        45
+        105,
+        70
       ],
-      "height": 180,
+      "bearing": 120,
+      "height": 139,
+      "rise": -14,
+      "speed": 12,
+      "size": [
+        40,
+        6.5
+      ],
+      "craft": 2
+    },
+    "upright": {
+      "around": [
+        538931,
+        677101
+      ],
+      "radius": [
+        200,
+        240
+      ],
+      "bearing": 120,
+      "height": 470,
       "rise": 0,
-      "speed": 10,
-      "start": 0.2
+      "speed": 40,
+      "size": [
+        150,
+        24.4
+      ],
+      "craft": 8,
+      "start": 0.2,
+      "near": {
+        "around": [
+          522096,
+          667273
+        ],
+        "radius": [
+          62,
+          45
+        ],
+        "height": 180,
+        "rise": 0,
+        "speed": 10,
+        "size": [
+          40,
+          6.5
+        ],
+        "craft": 2
+      }
     }
   },
   "boards": [
@@ -73,7 +117,7 @@
       ],
       "facing": 0,
       "turn": 298.7,
-      "size": 36,
+      "size": 25,
       "content": {
         "text": "X"
       },
@@ -96,7 +140,7 @@
       ],
       "facing": 0,
       "turn": 304.3,
-      "size": 26,
+      "size": 29.5,
       "content": {
         "text": "LinkedIn"
       },
@@ -109,17 +153,17 @@
       "type": "logo",
       "logo": "twitch",
       "building": [
-        529864,
-        669876
+        529882,
+        669835
       ],
       "at": [
-        529864,
+        529882,
         1855,
-        669876
+        669835
       ],
       "facing": 0,
       "turn": 293.6,
-      "size": 40,
+      "size": 28,
       "content": {
         "text": "Twitch"
       },

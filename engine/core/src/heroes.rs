@@ -93,6 +93,30 @@ pub fn looks(sort: u32, u: f32, y: f32, w: f32) -> Option<[f32; 2]> {
     }
 }
 
+/// A landmark's own light by night (#450): the part of it that a city knows it by in the dark, as numbers the page
+/// hands to whatever draws it, cells or faces (march.ts `landmarkLight`), so that it is lit one way near and far and
+/// needs no tile baked again. In its own metres, y up from its foot:
+///   0, 1   the lit part's foot and top;
+///   2, 3   half its width at each (it draws in between them);
+///   4 to 7 its light's colour and how strong (1 is a lit wall; over 1.2 the last pass spreads it as a lamp's);
+///   8      how far apart the dark rings across it are (0: none);
+///   9      how tall the very top's lamp is, the one that is seen as a point from across the city (0: none);
+///   10, 11 under the lit part, a storey's height and a bay's width where its glass is lit a floor at a time from
+///          within (0: its walls are another's to light, the map's building with its own windows).
+/// None: no such landmark. Every landmark answers, so that all are lit by one path: one with no light of its own
+/// says 0 for its strength, and still has its glass lit and showing what the city's windows show (far.ts).
+pub fn night(sort: u32) -> Option<[f32; 12]> {
+    match sort {
+        // The crown: nine storeys of lamps behind the open grid, a pale cold white that moves, and the offices under it.
+        SALESFORCE => Some([SF_CROWN, SF_TOP, SF_HALF * between(&SF_TAPER, SF_CROWN), SF_HALF * between(&SF_TAPER, SF_TOP), 0.62, 0.8, 1.0, 0.95, SF_FLOOR / 2.0, 0.0, SF_FLOOR, 3.0]),
+        // The spire: its louvres lit white from within, and the beacon at its point.
+        TRANSAMERICA => Some([TA_SPIRE, TA_TOP, 23.1 * (TA_TOP - TA_SPIRE) / (TA_TOP - TA_SKIRT), 0.0, 1.0, 0.95, 0.86, 0.9, 0.0, 4.0, 0.0, 0.0]),
+        // No light of their own, and what glass they have is their windows already: lit a room at a time, as any.
+        GOLDEN_GATE | BAY_BRIDGE | FERRY_BUILDING | SUTRO_TOWER | CITY_HALL | FINE_ARTS => Some([0.0; 12]),
+        _ => None,
+    }
+}
+
 /// Between the entries of a table of (at, value), straight from one to the next; the ends hold.
 fn between(table: &[(f32, f32)], at: f32) -> f32 {
     let mut last = table[0];

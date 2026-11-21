@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { arg, CHROME, has, here, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
+import { TOWERS, framed, moved as rainMoved } from './sf-towers.mjs'
 
 const shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'eggs'))
 const round = (n, to = 2) => Math.round(n * 10 ** to) / 10 ** to
@@ -200,6 +201,38 @@ try {
   check(green(city1) > green(city0) + 6, `the city's windows went green: green over red and blue ${round(green(city0), 1)} before, ${round(green(city1), 1)} in the Matrix`)
   const moved = mean(city1.map((c, i) => [c, city2[i]]), ([a, b]) => Math.abs(light(a) - light(b)))
   check(moved > 0.4, `the code falls: the city's light moved ${round(moved)} a cell in 0.4 s`)
+  // The landmarks are in it as the towers round them are (sf-towers.mjs): how far each one's green moves from one
+  // picture to the next, the middle of eleven such steps. Salesforce Tower's shaft against the towers under the logos (from half
+  // the least of them to twice the most); its crown against its shaft and the Pyramid's lit spire against the
+  // Pyramid's own windows under it (a third to three times). With no window screen on a landmark's glass the shaft was still;
+  // with the whole of it on its crown's lamps, the crown was the brightest thing in the Matrix.
+  {
+    // (The banner's plane is held meanwhile where it is furthest on the page from both landmarks: on its near round it
+    // flies before the Pyramid's point, and a plane crossing a tower moves more of its picture than any rain.)
+    await page.evaluate(async (TOWERS) => {
+      const p = globalThis.engine.boards.plane, marks = Object.values(new Function(`return (${TOWERS})()`)().landmarks), frame = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))
+      let best = null
+      for (let i = 0; i < 60; i++) { p.hold = i / 60; await frame(); const c = p.box; if (!c) continue; const far = Math.min(...marks.map((m) => Math.hypot((c.x0 + c.x1) / 2 - (m.x0 + m.x1) / 2, (c.y0 + c.y1) / 2 - (m.y0 + m.y1) / 2))); if (!best || far > best.far) best = { phase: i / 60, far } }
+      p.hold = best ? best.phase : null
+      await frame()
+    }, TOWERS.toString())
+    await page.waitForTimeout(800)
+    const sums = {}
+    let last = null
+    for (let i = 0; i < 12; i++) {
+      const m = await framed(page, await page.evaluate(TOWERS))
+      if (last) for (const [k, box] of Object.entries(m.boxes)) (sums[k] ??= []).push(rainMoved(last.picture, m.picture, box, m.signs))
+      last = m
+      await page.waitForTimeout(350)
+    }
+    // (The middle one of the eleven.)
+    const of = (k) => round([...(sums[k] ?? [0])].sort((a, b) => a - b)[Math.floor((sums[k]?.length ?? 1) / 2)], 2), round_ = Object.keys(sums).filter((k) => k.endsWith('tower')).map(of), lo = Math.min(...round_), hi = Math.max(...round_)
+    results.matrix.towers = Object.fromEntries(Object.keys(sums).map((k) => [k, of(k)]))
+    await page.evaluate(() => { globalThis.engine.boards.plane.hold = null })
+    const within = (v, a, b) => v >= a && v <= b
+    check(round_.length >= 2 && within(of('salesforce'), lo * 0.5, hi * 2), `Salesforce Tower's shaft shows the rain as the towers round it do: its green moves ${of('salesforce')} a pixel from picture to picture, theirs ${round_.join(', ')} (asked: ${round(lo * 0.5, 2)} to ${round(hi * 2, 2)})`)
+    check(within(of("salesforce's crown"), of('salesforce') / 3, of('salesforce') * 3) && within(of("pyramid's spire"), of('pyramid') / 3, of('pyramid') * 3), `the landmarks' own lamps show it as their windows do: Salesforce's crown ${of("salesforce's crown")} against its shaft's ${of('salesforce')}, the Pyramid's spire ${of("pyramid's spire")} against its body's ${of('pyramid')} (asked: a third to three times: which columns of the rain cross a part is luck)`)
+  }
   check(await cost(page, 'matrix'), 'the Matrix costs no more than a quarter more than its sky without the screen')
   await sayTo(page, 'blue pill')
   // On the way out too: the fog thins in the dark before the day is back, so no picture is a day washed pale under it

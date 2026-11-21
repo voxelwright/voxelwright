@@ -5,8 +5,8 @@
 // one: `propose` only offers roofs to whoever is editing (`?boards=edit`, sf/boards.mjs), and the file is what counts.
 //
 //   lettering   letters of lamp on panels of wood, one panel and one steel post a letter, all cells of the world:
-//               every tool breaks them as it breaks a wall, a letter whose post is cut falls by itself, and the
-//               march lights them by night as it lights any sign (march.ts: lamp in a colour of its own).
+//               every tool breaks them as it breaks a wall, a letter whose post is cut falls by itself. By night it is
+//               lit as a billboard is: a lamp on an arm over each panel, whose light the march lays on the face.
 //   digital     an LED billboard as a roof carries one: a dark cabinet of cells with a rim round its face, on steel
 //               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
 //               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
@@ -19,8 +19,9 @@
 //                 wall   flush on a wall under the crown, lying whichever way that wall looks. A tower of the skyline
 //                        is drawn by the far model from the park and as cells from near, and the two walls are metres
 //                        apart: the sign is seated on whichever is drawn from where the eye is (`seat`).
-//   banner      a small plane flying a long round across the park's sky, before the towers, towing a strip of cloth
-//               with words or a picture.
+//   banner      a plane towing a strip of cloth with words or a picture. Its own round is far off, past the towers and
+//               over the bay, small in a corner of the sky as a painter's name is in a corner of a painting; when it has
+//               something to say that must be read (an egg's line) it comes in to a round close before the park.
 //
 // What each says is set through signs.ts (`realm.signs.set`), which this file brings every sign to.
 // A click or tap on a board from where the pointer is free flies the eye to it and then tells the host page where to
@@ -83,6 +84,14 @@ export interface Banner {
   size: [number, number]
   /** Where on its round it is as the place is first shown, 0 to 1. */
   start?: number
+  /** How big the plane is: the size of its cells, in the world's (2 where not said: a plane 8.4 m long). A round flown far off wants a bigger one to be seen at all. */
+  craft?: number
+  /**
+   * The round it comes in to when it has something to say (an egg's line, `plane.loud`): whatever of the above it
+   * says otherwise. Its own round may be far off and small, a signature in a corner of the picture; a line someone
+   * must read and answer is flown close, and it goes back out when the line is done.
+   */
+  near?: Partial<Omit<Banner, 'content' | 'upright' | 'near'>>
   /**
    * The round flown where the picture is taller than it is wide (a phone held upright): whatever of the above it says
    * otherwise. Such a picture sees a strip of the sky a third as wide, and a round that crosses a wide one whole is
@@ -96,6 +105,8 @@ const M = 10
 const PLASTER = 9, WOOD = 10, STEEL = 12, LAMP = 15
 /** Panels near black, posts dark grey, letters pale grey: white lamp blooms into a blot by night (tried, #450). */
 const PANEL = WOOD | (14 << 8), POST = STEEL | (11 << 8), HOUSING = PLASTER | (14 << 8), LETTER = LAMP | (6 << 8), GRATING = STEEL | (13 << 8)
+/** A lettering board's lamps: how far before its face each hangs, cells; the lamp itself is a street lamp's (march.ts: colour 46, lit by night, spread into a glow). */
+const ARM = 8, BULB = LAMP | (46 << 8), HOOD = STEEL | (14 << 8)
 /** How far a digital board's foot is over its roof where its record does not say, m: room for the walkway and a person under it. */
 export const DIGITAL_LIFT = 3.2
 /** How deep a digital board's cabinet is, cells. */
@@ -161,6 +172,14 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
         const lit = k >= px / 2 && col < 3 && row >= 0 && row < 5 && ((Number(glyph[4 - row]) >> (2 - col)) & 1) === 1
         for (let d = 0; d < 2; d++) put(wide, k0 + k, d, y0 + y, lit ? LETTER : PANEL)
       }
+      // Its lamp, as a billboard is lit: an arm up from the panel's top, a hood at its end hung out before the face, and
+      // the lamp under the hood (a bar of light from before the board), turned down on the letters. All of it is over
+      // the panel's top and not before the letters: a far eye is shown coarser cells (16 on a phone), in which a hood
+      // hung before the top row of the panel was a block over the letters' heads. What its light does to the face is
+      // the march's (march.ts: the box `kept` tells it is washed by night, and its letters are lit by that and not
+      // of themselves).
+      for (let d = 0; d < 2; d++) for (let k = pitch / 2 - 1; k < pitch / 2 + 1; k++) for (let y = 0; y < 4; y++) put(wide, k0 + k, d, y0 + high + y, POST)
+      for (let d = -ARM; d < 2; d++) for (let k = pitch / 2 - 4; k < pitch / 2 + 4; k++) for (let y = 2; y < 6; y++) put(wide, k0 + k, d, y0 + high + y, y === 2 && d < 0 ? BULB : HOOD)
       // Its beam and its post.
       for (let k = 0; k < pitch - 1; k++) for (let d = 0; d < 2; d++) for (let y = 1; y <= 2; y++) put(wide, k0 + k, d, y0 - y, POST)
       for (let k = pitch / 2 - 2; k < pitch / 2 + 2; k++) for (let d = 0; d < 2; d++) for (let y = foot - 2; y < y0 - 2; y++) put(wide, k0 + k, d, y, POST)
@@ -235,6 +254,10 @@ export interface Boards {
    */
   readonly plane: {
     at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean
+    /** It has something to say: it comes in to its near round over some seconds, and goes back out when this is false again. */
+    loud: boolean
+    /** How far it has come in: 0 on its own round, 1 on the near one. */
+    readonly come: number
     /** The cloth's box on the page now (client px), or null where any of it is behind the eye. */
     readonly box: { x0: number; y0: number; x1: number; y1: number } | null
     /** Whether its words can be read now: the whole cloth in the picture, seen more from before it than along it, and under nothing the page lays over the picture (the hour's panel, the keys, a notice). */
@@ -456,7 +479,7 @@ export async function boards(o: Needs): Promise<Boards> {
   // ── The plane and its banner ──
   const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
   const towed: Banner | null = whole_ ? (whole_.upright && shape0.height > shape0.width ? { ...whole_, ...whole_.upright } : whole_) : null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; loud: boolean; readonly come: number; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
   /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
   let summon: (() => void) | null = null
   let boxAt: (phase: number) => { x0: number; y0: number; x1: number; y1: number } | null = () => null, read: (phase: number) => boolean = () => false
@@ -464,40 +487,59 @@ export async function boards(o: Needs): Promise<Boards> {
     const model = plane(), born = thing(model.kinds, model.size)
     born.com = [model.size[0] / 2, model.size[1] / 2, model.size[2] / 2]
     const piece = o.pieces.add(born)
-    piece.cell = 2
     const [long, tall] = towed.size
     const cloth = drawn.add({ pixels: [1024, Math.max(64, Math.round((1024 * tall) / long / 4) * 4)], both: true, style: CLOTH })
     cloth.wave = 5
     const line = drawn.add({ pixels: [4, 4], both: true, style: { ground: '#2a2a2a', ink: '#2a2a2a', glows: false } })
     line.show(null)
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { began = performance.now(); shift = 0 } }
     signs.add({ id: 'banner', kind: 'banner', name: 'The banner a plane tows', accepts: ['text', 'image', 'video'], own: towed.content, show: (content) => cloth.show(content) })
-    // Its round: a circle, or a long round (an ellipse) lying along `bearing`, higher on one long side than the other.
-    // Flown at one speed: where it is after so many metres is looked up in the round's own lengths.
-    const [A, B] = (typeof towed.radius === 'number' ? [towed.radius, towed.radius] : towed.radius).map((r) => r * M), lie = ((towed.bearing ?? 0) * Math.PI) / 180, rise = (towed.rise ?? 0) * M
-    const on = (a: number): [number, number, number] => { const u = A * Math.cos(a), v = B * Math.sin(a); return [towed.around[0] + u * Math.cos(lie) - v * Math.sin(lie), towed.height * M + rise * Math.sin(a), towed.around[1] + u * Math.sin(lie) + v * Math.cos(lie)] }
-    const STEPS = 720, lengths = new Float64Array(STEPS + 1)
-    for (let i = 1, last = on(0); i <= STEPS; i++) { const p = on((i / STEPS) * 2 * Math.PI); lengths[i] = lengths[i - 1] + Math.hypot(p[0] - last[0], p[2] - last[2]); last = p }
-    const whole = lengths[STEPS], lap = whole / (towed.speed * M)
-    /** Where it is `s` cells along its round. */
-    const along = (s: number): [number, number, number] => {
-      const d = ((s % whole) + whole) % whole
-      let lo = 0, hi = STEPS
-      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lengths[mid] <= d) lo = mid; else hi = mid }
-      return on(((lo + (d - lengths[lo]) / Math.max(1e-6, lengths[hi] - lengths[lo])) / STEPS) * 2 * Math.PI)
+    /**
+     * A round: a circle, or a long round (an ellipse) lying along `bearing`, higher on one long side than the other.
+     * Flown at one speed: where it is after so many cells is looked up in the round's own lengths. With it, the sizes
+     * of what flies it there (cells): the plane's cell and half its length, the line's length, drop and thickness (as
+     * the plane is big), half the cloth's length and its height.
+     */
+    const roundOf = (b: Omit<Banner, 'content' | 'upright' | 'near'>) => {
+      const [A, B] = (typeof b.radius === 'number' ? [b.radius, b.radius] : b.radius).map((r) => r * M), lie = ((b.bearing ?? 0) * Math.PI) / 180, rise = (b.rise ?? 0) * M
+      const on = (a: number): [number, number, number] => { const u = A * Math.cos(a), v = B * Math.sin(a); return [b.around[0] + u * Math.cos(lie) - v * Math.sin(lie), b.height * M + rise * Math.sin(a), b.around[1] + u * Math.sin(lie) + v * Math.cos(lie)] }
+      const STEPS = 720, lengths = new Float64Array(STEPS + 1)
+      for (let i = 1, last = on(0); i <= STEPS; i++) { const p = on((i / STEPS) * 2 * Math.PI); lengths[i] = lengths[i - 1] + Math.hypot(p[0] - last[0], p[2] - last[2]); last = p }
+      const whole = lengths[STEPS], cell = b.craft ?? 2, big = cell / 2
+      /** Where it is `s` cells along its round. */
+      const along = (s: number): [number, number, number] => {
+        const d = ((s % whole) + whole) % whole
+        let lo = 0, hi = STEPS
+        while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lengths[mid] <= d) lo = mid; else hi = mid }
+        return on(((lo + (d - lengths[lo]) / Math.max(1e-6, lengths[hi] - lengths[lo])) / STEPS) * 2 * Math.PI)
+      }
+      return { along, whole, lap: whole / (b.speed * M), cell, body: (model.size[0] * cell) / 2, gap: 12 * M * big, drop: 12 * big, line: 0.8 * big, half: (b.size[0] * M) / 2, tall: b.size[1] * M }
     }
-    let began = performance.now()
-    const gap = 12 * M, half = (long * M) / 2, body = (model.size[0] * piece.cell) / 2
+    type Round = ReturnType<typeof roundOf>
+    const own = roundOf(towed), near = towed.near ? roundOf({ ...towed, ...towed.near }) : own
+    /** How far it has come in to say something (0 on its own round, 1 on the near one), eased. */
+    let come = 0
+    const eased = () => come * come * (3 - 2 * come)
+    /** A size of what flies, as far in as it has come. */
+    const now = (pick: (r: Round) => number) => { const a = pick(own); return near === own || come === 0 ? a : a + (pick(near) - a) * eased() }
+    /** A point of what flies at a place on the round (0 to 1), `back` cells behind the plane's middle along it: between the two rounds as far in as it has come. Coming in, it is a plane that grows as it nears. */
+    const point = (phase: number, back: (r: Round) => number): [number, number, number] => {
+      const p = own.along(phase * own.whole - back(own))
+      if (near === own || come === 0) return p
+      const q = near.along(phase * near.whole - back(near)), e = eased()
+      return [p[0] + (q[0] - p[0]) * e, p[1] + (q[1] - p[1]) * e, p[2] + (q[2] - p[2]) * e]
+    }
+    /** Where on its round it is as it flies on, 0 to 1 (held, `flown.phase` is where it is held). */
+    let running = towed.start ?? 0, last = performance.now()
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, loud: false, get come() { return come }, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { running = towed.start ?? 0; last = performance.now() } }
     /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
-    const parts = (phase: number) => { const s = phase * whole; return [along(s), along(s - body - gap), along(s - body - gap - 2 * half)] }
-    /** How far round it has been put on (summoned), laps. */
-    let shift = 0, looked = 0
+    const parts = (phase: number) => [point(phase, () => 0), point(phase, (r) => r.body + r.gap), point(phase, (r) => r.body + r.gap + 2 * r.half)]
+    let looked = 0
     /** The cloth's box on the page at a place on its round, as `fly` hangs it there (client px); null where any corner is behind the eye. */
     boxAt = (phase: number) => {
       const [, a, b] = parts(phase), rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
       for (const end of [a, b]) for (const up of [-1, 1]) {
-        const at = onPicture([end[0], end[1] - 12 + (up * tall * M) / 2, end[2]], v, aspect)
+        const at = onPicture([end[0], end[1] - now((r) => r.drop) + (up * now((r) => r.tall)) / 2, end[2]], v, aspect)
         if (!at) return null
         const x = rect.left + ((at.x + 1) / 2) * rect.width, y = rect.top + ((1 - at.y) / 2) * rect.height
         x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y)
@@ -517,7 +559,7 @@ export async function boards(o: Needs): Promise<Boards> {
       if (!box || box.x0 < rect.left || box.y0 < rect.top || box.x1 > rect.right || box.y1 > rect.bottom) return false
       // As long on the page as half of what it is seen square on from there: turning at an end of its round it is seen along.
       const [, a, b] = parts(phase), v = o.view(), far = Math.hypot((a[0] + b[0]) / 2 - v.eye[0], (a[1] + b[1]) / 2 - v.eye[1], (a[2] + b[2]) / 2 - v.eye[2])
-      if (box.x1 - box.x0 < 0.5 * ((2 * half) / far / (2 * v.tanHalf)) * rect.height) return false
+      if (box.x1 - box.x0 < 0.5 * (now((r) => 2 * r.half) / far / (2 * v.tanHalf)) * rect.height) return false
       return !overlays().some((r) => box.x0 < r.right + 4 && box.x1 > r.left - 4 && box.y0 < r.bottom + 4 && box.y1 > r.top - 4)
     }
     // (Run from its flight, which first runs before `onPicture` below is made: it is not called before an egg calls it.)
@@ -526,7 +568,7 @@ export async function boards(o: Needs): Promise<Boards> {
       if (!f.called || f.hold !== null) { f.inView = false; return }
       const rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
       /** How much of it is on the picture at a place on its round: the plane, the cloth's ends, its middle. */
-      const seen = (phase: number, edge: number) => { const [p, a, b] = parts(phase); return [p, a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number]].filter((q) => { const at = onPicture([q[0], q[1] - 12, q[2]], v, aspect); return at && Math.abs(at.x) < edge && Math.abs(at.y) < edge }).length }
+      const seen = (phase: number, edge: number) => { const [p, a, b] = parts(phase); return [p, a, b, [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2] as [number, number, number]].filter((q) => { const at = onPicture([q[0], q[1] - now((r) => r.drop), q[2]], v, aspect); return at && Math.abs(at.x) < edge && Math.abs(at.y) < edge }).length }
       f.inView = seen(f.phase, 1) > 0
       // Out of sight, and not looked for in the last second (from where nothing of the round is seen, it waits).
       if (f.inView || performance.now() - looked < 1000) return
@@ -542,34 +584,38 @@ export async function boards(o: Needs): Promise<Boards> {
         if (!best || far < best.far * 0.8) {
           let from = phase
           for (let k = 0; k < 360 && seen(from, 1.05) > 0; k++) from = (from - STEP + 1) % 1
-          best = { from: (from - (towed.speed * M) / whole + 1) % 1, far }
+          best = { from: (from - 1 / now((r) => r.lap) + 1) % 1, far }
         }
       }
       if (!best) return
-      shift += best.from - f.phase
-      f.phase = best.from
+      running = f.phase = best.from
       // It is out of sight there and comes in within a second or two: not looked for again until it has.
       looked = performance.now() + 5000
     }
     const fly = () => {
-      const f = flown!
-      f.phase = f.hold ?? (((towed.start ?? 0) + (performance.now() - began) / 1000 / lap + shift) % 1 + 1) % 1
+      const f = flown!, t = performance.now(), dt = Math.min(0.1, (t - last) / 1000)
+      last = t
+      // It comes in over five seconds when it has something to say, and goes back out as slowly.
+      come = Math.max(0, Math.min(1, come + (f.loud ? dt : -dt) / 5))
+      running = (running + dt / now((r) => r.lap)) % 1
+      f.phase = f.hold ?? running
       summon?.()
-      const s = f.phase * whole, ahead = along(s + 20), heading = [ahead[0] - along(s)[0], ahead[2] - along(s)[2]], turn = Math.atan2(-heading[1], heading[0])
-      f.at = along(s)
+      const at = point(f.phase, () => 0), ahead = point(f.phase, (r) => -10 * r.cell), heading = [ahead[0] - at[0], ahead[2] - at[2]], turn = Math.atan2(-heading[1], heading[0])
+      f.at = at
       piece.pos = f.at
+      piece.cell = now((r) => r.cell)
       // Its nose along its way, banked into the round by how hard it is turning there.
-      const next = along(s + 200), bend = Math.atan2(next[2] - ahead[2], next[0] - ahead[0]) - Math.atan2(heading[1], heading[0])
+      const next = point(f.phase, (r) => -100 * r.cell), bend = Math.atan2(next[2] - ahead[2], next[0] - ahead[0]) - Math.atan2(heading[1], heading[0])
       const bank = Math.max(-0.5, Math.min(0.5, Math.atan2(Math.sin(bend), Math.cos(bend)) * 1.6)), sn = Math.sin(turn / 2), c = Math.cos(turn / 2), sb = Math.sin(bank / 2), cb = Math.cos(bank / 2)
       piece.rot = [c * sb, sn * cb, -sn * sb, c * cb]
       // The cloth behind it along the round, its leading edge first, a little under its tail; the line from the tail to that edge.
-      const from = along(s - body), to = along(s - body - gap), end = along(s - body - gap - 2 * half), drop = 12
+      const [, to, end] = parts(f.phase), from = point(f.phase, (r) => r.body), drop = now((r) => r.drop)
       cloth.at = [(to[0] + end[0]) / 2, (to[1] + end[1]) / 2 - drop, (to[2] + end[2]) / 2]
       cloth.hu = [(to[0] - end[0]) / 2, (to[1] - end[1]) / 2, (to[2] - end[2]) / 2]
-      cloth.hv = [0, (tall * M) / 2, 0]
+      cloth.hv = [0, now((r) => r.tall) / 2, 0]
       line.at = [(from[0] + to[0]) / 2, (from[1] + to[1] - drop) / 2, (from[2] + to[2]) / 2]
       line.hu = [(to[0] - from[0]) / 2, (to[1] - drop - from[1]) / 2, (to[2] - from[2]) / 2]
-      line.hv = [0, 0.8, 0]
+      line.hv = [0, now((r) => r.line), 0]
       requestAnimationFrame(fly)
     }
     fly()

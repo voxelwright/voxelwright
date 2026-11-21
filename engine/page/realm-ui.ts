@@ -53,7 +53,11 @@ const STYLE = /* css */ `
 @media (pointer: coarse) {
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
   #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); }
+  /* Down the right edge. Held upright, standing on the thumb's key: under the skyline's signs, which are the upper third of an upright
+     phone's picture (at 390 x 844 the column is from 340 px down and the skyline's lowest sign ends at 296). Set at
+     the middle of the picture's height, it was over the LinkedIn sign. */
   #realm .tools { left: auto; right: max(12px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-62%); }
+  @media (orientation: portrait) { #realm .tools { top: auto; bottom: calc(max(84px, env(safe-area-inset-bottom) + 84px) + 112px); transform: none; } }
   #realm .tools > label { padding-inline: calc(var(--vx) * 2); min-inline-size: calc(var(--vx) * 20); }
   /* Open, the sky's panel is over where the tools stand: they step aside until it is folded. */
   #realm.open .tools { display: none; }
@@ -66,6 +70,11 @@ const STYLE = /* css */ `
   #realm .fly { display: grid; gap: 10px; }
   #realm .fly .vx-button { min-inline-size: 60px; justify-content: center; }
   #realm .use { --vx: 6px; min-inline-size: 96px; min-block-size: 96px; justify-content: center; }
+  /* Held upright, the keys to fly lie in a row under the key that uses the tool: beside it they were over the BLOG board. */
+  @media (orientation: portrait) {
+    #realm .act { grid-template-columns: auto; justify-items: end; gap: 10px; bottom: max(20px, env(safe-area-inset-bottom)); }
+    #realm .fly { grid-auto-flow: column; order: 2; }
+  }
 }
 `
 
@@ -170,7 +179,8 @@ export function realmControls(page: RealmPage) {
     // The stick: at rest bottom left, where a thumb goes; with a thumb down, under it, its cap where the thumb is.
     if (coarse.matches) {
       const th = page.controls.thumb
-      const from = th ? th.from : [88, innerHeight - 170]
+      // (Held upright it rests higher: at 170 px up it was over the BLOG board's left end.)
+      const from = th ? th.from : innerHeight > innerWidth ? [72, innerHeight - 252] : [88, innerHeight - 170]
       let dx = th ? th.at[0] - th.from[0] : 0, dy = th ? th.at[1] - th.from[1] : 0
       const far = Math.hypot(dx, dy)
       if (far > 38) { dx *= 38 / far; dy *= 38 / far }

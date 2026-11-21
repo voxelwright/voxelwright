@@ -28,7 +28,7 @@
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
+import { AIR, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -45,7 +45,8 @@ struct V {
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
-// A landmark's section (whole) has every face drawn, each at least a pixel across.
+// A landmark's section (whole 1) has every face drawn, each at least a pixel across. A tree's crown (whole 2) is
+// leaf: by night it takes the city's glow and the street's lamps (LEAF_NIGHT).
 struct B { pos: vec3f, cell: f32, nth: u32, u0: f32, w0: f32, whole: u32, c0: vec3f, pad3: f32, c2: vec3f, pad4: f32 }
 struct Style { size: vec4f, glass: vec4f }
 struct Styles { s: array<Style, 16> }
@@ -62,6 +63,9 @@ ${HANDOVER}
 ${NOISE}
 ${FOG}
 ${SCREEN}
+${NIGHT_WALL}
+${LANDMARK_LIGHT}
+${LEAF_NIGHT}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) seen: vec3f,
@@ -93,7 +97,7 @@ const FAR = 100000.0;
   // A landmark's faces are a cell high and its grid's breadth across: from far they are under a pixel and fall
   // between pixels, and the sky shows through the tower. Each is grown about its middle to a pixel each way.
   var grow = vec2f(0.0);
-  if (b.whole != 0u) {
+  if (b.whole == 1u) {
     let mid = b.pos + b.c0 * ((x + lu * 0.5) * b.cell) + vec3f(0.0, (y0 + y1) * 0.5, 0.0) + b.c2 * ((z + lw * 0.5) * b.cell) - v.eye;
     let least = max(dot(mid, v.forward), 1.0) * v.pixel;
     let across = select(select(vec2f(lu * b.cell, y1 - y0), vec2f(lw * b.cell, y1 - y0), axis == 1u), vec2f(lu * b.cell, lw * b.cell), axis == 0u);
@@ -119,14 +123,6 @@ const FAR = 100000.0;
   out.pos = vec4f(dot(world, v.right) / (v.tanHalf * v.aspect), dot(world, v.up) / v.tanHalf, 1.0, d);
   if (dot(n, world) >= 0.0) { out.pos = vec4f(0.0, 0.0, -1.0, 1.0); }
   return out;
-}
-fn within(at: f32, lo: f32, hi: f32, wide: f32) -> f32 {
-  return clamp((at - lo) / wide + 0.5, 0.0, 1.0) * clamp((hi - at) / wide + 0.5, 0.0, 1.0);
-}
-fn hashf(p: vec2f, k: u32) -> f32 {
-  var h = (u32(i32(p.x)) * 73856093u) ^ (u32(i32(p.y)) * 83492791u) ^ (k * 2654435761u);
-  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
-  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
 }
 // Whether this point is the far model's to draw: not behind what the march met, and past the reach; or a tenth nearer
 // at most, on a look where the march met the ground or the sea only past the reach (the cells' coarse boxes and the faces do
@@ -156,6 +152,9 @@ struct Drawn { @location(0) colour: vec4f }
   let fy = in.high * 0.1 / max(st.size.x, 0.01);
   let ax = max(fwidth(fx), 0.0001);
   let ay = max(fwidth(fy), 0.0001);
+  // (How much of a metre along the wall and up it a pixel covers: for a landmark's glass, whose grid is its own.)
+  let along1 = fwidth(in.along);
+  let high1 = fwidth(in.high * 0.1);
   var pane = within(fract(fx), 0.5 - st.size.z * 0.5, 0.5 + st.size.z * 0.5, ax) * within(fract(fy), 0.26, 0.26 + st.size.w, ay);
   let blur = smoothstep(0.3, 0.8, max(ax, ay));
   pane = mix(pane, st.size.z * st.size.w, blur) * f32(in.style != 0u && in.style < 14u);
@@ -183,23 +182,68 @@ struct Drawn { @location(0) colour: vec4f }
     let facing = 1.0 - max(dot(-rd, in.n), 0.0);
     col = mix(col, skyBase(reflect(rd, in.n)) * 0.8, clamp(0.25 + 0.75 * (0.04 + 0.96 * pow(facing, 5.0)), 0.0, 1.0));
   }
-  // At night a room with someone home is lit (g.weather.z, as the march's windows): each pane its own, a building
-  // of them a scatter. Where panes are under two pixels the wall glows by the share of them that are lit.
-  if (g.weather.z > 0.0 && in.style != 0u && in.style < 14u) {
-    let one = smoothstep(0.62, 0.66, hashf(floor(vec2f(fx, fy)), in.id + in.way * 7919u));
-    // (Where panes are under two pixels, their share lit spread over the wall: a fifth of them over the whole wall, and
-    // brighter made a tower a lantern. Not the same share everywhere, which made every tower from the park one flat
-    // orange slab: offices are lit a run of a floor at a time, so the share is by runs of three bays of a storey, most
-    // of them dark and a third lit.)
-    var share = 0.2;
-    if (blur > 0.0) { share = 0.07 + 0.42 * smoothstep(0.62, 0.74, hashf(floor(vec2f(fx / 3.0, fy)), in.id + in.way * 7919u + 31u)); }
-    let lamp = mix(one * pane, pane * share, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
-    // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
-    // own lamps as much as it leaves on.
-    let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
-    // (A pane some pixels across is a lit room and no lamp, march.ts PANE_LIGHT: from a pixel and a half wide to four.)
-    let near = smoothstep(1.5, 4.0, st.size.z / ax);
-    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, blur) * (1.0 - pic.a) + pic.rgb * pane * 2.4;
+  if (g.weather.z > 0.0) {
+    let dark = clamp(g.weather.z * 3.0, 0.0, 1.0);
+    // Where the point is as the march measures (from its corner near the eye), and how many metres a pixel is there.
+    let at = in.seen + g.eye;
+    let wide = max(dot(in.seen, v.forward), 1.0) * v.pixel * 0.1;
+    // The wall's windows: a styled face's by its style. A landmark's glass has none (its faces come from its rule, which
+    // draws its own), and while windows' light and the window screen were for styled faces alone, Salesforce Tower
+    // stood dark over a lit city and took no part in what the city's windows show (the Matrix's rain, eggs.ts). So a
+    // landmark's glass is given a grid of windows here and then goes the one way every wall goes, below: where its
+    // rule says a storey and a bay (heroes.rs night: a wall of glass from floor to floor) by those, under its own
+    // lit part; where it says none, its glass is its windows already, each face of it a room's.
+    var lit = in.style != 0u && in.style < 14u;
+    var wx = fx; var wy = fy; var bx = ax; var by = ay;
+    var pw = st.size.z; var y0 = 0.26; var ph = st.size.w;
+    var panes = pane;
+    var least = 0.0;
+    // How much of the window screen its panes show: all of it, but a wall of glass from floor to floor is twice the
+    // pane a wall with windows is, and showed the Matrix's rain two and a half times as strong as the towers round it.
+    var shows = 1.0;
+    if (in.style == 15u && abs(in.n.y) < 0.5) {
+      var storey = 3.5;
+      var bay = 3.0;
+      var up = in.high * 0.1;
+      var under = 1e9;
+      pw = 1.0; y0 = 0.0; ph = 1.0;
+      for (var i = 0u; i < 8u; i++) {
+        let h = g.beacon[i];
+        if (h.more.w <= 0.0) { break; }
+        let q = (at - h.at.xyz) * 0.1;
+        if (length(q.xz) > h.more.w) { continue; }
+        up = q.y;
+        // (A tower of glass from floor to floor is let to firms that work late: two fifths of it are lit, where a building's share falls out a sixth to a half. Left to that chance, Salesforce Tower drew a fifth and stood dim among brighter towers.)
+        if (h.more.y > 0.0) { storey = h.more.y; bay = h.more.z; pw = 0.86; y0 = 0.2; ph = 0.62; least = 0.42; shows = 0.6; }
+        if (h.colour.a > 0.0) { under = h.span.x; }
+        break;
+      }
+      lit = up < under;
+      wx = in.along / bay; wy = up / storey; bx = max(along1 / bay, 0.0001); by = max(high1 / storey, 0.0001);
+      panes = mix(within(fract(wx), 0.5 - pw * 0.5, 0.5 + pw * 0.5, bx) * within(fract(wy), y0, y0 + ph, by), pw * ph, smoothstep(0.3, 0.8, max(bx, by)));
+    }
+    // At night a room with someone home is lit (as the march's windows): rows of panes, a floor and a run of bays at
+    // a time, which fade into the wall's own glow as they go under two pixels (march.ts NIGHT_WALL).
+    if (lit) {
+      let wall = nightWall(wx, wy, bx, by, pw, y0, ph, in.id + in.way * 7919u, least);
+      // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
+      // own lamps as much as it leaves on.
+      let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
+      // (A pane some pixels across is a lit room and no lamp, march.ts PANE_LIGHT: from a pixel and a half wide to four.)
+      let near = smoothstep(1.5, 4.0, pw / bx);
+      col += wall.rgb * wall.a * dark * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, smoothstep(0.3, 0.8, bx)) * (1.0 - pic.a) + pic.rgb * panes * shows * 2.4;
+    }
+    // A tree's crown in a city at night is not black (march.ts LEAF_NIGHT).
+    if (b.whole == 2u) { col += leafNight(in.rgb, in.n, at) * dark; }
+    // A landmark's own light (heroes.rs night, march.ts LANDMARK_LIGHT): its crown, its spire. Its lamps are the city's
+    // too: what the windows show, the crown's screen shows, and its own light as much as that leaves on.
+    let own = landmarkLight(at, wide);
+    if (own.r + own.g + own.b > 0.0) {
+      let shown = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
+      // (As much of it as its own windows show, measured: a sixth, where every pixel of a lit part is lamp and a wall is one part in four pane. Whole, the crown was the brightest thing in the Matrix.)
+      col += own * dark * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.16;
+    }
+    col += landmarkLamp(at) * dark;
   }
   col = air(col, rd, dist);
   // The march's fog (FOG), as over the cells: the faces begin 100 m off in the wedge, and the bank had stopped there.
@@ -378,7 +422,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
         device.queue.writeBuffer(own, 0, new Float32Array([s.pos[0] - anchor[0], s.pos[1] - anchor[1], s.pos[2] - anchor[2], s.cell]))
         device.queue.writeBuffer(own, 16, new Uint32Array([0]))
         device.queue.writeBuffer(own, 20, new Float32Array(s.uw ?? [0, 0]))
-        device.queue.writeBuffer(own, 28, new Uint32Array([s.layer === 'hero' ? 1 : 0]))
+        device.queue.writeBuffer(own, 28, new Uint32Array([s.layer === 'hero' ? 1 : s.layer.includes('crown') ? 2 : 0]))
         device.queue.writeBuffer(own, 32, new Float32Array([...s.c0, 0, ...s.c2, 0]))
         // The tile's box is what its faces fill, once any are here (a face may reach past its tile).
         if (!t.bounded) { t.lo = [...s.lo]; t.hi = [...s.hi]; t.bounded = true }

@@ -33,6 +33,124 @@ export function palette(): Float32Array<ArrayBuffer> {
 
 /** How bright a lit window's pane is, for the march's windows and the far model's (see PANE_LIGHT in the shader). */
 export const PANE_LIGHT = 1.25
+/**
+ * The landmarks' own lights by night (#450, heroes.rs `night`): the crown of lamps on Salesforce Tower, the Pyramid's
+ * lit spire and its beacon. Whatever is drawn inside a landmark's lit part, cells or the far model's faces, gives
+ * off its light: one rule for both, so a landmark is lit one way from across the city and from under it, and no
+ * tile is baked again for it. Needs `g`. `p` is a point measured as the eye is (cells), `wide` how many metres a
+ * pixel covers there. The answer is light to add, before the weather's share of the dark is taken.
+ */
+export const LANDMARK_LIGHT = /* wgsl */ `
+fn landmarkLight(p: vec3f, wide: f32) -> vec3f {
+  var out = vec3f(0.0);
+  for (var i = 0u; i < 8u; i++) {
+    let h = g.beacon[i];
+    if (h.colour.a <= 0.0) { break; }
+    let q = (p - h.at.xyz) * 0.1;
+    if (q.y < h.span.x - 0.5 || q.y > h.span.y + 1.0) { continue; }
+    let t = clamp((q.y - h.span.x) / max(h.span.y - h.span.x, 1.0), 0.0, 1.0);
+    // (Round its middle: a square's corner is 1.42 of its half width out, and its skin some metres proud.)
+    if (length(q.xz) > mix(h.at.w, h.span.z, t) * 1.45 + 3.0) { continue; }
+    var light = h.colour.a;
+    if (h.span.w > 0.0) {
+      // A screen of lamps behind a grid: dark rings across it while they are wider than a pixel, and a slow tide of
+      // brighter and dimmer going up it, as what the screen shows moves.
+      let ring = smoothstep(0.0, 0.5, abs(fract(q.y / h.span.w) - 0.5) * 2.0);
+      light *= mix(0.5 + 0.5 * ring, 0.75, smoothstep(0.25, 0.6, wide / h.span.w));
+      light *= 0.8 + 0.2 * sin(q.y * 0.21 - g.time * 0.45) + 0.12 * sin(q.y * 0.07 + g.time * 0.17);
+    } else {
+      // Lit from within, brighter towards its point.
+      light *= 0.3 + 0.7 * t;
+    }
+    out += h.colour.rgb * light;
+  }
+  return out;
+}
+// The lamp at a landmark's very top: far brighter than a wall, a point from across the city. Apart from its lit part,
+// which shows what the city's windows show and is put out by it as their lamps are: a beacon is no window, and put
+// out and lit again with every drop of the Matrix's rain it flickered, its glow with it, over the whole spire.
+fn landmarkLamp(p: vec3f) -> vec3f {
+  for (var i = 0u; i < 8u; i++) {
+    let h = g.beacon[i];
+    if (h.colour.a <= 0.0) { break; }
+    let q = (p - h.at.xyz) * 0.1;
+    if (h.more.x > 0.0 && q.y > h.span.y - h.more.x && q.y <= h.span.y + 1.0 && length(q.xz) < h.span.z * 1.45 + 3.0) { return h.colour.rgb * 4.0; }
+  }
+  return vec3f(0.0);
+}
+`
+
+/**
+ * A tree's crown by night (#450). The march lights leaves by the moon at a tenth and by a street lamp's pool where
+ * one is near, and the far model's faces by the moon alone: the park's big tree was a black mass before a lit city.
+ * A crown in a city is lit from under and from the side: by the sky's own glow over the town (warm, the lamps' light
+ * thrown back off the air), which its sides and top take, and by the street's lamps, which its underside and lower
+ * leaves take, clump by clump. `at` is the point measured as the eye is (cells): the clumps keep their places.
+ * The answer is light to add, before the weather's share of the dark is taken.
+ */
+export const LEAF_NIGHT = /* wgsl */ `
+fn leafNight(albedo: vec3f, n: vec3f, at: vec3f) -> vec3f {
+  // Clumps of leaves three metres across, some turned to the light and some in the crown's own shade.
+  let c = floor(at / 30.0);
+  let clump = fract(sin(dot(c, vec3f(12.9898, 78.233, 37.719))) * 43758.5453);
+  let glow = vec3f(0.62, 0.5, 0.46) * (0.35 + 0.3 * max(n.y, 0.0));
+  let lamps = vec3f(1.0, 0.72, 0.4) * (0.2 + 0.5 * max(-n.y, 0.0) + 0.3 * (1.0 - abs(n.y))) * (0.25 + 1.1 * clump * clump);
+  return albedo * (glow + lamps) * 0.95;
+}
+`
+
+/**
+ * A wall's windows by night from where its panes are too small to be cells (#450): one rule for the far model's faces
+ * (far.ts) and for the march's own coarse cells (`lit`, below), so that a tower is lit one way either side of where
+ * the two meet. `fx` and `fy` count bays along the wall and storeys up it; `ax` and `ay` are how much of a bay and of
+ * a storey a pixel covers; a pane is `pw` of its bay wide and stands from `y0` to `y0 + ph` of its storey.
+ *
+ * Offices are lit a floor at a time, in runs along the floor, with dark floors between and a dark band of wall
+ * (the spandrel) over every row of panes: a tower at night is rows of light. So the two ways across a wall are worked
+ * out apart. Along it, panes under two pixels wide become the share of their run that is lit, and runs under two
+ * pixels the share of their floor. Up it, the band of panes is kept until a storey itself is under two pixels, and
+ * only then do floors become the share of the building that is lit. (One measure for both ways, and a share drawn
+ * anew for every three bays of every storey, made a tower from the park a chessboard of blocks five pixels by
+ * three: a bay there is one pixel and a storey two and a half, so the rows were averaged away while they could still
+ * be seen, and what was left was the noise.) `least` is the least share of the building that is at work (0: as it
+ * falls out, building by building). What comes back is the light's colour and how much of it there is.
+ */
+export const NIGHT_WALL = /* wgsl */ `
+fn within(at: f32, lo: f32, hi: f32, wide: f32) -> f32 {
+  return clamp((at - lo) / wide + 0.5, 0.0, 1.0) * clamp((hi - at) / wide + 0.5, 0.0, 1.0);
+}
+fn wallHash(p: vec2f, k: u32) -> f32 {
+  var h = (u32(i32(p.x)) * 73856093u) ^ (u32(i32(p.y)) * 83492791u) ^ (k * 2654435761u);
+  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
+  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
+}
+// How many bays a run of lit panes is.
+const WALL_RUN = 6.0;
+fn nightWall(fx: f32, fy: f32, ax: f32, ay: f32, pw: f32, y0: f32, ph: f32, seed: u32, least: f32) -> vec4f {
+  let storey = floor(fy);
+  // The building: how much of it is at work tonight (a sixth to a half, or least if that is more), and how warm its lamps are.
+  let whole = wallHash(vec2f(0.0, 0.0), seed);
+  let busy = max(0.16 + 0.34 * whole, least);
+  // The floor: most of them a little lit, some dark, a few from end to end. (Its mean is the building's.)
+  let hf = wallHash(vec2f(7.0, storey), seed);
+  let floorShare = min(busy * (0.2 + 2.4 * hf * hf), 0.96);
+  // The run of bays, begun somewhere else on every floor, and the pane in it: a few dark, each as bright as its room.
+  let run = floor(fx / WALL_RUN + hf * WALL_RUN);
+  let on = step(1.0 - floorShare, wallHash(vec2f(run, storey), seed + 31u));
+  let hp = wallHash(vec2f(floor(fx), storey), seed + 77u);
+  let own = step(0.14, hp) * (0.55 + 0.45 * fract(hp * 13.0));
+  let bx = smoothstep(0.3, 0.8, ax);
+  let by = smoothstep(0.3, 0.8, ay);
+  let brun = max(smoothstep(0.3, 0.8, ax / WALL_RUN), by);
+  let share = mix(mix(on, floorShare, brun), busy, by);
+  let along = mix(within(fract(fx), 0.5 - pw * 0.5, 0.5 + pw * 0.5, ax) * own, pw * 0.67, bx);
+  let up = mix(within(fract(fy), y0, y0 + ph, ay), ph, by);
+  // Warm lamps in most, a whiter light in offices, a floor in a dozen the cold white of tubes.
+  let cold = step(0.92, wallHash(vec2f(3.0, storey), seed + 5u)) * (1.0 - by);
+  let tint = mix(mix(vec3f(1.0, 0.64, 0.32), vec3f(1.0, 0.82, 0.56), fract(whole * 7.0)), vec3f(0.78, 0.9, 1.0), cold);
+  return vec4f(tint, along * up * share);
+}
+`
 /** Each material's own colour and how its cells differ from one another (a fifth either way at 1), then how rough it is, how much it mirrors, how much it glows. Sixteen of each. */
 export function materials(): Float32Array<ArrayBuffer> {
   const M: [string, number, number, number, number][] = [
@@ -116,7 +234,14 @@ struct Globals {
   fog: vec4f,
   // The colour of the fog as the hour lights it.
   fogTint: vec4f,
+  // The landmarks' own lights by night (#450, LANDMARK_LIGHT): none where its strength is 0.
+  beacon: array<Beacon, 8>,
 }
+// A landmark's light (heroes.rs \`night\`): the middle of its foot, measured as the eye is, and half its lit part's width
+// at its foot (m); that part's foot and top over the landmark's own foot, half its width at the top, and how far apart
+// its dark rings are (m); its colour and how strong (0: no light of its own); how tall its top's lamp is, a storey and
+// a bay of its glass (0: its glass is its windows already) and how far from its middle it reaches (m; 0: no more of them).
+struct Beacon { at: vec4f, span: vec4f, colour: vec4f, more: vec4f }
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
 `
@@ -1034,6 +1159,9 @@ ${GLASS}
 ${PAINT}
 ${AIR}
 ${NOISE}
+${NIGHT_WALL}
+${LANDMARK_LIGHT}
+${LEAF_NIGHT}
 fn cloud(p: vec2f) -> f32 {
   var q = p;
   var sum = 0.0;
@@ -1377,7 +1505,16 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     // Windows, lamps and signs are lit well before the day has gone, and in rain.
     let dark = g.weather.z;
     // Its light is its colour made strong: a pale tint by day is a coloured tube by night.
-    if (sign) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
+    // (Not a lettering board's letters, #450: lit of themselves at 3.2 they were over what the last pass spreads as a
+    // lamp's, and BLOG from the park was four blots. A billboard is lit by lamps on arms before its face: the box the
+    // boards keep, looks.keep, is washed by them, brighter towards the lamps at its top, and its pale letters are
+    // read by that light against their dark panels, under what is spread. Nor are its panels a wall with windows.)
+    let board = kept(p, looks.keep0, looks.keep1);
+    if (sign && !board) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
+    if (board && n.y > -0.5) {
+      let up = clamp((p.y - looks.keep0.y) / max(looks.keep1.y - looks.keep0.y, 1.0), 0.0, 1.0);
+      col += albedo * vec3f(1.0, 0.92, 0.78) * (1.5 + 1.5 * up) * clamp(dark * 3.0, 0.0, 1.0);
+    }
     // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow.
     if (stuff == 15u && !sign) { col += vec3f(1.0, 0.76, 0.46) * 4.6 * dark; }
     let fine = hit.cell * i32(1u << hit.level);
@@ -1397,17 +1534,18 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
     // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
     // 1.6 m of each storey of 3.1 m, half the bay wide and half the storey tall, about a third of them with someone
-    // home, the same warm light; where a pane is under two pixels, the wall glows by the share of them lit.
-    if (faced && abs(n.y) < 0.5 && !slope && hit.level >= 2u && (stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u)) {
+    // home, the same warm light, lit a floor and a run of bays at a time (NIGHT_WALL).
+    if (faced && abs(n.y) < 0.5 && !slope && !board && hit.level >= 2u && (stuff == 7u || stuff == 8u || stuff == 9u || stuff == 10u)) {
       let s = f32(1u << hit.level);
       let q = (vec3f(fine) + qc * s) * 0.1;
       let fx = select(q.x, q.z, abs(n.x) > abs(n.z)) / 1.6;
       let fy = q.y / 3.1;
       let wide = max(hit.t, 1.0) * g.pixel * 0.1 / 1.6;
       let inPane = smoothstep(0.24, 0.26, fract(fx)) * (1.0 - smoothstep(0.74, 0.76, fract(fx))) * smoothstep(0.24, 0.26, fract(fy)) * (1.0 - smoothstep(0.76, 0.78, fract(fy)));
-      let one = smoothstep(0.62, 0.66, hash2i(vec2i(floor(vec2f(fx, fy))) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))));
       let blur = smoothstep(0.3, 0.8, wide);
-      let lampWall = mix(one * inPane, 0.26 * 0.2, blur) * clamp(dark * 3.0, 0.0, 1.0);
+      // (Which building it is the cells do not say: the block of 40 m it stands in and the way the wall looks.)
+      let seed = u32(hash2i(vec2i(floor(q.xz / 40.0)) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))) * 65535.0);
+      let wall = nightWall(fx, fy, wide, wide * 1.6 / 3.1, 0.5, 0.25, 0.52, seed, 0.0);
       // The window screen (eggs.ts): each pane its own pixel of it, seen from where the pane's middle is; where panes
       // are under two pixels, the wall shows it by the share of it that is glass.
       var pic = vec4f(0.0);
@@ -1416,7 +1554,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
         let mid = (floor(vec2f(fx, fy)) + 0.5 - vec2f(fx, fy)) * vec2f(16.0, 31.0);
         pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
       }
-      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(mix(2.4, PANE_LIGHT, smoothstep(1.5, 4.0, 0.5 / max(wide, 0.001))), 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
+      col += wall.rgb * wall.a * clamp(dark * 3.0, 0.0, 1.0) * mix(mix(2.4, PANE_LIGHT, smoothstep(1.5, 4.0, 0.5 / max(wide, 0.001))), 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
     }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
@@ -1453,6 +1591,16 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       col += vec3f(1.0, 0.72, 0.4) * streak * rough * wet * dark * 2.6;
     }
     col += albedo * vec3f(1.0, 0.78, 0.48) * min(pool * pool, 1.2) * dark * (0.12 + 0.88 * max(n.y, 0.0)) * 1.5;
+    // A tree's crown takes the city's glow (LEAF_NIGHT): the lamps' pools above are its light from under where one is near.
+    if (stuff == 13u) { col += leafNight(albedo, n, p) * clamp(dark * 3.0, 0.0, 1.0) * 0.6; }
+    // A landmark's own light (heroes.rs night): its crown, its spire.
+    // (Its lamps are the city's too: what the windows show, the crown's screen shows, and its own light as much as that leaves on.)
+    let own = landmarkLight(p, max(hit.t, 1.0) * g.pixel * 0.1);
+    if (own.r + own.g + own.b > 0.0) {
+      let shown = screenOf(p);
+      col += own * clamp(dark * 3.0, 0.0, 1.0) * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.16;
+    }
+    col += landmarkLamp(p) * clamp(dark * 3.0, 0.0, 1.0);
   }
   return col;
 }
@@ -1878,6 +2026,8 @@ export interface Marcher {
   readonly day: number
   /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day (linear colours). */
   air: Air
+  /** The landmarks as the night knows them (heroes.rs `night`): their own lights, and their glass's storey and bay. Eight at most. */
+  beacons: readonly Beacon[]
   /**
    * The window screen (#450, eggs.ts): the picture the city's lit windows show (SCREEN_SIZE, rgba8: light, and how
    * much of a pane's own lamp it puts out), how far it is up (0: off, and no window asks it), and how much larger
@@ -1886,6 +2036,8 @@ export interface Marcher {
   readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number }
 }
 
+/** A landmark as the night knows it: the middle of its foot in the world's finest cells, and its rule's twelve numbers (heroes.rs `night`). */
+export interface Beacon { at: readonly [number, number, number]; night: readonly number[]; /** How far from its middle it reaches, m. */ reach: number }
 /** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
 export interface Air { haze: number; clouds: number; sky?: { zenith: readonly [number, number, number]; horizon: readonly [number, number, number] } }
 
@@ -1929,7 +2081,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -1952,7 +2104,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192 + 512), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -1990,7 +2142,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const lit = mix(mix([0.8, 0.82, 0.85], [0.95, 0.72, 0.6], low), [0.6, 0.62, 0.66], Math.max(rain, cloud) * 0.8)
     f.set(mix([0.07, 0.065, 0.075], times(lit, 0.9), Math.min(1, day * 1.15)), s + 12)
     // A sky of the realm's own by day (#450, #423's photograph's: overhead and at the horizon), in place of the hour's.
-    if (air.sky && day > 0.5 && !rain) { f.set(air.sky.zenith, 44 + MAX_LEVELS * 32); f.set(air.sky.horizon, 48 + MAX_LEVELS * 32); f.set(air.sky.horizon, 52 + MAX_LEVELS * 32) }
+    // It gives way to the hour's as the day goes, from nine tenths of the day to half: held whole until half and then
+    // dropped, the afternoon's sky (as bright as a lamp to the last pass, which spreads such light as night comes)
+    // stood over the evening and was spread white across the picture at six o'clock, then went purple at a stroke.
+    if (air.sky && day > 0.5 && !rain) {
+      const own = Math.min(1, (day - 0.5) / 0.4)
+      for (const [at, colour] of [[44, air.sky.zenith], [48, air.sky.horizon], [52, air.sky.horizon]] as const) { const i = at + MAX_LEVELS * 32; for (let k = 0; k < 3; k++) f[i + k] += (colour[k] - f[i + k]) * own }
+    }
   }
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
@@ -2048,11 +2206,17 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       f.set([air.haze, air.clouds, screen.up, screen.moon], s + 4)
       f.set([fog * FOG_THICK, FOG_TOP, front - anchor[0], anchor[0]], s + 8)
       f[s + 15] = anchor[2]
+      for (let i = 0; i < 8; i++) {
+        const b = beacons[i], at = s + 16 + i * 16
+        if (!b) { f.fill(0, at, at + 16); continue }
+        f.set([b.at[0] - anchor[0], b.at[1] - anchor[1], b.at[2] - anchor[2], b.night[2], b.night[0], b.night[1], b.night[3], b.night[8], b.night[4], b.night[5], b.night[6], b.night[7], b.night[9], b.night[10], b.night[11], b.reach], at)
+      }
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
   let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0, cloud = 0, fog = 0, front = 0
   let air: Air = { haze: 1, clouds: 1 }
+  let beacons: readonly Beacon[] = []
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -2091,6 +2255,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
     get air() { return air },
     set air(a: Air) { air = a; colours() },
+    get beacons() { return beacons },
+    // (Those with a light of their own first: the light's loop stops at the first without.)
+    set beacons(b: readonly Beacon[]) { beacons = [...b].sort((p, q) => (q.night[7] > 0 ? 1 : 0) - (p.night[7] > 0 ? 1 : 0)).slice(0, 8) },
     screen,
     pick(view, plain = false) {
       // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
