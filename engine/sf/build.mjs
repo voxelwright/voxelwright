@@ -22,6 +22,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
+import { marksBytes, marksOf } from './marks.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -148,6 +149,11 @@ else if (realm.far && !manifest.far) console.log(`  no far model in the release 
 // Landmarks by rule (#450, core/src/heroes.rs): where each stands, read by every core (bay.ts `open`).
 mkdirSync(join(out, 'bay'), { recursive: true })
 copyFileSync(join(root, 'sf/heroes.json'), join(out, 'bay/heroes.json'))
+// The road's paint and rails from the release's street graph (#450, sf/marks.mjs), read by every core (bay.ts `open`).
+if (manifest.graph) {
+  const graphs = Object.values(manifest.graph).map((o) => JSON.parse(readFileSync(join(out, 'sf', dirname(pointer.manifest), o.path), 'utf8')))
+  writeFileSync(join(out, 'bay/marks.bin'), marksBytes(marksOf(graphs)))
+}
 // The engine's page with the realm's record in it (as the release made it), and its script beside it.
 put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,">`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
 

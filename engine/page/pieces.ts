@@ -76,6 +76,21 @@ const FAR = 100000.0;
   return out;
 }
 ${PAINT}
+// A vehicle's paint (#450: the library's paint role, marked polished by street.ts; kinds.rs POLISHED): a clear coat
+// over the colour. It mirrors the sky as the hour colours it, a little face on and more at a glance (Schlick, from
+// 0.04), the street where it looks down, and the sun in it is a sheen. Only this body's own faces are asked: nothing
+// of the world, so it costs a few multiplies a pixel. Hubs, poles and brass are not paint, and stay as they were.
+// In cells finer than the world's a curved panel is a stair of small faces, half of them seen nearly along: the
+// glance counts for no more than at 57 degrees, as a pane's does, or a door would be bands of sky.
+fn carPaint(col: vec3f, n: vec3f, rd: vec3f, direct: f32) -> vec3f {
+  let glance = min(1.0 - clamp(dot(-rd, n), 0.0, 1.0), select(1.0, 0.45, u.cell < 1.0));
+  let f = 0.04 + 0.96 * pow(glance, 5.0);
+  let back = reflect(rd, n);
+  let sky = mix(g.skyHorizon.rgb, g.skyZenith.rgb, pow(clamp(back.y, 0.0, 1.0), g.skyZenith.a));
+  let seen = select(sky, sky * 0.2, back.y < 0.0);
+  let sheen = pow(max(dot(back, u.sun), 0.0), 60.0) * direct * 1.2;
+  return col * (1.0 - f) + seen * f + vec3f(sheen);
+}
 // What is behind a pane of the world's glass that the march looked through is seen through it, tinted as the pane tints.
 fn behindPane(in: Out) -> vec3f {
   let pane = textureLoad(panes, vec2i(in.pos.xy), 0);
@@ -94,7 +109,9 @@ fn behindPane(in: Out) -> vec3f {
     let sunny = sunlit(in.seen + u.eye, in.facing, 0u);
     if (sunny >= 0.0) { direct *= sunny; }
   }
-  let lit = tone(shade(albedo, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow));
+  var col = shade(albedo, in.facing, normalize(in.seen), u.sun, direct, 1.0, m.rough, m.glow);
+  if ((in.kind & 128u) != 0u) { col = carPaint(col, in.facing, normalize(in.seen), direct); }
+  let lit = tone(col);
   if (u.ghost != 0) {
     // Every other pixel, in a grain that drifts upward, and paler: the world shows through.
     let p = vec2u(in.pos.xy);
