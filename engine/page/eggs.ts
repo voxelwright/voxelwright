@@ -89,9 +89,9 @@ const LOOKS: Record<Egg, { hour: number; weather: Weather; grade?: readonly [num
 }
 /** The videos (made for the site by scripts/landing/encode-eggs.mjs: 160 x 120, -16 LUFS, HE-AAC). `outside` is what the panes beyond the picture show. */
 const VIDEOS = {
-  rickroll: { file: 'eggs/rick.mp4', title: 'Never Gonna Give You Up', still: 20, outside: [14, 8, 22, 190] as const, contrast: 1.25,
+  rickroll: { file: 'eggs/rick.mp4', title: 'Never Gonna Give You Up', outside: [14, 8, 22, 190] as const, contrast: 1.25,
     start: 'Never gonna give you up. Rick Astley is on every window in the city.', end: 'Never gonna let you down: that was the whole song.' },
-  apple: { file: 'eggs/bad-apple.mp4', title: 'Bad Apple!!', still: 62, outside: [0, 0, 0, 240] as const, contrast: 1.1,
+  apple: { file: 'eggs/bad-apple.mp4', title: 'Bad Apple!!', outside: [0, 0, 0, 240] as const, contrast: 1.1,
     start: 'Bad Apple!! The city plays it in shadow.', end: 'Bad Apple!! is over. The lights come back on.' },
 }
 
@@ -227,7 +227,7 @@ export function eggs(page: EggsPage) {
       if (running !== current || started !== clock) return
       current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast })
       m.src = url
-      if (current.held) { m.pause(); m.currentTime = v.still } else run(current)
+      run(current)
       say(`${v.start} Esc, or Stop on the player, ends it.`)
     } catch (e) {
       console.warn(`${v.file} did not load:`, e)
@@ -341,6 +341,8 @@ export function eggs(page: EggsPage) {
   /** A line said while the joke is on: true if it was the joke's. */
   const joke = (said: string) => {
     if (!knock || performance.now() > knock.until) { knock = null; return false }
+    // An egg's own words are that egg, joke or no joke.
+    if (knock.stage !== 'asked' && PHRASES.has(said)) { knock = null; banner(null); return false }
     knock.until = performance.now() + 60_000
     if (knock.stage === 'asked') {
       if (!/^who ?s there$|^who is there$/.test(said)) return false
@@ -504,7 +506,6 @@ export function eggs(page: EggsPage) {
     }
     wasDark = dark
   })
-  // A video under the page's pause (none in the realm yet) would be held: `held` is kept for that.
 
   const status = document.createElement('p')
   status.className = 'egg-status'

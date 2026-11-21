@@ -1315,7 +1315,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
         let mid = (floor(vec2f(fx, fy)) + 0.5 - vec2f(fx, fy)) * vec2f(16.0, 31.0);
         pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
       }
-      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane, 0.26, blur) * 2.4;
+      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
     }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
