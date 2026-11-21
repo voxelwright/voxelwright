@@ -35,6 +35,8 @@ const SHELF = join(VILLAGE, 'kept-cars', 'shelf')
 const PYTHON = join(VILLAGE, 'bay', 'venv', 'bin', 'python')
 const quality = Number(arg('quality', '11'))
 const realm = JSON.parse(readFileSync(join(root, 'sf', 'realm.json'), 'utf8'))
+// Its billboards and banner (sf/boards.json, edited with sf/boards.mjs): in the page's own record, so nothing more is asked for.
+realm.signs = JSON.parse(readFileSync(join(root, 'sf', 'boards.json'), 'utf8'))
 
 const NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.ts\b/g
 const js = (text) => text.replace(NAMED, '$1$2$3.js')

@@ -141,6 +141,21 @@ const THIN = (1 / 280).toFixed(6)
  * The bank is even below its top and thins above it, a cell in THIN at a time; only what is west of its front is in it.
  * Its top is lumpy where the look crosses it, and its front wavy, by a slow noise that drifts with the time.
  */
+/** A quick number for a place on a plane, and a smooth noise of them: the clouds', the fog's (FOG) and the far model's fog. */
+export const NOISE = /* wgsl */ `
+// A quick number for a place on a plane: clouds need many and need them only to look unruly.
+fn hash2i(c: vec2i) -> f32 {
+  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
+  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
+  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
+}
+fn noise2(p: vec2f) -> f32 {
+  let i = vec2i(floor(p));
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2i(i), hash2i(i + vec2i(1, 0)), u.x), mix(hash2i(i + vec2i(0, 1)), hash2i(i + vec2i(1, 1)), u.x), u.y);
+}
+`
 export const FOG = /* wgsl */ `
 fn fogged(rd: vec3f, dist: f32) -> vec2f {
   // The part of the look west of the front: from t0 to t1.
@@ -181,6 +196,13 @@ fn fogged(rd: vec3f, dist: f32) -> vec2f {
   var over = (span - under) * e1;
   if (abs(y2 - y1) > 0.5) { over = (span - under) * (e1 - exp(-y2 * ${THIN})) / ((y2 - y1) * ${THIN}); }
   return vec2f(1.0 - exp(-min(g.fog.x * (under + over), 30.0)), lump);
+}
+// What is dist along a look, seen through the fog: seen from over it, its sunlit top is brighter than the fog one is
+// in, and its billows are lit on their tops. The cells' and the far model's (far.ts) alike.
+fn inFog(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
+  let fog = fogged(rd, dist);
+  let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
+  return mix(col, g.fogTint.rgb * (1.0 + over * (0.08 + 0.36 * (fog.y - 0.35))), fog.x);
 }
 `
 
@@ -248,6 +270,29 @@ fn glassTint(kind: u32, thick: f32) -> vec3f {
 fn glassMirror(rd: vec3f, n: vec3f) -> f32 {
   let facing = 1.0 - clamp(dot(-rd, n), 0.0, 1.0);
   return looks.material[11].mirror * (0.08 + 0.92 * pow(facing, 5.0));
+}
+`
+
+/**
+ * Where the far model takes over from the cells at a point p (far.ts), the same for both: past `reach` from the eye,
+ * or past `wedge.w` in #423's wedge (`inWedge`), whose faces are finer than the cells from there (`wedge`: its apex (x, z) from
+ * where p is measured and how far it reaches, finest cells, 0 where there is none; `bear`: the compass bearings it
+ * lies between, radians).
+ */
+export const HANDOVER = /* wgsl */ `
+fn inWedge(p: vec3f, wedge: vec4f, bear: vec4f) -> bool {
+  let d = p.xz - wedge.xy;
+  let b = atan2(d.x, -d.y);
+  let bearing = select(b, b + 6.2831853, b < 0.0);
+  return wedge.z > 0.0 && bearing > bear.x && bearing < bear.y && dot(d, d) < wedge.z * wedge.z;
+}
+// A box the wedge's nearer reach leaves to the cells (a lettering board's, #450: its letters are cells, which the
+// wedge's faces past 100 m know nothing of): its low and high corners, measured as p is; none where k1.w is 0.
+fn kept(p: vec3f, k0: vec4f, k1: vec4f) -> bool {
+  return k1.w > 0.0 && all(p >= k0.xyz) && all(p <= k1.xyz);
+}
+fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f, k0: vec4f, k1: vec4f) -> f32 {
+  return select(reach, min(reach, wedge.w), inWedge(p, wedge, bear) && !kept(p, k0, k1));
 }
 `
 
@@ -613,8 +658,8 @@ struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
 // far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
 // is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
-// 64 x 64 tiles it holds.
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32> }
+// 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER).
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f }
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
@@ -926,6 +971,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   return hit;
 }
 ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
+${HANDOVER}
 // Whether the far model holds the tile a point is in (far.ts).
 fn farHeld(p: vec3f) -> bool {
   let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
@@ -946,8 +992,12 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   // Past the far model's reach, where it holds the tile, what the cells met there is its to draw (far.ts): the coarse
   // boxes stand far wider than the buildings they hold. The look goes on to meet the sea, as though it had left the boxes.
   // Only a look from the eye (through a pane too): the water's look at what it mirrors starts at the water, and the far
-  // model is not drawn into what is mirrored.
-  if (eyed && looks.far.w > 0.0 && hit.t > looks.far.w && all(ro == g.eye) && farHeld(ro + rd * hit.t)) { hit.t = -1.0; hit.left = true; }
+  // model is not drawn into what is mirrored. A tool's aim (CELLS) is handed over only past the reach, not the wedge's:
+  // what it edits nearer is in the cells.
+  if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
+    let p = ro + rd * hit.t;
+    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p)) { hit.t = -1.0; hit.left = true; }
+  }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
   if (hit.t >= 0.0 && hit.t <= t) { return hit; }
@@ -972,18 +1022,7 @@ ${LIGHT}
 ${GLASS}
 ${PAINT}
 ${AIR}
-// A quick number for a place on a plane: clouds need many and need them only to look unruly.
-fn hash2i(c: vec2i) -> f32 {
-  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
-  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
-  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
-}
-fn noise2(p: vec2f) -> f32 {
-  let i = vec2i(floor(p));
-  let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash2i(i), hash2i(i + vec2i(1, 0)), u.x), mix(hash2i(i + vec2i(0, 1)), hash2i(i + vec2i(1, 1)), u.x), u.y);
-}
+${NOISE}
 fn cloud(p: vec2f) -> f32 {
   var q = p;
   var sum = 0.0;
@@ -1717,10 +1756,7 @@ override FOGGY: bool = false;
   if ((g.flags & 128u) == 0u && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
   // The fog, over everything as far as the first thing met, and over the sky (a look that met nothing goes on for ever).
   if (FOGGY && (g.flags & 128u) == 0u) {
-    // Seen from over it, its sunlit top is brighter than the fog one is in, and its billows are lit on their tops.
-    let fog = fogged(rd, select(1e7, first, first >= 0.0));
-    let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
-    col = mix(col, g.fogTint.rgb * (1.0 + over * (0.08 + 0.36 * (fog.y - 0.35))), fog.x);
+    col = inFog(col, rd, select(1e7, first, first >= 0.0));
   }
   if ((g.flags & 4u) != 0u) {
     // How hard each pixel was: steps as heat.
@@ -1747,6 +1783,8 @@ export interface View {
 /** PLAIN: no skip over empty air but from node to node. Slower and never wrong: what the skips are checked against. */
 /** UNDER: the eye is under the sea. The marcher sets it itself, from `under`. */
 export const SHADOWS = 1, MIRRORS = 2, HEAT = 4, COUNT = 8, PICK = 16, FLAT = 32, PLAIN = 64, UNDER = 128
+/** A tool's aim (`pick`): the far model takes it over only past its reach, not its wedge's (HANDOVER), so that an edit there finds the cells it changes. */
+export const CELLS = 256
 /** What the march leaves for what is drawn after it (Marcher.panes). */
 /** The fog bank (#450) when it is all in: how thick a finest cell (a third left in 260 m), and its top over the sea, 140 m. */
 const FOG_THICK = 1 / 2400, FOG_TOP = 1400
@@ -1762,9 +1800,11 @@ export interface Marcher {
   /**
    * Where the far model (far.ts) takes over: past `reach` (finest cells from the eye), in the tiles `held` marks, what
    * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
-   * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn.
+   * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn. In `wedge`
+   * (HANDOVER: its apex x and z, how far it reaches and the reach in it, cells; its bearings, radians) the reach is its own,
+   * except in `keep` (low and high corners, cells), which is the cells' out to the reach.
    */
-  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>): void
+  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null, keep?: readonly number[] | null): void
   /**
    * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
    * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
@@ -1863,7 +1903,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
@@ -1926,11 +1966,17 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   /** Tells the shader the view, the boxes and the sun's maps. Returns the corner near the eye that everything is measured from. */
   /** Where the far model's map of tiles begins (cells from the frame's corner, x and z), a tile's size, and its reach (farCover). */
   let farMap = [0, 0, 1, 0]
+  /** Its wedge (farCover): the apex (cells from the frame's corner, x and z), how far it reaches and the reach in it (cells), its bearings (radians). */
+  let farWedge: readonly number[] | null = null
+  /** The box the wedge leaves to the cells (farCover's `keep`): low and high corners, cells from the frame's corner. */
+  let farKeep: readonly number[] | null = null
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
       // The far model's map is measured from the same corner (farCover).
       if (farMap[3] > 0) device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, new Float32Array([farMap[0] - anchor[0], farMap[1] - anchor[2], farMap[2], farMap[3]]))
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, farWedge ? new Float32Array([farWedge[0] - anchor[0], farWedge[1] - anchor[2], farWedge[2], farWedge[3], farWedge[4], farWedge[5], 0, 0]) : new Float32Array(8))
+      device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, farKeep ? new Float32Array([farKeep[0] - anchor[0], farKeep[1] - anchor[1], farKeep[2] - anchor[2], 0, farKeep[3] - anchor[0], farKeep[4] - anchor[1], farKeep[5] - anchor[2], 1]) : new Float32Array(8))
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
       f.set([...view.up, time], 8)
@@ -1985,7 +2031,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const pointRead = device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ })
   const once = async (view: View, plain: boolean) => {
     const encoder = device.createCommandEncoder()
-    self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | (plain ? PLAIN : 0), 0)
+    self.draw(encoder, point, { ...view, tanHalf: 0.0001 }, PICK | CELLS | (plain ? PLAIN : 0), 0)
     encoder.copyTextureToBuffer({ texture: pointTexture }, { buffer: pointRead }, [1, 1])
     device.queue.submit([encoder.finish()])
     await pointRead.mapAsync(GPUMapMode.READ)
@@ -2047,8 +2093,10 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       })
     },
     rebind() { bind = binding(); sunBind = sunBinding() },
-    farCover(corner, size, reach, held) {
+    farCover(corner, size, reach, held, wedge = null, keep = null) {
       farMap = [corner[0] * size, corner[1] * size, size, reach]
+      farWedge = wedge
+      farKeep = keep
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
     },
     async reshade(change) {

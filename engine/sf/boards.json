@@ -1,0 +1,113 @@
+{
+  "version": 1,
+  "banner": {
+    "content": {
+      "text": "zahynailo.dev"
+    },
+    "around": [
+      519065,
+      665523
+    ],
+    "radius": [
+      260,
+      70
+    ],
+    "bearing": 120,
+    "height": 131,
+    "rise": -19,
+    "speed": 14,
+    "size": [
+      40,
+      6.5
+    ],
+    "start": 0.15
+  },
+  "boards": [
+    {
+      "id": "blog",
+      "name": "Blog",
+      "type": "lettering",
+      "building": [
+        518048,
+        664928
+      ],
+      "at": [
+        518048,
+        529,
+        664928
+      ],
+      "facing": 0,
+      "size": 4,
+      "content": {
+        "text": "BLOG"
+      },
+      "to": "/blog/"
+    },
+    {
+      "id": "x",
+      "name": "X",
+      "type": "logo",
+      "logo": "x",
+      "building": [
+        528767,
+        667125
+      ],
+      "at": [
+        528767,
+        911,
+        667125
+      ],
+      "facing": 0,
+      "turn": 261,
+      "size": 24,
+      "content": {
+        "text": "X"
+      },
+      "to": "https://x.com/pasha_knz"
+    },
+    {
+      "id": "linkedin",
+      "name": "LinkedIn",
+      "type": "logo",
+      "logo": "linkedin",
+      "building": [
+        525375,
+        673848
+      ],
+      "at": [
+        525375,
+        1433,
+        673848
+      ],
+      "facing": 0,
+      "turn": 350.3,
+      "size": 24,
+      "content": {
+        "text": "LinkedIn"
+      },
+      "to": "https://www.linkedin.com/in/pavlo-zahynailo/"
+    },
+    {
+      "id": "twitch",
+      "name": "Twitch",
+      "type": "logo",
+      "logo": "twitch",
+      "building": [
+        528841,
+        672395
+      ],
+      "at": [
+        528841,
+        1338,
+        672395
+      ],
+      "facing": 0,
+      "turn": 316.6,
+      "size": 26,
+      "content": {
+        "text": "Twitch"
+      },
+      "to": "https://www.twitch.tv/p_bender"
+    }
+  ]
+}

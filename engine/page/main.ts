@@ -51,6 +51,10 @@ import { LOCAL, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
+import { boards } from './boards.ts'
+import { firstView } from './first.ts'
+import { tell } from './host.ts'
+import { signs } from './signs.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
@@ -170,7 +174,9 @@ async function main() {
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
-  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [])
+  // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
+  const first = LOCAL ? firstView(canvas, query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
 
   // ── Moving ──────────────────────────────────────────────────────────────
   // The page's own mode, under any a lane adds (input.ts): the keys and the look move the eye, a click uses the
@@ -548,7 +554,8 @@ async function main() {
   // This thread's own core is told of every edit too: it is asked what a cell is made of at once, where the mover could
   // only answer a frame on (what is heard underfoot, and the eye behind a person, which must not be in a wall).
   const tellCore = (words: Int32Array) => { new Int32Array(core.memory.buffer, core.edits_room(words.length), words.length).set(words); core.world_edit(-1) }
-  const change = (edit: Edit) => { if (!adopted) world.edit(edit); spoiled.push(edit); farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
+  /** `farToo` false: the far model keeps the tile (#450, the billboards: laid in every world, they are no reason to draw their whole tiles as cells from far off). */
+  const change = (edit: Edit, farToo = true) => { if (!adopted) world.edit(edit); spoiled.push(edit); if (farToo) farModel.edited(edit.box); staff.changed(edit); me.edit(edit.words); tellCore(edit.words) }
   /** Cells that bodies have become, waiting to be put in the world together. */
   let putting: { runs: Int32Array<ArrayBuffer>; box: Edit["box"] }[] = [], putSince = 0
   const put = () => {
@@ -1262,6 +1269,40 @@ async function main() {
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
+  // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record
+  // (sf/boards.json). Laid as edits of the world, so every tool breaks them; reset lays them again. The page goes on
+  // without them if they cannot be made. `?boards=0` leaves them out, `?boards=edit` opens their editor (sf/boards.mjs).
+  const signboards = LOCAL?.signs && !far && query.get('boards') !== '0' ? await boards({
+    file: LOCAL.signs, device, format: gpu.format, passes: pluginDraws, pieces: falling,
+    lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
+    // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
+    kept: (box) => farModel.keep(box),
+    reach: () => farModel.reach * M,
+    done: () => world.done().length,
+    kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
+    pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
+    aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
+  }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
+  Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
+  // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
+  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
+  /**
+   * What the signs' screens cost the GPU here (#450): the march and the far model alone, and with the pass that draws
+   * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
+   */
+  const signPasses = async (rounds = 5) => {
+    const to = offscreen(gpu, [canvas.width, canvas.height]), v = view(), alone: number[] = [], both: number[] = []
+    paused = true
+    for (let i = 0; i < rounds; i++) {
+      alone.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v) }, 100)).ms)
+      both.push((await pace(gpu, to, (encoder, target) => { march.draw(encoder, target, v, flags, 0); farModel.draw(encoder, target, v); pluginDraws.draw(encoder, target, v, 0) }, 100)).ms)
+    }
+    paused = false
+    to.destroy()
+    const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
+    return { world: middle(alone), withSigns: middle(both), size: [canvas.width, canvas.height] }
+  }
+  Object.assign((globalThis as unknown as { engine: object }).engine, { signPasses })
   /**
    * The world as the realm has it again (#450): what was broken, burnt, flooded and thrown is forgotten, and so is
    * every living thing and loose body. The world is the tiles as they came plus the edits made since (world.ts, every
@@ -1289,6 +1330,7 @@ async function main() {
     Object.assign(pose, began)
     if (afoot) me.walk(true)
     await setDown()
+    signboards?.relay()
     over.notice('The world is as it was', 3000)
   }
   /**
@@ -1325,17 +1367,16 @@ async function main() {
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
-    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs-stand-in.ts,
-    // the shape of feature/450-boards' signs.ts until it lands). Fetched once the park is shown, so that nothing
-    // of them is in the bytes before it.
+    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
+    // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
     let hushed: AudioContext | null = null
     const hatch = () => {
       if (!seen.near) return
       watchers.delete(hatch)
-      void Promise.all([import('./eggs.ts'), import('./signs-stand-in.ts')]).then(([{ eggs }, { standInSigns }]) => {
-        const signs = standInSigns()
+      void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.inView ?? true,
           mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
@@ -1430,6 +1471,7 @@ main().catch(async (e: unknown) => {
   over.status(`This did not work here: ${text.split('\n')[0]}`)
   // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.
   if (LOCAL) {
+    tell('error', { message: text.split('\n')[0] })
     document.querySelector<HTMLElement>('#boom')?.style.setProperty('display', 'none')
     const told = document.createElement('p')
     told.style.cssText = 'position:fixed;inset:0;margin:auto;height:fit-content;max-width:min(30em,calc(100vw - 32px));padding:0 16px;font:500 17px/1.45 system-ui,sans-serif;color:#e8ecf2;text-align:center;z-index:20'
