@@ -308,9 +308,17 @@ async function main() {
     water.light(sun, day)
   }
   // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
+  /** The realm's own light (#450): the sun and grade of the afternoon it is seen in, the hour unset (the eggs give it back, eggs.ts). */
+  const ownLight = () => {
+    if (!LOCAL?.air?.sun) return setHour(null)
+    hour = null
+    const sun = LOCAL.air.sun
+    march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1)
+    if (LOCAL.air.grade) grade = LOCAL.air.grade
+  }
   if (LOCAL?.air) {
     march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
-    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) { const sun = LOCAL.air.sun; march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1); if (LOCAL.air.grade) grade = LOCAL.air.grade }
+    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) ownLight()
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
@@ -1260,8 +1268,11 @@ async function main() {
    * core): letting go of the edits is the whole of it, and nothing is sent anywhere. The eye goes back to where the
    * realm begins, on foot if it was, and the kept things are set down again.
    */
+  /** What else is put back with the world (the eggs, eggs.ts). */
+  const resetting = new Set<() => void>()
   const reset = async () => {
     if (far) return over.notice('A shared world is put back by its keeper, not by one page', 5000)
+    for (const each of resetting) each()
     const afoot = me.on
     alive.forget()
     if (afoot) me.walk(false)
@@ -1312,7 +1323,33 @@ async function main() {
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) }) })
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
+    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs-stand-in.ts,
+    // the shape of feature/450-boards' signs.ts until it lands). Fetched once the park is shown, so that nothing
+    // of them is in the bytes before it.
+    let hushed: AudioContext | null = null
+    const hatch = () => {
+      if (!seen.near) return
+      watchers.delete(hatch)
+      void Promise.all([import('./eggs.ts'), import('./signs-stand-in.ts')]).then(([{ eggs }, { standInSigns }]) => {
+        const signs = standInSigns()
+        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
+          device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
+          notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
+          watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          // The city's sound steps aside for an egg's: taken off the speakers, and put back.
+          hush: (on) => {
+            const voice = ears?.voice
+            if (!voice) return
+            if (on && !hushed) { try { voice.out.disconnect(voice.context.destination); hushed = voice.context } catch { /* not connected */ } }
+            else if (!on && hushed) { voice.out.connect(hushed.destination); hushed = null }
+          },
+        }) })
+      })
+    }
+    watchers.add(hatch)
   }
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
