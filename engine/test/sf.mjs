@@ -250,7 +250,7 @@ try {
   const solid = (at) => page.evaluate((at) => { const e = globalThis.engine; let n = 0; for (let x = -30; x <= 30; x += 2) for (let y = -30; y <= 30; y += 2) for (let z = -30; z <= 30; z += 2) if (x * x + y * y + z * z <= 900 && e.kind(at[0] + x, at[1] + y, at[2] + z)) n++; return n }, at)
   const hit = await page.evaluate(async () => { const e = globalThis.engine, r = await e.blast(18); return r && { at: r.at, material: r.material, t: r.t } })
   await page.waitForTimeout(5000)
-  const broken = hit && { edits: await page.evaluate(() => globalThis.engine.world.done().length), solid: await solid(hit.at) }
+  const broken = hit && { edits: await page.evaluate(() => globalThis.engine.world.done().length - (globalThis.engine.boards?.edits ?? 0)), solid: await solid(hit.at) }
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, { ...p, x: p.x - 25 * Math.sin(p.yaw), z: p.z + 25 * Math.cos(p.yaw), pitch: -0.1 }), aim)
   await page.waitForTimeout(1500)
   await page.screenshot({ path: join(shots, 'blast.png') })
@@ -270,14 +270,15 @@ try {
     const ms = performance.now() - began
     for (let i = 0; i < 300 && (e.world.stats.wanted || e.world.stats.stale); i++) await new Promise((r) => setTimeout(r, 100))
     await new Promise((r) => setTimeout(r, 1000))
-    return { ms: Math.round(ms), edits: e.world.done().length, things: e.alive.things.filter((t) => t.alive && t.name === 'grey saloon').length }
+    // The billboards are laid as edits again by reset (boards.ts): what is left beyond them.
+    return { ms: Math.round(ms), edits: e.world.done().length - (e.boards?.edits ?? 0), boards: e.boards?.edits ?? 0, things: e.alive.things.filter((t) => t.alive && t.name === 'grey saloon').length }
   })
   reset.solidWithin3m = hit ? await solid(hit.at) : null
   await page.evaluate((p) => Object.assign(globalThis.engine.pose, { ...p, x: p.x - 25 * Math.sin(p.yaw), z: p.z + 25 * Math.cos(p.yaw), pitch: -0.1 }), aim)
   await page.waitForTimeout(2000); await settle()
   await page.screenshot({ path: join(shots, 'reset.png') })
   f.reset = reset
-  check(reset.edits === 0 && reset.solidWithin3m > (broken?.solid ?? Infinity) && reset.things === 1, `reset: ${reset.edits} edits left, ${reset.solidWithin3m} solid cells within 3 m of the blast again (${broken?.solid} after it), ${reset.things} kept car set down again, in ${reset.ms} ms`)
+  check(reset.edits === 0 && reset.solidWithin3m > (broken?.solid ?? Infinity) && reset.things === 1, `reset: ${reset.edits} edits left beyond the ${reset.boards} that lay the billboards, ${reset.solidWithin3m} solid cells within 3 m of the blast again (${broken?.solid} after it), ${reset.things} kept car set down again, in ${reset.ms} ms`)
   // No model: however a helper was offered, it is not known and nothing is sent to it.
   const models = await page.evaluate(async () => { const e = globalThis.engine; const done = await e.ask({ wish: 'a park bench' }).catch((x) => String(x)); return { rules: e.rules, known: e.asker.known, done: done?.state ?? done, bar: getComputedStyle(document.querySelector('#ask')).display } })
   await page.waitForTimeout(1000)
@@ -295,7 +296,7 @@ try {
     e.strike(at, 14)
     await e.reset()
     await new Promise((r) => setTimeout(r, 4000))
-    return { edits: e.world.done().length, staleAnswers: e.mended.staleAnswers - staleBefore }
+    return { edits: e.world.done().length - (e.boards?.edits ?? 0), staleAnswers: e.mended.staleAnswers - staleBefore }
   }, hit?.at ?? [Math.round(aim.x * M), Math.round(aim.y * M), Math.round(aim.z * M)])
   check(ff.race.edits === 0 && ff.race.staleAnswers > 0, `reset while a blast is answered: ${ff.race.edits} edits after, ${ff.race.staleAnswers} answers of the old world let by`)
   // A mover that dies without a word, as in a tab out of memory: a blast still breaks the world after it.
