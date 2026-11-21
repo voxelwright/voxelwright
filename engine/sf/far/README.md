@@ -11,15 +11,31 @@ wedge and the squares' outside. Everywhere else they come from this folder's squ
 archives (`~/.village/engine/bay/450-inputs/<square>.zip`). The far model grows square by square as the city's run
 finishes them.
 
-Trees in the wedge are crowns on trunks (`landing/ina/matte.py` `crowns`). A column of the lidar's surface says a tree
-as a solid green mass from the ground up, and a crown that hangs over a building's outline was baked as part of that
-building: a block of wall with windows as tall as the tree, in colours fitted to the leaves that hid it (the big tree
-in the landing's left foreground was two houses' walls, 28 m high). Now every crown is found (leaf where no building is
-outlined, and a patch over a building's own roof that is leaf by its returns, ragged, no bigger than a tree and touching
-free leaf), baked as its own layers (`near-crown0` to `2`, `far-crown0`: slabs that hang lower the further inside the
-crown they are, in three greens), with a trunk under each top that stands on the ground and the building's own roof
-under what hangs over it. The square bake outside the wedge (`bake.py`) still bakes leaf as columns: at a metre a cell
-past 500 m a crown is a few pixels, and it has not been given the rule.
+Trees are crowns on trunks, by one rule (`landing/ina/matte.py` `crown_rule`) that the wedge's bake and the square
+bake (`bake.py`) both call. A column of the lidar's surface says a tree as a solid green mass from the ground up, and a
+crown that hangs over a building's outline was baked as part of that building: a block of wall with windows as tall as
+the tree, in colours fitted to the leaves that hid it (the big tree in the landing's left foreground was two houses'
+walls, 28 m high). The rule finds every crown (leaf where no building is outlined, and a patch over a building's own
+roof that is leaf by its returns, ragged, no bigger than a tree and touching free leaf) and says how low it hangs at
+each cell, what stands under it, where its trunks are, its own ragged top (the lidar's, not the smoothed surface a
+roof is given) and its gaps (clumps of columns left out, more of them in a thin crown and at its rim). A tall narrow
+crown is in leaf further down and as wide low as high. The greens are the photograph's (an olive: its big tree's mean
+is 43, 55, 27).
+
+The wedge bakes a crown as its own layers (`near-crown0` to `2`, `far-crown0`: slabs that hang lower the further
+inside the crown they are, each darker; the gaps are in the top slab), with a trunk under each top and the building's
+own roof under what hangs over it. The ragged top, the gaps and a slender crown's wider lower slabs are for crowns
+within 400 m of the eye (`DETAILED`), where a tree is tens of pixels across. Given to every crown they were 110,000
+faces more in the near layer and half a million in the far one, for nothing seen, and the park's frame at scale 0.75,
+which is at 60 a second's time as it is, went past it. The square bake writes one slab a crown (`far-crown0`), smooth
+and whole, for the same reason. The squares in the pinned release were baked before the rule was `bake.py`'s: they
+have leaf as columns until the city's far model is baked and packed again (`bake.py`'s `VERSION` is raised, so
+`grow.sh` bakes every square again).
+
+That big tree was measured against the photograph before the rule was changed: its crown is 14.3 m across the line
+of sight in the 2023 lidar and 13.9 m in the 2021 photograph, and within a metre and a half of it at every height
+(7.3, 9.8, 11.4, 12.9 m at 2, 4, 6, 8 m under its top in the photograph; 6.1, 10.0, 11.0, 11.2 m in the lidar). It
+was never too wide: it was smooth, solid and a lawn's green.
 
 In the wedge the faces are 25 cm out to 700 m from its apex and 50 cm past that, laid out with the streets (turned
 9.47 degrees), where the cells are 40 cm and more past 100 m and stepped along every street wall. So where the march's
