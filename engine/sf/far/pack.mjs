@@ -11,7 +11,8 @@
 //   - far.json is the manifest's `far` object as asked of the data lane on #450: `size` (a tile's side in 10 cm cells,
 //     on the frame's grid), `bands` (the least size of a face in each band, metres), `tiles` (key `x_z`, a record or
 //     null per band: {path, bytes, sha256} over the bytes as written), `wedge` (the place's: its apex in cells, the
-//     bearings it lies between and its reach in metres); far.state.json says what each tile was made from.
+//     bearings it lies between and its reach in metres), `light` (the fill and gain the place's colours were fitted
+//     under); far.state.json says what each tile was made from.
 //   - A tile's band holds the faces whose low corner is in the tile and whose size (metres, the geometric mean of
 //     its sides) is in the band. A far tile is fetched only for band 0, nearer ones add the rest.
 //   - A `.far` file: 'FAR1', a u32 length, that many bytes of JSON (spaces to a multiple of 4), then the faces with
@@ -51,7 +52,7 @@ export const LODS = [16, 8, 4, 2, 1, 0.5, 0.25]
 
 // ── Sources: every block, its frame, and the tiles it may hold faces of (from its bounds, without reading it) ──
 const blocks = []
-const meta = { styles: null, sun: null, credits: [] }
+const meta = { styles: null, sun: null, light: null, credits: [] }
 const read = (dir, owner) => {
   const index = JSON.parse(readFileSync(join(dir, 'index.json'), 'utf8'))
   const turn = ((index.turn ?? 0) * Math.PI) / 180
@@ -65,7 +66,7 @@ const read = (dir, owner) => {
     blocks.push({ owner, path: join(dir, b.file), faces: b.faces, layer: b.layer, frame: { pos: b.pos, cell: b.cell, c0, c2, uw: b.uw ?? [0, 0] }, tiles, sign: `${dir}/${b.file}:${st.size}:${Math.round(st.mtimeMs)}` })
   }
   meta.styles ??= index.styles
-  if (owner === 'place') meta.sun = index.sun
+  if (owner === 'place') { meta.sun = index.sun; meta.light = index.light ?? null }
   if (index.credit && !meta.credits.includes(index.credit)) meta.credits.push(index.credit)
 }
 if (existsSync(join(placeDir, 'index.json'))) {
@@ -241,6 +242,8 @@ for (let at = 0; at < todo.length; at += BATCH) {
 }
 listing.credit = [...new Set(meta.credits.flatMap((c) => c.split('; ')))].join('; ')
 // Where the place's faces are (page/far.ts takes over from the cells nearer there): its apex in cells, its bearings, its reach.
+// The light the place's colours were fitted under (#423's light.json), for page/far.ts to draw every face in.
+if (meta.light) listing.light = meta.light
 if (blocks.some((b) => b.owner === 'place')) listing.wedge = { at: [Math.round((we - E0) * 10), Math.round((N0 - wn) * 10)], from: wfrom, to: wto, far: wfar }
 mkdirSync(out, { recursive: true })
 writeFileSync(join(out, 'far.state.json'), JSON.stringify(sources))

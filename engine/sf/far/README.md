@@ -36,7 +36,12 @@ $PY sf/far/measure.py ~/.village/engine/sf/far/shots/<name>-park-ids.rgba 2018x8
 | `check.mjs` | Shots, the faces drawn, bytes held and fetched, and the march's GPU ms with and without the far model, under `~/.village/engine/sf/far/shots/`. |
 | `measure.py` | The park's skyline against the photograph, with #423's overlay measures (`landing/ina/overlay.py`). |
 
-Address switches: `?farreach=500` sets the metres from the eye where faces begin (0 means no far model), and
-`?farnear=100` where they begin in the wedge.
+The faces' colours are #423's, fitted to the photograph under its light (`landing/ina/light.json`: the sky's and the
+ground's light 3.44 times the engine's, the whole 1.23 times brighter). The listing's `light` says so, and `far.ts`
+draws every face in it. In the engine's own light the far model's walls were a quarter to a third darker than the
+photograph. Faces also take the march's fog, as the cells do.
+
+Address switches: `?farreach=500` sets the metres from the eye where faces begin (0 means no far model),
+`?farnear=100` where they begin in the wedge, and `?farlight=fill,gain` the faces' light.
 `?fardetail=0.75` sets how many pixels across a face must be to be drawn. `?farfaces=12000000` caps the faces held.
 `?fog=0.8` turns on the marine layer (`page/fog.ts`); `engine.fog` changes it while the page runs.

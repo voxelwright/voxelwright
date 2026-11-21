@@ -124,6 +124,21 @@ const THIN = (1 / 280).toFixed(6)
  * The bank is even below its top and thins above it, a cell in THIN at a time; only what is west of its front is in it.
  * Its top is lumpy where the look crosses it, and its front wavy, by a slow noise that drifts with the time.
  */
+/** A quick number for a place on a plane, and a smooth noise of them: the clouds', the fog's (FOG) and the far model's fog. */
+export const NOISE = /* wgsl */ `
+// A quick number for a place on a plane: clouds need many and need them only to look unruly.
+fn hash2i(c: vec2i) -> f32 {
+  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
+  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
+  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
+}
+fn noise2(p: vec2f) -> f32 {
+  let i = vec2i(floor(p));
+  let f = fract(p);
+  let u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash2i(i), hash2i(i + vec2i(1, 0)), u.x), mix(hash2i(i + vec2i(0, 1)), hash2i(i + vec2i(1, 1)), u.x), u.y);
+}
+`
 export const FOG = /* wgsl */ `
 fn fogged(rd: vec3f, dist: f32) -> vec2f {
   // The part of the look west of the front: from t0 to t1.
@@ -164,6 +179,13 @@ fn fogged(rd: vec3f, dist: f32) -> vec2f {
   var over = (span - under) * e1;
   if (abs(y2 - y1) > 0.5) { over = (span - under) * (e1 - exp(-y2 * ${THIN})) / ((y2 - y1) * ${THIN}); }
   return vec2f(1.0 - exp(-min(g.fog.x * (under + over), 30.0)), lump);
+}
+// What is dist along a look, seen through the fog: seen from over it, its sunlit top is brighter than the fog one is
+// in, and its billows are lit on their tops. The cells' and the far model's (far.ts) alike.
+fn inFog(col: vec3f, rd: vec3f, dist: f32) -> vec3f {
+  let fog = fogged(rd, dist);
+  let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
+  return mix(col, g.fogTint.rgb * (1.0 + over * (0.08 + 0.36 * (fog.y - 0.35))), fog.x);
 }
 `
 
@@ -966,18 +988,7 @@ ${LIGHT}
 ${GLASS}
 ${PAINT}
 ${AIR}
-// A quick number for a place on a plane: clouds need many and need them only to look unruly.
-fn hash2i(c: vec2i) -> f32 {
-  var h = (u32(c.x) * 73856093u) ^ (u32(c.y) * 83492791u);
-  h = (h ^ (h >> 13u)) * 0x5bd1e995u;
-  return f32((h ^ (h >> 15u)) >> 8u) / 16777216.0;
-}
-fn noise2(p: vec2f) -> f32 {
-  let i = vec2i(floor(p));
-  let f = fract(p);
-  let u = f * f * (3.0 - 2.0 * f);
-  return mix(mix(hash2i(i), hash2i(i + vec2i(1, 0)), u.x), mix(hash2i(i + vec2i(0, 1)), hash2i(i + vec2i(1, 1)), u.x), u.y);
-}
+${NOISE}
 fn cloud(p: vec2f) -> f32 {
   var q = p;
   var sum = 0.0;
@@ -1658,10 +1669,7 @@ override FOGGY: bool = false;
   if ((g.flags & 128u) == 0u && first >= 0.0) { col = mix(col, airColour, haze(rd, first)); }
   // The fog, over everything as far as the first thing met, and over the sky (a look that met nothing goes on for ever).
   if (FOGGY && (g.flags & 128u) == 0u) {
-    // Seen from over it, its sunlit top is brighter than the fog one is in, and its billows are lit on their tops.
-    let fog = fogged(rd, select(1e7, first, first >= 0.0));
-    let over = smoothstep(0.0, 600.0, g.eye.y - g.sea - g.fog.y);
-    col = mix(col, g.fogTint.rgb * (1.0 + over * (0.08 + 0.36 * (fog.y - 0.35))), fog.x);
+    col = inFog(col, rd, select(1e7, first, first >= 0.0));
   }
   if ((g.flags & 4u) != 0u) {
     // How hard each pixel was: steps as heat.

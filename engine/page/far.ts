@@ -24,10 +24,11 @@
 //
 //   ?farreach=500        metres from the eye where faces begin (0: no far model)
 //   ?farnear=100         metres from the eye where they begin in the wedge
+//   ?farlight=3.44,1.23  the faces' light, fill and gain (the listing's \`light\`: #423's, which their colours were fitted under)
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, GLOBALS, HANDOVER, LIGHT, type Marcher, type View } from './march.ts'
+import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -39,6 +40,7 @@ struct V {
   forward: vec3f, shaded: f32,
   sun: vec3f, pixel: f32,
   wedge: vec4f, bear: vec4f,
+  light: vec4f,
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
@@ -55,6 +57,8 @@ ${GLOBALS}
 ${LIGHT}
 ${AIR}
 ${HANDOVER}
+${NOISE}
+${FOG}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) seen: vec3f,
@@ -161,6 +165,10 @@ struct Drawn { @location(0) colour: vec4f }
   var paint = mix(in.rgb, st.glass.rgb, pane);
   var rough = mix(0.9, 0.35, pane);
   var col = shade(paint, in.n, rd, v.sun, direct, 1.0, rough, 0.0);
+  // The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light fill times the
+  // engine's, the whole gain times brighter. Drawn in the engine's own, the wedge's walls were a third darker than
+  // the photograph, and its foreground (100 m on, through the park's lens) darker still.
+  col = (col + (v.light.x - 1.0) * shade(paint, in.n, rd, v.sun, 0.0, 1.0, rough, 0.0)) * v.light.y;
   if (in.style == 15u) {
     // A landmark's glass shows what is across from it, which from far is the sky a little darker.
     let facing = 1.0 - max(dot(-rd, in.n), 0.0);
@@ -175,6 +183,8 @@ struct Drawn { @location(0) colour: vec4f }
     col += vec3f(1.0, 0.62, 0.3) * lamp * mix(2.4, 1.5, blur);
   }
   col = air(col, rd, dist);
+  // The march's fog (FOG), as over the cells: the faces begin 100 m off in the wedge, and the bank had stopped there.
+  if (g.fog.x > 0.0) { col = inFog(col, rd, dist); }
   // Beside the colour, how far brighter than any lit surface the pixel is, as the march writes it (glow.ts reads it).
   return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)));
 }
@@ -212,6 +222,8 @@ export interface Listing {
   landing?: Landing
   /** #423's wedge, whose faces are finer: its apex (cells, x and z), the compass bearings it lies between and how far it reaches (metres). */
   wedge?: { at: [number, number]; from: number; to: number; far: number }
+  /** The light the faces' colours were fitted under (#423's light.json): the sky's and the ground's light `fill` times the engine's, the whole `gain` times brighter. */
+  light?: { fill: number; gain: number }
 }
 type Rec = { path: string; bytes: number; sha256: string }
 interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number }
@@ -285,7 +297,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: 'less' },
   })
   const mergeBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
-  const uniforms = device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const uniforms = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const windows = device.createBuffer({ size: 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   let styled = false
   let sunBaked: [number, number, number] | null = null
@@ -403,6 +415,9 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const BUDGET = Number(query.get('farfaces') ?? 12_000_000)
   /** The lens (half its height's tangent) the wedge's faces begin nearer through: under 50 degrees, where at 720 pixels tall a cell of the march is over 3 pixels across (the realm's is 25). Not by the picture's own pixels: the page's scale moves with its load, and the foreground would flip between cells and faces. */
   const NARROW = Math.tan((50 * Math.PI) / 360)
+  /** The faces' light (Listing `light`, or `?farlight=fill,gain`): the engine's own where neither says. */
+  const lit = query.get('farlight')?.split(',').map(Number)
+  const light = lit?.length === 2 && lit.every(Number.isFinite) ? { fill: lit[0], gain: lit[1] } : listing.light ?? { fill: 1, gain: 1 }
   /** How near the landing's eye the eye must be for its cut to be used, cells. */
   const LANDED = 200
   /** How far past the reach a tile is still drawn, metres. */
@@ -521,7 +536,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
-    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0])]))
+    device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), light.fill, light.gain, 0, 0]))
     const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}`
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
