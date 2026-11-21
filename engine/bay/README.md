@@ -103,3 +103,21 @@ Under `~/.village/engine/bay/450-city-paint/`, follow `worker.log` for acquisiti
 The queue considers finished squares, first the observed weak streets and then nearby unsampled blocks. Each directed facade belongs to the survey cell containing its midpoint. The four prototype surveys retain their existing walls. Each `windows/*.json` records the input pack, solved camera catalogue and face bundle SHA-256. Sparse windows stay identifiable by camera count. Receipts also record the preceding and resulting tile hashes and their contributing squares. If a neighbour remains unfinished the receipt names it. A final city release recalculates against the complete contributor set.
 
 Panel batches carry a visual grade forward only when their tested tile set and renderer match the preceding batch or all resulting shot hashes match. Changed pairs wait in `pending/shots/` beside `pending/evidence.json`. Run `city_panel.py accept --batch <evidence hash> [--scores <16-place JSON>]` with the Bay Python. Acceptance first reads every view's pixels, new or carried (`panel_gate.py`, `render_checks.py`): thin uprights in the sky beyond the photograph's count, shade on the street bluer than 22 (blue less red), and a vision judge (`claude -p`, Opus) that fails any defect two readings both clearly name (pillars, banding, narrow windows, battlements, chessboard, mosaic, light slits), or that cannot answer. Inspections are cached under `inspections/` by both pictures' bytes. Scores are optional; supplied ones may not drop below a floor that an earlier passing render earned, and without them the previous scores are carried and flagged. `panel_gate.py --shots <folder>` runs the same pixel gate on any folder of `<place>-0.png` and `<place>-1.png`. Any failure leaves the previous pin in place. Acquisition continues while a review is pending. The accepted batch is in `current.json`; its tile hashes and grades are under `accepted/`. Once the city finishes, `paint_publication.py` stages the combined cell, life, vehicle and available far objects locally and writes `city-release.json`. The new city pin requires the full release panel before promotion.
+
+## Facade evidence (#450)
+
+The photographs are evidence for each building's parameters, not pixels on its walls. `facade_evidence.py` picks up to four panoramas per building, cuts a perspective face aimed at it, segments the face (UperNet ConvNeXt on the Neural Engine) and keeps only wall pixels that are neither clipped nor dark. Each record holds a wall colour, a material class, a window share and shape, a storefront flag and an awning colour, each with a confidence. The models, venv, speeds and limits are in `.agents/skills/facade-evidence`. Photos, faces and labels stay under `~/.village/engine/bay/450-city-paint/evidence/`.
+
+```
+venv=~/.village/engine/bay/evidence-venv/bin/python
+$venv engine/bay/evidence_run.py panel            # buildings within 45 m of the 16 panel cameras
+$venv engine/bay/evidence_run.py sample           # 500 street buildings drawn with seed 450
+$venv engine/bay/evidence_run.py city --squares 550.7_4182.5
+$venv engine/bay/evidence_proof.py summary        # coverage, before and after, and confidence quartiles
+$venv engine/bay/evidence_proof.py stage          # the round-2 panel tiles with the records written in
+$venv engine/bay/evidence_proof.py render         # one GPU render of the 32 views
+$venv engine/bay/evidence_proof.py compare        # each changed wall against its held-out panel photograph
+$venv engine/bay/evidence_proof.py spot           # 20 sample buildings, one camera held out
+```
+
+A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` set (`tiles.py`) carries the records in its building rows (`evidence_tile.py` lists which rule reads which field). The far bake reads the same folder (`landing/ina/looks.py` `walls`). Without the variable both are byte for byte as before.

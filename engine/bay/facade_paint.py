@@ -69,6 +69,44 @@ def exposure(pack, x, z, eye, rot, img):
     return float(np.clip(np.median(daylight / observed), 0.92, 2.0))
 
 
+def eave_of(p, flags, row, x, z):
+    """A wall's eave in cells: surveyed, else the roof raster's median along it; None where nothing stands."""
+    # The surveyed eave falls back to the roof raster on legacy faces.
+    eave = (flags >> 8) & 65535 if flags & 128 else 0
+    if eave >= 32768:
+        eave -= 65536
+    if eave <= row[-1] + 15:
+        ix = ((x - p["tx0"]) / 5).astype(int).clip(1, p["tw"] - 2)
+        iz = ((z - p["tz0"]) / 5).astype(int).clip(1, p["tw"] - 2)
+        heights = np.maximum.reduce(
+            [
+                p["top"][iz + j, ix + i]
+                for i, j in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0))
+            ]
+        )
+        heights = heights[heights > row[-1] + 15]
+        if not heights.size:
+            return None
+        eave = np.median(heights)
+    return eave
+
+
+def unoccluded(p, a, b, eye, x, z, y, dist, allowed=None):
+    """Which texels (heights `y` by wall points `x`, `z`) a camera at (a, b, eye) sees past the lidar's roofs and crowns."""
+    # The highest elevation angle on each camera-to-wall ray masks both
+    # intervening buildings and surveyed canopy. Stop at the face's near edge.
+    reach = dist[allowed].max() if allowed is not None else dist.max()
+    t = np.linspace(0.025, 0.985, max(3, math.ceil(reach / 7)))[:, None]
+    ii = ((a + (x - a) * t - p["tx0"]) / 5).astype(int)
+    jj = ((b + (z - b) * t - p["tz0"]) / 5).astype(int)
+    inside = (ii >= 0) & (jj >= 0) & (ii < p["tw"]) & (jj < p["tw"])
+    top = p["top"][jj.clip(0, p["tw"] - 1), ii.clip(0, p["tw"] - 1)]
+    obstacle = np.where(inside & ((1 - t) * dist > 14), top, -32768).astype("f4")
+    horizon = (eye + (obstacle - eye) / t).max(axis=0)
+    visible = np.asarray(y).reshape(-1, 1) > horizon + 2
+    return visible if allowed is None else visible & allowed
+
+
 def project(pack, catalog, center, photos=None, radius=RADIUS):
     began = time.monotonic()
     p = read(pack)
@@ -127,23 +165,9 @@ def project(pack, catalog, center, photos=None, radius=RADIUS):
             cols = math.ceil(length / STEP)
             u = np.minimum(np.arange(cols) * STEP + STEP / 2, length - 0.1) / length
             x, z = ax + dx * u, az + dz * u
-            # The surveyed eave falls back to the roof raster on legacy faces.
-            eave = (flags >> 8) & 65535 if flags & 128 else 0
-            if eave >= 32768:
-                eave -= 65536
-            if eave <= row[-1] + 15:
-                ix = ((x - p["tx0"]) / 5).astype(int).clip(1, p["tw"] - 2)
-                iz = ((z - p["tz0"]) / 5).astype(int).clip(1, p["tw"] - 2)
-                heights = np.maximum.reduce(
-                    [
-                        p["top"][iz + j, ix + i]
-                        for i, j in ((1, 0), (-1, 0), (0, 1), (0, -1), (0, 0))
-                    ]
-                )
-                heights = heights[heights > row[-1] + 15]
-                if not heights.size:
-                    continue
-                eave = np.median(heights)
+            eave = eave_of(p, flags, row, x, z)
+            if eave is None:
+                continue
             base = row[-1]
             h = math.ceil(min(eave - base, 380) / STEP)
             if h < 4:
@@ -167,20 +191,7 @@ def project(pack, catalog, center, photos=None, radius=RADIUS):
                 )
                 if not allowed.any():
                     continue
-                # The highest elevation angle on each camera-to-wall ray masks both
-                # intervening buildings and surveyed canopy. Stop at the face's near edge.
-                t = np.linspace(
-                    0.025, 0.985, max(3, math.ceil(dist[allowed].max() / 7))
-                )[:, None]
-                ii = ((a + (x - a) * t - p["tx0"]) / 5).astype(int)
-                jj = ((b + (z - b) * t - p["tz0"]) / 5).astype(int)
-                inside = (ii >= 0) & (jj >= 0) & (ii < p["tw"]) & (jj < p["tw"])
-                top = p["top"][jj.clip(0, p["tw"] - 1), ii.clip(0, p["tw"] - 1)]
-                obstacle = np.where(inside & ((1 - t) * dist > 14), top, -32768).astype(
-                    "f4"
-                )
-                horizon = (eye + (obstacle - eye) / t).max(axis=0)
-                visible = (y > horizon + 2) & allowed
+                visible = unoccluded(p, a, b, eye, x, z, y, dist, allowed)
                 if not visible.any():
                     continue
                 rr, cc = np.nonzero(visible)
