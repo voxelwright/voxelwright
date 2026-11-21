@@ -92,6 +92,8 @@ struct Building {
     count: usize,
     wall: Kind,
     trim: Kind,
+    /// The glass share of its upper walls as its photographs measured it (bay/facade_evidence.py), if they did.
+    glass: Option<f32>,
     /// Cells a storey, cells a bay of the front, whether people live in it, and a number of its own.
     storey: i32,
     module: i32,
@@ -265,14 +267,19 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
         join_cornices(own);
         let style = r[4] as u32;
+        let evidence = Evidence::of(r[3]);
         buildings.push(Building {
             first,
             count,
+            // Who says what a wall is, first to last: its photographs as evidence (a colour and a material several
+            // views agree on), the majority of its painted cells, the bake's rule.
             wall: match painted_colour((first..first + count).filter_map(|e| paint.get(&(e as u32)).copied())) {
+                _ if evidence.wall => r[2] as Kind,
                 Some(tint) => kind(material(r[2] as Kind), tint),
                 None => r[2] as Kind,
             },
             trim: r[3] as Kind,
+            glass: evidence.glass,
             storey: (style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 },
             module: (style >> 8 & 255).max(16) as i32,
             home: style >> 16 & 1 == 1,
@@ -351,6 +358,21 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
+/// the 16 bits over its trim's kind: bit 16, its wall's kind (`r[2]`) is measured; bits 17 to 23, the glass share of
+/// its upper walls in hundredths, present when bit 24 is set. A building no photograph spoke for has none of them.
+struct Evidence {
+    wall: bool,
+    glass: Option<f32>,
+}
+
+impl Evidence {
+    fn of(trim: i32) -> Evidence {
+        let bits = trim as u32 >> 16;
+        Evidence { wall: bits & 1 == 1, glass: (bits >> 8 & 1 == 1).then(|| (bits >> 1 & 127).min(100) as f32 / 100.0) }
+    }
 }
 
 /// What a building's photographs (bay/facade_paint.py: a colour every 30 cm of a wall it was seen on) say its walls
@@ -673,11 +695,11 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         }
     } else if b.home {
         // A home's front is mostly glass: its window spans the bay but for a pier of 0.6 m, in sashes (#450).
-        ((module / 2.0 - 3.0).max(6.0), 8, storey - 5, 0)
+        (measured_half(b, 8, storey - 5).unwrap_or((module / 2.0 - 3.0).max(6.0)), 8, storey - 5, 0)
     } else if storey > 60 {
         (4.5, 14, storey - 12, 0) // a church's windows: tall and narrow
     } else {
-        ((module / 2.0 - 5.0).min(8.0), 8, storey - 6, 0)
+        (measured_half(b, 8, storey - 6).unwrap_or((module / 2.0 - 5.0).min(8.0)), 8, storey - 6, 0)
     };
     // A belt at each floor and a sill under each window, where cells are fine enough to show them.
     if size == 1 && deep < 1.0 {
@@ -706,6 +728,14 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             if mullion || (fy - foot) == (head - foot) / 2 { b.trim } else { glass }
         } else { dark },
     }
+}
+
+/// An upper window's half width where the photographs measured the building's glass share: the bay's glass over a
+/// storey of `foot` to `head` is that share of the bay's wall, with a pier of at least 0.3 m either side.
+fn measured_half(b: &Building, foot: i32, head: i32) -> Option<f32> {
+    let share = b.glass?;
+    let module = b.module as f32;
+    Some((share * module * b.storey as f32 / (2.0 * (head - foot).max(1) as f32)).clamp(2.0, module / 2.0 - 3.0))
 }
 
 /// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
@@ -1361,6 +1391,35 @@ mod tests {
         assert_eq!(read(&painted(&[window; 30])).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
         let bytes = painted(&cells);
         assert!(read(&bytes[..bytes.len() - 1]).is_none());
+    }
+
+    #[test]
+    fn photographs_as_evidence_name_the_wall_and_the_glass_and_an_unmarked_row_reads_as_before() {
+        let cream = colour(4, 7);
+        let cells = [cream; 30];
+        // The trim's kind is the row's fourth number; the 16 bits over it are the evidence.
+        let trim_at = 64 + 65 * 65 * 2 + 128 * 128 * 4 + 12;
+        let with = |bits: u32| {
+            let mut bytes = painted(&cells);
+            let trim = kind(PLASTER, grey(3)) as u32 | bits << 16;
+            bytes[trim_at..trim_at + 4].copy_from_slice(&trim.to_le_bytes());
+            read(&bytes).unwrap()
+        };
+        // No evidence: the paint's majority stands, as it did, and the windows keep their rule.
+        let plain = read(&painted(&cells)).unwrap();
+        assert_eq!((plain.buildings[0].wall, plain.buildings[0].trim, plain.buildings[0].glass), (kind(PLASTER, cream), kind(PLASTER, grey(3)), None));
+        assert_eq!(with(0).buildings[0].wall, plain.buildings[0].wall);
+        // A measured wall is the row's own kind (the bake wrote the photographs' colour there), over the paint's.
+        let measured = with(1);
+        assert_eq!((measured.buildings[0].wall, measured.buildings[0].trim), (kind(PLASTER, WHITE), kind(PLASTER, grey(3))));
+        // A measured glass share of 0.35 makes the upper windows that share of the bay's wall (the pack's house: a
+        // storey of 32 cells and a bay of 30); none at all keeps the rule's, and the pier never goes under 0.3 m.
+        let glassy = with(1 << 8 | 35 << 1);
+        let b = &glassy.buildings[0];
+        assert_eq!(b.glass, Some(0.35));
+        assert!((measured_half(b, 8, b.storey - 5).unwrap() - 0.35 * 30.0 * 32.0 / 38.0).abs() < 1e-4);
+        assert_eq!(measured_half(&plain.buildings[0], 8, 27), None);
+        assert_eq!(measured_half(&with(1 << 8 | 100 << 1).buildings[0], 8, 27), Some(12.0));
     }
 
     #[test]
