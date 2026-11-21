@@ -247,6 +247,8 @@ try {
   // ── A phone: a tap ──
   console.log('\na phone (390 x 844, touch)')
   {
+    // The desktop page rests meanwhile: a visitor has one realm open, and two drawing in one browser starve the one that is loading.
+    await realm.evaluate(() => { globalThis.engine.resting = true })
     const handheld = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
     const small = await handheld.newPage()
     small.on('pageerror', (e) => errors.push(`phone: ${e.message}`))
@@ -269,6 +271,7 @@ try {
       check(nav?.board === target.id, `a tap on ${target.id} on a phone flew to it and told the host to go to ${nav?.to}`)
     } else check(false, 'a board to tap in a phone\'s picture from the park')
     await handheld.close()
+    await realm.evaluate(() => { globalThis.engine.resting = false })
   }
 
   // ── What the signs say ──
