@@ -1376,7 +1376,7 @@ async function main() {
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
-          callPlane: (on) => signboards?.plane?.call(on),
+          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.inView ?? true,
           mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,

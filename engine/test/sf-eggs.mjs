@@ -175,6 +175,8 @@ try {
   results.matrix = { banner: seen }
   check(s.signs.banner === 'The Matrix has you' && seen.seen, `the banner says "${s.signs.banner}" and its plane brings it into the picture: ${JSON.stringify(seen)}`)
   await still(page)
+  // (Its second line once the first has been in the picture 8 s.)
+  await page.waitForFunction(() => globalThis.realm.signs.list().find((x) => x.id === 'banner')?.content?.text === 'Red pill or blue pill?', null, { timeout: 30_000 }).catch(() => null)
   s = await state(page)
   check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
   const m1 = await grid(page, 'matrix'), m2 = (await page.waitForTimeout(400), await grid(page))

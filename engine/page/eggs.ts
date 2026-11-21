@@ -51,6 +51,8 @@ export interface EggsPage {
   signs: Signs
   /** Keeps the banner's plane in the picture while an egg has something on it (true), or lets it go round (false). */
   callPlane(on: boolean): void
+  /** Whether the banner's plane is in the picture now. */
+  planeSeen(): boolean
   /** The realm's controls (realm-ui.ts), which the line and the player join. */
   ui: HTMLElement
   /** Where the page's folder is: the videos are under eggs/ there. */
@@ -105,6 +107,8 @@ export function eggs(page: EggsPage) {
   // What the eggs say on the banner, and what they said last that was not the line's echo (the line gives it back as it
   // closes). Esc gives the banner its own words back. While an egg has something on it, its plane is kept in sight.
   let onBanner: string | null = null, saying = false
+  /** A line the banner says once what it says now has been seen. */
+  let nextLine: { after: string; next: string; seen: number } | null = null
   const show = (text: string | null) => {
     saying = text !== null
     page.callPlane(saying)
@@ -159,10 +163,9 @@ export function eggs(page: EggsPage) {
     if (started !== clock) return
     running = { egg: 'matrix', picture: codeRain(), started: performance.now() }
     dress('matrix')
-    // Two lines, one after the other: the banner has room for one.
+    // Two lines, one after the other (the banner has room for one): the second once the first has been in sight a while.
     banner('The Matrix has you')
-    const mine = running
-    setTimeout(() => { if (running === mine && onBanner === 'The Matrix has you') banner('Red pill or blue pill?') }, 6000)
+    nextLine = { after: 'The Matrix has you', next: 'Red pill or blue pill?', seen: 0 }
     say('Wake up, Neo… The windows are code now. Esc, or say “blue pill”, to leave.')
   }
 
@@ -479,6 +482,9 @@ export function eggs(page: EggsPage) {
   let flips: number[] = [], wasDark: boolean | null = null
   page.watch((gap) => {
     const dt = Math.min(gap, 100) / 1000
+    // The banner's next line, after its plane has been in the picture for 8 s (it flies in from the edge, cloth last).
+    if (nextLine && onBanner !== nextLine.after) nextLine = null
+    else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
     const up = running?.picture ? 1 : 0
     // Up over a second, down over two thirds of one.
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
