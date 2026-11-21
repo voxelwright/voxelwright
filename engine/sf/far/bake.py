@@ -26,7 +26,7 @@ from scipy import ndimage
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, '..', '..', 'landing', 'ina'))
 import looks  # noqa: E402  wall colours and windows by rule (#423)
-from matte import faces, filled, rgb24  # noqa: E402  columns to faces (#423)
+from matte import LEAF_SIDE, LEAF_TOP, crown_rule, faces, filled, rgb24  # noqa: E402  columns to faces, and trees as crowns (#423)
 
 # Where the archives are: the city's run (bay/full_run.py) writes them square by square; the pilot's are kept apart.
 # A square in both is the run's.
@@ -38,7 +38,7 @@ def archive(square):
 OUT = os.path.expanduser('~/.village/engine/sf/far/squares')
 E0, N0, SEA = 500_000.0, 4_250_000.0, 1.0
 TILE = 500.0  # metres: the far model's tiles (pack.mjs SIZE)
-VERSION = 2
+VERSION = 3  # 3: trees are crowns on trunks (matte.py `crown_rule`)
 NAMES = os.path.join(HERE, '..', '..', 'landing', 'ina', 'names.json')
 
 
@@ -99,6 +99,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
     del rr, cc
     seen = top > -1e8
     top, _ = filled(np.where(seen, top, -1e9), ground)
+    raw = np.where(seen, top, np.nan).astype(np.float32)
     # The lidar's noise taken off a flat roof, and the wall's foot not a bar code (matte.py `prepared`).
     for size, near in ((3, 0.2), (5, 0.5)):
         smooth = ndimage.median_filter(top, size=size)
@@ -117,6 +118,15 @@ def bake(square, force=False, cell=0.5, out=OUT):
     share = ndimage.mean(several, things, index=np.arange(n + 1)) if n else np.zeros(1)
     leafy = (np.nan_to_num(share) > 0.125)[things] & (things > 0)
     del things, several, clear
+    # Trees are crowns on trunks, as in the wedge (matte.py `crown_rule`, the one owner of the rule): under a crown
+    # stands what it hangs over (the ground, or the roof of the building it was baked as a wall of) and its trunk,
+    # and the crown is a layer of its own (`far-crown0`), with its gaps left out.
+    tree = crown_rule(top, ground, ids, leafy, multi, count, cell, raw)
+    crown, trunk = tree['crown'], tree['trunk']
+    top_all = np.where(crown, tree['rough'], top)
+    top = np.where(crown, np.where(trunk, np.maximum(tree['under'] + 1.0, tree['base']), tree['base']), top)
+    leafy = leafy & ~crown
+    over = top - ground
     scale = 255.0 / max(1.0, float(np.percentile(bright[seen], 98)))
     most = int(ids.max())
     grey = np.full(top.shape, 120.0, np.float32)
@@ -134,8 +144,10 @@ def bake(square, force=False, cell=0.5, out=OUT):
     lum = np.round(np.clip(55 + grey * 0.75, 60, 230) / 12) * 12
     roof = np.where(leafy, rgb24(np.full(top.shape, 62), np.full(top.shape, 98), np.full(top.shape, 46)), rgb24(lum, lum, lum * 0.98))
     green = rgb24(np.full(top.shape, 46), np.full(top.shape, 74), np.full(top.shape, 36))
-    walls = np.where(leafy, green, wall_of[ids])
-    style = np.where(leafy, 0, style_of[ids])
+    bark = rgb24(np.full(top.shape, 84), np.full(top.shape, 66), np.full(top.shape, 48))
+    roof = np.where(trunk, bark, roof)
+    walls = np.where(leafy, green, np.where(trunk, bark, wall_of[ids]))
+    style = np.where(leafy | trunk, 0, style_of[ids])
     # The building's number the faces carry: the city's own, so that it is the same building in every square.
     city = np.zeros(most + 1, np.int64)
     for b in table:
@@ -145,7 +157,7 @@ def bake(square, force=False, cell=0.5, out=OUT):
     ee = west + (np.arange(cols) + 0.5) * cell
     nn = north - (np.arange(rows) + 0.5) * cell
     own = ((ee >= e0) & (ee < e0 + 1000))[None, :] & ((nn > n0) & (nn <= n0 + 1000))[:, None]
-    stands = (ids > 0) | (over > 2.0)
+    stands = (ids > 0) | (over > 2.0) | trunk
     os.makedirs(dest, exist_ok=True)
     for old in os.listdir(dest):
         os.remove(f'{dest}/{old}')
@@ -189,11 +201,16 @@ def bake(square, force=False, cell=0.5, out=OUT):
     h = np.maximum(np.round((top - SEA) * 10 / hq).astype(np.int64), 0)
     floor = np.maximum(np.round((ground - SEA) * 10 / hq).astype(np.int64), 0)
     write('far', h, stands & ~water, own, roof, walls, style, bid, floor, hq, 1)
+    # The crowns: one slab each, from its own top down to where it hangs, in one green (at a metre a cell past 500 m
+    # a crown is a few pixels: the wedge's three slabs and three greens are for 25 cm).
+    upper = np.maximum(np.round((top_all - SEA) * 10 / hq).astype(np.int64), 0)
+    lower = np.maximum(np.minimum(np.round((tree['under'] - SEA) * 10 / hq).astype(np.int64), upper - 1), 0)
+    write('far-crown0', upper, crown & ~tree['gap'] & ~water, own, LEAF_TOP(top.shape), LEAF_SIDE(top.shape), zeros, zeros, lower, hq, 1)
     # The bare ground, every 4th cell (2 m), at its own height in metres; grey, a little green where it is leaf.
     step, hq = max(1, int(round(2.0 / cell))), 10
     sub = (slice(step // 2, None, step), slice(step // 2, None, step))
     gh = np.maximum(np.round((ground[sub] - SEA) * 10 / hq).astype(np.int64), 0)
-    gc = np.where(leafy[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
+    gc = np.where(leafy[sub] | crown[sub] | ((over[sub] > 0.5) & (ids[sub] == 0)), rgb24(np.full(gh.shape, 92), np.full(gh.shape, 104), np.full(gh.shape, 80)), rgb24(np.full(gh.shape, 104), np.full(gh.shape, 104), np.full(gh.shape, 106)))
     write('ground', gh, ~water[sub], own[sub], gc, gc, np.zeros(gh.shape, np.int64), np.zeros(gh.shape, np.int64), gh, hq, step)
     index = {'village': 'far', 'version': VERSION, 'square': square, 'inputs': sig, 'turn': 0, 'faces': sum(b['faces'] for b in blocks), 'blocks': blocks,
              'sun': None, 'styles': looks.STYLES, 'credit': 'U.S. Geological Survey 3DEP; City and County of San Francisco (DataSF)'}
