@@ -176,6 +176,8 @@ async function main() {
   let speed = 12
   // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
   const first = LOCAL ? firstView(canvas, query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  // The line of numbers is for whoever measures: a realm the page runs alone shows it only when asked (`?debug=1`; first.ts hides it).
+  if (LOCAL && query.get('debug') !== '1') document.documentElement.classList.add('plain')
   if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
 
   // ── Moving ──────────────────────────────────────────────────────────────
@@ -334,6 +336,20 @@ async function main() {
   // place of the hour's and its tint multiplies the finished picture (glow.ts), until the page is in another realm.
   const ownLook = { hour, rain: march.rain }
   const realmLook: { grade: [number, number] | null; tint: [number, number, number] } = { grade: null, tint: [1, 1, 1] }
+  /**
+   * An egg's mood (eggs.ts): a grade and a tint that come over the picture, not at once. The hour an egg goes to is
+   * glided to in about a second, and its mood set in one frame was a night's green laid over a day's sky: a frame or
+   * two washed pale green (#450). It comes over two seconds, the first half of one held back for the dark, and goes in half of one, before the day is back.
+   */
+  const mood: { of: { grade: [number, number] | null; tint: [number, number, number] } | null; on: boolean; t: number } = { of: null, on: false, t: 0 }
+  const easeMood = (dt: number, own: readonly [number, number]) => {
+    if (!mood.of) return
+    mood.t = mood.on ? Math.min(1, mood.t + dt / 2) : Math.max(0, mood.t - dt / 0.5)
+    const k = Math.max(0, Math.min(1, (mood.t - 0.25) / 0.75)), mix = k * k * (3 - 2 * k), of = mood.of
+    realmLook.tint = [1 + (of.tint[0] - 1) * mix, 1 + (of.tint[1] - 1) * mix, 1 + (of.tint[2] - 1) * mix]
+    realmLook.grade = of.grade && mix > 0 ? [own[0] + (of.grade[0] - own[0]) * mix, own[1] + (of.grade[1] - own[1]) * mix] : null
+    if (!mood.on && mood.t === 0) mood.of = null
+  }
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
@@ -461,6 +477,7 @@ async function main() {
       pluginDraws.draw(encoder, to, v, (now - started) / 1000)
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
+    easeMood(Math.min(frameMs, 100) / 1000, grade)
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
@@ -1277,15 +1294,18 @@ async function main() {
     lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
     // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
     kept: (box) => farModel.keep(box),
-    reach: () => farModel.reach * M,
+    reach: () => farModel.reach * M, handover: (x, z) => (farModel.reach > 0 ? farModel.handover(x, z) : Infinity),
     done: () => world.done().length,
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
     pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
     aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
+  // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
+  // the picture (boards.ts `call`), and after that it goes round as it will, unless an egg has something to say on it.
+  if (first && !first.engaged && signboards?.plane) { const plane = signboards.plane; plane.call(true); first.onEngage(() => plane.call(false)) }
   // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
-  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
+  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); signboards?.plane?.begin(); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
   /**
    * What the signs' screens cost the GPU here (#450): the march and the far model alone, and with the pass that draws
    * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
@@ -1376,8 +1396,8 @@ async function main() {
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
-          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.inView ?? true,
-          mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
+          callPlane: (on) => signboards?.plane?.call(on), planeSeen: () => signboards?.plane?.readable ?? true,
+          mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.

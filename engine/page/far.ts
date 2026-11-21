@@ -272,6 +272,11 @@ export interface Far {
   forget(): void
   /** A box (finest cells, low and high corners) that stays the cells' out to the reach in the wedge, or null: a lettering board's (boards.ts). */
   keep(box: readonly number[] | null): void
+  /**
+   * How far from the eye faces take over from cells for what stands at a point (finest cells, x and z), as the last
+   * draw had it: the reach, or in the wedge through a narrow lens the nearer one. Cells; Infinity where nothing is drawn as faces.
+   */
+  handover(x: number, z: number): number
   /** The far model's own depth as the last draw left it (one over the distance along the look; 0 where nothing), for the fog (fog.ts). */
   readonly depth: GPUTextureView | null
 }
@@ -279,7 +284,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {} }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -455,6 +460,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     },
     forget() { changed.clear() },
     keep(box) { kept = box },
+    handover(x, z) {
+      if (!handed) return Infinity
+      const w = handed.wedge, dx = w ? x - w[0] : 0, dz = w ? z - w[1] : 0, b = Math.atan2(dx, -dz), bearing = b < 0 ? b + 2 * Math.PI : b
+      return w && bearing > w[4] && bearing < w[5] && dx * dx + dz * dz < w[2] * w[2] ? Math.min(handed.reach, w[3]) : handed.reach
+    },
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) {
@@ -470,6 +480,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     },
     drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
   }
+  /** The reach and the wedge of the last draw (pass): what `handover` answers from. */
+  let handed: { reach: number; wedge: number[] | null } | null = null
   const viewBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
   let own: { texture: GPUTexture; view: GPUTextureView; size: readonly [number, number] } | null = null
   const ownDepth = (s: readonly [number, number]) => {
@@ -554,6 +566,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
     const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
+    if (!clear) handed = { reach, wedge }
     device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
     const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}:${kept}`
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
