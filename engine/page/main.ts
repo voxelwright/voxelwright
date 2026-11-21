@@ -55,8 +55,6 @@ import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
-import { eggs } from './eggs.ts'
-import { standInSigns } from './signs-stand-in.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -1323,22 +1321,30 @@ async function main() {
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs-stand-in.ts,
-    // the shape of feature/450-boards' signs.ts until it lands).
-    const signs = standInSigns()
+    // the shape of feature/450-boards' signs.ts until it lands). Fetched once the park is shown, so that nothing
+    // of them is in the bytes before it.
     let hushed: AudioContext | null = null
-    Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
-      device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
-      mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
-      notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
-      watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
-      // The city's sound steps aside for an egg's: taken off the speakers, and put back.
-      hush: (on) => {
-        const voice = ears?.voice
-        if (!voice) return
-        if (on && !hushed) { try { voice.out.disconnect(voice.context.destination); hushed = voice.context } catch { /* not connected */ } }
-        else if (!on && hushed) { voice.out.connect(hushed.destination); hushed = null }
-      },
-    }) })
+    const hatch = () => {
+      if (!seen.near) return
+      watchers.delete(hatch)
+      void Promise.all([import('./eggs.ts'), import('./signs-stand-in.ts')]).then(([{ eggs }, { standInSigns }]) => {
+        const signs = standInSigns()
+        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
+          device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
+          notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
+          watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          // The city's sound steps aside for an egg's: taken off the speakers, and put back.
+          hush: (on) => {
+            const voice = ears?.voice
+            if (!voice) return
+            if (on && !hushed) { try { voice.out.disconnect(voice.context.destination); hushed = voice.context } catch { /* not connected */ } }
+            else if (!on && hushed) { voice.out.connect(hushed.destination); hushed = null }
+          },
+        }) })
+      })
+    }
+    watchers.add(hatch)
   }
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
