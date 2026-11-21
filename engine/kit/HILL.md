@@ -25,6 +25,7 @@ PORT=5989 node tools/select.mjs     # lettering is text: it selects, copies, and
 PORT=5989 node tools/film.mjs       # every motion, frame by frame: must end "rehearsal passed"
 PORT=5989 node tools/seam.mjs       # a renderer handed to the kit: late, none, failing, lost
 PORT=5989 node tools/default.mjs    # who draws when no renderer is handed over
+PORT=5989 node tools/feel.mjs       # keys answer the hand alike plain and live; no two strokes sound the same
 node tools/root.mjs http://127.0.0.1:5989   # the address a person is given
 ```
 
@@ -117,6 +118,7 @@ That is 63 to build and 76 in all.
 | 6 | 2026-11-18 | One warm header tube, quiet idle wells and an opaque lifting plate that catches at its mechanical stop. Both reviewers saw the same whole showcase, all nine component sheets, the two references, rounds 1, 3 and 5, four paired motion films and native 1×/2× crops. Both preferred round 6. | Sol 8.91 (9.2/8.8/8.6/9/9.1/8.5/8.8/9/9.2). Opus 7.33 (7.5/7.5/7/7.5/7/6.5/7/8/8). Mean 8.12, up 1.18 from round 5. |
 | 7 | 2026-11-18 | A one-course Close plate, shared latch window, clearer night key faces and mass-scaled returns. Both reviewers opened the same 14 sheets, including all parts, both references and the full tab strip at 2×. Both narrowly preferred the candidate to round 6. | Sol 8.67 (9/9/8.5/9/9/8/8.5/8/9). Opus 6.78 (7/7/7/7/7/6/7/6/7). Mean 7.72, down 0.40 from round 6. Trial only. Replaced in round 8. |
 | 8 | 2026-11-18 | Final regroup. A fixed lens in the bezel (A) and a fixed lit slot with a shutter (B). Both reviewers opened the same 15 panels, including all nine part sheets, the showcase at both sizes and times of day, the references, earlier rounds, 2× sections and three interrupted motions. Both chose B. | A scored 8.81 Sol and 7.72 Opus. B scored 9.08 Sol and 8.11 Opus. B’s mean of 8.59 is 0.47 above round 6 and 1.65 above round 5. |
+| 9 | 2026-11-19 | Feel, from the site's audit: the plain Ridgeline print redrawn from the voxels' horizon and a link key that keeps its legend; plain keys on the voxels' own springs with a mouse hover; the plain slide switch built like the voxel one; a focus ring round the whole solid, live and plain; a voice per key stroke, pitched by the cap's mass. `tools/feel.mjs` joins the floor. A crossfade for the voxels' arrival (a view transition) was tried and dropped: presses during the fade landed on the page root (3 of 3). | Gates: all pass but `contrast.mjs`, which crashes on the base commit too. Opus 5.5 on five before/after sheets, before → after: plain matches voxel 3 → 6 (print), 3 → 6 (press), 2 → 7 (switch); motion 2 → 7 (press), 3 → 8 (focus). GPT-6.2 Astra: plain matches voxel 5 → 7 (print), 4 → 9 (switch), 6 → 8 (site at 390); motion 6 → 8 (press), 6 → 9 (focus). Both name the next fault: a plain key reads as a bevelled plaque, not a raised cap with depth round it. |
 
 ### Final regroup and ceiling
 

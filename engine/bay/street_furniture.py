@@ -148,6 +148,30 @@ def utility_evidence(sq, src, graph, survey, stats):
     ], spans
 
 
+STEEL, DARK, WOOD = 12 | 9 << 8, 12 | 14 << 8, 10 | 46 << 8
+SENSED_POLE, SPAN_WIRE = 14, 3
+
+
+def standing(segments):
+    """Drop sensed poles that end no measured span, as bake now does.
+
+    A sensed pole is a vertical wood rod of radius 14 from the ground to the lidar top. A span's wire leaves each
+    of its two poles 4 below that top. Squares baked before #450's fix still carry the lone ones; cutting tiles
+    through this filter gives the same fixtures as a fresh bake."""
+    ends = {
+        end
+        for ax, ay, az, bx, by, bz, r, m in segments
+        if r == SPAN_WIRE and m == DARK
+        for end in ((ax, ay, az), (bx, by, bz))
+    }
+    return [
+        s
+        for s in segments
+        if not (s[6] == SENSED_POLE and s[7] == WOOD and s[0] == s[3] and s[2] == s[5])
+        or (s[3], s[4] - 4, s[5]) in ends
+    ]
+
+
 def bake(sq, src, detail, survey, stop_points, graph, stats):
     h = sq.h
     margin = box(h[10], h[11], h[10] + 5 * h[9], h[11] + 5 * h[9])
@@ -160,7 +184,7 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
     def rod(a, b, r, material):
         segments.add(tuple(round(v) for v in (*a, *b, r, material)))
 
-    steel, dark, wood = 12 | 9 << 8, 12 | 14 << 8, 10 | 46 << 8
+    steel, dark, wood = STEEL, DARK, WOOD
     white, red = 7 | 1 << 8, 12 | 20 << 8
     kerbs = [LineString(k["line"]) for k in graph["kerbs"] if len(k["line"]) > 1]
     kerb_tree = STRtree(kerbs)
@@ -309,13 +333,13 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
             stats[kind + "WireSpans"] += 1
     sensed_poles, spans = utility_evidence(sq, src, graph, survey, stats)
     for x, z, top in sensed_poles:
-        rod((x, base(x, z), z), (x, top, z), 14, wood)
+        rod((x, base(x, z), z), (x, top, z), SENSED_POLE, wood)
     for a, b in spans:
         ax, az, ay = a
         bx, bz, by = b
         mid = ((ax + bx) / 2, (ay + by) / 2 - 8, (az + bz) / 2)
-        rod((ax, ay - 4, az), mid, 3, dark)
-        rod(mid, (bx, by - 4, bz), 3, dark)
+        rod((ax, ay - 4, az), mid, SPAN_WIRE, dark)
+        rod(mid, (bx, by - 4, bz), SPAN_WIRE, dark)
     return sorted(segments)
 
 

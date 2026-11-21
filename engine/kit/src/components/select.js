@@ -6,11 +6,11 @@
 // The <select> is the control and stays one: it lies over the whole key, so every press, key and
 // touch goes to the browser, and the picker that opens is the browser's, on a phone as on a desk.
 
-import { ring, halo, byTheme, lightName, cap as capOf } from '../core/light.js';
+import { seatedKey, halo, byTheme, lightName } from '../core/light.js';
 import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
-import { listeners, wrapLabel } from './util.js';
+import { watchFieldsets, listeners, wrapLabel } from './util.js';
 
 const GLOW = 0.075, REACH = 4.2; // a key's light, as the look's other keys have it
 const EDGE = 5;                  // voxels from the chevron to the end of the cap: four on its top, which is a voxel smaller all round, as the words have before them
@@ -29,23 +29,22 @@ export const select = {
   glowStrength: halo(GLOW),
 
   build(live, m) {
-    const { W, H, el } = live, look = live.look;
+    const { W, H, el } = live;
     const control = el.querySelector('select');
     const off = !control || control.matches(':disabled');
-    const depth = off ? 1 : look.rise;
-    const cap = m.part('cap');
-    if (off) cap.slab(0, 0, 0, W, H, 1, 'steel', 1);
-    else {
-      // the light is a ring one voxel high under the cap's edge: a lit line at the foot of the
-      // key, and its halo on the surface round it
-      ring(m.part('light'), 0, 0, 0, W, H, lightName(el, 'light'), 1);
-      cap.grounded = false;
-      capOf(cap, 0, 0, 1, W, H, depth - 1, 'key');
-    }
+    const cap = seatedKey(live, m, off, 'key', lightName(el));
+    const depth = live.faceZ;
     // the chevron is set into the cap's top at its far end, level with it: the face stays plain
     const g = ICONS.chevron, rtl = getComputedStyle(el).direction === 'rtl';
     const gx = rtl ? EDGE : W - g[0].length - EDGE, gy = Math.round((H - g.length) / 2);
-    if (W >= g[0].length + EDGE * 2) for (let j = 0; j < g.length; j++) for (let i = 0; i < g[j].length; i++) if (g[j][i] === '#') cap.plot(gx + i, gy + j, depth - 1, off ? 'slate' : 'ink');
+    if (W >= g[0].length + EDGE * 2) {
+      // The moulded thumb rest carries a contrasting inlaid arrow even
+      // when the cap and the surrounding case use different finishes.
+      cap.slab(gx - 1, gy - 1, depth - 1, g[0].length + 2, g.length + 2, 1, 'gasket', 1);
+      for (let j = 0; j < g.length; j++) for (let i = 0; i < g[j].length; i++) {
+        if (g[j][i] === '#') cap.plot(gx + i, gy + j, depth - 1, off ? 'steel' : 'ivory');
+      }
+    }
     if (off) { live.state.held = false; live.spring('press').snap(0); } // switched off while down: it is not left down
     live.state.off = off;
     live.state.top = depth;
@@ -76,11 +75,11 @@ export const select = {
       s.t += dt;
       const open = isOpen(s.control);
       if (s.t >= SHOWN && (open === null ? s.heard : !open)) s.up();
-      else waiting = true;
+      waiting = true; // The release retargets the spring after this frame's spring pass.
     }
     const down = live.spring('press').x < -0.4;
     const was = s.flare ?? 0;
-    const f = down ? Math.min(1, was + dt / 0.06) : Math.max(0, was - dt / 0.55);
+    const f = reducedMotion() ? 0 : down ? Math.min(1, was + dt / 0.06) : Math.max(0, was - dt / 0.55);
     s.flare = f;
     return waiting || (f > 0 && f !== was);
   },
@@ -95,7 +94,7 @@ export const select = {
     const press = live.spring('press'), hover = live.spring('hover');
     // with less motion asked for the cap does not travel: it is down, or it is up
     const move = (to, { k, c }) => (reducedMotion() ? press.snap(to) : press.to(to, k, c));
-    const down = () => { if (s.off || s.held) return; s.held = true; s.t = 0; s.heard = false; move(-live.look.travel, PRESS); cue('press'); live.invalidate(); };
+    const down = () => { if (s.off || s.held) return; s.held = true; s.t = 0; s.heard = false; move(-live.model.keyTravel, PRESS); cue('press'); live.invalidate(); };
     s.up = () => { if (!s.held) return; s.held = false; move(0, RELEASE); cue('release'); live.invalidate(); };
     const hear = () => { if (s.held) { s.heard = true; live.invalidate(); } };
     on(control, 'pointerdown', (e) => { if (e.button === 0) down(); });
@@ -112,8 +111,7 @@ export const select = {
     on(el, 'pointerleave', () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); live.invalidate(); });
     // switched off or on, or its choices changed (the key is as wide as its longest one)
     on.watch(control, { attributes: true, attributeFilter: ['disabled'], childList: true, subtree: true, characterData: true }, () => live.rebuild());
-    const set = control.closest('fieldset');
-    if (set) on.watch(set, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
+    watchFieldsets(control, on, () => live.rebuild());
     return on.done;
   },
 };

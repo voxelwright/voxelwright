@@ -3,6 +3,7 @@
 // with Enter. Also holds the quote's groove to where the quote's rule is. In voxels and plain, on
 // a laptop and on a phone. Says ok or FAIL for each thing that must hold.
 //   PORT=5989 node tools/parts/prose.mjs
+import { reachByTab } from '../reach-by-tab.mjs';
 import { chromium } from 'playwright';
 
 const port = process.env.PORT || 5989;
@@ -65,9 +66,9 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 390]) {
   await p.evaluate(() => { document.activeElement?.blur(); scrollTo(0, 0); });
   const order = [];
   let ring = true;
-  for (let i = 0; i < 6; i++) {
-    await p.keyboard.press('Tab');
-    const at = await p.evaluate(() => { const a = document.activeElement; if (!a || a.tagName !== 'A') return null; const s = getComputedStyle(a); return { text: a.textContent.slice(0, 24), ring: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2 }; });
+  for (let i = 0; i <= await p.locator('.vx-prose a').count(); i++) {
+    if (i === 0) await reachByTab(p, '.vx-prose a'); else await p.keyboard.press('Tab');
+    const at = await p.evaluate(() => { const a = document.activeElement; if (!a?.matches('.vx-prose a')) return null; const s = getComputedStyle(a); return { text: a.textContent.slice(0, 24), ring: s.outlineStyle !== 'none' && parseFloat(s.outlineWidth) >= 2 }; });
     if (!at) break;
     order.push(at.text); if (!at.ring) ring = false;
   }
@@ -77,7 +78,7 @@ for (const mode of ['voxels', 'plain']) for (const w of [1280, 390]) {
 
   // Enter follows a link; so does a real click
   await p.evaluate(() => { history.replaceState(null, '', location.pathname + location.search); document.activeElement?.blur(); scrollTo(0, 0); });
-  await p.keyboard.press('Tab');
+  await reachByTab(p, '.vx-prose a[href="#post"]');
   await p.keyboard.press('Enter');
   await p.waitForTimeout(150);
   say(await p.evaluate(() => location.hash) === '#post', `${tag} Enter on a link follows it`);

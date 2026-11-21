@@ -1,14 +1,17 @@
 """What the panel gate reads in a render's pixels (#450), each measured the same way in the reference photograph.
 
 pillars   thin upright structures standing in the sky over the roofline, counted in both pictures
+shade     the blue of shade on the street: the median blue over red of shaded, unsaturated pixels where the road is
 banding   second-difference energy on edge-free wall pixels, along x (upright ribs) and along y (courses)
 windows   dark openings with their bars closed: their median width over height, and opening over opening plus pier
 judge     a vision model's reading of the native pixels, which names these defects
 
-Only `pillars` and `judge` decide (panel_gate.py). On the Nob Hill batch the owner flagged, banding and window
-measures did not separate the defective render from the fixed one or from the photographs (photo walls carry more
-fine texture than any render, and a photograph's sash casings split its windows), so they are reported, not
-thresholds fitted to one view.
+Only `pillars`, `shade` and `judge` decide (panel_gate.py). On the Nob Hill batch the owner flagged, banding and
+window measures did not separate the defective render from the fixed one or from the photographs (photo walls carry
+more fine texture than any render, and a photograph's sash casings split its windows), so they are reported, not
+thresholds fitted to one view. Round two (#450) tried pixel measures for battlements, a chessboard of steps and a
+mosaic of colours (roofline teeth and notches, spectral peaks, dark rectangles, hues in a window): none separated the
+old renders from the fixed ones or from the photographs, so the judge names those.
 """
 
 import json
@@ -22,7 +25,7 @@ from PIL import Image
 
 SIZE = (960, 540)
 JUDGE_MODEL = "claude-opus-5-5"
-DEFECTS = ("pillars", "banding", "narrow windows")
+DEFECTS = ("pillars", "banding", "narrow windows", "battlements", "chessboard", "mosaic", "light slits")
 
 
 def load(path):
@@ -140,6 +143,21 @@ def banding(rgb):
     )
 
 
+def shade(rgb):
+    """How blue the street's shade is: the median of blue less red (0 to 255) over pixels that are shaded (luminance
+    16 to 109) and not strongly coloured, in the band where the road and pavement are, from 0.58 to 0.76 of the height
+    (above a photograph's camera car) and 0.1 to 0.9 of the width. None where under 3000 pixels are shaded there.
+    The panel's photographs read -12 to 19; renders lit in shade by the sky's blue alone read 21 to 40."""
+    lum = luminance(rgb)
+    band = slice(int(rgb.shape[0] * 0.58), int(rgb.shape[0] * 0.76))
+    side = slice(int(rgb.shape[1] * 0.1), int(rgb.shape[1] * 0.9))
+    sub, light = rgb[band, side], lum[band, side]
+    shaded = (light > 15) & (light < 110) & (sub.max(-1) - sub.min(-1) < 80)
+    if shaded.sum() < 3000:
+        return None
+    return round(float(np.median((sub[..., 2] - sub[..., 0])[shaded])), 1)
+
+
 def _blobs(mask):
     height, width = mask.shape
     seen = np.zeros_like(mask)
@@ -205,10 +223,18 @@ counterpart in the photograph (real poles or lamps that the photograph also show
 - "banding": a ribbed, striped or vertically banded texture across building walls that the photograph's walls do \
 not have.
 - "narrow windows": windows clearly narrower or smaller than the photograph's windows on comparable walls.
+- "battlements": a roof edge, parapet or cornice broken into evenly spaced blocks and gaps or notches, like a \
+castle's crenellations, where the photograph's rooflines run straight.
+- "chessboard": ground (a hillside, a bank, a slope, a road or a lawn) drawn as a regular grid of light and dark \
+squares or steps, where the photograph shows a smooth surface or plants.
+- "mosaic": a building front covered in a patchwork of small squares of unrelated colours, where the photograph \
+shows a wall of one or two colours with windows.
+- "light slits": thin bright vertical slits, as of sky, beside windows or down a wall.
 - "other": any other defect a person would notice at once.
 
 Reply with JSON only, no prose and no code fence:
-{{"defects": [{{"name": "pillars" | "banding" | "narrow windows" | "other", "clear": true | false, \
+{{"defects": [{{"name": "pillars" | "banding" | "narrow windows" | "battlements" | "chessboard" | "mosaic" | \
+"light slits" | "other", "clear": true | false, \
 "where": "<where in the render>"}}], "notes": "<one sentence>"}}
 "clear" is true when anyone would notice the defect at once, false when it is slight. An empty list means none."""
 

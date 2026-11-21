@@ -85,7 +85,7 @@ export const trace = {
       const lamp = lampOf(li);
       if (!lamp) return null;
       const b = lamp.getBoundingClientRect();
-      return { x: (b.left - r.left - remX) / vx, y: (b.top - r.top - remY) / vx, w: Math.max(1, Math.round(b.width / vx)), h: Math.max(1, Math.round(b.height / vx)), dark: !(stateOf(li) in LIGHT) };
+      return { x: (b.left - r.left - remX) / vx, y: (b.top - r.top - remY) / vx, w: Math.max(1, Math.round(b.width / vx)), h: Math.max(1, Math.round(b.height / vx)), light: LIGHT[stateOf(li)] };
     }).filter(Boolean);
     if (!lamps.length) return;
     // A lamp is a part of its own, put on whole pixels by the stage; the rail is cut on this
@@ -95,6 +95,30 @@ export const trace = {
     const first = lamps[0], last = lamps.at(-1);
     const x = Math.floor(first.x), fx = px(first.x - x);
     const y0 = Math.floor(first.y), fy = px(first.y - y0), y1 = Math.round(last.y - fy) + last.h;
+    const strip = el.dataset.vxRail === 'pilot-strip';
+    if (strip) {
+      // One milled opening. Each fixed lens sits on the same dark bed, even before
+      // its step begins. Only the core emits; the gasket and steel ends stay passive.
+      const { walls, floor } = hole(live, m, {
+        x: x - 1, y: y0 - 1, w: first.w + 2, h: y1 - y0 + 2, depth: 1, wall: 'steel', floor: 'gasket',
+      });
+      const windows = m.part('windows');
+      windows.sunk = true;
+      for (const s of lamps) {
+        const y = Math.round(s.y - fy);
+        const face = s.light === 'accent' ? 'light' : s.light ? 'light-' + s.light : 'lens';
+        windows.box(x, y, -1, s.w, s.h, 1, face);
+        windows.plot(x, y, -1, 'lens');
+      }
+      const ends = m.part('retainers');
+      for (const y of [y0 - 3, y1 + 1]) {
+        ends.slab(x - 2, y, 0, first.w + 3, 2, 1, 'steel', 1);
+      }
+      for (const part of [walls, floor, windows, ends]) { part.tx = fx; part.ty = fy; }
+      live.well = [x - 1 + fx, y0 - 1 + fy, x + first.w + 1 + fx, y1 + 1 + fy];
+      live.glowRadius = 1.5;
+      return;
+    }
     if (lamps.length > 1) {
       const { walls, floor } = hole(live, m, { x, y: y0, w: first.w, h: y1 - y0, depth: G, wall: 'light-warm', floor: 'light-warm' });
       walls.tx = floor.tx = fx; walls.ty = floor.ty = fy;
@@ -102,7 +126,7 @@ export const trace = {
     }
     // a step that has not begun: the same lamp in its collar, with no light in it
     lamps.forEach((s, i) => {
-      if (!s.dark) return;
+      if (s.light) return;
       const sx = Math.floor(s.x), sy = Math.floor(s.y);
       const stud = m.part('dark' + i);
       stud.grounded = false;

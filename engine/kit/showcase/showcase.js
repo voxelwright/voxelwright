@@ -1,4 +1,6 @@
-import { adopt, release, live, toast, sound, stageOf, getStage, ready } from '../src/index.js';
+import { adopt, release, live, toast, stageOf, getStage, ready } from '../src/index.js';
+
+import { connectSound } from './switch-sound.js';
 
 const $ = (s) => document.querySelector(s);
 const root = document.documentElement;
@@ -48,7 +50,7 @@ voxels.addEventListener('change', () => {
 });
 
 // ----- sound
-$('#sound').addEventListener('change', (e) => sound(e.target.checked));
+connectSound($('#sound'));
 
 // ----- rule: the voxel is the unit
 $('#scale').addEventListener('input', (e) => {

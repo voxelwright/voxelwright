@@ -57,7 +57,7 @@ say(m.out === null && m.expanded.length === 0 && m.current === 'Docs' && under(m
 await press('#product-k');
 m = await read();
 say(m.out === 'Product' && m.expanded.join() === 'Product' && m.under >= 4 && m.under <= 24 && m.inside, `a press on a word opens its float under it (${m.under} px under), and the word says so`);
-say(m.body === 'key' && m.light === 'light' && m.mark === '', `the float is a plate of ${m.body} on a ring of ${m.light}; no page in it is current, so no mark`);
+say(m.body === 'panel' && m.light === 'light' && m.mark === '', `the float is a plate of ${m.body} on a ring of ${m.light}; no page in it is current, so no mark`);
 await press('#product-k');
 m = await read();
 say(m.out === null && m.expanded.length === 0, 'a second press closes it');

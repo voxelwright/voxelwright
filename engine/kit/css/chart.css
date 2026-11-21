@@ -72,3 +72,12 @@
 .vx-chart-marks [data-vx-light="stop"] { --_light: var(--lit-stop, var(--vx-brick)); }
 .vx-chart-marks [data-vx-light="warm"] { --_light: var(--lit-warm, var(--vx-steel)); }
 .vx-chart-marks [data-vx-light="stud"] { --_light: var(--vx-steel); } /* the studs are steel, as drawn */
+
+/* An optional last-row readout, formatted from the source table. */
+.vx-chart-reading:not([hidden]) {
+  display: inline-flex; align-items: baseline; gap: 1em;
+  margin: 0 0 0 var(--_gutter); padding: .2rem .65rem;
+  border-inline-start: 2px solid currentColor; color: var(--vx-ink-quiet);
+  font: 400 .8125rem/1.25rem var(--vx-mono); font-variant-numeric: tabular-nums;
+}
+.vx-chart-reading strong { color: var(--vx-ink); }

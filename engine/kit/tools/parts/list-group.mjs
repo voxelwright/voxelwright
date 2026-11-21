@@ -11,7 +11,7 @@ let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 
 async function open({ width = 1180, plain = false, reduced = false } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height: 900 }, deviceScaleFactor: 1, reducedMotion: reduced ? 'reduce' : 'no-preference' });
+  const ctx = await browser.newContext({ viewport: { width, height: 900 }, hasTouch: width < 600, deviceScaleFactor: 1, reducedMotion: reduced ? 'reduce' : 'no-preference' });
   const p = await ctx.newPage();
   p.errors = [];
   p.on('pageerror', (e) => p.errors.push(String(e)));
@@ -45,21 +45,52 @@ const currentOf = (p, list) => p.evaluate((list) => [...document.querySelectorAl
 // where the mark is drawn (voxels) or painted (plain): the row it is on, by its top edge
 const markOf = (p, list, plain) => p.evaluate(([list, plain]) => {
   const ul = document.querySelector(list), rows = [...ul.children].filter((n) => n.tagName === 'LI');
-  if (plain) return rows.map((li, i) => (getComputedStyle(li, '::before').content !== 'none' ? i : -1)).filter((i) => i >= 0).join(',');
-  const l = window.vx.live(ul);
-  if (!l.well) return '';
-  const y = l.well[1] * l.vx, yy = l.well[3] * l.vx;
-  return rows.map((li, i) => (y >= li.offsetTop && yy <= li.offsetTop + li.offsetHeight ? i : -1)).filter((i) => i >= 0).join(',') + (l.well[0] === 1 ? '' : ` (x ${l.well[0]})`);
+  if (plain) {
+    const swatch = document.createElement('span');
+    swatch.style.color = 'var(--lit-accent, var(--vx-enamel))';
+    ul.append(swatch);
+    const accent = getComputedStyle(swatch).color;
+    swatch.remove();
+    return rows.flatMap((li, i) => {
+      const lens = getComputedStyle(li, '::before');
+      if (lens.content === 'none' || parseFloat(lens.width) <= 0) return ['missing lens'];
+      return lens.backgroundColor === accent ? [i] : [];
+    }).join(',');
+  }
+  const live = window.vx.live(ul);
+  const lens = live.model.byName.lens;
+  if (!lens) return 'missing lenses';
+  return rows.flatMap((li, row) => {
+    let fitted = false, lit = false;
+    for (let i = 0; i < lens.count; i++) {
+      const y = lens.rest[i * 3 + 1] * live.vx;
+      if (y < li.offsetTop || y >= li.offsetTop + li.offsetHeight) continue;
+      fitted = true;
+      if (lens.col[i * 4 + 3] > 0) lit = true;
+    }
+    if (!fitted) return ['missing lens'];
+    return lit ? [row] : [];
+  }).join(',');
 }, [list, plain]);
 
 for (const plain of [false, true]) {
   const tag = plain ? 'plain' : 'voxels';
   const p = await open({ plain });
-  say(await p.locator('.vx-list-group[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no list is drawn in voxels' : 'every list has its canvas'}`);
+  say(await p.locator(':is(.vx-list-group, #sections)[data-vx-live]').count() === (plain ? 0 : 6), `${tag}: ${plain ? 'no list is drawn in voxels' : 'every list has its canvas'}`);
   say(await currentOf(p, '#sections') === 'Domains' && await markOf(p, '#sections', plain) === '1', `${tag}: it starts with Domains current, and the mark on the second row (row ${await markOf(p, '#sections', plain)})`);
 
-  // a real press on a row
-  await press(p, '#sections a[href="#secrets"]');
+  const paddle = p.locator('#sections a[href="#secrets"]');
+  const box = await paddle.boundingBox();
+  await p.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await p.mouse.down();
+  if (!plain) {
+    await p.waitForFunction(() => {
+      const bank = window.vx.live(document.querySelector('#sections'));
+      return bank.model.byName.paddle2.tz === -bank.state.travel;
+    });
+  }
+  say(await markOf(p, '#sections', plain) === '1', `${tag}: the held paddle leaves Domains lit until activation`);
+  await p.mouse.up();
   await p.waitForTimeout(300);
   say(await currentOf(p, '#sections') === 'Secrets' && await p.textContent('#pane-name') === 'Secrets', `${tag}: a press on Secrets makes it the current row, and the only one (${await currentOf(p, '#sections')})`);
   say(await markOf(p, '#sections', plain) === '2', `${tag}: and the mark is on its row (row ${await markOf(p, '#sections', plain)})`);
@@ -107,10 +138,20 @@ for (const plain of [false, true]) {
   // right to left: the mark is at the start of the line, which is the right
   await p.evaluate(() => document.querySelector('#sections').setAttribute('dir', 'rtl'));
   await p.waitForTimeout(300);
-  const rtl = await p.evaluate((plain) => { const ul = document.querySelector('#sections'); if (plain) { const li = ul.querySelector('li:has([aria-current])'), b = getComputedStyle(li, '::before'); return parseFloat(b.right); } const l = window.vx.live(ul); return (l.W - 1 - l.well[0]) * l.vx; }, plain);
-  say(rtl === 4, `${tag}: right to left, the mark is one voxel in from the right (${rtl} px)`);
+  const lampInset = await p.evaluate((plain) => {
+    const ul = document.querySelector('#sections');
+    if (plain) {
+      const li = ul.querySelector('li');
+      return ul.clientWidth - li.offsetLeft - li.offsetWidth + parseFloat(getComputedStyle(li, '::before').right);
+    }
+    const l = window.vx.live(ul), lens = l.model.byName.lens;
+    let right = 0;
+    for (let i = 0; i < lens.count; i++) right = Math.max(right, Math.floor(lens.rest[i * 3]) + 1);
+    return (l.W - right) * l.vx;
+  }, plain);
+  say(lampInset === 14, `${tag}: the bank mirrors the fixed pilots to the right (${lampInset} px inset)`);
 
-  const small = await p.evaluate(() => [...document.querySelectorAll('.vx-list-group > li')].filter((li) => li.querySelector('a, button') && li.getBoundingClientRect().height < 44).length);
+  const small = await p.evaluate(() => [...document.querySelectorAll(':is(.vx-list-group, #sections) > li')].filter((li) => li.querySelector('a, button') && li.getBoundingClientRect().height < 44).length);
   say(small === 0, `${tag}: every row you can press is at least 44 px high (${small} lower)`);
   noErrors(p, tag);
   await p.context().close();
@@ -118,8 +159,14 @@ for (const plain of [false, true]) {
 
 for (const plain of [false, true]) {
   const tag = plain ? 'phone, plain' : 'phone, voxels';
-  const p = await open({ width: 390, plain });
-  await fits(p, '.vx-list-group', tag);
+  const p = await open({ width: 390, plain, reduced: true });
+  await p.locator('#sections a[href="#people"]').tap();
+  await p.waitForFunction(() => {
+    const bank = window.vx.live(document.querySelector('#sections'));
+    return document.querySelector('#pane-name').textContent === 'People' && (!bank || bank.state.current?.link.textContent === 'People');
+  });
+  say(await markOf(p, '#sections', plain) === '3', `${tag}: a touch selects People with reduced motion`);
+  await fits(p, ':is(.vx-list-group, #sections)', tag);
   const tall = await p.evaluate(() => { const li = document.querySelectorAll('#items > li'); return [li[1].offsetHeight, li[2].offsetHeight]; });
   say(tall[0] > 60 && tall[1] > 60, `${tag}: a long line and a long title wrap inside their rows (${tall.join(', ')} px high)`);
   say(await markOf(p, '#items', plain) === '1', `${tag}: the mark is on the tall current row (row ${await markOf(p, '#items', plain)})`);

@@ -126,16 +126,36 @@ export function van() {
   g.rounded(L - 1.2, L, 0.35, 1.1, 0, Wd, 0.2, WHITE)
   for (let i = 0; i < 20; i++) { const t = i / 20; g.box(L - 1.25 - t * 0.0, L - 0.9 - t * 0.5, 1.1 + t * 1.3, 1.1 + (t + 0.05) * 1.3, 0.05, Wd - 0.05, WHITE) }
   for (let i = 0; i < 20; i++) { const t = i / 20; g.box(L - 0.95 - t * 0.5, L - 0.88 - t * 0.5, 1.12 + t * 1.2, 1.12 + (t + 0.06) * 1.2, 0.12, Wd - 0.12, k(GLASS, grey(12))) }
-  // Cab side windows, a sliding door's line, the back doors' seam, lamps, bumpers, mirrors.
-  for (const [z0, z1] of [[0, 0.04], [Wd - 0.04, Wd]]) { g.box(L - 1.75, L - 1.0, 1.25, 2.0, z0, z1, k(GLASS, grey(12))); g.box(2.6, 2.63, 0.5, 2.3, z0, z1, k(STEEL, grey(6))) }
-  g.box(0, 0.04, 0.6, 2.4, Wd / 2 - 0.01, Wd / 2 + 0.01, k(STEEL, grey(6)))
-  for (const z of [0.15, Wd - 0.45]) { g.box(L - 0.04, L, 0.75, 0.95, z, z + 0.3, k(LAMP, 1)); g.box(0, 0.04, 0.9, 1.5, z + 0.05, z + 0.25, k(LAMP, hue(0, 4))) }
-  g.box(L - 0.08, L, 0.3, 0.5, 0.05, Wd - 0.05, BLACK); g.box(0, 0.08, 0.3, 0.5, 0.05, Wd - 0.05, BLACK)
+  // Cab side windows, the sliding door with its window, seams and handles, a rubbing strip along each side, wheel
+  // arches, marker lamps; the back doors with their windows, handles and seam, a plate, tall lamp clusters, a step.
+  const SEAM = k(STEEL, grey(11)), TRIM = k(ROOFING, grey(12)), DARK_GLASS = k(GLASS, grey(13))
+  for (const [z0, z1] of [[0, 0.04], [Wd - 0.04, Wd]]) {
+    g.box(L - 1.75, L - 1.0, 1.25, 2.0, z0, z1, k(GLASS, grey(12)))
+    g.box(L - 2.85, L - 2.05, 1.35, 1.95, z0, z1, DARK_GLASS)
+    for (const x of [L - 1.82, L - 2.95, 1.6]) g.box(x, x + 0.06, 0.45, 2.35, z0, z1, SEAM)
+    g.box(L - 2.85, L - 1.85, 2.35, 2.4, z0, z1, SEAM)
+    g.box(L - 3.15, L - 2.98, 1.2, 1.27, z0, z1, BLACK); g.box(L - 1.98, L - 1.85, 1.2, 1.27, z0, z1, BLACK)
+    g.box(0.05, L - 0.9, 0.62, 0.72, z0, z1, TRIM)
+    g.box(0.3, 0.42, 1.0, 1.08, z0, z1, k(LAMP, hue(3, 4))); g.box(L - 1.15, L - 1.05, 0.95, 1.03, z0, z1, k(LAMP, hue(3, 4)))
+  }
+  // The back: two doors, each with a window, the seam between, handles, a plate, the lamp clusters, a step under.
+  g.box(0, 0.04, 0.45, 2.45, Wd / 2 - 0.02, Wd / 2 + 0.02, SEAM)
+  for (const [z0, z1] of [[0.18, Wd / 2 - 0.1], [Wd / 2 + 0.1, Wd - 0.18]]) g.box(0, 0.04, 1.5, 2.2, z0, z1, DARK_GLASS)
+  g.box(0, 0.05, 1.15, 1.22, Wd / 2 - 0.2, Wd / 2 - 0.06, BLACK); g.box(0, 0.05, 1.15, 1.22, Wd / 2 + 0.06, Wd / 2 + 0.2, BLACK)
+  g.box(0, 0.05, 0.62, 0.78, Wd / 2 - 0.26, Wd / 2 + 0.26, k(PLASTER, grey(1))); g.box(0, 0.06, 0.66, 0.74, Wd / 2 - 0.2, Wd / 2 + 0.2, k(STEEL, hue(16, 5)))
+  for (const z of [0.0, Wd - 0.14]) { g.box(0, 0.05, 1.3, 1.9, z, z + 0.14, k(LAMP, hue(0, 4))); g.box(0, 0.05, 1.12, 1.3, z, z + 0.14, k(LAMP, hue(3, 4))); g.box(0, 0.05, 0.98, 1.12, z, z + 0.14, k(LAMP, 1)) }
+  for (const z of [0.15, Wd - 0.45]) g.box(L - 0.04, L, 0.75, 0.95, z, z + 0.3, k(LAMP, 1))
+  g.box(L - 0.04, L, 0.55, 0.72, 0.5, Wd - 0.5, TRIM)
+  g.box(L - 0.08, L, 0.3, 0.5, 0.05, Wd - 0.05, BLACK); g.box(0, 0.08, 0.3, 0.5, 0.05, Wd - 0.05, BLACK); g.box(-0.0, 0.25, 0.28, 0.33, 0.3, Wd - 0.3, BLACK)
   for (const z of [-0.12, Wd]) g.box(L - 1.2, L - 1.1, 1.6, 1.85, Math.max(0, z), Math.min(Wd, z + 0.12), BLACK)
   g.hollow()
   // Two seats in the cab, seen through the glass.
   for (const z of [0.3, Wd - 0.85]) { g.box(L - 2.1, L - 1.6, 0.45, 0.95, z, z + 0.55, BLACK); g.box(L - 2.2, L - 2.05, 0.95, 1.6, z, z + 0.55, BLACK) }
-  for (const xm of [1.1, L - 1.3]) for (const [z0, z1] of [[0, 0.22], [Wd - 0.22, Wd]]) g.wheel(xm, 0.36, z0, z1, 0.36, BLACK, k(STEEL, grey(5)))
+  for (const xm of [1.1, L - 1.3]) {
+    // Arches: a dark band round each wheel's top on the body's sides.
+    for (let y = g.c(0.35); y <= g.c(0.85); y++) for (let x = g.c(xm - 0.5); x <= g.c(xm + 0.5); x++) { const d = Math.hypot(x - g.c(xm), y - g.c(0.36)); if (d > 0.42 * g.s && d < 0.5 * g.s) for (const z of [0, 1, g.D - 2, g.D - 1]) if (g.get(x, y, z)) g.set(x, y, z, TRIM) }
+    for (const [z0, z1] of [[0, 0.22], [Wd - 0.22, Wd]]) g.wheel(xm, 0.36, z0, z1, 0.36, BLACK, k(STEEL, grey(10)))
+  }
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
   return { name: 'delivery van', kind: 'van', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [11, 47], 140), seats: [[42, 4.5, 6.5], [42, 4.5, 14]] }
 }
@@ -154,7 +174,13 @@ export function boxTruck() {
   g.box(0.3, 7.8, 0.35, 0.75, 0.4, Wd - 0.4, k(STEEL, grey(12)))
   g.hollow()
   for (const z of [0.3, Wd - 0.85]) { g.box(6.4, 6.9, 0.9, 1.4, z, z + 0.55, BLACK); g.box(6.3, 6.45, 1.4, 2.1, z, z + 0.55, BLACK) }
-  for (const xm of [1.0, 2.2, L - 1.1]) for (const [z0, z1] of [[0, 0.3], [Wd - 0.3, Wd]]) g.wheel(xm, 0.48, z0, z1, 0.48, BLACK, k(STEEL, grey(5)))
+  // The roll-up door's ribs, its handle, a plate and the bar under the back; a skirt along each side between the wheels.
+  for (let y = 0.95; y < H - 0.2; y += 0.3) g.box(0, 0.03, y, y + 0.04, 0.12, Wd - 0.12, k(STEEL, grey(7)))
+  g.box(0, 0.05, 0.95, 1.05, Wd / 2 - 0.2, Wd / 2 + 0.2, BLACK)
+  g.box(0, 0.06, 0.55, 0.7, Wd / 2 - 0.26, Wd / 2 + 0.26, k(PLASTER, grey(1))); g.box(0, 0.07, 0.59, 0.66, Wd / 2 - 0.2, Wd / 2 + 0.2, k(STEEL, hue(16, 5)))
+  g.box(0.1, 0.25, 0.3, 0.42, 0.1, Wd - 0.1, k(STEEL, grey(12)))
+  for (const [z0, z1] of [[0.02, 0.06], [Wd - 0.06, Wd - 0.02]]) { g.box(2.8, 6.5, 0.4, 0.75, z0, z1, k(STEEL, grey(11))); g.box(0.2, 5.6, 1.0, 1.1, z0 - 0.02, z1 + 0.02, k(LAMP, hue(3, 4))) }
+  for (const xm of [1.0, 2.2, L - 1.1]) for (const [z0, z1] of [[0, 0.3], [Wd - 0.3, Wd]]) g.wheel(xm, 0.48, z0, z1, 0.48, BLACK, k(STEEL, grey(10)))
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
   return { name: 'box truck', kind: 'truck', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [16, 69], 110), seats: [[66, 9, 7], [66, 9, 17]] }
 }

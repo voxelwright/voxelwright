@@ -170,9 +170,20 @@ function physics(part) {
           } else busy = true;
         }
         off[i * 3] = ox; off[i * 3 + 1] = oy; off[i * 3 + 2] = oz;
-        pos[o] = rest[i * 3] + part.tx + ox; pos[o + 1] = rest[i * 3 + 1] + part.ty + oy; pos[o + 2] = rest[i * 3 + 2] + part.tz + oz;
+        // A recessed letter travels straight out of its pocket before it can turn or slide.
+        // On return the same path lines it up over the pocket before lowering it.
+        let side = 1, lift = oz;
+        if (part.inlayDepth) {
+          const travel = Math.hypot(ox, oy, oz);
+          const clearance = part.inlayDepth + (Math.sqrt(3) - 1) / 2;
+          lift = Math.max(lift, Math.min(travel, clearance));
+          side = Math.min(1, Math.max(0, (travel - clearance) * 2));
+        }
+        pos[o] = rest[i * 3] + part.tx + ox * side;
+        pos[o + 1] = rest[i * 3 + 1] + part.ty + oy * side;
+        pos[o + 2] = rest[i * 3 + 2] + part.tz + lift;
         pos[o + 3] = 1;
-        const a = ang[i];
+        const a = ang[i] * side;
         if (a) {
           const l = Math.hypot(axis[i * 3], axis[i * 3 + 1], axis[i * 3 + 2]) || 1, s = Math.sin(a / 2) / l;
           pos[o + 4] = axis[i * 3] * s; pos[o + 5] = axis[i * 3 + 1] * s; pos[o + 6] = axis[i * 3 + 2] * s; pos[o + 7] = Math.cos(a / 2);

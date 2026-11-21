@@ -12,6 +12,8 @@ let p = await (await browser.newContext({ viewport: { width: 1180, height: 900 }
 const errors = [];
 const hear = (pg) => { pg.on('pageerror', (e) => errors.push(String(e))); pg.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); }); };
 hear(p);
+const gl = process.argv.includes('--webgl2');
+if (gl) await p.addInitScript(() => Object.defineProperty(navigator, 'gpu', { value: undefined }));
 let bad = 0;
 const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${what}`); };
 const open = async () => {
@@ -33,6 +35,14 @@ const read = (id) => p.evaluate(async (id) => {
   const act = document.getElementById(input.getAttribute('aria-activedescendant') || '-');
   const words = (o) => o.firstChild.textContent.trim();
   const l = window.vx?.live(list), walls = l?.model.byName.walls;
+  const windows = l?.model.byName.windows;
+  const litY = [];
+  let darkCells = 0;
+  for (let i = 0; i < (windows?.count ?? 0); i++) {
+    const material = name(windows.mats[i]);
+    if (material === 'light') litY.push(windows.rest[3 * i + 1] * l.vx);
+    else if (material === 'lens') darkCells++;
+  }
   const r = act?.getBoundingClientRect(), b = list.getBoundingClientRect();
   const empty = dialog.querySelector('.vx-command-empty');
   return {
@@ -40,11 +50,14 @@ const read = (id) => p.evaluate(async (id) => {
     role: input.getAttribute('role'), listRole: list.getAttribute('role'), shown: seen.map(words), active: act ? words(act) : null,
     groups: [...list.querySelectorAll('[role="group"]')].filter((g) => !g.hidden).length,
     walls: walls ? [...new Set(walls.mats)].map(name).join('+') : '', well: l?.well?.map((v) => v * l.vx) ?? null,
+    litY, darkCells,
     row: r ? [r.top - b.top, r.bottom - b.top] : null, empty: empty && !empty.hidden ? empty.textContent : null,
     done: document.getElementById('done').textContent, inView: r ? (() => { const s = list.parentElement.getBoundingClientRect(); return r.top >= s.top - 1 && r.bottom <= s.bottom + 1; })() : null,
   };
 }, id);
 const groove = (m) => m.well && m.row && m.well[2] - m.well[0] === 4 && m.well[1] >= m.row[0] && m.well[3] <= m.row[1];
+const fitted = m => m.row && m.litY.length === 2 && m.darkCells === 2 * (m.shown.length - 1)
+  && m.litY.every(y => y >= m.row[0] && y < m.row[1]);
 const key = async (k, n = 1) => { for (let i = 0; i < n; i++) await p.keyboard.press(k); await p.waitForTimeout(220); };
 
 let m = await read('cmds');
@@ -52,25 +65,99 @@ say(!m.open && m.role === 'combobox' && m.listRole === 'listbox', 'shut as the p
 const legend = await p.evaluate(() => document.querySelector('[data-vx-chord-for="cmds"] [data-vx-mod]').textContent.trim());
 say(legend === (mac ? '⌘' : 'Ctrl'), `the chord is shown as this computer names it (${legend} K)`);
 
+// At 80 ms the command under the pointer must already be fully readable.
+const early = await p.evaluate(async () => {
+  const dialog = document.querySelector('#palette');
+  dialog.showModal();
+  await new Promise(resolve => setTimeout(resolve, 80));
+  const row = dialog.querySelector('[role="option"]'), box = row.getBoundingClientRect();
+  const x = box.x + box.width / 2, y = box.y + box.height / 2;
+  let opacity = 1;
+  for (let el = row; el; el = el.parentElement) opacity *= Number(getComputedStyle(el).opacity);
+  return { x, y, opacity, hit: row.contains(document.elementFromPoint(x, y)),
+    engine: !!window.vx.stage.renderer.ownsCanvas };
+});
+say(early.engine !== gl, 'active renderer: ' + (early.engine ? 'WebGPU' : 'WebGL2'));
+say(early.hit && early.opacity === 1, 'the pointer and the readable first row agree at 80 ms');
+await p.mouse.click(early.x, early.y);
+say((await read('cmds')).done === 'Done: Open harbor-api.', 'the visible row accepts the pointer');
+await p.waitForTimeout(300);
+
+// The chord can go directly to a readable row and invoke it.
+await p.keyboard.press(CHORD);
+await p.keyboard.press('ArrowDown');
+m = await read('cmds');
+say(m.active === 'fog-site' && fitted(m) && m.focus, 'the chord goes straight to keyboard selection');
+await p.keyboard.press('Enter');
+say((await read('cmds')).done === 'Done: Open fog-site.', 'Enter chooses that row during entry');
+await p.waitForTimeout(300);
+
+// A reversal belongs to the same invocation. A completed dismissal ends it.
+await p.keyboard.press(CHORD);
+await p.keyboard.type('roll');
+await p.waitForFunction(() => {
+  const el = document.querySelector('#palette');
+  return el.offsetHeight === window.vx.live(el).cssH;
+});
+const reverse = await p.evaluate(async () => {
+  const el = document.querySelector('#palette'), height = el.offsetHeight;
+  el.close();
+  const row = el.querySelector('[data-vx-active]').getBoundingClientRect();
+  const hit = el.contains(document.elementFromPoint(row.x + row.width / 2, row.y + row.height / 2));
+  const exiting = el.hasAttribute('data-vx-native-exit');
+  el.showModal();
+  await new Promise(requestAnimationFrame);
+  return { exiting, hit, height, reopened: el.offsetHeight, model: window.vx.live(el).cssH };
+});
+say(!reverse.hit, 'the departing row has no pointer target');
+say(reverse.exiting && reverse.height === reverse.reopened && reverse.model === reverse.height
+  && (await read('cmds')).value === 'roll', `interrupted release retains the filtered height (${reverse.height} px) and query`);
+await p.keyboard.type(' b');
+await p.setViewportSize({ width: 390, height: 800 });
+await p.waitForFunction(() => {
+  const el = document.querySelector('#palette'), live = window.vx.live(el);
+  return el.offsetWidth === live.cssW && el.offsetHeight === live.cssH;
+});
+m = await read('cmds');
+say(m.value === 'roll b' && m.shown.length === 1 && m.active === m.shown[0] && fitted(m),
+  'typing and resizing the reopened panel keeps the single row and its fitted lens');
+await p.setViewportSize({ width: 1180, height: 900 });
+await p.keyboard.press('Escape');
+await p.waitForTimeout(300);
+
+const partial = await p.evaluate(async () => {
+  const { adopt, release } = await import('/kit/src/index.js');
+  const el = document.createElement('dialog');
+  el.className = 'vx-dialog vx-command-dialog';
+  el.dataset.vxCommandDeck = '';
+  document.body.append(el);
+  try {
+    adopt(el); el.showModal();
+    await new Promise(requestAnimationFrame);
+    return !!window.vx.live(el)?.model.byName.panel;
+  } finally { el.close(); release(el); el.remove(); }
+});
+say(partial, 'adopting a deck before its scroller exists builds a carrier');
+
 // the chord
 await p.mouse.click(1100, 860);
 await p.keyboard.press(CHORD); await p.waitForTimeout(700);
 m = await read('cmds');
 say(m.open && m.modal && m.focus && m.value === '' && m.shown.length === 11, `${CHORD} opens it, modal, with the focus in its well and every row (${m.shown.length})`);
-say(m.active === 'harbor-api' && groove(m) && m.walls === 'light', `the first row is marked, and the accent groove is cut at its start (${m.well?.join(', ')} px)`);
+say(m.active === 'harbor-api' && fitted(m), `the first row is marked, and its two lens cells light within the row (${m.litY.join(', ')} px)`);
 await p.screenshot({ path: 'shots/parts/command-palette/hand-open.png' });
 
 // typing
 await p.keyboard.type('roll', { delay: 40 }); await p.waitForTimeout(350);
 m = await read('cmds');
-say(m.shown.length === 1 && m.shown[0] === 'Roll back to 4f2c9a1' && m.active === m.shown[0] && m.groups === 1 && groove(m), `typing "roll" keeps what matches (${m.shown.join(', ')}), hides the groups with nothing left, and marks it`);
+say(m.shown.length === 1 && m.shown[0] === 'Roll back to 4f2c9a1' && m.active === m.shown[0] && m.groups === 1 && fitted(m), `typing "roll" keeps what matches (${m.shown.join(', ')}), hides the groups with nothing left, and marks it`);
 await key('Backspace', 4);
 await p.keyboard.type('deploy', { delay: 30 }); await p.waitForTimeout(350);
 m = await read('cmds');
 say(m.shown.length === 2 && m.shown.includes('Розгорнути на сервері'), `a row is found by its keywords too ("deploy": ${m.shown.join(', ')})`);
 await key('ArrowDown');
 m = await read('cmds');
-say(m.active === 'Розгорнути на сервері' && m.focus && groove(m), 'Down moves the mark; the focus stays in the well and the groove goes with it');
+say(m.active === 'Розгорнути на сервері' && m.focus && fitted(m), 'Down moves the mark; the focus stays in the well and its fitted lens lights');
 await key('ArrowDown');
 m = await read('cmds');
 say(m.active === 'Deploy harbor-api', 'and goes round from the last to the first');
@@ -87,7 +174,7 @@ say(m.open && m.value === '' && m.shown.length === 11 && m.active === 'harbor-ap
 // the long list scrolls, and the mark stays in sight
 await key('ArrowUp');
 m = await read('cmds');
-say(m.active === 'Sign out of fogline' && m.inView && groove(m), 'Up from the first goes to the last, which is scrolled into sight with its groove');
+say(m.active === 'Sign out of fogline' && m.inView && fitted(m), 'Up from the first goes to the last, which is scrolled into sight with its lit lens');
 await key('Escape'); await p.waitForTimeout(600);
 m = await read('cmds');
 say(!m.open, 'Escape closes it');
@@ -99,7 +186,7 @@ say(!(await read('cmds')).open, 'the chord again closes it');
 await key(CHORD); await p.waitForTimeout(500);
 await p.keyboard.type('lighthouse', { delay: 20 }); await p.waitForTimeout(300);
 m = await read('cmds');
-say(m.shown.length === 0 && m.empty === 'Nothing is called “lighthouse”.' && m.active === null && m.well === null, `nothing matches: no rows, no groove, and it says so in words ("${m.empty}")`);
+say(m.shown.length === 0 && m.empty === 'Nothing is called “lighthouse”.' && m.active === null && !m.litY.length && !m.darkCells, `nothing matches: no rows, no groove, and it says so in words ("${m.empty}")`);
 await key('Enter');
 say((await read('cmds')).open, 'and Enter does nothing');
 await key('Escape'); await p.waitForTimeout(600);
@@ -112,7 +199,7 @@ const row = p.locator('#cmds [role="option"]').nth(6);
 const rb = await row.boundingBox();
 await p.mouse.move(rb.x + rb.width / 2, rb.y + rb.height / 2, { steps: 6 }); await p.waitForTimeout(250);
 m = await read('cmds');
-say(m.active === 'Invite Mina to fog-site' && groove(m) && m.focus, 'the pointer over a row marks it; the focus stays in the well');
+say(m.active === 'Invite Mina to fog-site' && fitted(m) && m.focus, 'the pointer over a row marks it; the focus stays in the well');
 const off = await p.locator('#cmds [role="option"][aria-disabled="true"]').boundingBox();
 await p.mouse.click(off.x + off.width / 2, off.y + off.height / 2); await p.waitForTimeout(300);
 say((await read('cmds')).open, 'a press on a row that is off does nothing');
@@ -156,7 +243,8 @@ await p.mouse.click(1100, 860);
 await key(CHORD); await p.waitForTimeout(300);
 await p.keyboard.type('fog', { delay: 20 }); await key('ArrowDown');
 m = await read('cmds');
-const paint = await p.evaluate(() => getComputedStyle(document.querySelector('#cmds [data-vx-active]')).backgroundImage !== 'none');
+const paint = await p.evaluate(() => getComputedStyle(document.querySelector('#cmds [data-vx-active]'), '::before').backgroundColor
+  !== getComputedStyle(document.querySelector('#cmds [role="option"]:not([hidden], [data-vx-active])'), '::before').backgroundColor);
 say(await p.evaluate(() => document.querySelectorAll('[data-vx-live]').length) === 0 && m.open && m.active === 'Invite Mina to fog-site' && paint, `with no voxels it works the same, and the mark is painted (${m.shown.join(', ')})`);
 await key('Enter'); await p.waitForTimeout(200);
 m = await read('cmds');

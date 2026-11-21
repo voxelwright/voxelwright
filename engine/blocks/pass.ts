@@ -44,6 +44,8 @@ export interface Frame {
   ao: Uint32Array<ArrayBuffer>
   /** Opt into two unsigned strengths in the second AO word per cube: bits 16–23 chamfer and seam, 24–31 specular. */
   surfaceBytes?: boolean
+  /** Optional signed-normalized xyz surface normal and blend weight per voxel. */
+  normals?: Int8Array<ArrayBuffer> | null
   count: number
   /** The part's picture, device pixels. */
   wpx: number
@@ -104,7 +106,7 @@ const FACES = [
 const wgsl = (world: boolean) => /* wgsl */ `
 struct Part {
   clip: mat4x4f,    // from a place among the part's cubes to where it is seen
-  view: vec4f,      // ground filter radius (-1: inherited), surface bytes enabled, px a cube, halo strength
+  view: vec4f,      // ground filter radius (-1: inherited), finish and normal flags, px a cube, halo strength
   area: vec4f,      // the part of the page that is this part's picture, in cubes: x0, y0, x1, y1
   sun: vec4f,       // towards the light, its strength
   ambient: vec4f,   // top, front, side, under
@@ -141,7 +143,7 @@ fn lit(p: vec3f, n: vec3f, soft: f32) -> f32 {
 
 struct Cube {
   @location(0) pos: vec3f, @location(1) normal: vec3f, @location(2) face: vec2f, @location(3) uv: vec2f,
-  @location(4) at: vec4f, @location(5) quat: vec4f, @location(6) color: vec4f, @location(7) ao: vec2u,
+  @location(4) at: vec4f, @location(5) quat: vec4f, @location(6) color: vec4f, @location(7) ao: vec2u, @location(8) mould: vec4f,
 }
 struct Face {
   @builtin(position) at: vec4f,
@@ -149,6 +151,7 @@ struct Face {
   // How far the face's two axes lean to the light: the one \`uv.x\` runs along, and the one \`uv.y\` does.
   @location(5) lean: vec2f,
   @location(6) @interpolate(flat) finish: vec2f,
+  @location(7) @interpolate(flat) normalBias: f32,
 }
 @vertex fn cube(i: Cube) -> Face {
   const ALONG = array(${FACES.map(face => `vec3f(${face.a})`).join(', ')});
@@ -159,12 +162,15 @@ struct Face {
   var bits = i.ao.y >> ((f - 4u) * 8u + c * 2u);
   if (f < 4u) { bits = i.ao.x >> (f * 8u + c * 2u); }
   var o: Face;
-  o.n = turned(i.normal, i.quat);
+  // The shadow caster remains the cube. A normal bias avoids striping where
+  // the moulded finish spans the neighbouring tread and riser.
+  o.normalBias = select(0.0, i.mould.w, part.view.y >= 2.0);
+  o.n = turned(mix(i.normal, i.mould.xyz, o.normalBias), i.quat);
   o.p = p;
   o.uv = i.uv;
-  o.ao = f32(bits & 3u);
+  o.ao = f32(bits & 3u) * (1.0 - o.normalBias * 0.8);
   o.color = i.color;
-  o.finish = select(vec2f(1.0, 0.0), vec2f(vec2u(i.ao.y >> 16u, i.ao.y >> 24u) & vec2u(255u)) / 255.0, part.view.y != 0.0);
+  o.finish = select(vec2f(1.0, 0.0), vec2f(vec2u(i.ao.y >> 16u, i.ao.y >> 24u) & vec2u(255u)) / 255.0, (u32(part.view.y) & 1u) != 0u);
   o.lean = vec2f(dot(turned(ALONG[f], i.quat), part.sun.xyz), dot(turned(ACROSS[f], i.quat), part.sun.xyz));
   o.at = part.clip * vec4f(p, 1.0);
   return o;
@@ -178,7 +184,7 @@ ${world ? `  // The page hides whatever sinks into it, except through a well cut
   let amb = n2.x * part.ambient.z + n2.y * select(part.ambient.w, part.ambient.x, n.y < 0.0) + n2.z * select(part.ambient.w, part.ambient.y, n.z > 0.0);
   let ndl = max(dot(n, part.sun.xyz), 0.0);
   var sh = 0.0;
-  if (ndl > 0.0) { sh = lit(i.p, n, part.fall.z); }
+  if (ndl > 0.0) { sh = lit(i.p + n * i.normalBias * 0.65, n, part.fall.z); }
   let ao = 1.0 - i.ao * 0.17;
   let direct = part.sun.w * ndl * sh;
   let l = amb * ao + direct;
@@ -186,7 +192,10 @@ ${world ? `  // The page hides whatever sinks into it, except through a well cut
   let base = i.color.rgb;
   var c = base * min(l, 1.0);
   c = mix(c * part.tint.rgb, c, clamp(direct / max(part.sun.w * 0.6, 0.0001), 0.0, 1.0));
-  c = mix(c, part.gleam.rgb, clamp((l - 1.0) * 1.5, 0.0, 0.55));
+  // Diffuse PBT keeps its pigment in bright light. The glossier resin can
+  // approach the highlight colour along the same moulded shoulder.
+  let shoulder = mix(1.0, i.finish.y, i.normalBias);
+  c = mix(c, part.gleam.rgb, shoulder * clamp((l - 1.0) * 1.5, 0.0, 0.55));
   // Simulate a chamfer by lighting opposite edges differently. Page widths are measured on a full-size front face;
   // the cabinet projection foreshortens the sides. In the world use the projected width of each face instead.
   let px = ${world ? '1.0 / max(fwidth(i.uv), vec2f(0.0001))' : 'vec2f(part.view.z)'};
@@ -221,7 +230,11 @@ ${world ? `    // The world's picture has one sample a pixel and cubes of any si
   let g = max(i.color.a, 0.0) * part.gleam.a;
   c = mix(c, base * (0.86 + 0.14 * min(l, 1.15)) * seamLight, g * 0.36);
   ${world ? `// The world's last pass makes whatever is over ${GLOWS_OVER} of full glow (glow.ts): the kit's white is kept under it.
-  return vec4f(c * ${GLOWS_OVER}, 1.0);` : 'return vec4f(c, 1.0);'}
+  return vec4f(c * ${GLOWS_OVER}, 1.0);` : `let through = clamp(-1.0 - i.color.a, 0.0, 1.0);
+  let facing = abs(dot(n, normalize(part.eye.xyz)));
+  let grazing = pow(1.0 - min(facing, 1.0), 3.0) * through;
+  let opacity = 1.0 - through + grazing * 0.65;
+  return vec4f(mix(c, part.gleam.rgb, grazing * 0.45) * opacity, opacity);`}
 }
 
 // Depth as the light sees it.
@@ -320,6 +333,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
   const whereOnly: GPUVertexBufferLayout = { arrayStride: 32, stepMode: 'instance', attributes: [{ shaderLocation: 4, offset: 0, format: 'float32x4' }] }
   const colour: GPUVertexBufferLayout = { arrayStride: 16, stepMode: 'instance', attributes: [{ shaderLocation: 6, offset: 0, format: 'float32x4' }] }
   const shut: GPUVertexBufferLayout = { arrayStride: 8, stepMode: 'instance', attributes: [{ shaderLocation: 7, offset: 0, format: 'uint32x2' }] }
+  const normal: GPUVertexBufferLayout = { arrayStride: 4, stepMode: 'instance', attributes: [{ shaderLocation: 8, offset: 0, format: 'snorm8x4' }] }
   const over: GPUBlendState = { color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' }, alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' } }
   const multisample = { count: samples }
   const [shadowPipe, facePipe, groundPipe, haloPipe, pagePipe] = await Promise.all([
@@ -330,7 +344,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
     }),
     device.createRenderPipelineAsync({
       label: 'blocks: cubes', layout: layoutOf(lit),
-      vertex: { module, entryPoint: 'cube', buffers: [corners, where, colour, shut] },
+      vertex: { module, entryPoint: 'cube', buffers: [corners, where, colour, shut, normal] },
       fragment: { module, entryPoint: 'face', targets: [{ format }] },
       depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: 'less-equal' },
       multisample,
@@ -373,13 +387,13 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
     return (map = { texture, view, group: device.createBindGroup({ layout: lit, entries: [{ binding: 0, resource: { buffer: slots, size: SLOT } }, { binding: 1, resource: view }, { binding: 2, resource: sampler }] }) })
   }
 
-  // Every laid part's cubes, one after another, in three buffers as the kit keeps them.
-  let room = 0, cubes: { pos: GPUBuffer; col: GPUBuffer; ao: GPUBuffer } | null = null, used = 0
+  // Every laid part's cubes, one after another, in instance buffers.
+  let room = 0, cubes: { pos: GPUBuffer; col: GPUBuffer; ao: GPUBuffer; normals: GPUBuffer } | null = null, used = 0
   const hold = (n: number) => {
-    cubes?.pos.destroy(); cubes?.col.destroy(); cubes?.ao.destroy()
+    cubes?.pos.destroy(); cubes?.col.destroy(); cubes?.ao.destroy(); cubes?.normals.destroy()
     room = n
     const usage = GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST
-    cubes = { pos: device.createBuffer({ size: n * 32, usage }), col: device.createBuffer({ size: n * 16, usage }), ao: device.createBuffer({ size: n * 8, usage }) }
+    cubes = { pos: device.createBuffer({ size: n * 32, usage }), col: device.createBuffer({ size: n * 16, usage }), ao: device.createBuffer({ size: n * 8, usage }), normals: device.createBuffer({ size: n * 4, usage }) }
   }
   hold(16384)
 
@@ -435,6 +449,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
       if (count) {
         device.queue.writeBuffer(cubes!.pos, used * 32, frame.pos, 0, count * 8)
         device.queue.writeBuffer(cubes!.col, used * 16, frame.col, 0, count * 4)
+        if (frame.normals) device.queue.writeBuffer(cubes!.normals, used * 4, frame.normals, 0, count * 4)
         device.queue.writeBuffer(cubes!.ao, used * 8, frame.ao, 0, count * 2)
       }
       // Everything but the matrix, which waits to be told how large what is drawn into is.
@@ -443,7 +458,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
       const eye = 'clip' in at ? at.eye : undefined, { groundSoft } = frame
       slotValues.set([
         groundSoft !== undefined && Number.isFinite(groundSoft) ? Math.min(2, Math.max(0, groundSoft)) : -1,
-        frame.surfaceBytes === true ? 1 : 0, s, light.glow * (frame.glowStrength ?? 0.11),
+        Number(frame.surfaceBytes === true) + (frame.normals ? 2 : 0), s, light.glow * (frame.glowStrength ?? 0.11),
         area[0], area[1], area[2], area[3],
         L[0], L[1], L[2], light.sun,
         a.top, a.front, a.side, a.under,
@@ -517,6 +532,7 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
         picture.setVertexBuffer(1, cubes!.pos)
         picture.setVertexBuffer(2, cubes!.col)
         picture.setVertexBuffer(3, cubes!.ao)
+        picture.setVertexBuffer(4, cubes!.normals)
         picture.draw(36, l.count, 0, l.first)
         if (!l.glows) return
         picture.setPipeline(haloPipe)
@@ -533,11 +549,11 @@ export async function blocks(device: GPUDevice, format: GPUTextureFormat, option
     rest,
     bytes() {
       const px = scratches.reduce((n, s) => n + s.size[0] * s.size[1], 0)
-      return (map ? MAP * MAP * 4 : 0) + room * 56 + px * 4 * samples * (samples > 1 ? 2 : 1)
+      return (map ? MAP * MAP * 4 : 0) + room * 60 + px * 4 * samples * (samples > 1 ? 2 : 1)
     },
     destroy() {
       rest()
-      cubes?.pos.destroy(); cubes?.col.destroy(); cubes?.ao.destroy()
+      cubes?.pos.destroy(); cubes?.col.destroy(); cubes?.ao.destroy(); cubes?.normals.destroy()
       slots.destroy(); cubeBuffer.destroy()
     },
   }

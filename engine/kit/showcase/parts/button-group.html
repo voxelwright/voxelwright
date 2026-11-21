@@ -19,6 +19,25 @@
   .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; min-inline-size: 0; max-inline-size: 100%; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
   .row { align-items: start; }
+
+  #history {
+    --vx: 2px;
+    --vx-look: history-bank;
+    position: relative;
+    isolation: isolate;
+    align-items: center;
+    gap: 4px;
+    padding: 12px 8px 6px 10px;
+  }
+  #history:not([data-vx-live]) { background: #793f46; }
+  #history > button {
+    min-inline-size: 76px;
+    min-block-size: 44px;
+    --_on: var(--lit-legend);
+  }
+  #history > button:disabled:not([data-vx-live]) { --_on: #343832; }
+  #history .vx-label { text-shadow: none; }
+  #history > button:focus-visible { outline: 2px solid #ffc77d; outline-offset: 0; }
 </style>
 </head>
 <body>
@@ -69,6 +88,7 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
+  import { historyPlate } from './history-bank.js';
   const said = document.getElementById('said'), undo = document.getElementById('undo'), redo = document.getElementById('redo');
   let done = 3, undone = 0;
   const say = (what) => { undo.disabled = !done; redo.disabled = !undone; said.textContent = what ?? `${done} change${done === 1 ? '' : 's'} since the last draft`; };
@@ -76,7 +96,7 @@
   redo.addEventListener('click', () => { if (undone) { undone--; done++; say(); } });
   document.getElementById('draft').addEventListener('click', () => { done = 0; undone = 0; say('Draft saved'); });
   document.getElementById('publish').addEventListener('click', () => { done = 0; undone = 0; say('Published'); });
-  show();
+  show(historyPlate);
 </script>
 </body>
 </html>

@@ -2,7 +2,7 @@
 // node tools/shift.mjs [page] : compares every lettering box and the page height, plain against live.
 import { chromium } from 'playwright';
 const port = process.env.PORT || 5985;
-const path = process.argv[2] || 'showcase/index.html';
+const path = process.argv[2] || 'showcase/principles.html';
 const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--enable-unsafe-webgpu'] });
 let worst = 0;
 for (const w of [320, 390, 560, 768, 1080, 1280]) {

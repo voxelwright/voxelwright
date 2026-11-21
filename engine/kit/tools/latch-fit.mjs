@@ -4,22 +4,29 @@ import { chromium } from 'playwright';
 
 const base = `http://127.0.0.1:${process.env.PORT || 5989}/kit/showcase/`;
 const controls = [
-  { name: 'tabs', path: '', selector: '.tabcard .vx-tabs', legend: '[aria-selected="true"] .vx-label' },
+  { name: 'tabs', path: 'principles.html', selector: '.tabcard .vx-tabs', legend: '[aria-selected="true"] .vx-label' },
   { name: 'follow', path: 'parts/toggle-button.html', selector: '#s-off', legend: ':scope > .vx-label' },
   { name: 'bank', path: 'parts/toggle-group.html', selector: '#range', legend: 'label:has(input:checked) .vx-label' },
-  { name: 'pager', path: 'parts/pagination.html', selector: '#pager ol', legend: '[aria-current="page"] .vx-label' },
+  ...['high', 'low'].flatMap(profile => ['s', 'm', 'l', 'xl'].map(value => ({
+    name: 'bank', path: 'parts/toggle-group.html', selector: '.vx-toggle-group[data-vx-size="small"]',
+    legend: 'label:has(input:checked) .vx-label', value, profile,
+  }))),
+  { name: 'pager', path: 'parts/pagination.html', selector: '#pager', legend: '[aria-current="page"] .vx-label' },
 ];
 
 function geometry(el, name) {
   const live = window.vx.live(el);
-  const selected = { tabs: live.state.index, follow: '', bank: live.state.index, pager: live.state.latched }[name];
-  const partsFor = key => ['lens', 'guide', 'tongue'].map(prefix => live.model.byName[prefix + key]);
+  const selected = { tabs: live.state.index, follow: '', bank: live.state.index }[name];
+  const above = el.id === 'range';
+  const partsFor = key => (above ? ['lens', 'collar'] : ['lens', 'guide', 'tongue']).map(prefix => live.model.byName[prefix + key]);
   const seatEnd = key => name === 'bank' ? live.state.at[key][1] + live.state.at[key][3] : live.H;
   const canvas = live.canvas.getBoundingClientRect();
   const originX = canvas.x + live.ox / devicePixelRatio;
   const originY = canvas.y + live.oy / devicePixelRatio;
-  const lowerEdge = originY + seatEnd(selected) * live.vx;
-  const assembly = partsFor(selected);
+  const pager = name === 'pager';
+  const pageKey = pager && el.querySelector('[aria-current="page"]').getBoundingClientRect();
+  const lowerEdge = above ? originY - 2 * live.vx : pager ? pageKey.bottom : originY + seatEnd(selected) * live.vx;
+  const assembly = pager ? [live.model.byName.windows, live.model.byName['lit-clips']] : partsFor(selected);
   const lens = assembly[0];
   const centres = [];
   for (let i = 0; i < lens.count; i++) {
@@ -30,6 +37,16 @@ function geometry(el, name) {
   }
 
   let solidClear = Infinity, inactiveCells = 0, inactiveLit = 0;
+  if (pager) {
+    const smoked = live.model.byName['smoked-windows'];
+    inactiveCells = smoked.count;
+    for (let i = 0; i < smoked.count; i++) if (smoked.col[i * 4 + 3] > 0) inactiveLit++;
+    for (const part of assembly) for (let i = 0; i < part.count; i++) {
+      const y = part.rest[3 * i + 1] + .5;
+      const z = part.rest[3 * i + 2] + .5;
+      solidClear = Math.min(solidClear, lowerEdge - originY - (y + z / 2) * live.vx);
+    }
+  }
   for (const glass of live.model.parts.filter(p => /^lens\d*$/.test(p.name))) {
     const key = glass.name.slice(4);
     const inactive = key !== String(selected) || (name === 'follow' && el.getAttribute('aria-pressed') === 'false');
@@ -45,7 +62,8 @@ function geometry(el, name) {
         const at = 3 * i;
         const z = part.rest[at + 2] + part.tz + 0.5;
         const bottom = part.rest[at + 1] + part.ty + 0.5 + z / 2;
-        solidClear = Math.min(solidClear, (seatEnd(key) - bottom) * live.vx);
+        const clear = above ? (part.rest[at + 1] + part.ty - .5 + (z - 1) / 2 + 2) * live.vx : (seatEnd(key) - bottom) * live.vx;
+        solidClear = Math.min(solidClear, clear);
       }
     }
   }
@@ -60,7 +78,7 @@ function removeParts(el, names) {
   live.draw();
 }
 
-async function comparePixels({ frames, centres, clip, edge }) {
+async function comparePixels({ frames, centres, clip, edge, above }) {
   async function decode(png) {
     const image = new Image();
     image.src = 'data:image/png;base64,' + png;
@@ -99,7 +117,8 @@ async function comparePixels({ frames, centres, clip, edge }) {
   if (images.length === 2) return { visible };
   const [full, noInk, noLens, bare] = images;
   const ink = rows(full, noInk, 12), lamp = rows(noInk, noLens, 32), assembly = rows(noInk, bare, 32);
-  return { visible, inkClear: lamp.first - ink.last - 1, paintedClear: edge - clip.y - assembly.last - 1 };
+  return { visible, inkClear: above ? ink.first - lamp.last - 1 : lamp.first - ink.last - 1,
+    paintedClear: above ? clip.y + assembly.first - edge : edge - clip.y - assembly.last - 1 };
 }
 
 let failures = 0;
@@ -107,15 +126,18 @@ function report(ok, message) {
   if (!ok) failures++;
   console.log(`${ok ? 'ok' : 'FAIL'} ${message}`);
 }
-async function check(page, { name, path, selector, legend }, theme, width) {
+async function check(page, { name, path, selector, legend, value, profile = 'high' }, theme, width) {
+  await page.evaluate(build => sessionStorage.setItem('vx-instrument-build', JSON.stringify(build)),
+    { shell: theme === 'dark' ? 'smoke' : 'walnut', profile });
   await page.goto(base + path + (path ? '?theme=' + theme : ''));
   const control = page.locator(selector);
-  await control.scrollIntoViewIfNeeded();
+  await control.evaluate(el => el.scrollIntoView({ block: 'center' }));
+  if (value) await control.locator('label').filter({ has: page.locator(`input[value="${value}"]`) }).click();
   await page.evaluate(() => document.fonts.ready);
   const settle = () => page.waitForFunction(() => document.documentElement.dataset.ready === '1' &&
     window.vx?.stage && !window.vx.stage.awake.size);
   const capture = async clip => (await page.screenshot({ clip })).toString('base64');
-  const prefix = `${width} ${theme} ${name}`;
+  const prefix = `${width} ${theme} ${name}${value ? " " + value + " " + profile : ""}`;
   if (name === 'follow') {
     await settle();
     const { centres, names, solidClear, inactiveLit } = await control.evaluate(geometry, name);
@@ -135,7 +157,8 @@ async function check(page, { name, path, selector, legend }, theme, width) {
   await settle();
   const label = control.locator(legend);
   const box = await label.boundingBox();
-  const clip = { x: Math.max(0, Math.floor(box.x - 16)), y: Math.floor(box.y - 16),
+  const above = selector === '#range';
+  const clip = { x: Math.max(0, Math.floor(box.x - 16)), y: Math.floor(box.y - (above ? 36 : 16)),
     width: Math.ceil(box.width + 32), height: Math.ceil(box.height + 62) };
   const { lowerEdge, solidClear, names, centres, inactiveCells, inactiveLit } = await control.evaluate(geometry, name);
   const full = await capture(clip);
@@ -146,11 +169,11 @@ async function check(page, { name, path, selector, legend }, theme, width) {
   await control.evaluate(removeParts, names);
   const bare = await capture(clip);
   const { visible, inkClear, paintedClear } = await page.evaluate(comparePixels, {
-    frames: [full, noInk, noLens, bare], centres, clip, edge: lowerEdge,
+    frames: [full, noInk, noLens, bare], centres, clip, edge: lowerEdge, above,
   });
   const ok = inactiveLit === 0 && visible > 0 && visible === centres.length &&
     inkClear >= 4 && paintedClear >= 0 && solidClear >= 0;
-  report(ok, `${prefix}: ${inkClear} px under lettering, ${paintedClear} px inside painted bezel, ` +
+  report(ok, `${prefix}: ${inkClear} px clear of lettering, ${paintedClear} px inside painted bezel, ` +
     `${solidClear} px inside in geometry, ${visible}/${centres.length} lens cells visible, ${inactiveLit}/${inactiveCells} inactive cells emit`);
 }
 
@@ -158,6 +181,7 @@ const browser = await chromium.launch({ args: ['--use-angle=metal', '--enable-un
 try {
   for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
     const page = await browser.newPage({ viewport: { width, height: 900 }, deviceScaleFactor: 1, colorScheme: theme });
+    await page.goto(base + 'parts/');
     for (const control of controls) await check(page, control, theme, width);
     await page.close();
   }

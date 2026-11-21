@@ -38,6 +38,9 @@ def service():
                     print(name, "exited", code, flush=True)
                 if (ROOT / "hold-at-boundary").exists() or time.time() < next_run[name]:
                     continue
+                # Acquisition continues while a stricter acceptance gate is prepared.
+                if name in ("panel", "publication") and (ROOT / "hold-acceptance").exists():
+                    continue
                 with (ROOT / (name + ".log")).open("ab") as log:
                     running[name] = subprocess.Popen(
                         [sys.executable, "-u", str(HERE / args[0]), *args[1:]],

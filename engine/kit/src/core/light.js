@@ -8,6 +8,7 @@
 //   well     a level below the surface (hole), lit from its rim: where you put something in, and
 //            what you read as set apart.
 // Most of what a page holds is none of these: it is words on the surface.
+import { ridgeline } from '../looks/fittings.js';
 
 // The renderer takes a glowing cube 36% of the way to its own colour for each unit of the
 // light's glow. This much makes it wholly its own colour, in shadow and in a hole alike. The
@@ -89,12 +90,12 @@ export function seatIndicator(live, id, x, y, w, h, light = 'light', z = -1) {
   const tongue = m.part('tongue' + id);
   // One cell of overlap on each side covers the light at this projection.
   tongue.slab(left - 1, row - 1, z + 1, width + 2, 2, 1, 'slate', 1);
-  let lastTravel, lastTheme;
+  let lastTravel, lastTint;
   return (amount) => {
     const travel = Math.max(0, Math.min(1, amount));
-    if (travel === lastTravel && live.theme === lastTheme) return;
+    if (travel === lastTravel && live.tintRevision === lastTint) return;
     lastTravel = travel;
-    lastTheme = live.theme;
+    lastTint = live.tintRevision;
     tongue.ty = -2 * travel;
     tongue.tz = -2 * travel;
     // The two end lamps share the shutter's travel. In a closed slit even
@@ -127,12 +128,40 @@ export function seatedKey(live, m, disabled, material, lamp) {
     key.grounded = false;
     key.sunk = true;
     key.slab(0, inset, 0, W, height, 1, material, Math.min(W, height) > 2 ? 1 : 0);
+    if (look.tooling && live.el.hasAttribute('data-vx-step') && height >= 3) {
+      // A short-travel counter key. Its leading lip sits above the stamped
+      // carrier until the switch closes. The sign follows the raised face.
+      key.slab(0, inset, 1, W, height, 1, material, 1);
+      key.box(1, inset + 1, 2, W - 2, height - 2, 1, material);
+      live.state.top = live.faceZ = 3;
+      m.keyTravel = 2;
+      return key;
+    }
     m.keyTravel = 1;
   } else {
     ring(m.part('socket'), -1, -1, 0, W + 2, H + 2, 'gasket', 2);
-    ring(m.part('light'), 0, 0, 0, W, H, lamp, 1);
+    ring(m.part('light'), 0, 0, 0, W, H, look.tooling && lamp === 'light' ? 'backlight' : lamp, 1);
     key.grounded = false;
-    cap(key, 0, 0, 1, W, H, depth - 1, material);
+    if (look.tooling && W >= 10 && H >= 10 && depth >= 3) {
+      // Stepped skirt, shoulders and a shallow cylindrical dish. The art is
+      // sampled in the bank's coordinates so its horizon crosses the gaps.
+      const sculpt = depth >= 5;
+      const lip = sculpt ? 2 : 1;
+      const shoulder = depth - 2;
+      key.slab(0, 0, 1, W, H, Math.max(1, shoulder - 1), material, 2);
+      key.slab(1, 1, shoulder, W - 2, H - 2, 1, material, 2);
+      const origin = live.el.offsetLeft / live.vx;
+      for (let x = lip; x < W - lip; x++) {
+        const rim = sculpt && (x < lip + 2 || x >= W - lip - 2);
+        const u = (origin + x) * live.vx;
+        const horizon = H * ridgeline.key(u);
+        for (let y = 2; y < H - 2; y++) {
+          const art = material === 'key' && look.artwork && y >= horizon;
+          key.plot(x, y, depth - 1, art ? (y > horizon + 2 ? 'cap-ridge' : 'cap-inlay') : material);
+          if (rim) key.plot(x, y, depth, art ? 'cap-ridge' : material);
+        }
+      }
+    } else cap(key, 0, 0, 1, W, H, depth - 1, material);
   }
   live.state.top = live.faceZ = depth;
   return key;
@@ -142,6 +171,16 @@ export function seatedKey(live, m, disabled, material, lamp) {
 export function keyLight(live, hover, flare, held = 0) {
   live.glowStrength = halo(0.026) * byTheme(live) * (1 + hover * 1.2 + flare * 2.6 + held * 1.3);
   live.glowRadius = 2.3 + flare * 0.8;
+}
+
+/**
+ * A row lens: a strip of smoked glass set flush in the surface, one course proud of it so its
+ * glass catches the light. Every row of a list carries one, so the choice moving is a lens going
+ * dark and another lighting, and nothing appears from nowhere. `on` lights it with `light`.
+ */
+export function rowLens(part, x, y, w, h, on, light = 'light') {
+  part.box(x, y, 0, w, h, 1, on ? light : 'lens');
+  return part;
 }
 
 /** A pilot lamp has a steel socket, a raised lens and one pale facet facing the light. */

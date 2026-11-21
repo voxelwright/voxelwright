@@ -30,6 +30,31 @@
   font-weight: 400; font-style: normal; font-display: swap;
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
+/* Script faces from IBM/plex at 2e90fe3, licensed in fonts/ibm-plex-sans. */
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("fonts/ibm-plex-sans/IBMPlexSansArabic-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "IBM Plex Sans Arabic";
+  src: url("fonts/ibm-plex-sans/IBMPlexSansArabic-SemiBold.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-089F, U+08A0-08FF, U+FB50-FDFF, U+FE70-FEFF;
+}
+@font-face {
+  font-family: "IBM Plex Sans Hebrew";
+  src: url("fonts/ibm-plex-sans/IBMPlexSansHebrew-Regular.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+  unicode-range: U+0590-05FF, U+FB1D-FB4F;
+}
+@font-face {
+  font-family: "IBM Plex Sans Hebrew";
+  src: url("fonts/ibm-plex-sans/IBMPlexSansHebrew-SemiBold.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+  unicode-range: U+0590-05FF, U+FB1D-FB4F;
+}
 /* Vox Text: the voxel glyphs laid flat, for what is written on a key. Two weights, 4 KB each. */
 @font-face {
   font-family: "Vox Text";
@@ -51,8 +76,10 @@
 :root {
   --vx: 4px;
   --vx-theme: day;
-  --vx-font: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+  --vx-font: "IBM Plex Sans", "IBM Plex Sans Arabic", "IBM Plex Sans Hebrew", "Avenir Next", "Segoe UI", sans-serif;
   --vx-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* the reading face for display words in an article: headings and quotes in an instrument's prose */
+  --vx-serif: Georgia, "Times New Roman", serif;
   /* What is written on a key (buttons, tabs, menu items) is cut from the same cells as the key.
      Five voxels to the em, so a cell is half a voxel and every edge lands on a pixel. */
   --vx-key-font: "Vox Text", var(--vx-font);
@@ -89,6 +116,14 @@
 
   --vx-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --vx-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  /* The press, release and slide springs of src/core/motion.js as CSS (springCurve; tools/feel.mjs checks
+     they still agree), so a plain key moves by the same physics as a voxel one. */
+  --vx-press-time: 173ms;
+  --vx-press-ease: linear(0, 0.035, 0.131, 0.219, 0.34, 0.427, 0.533, 0.602, 0.682, 0.732, 0.789, 0.824, 0.862, 0.886, 0.905, 0.927, 0.94, 0.953, 0.962, 0.97, 0.976, 0.981, 0.985, 0.988, 1);
+  --vx-release-time: 271ms;
+  --vx-release-ease: linear(0, 0.059, 0.221, 0.393, 0.606, 0.769, 0.929, 1.028, 1.095, 1.138, 1.149, 1.139, 1.12, 1.095, 1.063, 1.038, 1.013, 0.998, 0.986, 0.98, 0.978, 0.979, 0.982, 0.986, 1);
+  --vx-slide-time: 317ms;
+  --vx-slide-ease: linear(0, 0.034, 0.127, 0.232, 0.346, 0.479, 0.585, 0.68, 0.775, 0.842, 0.896, 0.945, 0.976, 0.998, 1.015, 1.024, 1.029, 1.03, 1.029, 1.027, 1.023, 1.02, 1.017, 1.013, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -189,6 +224,8 @@
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
+/* A link made a key keeps its legend: a page's own rule for links (a { color: inherit }) must not reach it. */
+.vx-button:any-link { color: var(--_on); text-decoration: none; }
 .vx-button[data-vx-material="signal"] { --_face: var(--vx-signal); --_top: var(--vx-signal-top); --_side: var(--vx-signal-side); --_on: var(--vx-on-signal); }
 .vx-button[data-vx-material="chalk"] { --_face: var(--vx-chalk); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--vx-ink); }
 .vx-button[data-vx-material="walnut"] { --_face: var(--vx-walnut); --_top: var(--vx-walnut-top); --_side: var(--vx-walnut-side); --_on: #fff; }
@@ -207,16 +244,66 @@
 .vx-button:not([data-vx-live])::before {
   content: "";
   position: absolute;
-  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
-  border-top: var(--_lift) solid var(--_top);
-  border-left: var(--_lift) solid var(--_side);
-  border-right: var(--_lift) solid transparent;
-  border-bottom: var(--_lift) solid transparent;
+  --_body: calc(var(--_lift) + var(--_hover));
+  inset: calc(var(--_body) * -1) 0 0 calc(var(--_body) * -1);
+  border-top: var(--_body) solid var(--_top);
+  border-left: var(--_body) solid var(--_side);
+  border-right: var(--_body) solid transparent;
+  border-bottom: var(--_body) solid transparent;
   box-sizing: border-box;
   z-index: -1;
   pointer-events: none;
 }
 .vx-button:not([data-vx-live]):is(:active, [aria-expanded="true"], [aria-pressed="true"]):not(:disabled) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
+
+/* ---------- How a key answers the hand ----------
+   Plain, a key moves by the voxels' own springs: down at contact on the press curve, back up on
+   the release curve with the same carry past rest. Its side (--_lift) is a length, so the body
+   follows the face. A mouse resting on a key raises it a little, as the voxels do: the body grows
+   up and to the left while the face stays under the pointer, so the hit box never moves away
+   from it. Touch never hovers. Nothing travels with less motion: states change at once. */
+@property --_lift { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --_hover { syntax: "<length>"; inherits: true; initial-value: 0px; }
+:is(.vx-button, .vx-toggle-button):not([data-vx-live], [data-lamp]) {
+  transition-property: transform, --_lift, --_hover, box-shadow;
+  transition-duration: var(--vx-release-time);
+  transition-timing-function: var(--vx-release-ease);
+}
+:is(.vx-button, .vx-toggle-button):not([data-vx-live], [data-lamp]):is(:active, [aria-expanded="true"], [aria-pressed="true"]) {
+  transition-duration: var(--vx-press-time);
+  transition-timing-function: var(--vx-press-ease);
+}
+@media (hover: hover) and (pointer: fine) {
+  :is(.vx-button, .vx-toggle-button):not([data-vx-live], [data-lamp], :disabled, [aria-disabled="true"], :active, [aria-expanded="true"], [aria-pressed="true"]):hover {
+    --_hover: calc(var(--vx) * 0.5);
+  }
+}
+/* Live, the ring frames the whole solid, not the face alone: the projection draws a key's body
+   half its height (--vx-face-z, set as it is built) up and to the left of the face. */
+:is(.vx-button, .vx-toggle-button)[data-vx-live]:not([data-lamp]):focus-visible { outline-color: transparent; }
+:is(.vx-button, .vx-toggle-button)[data-vx-live]:not([data-lamp]):focus-visible::after {
+  --_up: calc(var(--vx) * (var(--vx-face-z, 0) / 2 + 1.5));
+  content: ""; position: absolute; z-index: 1; pointer-events: none;
+  inset: calc(var(--_up) * -1) calc(var(--vx) * -1.5) calc(var(--vx) * -1.5) calc(var(--_up) * -1);
+  outline: 2px solid var(--vx-focus);
+}
+/* Plain, the body is the side band up and to the left of the face (--_lift): frame it the same way. */
+.vx-button:not([data-vx-live], [data-lamp]):focus-visible { outline-color: transparent; }
+.vx-button:not([data-vx-live], [data-lamp]):focus-visible::after {
+  --_up: calc(var(--_lift) + var(--_hover) + var(--vx) * 1.5);
+  content: ""; position: absolute; z-index: 1; pointer-events: none;
+  inset: calc(var(--_up) * -1) calc(var(--vx) * -1.5) calc(var(--vx) * -1.5) calc(var(--_up) * -1);
+  outline: 2px solid var(--vx-focus);
+}
+@media (forced-colors: active) {
+  .vx-button:not([data-vx-live], [data-lamp]):focus-visible { outline-color: Highlight; }
+  .vx-button:not([data-vx-live], [data-lamp]):focus-visible::after { content: none; }
+  :is(.vx-button, .vx-toggle-button)[data-vx-live]:not([data-lamp]):focus-visible { outline-color: Highlight; }
+  :is(.vx-button, .vx-toggle-button)[data-vx-live]:not([data-lamp]):focus-visible::after { content: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :is(.vx-button, .vx-toggle-button):not([data-vx-live]) { transition: none; }
+}
 
 /* ---------- Shared ---------- */
 
@@ -253,15 +340,55 @@
 .vx-toggle:has(input:disabled) { color: var(--vx-ink-quiet); cursor: default; }
 .vx-switch { flex: none; inline-size: calc(var(--vx) * 16); block-size: calc(var(--vx) * 8); }
 .vx-toggle input:focus-visible + .vx-switch { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
+/* plain: a knob in a channel whose floor fills with signal when on (components/toggle.js) */
 .vx-switch:not([data-vx-live]) { background: var(--vx-slate); box-shadow: inset 0 0 0 var(--vx) var(--vx-steel); }
 .vx-switch:not([data-vx-live])::after {
   content: ""; position: absolute; inset-block: var(--vx); inset-inline-start: var(--vx);
   inline-size: calc(var(--vx) * 6); background: var(--vx-knob);
   box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow);
-  transition: transform 160ms var(--vx-ease-out);
+  transition: transform var(--vx-slide-time) var(--vx-slide-ease);
 }
 .vx-toggle input:checked + .vx-switch:not([data-vx-live]) { background: var(--vx-signal); }
 .vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8 * var(--_inline-sign))); }
+/* plain, in the lit look: the same slide switch its voxels build (src/looks/lit.js, switchPart). A steel bezel a
+   voxel proud round a dark slot whose far walls catch the light; a seven-voxel paddle with a
+   raised crest and a grip line; on, the trench behind the paddle fills with light. The paddle
+   travels on the SLIDE spring. An instrument's hardware colours come from fittings (--vx-hw-*). */
+[data-vx-look="lit"] .vx-switch {
+  --_edge: var(--vx-hw-steel, var(--vx-steel));
+  --_bezel: var(--vx-hw-slate, var(--vx-slate));
+  --_slot: color-mix(in oklab, var(--_bezel), #000 38%);
+  --_wall: color-mix(in oklab, var(--_bezel), #fff 12%);
+  --_knob: var(--vx-hw-ivory, var(--vx-knob));
+  /* the trench's light glows, so it is the go colour lifted toward its light */
+  --_glow: color-mix(in oklab, var(--lit-go, var(--vx-leaf)), #fff 30%);
+}
+[data-vx-look="lit"] .vx-switch:not([data-vx-live]) {
+  background:
+    linear-gradient(var(--_wall) 0 0) right var(--vx) top var(--vx) / var(--vx) calc(100% - var(--vx) * 2) no-repeat,
+    linear-gradient(var(--_wall) 0 0) left var(--vx) bottom var(--vx) / calc(100% - var(--vx) * 2) var(--vx) no-repeat,
+    var(--_slot);
+  box-shadow: inset 0 0 0 calc(var(--vx) * 0.5) var(--_edge), inset 0 0 0 var(--vx) var(--_bezel), calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-switch:not([data-vx-live])::before {
+  content: ""; position: absolute; inset-block: calc(var(--vx) * 2) calc(var(--vx) * 4); inset-inline: var(--vx);
+  background: var(--_glow); clip-path: inset(0 100% 0 0);
+  transition: clip-path var(--vx-slide-time) var(--vx-slide-ease);
+}
+[data-vx-look="lit"] .vx-switch:not([data-vx-live]):dir(rtl)::before { clip-path: inset(0 0 0 100%); }
+[data-vx-look="lit"] .vx-switch:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block-start: var(--vx); inset-inline-start: var(--vx);
+  inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 6);
+  background:
+    linear-gradient(color-mix(in oklab, var(--_knob), #000 14%) 0 0) calc(var(--vx) * 2) var(--vx) / calc(var(--vx) * 3) var(--vx) no-repeat,
+    linear-gradient(color-mix(in oklab, var(--_knob), #fff 40%) 0 0) var(--vx) var(--vx) / calc(var(--vx) * 5) calc(var(--vx) * 2) no-repeat,
+    var(--_knob);
+  box-shadow: inset calc(var(--vx) * 0.5) 0 0 color-mix(in oklab, var(--_knob), #000 20%), calc(var(--vx) * 0.5) calc(var(--vx) * 0.75) 0 rgb(0 0 0 / 0.35);
+  transition: transform var(--vx-slide-time) var(--vx-slide-ease);
+}
+[data-vx-look="lit"] .vx-toggle input:checked + .vx-switch:not([data-vx-live])::before { clip-path: inset(0); }
+[data-vx-look="lit"] .vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 7 * var(--_inline-sign))); }
+[data-vx-look="lit"] .vx-toggle input:disabled + .vx-switch { --_knob: var(--vx-steel); --_glow: var(--_slot); }
 
 /* ---------- Slider ---------- */
 
@@ -291,7 +418,8 @@
 .vx-well ::placeholder { color: var(--vx-ink-quiet); opacity: 1; }
 .vx-well:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
 .vx-well:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
-.vx-well:not([data-vx-live]):has([aria-invalid="true"]) { box-shadow: inset 0 0 0 var(--vx) var(--vx-brick); }
+/* invalid: a red line inside the far lower edge, not a ring */
+.vx-well:not([data-vx-live]):has([aria-invalid="true"]) { box-shadow: inset 0 calc(var(--vx) * -1) 0 var(--lit-stop, var(--vx-brick)); }
 
 /* ---------- Note card ---------- */
 
@@ -362,6 +490,11 @@
   padding: calc(var(--vx) * 2) 0; background: none;
   min-inline-size: calc(var(--vx) * 44);
 }
+.vx-menu-rows {
+  max-block-size: calc(100dvh - 24px - var(--vx) * 4);
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
 .vx-menu [role^="menuitem"] {
   display: flex; align-items: center; box-sizing: border-box; inline-size: 100%;
   min-block-size: calc(var(--vx) * 10); padding: 0 calc(var(--vx) * 5);
@@ -385,19 +518,30 @@ dialog.vx-dialog {
 .vx-dialog > :is(header, footer) { margin: 0; border: 0; background: none; }
 dialog.vx-dialog:focus-visible { outline: none; }
 .vx-dialog::backdrop { background: rgb(10 15 61 / 0.5); transition: opacity 200ms ease-out; }
-.vx-dialog[data-vx-leaving]::backdrop { opacity: 0; }
+.vx-dialog[data-vx-native-exit]::backdrop { opacity: 0; }
 .vx-dialog > header { padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 3.5); font-weight: 700; font-size: 1.125rem; line-height: 1.25; color: var(--vx-on-enamel); }
 .vx-dialog-body { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); line-height: 1.55; overflow: auto; }
 .vx-dialog-body > :first-child { margin-block-start: 0; }
 .vx-dialog-body > :last-child { margin-block-end: 0; }
 .vx-dialog > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--vx) * 4); padding: calc(var(--vx) * 1) calc(var(--vx) * 6) calc(var(--vx) * 6); }
-[data-vx-carried] > :not(.vx-canvas) {
-  translate: var(--vx-plate-x, 0) var(--vx-plate-y, 0);
-  opacity: var(--vx-plate-ink, 0);
-  transition: none;
+[data-vx-surface="courses"] > :not(.vx-canvas) { opacity: var(--vx-surface-ink); transition: none; }
+[data-vx-surface="rim"], [popover][data-vx-surface="still"] { opacity: var(--vx-surface-alpha); }
+[data-vx-surface="still"]:not([popover]) > * { opacity: var(--vx-surface-alpha); transition: none; }
+[popover][data-vx-native-exit], dialog.vx-dialog[data-vx-native-exit] {
+  display: var(--vx-exit-display);
+  transition: overlay 150ms allow-discrete;
 }
-[data-vx-carried="still"] > .vx-canvas { opacity: var(--vx-plate-ink, 0); }
-.vx-toast[data-vx-carried] .vx-toast-text { display: inline-block; transition: none; }
+dialog.vx-dialog[data-vx-native-exit]:not([open]) {
+  position: fixed;
+  inset: var(--vx-exit-y) auto auto var(--vx-exit-x);
+  margin: 0;
+  box-sizing: border-box;
+  width: var(--vx-exit-w);
+  height: var(--vx-exit-h);
+  transition-duration: 240ms;
+}
+[data-vx-native-exit]::backdrop { pointer-events: none; }
+[data-vx-native-exit]:not([open], :popover-open) { pointer-events: none; interactivity: inert; }
 .vx-dialog:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow); }
 .vx-dialog:not([data-vx-live]) > header { background: var(--vx-enamel); }
 
@@ -408,6 +552,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
 .vx-menu[data-vx-cover-legends] [role^="menuitem"] { opacity: 0; }
 .vx-toast-text { transition: opacity 120ms ease; }
 .vx-toast[data-vx-leaving] .vx-toast-text { opacity: 0; }
+.vx-toast[data-vx-surface] > .vx-toast-text { opacity: var(--vx-surface-ink); transition: none; }
 .vx-toast:not([data-vx-live]) { background: var(--vx-chalk); border-inline-start: calc(var(--vx) * 2) solid var(--vx-signal); padding-inline-start: calc(var(--vx) * 6); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
 .vx-toast:not([data-vx-live])[data-vx-kind="done"] { border-color: var(--vx-leaf); }
 .vx-toast:not([data-vx-live])[data-vx-kind="failed"] { border-color: var(--vx-brick); }
@@ -484,7 +629,9 @@ dialog.vx-dialog:focus-visible { outline: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vx-switch:not([data-vx-live])::after { transition: none; }
+  .vx-switch:not([data-vx-live])::after,
+  [data-vx-look="lit"] .vx-switch:not([data-vx-live])::after,
+  [data-vx-look="lit"] .vx-switch:not([data-vx-live])::before { transition: none; }
 }
 
 /* ============================================================================================
@@ -528,7 +675,7 @@ dialog.vx-dialog:focus-visible { outline: none; }
   --lit-stop: #c5301c;
   --lit-night: 0; /* 1 at night: what shines only then is multiplied by it */
 }
-:root[data-theme="dark"][data-vx-look="lit"], :root[data-theme="dark"] [data-vx-look="lit"] {
+:root[data-theme="dark"]:not([data-shell])[data-vx-look="lit"], :root[data-theme="dark"]:not([data-shell]) [data-vx-look="lit"] {
   --vx-ground: #08090f;
   --vx-ink: #e8eaf4;
   --vx-ink-quiet: #d1d5e3;
@@ -554,8 +701,9 @@ dialog.vx-dialog:focus-visible { outline: none; }
   --lit-stop: #ff7a66;
   --lit-night: 1;
 }
+/* an instrument (data-shell) has its own night: its night enclosure, in css/fittings.css */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"])[data-vx-look="lit"], :root:not([data-theme="light"]) [data-vx-look="lit"] {
+  :root:not([data-theme="light"], [data-shell])[data-vx-look="lit"], :root:not([data-theme="light"], [data-shell]) [data-vx-look="lit"] {
     --vx-ground: #08090f;
     --vx-ink: #e8eaf4;
     --vx-ink-quiet: #d1d5e3;
@@ -596,8 +744,8 @@ dialog.vx-dialog:focus-visible { outline: none; }
    main action of a group (the accent cap); data-vx-kind="danger" destroys something (a red light). */
 [data-vx-look="lit"] .vx-button { --_face: var(--vx-key); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--lit-legend); font-weight: 400; }
 [data-vx-look="lit"] .vx-button:is([data-vx-kind="main"], [data-vx-material="enamel"]) { --_face: var(--vx-enamel); --_top: var(--vx-enamel-top); --_side: var(--vx-enamel-side); --_on: var(--vx-on-enamel); }
-[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-text); }
-[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
 [data-vx-look="lit"] .vx-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); }
 [data-vx-look="lit"] .vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
 /* at night the legend shines through, and flares with the light as the key goes down (--lit is
@@ -622,6 +770,10 @@ dialog.vx-dialog:focus-visible { outline: none; }
 .vx-groove[data-vx-way="down"] { block-size: auto; inline-size: var(--vx); align-self: stretch; }
 .vx-groove:not([data-vx-live]) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
 .vx-groove[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+/* a row lens: smoked and unlit until its row is the current one */
+.vx-groove[data-vx-lens]:not([data-vx-live]) { background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate)); }
+:is(li, a, [role="option"], [role="tab"])[aria-current]:not([aria-current="false"]) > .vx-groove[data-vx-lens]:not([data-vx-live]),
+[aria-selected="true"] > .vx-groove[data-vx-lens]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
 
 /* Lamp: a small light that says a state. data-vx-light: go (the default), stop, warm, accent. */
 .vx-lamp { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }

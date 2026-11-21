@@ -129,7 +129,7 @@ dialog:where(.vx-sheet, .vx-drawer) > footer {
 
 /* plain: a painted panel, and a painted groove under the header */
 dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) {
-  background: var(--vx-chalk);
+  background: var(--vx-reading-plate, var(--vx-chalk));
   box-shadow: 0 0 0 1px var(--vx-chalk-side), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
 }
 dialog:where(.vx-sheet, .vx-drawer):not([data-vx-live]) > header {

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en" data-vx-look="lit">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voxelmorphism</title>
+<meta name="description" content="Voxelmorphism: a design language where every control is a small solid built from voxels.">
+<link rel="stylesheet" href="../voxelmorphism.css">
+<link rel="stylesheet" href="showcase.css">
+<script>document.documentElement.classList.add("js"); setTimeout(function () { document.documentElement.dataset.ready = "1"; }, 3000);</script>
+</head>
+<body>
+<a class="skip" href="#rules">Skip to the rules</a>
+
+<header class="top">
+  <h1 class="vx-sign">Voxelmorphism</h1>
+  <p class="lede">Skeuomorphism painted controls to look like leather and brushed metal. Voxelmorphism builds them out of blocks. Every control on this page is a small solid made of voxels, lit by one light, and you can count what it is made of.</p>
+  <p class="aside">Poke the sign, or hold and brush it. It mends itself.</p>
+
+  <div class="controls" role="group" aria-label="How this page is shown">
+    <div class="vx-tabs" role="tablist" aria-label="Light" id="light">
+      <button role="tab" aria-selected="true" data-theme-value="">Auto</button>
+      <button role="tab" aria-selected="false" data-theme-value="light">Day</button>
+      <button role="tab" aria-selected="false" data-theme-value="dark">Night</button>
+    </div>
+    <label class="vx-toggle"><input type="checkbox" role="switch" id="voxels" checked><span class="vx-switch"></span>Voxels</label>
+    <label class="vx-toggle"><input type="checkbox" role="switch" id="sound"><span class="vx-switch"></span>Sound</label>
+  </div>
+  <nav aria-label="Kit examples"><a href="lit.html?still">Hardware panel</a> · <a href="parts/">All parts</a></nav>
+</header>
+
+<main>
+<section id="rules" aria-labelledby="rules-h">
+  <h2 id="rules-h" class="vx-sign" data-vx-board="none">The rules</h2>
+
+  <article class="rule">
+    <div class="say">
+      <h3>The voxel is the unit</h3>
+      <p>One voxel is 4 px. Every size is a whole number of voxels: a button is 11 tall, a switch is 16 by 8, a gap is 1. Nothing is a fraction of a block, so nothing looks nearly right.</p>
+      <p>Change the size of a voxel and the whole interface scales with it, the way a brick wall scales with its bricks.</p>
+    </div>
+    <div class="show" id="scale-demo">
+      <div class="bench" id="scale-bench">
+        <button class="vx-button" data-vx-kind="main">Plant a seed</button>
+        <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
+      </div>
+      <label class="knob"><span>Voxel size <output id="scale-out">4 px</output></span>
+        <span class="vx-slider"><input type="range" min="2" max="8" step="1" value="4" id="scale"></span></label>
+    </div>
+  </article>
+
+  <article class="rule">
+    <div class="say">
+      <h3>The front face sits on the pixel grid</h3>
+      <p>There is no camera. The view is a cabinet projection: the face of every voxel is a square of whole pixels, and height shows as a shift of half a voxel down and to the right, as if you stood up and to the left of the page.</p>
+      <p>So text stays sharp, a control is where its box says it is, and depth is still real depth.</p>
+    </div>
+    <div class="show">
+      <div class="bench tall gridded"><span class="vx-block" id="depth-block" data-vx-profile="depth-sample" data-vx-material="enamel" data-vx-depth="4" style="inline-size: calc(var(--vx) * 24); block-size: calc(var(--vx) * 16)"></span></div>
+      <label class="knob"><span>Height above the seat <output id="depth-out">4 voxels</output></span>
+        <span class="vx-slider"><input type="range" min="1" max="12" step="1" value="4" id="depth"></span></label>
+    </div>
+  </article>
+
+  <article class="rule">
+    <div class="say">
+      <h3>Height says what you can do</h3>
+      <p>A thing that stands proud of the page can be pressed, and it goes down when you press it. A well cut into a slab takes what you type. A thing that sits low is switched off. The page itself is bedrock: nothing goes below it.</p>
+    </div>
+    <div class="show">
+      <div class="bench wrap">
+        <button class="vx-button">Press me</button>
+        <button class="vx-button" disabled>Switched off</button>
+        <label class="vx-field grow"><span class="vx-field-label">Type here</span><span class="vx-well"><input type="text" placeholder="A well, one voxel deep"></span></label>
+      </div>
+    </div>
+  </article>
+
+  <article class="rule">
+    <div class="say">
+      <h3>Material says what it is for</h3>
+      <p>Colour is never chosen for looks. Enamel is the thing to press. Signal is where you are and what is on, and it glows at night. Chalk carries content. Slate is the floor of a well or a track. Steel is switched off. Walnut carries other things. Leaf has gone well and brick has not.</p>
+    </div>
+    <div class="show">
+      <ul class="swatches">
+        <li><span class="vx-block" data-vx-material="enamel" data-vx-depth="3"></span>Enamel</li>
+        <li><span class="vx-block" data-vx-material="signal" data-vx-depth="3"></span>Signal</li>
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="3"></span>Chalk</li>
+        <li><span class="vx-block" data-vx-material="slate" data-vx-depth="3"></span>Slate</li>
+        <li><span class="vx-block" data-vx-material="steel" data-vx-depth="3"></span>Steel</li>
+        <li><span class="vx-block" data-vx-material="walnut" data-vx-depth="3"></span>Walnut</li>
+        <li><span class="vx-block" data-vx-material="leaf" data-vx-depth="3"></span>Leaf</li>
+        <li><span class="vx-block" data-vx-material="brick" data-vx-depth="3"></span>Brick</li>
+      </ul>
+    </div>
+  </article>
+
+  <article class="rule">
+    <div class="say">
+      <h3>One light, and real shadows</h3>
+      <p>The light comes from the top left, as it has in interfaces since the first bevelled button. Tops are brightest, fronts are the true colour, sides are darkest. Shadows are cast, not painted, so they tighten when a button goes down.</p>
+      <p>Dark mode is night. The materials stay; the light drops, and anything made of signal lights the wall around it.</p>
+    </div>
+    <div class="show">
+      <ul class="swatches heights">
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="2"></span>2 voxels high</li>
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="6"></span>6</li>
+        <li><span class="vx-block" data-vx-material="chalk" data-vx-depth="12"></span>12</li>
+        <li><span class="vx-block" data-vx-material="signal" data-vx-depth="6"></span>Signal, 6</li>
+      </ul>
+      <div class="bench"><button class="vx-button">Hold for shadow</button></div>
+    </div>
+  </article>
+
+  <article class="rule">
+    <div class="say">
+      <h3>Things are built, and they break</h3>
+      <p>When something is made, it is assembled in front of you: lowest layer first, each block set down from your side of the page. When it is removed, it crumbles and falls. A break is quicker than a build.</p>
+      <p>This marks making and unmaking only. Nothing assembles because you scrolled to it, and nothing moves while you read.</p>
+    </div>
+    <div class="show">
+      <div class="bench tall" id="build-bench">
+        <article class="vx-card" data-vx-edge="leaf" id="build-card"><p><strong>Watered on 14 November</strong></p><p>Hide the egg in the footer.</p></article>
+      </div>
+      <div class="pair">
+        <button class="vx-button" data-vx-material="chalk" id="break">Break it</button>
+        <button class="vx-button" id="build" disabled>Build it</button>
+      </div>
+    </div>
+  </article>
+</section>
+
+<section id="kit" aria-labelledby="kit-h">
+  <h2 id="kit-h" class="vx-sign" data-vx-board="none">The kit</h2>
+  <p class="intro">Eleven parts, each a real HTML control underneath. Tab through them: the keyboard works as it would with no voxels at all.</p>
+
+  <div class="kit">
+    <figure><div class="bench wrap">
+      <button class="vx-button" data-vx-kind="main" data-vx-icon="plus">Plant a seed</button>
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="drop">Water it</button>
+      <button class="vx-button" data-vx-material="brick" data-vx-icon="cross">Pull it up</button>
+      <button class="vx-button" disabled>Asleep</button>
+    </div><figcaption>Button</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Ship when the tests pass</label>
+      <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Hold every bloom for review</label>
+    </div><figcaption>Toggle</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <label class="knob"><span>Waterings before a bud <output id="w-out">6</output></span>
+        <span class="vx-slider"><input type="range" min="1" max="10" value="6" id="w"></span></label>
+    </div><figcaption>Slider</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <label class="knob"><span>Tests passing <output>3 of 5</output></span>
+        <span class="vx-meter"><progress value="3" max="5">3 of 5</progress></span></label>
+    </div><figcaption>Meter</figcaption></figure>
+
+    <figure><div class="bench wrap">
+      <button class="vx-button" data-vx-material="chalk" data-vx-icon="chevron" popovertarget="plant-menu" aria-haspopup="menu" aria-expanded="false">This plant</button>
+      <div class="vx-menu" id="plant-menu" popover role="menu">
+        <button role="menuitem">Water it</button>
+        <button role="menuitem">Move to another shelf</button>
+        <button role="menuitem">Show the session</button>
+        <button role="menuitem" data-vx-kind="danger">Pull it up</button>
+      </div>
+    </div><figcaption>Menu</figcaption></figure>
+
+    <figure><div class="bench wrap">
+      <button class="vx-button" id="open-dialog">Let it bloom</button>
+    </div><figcaption>Dialog</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <label class="vx-field"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="A new easter egg for the blog"></span></label>
+      <label class="vx-field"><span class="vx-field-label">Water it</span><span class="vx-well"><textarea placeholder="What did you learn about this idea today?"></textarea></span><span class="vx-field-hint">Every watering becomes part of the brief.</span></label>
+    </div><figcaption>Text field</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <ul class="vx-list">
+        <li aria-current="true"><a href="#kit">A new easter egg for the blog</a><span class="vx-row-meta">bud</span></li>
+        <li><a href="#kit">A greeting in the console</a><span class="vx-row-meta">sprout</span></li>
+        <li><a href="#kit">The LOG page as a changelog</a><span class="vx-row-meta">seed</span></li>
+      </ul>
+    </div><figcaption>List</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <article class="vx-card" data-vx-edge="walnut"><p><strong>Watered on 16 November</strong></p><p>Typing the old cheat code turns every heading into voxels for a minute.</p></article>
+    </div><figcaption>Note card</figcaption></figure>
+
+    <figure><div class="bench stack start">
+      <div class="vx-toast" data-vx-kind="done"><span class="vx-toast-text">Watered. Two more and it buds.</span></div>
+      <div class="vx-toast" data-vx-kind="failed"><span class="vx-toast-text">The session failed: 2 tests did not pass.</span></div>
+      <button class="vx-button" data-vx-material="chalk" id="toast-done">Show a toast</button>
+    </div><figcaption>Toast</figcaption></figure>
+
+    <figure><div class="bench stack">
+      <div class="vx-card tabcard">
+        <div class="vx-tabs" role="tablist" aria-label="Garden">
+        <button role="tab" aria-selected="true" aria-controls="tp1">Growing</button>
+        <button role="tab" aria-selected="false" aria-controls="tp2">Bloomed</button>
+        <button role="tab" aria-selected="false" aria-controls="tp3">Wilted</button>
+      </div>
+        <p id="tp1" role="tabpanel">Three plants are growing. The easter egg is closest: one more watering and it buds.</p>
+        <p id="tp2" role="tabpanel" hidden>One has bloomed and shipped: the greeting in the console.</p>
+        <p id="tp3" role="tabpanel" hidden>Nothing has wilted.</p>
+      </div>
+    </div><figcaption>Tabs</figcaption></figure>
+  </div>
+</section>
+
+<section id="growth" aria-labelledby="growth-h">
+  <h2 id="growth-h" class="vx-sign" data-vx-board="none">A plant, grown from a number</h2>
+  <div class="rule">
+    <div class="say">
+      <p>The growth meter is a plant. Every voxel in it has a birthday between 0 and 1, so one number draws it at any moment of its life: seed, sprout, sapling, bud, bloom. Each plant grows from its own seed number and no two are alike.</p>
+      <p>This is the heart of Plant a Seed, the first app built with the kit.</p>
+      <label class="knob"><span>Grow <output id="grow-out">sapling</output></span>
+        <span class="vx-slider"><input type="range" min="0" max="100" value="55" id="grow"></span></label>
+    </div>
+    <div class="show">
+      <div class="shelf" id="shelf">
+        <span class="vx-block plank" data-vx-material="walnut" data-vx-depth="7" data-vx-round="0"></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="2" data-vx-petal="petal"><progress value="0.55">55%</progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="5" data-vx-petal="signal"><progress value="0.55">55%</progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="9" data-vx-petal="ivory"><progress value="0.55">55%</progress></span>
+        <span class="vx-meter" data-vx-kind="growth" data-vx-seed="4" data-vx-petal="enamel"><progress value="0.55">55%</progress></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="plain" aria-labelledby="plain-h">
+  <h2 id="plain-h" class="vx-sign" data-vx-board="none">The plain version</h2>
+  <div class="rule">
+    <div class="say">
+      <p>The voxels are an addition. Underneath, every part is ordinary HTML styled by one stylesheet, and that plain version is what you get with no script or no WebGL2. Turn <em>Voxels</em> off at the top of the page to see it.</p>
+      <p>If you ask your system for less motion, you keep the voxels and lose the travel: nothing flies in or falls away, states change with a short fade, and the sign holds still.</p>
+    </div>
+    <div class="show">
+      <div class="bench wrap" data-plain>
+        <button class="vx-button" data-vx-kind="main">Plant a seed</button>
+        <button class="vx-button" data-vx-material="chalk">Not yet</button>
+        <label class="vx-toggle"><input type="checkbox" role="switch" checked><span class="vx-switch"></span>Water daily</label>
+        <label class="vx-field grow"><span class="vx-field-label">Seed</span><span class="vx-well"><input type="text" value="Plain HTML"></span></label>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="use" aria-labelledby="use-h">
+  <h2 id="use-h" class="vx-sign" data-vx-board="none">Use it</h2>
+  <div class="rule">
+    <div class="say">
+      <p>Link the stylesheet, write ordinary markup with the class names, and call <code>adopt()</code>. There is no build step and no framework. A part of your own is a function that fills a model with boxes.</p>
+      <p>The rules in full, with every number, are in <a href="../SPEC.md">the spec</a>.</p>
+    </div>
+    <div class="show">
+<div class="vx-card codecard"><pre class="code"><code>&lt;link rel="stylesheet" href="voxelmorphism.css"&gt;
+
+&lt;button class="vx-button"&gt;Plant a seed&lt;/button&gt;
+
+&lt;script type="module"&gt;
+  import { adopt } from './voxelmorphism/src/index.js';
+  adopt();
+&lt;/script&gt;</code></pre></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<footer class="foot">
+  <p>Voxelmorphism is the design language of Plant a Seed. Type is Overpass; the lettering in voxels is Vox Sign, drawn for this.</p>
+</footer>
+
+<dialog class="vx-dialog" id="dlg" aria-labelledby="dlg-h">
+  <header id="dlg-h">Let it bloom?</header>
+  <div class="vx-dialog-body"><p>A coding session will start on your Mac. It reads every watering, makes the change, tests it and shows you a preview.</p></div>
+  <footer>
+    <button class="vx-button" data-vx-material="chalk" data-vx-close="no">Not yet</button>
+    <button class="vx-button" data-vx-close="yes">Let it bloom</button>
+  </footer>
+</dialog>
+
+<script type="module" src="showcase.js"></script>
+</body>
+</html>

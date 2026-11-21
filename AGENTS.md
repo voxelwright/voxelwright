@@ -50,30 +50,60 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Bring the owner results and things to try, not permission questions. Ask
   only when something below is his to decide, with a recommendation.
 
+## Quality
+
+From the November 20, 2026 retrospective (`~/.village/retro/2026-11-20-process.md`).
+The owner had been first to spot six visible faults in 14 days.
+
+- Look before you score. Before any score, an agent that did not build the work
+  lists what a person would point at, working from full-size frames beside the
+  reference. A listed defect blocks acceptance.
+- A gate reads the output itself. A score file written by the builder is not a
+  gate.
+- Judge a baseline independently before it becomes a floor. A gate that only
+  forbids getting worse keeps every fault in its first render.
+- Every fault the owner finds becomes an automatic check, and that check must
+  fail on the old output.
+- The lead opens every picture at full size before relaying it, and embeds it in
+  the report.
+- A projection longer than a day names what bounds it and gives a source. The
+  lead checks it before relaying it.
+- Cross-lane asks go in a checklist in the issue body. The lead routes each one
+  within an hour.
+- No branch runs more than a day or 15 commits ahead of main. Ship unfinished
+  work behind a switch.
+
 ## Agents and models
 
 - A lock file on the maintainer's machine can block agents from `codex`,
   `gcloud` and related tools. Never work around it (for example with an
   app-bundled Codex binary). Reach GPT-6.1 Sol only through T3 delegation
   until the owner authorizes a specific use.
-- Choose each subagent's model by task. Use Haiku or Sonnet for lookups,
-  summaries and routine code, and Opus at medium effort for architecture, hard
-  debugging and high-stakes calls. Use GPT-6.1 Sol through T3 delegation when it
-  fits, and GPT-6 Astra in Codex sessions for decisions that are expensive to get wrong.
-- Routing table. Units are bounded by a clear stop condition and a time box,
-  not a token cap:
-
-  | Work | Model |
-  | --- | --- |
-  | Lookup, fetch, summarize a page | Haiku or Sonnet |
-  | Research with sources | Sonnet |
-  | Reviewer (adversarial review) | Sonnet |
-  | Critic | GPT-6.1 Sol via T3, medium |
-  | Security review (Sentinel) | Opus, medium |
-  | Build one unit (logic, infrastructure) | Opus, medium |
-  | UI, 3D and visual work | Opus, high or extra-high, with the ui-craft hill climb until a cross-model consensus of 9/10 or better |
-  | Merge or small fix | Sonnet |
-
+- Choose each agent's model by how much the work matters, how ambiguous it is
+  and how hard it is (owner, November 20, 2026):
+  - Claude Opus 5.5 is the default for important work, where reliability,
+    comprehension and quality matter, especially when the task is ambiguous.
+  - GPT-6.2 Astra (or the latest Astra) at high or xhigh is a capable
+    alternative. It gets blocked more easily and needs a precise brief and
+    closer supervision.
+  - Claude Fable 5.2 at medium or high is for the most challenging, complex
+    work. Use higher effort only when earlier runs show it needs more thinking.
+    Fable has its own limit on top of the weekly one: never spend it on
+    mundane work, but do use it.
+  - For well-defined work that smaller models do well, the lead may choose
+    Sonnet, Haiku or GPT-6.2 Sol.
+- Pace Claude usage to the weekly reset, Friday 8am Pacific. If usage runs
+  ahead of the clock (for example half left on a Sunday), shift toward Astra
+  and Sol. On Wednesday and Thursday, plan to use the allowance up by the
+  reset. If no work remains, give Opus or Fable a deep improvement task, such
+  as finding implicit state machines, running the reviewers skill, or using
+  Taproot to find and fix deep debt. Ask the owner for the usage figure when
+  pacing matters.
+- Start each unit of work in a fresh thread with a self-contained brief. Do not
+  hand new work to a long, finished lane thread.
+- A lead coordinating other agents follows `.agents/skills/lead-orchestration`.
+- Give each unit a clear stop condition and a time box. For UI and 3D, use the
+  UI Craft screenshot and review loop with its cross-model target of 9/10 or better.
 - Keep subagents short-lived. Give each one unit of work, end it when the work
   is done, and never leave one idle.
 - Record every dispatch in `.agents/dispatch-log.jsonl` on `feature/village`
@@ -85,6 +115,8 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   Adding a vendor or dependency requires one.
 
 ## Engineering
+
+Before building or changing UI, read [DESIGN.md](DESIGN.md).
 
 - Prefer maintained tools and their standard interfaces to custom substitutes.
 - Add only the code required for an observed need. Keep one owner for each rule.

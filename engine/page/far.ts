@@ -28,7 +28,7 @@
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, type Marcher, type View } from './march.ts'
+import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, SCREEN, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -53,12 +53,14 @@ ${GLOBALS}
 @group(0) @binding(1) var<uniform> g: Globals;
 @group(0) @binding(2) var<uniform> styles: Styles;
 @group(0) @binding(3) var marched: texture_depth_2d;
+@group(0) @binding(4) var screen: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> b: B;
 ${LIGHT}
 ${AIR}
 ${HANDOVER}
 ${NOISE}
 ${FOG}
+${SCREEN}
 struct Out {
   @builtin(position) pos: vec4f,
   @location(0) seen: vec3f,
@@ -186,7 +188,10 @@ struct Drawn { @location(0) colour: vec4f }
     let one = smoothstep(0.62, 0.66, hashf(floor(vec2f(fx, fy)), in.id + in.way * 7919u));
     // (Where panes are under two pixels, their share lit, a fifth, spread over the wall: brighter made a tower a lantern.)
     let lamp = mix(one * pane, pane * 0.2, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
-    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(2.4, 1.5, blur);
+    // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
+    // own lamps as much as it leaves on.
+    let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
+    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * pane * 2.4;
   }
   col = air(col, rd, dist);
   // The march's fog (FOG), as over the cells: the faces begin 100 m off in the wedge, and the bank had stopped there.
@@ -288,7 +293,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const module = await shader(device, 'far', CODE)
   const vertex: GPUVertexState = { module, entryPoint: 'vs', buffers: [{ arrayStride: 20, stepMode: 'instance', attributes: [0, 1, 2, 3, 4].map((n) => ({ shaderLocation: n, offset: n * 4, format: 'uint32' as const })) }] }
   const F = GPUShaderStage.FRAGMENT, VF = GPUShaderStage.VERTEX | F
-  const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }] })
+  const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }, { binding: 4, visibility: F, texture: {} }] })
   const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }] })
   const layout = device.createPipelineLayout({ bindGroupLayouts: [viewLayout, blockLayout] })
   const pipelineFor = (entry: string, target: GPUTextureFormat) => device.createRenderPipelineAsync({
@@ -549,7 +554,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
-    if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }] }); viewBinds.set(depth, bind) }
+    if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }] }); viewBinds.set(depth, bind) }
     const out = encoder.beginRenderPass({
       label: 'far',
       colorAttachments: [{ view: colour, loadOp: clear ? 'clear' : 'load', storeOp: 'store', clearValue: [0, 0, 0, 0] }],

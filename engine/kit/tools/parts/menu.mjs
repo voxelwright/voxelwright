@@ -26,7 +26,7 @@ const read = (id) => p.evaluate(async (id) => {
   const items = l.state.items;
   return {
     open: el.matches(':popover-open'), parts: l.model.parts.map((q) => q.name).join(','), panel: made(panel), panelCubes: panel.count, pick: made(pick), pickCubes: pick.count,
-    danger: !l.model.byName.danger.hidden, active: l.state.active, shown: !pick.hidden || !l.model.byName.danger.hidden, markY: pick.ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
+    danger: !l.model.byName.danger.hidden, active: l.state.active, shown: !pick.hidden || !l.model.byName.danger.hidden, markY: (l.model.byName.danger.hidden ? pick : l.model.byName.danger).ty * l.vx, rowY: items.map((it) => it.offsetTop), marked: items.findIndex((it) => it.hasAttribute('data-vx-active')),
     building: panel.fx?.kind ?? null, top: l.faceZ, float: l.look.float, focus: items.indexOf(document.activeElement),
     expanded: document.querySelector(`[popovertarget="${id}"]`).getAttribute('aria-expanded'), rect: (({ left, top, width, height }) => ({ left, top, width, height }))(el.getBoundingClientRect()),
   };
@@ -37,7 +37,7 @@ const focusId = () => p.evaluate(() => document.activeElement.id || document.act
 
 // the one shown open on the page
 let m = await read('still-menu');
-say(m.open && m.panelCubes > 200 && m.panel === 'key+light' && m.pick === 'light', `the panel and the mark are voxels: a slab of ${m.panel} (${m.panelCubes} cubes), a mark of ${m.pick} (${m.pickCubes})`);
+say(m.open && m.panelCubes > 200 && m.panel === 'light+panel' && m.pick === 'light', `the panel and the mark are voxels: a slab of ${m.panel} (${m.panelCubes} cubes), a mark of ${m.pick} (${m.pickCubes})`);
 say(m.top === m.float, `it stands at the height of a float (${m.top} voxels)`);
 say(m.active === 1 && m.shown && m.markY === m.rowY[1], `its second row is active, and the mark is beside it (${m.markY} px down for a row at ${m.rowY[1]})`);
 await over('still-menu', 2);
@@ -54,7 +54,7 @@ await p.mouse.down(); await p.waitForTimeout(60); await p.mouse.up();
 await p.waitForTimeout(40);
 m = await read('project-menu');
 say(m.open && m.building === 'assemble', 'a press on its key opens it, and it is being built');
-say(!m.parts.split(',').includes('light') && m.panel === 'key+light', 'its light is part of what is built, so light and slab rise out of the corner together');
+say(m.panel === 'chalk+floor+gasket+slate' && m.parts.split(',').filter(name => name.startsWith('lens-')).length === 4, 'the command glass sits in its casting with a fitted lens for each row');
 say(Math.abs(m.rect.left - t.x) < 1 && m.rect.top > t.y + t.height, `it opens under its key, from the key's corner (left ${m.rect.left} for ${t.x})`);
 await p.waitForTimeout(450);
 m = await read('project-menu');
@@ -76,7 +76,7 @@ say(await p.evaluate(() => document.getElementById('chosen').textContent) === 'C
 await p.focus('#trigger'); await p.keyboard.press('Shift+Tab'); await p.keyboard.press('Tab');
 await p.keyboard.press('Enter'); await p.waitForTimeout(40);
 m = await read('project-menu');
-say(m.open && m.building === 'assemble' && !m.shown, 'Enter on its key opens it; while it is being built the mark waits');
+say(m.open && m.building === 'assemble' && m.shown && m.focus === 0, 'Enter opens it with the focus mark on the first row during assembly');
 await p.waitForTimeout(450);
 m = await read('project-menu');
 say(m.focus === 0 && m.active === 0 && m.shown && m.markY === m.rowY[0], 'opened from the keyboard, focus is on the first row and the mark is beside it');
@@ -111,6 +111,33 @@ const t2 = await p.locator('#trigger').boundingBox();
 await p.mouse.click(t2.x + t2.width / 2, t2.y + t2.height / 2); await p.waitForTimeout(500);
 m = await read('project-menu');
 say(m.open && m.rect.left >= 0 && m.rect.left + m.rect.width <= 390, `at 390 px it is inside the window (${m.rect.left} to ${m.rect.left + m.rect.width})`);
+
+await p.keyboard.press('Escape');
+await p.setViewportSize({ width: 390, height: 270 });
+await p.locator('#project-menu').evaluate(menu => {
+  for (const label of ['View logs', 'Copy URL', 'Manage access', 'Pause builds', 'Resume builds', 'Archive project']) {
+    const item = document.createElement('button');
+    item.setAttribute('role', 'menuitem');
+    item.textContent = label;
+    menu.append(item);
+  }
+});
+await p.locator('#trigger').focus();
+await p.keyboard.press('Shift+Tab');
+await p.keyboard.press('Tab');
+await p.keyboard.press('Enter');
+await p.keyboard.press('End');
+await p.waitForTimeout(180);
+const short = await p.locator('#project-menu').evaluate(menu => {
+  const r = menu.getBoundingClientRect(), item = document.activeElement, row = item.getBoundingClientRect();
+  return item.textContent === 'Archive project' && menu.contains(item) && menu.querySelector('.vx-menu-rows')?.scrollTop > 0
+    && r.top >= 0 && r.bottom <= innerHeight && row.top >= r.top && row.bottom <= r.bottom;
+});
+say(short, 'in a 270px-high viewport End scrolls the last choice fully into the fixed plate');
+await p.screenshot({ path: 'shots/parts/menu/hand-short.png' });
+await p.keyboard.press('Enter');
+say(!(await read('project-menu')).open && await focusId() === 'trigger'
+  && await p.locator('#chosen').textContent() === 'Chosen: Archive project', 'the last choice commits, closes the short menu and restores focus');
 
 say(errors.length === 0, 'no errors' + (errors.length ? ': ' + [...new Set(errors)].join(' | ') : ''));
 await browser.close();

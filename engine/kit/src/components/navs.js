@@ -66,8 +66,40 @@ export function mark(live, m, node, { way = 'under', light = 'light', clip } = {
   return true;
 }
 
+// A shallow index rail sits under each line of project destinations. Every
+// window is fitted at rest. Routing changes only which lens receives power.
+function indexRail(live, model, current) {
+  const rail = model.part('rail'), rows = new Map();
+  for (const a of live.el.querySelectorAll('a')) {
+    const box = boxOf(live, a);
+    if (!box) continue;
+    const [x, y, w, h] = box, bottom = y + h;
+    const row = rows.get(bottom) ?? [];
+    row.push({ x, w, on: a === current });
+    rows.set(bottom, row);
+  }
+  for (const [bottom, stops] of rows) {
+    const left = Math.min(...stops.map(stop => stop.x));
+    const right = Math.max(...stops.map(stop => stop.x + stop.w));
+    rail.slab(left, bottom - 3, 0, right - left, 3, 1, 'steel', 1);
+    for (const { x, w, on } of stops) {
+      const width = Math.min(5, w), start = x + Math.floor((w - width) / 2);
+      rail.box(start, bottom - 2, 0, width, 1, 1, 'lens');
+      if (on) {
+        const rim = width >= 3 ? 1 : 0;
+        rail.box(start + rim, bottom - 2, 0, width - 2 * rim, 1, 1, 'light');
+      }
+    }
+  }
+  live.faceZ = 1;
+}
+
 const MARK_GLOW = 0.05, SEAT_GLOW = 0.07;
-const kindOf = (el) => (el.dataset.vxMark === 'seats' ? 'seats' : el.dataset.vxMark === 'groove' ? 'groove' : 'plain');
+const kindOf = (el) => ['index', 'seats', 'groove'].includes(el.dataset.vxMark) ? el.dataset.vxMark : 'plain';
+function layoutSignature(live, cur) {
+  if (live.el.dataset.vxMark === 'index') return [...live.el.querySelectorAll('a')].map(a => boxOf(live, a)?.join()).join('|');
+  return cur ? boxOf(live, cur)?.join() : '';
+}
 const down = (el) => /^column/.test(getComputedStyle(el).flexDirection);
 
 export const navs = {
@@ -82,7 +114,8 @@ export const navs = {
     const kind = s.kind = kindOf(el);
     const cur = currentOf(el);
     s.has = false;
-    s.sig = cur ? boxOf(live, cur)?.join() : '';
+    s.sig = layoutSignature(live, cur);
+    if (kind === 'index') { indexRail(live, m, cur); return; }
     if (kind === 'plain') return; // words alone
     if (kind === 'groove') { mark(live, m, cur, { way: down(el) ? 'beside' : 'under' }); return; }
     // seats: the trench is the part's whole box
@@ -128,7 +161,7 @@ export const navs = {
     // A link can move with the part's own box staying as it is (a font arrives, a neighbour's
     // words change, a row turns into a column): the mark is measured again whenever a link's box
     // changes, and drawn again only if the current one is somewhere else.
-    const again = () => { const cur = currentOf(el); if ((cur ? boxOf(live, cur)?.join() : '') !== live.state.sig) live.rebuild(); };
+    const again = () => { const cur = currentOf(el); if (layoutSignature(live, cur) !== live.state.sig) live.rebuild(); };
     const sizes = new ResizeObserver(again);
     for (const a of el.querySelectorAll('a')) sizes.observe(a);
     on(window, 'resize', again);

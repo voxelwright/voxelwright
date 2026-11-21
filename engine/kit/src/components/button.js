@@ -2,10 +2,10 @@
 // be pressed, and it goes down into the page when you press it. A disabled button sits low.
 
 import { inlineX, watchDirection } from '../plain.js';
-import { PRESS, RELEASE, CALM } from '../core/motion.js';
+import { PRESS, RELEASE, CALM, reducedMotion } from '../core/motion.js';
 import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
-import { listeners, wrapLabel } from './util.js';
+import { watchFieldsets, listeners, wrapLabel } from './util.js';
 
 /** Draw a key's glyph in the space reserved by padding-inline-end. */
 export function capIcon(live, cap, z, mat) {
@@ -19,14 +19,48 @@ export function capIcon(live, cap, z, mat) {
   }
 }
 
+const latched = el => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
+
+// A stroke belongs to the finger or key that began it. CSS supplies the plain
+// pressed pose; a rendered key also moves its spring at contact and release.
+function wireStroke(el, on, { push, lift, momentary } = {}) {
+  let held = null;
+  const down = source => {
+    if (held !== null || el.matches(':disabled, [aria-disabled="true"]')) return;
+    held = source;
+    push?.();
+    cue('press');
+  };
+  const up = (source, returned) => {
+    if (held === null || held !== source) return;
+    held = null;
+    if (!momentary && latched(el)) return;
+    lift?.();
+    if (returned && !el.matches(':disabled, [aria-disabled="true"]')) cue('release');
+  };
+  on(el, 'pointerdown', e => { if (e.button === 0) down(e.pointerId); });
+  on(el, 'pointermove', e => { if (e.pointerType === 'mouse' && !(e.buttons & 1)) up(e.pointerId, true); });
+  on(el, 'pointerup', e => up(e.pointerId, true));
+  on(el, 'pointercancel', e => up(e.pointerId, false));
+  on(el, 'pointerleave', e => up(e.pointerId, false));
+  on(el, 'keydown', e => {
+    if (momentary && e.repeat && e.key === 'Enter') e.preventDefault();
+    if (!e.repeat && (e.key === ' ' || e.key === 'Enter')) down(e.key);
+  });
+  on(el, 'keyup', e => up(e.key, true));
+  on(el, 'blur', () => up(held, false));
+  on(window, 'blur', () => up(held, false));
+  return () => { held = null; };
+}
+
 export const button = {
   name: 'button',
-  selector: '.vx-button',
+  selector: '.vx-button:not([data-lamp])',
   pad: 7,
 
   build(live, m) {
     const { W, H, el } = live;
-    const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
+    const off = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
     const mat = off ? 'steel' : el.dataset.vxMaterial || 'enamel';
     const look = live.look, depth = off ? 1 : look.rise, step = Math.min(look.step, depth - 1);
     // A keycap: a body, and a top one voxel smaller all round. The step is what says "block".
@@ -54,33 +88,54 @@ export const button = {
     watchDirection(live, on);
     wrapLabel(el);
     const press = live.spring('press'), hover = live.spring('hover');
-    let held = false;
     const travel = () => live.model.keyTravel ?? Math.min(live.look.travel, Math.max(0, (live.state.top ?? live.look.rise) - 1));
-    const down = () => { if (live.state.off) return; held = true; press.to(-travel(), PRESS.k, PRESS.c); cue('press'); live.invalidate(); };
-    const holds = () => el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true';
-    const up = () => { if (!held) return; held = false; if (holds()) return; press.to(0, RELEASE.k, RELEASE.c); cue('release'); live.invalidate(); };
-    const key = (e) => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) down(); };
-    const enter = (e) => { if (e.pointerType === 'mouse' && !live.state.off) { hover.to(0.5, CALM.k * 2, CALM.c * 1.4); live.invalidate(); } };
-    const leave = () => { hover.to(0, CALM.k * 2, CALM.c * 1.4); up(); live.invalidate(); };
-    el.addEventListener('pointerdown', down);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-    el.addEventListener('pointerenter', enter);
-    el.addEventListener('pointerleave', leave);
-    el.addEventListener('keydown', key);
-    el.addEventListener('keyup', up);
-    el.addEventListener('blur', up);
-    on.watch(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] }, (list) => {
-      if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) return live.rebuild();
-      // a trigger stays down while what it opened is open
-      const open = holds();
-      held = false;
-      press.to(open ? -travel() : 0, open ? PRESS.k : RELEASE.k, open ? PRESS.c : RELEASE.c);
+    const move = (target, spring) => {
+      if (reducedMotion()) press.snap(target);
+      else press.to(target, spring.k, spring.c);
+      live.invalidate();
+    };
+    const momentary = live.def.momentary;
+    const reset = wireStroke(el, on, {
+      momentary,
+      push() {
+        const stop = -travel();
+        // A tap that fits between two paint frames still releases from a displaced cap.
+        press.x = Math.min(press.x, stop * 0.36);
+        move(stop, PRESS);
+      },
+      lift: () => move(0, RELEASE),
+    });
+    watchFieldsets(el, on, () => {
+      if (el.matches(':disabled')) { reset(); press.snap(0); hover.snap(0); }
+      live.rebuild();
+    });
+    on(el, 'pointerenter', e => {
+      if (!momentary && e.pointerType === 'mouse' && !live.state.off && !reducedMotion()) {
+        hover.to(0.5, CALM.k * 2, CALM.c * 1.4);
+        live.invalidate();
+      }
+    });
+    on(el, 'pointerleave', () => {
+      hover.to(0, CALM.k * 2, CALM.c * 1.4);
       live.invalidate();
     });
-    return () => {
-      on.done();
-      for (const [t, f] of [['pointerdown', down], ['pointerup', up], ['pointercancel', up], ['pointerenter', enter], ['pointerleave', leave], ['keydown', key], ['keyup', up], ['blur', up]]) el.removeEventListener(t, f);
-    };
+    on.watch(el, { attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'data-vx-material', 'data-vx-kind', 'data-vx-light', 'data-vx-icon', 'aria-expanded', 'aria-pressed'] }, (list) => {
+      if (list.some((r) => r.attributeName !== 'aria-expanded' && r.attributeName !== 'aria-pressed')) {
+        if (el.matches(':disabled, [aria-disabled="true"]')) {
+          reset();
+          press.snap(0);
+          hover.snap(0);
+        }
+        return live.rebuild();
+      }
+      if (momentary) return live.invalidate();
+      // a trigger stays down while what it opened is open
+      const open = latched(el);
+      reset();
+      move(open ? -travel() : 0, open ? PRESS : RELEASE);
+    });
+    return on.done;
   },
+
+  plain: wireStroke,
 };
