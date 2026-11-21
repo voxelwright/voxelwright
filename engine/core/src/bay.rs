@@ -894,10 +894,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
     };
     let ground_height = p.ground_height(x, z);
-    let mut g = (ground_height + 0.5).floor() as i32;
+    let g = (ground_height + 0.5).floor() as i32;
     let (mut class, tint) = p.surface(x, z);
     // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
-    let graphed = class & 7 == ROAD && size <= 2 && marked_place(x, z);
+    let graphed = class & 7 == ROAD && marked_place(x, z);
     if graphed { class &= !96; }
     // A measured asphalt's byte is the aerial's daylight brightness of the road as a step of the palette's greys
     // (bay/surface_detail.py: 4 the palest to 11 the darkest). The aerial is stretched bright: read as the road's own
@@ -913,16 +913,12 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         })
     } else { None };
     let road_top4 = (size == 1 && asphalt.is_some()).then(|| ((ground_height+1.0)*4.0).round() as i32);
-    // The road's grade in quarter cells (`grade_rows`) is carved down into its top cell, never laid on a cell over it:
-    // past a few metres a cell of finer cells is drawn whole, and a quarter of a cell laid over the ground was a whole
-    // cell there, a bump with a dark riser at every step of the street (#450, Filbert and Powell). So the ground's top
-    // cell is the one the grade falls in.
-    if let Some(top4) = road_top4 { g = (top4 + 3).div_euclid(4) - 1; }
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
-        ROAD => (if graphed { mark_at(x, z, size) } else { None }.unwrap_or(kind(ASPHALT, asphalt.unwrap_or(OWN))), 0),
-        PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        ROAD => (if graphed && size <= 2 { mark_at(x, z, size) } else { None }.unwrap_or(kind(ASPHALT, asphalt.unwrap_or(OWN))), 0),
+        // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
+        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
         WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
@@ -1249,8 +1245,7 @@ pub fn span(sx: i32, sz: i32, lod: u32) -> (i32, i32) {
     ((lo - DEEP).div_euclid(size), (hi + 4).div_euclid(size))
 }
 
-/// At eye level, carry the interpolated road grade into the top 10 cm cell: the quarter cells over it are carved out
-/// (the column's ground is the cell the grade falls in, `column`).
+/// At eye level, carry the interpolated road grade into the top 10 cm cell.
 fn grade_rows(c: &Column, x: i32, z: i32, low_y: i32, rows: &mut Vec<Run>) {
     let Some(top4) = c.road_top4 else { return };
     let y = top4.div_euclid(4);
@@ -1442,13 +1437,12 @@ mod tests {
     #[test]
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
-        // A grade of 17 quarter cells falls in cell 4 (the column makes it the ground's top): its three upper quarters are carved.
-        let mut c = Column { g: (17 + 3) / 4 - 1, road_top4: Some(17), ground, kerb: 0,
+        let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
             what: What::Open, fixtures: Vec::new(), hero: None };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
-        assert_eq!(rows.len(), 12);
-        assert!(rows.iter().all(|r| (17..20).contains(&r.y) && r.kind == 0 && r.x0 == 16 && r.x1 == 20));
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|r| r.y == 16 && r.kind == ground && r.x0 == 16 && r.x1 == 20));
         c.g = -2;
         c.road_top4 = Some(-5);
         rows.clear();

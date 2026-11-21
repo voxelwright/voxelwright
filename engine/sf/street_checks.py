@@ -7,7 +7,7 @@ under a grid of pixels (material, colour, distance in 10 cm cells); every measur
 at those places, so a builder's score file decides nothing.
 
 asphalt   the road's brightness. In the picture: the median luminance of sunlit asphalt pixels within 40 m against
-          that of sunlit pavement (material concrete in its own colour), sunlit being over half the brightest of
+          that of sunlit pavement (concrete in its own colour, or grey 5 as bay.rs draws it now), sunlit being over half the brightest of
           either. Fails where the asphalt is not darker by a tenth, or where that ratio is over the most the
           photographs show (the upper quartile of a road patch over a pavement patch, street-refs.json: patches
           chosen by looking at each photograph) by 0.05. The ratio holds whatever the exposure; the upper quartile
@@ -17,8 +17,10 @@ asphalt   the road's brightness. In the picture: the median luminance of sunlit 
 terraces  the staircase of a street on a hill: in the 12 x 9 pixel box round each asphalt pixel within 30 m, the
           mean of each row, and the share of neighbouring rows whose means differ by 12 or more. Lines across the
           road (a riser drawn dark or bright at every 10 cm step) survive the row's mean; grain and lines along
-          the road do not. Fails over 0.06 where the view's road climbs (Powell, California, Filbert and the
-          panel's hill views) and 150 or more of its labelled pixels are asphalt.
+          the road do not. Fails over 0.09 where the view's road climbs (Powell, California, Filbert and the
+          panel's hill views) and 150 or more of its labelled pixels are asphalt. The bar lies between the stairs
+          (0.13 to 0.33 on the old Powell, California and Filbert) and the photographs of climbing streets (0.05 at
+          most); the first bar, 0.06, sat on the ramps' own run-to-run spread (0.044 to 0.063).
 markings  that lane lines, centre lines and crossings are there where the street graph puts them: the share of
           asphalt pixels within 30 m that are paint (white or yellow on asphalt: palette colours 2 and 59; rails, greys
           6 and 14 of the road, are neither paint nor road here). In the realm's views (the page server the panel uses has no graph), it fails with
@@ -66,7 +68,7 @@ def measure(png, labels):
     grid = labels["grid"]
     at = lambda px, py: float(l[py - 1 : py + 2, px - 1 : px + 2].mean())
     road = [at(px, py) for px, py, m, c, t in grid if m == ASPHALT and c not in MARKS_NOT_ROAD and t < 400]
-    pave = [at(px, py) for px, py, m, c, t in grid if m == CONCRETE and c == 0 and t < 400]
+    pave = [at(px, py) for px, py, m, c, t in grid if m == CONCRETE and c in (0, 6) and t < 400]
     near = [(px, py, m, c) for px, py, m, c, t in grid if t < 300]
     paint = sum(1 for _, _, m, c in near if m == ASPHALT and c in PAINT)
     asphalt = sum(1 for _, _, m, c in near if m == ASPHALT)
@@ -136,7 +138,7 @@ def verdicts(name, r, p, most):
             bad.append(f"sunlit asphalt {r['asphaltLit']:.0f} not darker than sunlit pavement {r['pavement']:.0f}")
         if ratio > most + 0.05:
             bad.append(f"asphalt over pavement {ratio:.2f}, the photographs' most {most:.2f}")
-    if name in CLIMBS and r["terraces"] is not None and r["roadPixels"] >= 150 and r["terraces"] > 0.06:
+    if name in CLIMBS and r["terraces"] is not None and r["roadPixels"] >= 150 and r["terraces"] > 0.09:
         bad.append(f"terraces {r['terraces']:.3f}")
     if r.get("expected") and not r["markings"]:
         bad.append(f"no markings where the graph has {r['expected']}")
@@ -183,7 +185,7 @@ def main():
         p = photo(name, refs)
         if p and p.get("pavement") and p["asphalt"] > 0.9 * p["pavement"]:
             print(f"  photograph {name}: road {p['asphalt']:.0f} not darker than its pavement {p['pavement']:.0f}")
-        if p and name in CLIMBS and p["terraces"] > 0.06:
+        if p and name in CLIMBS and p["terraces"] > 0.09:
             print(f"  photograph {name}: terraces {p['terraces']:.3f}")
     print(f"{failed} of {len(results)} views fail")
     if a.json:
