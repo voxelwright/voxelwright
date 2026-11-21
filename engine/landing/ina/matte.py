@@ -161,6 +161,7 @@ def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, 
                            'size': [int(cb - ca), int(hs.max()) + 1, int(rb - ra)], 'low': int(hs.min())})
 
 
+CROWNS = 5  # raised when what `crowns` works out changes
 PREPARED = 9  # raised when what `prepared` works out changes: its files are made again
 
 
@@ -258,6 +259,84 @@ def prepared(grid, bearing, height):
     return out
 
 
+def crowns(g, grid):
+    """Trees as crowns on trunks (#450). A column of the lidar's surface says a tree as a solid mass from the ground
+    up, and a crown that hangs over a building's outline as part of that building: a block of wall with windows as
+    tall as the tree. Here every crown is found (leaf where no building is outlined, and what stands over a
+    building's own roof and sends pulses back more than once, as leaves do), and said as what it is: how low it
+    hangs at each cell (round underneath, deepest in its middle), what stands under it (the roof it hangs over, or
+    the ground), and where its trunks are. Kept in DATA beside the surface it is worked out from."""
+    path = f'{DATA}/crowns-{grid}-{PREPARED}-{CROWNS}.npz'
+    if os.path.exists(path):
+        return dict(np.load(path))
+    s = np.load(f'{DATA}/surface-{grid}.npz')
+    top, ground, ids, leafy = g['top'], g['ground'], g['ids'], g['leafy']
+    cell = float(g['frame'][2])
+    over = top - ground
+    # How much of what came back round a cell came back more than once, over a square 1.25 m across.
+    share = ndimage.uniform_filter(s['multi'].astype(np.float32) / np.maximum(s['count'].astype(np.float32), 1), size=max(3, int(round(1.25 / cell)) | 1))
+    # A building's own roof: the height three tenths of its cells are under (the middle one is the tree's, where a
+    # crown hangs over most of a small house).
+    n = int(ids.max())
+    level = np.zeros(n + 1, np.float32)
+    if n:
+        built = np.flatnonzero(ids.ravel() > 0)
+        order = built[np.lexsort((top.ravel()[built], ids.ravel()[built]))]
+        count = np.bincount(ids.ravel()[built], minlength=n + 1)
+        first = np.concatenate([[0], np.cumsum(count)[:-1]])
+        has = count > 0
+        level[has] = top.ravel()[order[(first + (count * 0.3).astype(np.int64))[has]]]
+    # Over a building's outline: a patch that stands 3 m and more over its roof, is leaf by its returns (an upper
+    # storey sends its pulses back once but at its edge), is no bigger than a tree and touches a crown that stands
+    # where no building is outlined. (A roof garden touches none, and is not cut off its roof.)
+    hung = (ids > 0) & (top - level[ids] > 3.0)
+    free = leafy & (over > 2.8)
+    patches, m = ndimage.label(hung)
+    if m:
+        index = np.arange(m + 1)
+        area = ndimage.sum(hung, patches, index) * cell * cell
+        mean = np.nan_to_num(ndimage.mean(share, patches, index))
+        touches = ndimage.maximum(ndimage.binary_dilation(free, iterations=2), patches, index) > 0
+        # A crown's top is ragged by metres; a roof's plant sends pulses back twice as leaves do, and is flat.
+        ragged = np.nan_to_num(ndimage.standard_deviation(top, patches, index))
+        # (All of a patch under 45 m: the rim of a taller storey is not a patch of its own.)
+        keep = (area >= 1.0) & (area < 400.0) & (mean > 0.4) & (ragged > 1.2) & touches & (ndimage.maximum(over, patches, index) < 45.0)
+        keep[0] = False
+        hung &= keep[patches]
+    crown = (leafy & (over > 2.8)) | hung
+    base = np.where(hung, level[ids], ground).astype(np.float32)
+    # How tall the tree is at a cell: the highest of its crown within 3 m. Its crown is three fifths of that deep
+    # (1.6 to 18 m), and thins to its rim: how far a cell is inside the crown says how low it hangs there.
+    high = ndimage.maximum_filter(np.where(crown, top, -1e9), size=int(round(6 / cell)) | 1)
+    deep = np.clip((high - ground) * 0.62, 1.6, 18.0)
+    inside = ndimage.distance_transform_edt(crown) * cell
+    under = np.maximum(high - deep * np.sqrt(np.clip(inside / 2.5, 0.05, 1.0)), base + 0.5)
+    under = np.minimum(under, top - 0.75).astype(np.float32)
+    # A trunk under each top of a crown that stands on the ground: half a metre square, up into the crown.
+    smooth = ndimage.uniform_filter(np.where(crown, top, ground), size=int(round(2 / cell)) | 1)
+    peak = crown & ~hung & (over > 4.0) & (inside > 1.0) & (smooth >= ndimage.maximum_filter(smooth, size=int(round(7 / cell)) | 1) - 1e-4)
+    marks, k = ndimage.label(peak)
+    trunk = np.zeros(top.shape, bool)
+    if k:
+        at = np.round(np.array(ndimage.center_of_mass(peak, marks, np.arange(1, k + 1)))).astype(np.int64)
+        trunk[at[:, 0], at[:, 1]] = True
+        trunk = ndimage.binary_dilation(trunk, iterations=max(1, int(round(0.25 / cell)))) & crown & ~hung
+    out = {'crown': crown, 'hung': hung, 'base': base, 'under': under, 'trunk': trunk}
+    print(f'crowns ({grid}): {int(crown.sum() * cell * cell)} m2 of crown, {int(hung.sum() * cell * cell)} m2 of it over outlines, {k} trunks', flush=True)
+    np.savez(path, **out)
+    return out
+
+
+def bark_and_leaf(shape, cell):
+    """Leaves in three greens, in patches a metre and a half across (one flat green is a blob from any distance), and bark."""
+    rows, cols = np.indices(shape)
+    patch = ((rows * cell / 1.5).astype(np.int64) * 73856093) ^ ((cols * cell / 1.5).astype(np.int64) * 19349663)
+    pick = (patch >> 3) % 3
+    tops = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((62, 98, 46), (74, 108, 52), (52, 88, 44))])
+    sides = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((46, 74, 36), (56, 84, 40), (38, 64, 34))])
+    return tops, sides, rgb24(np.full(shape, 84), np.full(shape, 66), np.full(shape, 48))
+
+
 def main():
     arg = lambda k, d: sys.argv[sys.argv.index(k) + 1] if k in sys.argv else d
     # The whole bake, every face: far more than a page should be sent. cull.mjs keeps what can be seen, as `ina`.
@@ -292,6 +371,13 @@ def main():
         # Where a thing is built as a solid (church.py), the lidar's columns are cut off at its foot.
         for a, b, c, d, cap in church.boxes():
             top = np.where((uu[None, :] >= a) & (uu[None, :] < b) & (ww[:, None] >= c) & (ww[:, None] < d), np.minimum(top, cap), top)
+        # Trees are crowns on trunks (`crowns`): under a crown stands what it hangs over, and its trunk.
+        tree = crowns(g, grid) if standing else None
+        if standing:
+            crown, trunk = tree['crown'], tree['trunk']
+            top_all = top
+            top = np.where(crown, np.where(trunk, np.maximum(tree['under'] + 1.0, tree['base']), tree['base']), top)
+            leafy = leafy & ~crown
         over = top - ground
         # The park's own trees stand round the eye in the lidar (flown two summers after the photograph) as solid
         # columns from the ground up, and a column is no tree to look out from under: within 40 m of the eye only
@@ -320,13 +406,16 @@ def main():
             # leaves green, walls a pale plaster.
             lum = np.round(np.clip(55 + g['grey'] * 0.75, 60, 230) / 12) * 12
             roof = rgb24(lum, lum, lum * 0.98)
-            roof = np.where(leafy, rgb24(np.full(top.shape, 62), np.full(top.shape, 98), np.full(top.shape, 46)), roof)
+            roof_green = rgb24(np.full(top.shape, 62), np.full(top.shape, 98), np.full(top.shape, 46))
+            roof = np.where(leafy, roof_green, roof)
             # A wall's colour and how its windows go are its building's (looks.py): by its height and its number where
             # nothing is known of it, by name where something is.
             wall_of, style_of = looks.walls(table, int(ids.max()))
             green = rgb24(np.full(top.shape, 46), np.full(top.shape, 74), np.full(top.shape, 36))
-            walls = np.where(leafy, green, wall_of[ids])
-            style = np.where(leafy, 0, style_of[ids])
+            leaf_top, leaf_side, bark = bark_and_leaf(top.shape, cell)
+            roof = np.where(trunk, bark, roof)
+            walls = np.where(leafy, green, np.where(trunk, bark, wall_of[ids]))
+            style = np.where(leafy | trunk, 0, style_of[ids])
             # What colours were given, by building: its roof and its walls (fitcolours.py starts from these).
             seen_ids = np.unique(ids[inside & (ids > 0)])
             first = {int(i): n for n, i in zip(*np.unique(ids, return_index=True)[::-1])}
@@ -338,14 +427,21 @@ def main():
                 tops = np.zeros(int(ids.max()) + 1, np.int64)
                 sides = [wall_of.copy() for _ in range(4)]
                 has = np.zeros(int(ids.max()) + 1, bool)
+                # A building a crown hangs over was seen through its leaves: a colour fitted there that is leaf's own
+                # (green over red and blue) is the tree's, and the building keeps its colour by rule.
+                hung_ids = np.zeros(int(ids.max()) + 1, bool)
+                hung_ids[np.unique(ids[tree['hung']])] = True
+                leaf_like = lambda v: ((v >> 8) & 255) > 1.12 * max((v >> 16) & 255, v & 255)
                 for i, c in photo.items():
                     i = int(i)
                     if i <= ids.max():
-                        tops[i], has[i] = c[0], True
+                        if not (hung_ids[i] and leaf_like(c[0])):
+                            tops[i], has[i] = c[0], True
                         for k in range(4):
-                            sides[k][i] = c[1 + k]
-                roof = np.where(has[ids] & ~leafy, tops[ids], roof)
-                walls = [np.where(leafy, green, side[ids]) for side in sides]
+                            if not (hung_ids[i] and leaf_like(c[1 + k])):
+                                sides[k][i] = c[1 + k]
+                roof = np.where(has[ids] & ~leafy & ~trunk, tops[ids], roof)
+                walls = [np.where(leafy, green, np.where(trunk, bark, side[ids])) for side in sides]
             shade = np.round((sh - SEA) * 10).astype(np.int64)
             step = 1
         else:
@@ -363,6 +459,26 @@ def main():
             shade = np.round((sh[sub] - SEA) * 10).astype(np.int64)
             ids = np.zeros(h.shape, np.int32)
         write(out, blocks, layer, np.maximum(h, 0), inside, roof, walls, style, ids, np.maximum(shade, 0), np.maximum(floor, 0), hq, u0, w0, cell * step)
+        if standing:
+            # The crowns, over what stands under them: three slabs, each further inside the crown and hanging lower,
+            # since a column's faces are its top and its walls and a crown is round underneath. The first is the
+            # crown's own top down a quarter of its depth; the next hang from it, to half and to all of it.
+            held = domain & crown & (dist > 40.0)
+            reach = ndimage.distance_transform_edt(crown) * cell
+            depth = top_all - tree['under']
+            upper = np.round((top_all - SEA) * 10 / hq).astype(np.int64)
+            nothing = np.zeros(top.shape, np.int32)
+            # Past the handover a crown is a few pixels: one slab, its whole depth, in one green (so its tops merge).
+            near = cell_out < 0.5
+            if not near:
+                leaf_top, leaf_side = roof_green, green
+            for nth, (share_, far_in) in enumerate(((0.3, 0.0), (0.65, 0.8), (1.0, 1.8)) if near else ((1.0, 0.0),)):
+                lower = np.minimum(np.round((top_all - depth * share_ - SEA) * 10 / hq).astype(np.int64), upper - 1)
+                part = held & (reach >= far_in)
+                # (What hangs lower is in the crown's own shade: each slab a little darker than the one over it.)
+                dim = lambda c, by=1 - 0.14 * nth: rgb24(((c >> 16) & 255) * by, ((c >> 8) & 255) * by, (c & 255) * by)
+                write(out, blocks, f'{layer}-crown{nth}', np.maximum(upper, 0), part, leaf_top, dim(leaf_side), np.zeros(top.shape, np.int64), nothing, np.maximum(shade, 0), np.maximum(lower, 0), hq, u0, w0, cell)
+                upper = lower
         print(f'{layer}: {sum(b["faces"] for b in blocks if b["layer"] == layer)} faces in {sum(1 for b in blocks if b["layer"] == layer)} blocks, {time.time() - began:.0f} s', flush=True)
     # The church's towers, as solids in cells of 10 cm.
     named = {b.get('name'): b['id'] for b in table}

@@ -11,10 +11,12 @@
 //               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
 //               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
 //               of the panel whose cabinet is gone is dark.
-//   logo        the mark of a network the owner is on, flat on a tower's face under its crown, as a head office
-//               wears its company's: lit of itself, lying on the face whichever way that looks. It is a
-//               face and no cells (the towers of the skyline are past the cells' reach, where the far model draws
-//               them: far.ts), so no tool breaks it; it leads to the owner's page on that network.
+//   logo        the mark or the wordmark of a network the owner is on, big on a tower's crown and flush with its
+//               wall, as a head office wears its company's: cut out (no plate behind it), lit of itself, lying on
+//               the wall whichever way that looks. It is a face and no cells, so no tool breaks it. A tower of the
+//               skyline is drawn by the far model from the park and as cells from near, and the two walls are metres
+//               apart: the sign is seated on whichever is drawn from where the eye is (`seat`). It leads to the
+//               owner's page on that network.
 //   banner      a small plane flying a long round across the park's sky, before the towers, towing a strip of cloth
 //               with words or a picture.
 //
@@ -46,9 +48,11 @@ export interface Board {
   /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. A logo lies on a wall that may look any way: `turn` is where its face looks, degrees clockwise from north. */
   facing: 0 | 1 | 2 | 3
   turn?: number
+  /** A logo: the building's wall as the far model draws it is where `at` is (sf/boards.mjs `seat`); its wall as cells is found where they are drawn, within this many metres of that, out or in (20 where not said). */
+  search?: number
   /** A logo's mark: one of logos.ts `MARKS`. */
   logo?: string
-  /** Lettering: how tall a letter is, metres. Digital: how wide and how tall its housing is, metres. A logo: how tall its mark is, metres. */
+  /** Lettering: how tall a letter is, metres. Digital: how wide and how tall its housing is, metres. A logo: how tall its sign is, metres (how wide follows from its mark, logos.ts). */
   size: number | [number, number]
   /** How far its foot is over the roof, metres. */
   lift?: number
@@ -73,8 +77,14 @@ export interface Banner {
   speed: number
   /** How long and how high the cloth is, m. */
   size: [number, number]
-  /** Where on its round it is as the page opens, 0 to 1. */
+  /** Where on its round it is as the place is first shown, 0 to 1. */
   start?: number
+  /**
+   * The round flown where the picture is taller than it is wide (a phone held upright): whatever of the above it says
+   * otherwise. Such a picture sees a strip of the sky a third as wide, and a round that crosses a wide one whole is
+   * out of it but for a second or two a lap.
+   */
+  upright?: Partial<Omit<Banner, 'content' | 'upright'>>
 }
 export interface SignsFile { version: 1; banner?: Banner; boards: Board[] }
 
@@ -117,7 +127,7 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
 export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
   if (b.type === 'logo') {
     // A face alone, flat on a wall: `at` is the middle of its lower edge, a little out from the wall.
-    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = (b.size as number) * M, wide = (b.size as number) * M, y0 = b.at[1] + (b.lift ?? 0) * M
+    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = (b.size as number) * M, wide = high * (MARKS[b.logo ?? '']?.wide ?? 1), y0 = b.at[1] + (b.lift ?? 0) * M
     return { runs: new Int32Array(0), box: [b.at[0], y0, b.at[2], b.at[0] + 1, y0 + 1, b.at[2] + 1], middle: [b.at[0], y0 + high / 2, b.at[2]], right: [n[2], 0, -n[0]], normal: n, wide, high }
   }
   const [nx, nz] = NORMALS[b.facing], rx = nz, rz = -nx, snap = (v: number) => Math.round(v / 8) * 8
@@ -216,7 +226,15 @@ export interface Boards {
    * keeps it in the picture for whoever has something to say on its banner (the eggs): whenever it is out of sight, it
    * is put, unseen, just short of where it comes into the picture on its nearest pass, and flies in. `call(false)` lets it go round.
    */
-  readonly plane: { at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean } | null
+  readonly plane: {
+    at: [number, number, number]; phase: number; hold: number | null; readonly cloth: Screen; call(on: boolean): void; readonly called: boolean; readonly inView: boolean
+    /** The cloth's box on the page now (client px), or null where any of it is behind the eye. */
+    readonly box: { x0: number; y0: number; x1: number; y1: number } | null
+    /** Whether its words can be read now: the whole cloth in the picture, seen more from before it than along it, and under nothing the page lays over the picture (the hour's panel, the keys, a notice). */
+    readonly readable: boolean
+    /** Starts its round from `start` now: the place is first shown, and where the plane is in the first picture should not be how long the page took to come. */
+    begin(): void
+  } | null
   /** The editor, in `?boards=edit`. */
   readonly editor: { add(b: Board): void; change(id: string, to: Partial<Board>): void; remove(id: string): void; file(): SignsFile; save(): Promise<string>; select(id: string): void; readonly selected: string | null } | null
 }
@@ -258,6 +276,8 @@ export interface Needs {
   aloft(): void
   /** How far from the eye the far model's faces take over from cells (0: never), cells. */
   reach(): number
+  /** The same for what stands at a point (finest cells, x and z): nearer in the far model's wedge. Infinity where there is no far model. */
+  handover(x: number, z: number): number
   edit: boolean
 }
 
@@ -275,12 +295,16 @@ export async function boards(o: Needs): Promise<Boards> {
   o.passes.add('signs', (encoder, to, view, time) => {
     // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
     const reach = o.reach()
-    for (const s of stood.values()) if (s.screen && s.shape && s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+    for (const s of stood.values()) {
+      if (!s.screen || !s.shape) continue
+      if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
+      else if (s.b.type === 'logo') seat(s, view.eye)
+    }
     drawn.draw(encoder, to, view, time, o.day(), o.dull(), o.faced())
   })
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
-  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void }
+  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null }
   const stood = new Map<string, Stood>()
   let laid = 0
   const lay = (edit: Edit) => { laid++; o.lay(edit) }
@@ -293,7 +317,7 @@ export async function boards(o: Needs): Promise<Boards> {
   const place = (s: Stood) => {
     const sh = s.shape!, sc = s.screen
     if (!sc) return
-    if (s.b.type === 'logo') { sc.at = [...sh.middle]; sc.hu = [sh.right[0] * sh.wide / 2, 0, sh.right[2] * sh.wide / 2]; sc.hv = [0, sh.high / 2, 0]; return }
+    if (s.b.type === 'logo') { const out = s.out ?? 0; sc.at = [sh.middle[0] + sh.normal[0] * out, sh.middle[1], sh.middle[2] + sh.normal[2] * out]; sc.hu = [sh.right[0] * sh.wide / 2, 0, sh.right[2] * sh.wide / 2]; sc.hv = [0, sh.high / 2, 0]; return }
     // Its panel: on the cabinet's face, inside a rim of four cells.
     sc.at = [sh.middle[0] + sh.normal[0] * 0.5, sh.middle[1], sh.middle[2] + sh.normal[2] * 0.5]
     sc.hu = [sh.right[0] * (sh.wide / 2 - RIM), 0, sh.right[2] * (sh.wide / 2 - RIM)]
@@ -303,6 +327,27 @@ export async function boards(o: Needs): Promise<Boards> {
   const keep = () => {
     const boxes = [...stood.values()].filter((s) => s.b.type === 'lettering' && s.shape).map((s) => s.shape!.box), grow = 16
     o.kept?.(boxes.length ? [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b[k])) - grow).concat([3, 4, 5].map((k) => Math.max(...boxes.map((b) => b[k])) + grow)) : null)
+  }
+  /**
+   * A logo's seat. Its `at` is on the wall the far model draws (sf/boards.mjs `seat` measured it). Nearer than the far
+   * model's handover the tower is cells, whose wall is the city's outline and not the lidar's: there the sign lies on
+   * that wall, found by walking in through the cells at five points of the sign (the outermost of them: the plane of
+   * its piers), 40 cm proud of it. Looked for twice a second while the eye is near and it is not found (the cells may not be made yet).
+   */
+  const seat = (s: Stood, eye: readonly number[]) => {
+    const sh = s.shape!, near = Math.hypot(sh.middle[0] - eye[0], sh.middle[1] - eye[1], sh.middle[2] - eye[2]) < o.handover(sh.middle[0], sh.middle[2])
+    if (near && s.cells == null && performance.now() - (s.looked ?? -1e9) > 500) {
+      s.looked = performance.now()
+      const reach = Math.round((s.b.search ?? 20) * M)
+      let most: number | null = null
+      for (const [u, v] of [[0, 0], [-0.35, -0.3], [0.35, -0.3], [-0.35, 0.3], [0.35, 0.3]]) for (let d = reach; d >= -reach; d--) {
+        const x = sh.middle[0] + sh.right[0] * u * sh.wide + sh.normal[0] * d, z = sh.middle[2] + sh.right[2] * u * sh.wide + sh.normal[2] * d
+        if (o.kind(Math.floor(x), Math.floor(sh.middle[1] + v * sh.high), Math.floor(z))) { if (most === null || d > most) most = d; break }
+      }
+      s.cells = most === null ? null : most + 4
+    }
+    const out = near && s.cells != null ? s.cells : 0
+    if (out !== s.out) { s.out = out; place(s) }
   }
   const stand = (s: Stood, again = false) => {
     const b = s.b, text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '') : ''
@@ -318,7 +363,8 @@ export async function boards(o: Needs): Promise<Boards> {
     if (b.type === 'logo') {
       const mark = MARKS[b.logo ?? '']
       if (!mark) throw new Error(`the logo "${b.logo}" of the board ${b.id} is none of ${Object.keys(MARKS).join(', ')}`)
-      s.screen = drawn.add({ pixels: [320, 320], style: { ground: '#000', ink: '#fff', glows: true } })
+      // (Lit as channel letters are, not as a screen is: a screen's light on a mark's white was a blot by night from before it.)
+      s.screen = drawn.add({ pixels: [Math.round((256 * mark.wide) / 4) * 4, 256], style: { ground: '#000', ink: '#fff', glows: true, glow: 0.3, dim: 0.72 } })
       s.screen.paint((pen, w, h) => signOf(pen, mark, w, h))
       stood.set(b.id, s)
       stand(s)
@@ -382,10 +428,12 @@ export async function boards(o: Needs): Promise<Boards> {
   setInterval(() => { const n = o.done(); if (n !== seenEdits) { seenEdits = n; masks() } }, 400)
 
   // ── The plane and its banner ──
-  const towed = o.file.banner ?? null
-  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean } | null = null
+  const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
+  const towed: Banner | null = whole_ ? (whole_.upright && shape0.height > shape0.width ? { ...whole_, ...whole_.upright } : whole_) : null
+  let flown: { piece: Piece; cloth: Screen; line: Screen; at: [number, number, number]; phase: number; hold: number | null; call(on: boolean): void; called: boolean; inView: boolean; readonly box: { x0: number; y0: number; x1: number; y1: number } | null; readonly readable: boolean; begin(): void } | null = null
   /** Keeps a called plane in the picture (below, where the picture's projection is): every frame of its flight. */
   let summon: (() => void) | null = null
+  let boxAt: (phase: number) => { x0: number; y0: number; x1: number; y1: number } | null = () => null, read: (phase: number) => boolean = () => false
   if (towed) {
     const model = plane(), born = thing(model.kinds, model.size)
     born.com = [model.size[0] / 2, model.size[1] / 2, model.size[2] / 2]
@@ -396,7 +444,7 @@ export async function boards(o: Needs): Promise<Boards> {
     cloth.wave = 5
     const line = drawn.add({ pixels: [4, 4], both: true, style: { ground: '#2a2a2a', ink: '#2a2a2a', glows: false } })
     line.show(null)
-    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, call(on) { this.called = on } }
+    flown = { piece, cloth, line, at: [0, 0, 0], phase: 0, hold: null, called: false, inView: false, call(on) { this.called = on }, get box() { return boxAt(this.phase) }, get readable() { return read(this.phase) }, begin() { began = performance.now(); shift = 0 } }
     signs.add({ id: 'banner', kind: 'banner', name: 'The banner a plane tows', accepts: ['text', 'image', 'video'], own: towed.content, show: (content) => cloth.show(content) })
     // Its round: a circle, or a long round (an ellipse) lying along `bearing`, higher on one long side than the other.
     // Flown at one speed: where it is after so many metres is looked up in the round's own lengths.
@@ -412,11 +460,40 @@ export async function boards(o: Needs): Promise<Boards> {
       while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (lengths[mid] <= d) lo = mid; else hi = mid }
       return on(((lo + (d - lengths[lo]) / Math.max(1e-6, lengths[hi] - lengths[lo])) / STEPS) * 2 * Math.PI)
     }
-    const began = performance.now(), gap = 12 * M, half = (long * M) / 2, body = (model.size[0] * piece.cell) / 2
+    let began = performance.now()
+    const gap = 12 * M, half = (long * M) / 2, body = (model.size[0] * piece.cell) / 2
     /** Where the plane is and where its cloth's two ends are, at a place on its round (0 to 1). */
     const parts = (phase: number) => { const s = phase * whole; return [along(s), along(s - body - gap), along(s - body - gap - 2 * half)] }
     /** How far round it has been put on (summoned), laps. */
     let shift = 0, looked = 0
+    /** The cloth's box on the page at a place on its round, as `fly` hangs it there (client px); null where any corner is behind the eye. */
+    boxAt = (phase: number) => {
+      const [, a, b] = parts(phase), rect = o.canvas.getBoundingClientRect(), v = o.view(), aspect = rect.width / Math.max(1, rect.height)
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity
+      for (const end of [a, b]) for (const up of [-1, 1]) {
+        const at = onPicture([end[0], end[1] - 12 + (up * tall * M) / 2, end[2]], v, aspect)
+        if (!at) return null
+        const x = rect.left + ((at.x + 1) / 2) * rect.width, y = rect.top + ((1 - at.y) / 2) * rect.height
+        x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y)
+      }
+      return { x0, y0, x1, y1 }
+    }
+    /** What the page lays over the picture, as boxes of the page: asked for four times a second. */
+    let laid: DOMRect[] = [], laidAt = -1e9
+    const overlays = () => {
+      if (performance.now() - laidAt < 250) return laid
+      laidAt = performance.now()
+      laid = [...document.querySelectorAll<HTMLElement>('#realm .sky, #realm .fold, #realm .tools, #hud, #notices p, #first > button')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+      return laid
+    }
+    read = (phase: number) => {
+      const box = boxAt(phase), rect = o.canvas.getBoundingClientRect()
+      if (!box || box.x0 < rect.left || box.y0 < rect.top || box.x1 > rect.right || box.y1 > rect.bottom) return false
+      // As long on the page as half of what it is seen square on from there: turning at an end of its round it is seen along.
+      const [, a, b] = parts(phase), v = o.view(), far = Math.hypot((a[0] + b[0]) / 2 - v.eye[0], (a[1] + b[1]) / 2 - v.eye[1], (a[2] + b[2]) / 2 - v.eye[2])
+      if (box.x1 - box.x0 < 0.5 * ((2 * half) / far / (2 * v.tanHalf)) * rect.height) return false
+      return !overlays().some((r) => box.x0 < r.right + 4 && box.x1 > r.left - 4 && box.y0 < r.bottom + 4 && box.y1 > r.top - 4)
+    }
     // (Run from its flight, which first runs before `onPicture` below is made: it is not called before an egg calls it.)
     summon = () => {
       const f = flown!
@@ -428,12 +505,12 @@ export async function boards(o: Needs): Promise<Boards> {
       // Out of sight, and not looked for in the last second (from where nothing of the round is seen, it waits).
       if (f.inView || performance.now() - looked < 1000) return
       looked = performance.now()
-      // Each stretch of the round where its cloth is whole in the picture, and how near it passes there: the nearest.
+      // Each stretch of the round where its cloth can be read (whole in the picture, under nothing), and how near it passes there: the nearest.
       const STEP = 1 / 360
       let best: { from: number; far: number } | null = null
       for (let i = 0; i < 360; i++) {
         const phase = (f.phase + i * STEP) % 1
-        if (seen(phase, 0.9) < 4) continue
+        if (!read(phase)) continue
         const [, a, b] = parts(phase), far = Math.hypot((a[0] + b[0]) / 2 - v.eye[0], (a[1] + b[1]) / 2 - v.eye[1], (a[2] + b[2]) / 2 - v.eye[2])
         // Back along the round to where nothing of it was in the picture yet, and a second more.
         if (!best || far < best.far * 0.8) {
@@ -527,7 +604,9 @@ export async function boards(o: Needs): Promise<Boards> {
     if (!s?.shape) return Promise.resolve(false)
     const sh = s.shape, rect = o.canvas.getBoundingClientRect(), v = o.view(), across = Math.atan(v.tanHalf * (rect.width / Math.max(1, rect.height)))
     // Far enough off that the whole face is in the picture, and not further than 90 m: a narrow picture sees less of it.
-    const off = Math.min(s.b.type === 'logo' ? 1800 : 900, Math.max(80, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
+    // A logo's tower is the far model's from the park: the flight to it ends past the far model's handover there (and a little), before the same wall the sign was seen on.
+    const least = s.b.type === 'logo' ? Math.min(1700, o.handover(sh.middle[0], sh.middle[2]) * 1.15) : 80
+    const off = Math.min(s.b.type === 'logo' ? 1800 : 900, Math.max(least, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
     // Before it on the line to where the realm begins, where that is before its face at all: a board is placed to be
     // seen from there, so that line is clear, while straight out from its face another roof may stand (one did, #450).
     const park = [o.began.x * M - sh.middle[0], o.began.y * M - sh.middle[1], o.began.z * M - sh.middle[2]], far = Math.hypot(park[0], park[1], park[2]) || 1
@@ -655,7 +734,7 @@ export async function boards(o: Needs): Promise<Boards> {
   }
 
   // ── The editor (`?boards=edit`): boards added, moved, sized and turned where they stand, and the file saved ──
-  const file = (): SignsFile => ({ version: 1, ...(towed ? { banner: towed } : {}), boards: records.map((b) => ({ ...b })) })
+  const file = (): SignsFile => ({ version: 1, ...(whole_ ? { banner: whole_ } : {}), boards: records.map((b) => ({ ...b })) })
   const change = (id: string, to: Partial<Board>) => {
     const at = records.findIndex((b) => b.id === id)
     if (at < 0) return

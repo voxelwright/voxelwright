@@ -7,6 +7,8 @@
 // the page's own is made or owned here: it is hidden by one class on <html> (`first`), which this file takes away.
 //
 //   ?first=0   no first view: the controls are there from the start (the boards' editor asks for the same)
+//   ?debug=1   the line of numbers (frames, the march's time, memory, where the eye is) is shown with the controls;
+//              without it a realm the page runs alone never shows it (main.ts sets `plain` on <html>)
 import { embedded, hear, tell } from './host.ts'
 
 export interface First {
@@ -14,6 +16,8 @@ export interface First {
   readonly engaged: boolean
   /** Shows the controls, as the visitor's own first move does. */
   engage(): void
+  /** Runs once when the visitor engages (at once if they have). */
+  onEngage(run: () => void): void
   /** Whose data the place is made from, each said once: what the credits key opens. */
   credits(list: readonly string[]): void
 }
@@ -21,6 +25,7 @@ export interface First {
 const STYLE = /* css */ `
 /* Until the visitor engages, nothing of the page's own is over the picture. */
 html.first :is(#hud, #aim, #realm, #where, #over) { visibility: hidden; opacity: 0; }
+html.plain #hud { display: none; }
 html.first #realm .sky { translate: 0 -10px; }
 html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 /* They come as one: the picture's own marks first, the hardware a moment after, settling into place. */
@@ -29,12 +34,14 @@ html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 #realm :is(.sky, .tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
-#first .explore { position: absolute; left: 50%; bottom: max(20px, calc(env(safe-area-inset-bottom) + 14px)); translate: -50% 0; min-inline-size: calc(var(--vx) * 28); justify-content: center; transition: opacity 0.28s ease-in, translate 0.4s ease-in; }
-html:not(.first) #first .explore { opacity: 0; translate: -50% 14px; pointer-events: none; }
+/* The Explore key is in the bottom right corner: the middle of the foot of the picture is the BLOG board's, on a wide picture and a phone's alike. */
+#first .explore { position: absolute; right: max(24px, calc(env(safe-area-inset-right) + 16px)); bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px)); min-inline-size: calc(var(--vx) * 28); justify-content: center; transition: opacity 0.28s ease-in, translate 0.4s ease-in; }
+html:not(.first) #first .explore { opacity: 0; translate: 0 14px; pointer-events: none; }
 #first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; font-size: 12px; opacity: 0.86; }
 #first .credits:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
 /* By touch the bottom corners are the thumbs': the credits key is at the top, where a phone shows no line of numbers. */
-@media (pointer: coarse) { #first .credits { bottom: auto; top: max(12px, env(safe-area-inset-top)); } }
+/* (Its voxel body stands out past its box to the left and up: further in from the corner than 12 px, or the screen's edge cuts it.) */
+@media (pointer: coarse) { #first .credits { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } #first .explore { min-inline-size: calc(var(--vx) * 22); } }
 #first-credits { max-block-size: min(60vh, 420px); overflow: auto; }
 #first-credits ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--vx) * 2); font-size: 0.8125rem; line-height: 1.4; color: var(--vx-ink-quiet); }
 /* The street's name stands over the credits key. */
@@ -68,9 +75,11 @@ export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
   let kit: Kit | null = null
   if (new URLSearchParams(location.search).get('kit') !== 'plain') void import(kitAt).then((k: Kit) => { kit = k; k.adopt(root) }).catch(() => {})
 
+  const waiting: (() => void)[] = []
   const engage = () => {
     if (engaged) return
     engaged = true
+    for (const run of waiting.splice(0)) run()
     html.classList.remove('first')
     // The hardware builds itself as it comes (the kit's own assembling; still, where motion is not wanted), and the Explore key, its work done, goes.
     for (const el of document.querySelectorAll('#realm [data-vx-live]')) void kit?.live(el)?.play('assemble')
@@ -95,6 +104,7 @@ export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
   return {
     get engaged() { return engaged },
     engage,
+    onEngage(run) { if (engaged) run(); else waiting.push(run) },
     // (Said once each, however it was written: two releases name the same terrain with a capital and without.)
     credits(said) { list.replaceChildren(...said.filter((c, i) => said.findIndex((d) => d.toLowerCase() === c.toLowerCase()) === i).map((c) => Object.assign(document.createElement('li'), { textContent: c }))) },
   }

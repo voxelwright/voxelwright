@@ -26,13 +26,13 @@
 // flight to a board and to each logo, a broken board, the banner passing at both sizes.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
-const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'boards', 'r2')), mbit = Number(arg('mbit', '25')), seconds = Number(arg('seconds', '8'))
+const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'boards', 'r3')), mbit = Number(arg('mbit', '25')), seconds = Number(arg('seconds', '8'))
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
@@ -53,7 +53,36 @@ const brandShare = (picture, w, logo, within = 90) => {
   for (let y = Math.round((w.y - w.tall / 2) * scale); y <= (w.y + w.tall / 2) * scale; y++) for (let x = Math.round((w.x - w.wide / 2) * scale); x <= (w.x + w.wide / 2) * scale; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < within) near[k]++ }) }
   return [near[0] / Math.max(1, n), near[1] / Math.max(1, n)]
 }
-const BRAND = { x: [[255, 255, 255], [0, 0, 0]], linkedin: [[10, 102, 194], [255, 255, 255]], twitch: [[145, 70, 255], [255, 255, 255]] }
+// (A mark alone, cut out, no plate behind it: X's near-black face and its lit edge, LinkedIn's white word and its blue square, Twitch's purple and its white face.)
+const BRAND = { x: [[13, 13, 13], [255, 255, 255]], linkedin: [[255, 255, 255], [10, 102, 194]], twitch: [[145, 70, 255], [255, 255, 255]] }
+/** In a page at its first view: watches it for some seconds and says what it shows (each board in the picture, the banner's cloth whole and readable, the keys' boxes) and what lies over what. */
+const COMPOSED = async (ms) => {
+  const e = globalThis.engine, b = e.boards, box = (el) => { const r = el.getBoundingClientRect(); return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom } }
+  const keys = { explore: box(document.querySelector('#first .explore')), credits: box(document.querySelector('#first .credits')) }
+  const boards = b.records.map((r) => { const w = b.where(r.id); return { id: r.id, type: r.type, box: w && { x0: w.x - w.wide / 2, y0: w.y - w.high / 2, x1: w.x + w.wide / 2, y1: w.y + w.high / 2 } } })
+  const inside = (k) => !!k && k.x0 >= 0 && k.y0 >= 0 && k.x1 <= innerWidth && k.y1 <= innerHeight, meet = (a, c, by = 0) => a.x0 < c.x1 + by && a.x1 > c.x0 - by && a.y0 < c.y1 + by && a.y1 > c.y0 - by
+  // The banner, every 200 ms: whole in the picture and readable, and whether a key was ever over it.
+  let looks = 0, some = 0, whole = 0, read = 0, under = 0
+  for (const until = performance.now() + ms; performance.now() < until; ) { const c = b.plane.box; looks++; if (c && c.x1 > 0 && c.y1 > 0 && c.x0 < innerWidth && c.y0 < innerHeight) some++; if (inside(c)) whole++; if (b.plane.readable) read++; if (c && Object.values(keys).some((k) => meet(c, k))) under++; await new Promise((r) => setTimeout(r, 200)) }
+  // And its whole round, a 120th at a time, as it would be flown with nobody calling it back: how much of it the cloth is whole in the picture for.
+  const frame = () => new Promise((r) => requestAnimationFrame(() => r()))
+  let round = 0
+  for (let i = 0; i < 120; i++) { b.plane.hold = i / 120; await frame(); if (inside(b.plane.box)) round++ }
+  b.plane.hold = null
+  const atop = []
+  for (const [name, k] of Object.entries(keys)) for (const s of boards) if (s.box && meet(k, s.box, 4)) atop.push(name + ' over ' + s.id)
+  return { size: [innerWidth, innerHeight], keys, keysInside: Object.values(keys).every(inside), creditsIn: Math.round(Math.min(keys.credits.x0, keys.credits.y0, innerWidth - keys.credits.x1, innerHeight - keys.credits.y1)), shown: boards.filter((s) => inside(s.box)).map((s) => s.id), logos: boards.filter((s) => s.type === 'logo' && inside(s.box)).length, lettering: boards.some((s) => s.type === 'lettering' && inside(s.box)), banner: { looks, some, whole, read, under, round }, atop }
+}
+/** In a page with its controls shown: the banner's cloth at every 120th of its round, against what the page lays over the picture there (the hour's panel, or a phone's fold). How much of the round it can be read on, and where it passes under a control. */
+const CLEAR = async () => {
+  const p = globalThis.engine.boards.plane, frame = () => new Promise((r) => requestAnimationFrame(() => r()))
+  const laid = [...document.querySelectorAll('#realm .sky, #realm .fold')].filter((el) => el.checkVisibility({ visibilityProperty: true })).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0)
+  let read = 0; const under = []
+  for (let i = 0; i < 120; i++) { p.hold = i / 120; await frame(); const c = p.box; if (p.readable) read++; if (c && c.x1 > 0 && c.y1 > 0 && c.x0 < innerWidth && c.y0 < innerHeight && laid.some((r) => c.x0 < r.right && c.x1 > r.left && c.y0 < r.bottom && c.y1 > r.top)) under.push(i) }
+  p.hold = null
+  return { read, of: 120, under, laid: laid.map((r) => [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)]) }
+}
+
 /** How tall the words on the banner are in a picture of it, px of that picture: the run of ink down a column, at the ninth tenth of the columns that have any (a letter's stem; a stray pixel of the plane's red is left out). The cloth's ink is red on a pale ground. */
 const inkTall = (picture, box) => {
   const runs = [], rows = picture.data.length / 4 / picture.w
@@ -91,7 +120,7 @@ try {
   const plainContext = await browser.newContext({ viewport: { width: 1280, height: 720 } })
   const bare = await plainContext.newPage()
   const unlink = await link(plainContext, bare), bareFrom = Date.now()
-  await bare.goto(`${site.url}/sf/index.html?boards=0`)
+  await bare.goto(`${site.url}/sf/index.html?boards=0&debug=1`)
   await bare.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 300_000 })
   const without = await untilShown(bare, bareFrom)
   await unlink()
@@ -100,6 +129,9 @@ try {
   await bare.evaluate(() => { globalThis.engine.scale = 1 }); await bare.waitForTimeout(4000)
   await bare.screenshot({ path: join(shots, 'park-before.png') })
   check(await bare.evaluate(() => globalThis.engine.boards === null && globalThis.engine.world.done().length === 0), '?boards=0 leaves the boards out: no board, no edit in the world')
+  // The line of numbers is `?debug=1`'s: asked for here, it comes with the controls (the page in the host's frame, below, does not ask).
+  const numbers = await bare.evaluate(async () => { globalThis.engine.first.engage(); await new Promise((r) => setTimeout(r, 1200)); const h = document.querySelector('#hud'), c = getComputedStyle(h); return { shown: c.display !== 'none' && c.visibility !== 'hidden' && Number(c.opacity) > 0.5, text: h.textContent } })
+  check(numbers.shown && /fps/.test(numbers.text), `with ?debug=1 the line of numbers comes with the controls ("${numbers.text.slice(0, 44)}…")`)
   // (It rests, not drawing, until its turn in the timing below: the next page loads as a visitor's would, alone.)
   await bare.evaluate(() => { globalThis.engine.resting = true })
   // Each board's foot is on its roof as this release has it: the file was made against a release, and the pin moves.
@@ -148,6 +180,14 @@ try {
   const firstView = await over(realm)
   await page.screenshot({ path: join(shots, 'first-desktop.png') })
   results.first = { desktop: firstView }
+  // What the first view shows, over twelve seconds of it (its plane is kept in the picture until the visitor engages): the BLOG board, the banner and two logos or more, and the keys over none of them.
+  const composedCheck = (c, name) => {
+    // (A wide picture's round leaves it on one side and is brought back: some eight seconds of a lap of thirty-six the cloth is going or coming.)
+    check(c.lettering && c.logos >= 2 && c.banner.round >= 66 && c.banner.some >= c.banner.looks * 0.6 && c.banner.whole >= c.banner.looks * 0.25, `${name}'s first view (${c.size.join(' x ')}) shows ${c.shown.join(', ')}; the banner's cloth is whole in the picture for ${c.banner.round} of 120 places on its round, and over twelve seconds some of it was in the picture at ${c.banner.some} of ${c.banner.looks} looks, the whole of it at ${c.banner.whole}, readable at ${c.banner.read} (asked: the lettering, two logos, the cloth whole for 66 places, in the picture three looks in five and whole at one in four)`)
+    check(c.atop.length === 0 && c.banner.under === 0 && c.keysInside && c.creditsIn >= 12, `${name}: the Explore key and the credits key are over no board and never over the banner${c.atop.length ? ` (${c.atop.join(', ')})` : ''}, and the credits key is ${c.creditsIn} px in from the picture's edge (bound 12: its voxel body stands out past its box)`)
+  }
+  results.first.composed = await realm.evaluate(COMPOSED, 12000)
+  composedCheck(results.first.composed, 'the desktop')
   check(firstView.first && !firstView.engaged && !firstView.hud && !firstView.aim && !firstView.sky && !firstView.tools && !firstView.where && firstView.wall === 0 && firstView.focus !== 'A', `before the visitor engages nothing is over the picture: no line of numbers, no aim, no hour and weather, no tools, no street name, no focus on a link, no wall of words (${JSON.stringify({ hud: firstView.hud, aim: firstView.aim, sky: firstView.sky, tools: firstView.tools, where: firstView.where, wall: firstView.wall })})`)
   check(firstView.explore && firstView.credits && firstView.creditsBox[0] <= 96 && firstView.creditsBox[1] <= 40 && firstView.sources.length >= 3 && firstView.sources.some((c) => /OpenStreetMap/.test(c)), `the Explore key and a credits key of ${firstView.creditsBox.join(' x ')} px are there, and the credits key holds ${firstView.sources.length} sources (${firstView.sources.map((c) => c.slice(0, 28)).join(' | ')})`)
   const settle = () => realm.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 60_000, polling: 250 }).catch(() => null)
@@ -231,12 +271,13 @@ try {
     // A letter of lamp is five sevenths of its panel; a logo's mark is its whole face; a screen's words about half of it.
     const letter = w ? (s.type === 'lettering' ? (w.tall * 5) / 7 : s.type === 'logo' ? w.tall : w.tall * 0.5) : 0
     const r = (results.park[s.id] = { metres: w && round(w.far), at: w && [Math.round(w.x), Math.round(w.y)], widePx: w && Math.round(w.wide), letterPx: round(letter), clear: s.clear, standing: s.standing.letters })
-    check(inside && s.clear && s.standing.whole && letter >= (s.type === 'logo' ? 24 : 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its mark' : 'a letter'} ${r.letterPx} px tall, nothing between the eye and it`)
+    // (A logo's sign: 24 px or more the longer way, and 14 px or more tall, which is a wordmark's letters at 11.)
+    check(inside && s.clear && s.standing.whole && (s.type === 'logo' ? Math.max(w.tall, w.wide) >= 24 && w.tall >= 14 : letter >= 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its sign' : 'a letter'} ${r.letterPx} px tall, nothing between the eye and it`)
     if (s.type === 'logo') {
       // The picture where its mark is: how much of it is one of its brand's two colours, and whether both are there.
       const share = brandShare(picture, w, s.logo), near = share, n = 1
       r.read = { ink: round(near[0] / n, 2), ground: round(near[1] / n, 2) }
-      check(near[0] / n > 0.05 && near[1] / n > 0.05 && (near[0] + near[1]) / n > 0.5, `${s.id} reads in the picture at scale 0.7: ${Math.round((near[0] / n) * 100)}% of its mark is its brand's colour and ${Math.round((near[1] / n) * 100)}% what that stands on`)
+      check(near[0] / n > 0.03 && near[1] / n > 0.03 && (near[0] + near[1]) / n > 0.2, `${s.id} reads in the picture at scale 0.7: ${Math.round((near[0] / n) * 100)}% of its sign's box is its mark's first colour and ${Math.round((near[1] / n) * 100)}% its second (cut out, the wall shows between: bounds 3% each, 20% together)`)
     }
     if (s.type === 'lettering') {
       const lit = s.marks.filter((m) => m.lit).map((m) => light(m.x, m.y)), dark = s.marks.filter((m) => !m.lit).map((m) => light(m.x, m.y)), mean = (a) => a.reduce((n, v) => n + v, 0) / a.length
@@ -250,6 +291,18 @@ try {
   const boxes = seen.filter((s) => s.where).map((s) => ({ id: s.id, ...s.where })), atop = []
   for (const [i, a] of boxes.entries()) for (const b of boxes.slice(i + 1)) if (Math.abs(a.x - b.x) < (a.wide + b.wide) / 2 && Math.abs(a.y - b.y) < (a.high + b.high) / 2) atop.push(`${a.id} and ${b.id}`)
   check(atop.length === 0, `no board is over another in the park's picture${atop.length ? `: ${atop.join(', ')}` : ''}`)
+  // Each logo lies on its tower's wall as the far model draws it from the park: read from this release's own far tiles
+  // (sf/far/strike.mjs), at points all over the sign. None of the wall is before the sign, and none of it further behind than 2.5 m.
+  {
+    const { striker, lies } = await import('../sf/far/strike.mjs'), { MARKS } = await import('../page/logos.ts')
+    const pointer = JSON.parse(readFileSync(join(dist, 'sf', 'current.json'), 'utf8')), strike = striker(join(dist, 'sf', dirname(pointer.manifest)))
+    results.flush = {}
+    for (const l of logos) {
+      const g = lies(strike, l.at, l.turn, l.size, l.size * MARKS[l.logo].wide)
+      results.flush[l.id] = { leastM: round(g.least / 10, 2), mostM: round(g.most / 10, 2), points: g.all, off: g.off }
+      check(g.off === 0 && g.least >= 0 && g.most <= 25, `${l.id} lies flush on its tower's wall as the far model has it: at ${g.all} points of the sign the wall is ${round(g.least / 10, 2)} to ${round(g.most / 10, 2)} m behind it (asked: none before it, none past 2.5 m, none off the wall: ${g.off})`)
+    }
+  }
   await realm.evaluate(() => { globalThis.engine.scale = 1 }); await page.waitForTimeout(3000)
   await page.screenshot({ path: join(shots, 'park-after.png') })
   await realm.evaluate(() => { globalThis.engine.hour = 21 }); await page.waitForTimeout(3500)
@@ -270,7 +323,10 @@ try {
     await page.screenshot({ path: join(shots, 'engaged-desktop.png') })
     results.first.engaged = after
     check(still.first && hovered.first && !hovered.sky, 'the first view holds through every check until here, and a mouse moved over the picture does not end it')
-    check(!after.first && after.engaged && after.hud && after.aim && after.sky && after.tools && after.where && !after.explore && after.credits && toldEngaged === 1, `a key pressed brought the line of numbers, the aim, the hour and weather, the tools and the street's name; the Explore key went, the credits key stayed, and the host was told once (${toldEngaged})`)
+    check(!after.first && after.engaged && !after.hud && after.aim && after.sky && after.tools && after.where && !after.explore && after.credits && toldEngaged === 1, `a key pressed brought the aim, the hour and weather, the tools and the street's name, and no line of numbers (that is ?debug=1's); the Explore key went, the credits key stayed, and the host was told once (${toldEngaged})`)
+    // With the controls there, the banner's whole round against the hour's panel: it passes under it nowhere, and can be read on a good part of the round.
+    results.first.clear = await realm.evaluate(CLEAR)
+    check(results.first.clear.under.length === 0 && results.first.clear.read >= 40, `with the controls shown, the banner passes under the hour's panel (${results.first.clear.laid.map((r) => r.join(' ')).join('; ')}) at ${results.first.clear.under.length} of 120 places on its round, and can be read at ${results.first.clear.read} (asked: none, and a third of the round)`)
     await toPark()
   }
   // ── Navigation ──
@@ -279,7 +335,7 @@ try {
   const markSeen = async (logo) => {
     await page.waitForTimeout(1500); await settle(); await page.waitForTimeout(2500)
     const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), logo.id), share = brandShare(await pixelsOf(await page.screenshot({ path: join(shots, `fly-to-${logo.id}.png`) })), w, logo.logo, 130)
-    check(share[0] > 0.05 && share[1] > 0.05 && share[0] + share[1] > 0.6, `before the ${logo.id} logo after the flight, its mark is in the picture: ${Math.round(share[0] * 100)}% its brand's colour and ${Math.round(share[1] * 100)}% what that stands on (${Math.round(w.tall)} px tall)`)
+    check(share[0] > 0.04 && share[1] > 0.04 && share[0] + share[1] > 0.25, `before the ${logo.id} logo after the flight, its mark is in the picture: ${Math.round(share[0] * 100)}% of its sign's box is its first colour and ${Math.round(share[1] * 100)}% its second (${Math.round(w.tall)} px tall; a mark sunk in its wall has none, a mark alone has the wall between: bound 25% together)`)
   }
   const told = (type) => page.evaluate((type) => window.told.filter((m) => m.type === type), type)
   /** Whether the eye is before a board, looking at it. */
@@ -320,10 +376,12 @@ try {
     await toPark()
     const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), logo.id)
     n = (await told('navigate')).length
-    await page.mouse.click(w.x, w.y)
+    // With the controls shown, the hour's panel is over the right of the skyline: a logo under it is not the picture's to click, and is opened by its link (as the host's own `open` does).
+    const covered = await realm.evaluate(([x, y]) => document.elementFromPoint(x, y)?.tagName !== 'CANVAS', [w.x, w.y])
+    if (covered) await page.evaluate((id) => window.ask({ type: 'open', board: id }), logo.id); else await page.mouse.click(w.x, w.y)
     await page.waitForFunction((n) => window.told.filter((m) => m.type === 'navigate').length > n, n, { timeout: 15_000 }).catch(() => null)
     nav = (await told('navigate')).at(-1)
-    check((await told('navigate')).length === n + 1 && nav?.board === logo.id && nav.to === logo.to, `a click on the ${logo.id} logo in the park's picture flew to it and told the host to go to ${nav?.to}`)
+    check((await told('navigate')).length === n + 1 && nav?.board === logo.id && nav.to === logo.to, `${covered ? `the ${logo.id} logo is under the hour's panel in the park's picture (said, not failed): the host's open` : `a click on the ${logo.id} logo in the park's picture`} flew to it and told the host to go to ${nav?.to}`)
     await markSeen(logo)
   }
   // Flying free: from the park by the keys towards a board, then O.
@@ -367,7 +425,9 @@ try {
     const across = round((Math.atan(Math.tan((25.05 * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)
     results.phone = { inPicture: inView.filter((r) => r.inside).map((r) => r.id), of: inView.length }
     const target = inView.find((r) => r.inside && r.type === 'logo')
-    check(inView.some((r) => r.inside && r.type === 'lettering') && !!target, `in an upright phone's picture from the park (${across} degrees across): ${results.phone.inPicture.join(', ') || 'no board'}, of ${inView.length} (a lettering board and a logo are asked for; the rest are a turn of the eye away)`)
+    check(inView.some((r) => r.inside && r.type === 'lettering') && inView.filter((r) => r.inside && r.type === 'logo').length >= 2, `in an upright phone's picture from the park (${across} degrees across): ${results.phone.inPicture.join(', ') || 'no board'}, of ${inView.length} (the lettering board and two logos are asked for; the rest are a turn of the eye away)`)
+    results.phone.composed = await held.evaluate(COMPOSED, 12000)
+    composedCheck(results.phone.composed, 'the phone')
     // The banner on its near pass, as the phone's own pixels have it.
     {
       await held.evaluate(() => { globalThis.realm.signs.set('banner', { text: 'NEW POST' }); globalThis.engine.scale = 1 })
@@ -379,7 +439,8 @@ try {
       const shot = await pixelsOf(await small.screenshot({ clip }))
       const tall = inkTall(shot, { x0: 0, x1: clip.width * dpr, y0: 0, y1: clip.height * dpr }) / dpr
       results.phone.banner = { ...pass, wordsPx: round(tall) }
-      check(pass.box.x0 >= 0 && pass.box.x1 <= 390 && tall >= 20, `on the phone the banner's near pass is whole in the picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} of 390 px, ${pass.metres} m off) and its words are ${round(tall)} px tall as the picture has them (CSS px; bound 20)`)
+      // (A phone's round is flown 650 m off, so that the banner stays in its strip of the sky the whole lap: its words are smaller than on the near pass of a wide picture, which was in a phone's for two seconds a lap.)
+      check(pass.box.x0 >= 0 && pass.box.x1 <= 390 && tall >= 11, `on the phone the banner's pass is whole in the picture (${Math.round(pass.box.x0)} to ${Math.round(pass.box.x1)} of 390 px, ${pass.metres} m off) and its words are ${round(tall)} px tall as the picture has them (CSS px, three of the phone's own to each; bound 11)`)
       await held.evaluate(() => { globalThis.engine.boards.plane.hold = null })
     }
     if (target) {
@@ -398,19 +459,22 @@ try {
         Object.assign(e.pose, park, { yaw: Math.atan2(to[0] - park.x, -(to[2] - park.z)), pitch: Math.atan2(to[1] - park.y, Math.hypot(to[0] - park.x, to[2] - park.z)) })
         await new Promise((r) => setTimeout(r, 400))
         const w = e.boards.where(id)
-        out.push({ id, markPx: w ? Math.round(w.tall * 10) / 10 : 0 })
+        out.push({ id, markPx: w ? Math.round(w.tall * 10) / 10 : 0, longPx: w ? Math.round(Math.max(w.tall, w.wide) * 10) / 10 : 0 })
       }
       Object.assign(e.pose, park)
       return out
     }, { ids: logos.map((l) => l.id), park })
     results.phone.logos = turned
-    check(turned.every((t) => t.markPx >= 24), `on the phone, the eye turned to each logo from the park: ${turned.map((t) => `${t.id} ${t.markPx} px`).join(', ')} (bound 24)`)
+    check(turned.every((t) => t.markPx >= 14 && t.longPx >= 24), `on the phone, the eye turned to each logo from the park: ${turned.map((t) => `${t.id} ${t.markPx} px tall, ${t.longPx} the longer way`).join(', ')} (bounds 14 and 24)`)
     // The Explore key brings a thumb's controls.
-    await small.touchscreen.tap(195, (await held.evaluate(() => { const r = document.querySelector('#first .explore').getBoundingClientRect(); return r.top + r.height / 2 })))
+    const key = await held.evaluate(() => { const r = document.querySelector('#first .explore').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
+    await small.touchscreen.tap(key[0], key[1])
     await small.waitForTimeout(1500)
     const afterPhone = await over(held)
     await small.screenshot({ path: join(shots, 'engaged-phone.png') })
     check(!afterPhone.first && afterPhone.fold && afterPhone.thumbs && afterPhone.tools && !afterPhone.explore && afterPhone.credits, 'a tap on the Explore key brought the phone its fold, its thumbs and its tools; the credits key stayed')
+    results.phone.clear = await held.evaluate(CLEAR)
+    check(results.phone.clear.under.length === 0 && results.phone.clear.read >= 40, `on the phone, with the controls shown, the banner passes under the fold (${results.phone.clear.laid.map((r) => r.join(' ')).join('; ')}) at ${results.phone.clear.under.length} of 120 places on its round, and can be read at ${results.phone.clear.read}`)
     await handheld.close()
     await realm.evaluate(() => { globalThis.engine.resting = false })
   }
