@@ -45,6 +45,9 @@ const CROSS_BARS: u8 = 4;
 const CROSS_LINES: u8 = 5;
 const RAILS_CABLE: u8 = 6;
 const RAILS: u8 = 7;
+/// A rail's worn top and the cable's slot, as greys of the road (`mark_at`).
+const RAIL: u8 = grey(5);
+const SLOT: u8 = grey(13);
 
 /// Takes the marks in the room (`room`): little-endian words, `MARK`, how many covered squares and how many segments,
 /// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments held, or -1.
@@ -103,14 +106,16 @@ fn mark_at(x: i32, z: i32, size: i32) -> Option<Kind> {
                 // Continental bars: 60 cm wide and 60 cm apart along the crossing, 3 m long across it.
                 CROSS_BARS if on(-2.0) && within(0.0, 15.0) && (t - 2.0).rem_euclid(12.0) < 6.0 => kind(ASPHALT, grey(1)),
                 CROSS_LINES if on(0.0) && within(13.0, 15.0) => kind(ASPHALT, grey(1)),
-                // A cable car's rails 1067 mm apart with the cable's slot between; a streetcar's 1435 mm.
-                RAILS_CABLE if on(0.0) && within(4.8, 5.9) => kind(STEEL, grey(6)),
-                RAILS_CABLE if on(0.0) && within(0.0, 0.5) => kind(STEEL, grey(13)),
-                RAILS if on(0.0) && within(6.7, 7.8) => kind(STEEL, grey(6)),
+                // A cable car's rails 1067 mm apart with the cable's slot between; a streetcar's 1435 mm. Set flush in the
+                // road and climbing with it, they are its surface (asphalt) in the rail's worn grey and the slot's dark:
+                // as steel they stood apart from the road's grade and were a stair of dark steps up Powell.
+                RAILS_CABLE if on(0.0) && within(4.8, 5.9) => kind(ASPHALT, RAIL),
+                RAILS_CABLE if on(0.0) && within(0.0, 0.5) => kind(ASPHALT, SLOT),
+                RAILS if on(0.0) && within(6.7, 7.8) => kind(ASPHALT, RAIL),
                 _ => continue,
             };
             // Rails over paint: a crossing's bars stop at the track.
-            if material(k) == STEEL { return Some(k); }
+            if k >> 8 == RAIL as Kind || k >> 8 == SLOT as Kind { return Some(k); }
             found = Some(k);
         }
         found
@@ -1381,9 +1386,9 @@ mod tests {
         assert!(bars[..6].iter().all(|&b| b) && bars[6..12].iter().all(|&b| !b) && bars[12..18].iter().all(|&b| b));
         assert!(mark_at(514, 54, 1).is_some() && mark_at(517, 54, 1).is_none());
         // Rails 1067 mm apart with the slot between them.
-        assert_eq!(mark_at(10, 305, 1), Some(kind(STEEL, grey(6))));
-        assert_eq!(mark_at(10, 295, 1), Some(kind(STEEL, grey(6))));
-        assert_eq!(mark_at(10, 300, 1), Some(kind(STEEL, grey(13))));
+        assert_eq!(mark_at(10, 305, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 295, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 300, 1), Some(kind(ASPHALT, SLOT)));
         assert_eq!(mark_at(10, 302, 1), None);
         // Coarser cells keep a line: a 20 cm cell whose middle is a cell off the line still has it.
         assert_eq!(mark_at(10, 101, 2), Some(white));

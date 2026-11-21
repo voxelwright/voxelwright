@@ -1249,10 +1249,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   // Earth, grass, sand, asphalt and paving lie on the hills in steps a cell high. A step's riser is lit as the tread
   // is, so a street reads as a slope: a riser is a side face with air over its cell and ground under the cell before it.
   let stuff = hit.kind & 15u;
-  // (A rail is steel in a road's top cell, bay.rs mark_at: steel on asphalt with air over it climbs the hill with the road.)
-  let hc = hit.cell - lvh.cells;
-  let rail = stuff == 12u && hit.level == 0u && (kindAt(hc - vec3i(0, 1, 0), 0u) & 15u) == 6u && !solidAt(hc + vec3i(0, 1, 0), 0u);
-  let ground = stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u || stuff == 7u || rail;
+  let ground = stuff == 1u || stuff == 3u || stuff == 4u || stuff == 6u || stuff == 7u;
   var slope = false;
   if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
     let c = hit.cell - g.level[hit.level].cells;
@@ -1263,6 +1260,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
       n = vec3f(0.0, 1.0, 0.0);
+      // And worn as the tread is: a riser in a wall's pattern was a grey dash at every step.
+      face = n;
       slope = true;
     }
   }
