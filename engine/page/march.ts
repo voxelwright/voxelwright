@@ -30,6 +30,8 @@ export function palette(): Float32Array<ArrayBuffer> {
   return out
 }
 
+/** How bright a lit window's pane is, for the march's windows and the far model's (see PANE_LIGHT in the shader). */
+export const PANE_LIGHT = 1.25
 /** Each material's own colour and how its cells differ from one another (a fifth either way at 1), then how rough it is, how much it mirrors, how much it glows. Sixteen of each. */
 export function materials(): Float32Array<ArrayBuffer> {
   const M: [string, number, number, number, number][] = [
@@ -526,7 +528,7 @@ fn fineWord(entry: u32, c: vec3i) -> u32 {
 
 const REFINE = /* wgsl */ `
 // What a ray met inside a cell of finer cells: kind 0 where it passed between them, and where it leaves the cell.
-struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32 }
+struct Fine { t: f32, kind: u32, n: vec3f, leave: f32, out: f32, side: vec3f }
 fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   let lv = g.level[hit.level];
   let c = hit.cell - lv.cells;
@@ -538,6 +540,8 @@ fn finer(ro: vec3f, rd: vec3f, hit: Hit) -> Fine {
   var r: Fine;
   r.kind = 0u;
   r.leave = min(out.x, min(out.y, out.z)) + 0.002 / lv.scale;
+  // The face of the next cell a ray that leaves this one meets, if that cell is solid.
+  r.side = select(select(vec3f(0.0, 0.0, -f32(toward.z)), vec3f(0.0, -f32(toward.y), 0.0), out.y <= out.z), vec3f(-f32(toward.x), 0.0, 0.0), out.x <= out.y && out.x <= out.z);
   let entry = sectorOf(c, hit.level);
   let word = fineWord(entry, c);
   if (word == 0u) { return r; }
@@ -584,7 +588,12 @@ fn refine(ro: vec3f, rd: vec3f, met: Hit, most: u32, wide: f32, spread: f32, rou
     let f = finer(ro, rd, hit);
     if (f.kind != 0u) { hit.t = f.t; hit.kind = f.kind; hit.n = f.n; hit.out = f.out; break; }
     // Between them: on from the cell's far side. The last of many such cells is taken whole.
-    hit = march(ro, rd, f.leave, hit.level, most, wide, spread, rough, false, eyed);
+    let leave = f.leave;
+    hit = march(ro, rd, leave, hit.level, most, wide, spread, rough, false, eyed);
+    // A march begun in a solid cell says no face (its normal is nought, and it was lit as facing the eye): it met that
+    // cell's face as it left this one. Through the carved quarter cells of a road's grade (bay.rs grade_rows) into the
+    // ground beside, every step up Filbert and Powell was a black line (#450).
+    if (hit.t >= 0.0 && hit.t <= leave + 0.5 / g.level[hit.level].scale && dot(hit.n, hit.n) < 0.5) { hit.n = f.side; }
     if ((hit.kind & 64u) == 0u) { break; }
   }
   return hit;
@@ -1046,9 +1055,14 @@ fn sky(rd: vec3f) -> vec3f {
     col += vec3f(0.8, 0.86, 1.0) * (smoothstep(1.0 - 0.00025 * r, 1.0 - 0.0002 * r, toward) * 0.9 + pow(toward, 400.0 / r) * 0.06) * (1.0 - g.day);
   }
   if (g.day < 0.98 && rd.y > 0.0) {
-    // Stars: one in some of the small squares the sky is cut into, the brighter the fewer.
-    let square = vec3i(floor(rd * 220.0));
-    let star = hash3i(square, 19u);
+    // Stars: one in some of the small squares the sky is cut into, the brighter the fewer. A star is a point a pixel
+    // or two across in its square, not the square: a square is a quarter of a degree, which through the SF realm's
+    // 25 degree lens is seven pixels, and the stars were grey specks with corners floating over the towers (#450).
+    let cell = rd * 220.0;
+    let square = vec3i(floor(cell));
+    var star = hash3i(square, 19u);
+    // (Only in a square that has one: three in a thousand.)
+    if (star > 0.9965) { star *= 1.0 - smoothstep(0.6, 1.4, length(cell - normalize(vec3f(square) + 0.5) * 220.0) / (220.0 * g.pixel)); }
     // Fewer the brighter the sky overhead is, and none under a sky of rain (which is told by that brightness: the
     // weather itself is not read here, see the globals).
     col += vec3f(0.9, 0.93, 1.0) * smoothstep(0.9965, 1.0, star) * (1.0 - g.day) * smoothstep(0.02, 0.3, rd.y) * 0.9 * clamp(1.0 - (g.skyZenith.g - 0.012) * 40.0, 0.0, 1.0);
@@ -1199,6 +1213,12 @@ fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
   return mix(mix(c00, c10, fu), mix(c01, c11, fu), fv) / 3.0;
 }
 
+// How bright a lit window's pane is (#450): a lit room, which is about as bright as a wall in the sun, and not a lamp.
+// Over 1.2 a pixel says it is brighter than any lit surface and the last pass spreads it (glow.ts: at night ten times
+// what is over). That is right for a street lamp a few pixels across; a pane at 2.4, which from before a tower is a
+// dozen pixels, was spread as five times its own light and a wall of them was white blots. So a pane is as bright as
+// that only while it is a few pixels across (a far window is a point of light), and this bright from near.
+const PANE_LIGHT = ${PANE_LIGHT};
 // Whether a pane of glass is a window with a light on behind it at night, and how bright: by the window, a storey
 // of a house or a bay of a tower, about two in five of them.
 fn litWindow(fine: vec3i) -> f32 {
@@ -1253,6 +1273,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
       n = vec3f(0.0, 1.0, 0.0);
+      // And worn as the tread is: a riser in a wall's pattern was a grey dash at every step.
+      face = n;
       slope = true;
     }
   }
@@ -1367,7 +1389,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
       // The window screen (eggs.ts): a pane shows its pixel of it, and its own lamp as much as the picture leaves on.
       let pic = screenOf(p);
-      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
+      col += warm * w * dark * mix(1.5, PANE_LIGHT, smoothstep(1.5, 5.0, wide)) * (1.0 - 0.33 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
     }${world.options.surveyedWalls ? `
     // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
     // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
@@ -1391,7 +1413,7 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
         let mid = (floor(vec2f(fx, fy)) + 0.5 - vec2f(fx, fy)) * vec2f(16.0, 31.0);
         pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
       }
-      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
+      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(mix(2.4, PANE_LIGHT, smoothstep(1.5, 4.0, 0.5 / max(wide, 0.001))), 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
     }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in

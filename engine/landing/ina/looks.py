@@ -51,8 +51,25 @@ KNOWN = {
 }
 
 
-def walls(table, most):
-    """Each building's wall colour (24 bits) and style, by its number: arrays of length most + 1; 0 is no building."""
+def evidence(folder=None):
+    """What the photographs say of each building (bay/facade_evidence.py records), by the city's building number.
+    Nothing unless a records folder is named (VILLAGE_FACADE_EVIDENCE), so a bake without one is as it was."""
+    import json, os
+    from pathlib import Path
+    folder = folder or os.environ.get('VILLAGE_FACADE_EVIDENCE')
+    out = {}
+    for path in sorted(Path(folder).rglob('*.json')) if folder else []:
+        if path.name != 'draw.json':
+            out.update({r['city']: r for r in json.loads(path.read_text()).values() if r.get('city')})
+    return out
+
+
+def walls(table, most, measured=None):
+    """Each building's wall colour (24 bits) and style, by its number: arrays of length most + 1; 0 is no building.
+
+    `measured` (from `evidence`) overrides a building that is not in KNOWN: a wall colour its photographs agree on
+    (wall.srgb where wall.trusted) is its colour, and a glass curtain wall (material.cls 'glass', confidence 0.6 or
+    more) takes the 'glass' style. Window shares stay with the style: the far styles do not read one yet."""
     colour = np.zeros(most + 1, np.int64)
     style = np.zeros(most + 1, np.int64)
     pack = lambda c: (c[0] << 16) | (c[1] << 8) | c[2]
@@ -74,4 +91,11 @@ def walls(table, most):
             colour[i], style[i] = pack(TALL[(seed >> 4) % len(TALL)]), BY_NAME['offices'] if (seed >> 9) % 4 else BY_NAME['bands']
         else:
             colour[i], style[i] = pack(TALL[(seed >> 4) % len(TALL)]), BY_NAME['tower']
+        rec = None if known else (measured or {}).get(b['city'])
+        if rec:
+            if rec.get('wall', {}).get('trusted'):
+                colour[i] = pack(tuple(rec['wall']['srgb']))
+            m = rec.get('material')
+            if m and m['cls'] == 'glass' and m['confidence'] >= 0.6:
+                style[i] = BY_NAME['glass']
     return colour, style

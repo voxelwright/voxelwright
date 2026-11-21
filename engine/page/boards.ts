@@ -11,12 +11,14 @@
 //               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
 //               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
 //               of the panel whose cabinet is gone is dark.
-//   logo        the mark or the wordmark of a network the owner is on, big on a tower's crown and flush with its
-//               wall, as a head office wears its company's: cut out (no plate behind it), lit of itself, lying on
-//               the wall whichever way that looks. It is a face and no cells, so no tool breaks it. A tower of the
-//               skyline is drawn by the far model from the park and as cells from near, and the two walls are metres
-//               apart: the sign is seated on whichever is drawn from where the eye is (`seat`). It leads to the
-//               owner's page on that network.
+//   logo        the mark or the wordmark of a network the owner is on, as a head office wears its company's: cut
+//               out (no plate behind it), lit of itself. It is a face and no cells, so no tool breaks it. It leads to
+//               the owner's page on that network. Mounted one of two ways (`mount`):
+//                 roof   standing on the tower's roof on a steel frame, turned to face the park. A roof sign may be
+//                        taller than any wall of a tower 1.3 km off is wide, which is what lets it be read from there.
+//                 wall   flush on a wall under the crown, lying whichever way that wall looks. A tower of the skyline
+//                        is drawn by the far model from the park and as cells from near, and the two walls are metres
+//                        apart: the sign is seated on whichever is drawn from where the eye is (`seat`).
 //   banner      a small plane flying a long round across the park's sky, before the towers, towing a strip of cloth
 //               with words or a picture.
 //
@@ -48,6 +50,8 @@ export interface Board {
   /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. A logo lies on a wall that may look any way: `turn` is where its face looks, degrees clockwise from north. */
   facing: 0 | 1 | 2 | 3
   turn?: number
+  /** A logo: `roof` stands on the roof on a frame (`at` is the middle of its frame's foot on the roof as the far model draws it), `wall` lies flush on a wall (`at` is the middle of its lower edge). `wall` where not said. */
+  mount?: 'roof' | 'wall'
   /** A logo: the building's wall as the far model draws it is where `at` is (sf/boards.mjs `seat`); its wall as cells is found where they are drawn, within this many metres of that, out or in (20 where not said). */
   search?: number
   /** A logo's mark: one of logos.ts `MARKS`. */
@@ -97,6 +101,8 @@ export const DIGITAL_LIFT = 3.2
 /** How deep a digital board's cabinet is, cells. */
 const DEEP = 6
 const NORMALS = [[-1, 0], [0, -1], [1, 0], [0, 1]] as const
+/** A roof sign's frame: how tall its legs are for the sign's height, and how far they go down into the roof, cells (the far model's roof and the cells' are not at one height). */
+export const STAND = 0.16, SUNK = 30
 /** Three across and five up, a row a digit (4, 2, 1 from the left), from the top. */
 const FONT: Record<string, string> = {
   A: '25755', B: '65656', C: '34443', D: '65556', E: '74647', F: '74644', G: '34553', H: '55755', I: '72227', J: '11152', K: '55655', L: '44447', M: '57755',
@@ -127,7 +133,8 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
 export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
   if (b.type === 'logo') {
     // A face alone, flat on a wall: `at` is the middle of its lower edge, a little out from the wall.
-    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = (b.size as number) * M, wide = high * (MARKS[b.logo ?? '']?.wide ?? 1), y0 = b.at[1] + (b.lift ?? 0) * M
+    // (On a roof it stands on its frame's legs: its own lower edge is that much over the roof.)
+    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = (b.size as number) * M, wide = high * (MARKS[b.logo ?? '']?.wide ?? 1), y0 = b.at[1] + (b.lift ?? 0) * M + (b.mount === 'roof' ? high * STAND : 0)
     return { runs: new Int32Array(0), box: [b.at[0], y0, b.at[2], b.at[0] + 1, y0 + 1, b.at[2] + 1], middle: [b.at[0], y0 + high / 2, b.at[2]], right: [n[2], 0, -n[0]], normal: n, wide, high }
   }
   const [nx, nz] = NORMALS[b.facing], rx = nz, rz = -nx, snap = (v: number) => Math.round(v / 8) * 8
@@ -304,7 +311,7 @@ export async function boards(o: Needs): Promise<Boards> {
   })
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
-  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null }
+  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
   const stood = new Map<string, Stood>()
   let laid = 0
   const lay = (edit: Edit) => { laid++; o.lay(edit) }
@@ -317,7 +324,13 @@ export async function boards(o: Needs): Promise<Boards> {
   const place = (s: Stood) => {
     const sh = s.shape!, sc = s.screen
     if (!sc) return
-    if (s.b.type === 'logo') { const out = s.out ?? 0; sc.at = [sh.middle[0] + sh.normal[0] * out, sh.middle[1], sh.middle[2] + sh.normal[2] * out]; sc.hu = [sh.right[0] * sh.wide / 2, 0, sh.right[2] * sh.wide / 2]; sc.hv = [0, sh.high / 2, 0]; return }
+    if (s.b.type === 'logo') {
+      const out = s.out ?? 0
+      // A roof sign's picture is the sign over its frame: the legs under it, down into the roof.
+      const legs = s.b.mount === 'roof' ? sh.high * STAND + SUNK : 0
+      sc.at = [sh.middle[0] + sh.normal[0] * out, sh.middle[1] - legs / 2 + (s.up ?? 0), sh.middle[2] + sh.normal[2] * out]; sc.hu = [sh.right[0] * sh.wide / 2, 0, sh.right[2] * sh.wide / 2]; sc.hv = [0, (sh.high + legs) / 2, 0]
+      return
+    }
     // Its panel: on the cabinet's face, inside a rim of four cells.
     sc.at = [sh.middle[0] + sh.normal[0] * 0.5, sh.middle[1], sh.middle[2] + sh.normal[2] * 0.5]
     sc.hu = [sh.right[0] * (sh.wide / 2 - RIM), 0, sh.right[2] * (sh.wide / 2 - RIM)]
@@ -336,6 +349,17 @@ export async function boards(o: Needs): Promise<Boards> {
    */
   const seat = (s: Stood, eye: readonly number[]) => {
     const sh = s.shape!, near = Math.hypot(sh.middle[0] - eye[0], sh.middle[1] - eye[1], sh.middle[2] - eye[2]) < o.handover(sh.middle[0], sh.middle[2])
+    if (s.b.mount === 'roof') {
+      // On a roof: the cells' roof under its foot, where the tower is cells (looked for as its wall is, and only a roof within 12 m of the far model's: a spire beside it is not its roof).
+      if (near && s.cells == null && performance.now() - (s.looked ?? -1e9) > 500) {
+        s.looked = performance.now()
+        const feet = o.feet(Math.round(s.b.at[0]), Math.round(s.b.at[2])) - s.b.at[1]
+        s.cells = Math.abs(feet) < 120 && o.kind(Math.round(s.b.at[0]), Math.round(s.b.at[1] + feet - 2), Math.round(s.b.at[2])) ? feet : null
+      }
+      const up = near && s.cells != null ? s.cells : 0
+      if (up !== (s.up ?? 0)) { s.up = up; place(s) }
+      return
+    }
     if (near && s.cells == null && performance.now() - (s.looked ?? -1e9) > 500) {
       s.looked = performance.now()
       const reach = Math.round((s.b.search ?? 20) * M)
@@ -364,8 +388,10 @@ export async function boards(o: Needs): Promise<Boards> {
       const mark = MARKS[b.logo ?? '']
       if (!mark) throw new Error(`the logo "${b.logo}" of the board ${b.id} is none of ${Object.keys(MARKS).join(', ')}`)
       // (Lit as channel letters are, not as a screen is: a screen's light on a mark's white was a blot by night from before it.)
-      s.screen = drawn.add({ pixels: [Math.round((256 * mark.wide) / 4) * 4, 256], style: { ground: '#000', ink: '#fff', glows: true, glow: 0.3, dim: 0.72 } })
-      s.screen.paint((pen, w, h) => signOf(pen, mark, w, h))
+      const roof = b.mount === 'roof', wide = Math.round((256 * mark.wide) / 4) * 4, legs = roof ? Math.round((256 * (STAND + SUNK / ((b.size as number) * M))) / 4) * 4 : 0
+      // (A roof sign is read from behind too, the right way round, as the banner is.)
+      s.screen = drawn.add({ pixels: [wide, 256 + legs], both: roof, style: { ground: '#000', ink: '#fff', glows: true, glow: 0.3, dim: 0.72 } })
+      s.screen.paint((pen, w, h) => signOf(pen, mark, w, h - legs, legs))
       stood.set(b.id, s)
       stand(s)
       return
@@ -606,7 +632,7 @@ export async function boards(o: Needs): Promise<Boards> {
     // Far enough off that the whole face is in the picture, and not further than 90 m: a narrow picture sees less of it.
     // A logo's tower is the far model's from the park: the flight to it ends past the far model's handover there (and a little), before the same wall the sign was seen on.
     const least = s.b.type === 'logo' ? Math.min(1700, o.handover(sh.middle[0], sh.middle[2]) * 1.15) : 80
-    const off = Math.min(s.b.type === 'logo' ? 1800 : 900, Math.max(least, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
+    const off = Math.min(s.b.type === 'logo' ? (s.b.mount === 'roof' ? 4000 : 1800) : 900, Math.max(least, (sh.wide * 0.9) / Math.tan(across), (sh.high * (s.b.mount === 'roof' ? 1.5 : 1.1)) / v.tanHalf))
     // Before it on the line to where the realm begins, where that is before its face at all: a board is placed to be
     // seen from there, so that line is clear, while straight out from its face another roof may stand (one did, #450).
     const park = [o.began.x * M - sh.middle[0], o.began.y * M - sh.middle[1], o.began.z * M - sh.middle[2]], far = Math.hypot(park[0], park[1], park[2]) || 1

@@ -161,7 +161,8 @@ def write(out, blocks, layer, h, inside, roof, walls, style, ids, shade, floor, 
                            'size': [int(cb - ca), int(hs.max()) + 1, int(rb - ra)], 'low': int(hs.min())})
 
 
-CROWNS = 5  # raised when what `crowns` works out changes
+CROWNS = 8  # raised when what `crowns` works out changes
+DETAILED = float(os.environ.get('CROWNS_DETAILED', 400))  # metres from the eye within which a crown has its ragged top and its gaps
 PREPARED = 9  # raised when what `prepared` works out changes: its files are made again
 
 
@@ -270,11 +271,28 @@ def crowns(g, grid):
     if os.path.exists(path):
         return dict(np.load(path))
     s = np.load(f'{DATA}/surface-{grid}.npz')
-    top, ground, ids, leafy = g['top'], g['ground'], g['ids'], g['leafy']
-    cell = float(g['frame'][2])
+    out = crown_rule(g['top'], g['ground'], g['ids'], g['leafy'], s['multi'], s['count'], float(g['frame'][2]), s['top'])
+    print(f"crowns ({grid}): {out['said']}", flush=True)
+    del out['said']
+    np.savez(path, **out)
+    return out
+
+
+def crown_rule(top, ground, ids, leafy, multi, returns, cell, raw):
+    """The rule `crowns` keeps, for any surface (the wedge's here, a square's in sf/far/bake.py): the surface made ready
+    (`top`, with its noise taken off), the ground, each cell's building, what is leaf, how many pulses came back from
+    each cell more than once and how many in all (`multi`, `returns`), the cell in metres, and the surface as the lidar had it (`raw`).
+
+    Beside where each crown is and how low it hangs, it says a crown's own top and its gaps. The surface made ready
+    has had the middle value of each 1.25 m taken, which is right for a roof and makes a crown a smooth dome: a
+    crown's top is the lidar's own (`rough`). And a crown is not solid: the big tree of the landing's left foreground
+    is as wide in the lidar as in the photograph (14.3 m across the line of sight against 13.9 m, and within a metre
+    and a half at every height), but stood as one unbroken green mass, where the photograph's is clumps with dark and
+    the houses behind showing between them. So some of a crown's columns are left out (`gap`): clumps about a metre
+    across, more of them where more pulses went through the leaves (a thin crown) and towards its rim, none at its trunk."""
     over = top - ground
     # How much of what came back round a cell came back more than once, over a square 1.25 m across.
-    share = ndimage.uniform_filter(s['multi'].astype(np.float32) / np.maximum(s['count'].astype(np.float32), 1), size=max(3, int(round(1.25 / cell)) | 1))
+    share = ndimage.uniform_filter(multi.astype(np.float32) / np.maximum(returns.astype(np.float32), 1), size=max(3, int(round(1.25 / cell)) | 1))
     # A building's own roof: the height three tenths of its cells are under (the middle one is the tree's, where a
     # crown hangs over most of a small house).
     n = int(ids.max())
@@ -306,11 +324,21 @@ def crowns(g, grid):
     crown = (leafy & (over > 2.8)) | hung
     base = np.where(hung, level[ids], ground).astype(np.float32)
     # How tall the tree is at a cell: the highest of its crown within 3 m. Its crown is three fifths of that deep
-    # (1.6 to 18 m), and thins to its rim: how far a cell is inside the crown says how low it hangs there.
+    # (1.6 m at least), and thins to its rim: how far a cell is inside the crown says how low it hangs there.
+    # A tall narrow tree (a poplar, a cypress: the landing's big tree is 31 m tall and 13 m across) is in leaf far
+    # further down and as wide low as high: by how slender each crown is (its height for its width, as wide as a
+    # round of its area), it is up to nine tenths deep, and at its full depth from 80 cm inside its rim, not 2.5 m.
     high = ndimage.maximum_filter(np.where(crown, top, -1e9), size=int(round(6 / cell)) | 1)
-    deep = np.clip((high - ground) * 0.62, 1.6, 18.0)
+    each, m = ndimage.label(crown)
+    slender = np.ones(m + 1, np.float32)
+    if m:
+        index = np.arange(1, m + 1)
+        slender[1:] = ndimage.maximum(np.where(crown, top - base, 0), each, index) / np.maximum(np.sqrt(ndimage.sum(crown, each, index) * cell * cell * 4 / np.pi), 1.0)
+    slender = np.clip(slender[each] - 1.2, 0.0, 1.2)
+    del each
+    deep = np.clip((high - ground) * (0.62 + 0.25 * slender), 1.6, 28.0)
     inside = ndimage.distance_transform_edt(crown) * cell
-    under = np.maximum(high - deep * np.sqrt(np.clip(inside / 2.5, 0.05, 1.0)), base + 0.5)
+    under = np.maximum(high - deep * np.sqrt(np.clip(inside / (2.5 - 1.4 * slender), 0.05, 1.0)), base + 0.5)
     under = np.minimum(under, top - 0.75).astype(np.float32)
     # A trunk under each top of a crown that stands on the ground: half a metre square, up into the crown.
     smooth = ndimage.uniform_filter(np.where(crown, top, ground), size=int(round(2 / cell)) | 1)
@@ -321,19 +349,37 @@ def crowns(g, grid):
         at = np.round(np.array(ndimage.center_of_mass(peak, marks, np.arange(1, k + 1)))).astype(np.int64)
         trunk[at[:, 0], at[:, 1]] = True
         trunk = ndimage.binary_dilation(trunk, iterations=max(1, int(round(0.25 / cell)))) & crown & ~hung
-    out = {'crown': crown, 'hung': hung, 'base': base, 'under': under, 'trunk': trunk}
-    print(f'crowns ({grid}): {int(crown.sum() * cell * cell)} m2 of crown, {int(hung.sum() * cell * cell)} m2 of it over outlines, {k} trunks', flush=True)
-    np.savez(path, **out)
-    return out
+    # Its own top: the lidar's, where that is a crown's (within 6 m of the smoothed one, and over where it hangs to).
+    rough = np.where(crown & np.isfinite(raw) & (np.abs(raw - top) < 6.0), np.maximum(raw, under + 0.75), top).astype(np.float32)
+    # Its gaps: of a grain a metre across (the same wherever the bake is run), the lowest share in a crown: a
+    # twentieth of a dense crown's columns, an eighth more of a thin one's, a fifth more again at its rim.
+    grain = ndimage.gaussian_filter(np.random.default_rng(450).random(top.shape, dtype=np.float32), sigma=max(0.6, 0.45 / cell))
+    rank = np.zeros(top.shape, np.float32)
+    values = grain[crown]
+    if values.size:
+        rank[crown] = np.argsort(np.argsort(values)).astype(np.float32) / max(1, values.size - 1)
+    thin = np.clip((share - 0.5) / 0.4, 0.0, 1.0)
+    rim = np.clip(1.0 - inside / 2.0, 0.0, 1.0)
+    by_trunk = ndimage.binary_dilation(trunk, iterations=max(1, int(round(1.0 / cell))))
+    gap = crown & ~by_trunk & (rank < 0.05 + 0.12 * thin + 0.2 * rim)
+    return {'crown': crown, 'hung': hung, 'base': base, 'under': under, 'trunk': trunk, 'rough': rough, 'gap': gap, 'slender': np.clip(slender, 0.0, 1.0).astype(np.float32),
+            'said': f'{int(crown.sum() * cell * cell)} m2 of crown, {int(hung.sum() * cell * cell)} m2 of it over outlines, {int(gap.sum() * cell * cell)} m2 of gaps, {k} trunks'}
+
+
+# A far crown's one green (and a square's, sf/far/bake.py): the middle of `bark_and_leaf`'s three.
+LEAF_TOP = lambda shape: rgb24(np.full(shape, 72), np.full(shape, 90), np.full(shape, 44))
+LEAF_SIDE = lambda shape: rgb24(np.full(shape, 54), np.full(shape, 68), np.full(shape, 33))
 
 
 def bark_and_leaf(shape, cell):
-    """Leaves in three greens, in patches a metre and a half across (one flat green is a blob from any distance), and bark."""
+    """Leaves in three greens, in patches a metre and a half across (one flat green is a blob from any distance), and bark.
+    The greens are the photograph's big tree's (its mean 43, 55, 27: an olive, red three quarters of green), not a
+    lawn's: with red under half of green the crowns were the brightest and most coloured things in the landing."""
     rows, cols = np.indices(shape)
     patch = ((rows * cell / 1.5).astype(np.int64) * 73856093) ^ ((cols * cell / 1.5).astype(np.int64) * 19349663)
     pick = (patch >> 3) % 3
-    tops = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((62, 98, 46), (74, 108, 52), (52, 88, 44))])
-    sides = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((46, 74, 36), (56, 84, 40), (38, 64, 34))])
+    tops = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((72, 90, 44), (84, 100, 50), (60, 78, 40))])
+    sides = np.choose(pick, [rgb24(*(np.full(shape, v) for v in c)) for c in ((54, 68, 33), (64, 78, 38), (45, 58, 30))])
     return tops, sides, rgb24(np.full(shape, 84), np.full(shape, 66), np.full(shape, 48))
 
 
@@ -375,7 +421,12 @@ def main():
         tree = crowns(g, grid) if standing else None
         if standing:
             crown, trunk = tree['crown'], tree['trunk']
-            top_all = top
+            # (A crown's own top is the lidar's, ragged, and some of its columns are gaps: within DETAILED metres of the
+            # eye, where a tree is tens of pixels across. Everywhere in the near layer they were 110,000 faces more than
+            # smooth whole crowns, and in the far layer half a million: with those the park's frame at scale 0.75 went
+            # past 60 a second's time by night, and a second page on the same GPU never got its turn.)
+            detailed = (np.hypot(uu[None, :] - eu, ww[:, None] - ew) < DETAILED) if cell_out < 0.5 else np.zeros(top.shape, bool)
+            top_all = np.where(crown & detailed, tree['rough'], top)
             top = np.where(crown, np.where(trunk, np.maximum(tree['under'] + 1.0, tree['base']), tree['base']), top)
             leafy = leafy & ~crown
         over = top - ground
@@ -463,6 +514,9 @@ def main():
             # The crowns, over what stands under them: three slabs, each further inside the crown and hanging lower,
             # since a column's faces are its top and its walls and a crown is round underneath. The first is the
             # crown's own top down a quarter of its depth; the next hang from it, to half and to all of it.
+            # (A gap is in the crown's top slab: at its rim, where that is all there is, the gap is seen through; further
+            # in it is a dark slot down to the slab under it, as between two clumps of leaf.)
+            leaf = crown & ~(tree['gap'] & detailed)
             held = domain & crown & (dist > 40.0)
             reach = ndimage.distance_transform_edt(crown) * cell
             depth = top_all - tree['under']
@@ -471,12 +525,13 @@ def main():
             # Past the handover a crown is a few pixels: one slab, its whole depth, in one green (so its tops merge).
             near = cell_out < 0.5
             if not near:
-                leaf_top, leaf_side = roof_green, green
+                leaf_top, leaf_side = LEAF_TOP(top.shape), LEAF_SIDE(top.shape)
             for nth, (share_, far_in) in enumerate(((0.3, 0.0), (0.65, 0.8), (1.0, 1.8)) if near else ((1.0, 0.0),)):
                 lower = np.minimum(np.round((top_all - depth * share_ - SEA) * 10 / hq).astype(np.int64), upper - 1)
-                part = held & (reach >= far_in)
+                # (A slender crown's lower slabs begin nearer its rim, by up to half: it is as wide low as high.)
+                part = held & (reach >= far_in * (1.0 - 0.45 * tree['slender'] * detailed)) & (leaf if nth == 0 else True)
                 # (What hangs lower is in the crown's own shade: each slab a little darker than the one over it.)
-                dim = lambda c, by=1 - 0.14 * nth: rgb24(((c >> 16) & 255) * by, ((c >> 8) & 255) * by, (c & 255) * by)
+                dim = lambda c, by=1 - 0.2 * nth: rgb24(((c >> 16) & 255) * by, ((c >> 8) & 255) * by, (c & 255) * by)
                 write(out, blocks, f'{layer}-crown{nth}', np.maximum(upper, 0), part, leaf_top, dim(leaf_side), np.zeros(top.shape, np.int64), nothing, np.maximum(shade, 0), np.maximum(lower, 0), hq, u0, w0, cell)
                 upper = lower
         print(f'{layer}: {sum(b["faces"] for b in blocks if b["layer"] == layer)} faces in {sum(1 for b in blocks if b["layer"] == layer)} blocks, {time.time() - began:.0f} s', flush=True)

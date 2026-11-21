@@ -184,3 +184,20 @@ export function seat(strike, realm, px, py, size, wide, { under = 1.5, along = 0
   const out = 3 - (first.least ?? 0), at = [Math.round(on[0] + n[0] * out), y, Math.round(on[2] + n[2] * out)]
   return { at, turn, run: b - a + 1, top: here / 10, id: w.id, lies: lies(strike, at, turn, size, wide) }
 }
+
+/**
+ * Where a roof sign stands on the tower seen at a pixel of the first picture: on the far model's roof `back` m behind
+ * the wall the pixel shows (along the look), `along` m to the right, turned to face the eye. `at` is the middle of its
+ * frame's foot, cells; `level` is how far the roof under the sign's width is from that height, cells (least, most).
+ */
+export function stand(strike, realm, px, py, wide, { back = 5, along = 0 } = {}) {
+  const [from, dir] = sight(realm, [1280, 720], px, py), h = strike(from, dir)
+  if (!h) return null
+  const far = Math.hypot(dir[0], dir[2]), ahead = [dir[0] / far, 0, dir[2] / far], right = [-ahead[2], 0, ahead[0]]
+  const roof = (x, z) => strike([x, 60000, z], [0, -1, 0], 60000)?.at[1] ?? null
+  const x = h.at[0] + ahead[0] * back * 10 + right[0] * along * 10, z = h.at[2] + ahead[2] * back * 10 + right[2] * along * 10, y = roof(x, z)
+  if (y === null) return null
+  const under = []
+  for (let u = -0.5; u <= 0.501; u += 0.1) { const r = roof(x + right[0] * u * wide * 10, z + right[2] * u * wide * 10); under.push(r === null ? -Infinity : r - y) }
+  return { at: [Math.round(x), Math.round(y), Math.round(z)], turn: Math.round((((Math.atan2(-ahead[0], ahead[2]) * 180) / Math.PI + 360) % 360) * 10) / 10, top: y / 10, far: h.t / 10, level: [Math.min(...under), Math.max(...under)] }
+}

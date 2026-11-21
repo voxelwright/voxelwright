@@ -23,6 +23,7 @@ import type { Input } from './input.ts'
 import type { Born } from './told.ts'
 import { chance, out as homeHours, type Shock } from './residents.ts'
 import { unrun } from './runs.ts'
+import { POLISHED } from './spells.ts'
 import { faces as facesOf } from './fine.ts'
 
 /** What street life asks of the land (the core's exports). */
@@ -33,7 +34,7 @@ interface Walk { a: number; b: number; kind: number; busy: number; signal: numbe
 interface Road { key: string; way: number; a: number; b: number; lanes: number; flags: number; next: string[]; ctl: number; cls: number; wired: boolean; blocked: boolean; p: Ring; cum: Ring; len: number; open: boolean | null; weight: number; mx: number; mz: number }
 interface Slot { x: number; z: number; yaw: number; mapped: boolean; seed: number; y?: number; pitch?: number; ok?: boolean }
 interface Line { p: Ring; cum: Ring; len: number; seed: number; lights?: { s: number; node: number; dx: number; dz: number }[] }
-interface Look { size: [number, number, number]; per: number; low: [number, number, number]; palette: number[]; runs: string }
+interface Look { size: [number, number, number]; per: number; low: [number, number, number]; palette: number[]; runs: string; roles?: string[] }
 interface Model { id: string; name: string; kind: string; size: [number, number, number]; body: { palette: number[]; runs: string }; motor?: Motor; controls?: Making['controls']; seats?: [number, number, number][]; eye?: [number, number, number]; looks: Look[]; variants: { name: string; body: number[]; looks: number[][] }[]; front: number; long: number; wide: number }
 interface Car {
   id: number; model: Model; paint: number; kind: 'parked' | 'traffic' | 'cable' | 'tram'; seed: number
@@ -128,8 +129,8 @@ export interface Street {
   cable(x: number, z: number): { in: number; near: number } | null
   /** Off, nothing of street life is worked out or drawn (for timing what it costs). */
   enabled: boolean
-  /** One of every kept vehicle side by side, standing still, all facing a heading (radians) with their fronts on a line through a place (cells) and the row going off to their left: for looking at them (the checks' line-up). Null clears it. */
-  lineup(at: readonly [number, number] | null, heading?: number): string[]
+  /** One of every kept vehicle side by side, `gap` cells apart (22), standing still, all facing a heading (radians) with their fronts on a line through a place (cells) and the row going off to their left: for looking at them (the checks' line-up). Null clears it. */
+  lineup(at: readonly [number, number] | null, heading?: number, gap?: number): string[]
   /**
    * The rules kept, over `seconds` of the clock from now (for the checks): every cable car crossing a stop line with
    * lights, and how many of those at red; left turns on green as they crossed the line, and how many with something
@@ -616,11 +617,19 @@ export function street(o: {
     if (e.data.cells) { const k = e.data.key; if (fineKept.size >= 8) fineKept.delete(fineKept.keys().next().value!); fineKept.set(k, Promise.resolve(e.data.cells)); cellsAsked.get(k)?.(e.data.cells); cellsAsked.delete(k); return }
     asking--; const look = lookOf(e.data.key); if (look) faces.set(e.data.key, { id: 0, cells: e.data.filled!, size: look.size, com: [0, 0, 0], low: [0, 0, 0], faces: e.data.faces! })
   }
+  /**
+   * A look's palette in a colour, with what the library says is the vehicle's paint (sf/cars.mjs `rolesOf`) marked
+   * polished (kinds.rs POLISHED): pieces.ts draws it as car paint, and its hubs, poles and brass as they were.
+   */
+  const paletteOf = (m: Model, paint: number, i: number) => {
+    const p = paint >= 0 ? m.variants[paint].looks[i] : m.looks[i].palette, roles = m.looks[i].roles
+    return roles ? p.map((k, j) => (roles[j] === 'paint' ? k | POLISHED : k)) : p
+  }
   const lookOf = (key: string) => { const [id, , i] = key.split('/'); return ready.get(id)?.looks[Number(i)] }
   const bornOf = (m: Model, paint: number, i: number): Born | null => {
     const key = `${m.id}/${paint}/${i}`, f = faces.get(key)
     if (f && f !== 'asked') return f
-    if (!f && asking < 2) { faces.set(key, 'asked'); asking++; const l = m.looks[i]; maker.postMessage({ key, runs: l.runs, kinds: paint >= 0 ? m.variants[paint].looks[i] : l.palette, size: l.size }) }
+    if (!f && asking < 2) { faces.set(key, 'asked'); asking++; const l = m.looks[i]; maker.postMessage({ key, runs: l.runs, kinds: paletteOf(m, paint, i), size: l.size }) }
     return null
   }
 
@@ -830,7 +839,7 @@ export function street(o: {
     if (!k) {
       const l = m.looks[i]
       fineKept.set(key, k = new Promise((done) => cellsAsked.set(key, done)))
-      maker.postMessage({ key, runs: l.runs, kinds: paint >= 0 ? m.variants[paint].looks[i] : l.palette, size: l.size, cells: true })
+      maker.postMessage({ key, runs: l.runs, kinds: paletteOf(m, paint, i), size: l.size, cells: true })
     }
     return k
   }
@@ -1566,7 +1575,7 @@ export function street(o: {
     },
     get debug() { return { laps: Object.fromEntries(Object.entries(laps).map(([k, v]) => [k, Math.round(v * 100) / 100])), pending: [...pending.keys()].map((c) => ({ name: c.model.name, waking: !!c.waking, thing: !!c.thing })), living: living.size, faces: [...faces.entries()].map(([k, v]) => `${k}:${v === 'asked' ? 'asked' : 'made'}`), asking } },
     get red() { return shown.filter((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }; return q.sig && lightFor(junctionOf(q.sig), q.cdx!, q.cdz!, o.clock()) === 'red' }).map((p) => { const q = p as { sig?: number; cdx?: number; cdz?: number }, j = junctionOf(q.sig!); return { seed: p.seed, node: q.sig, u: Math.round(cycleAt(j, o.clock())), phase: phaseOf(j, q.cdx!, q.cdz!), axis: [j.ax, j.az].map((v) => Math.round(v * 100) / 100), dir: [q.cdx!, q.cdz!].map((v) => Math.round(v * 100) / 100), at: [Math.round(p.at[0]), Math.round(p.at[2])], jat: [Math.round(j.x), Math.round(j.z)] } }) },
-    lineup(at, heading = 0) {
+    lineup(at, heading = 0, gap = 22) {
       for (const c of showcase) hide(c)
       showcase.length = 0
       if (!at) return []
@@ -1574,7 +1583,7 @@ export function street(o: {
       const fx = Math.cos(heading), fz = Math.sin(heading), lx = fz, lz = -fx
       for (const m of library.map((c) => ready.get(c.id)).filter((m): m is Model => !!m)) {
         const c: Car = { id: ids++, model: m, paint: -1, kind: 'parked', seed: ids, x: at[0] + lx * (along + m.wide / 2) - fx * m.long / 2, y: 0, z: at[1] + lz * (along + m.wide / 2) - fz * m.long / 2, heading, pitch: 0, v: 0, piece: null, shown: '' }
-        settle(c); showcase.push(c); along += m.wide + 22
+        settle(c); showcase.push(c); along += m.wide + gap
       }
       return showcase.map((c) => c.model.name)
     },

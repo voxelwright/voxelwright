@@ -238,6 +238,9 @@ try {
     const liveDrag = await drag(page)
     check(liveDrag.hour > 18, `the fader dragged to the right: the hour asked for is ${round(liveDrag.hour)}`)
     const stats = await page.evaluate(async () => { const k = globalThis.engine.realmControls.kit; const s = k ? await k.ready() : null; return s?.renderer?.stage?.stats ?? null })
+    // The first page rests while the second comes (#450): drawing at a fixed scale it takes the GPU's whole frame, and
+    // on a GPU that other checks share the second page's own start (its adapter) then never got a turn: 180 s, twice.
+    await page.evaluate(() => { globalThis.engine.resting = true })
     const plainPage = await (async () => { const p = await desk.newPage(); await p.goto(`${site.url}/sf/index.html?kit=plain`); await p.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 }); await p.waitForTimeout(1500); await p.evaluate(() => { globalThis.engine.first?.engage(); globalThis.engine.scale = 0.75 }); return p })()
     await page.evaluate(() => { globalThis.engine.resting = true })
     const plainDrag = await drag(plainPage)

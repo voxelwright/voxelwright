@@ -13,7 +13,7 @@
       70
     ],
     "bearing": 120,
-    "height": 127,
+    "height": 139,
     "rise": -14,
     "speed": 12,
     "size": [
@@ -63,21 +63,22 @@
       "type": "logo",
       "logo": "x",
       "building": [
-        527579,
-        670244
+        527804,
+        670239
       ],
       "at": [
-        527579,
-        1662,
-        670244
+        527804,
+        1915,
+        670239
       ],
       "facing": 0,
-      "turn": 305,
-      "size": 19,
+      "turn": 298.7,
+      "size": 36,
       "content": {
         "text": "X"
       },
-      "to": "https://x.com/pasha_knz"
+      "to": "https://x.com/pasha_knz",
+      "mount": "roof"
     },
     {
       "id": "linkedin",
@@ -85,21 +86,22 @@
       "type": "logo",
       "logo": "linkedin",
       "building": [
-        528848,
-        672403
+        528913,
+        672395
       ],
       "at": [
-        528848,
-        1492,
-        672403
+        528913,
+        1650,
+        672395
       ],
       "facing": 0,
-      "turn": 314.5,
-      "size": 14.8,
+      "turn": 304.3,
+      "size": 26,
       "content": {
         "text": "LinkedIn"
       },
-      "to": "https://www.linkedin.com/in/pavlo-zahynailo/"
+      "to": "https://www.linkedin.com/in/pavlo-zahynailo/",
+      "mount": "roof"
     },
     {
       "id": "twitch",
@@ -107,21 +109,22 @@
       "type": "logo",
       "logo": "twitch",
       "building": [
-        525110,
-        674099
+        529864,
+        669876
       ],
       "at": [
-        525110,
-        1358,
-        674099
+        529864,
+        1855,
+        669876
       ],
       "facing": 0,
-      "turn": 260.4,
-      "size": 30,
+      "turn": 293.6,
+      "size": 40,
       "content": {
         "text": "Twitch"
       },
-      "to": "https://www.twitch.tv/p_bender"
+      "to": "https://www.twitch.tv/p_bender",
+      "mount": "roof"
     }
   ]
 }

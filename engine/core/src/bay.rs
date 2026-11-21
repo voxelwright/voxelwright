@@ -21,6 +21,105 @@ thread_local! {
     static ROOM: RefCell<Vec<u8>> = const { RefCell::new(Vec::new()) };
     static HEROES: RefCell<Vec<Hero>> = const { RefCell::new(Vec::new()) };
     static LANDMARKS: Cell<bool> = const { Cell::new(true) };
+    static MARKS: RefCell<Marks> = RefCell::new(Marks::default());
+}
+
+/// Paint and rails on the road, from the street graph (#450, the page's `marks`): lane lines, centre lines, crossings
+/// and tracks, drawn in the road's top cell at 10 cm. Where the graph covers a place, the bake's own paint and rails
+/// (class bits 32 and 64, settled per 50 cm sample from the aerial) are not drawn: they were blocks and bands.
+#[derive(Default)]
+struct Marks {
+    covers: Vec<[i32; 4]>,
+    /// x0, z0, x1, z1 (cells) and a style (`mark_at`).
+    segs: Vec<[i32; 5]>,
+    /// The segments that come within reach of each square of 256 cells.
+    grid: std::collections::HashMap<(i32, i32), Vec<u32>>,
+}
+const MARK_CELL: i32 = 256;
+/// How far a mark reaches from its line, in cells: a crossing's bars run 1.5 m either side.
+const MARK_REACH: i32 = 16;
+const WHITE_LINE: u8 = 1;
+const WHITE_DASH: u8 = 2;
+const YELLOW_DOUBLE: u8 = 3;
+const CROSS_BARS: u8 = 4;
+const CROSS_LINES: u8 = 5;
+const RAILS_CABLE: u8 = 6;
+const RAILS: u8 = 7;
+/// A rail's worn top and the cable's slot, as greys of the road (`mark_at`).
+const RAIL: u8 = grey(5);
+const SLOT: u8 = grey(13);
+
+/// Takes the marks in the room (`room`): little-endian words, `MARK`, how many covered squares and how many segments,
+/// then the squares (x0, z0, x1, z1) and the segments (x0, z0, x1, z1, style). Returns the segments held, or -1.
+pub fn marks() -> i32 {
+    let bytes = ROOM.with_borrow_mut(std::mem::take);
+    let w: Vec<i32> = bytes.chunks_exact(4).map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect();
+    if w.len() < 3 || w[0] != 0x4b52_414d { return -1; }
+    let (nc, ns) = (w[1] as usize, w[2] as usize);
+    if w.len() != 3 + nc * 4 + ns * 5 { return -1; }
+    let mut m = Marks::default();
+    for c in w[3..3 + nc * 4].chunks_exact(4) { m.covers.push([c[0], c[1], c[2], c[3]]); }
+    for (i, s) in w[3 + nc * 4..].chunks_exact(5).enumerate() {
+        m.segs.push([s[0], s[1], s[2], s[3], s[4]]);
+        let (x0, x1) = (s[0].min(s[2]) - MARK_REACH, s[0].max(s[2]) + MARK_REACH);
+        let (z0, z1) = (s[1].min(s[3]) - MARK_REACH, s[1].max(s[3]) + MARK_REACH);
+        for gz in z0.div_euclid(MARK_CELL)..=z1.div_euclid(MARK_CELL) {
+            for gx in x0.div_euclid(MARK_CELL)..=x1.div_euclid(MARK_CELL) {
+                m.grid.entry((gx, gz)).or_default().push(i as u32);
+            }
+        }
+    }
+    let n = m.segs.len() as i32;
+    MARKS.with_borrow_mut(|held| *held = m);
+    n
+}
+
+/// Whether the graph's marks are drawn at a column: then the bake's paint and rails are not.
+fn marked_place(x: i32, z: i32) -> bool {
+    MARKS.with_borrow(|m| m.covers.iter().any(|c| x >= c[0] && z >= c[1] && x < c[2] && z < c[3]))
+}
+
+/// The paint or rail in the road's top cell at a column (cells `size` wide, its middle at x, z), if any. A line is a
+/// cell wide, or the cell's own width where cells are coarser, so a coarse cell does not lose it between samples.
+fn mark_at(x: i32, z: i32, size: i32) -> Option<Kind> {
+    MARKS.with_borrow(|m| {
+        let list = m.grid.get(&(x.div_euclid(MARK_CELL), z.div_euclid(MARK_CELL)))?;
+        // The graph's points name cells, as the column's x and z do (a coarse column's are its middle).
+        let (px, pz) = (x as f32, z as f32);
+        let half = 0.5 * size as f32;
+        let mut found = None;
+        for &i in list {
+            let s = m.segs[i as usize];
+            let (dx, dz) = ((s[2] - s[0]) as f32, (s[3] - s[1]) as f32);
+            let long = (dx * dx + dz * dz).sqrt();
+            if long < 1.0 { continue; }
+            let (ux, uz) = (dx / long, dz / long);
+            let (rx, rz) = (px - s[0] as f32, pz - s[1] as f32);
+            let t = rx * ux + rz * uz;
+            let d = (rz * ux - rx * uz).abs();
+            let within = |lo: f32, hi: f32| d >= lo - half + 0.5 && d < hi + half - 0.5;
+            let on = |w: f32| t >= -w && t <= long + w;
+            let k = match s[4] as u8 {
+                WHITE_LINE if on(0.0) && within(0.0, 0.6) => kind(ASPHALT, grey(1)),
+                WHITE_DASH if on(0.0) && within(0.0, 0.6) && t.rem_euclid(90.0) < 30.0 => kind(ASPHALT, grey(1)),
+                YELLOW_DOUBLE if on(0.0) && within(0.4, 1.6) => kind(ASPHALT, colour(4, 3)),
+                // Continental bars: 60 cm wide and 60 cm apart along the crossing, 3 m long across it.
+                CROSS_BARS if on(-2.0) && within(0.0, 15.0) && (t - 2.0).rem_euclid(12.0) < 6.0 => kind(ASPHALT, grey(1)),
+                CROSS_LINES if on(0.0) && within(13.0, 15.0) => kind(ASPHALT, grey(1)),
+                // A cable car's rails 1067 mm apart with the cable's slot between; a streetcar's 1435 mm. Set flush in the
+                // road and climbing with it, they are its surface (asphalt) in the rail's worn grey and the slot's dark:
+                // as steel they stood apart from the road's grade and were a stair of dark steps up Powell.
+                RAILS_CABLE if on(0.0) && within(4.8, 5.9) => kind(ASPHALT, RAIL),
+                RAILS_CABLE if on(0.0) && within(0.0, 0.5) => kind(ASPHALT, SLOT),
+                RAILS if on(0.0) && within(6.7, 7.8) => kind(ASPHALT, RAIL),
+                _ => continue,
+            };
+            // Rails over paint: a crossing's bars stop at the track.
+            if k >> 8 == RAIL as Kind || k >> 8 == SLOT as Kind { return Some(k); }
+            found = Some(k);
+        }
+        found
+    })
 }
 
 /// A landmark (#423, heroes.rs) standing in the world: which rule, where its frame's middle and foot are in cells,
@@ -92,6 +191,8 @@ struct Building {
     count: usize,
     wall: Kind,
     trim: Kind,
+    /// The glass share of its upper walls as its photographs measured it (bay/facade_evidence.py), if they did.
+    glass: Option<f32>,
     /// Cells a storey, cells a bay of the front, whether people live in it, and a number of its own.
     storey: i32,
     module: i32,
@@ -265,14 +366,19 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
         join_cornices(own);
         let style = r[4] as u32;
+        let evidence = Evidence::of(r[3]);
         buildings.push(Building {
             first,
             count,
+            // Who says what a wall is, first to last: its photographs as evidence (a colour and a material several
+            // views agree on), the majority of its painted cells, the bake's rule.
             wall: match painted_colour((first..first + count).filter_map(|e| paint.get(&(e as u32)).copied())) {
+                _ if evidence.wall => r[2] as Kind,
                 Some(tint) => kind(material(r[2] as Kind), tint),
                 None => r[2] as Kind,
             },
             trim: r[3] as Kind,
+            glass: evidence.glass,
             storey: (style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 },
             module: (style >> 8 & 255).max(16) as i32,
             home: style >> 16 & 1 == 1,
@@ -351,6 +457,21 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// What a building's photographs say of it as evidence (bay/facade_evidence.py, written by bay/evidence_tile.py), in
+/// the 16 bits over its trim's kind: bit 16, its wall's kind (`r[2]`) is measured; bits 17 to 23, the glass share of
+/// its upper walls in hundredths, present when bit 24 is set. A building no photograph spoke for has none of them.
+struct Evidence {
+    wall: bool,
+    glass: Option<f32>,
+}
+
+impl Evidence {
+    fn of(trim: i32) -> Evidence {
+        let bits = trim as u32 >> 16;
+        Evidence { wall: bits & 1 == 1, glass: (bits >> 8 & 1 == 1).then(|| (bits >> 1 & 127).min(100) as f32 / 100.0) }
+    }
 }
 
 /// What a building's photographs (bay/facade_paint.py: a colour every 30 cm of a wall it was seen on) say its walls
@@ -673,11 +794,11 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
         }
     } else if b.home {
         // A home's front is mostly glass: its window spans the bay but for a pier of 0.6 m, in sashes (#450).
-        ((module / 2.0 - 3.0).max(6.0), 8, storey - 5, 0)
+        (measured_half(b, 8, storey - 5).unwrap_or((module / 2.0 - 3.0).max(6.0)), 8, storey - 5, 0)
     } else if storey > 60 {
         (4.5, 14, storey - 12, 0) // a church's windows: tall and narrow
     } else {
-        ((module / 2.0 - 5.0).min(8.0), 8, storey - 6, 0)
+        (measured_half(b, 8, storey - 6).unwrap_or((module / 2.0 - 5.0).min(8.0)), 8, storey - 6, 0)
     };
     // A belt at each floor and a sill under each window, where cells are fine enough to show them.
     if size == 1 && deep < 1.0 {
@@ -706,6 +827,14 @@ fn front(b: &Building, p: &Probe, up: i32, top: i32, over_ground: i32, deep: f32
             if mullion || (fy - foot) == (head - foot) / 2 { b.trim } else { glass }
         } else { dark },
     }
+}
+
+/// An upper window's half width where the photographs measured the building's glass share: the bay's glass over a
+/// storey of `foot` to `head` is that share of the bay's wall, with a pier of at least 0.3 m either side.
+fn measured_half(b: &Building, foot: i32, head: i32) -> Option<f32> {
+    let share = b.glass?;
+    let module = b.module as f32;
+    Some((share * module * b.storey as f32 / (2.0 * (head - foot).max(1) as f32)).clamp(2.0, module / 2.0 - 3.0))
 }
 
 /// What a column of the Bay holds, in one pack's knowledge: asked cell by cell with `kind_at`.
@@ -796,21 +925,30 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     };
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
-    let (class, tint) = p.surface(x, z);
+    let (mut class, tint) = p.surface(x, z);
+    // Where the graph's marks are drawn, the bake's paint and rails are not (`Marks`).
+    let graphed = class & 7 == ROAD && marked_place(x, z);
+    if graphed { class &= !96; }
+    // A measured asphalt's byte is the aerial's daylight brightness of the road as a step of the palette's greys
+    // (bay/surface_detail.py: 4 the palest to 11 the darkest). The aerial is stretched bright: read as the road's own
+    // colour it made every street as pale as its pavement (#450). As colour, the same range runs from the grey of worn
+    // asphalt (8) to fresh (12), so the street photographs' road against pavement holds (sf/street_checks.py).
+    let road_grey = |t: u8| 8 + ((t.clamp(4, 11) - 4) * 4 + 3) / 7;
     let asphalt = if class & 159 == 128 && (1..=15).contains(&tint) {
-        Some(tint)
+        Some(road_grey(tint))
     } else if class & 31 == CANOPY && measured_foliage(tint) && !p.under_leaf_road.is_empty() {
         p.cell(x,z).map(|i| {
             let w = p.tw as usize;
-            p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16]
+            road_grey(p.under_leaf_road[(i / w / 16) * w.div_ceil(16) + (i % w) / 16])
         })
     } else { None };
     let road_top4 = (size == 1 && asphalt.is_some()).then(|| ((ground_height+1.0)*4.0).round() as i32);
     let (ground, kerb) = match class & 7 {
         ROAD if class & 64 != 0 => (kind(STEEL, grey(8)), 0),
         ROAD if class & 32 != 0 => (kind(CONCRETE, grey(1)), 0),
-        ROAD => (kind(ASPHALT, asphalt.unwrap_or(OWN)), 0),
-        PAVEMENT => (kind(CONCRETE, OWN), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
+        ROAD => (if graphed && size <= 2 { mark_at(x, z, size) } else { None }.unwrap_or(kind(ASPHALT, asphalt.unwrap_or(OWN))), 0),
+        // Pavement a grey step under the concrete's own: in sun it read brighter than the street photographs' (#450).
+        PAVEMENT => (kind(CONCRETE, grey(5)), if class & 32 != 0 { 0 } else if class & 128 != 0 { 2 } else { 1 }),
         GRASS_HERE => (kind(GRASS, OWN), 0),
         // Water above the sea's level (a river, a lake): the engine's water is the sea's alone, so it is dark glass.
         WATER_HERE if g > 4 => (kind(GLASS, colour(14, 5)), 0),
@@ -1243,6 +1381,56 @@ mod tests {
         b
     }
 
+    /// Marks as the page hands them over (sf/marks.mjs): one covered square and the segments given.
+    fn take_marks(segs: &[[i32; 5]]) -> i32 {
+        let mut words = vec![0x4b52_414d, 1, segs.len() as i32, 0, 0, 1000, 1000];
+        for s in segs { words.extend(s); }
+        let bytes: Vec<u8> = words.iter().flat_map(|w| w.to_le_bytes()).collect();
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), room(bytes.len()), bytes.len()); }
+        marks()
+    }
+
+    #[test]
+    fn marks_are_drawn_a_cell_wide_where_the_graph_puts_them() {
+        // A dashed lane line along x at z = 100, a double yellow at z = 200, a crossing's bars across x at x = 500,
+        // a cable car's rails along x at z = 300.
+        assert_eq!(take_marks(&[[0, 100, 400, 100, 2], [0, 200, 400, 200, 3], [500, 50, 500, 250, 4], [0, 300, 400, 300, 6]]), 4);
+        assert!(marked_place(10, 10) && !marked_place(-1, 10));
+        let white = kind(ASPHALT, grey(1));
+        // Dashes: 3 m of paint, 6 m of none, on the line's own cell and not the next.
+        assert_eq!(mark_at(10, 100, 1), Some(white));
+        assert_eq!(mark_at(10, 101, 1), None);
+        assert_eq!(mark_at(50, 100, 1), None);
+        assert_eq!(mark_at(95, 100, 1), Some(white));
+        // Two yellow lines a cell either side of the middle, nothing on it.
+        assert_eq!(mark_at(10, 200, 1), None);
+        assert_eq!(mark_at(10, 201, 1), Some(kind(ASPHALT, colour(4, 3))));
+        assert_eq!(mark_at(10, 199, 1), Some(kind(ASPHALT, colour(4, 3))));
+        // Bars 60 cm wide and 60 cm apart along the crossing, 3 m across it.
+        let bars: Vec<bool> = (52..76).map(|z| mark_at(500, z, 1).is_some()).collect();
+        assert!(bars[..6].iter().all(|&b| b) && bars[6..12].iter().all(|&b| !b) && bars[12..18].iter().all(|&b| b));
+        assert!(mark_at(514, 54, 1).is_some() && mark_at(517, 54, 1).is_none());
+        // Rails 1067 mm apart with the slot between them.
+        assert_eq!(mark_at(10, 305, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 295, 1), Some(kind(ASPHALT, RAIL)));
+        assert_eq!(mark_at(10, 300, 1), Some(kind(ASPHALT, SLOT)));
+        assert_eq!(mark_at(10, 302, 1), None);
+        // Coarser cells keep a line: a 20 cm cell whose middle is a cell off the line still has it.
+        assert_eq!(mark_at(10, 101, 2), Some(white));
+        take_marks(&[]);
+    }
+
+    #[test]
+    fn measured_asphalt_reads_darker_than_pavement() {
+        // The aerial's brightest road (4) and its darkest (11), as the column draws them: darker than the concrete of
+        // a pavement, and darkest for the darkest.
+        let pale = 8 + ((4u8 - 4) * 4 + 3) / 7;
+        let dark = 8 + ((11u8 - 4) * 4 + 3) / 7;
+        assert_eq!((pale, dark), (8, 12));
+        // Palette grey 8 is 0.86 - 7/14 * 0.8 = 0.46 of white; the concrete material is #a9a69f, 0.66 (march.ts).
+        assert!(0.86 - (pale as f32 - 1.0) / 14.0 * 0.8 < 0.66 * 0.75);
+    }
+
     #[test]
     fn a_road_below_foliage_uses_nearby_measured_asphalt() {
         let mut class = vec![CANOPY; 32*32];
@@ -1361,6 +1549,35 @@ mod tests {
         assert_eq!(read(&painted(&[window; 30])).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
         let bytes = painted(&cells);
         assert!(read(&bytes[..bytes.len() - 1]).is_none());
+    }
+
+    #[test]
+    fn photographs_as_evidence_name_the_wall_and_the_glass_and_an_unmarked_row_reads_as_before() {
+        let cream = colour(4, 7);
+        let cells = [cream; 30];
+        // The trim's kind is the row's fourth number; the 16 bits over it are the evidence.
+        let trim_at = 64 + 65 * 65 * 2 + 128 * 128 * 4 + 12;
+        let with = |bits: u32| {
+            let mut bytes = painted(&cells);
+            let trim = kind(PLASTER, grey(3)) as u32 | bits << 16;
+            bytes[trim_at..trim_at + 4].copy_from_slice(&trim.to_le_bytes());
+            read(&bytes).unwrap()
+        };
+        // No evidence: the paint's majority stands, as it did, and the windows keep their rule.
+        let plain = read(&painted(&cells)).unwrap();
+        assert_eq!((plain.buildings[0].wall, plain.buildings[0].trim, plain.buildings[0].glass), (kind(PLASTER, cream), kind(PLASTER, grey(3)), None));
+        assert_eq!(with(0).buildings[0].wall, plain.buildings[0].wall);
+        // A measured wall is the row's own kind (the bake wrote the photographs' colour there), over the paint's.
+        let measured = with(1);
+        assert_eq!((measured.buildings[0].wall, measured.buildings[0].trim), (kind(PLASTER, WHITE), kind(PLASTER, grey(3))));
+        // A measured glass share of 0.35 makes the upper windows that share of the bay's wall (the pack's house: a
+        // storey of 32 cells and a bay of 30); none at all keeps the rule's, and the pier never goes under 0.3 m.
+        let glassy = with(1 << 8 | 35 << 1);
+        let b = &glassy.buildings[0];
+        assert_eq!(b.glass, Some(0.35));
+        assert!((measured_half(b, 8, b.storey - 5).unwrap() - 0.35 * 30.0 * 32.0 / 38.0).abs() < 1e-4);
+        assert_eq!(measured_half(&plain.buildings[0], 8, 27), None);
+        assert_eq!(measured_half(&with(1 << 8 | 100 << 1).buildings[0], 8, 27), Some(12.0));
     }
 
     #[test]
