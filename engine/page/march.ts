@@ -103,6 +103,8 @@ struct Globals {
   starts: vec4f,
   // The air (#450): how thick its haze is and how much cloud there is, against the town's own (1, 1). A realm says
   // its own: the SF realm's is the clear afternoon of the landing's photograph (#423: haze 0.12, cloud 0.1).
+  // Then the eggs' two (#450, eggs.ts): z how far the window screen is up (0: off, and it is never read), w how much
+  // larger than its own the moon's disc is (0: its own size).
   air: vec4f,
   // The fog (#450, after the air): a low bank in from the sea, what is lost in it worked out after the march (fogged), never in sky().
   // x how thick it is a cell (0: no fog, and nothing of it is worked out); y the height of its top over the sea; z where
@@ -115,6 +117,21 @@ struct Globals {
 // A box's map of the sun: where its texels are counted from, and which of its 16 x 16 tiles are drawn.
 struct SunLevel { base: vec2f, pad: vec2f, drawn0: vec4u, drawn1: vec4u }
 `
+
+/**
+ * The window screen (#450, eggs.ts): a small picture the city's lit windows show, as if every pane were a pixel of
+ * one screen the size of the view. Needs `g` and a `screen` texture bound by the shader that takes it (march, far).
+ * `uv` is where in the view (0 to 1, top left first); the answer is light (rgb) and how much of a pane's own lamp
+ * it puts out (a), both times how far the screen is up. Nothing there off the view, and nothing while it is down.
+ */
+export const SCREEN = /* wgsl */ `
+fn screenAt(uv: vec2f) -> vec4f {
+  if (g.air.z <= 0.0 || any(uv < vec2f(0.0)) || any(uv >= vec2f(1.0))) { return vec4f(0.0); }
+  return textureLoad(screen, vec2i(uv * vec2f(textureDimensions(screen))), 0) * g.air.z;
+}
+`
+/** The window screen's size, texels: a pane is a pixel of it, and the view is about 140 panes tall from the park. */
+export const SCREEN_SIZE = [256, 144] as const
 
 /** How fast the fog thins over its top, a finest cell: to a third in 30 m. */
 const THIN = (1 / 280).toFixed(6)
@@ -604,7 +621,16 @@ struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: v
 @group(0) @binding(2) var<storage, read> top: array<u32>;
 @group(0) @binding(3) var<uniform> looks: Looks;
 @group(0) @binding(4) var sunMap: texture_2d_array<f32>;
+@group(0) @binding(5) var screen: texture_2d<f32>;
 @group(1) @binding(0) var<uniform> sunTile: SunTile;
+${SCREEN}
+// The window screen where a point of the world is in the view (the middle of a pane, for a pane to be one pixel of it).
+fn screenOf(at: vec3f) -> vec4f {
+  if (g.air.z <= 0.0) { return vec4f(0.0); }
+  let v = at - g.eye;
+  let z = max(dot(v, g.forward), 1e-3);
+  return screenAt(vec2f(dot(v, g.right) / (z * g.tanHalf * g.aspect), -dot(v, g.up) / (z * g.tanHalf)) * 0.5 + 0.5);
+}
 
 const GRID = vec3u(${grid[0]}u, ${grid[1]}u, ${grid[2]}u);
 const SLOTS = ${grid[0] * grid[1] * grid[2]}u;
@@ -975,7 +1001,11 @@ fn sky(rd: vec3f) -> vec3f {
   let toward = max(dot(rd, g.sun), 0.0);
   // The sun, or at night the moon: a disc and the brightness round it.
   if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35) * g.day; }
-  if (g.day < 1.0) { col += vec3f(0.8, 0.86, 1.0) * (smoothstep(0.99975, 0.9998, toward) * 0.9 + pow(toward, 400.0) * 0.06) * (1.0 - g.day); }
+  if (g.day < 1.0) {
+    // The moon's disc, as large as the eggs make it (air.w, eggs.ts: shot at, it grows).
+    let r = (1.0 + g.air.w) * (1.0 + g.air.w);
+    col += vec3f(0.8, 0.86, 1.0) * (smoothstep(1.0 - 0.00025 * r, 1.0 - 0.0002 * r, toward) * 0.9 + pow(toward, 400.0 / r) * 0.06) * (1.0 - g.day);
+  }
   if (g.day < 0.98 && rd.y > 0.0) {
     // Stars: one in some of the small squares the sky is cut into, the brighter the fewer.
     let square = vec3i(floor(rd * 220.0));
@@ -1177,7 +1207,9 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
   var slope = false;
   if (ground && faced && shadows == 1u && abs(n.y) < 0.5) {
     let c = hit.cell - g.level[hit.level].cells;
-    if (!solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
+    // (A kerb is not a step of the slope: paving over asphalt keeps its face, or the street had no kerb, #450.)
+    let kerb = ${world.options.surveyedWalls ? 'stuff == 7u && (kindAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level) & 15u) == 6u' : 'false'};
+    if (!kerb && !solidAt(c + vec3i(0, 1, 0), hit.level) && solidAt(c + vec3i(n) - vec3i(0, 1, 0), hit.level)) {
       // And it is in the sun when the tread above it is: the sun is asked about from the middle of the cell's top.
       let lv = g.level[hit.level];
       at = (vec3f(c) + vec3f(0.5, 1.0, 0.5)) / lv.scale + lv.boxMin;
@@ -1185,6 +1217,41 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       slope = true;
     }
   }
+  ${world.options.surveyedWalls ? `// A bank steeper than a cell a cell is a staircase of 10 cm cells: treads lit, risers dark and the corner of every
+  // step shut in, a chessboard across Telegraph Hill (#450). Ground on a step is lit on the slope that the solid round
+  // it makes, asked about the sun from over its cell, and not darkened in the step's corner.
+  if (ground && faced && hit.level <= 1u && (hit.kind & 64u) == 0u) {
+    let c = hit.cell - lvh.cells;
+    let up = vec3i(0, 1, 0);
+    // Only where the ground rises a cell a cell or more for two cells: a riser with the ground behind it rising so (a
+    // kerb has the pavement level behind it), a tread with ground beside it rising so (a wall beside a pavement stands
+    // higher yet). A gentler slope is lit flat, its risers as its treads (above): lit on the slope, the tread under
+    // each step of a lawn or a street stood out from the rest, a line at every step from 100 m.
+    var step = false;
+    if (abs(hit.n.y) < 0.5) {
+      let back = -vec3i(hit.n);
+      step = solidAt(c + back + up, hit.level) && solidAt(c + back * 2 + up * 2, hit.level);
+    } else if (!solidAt(c + up, hit.level)) {
+      let beside = array<vec3i, 4>(vec3i(1, 0, 0), vec3i(-1, 0, 0), vec3i(0, 0, 1), vec3i(0, 0, -1));
+      for (var i = 0u; i < 4u && !step; i++) {
+        step = solidAt(c + beside[i] + up, hit.level) && solidAt(c + beside[i] * 2 + up * 2, hit.level)
+          && !solidAt(c + beside[i] + up * 4, hit.level);
+      }
+    }
+    if (step) {
+      let around = array<vec3i, 13>(vec3i(3,0,0), vec3i(0,3,0), vec3i(0,0,3), vec3i(2,2,0), vec3i(2,-2,0), vec3i(2,0,2),
+        vec3i(2,0,-2), vec3i(0,2,2), vec3i(0,2,-2), vec3i(2,2,2), vec3i(2,2,-2), vec3i(2,-2,2), vec3i(2,-2,-2));
+      var grad = vec3f(0.0);
+      for (var i = 0u; i < 13u; i++) {
+        grad += vec3f(around[i]) * (f32(solidAt(c - around[i], hit.level)) - f32(solidAt(c + around[i], hit.level)));
+      }
+      if (grad.y > 0.0) {
+        n = normalize(grad);
+        at = p + n * (1.0 / lvh.scale);
+        slope = true;
+      }
+    }
+  }` : ''}
   ${world.options.surveyedWalls ? `// Average the exposed horizontal normal over a short piece of the footprint.
   // A diagonal plane otherwise alternates sunlit and dark cardinal cell faces.
   if (faced && abs(n.y) < 0.5 && (stuff == 8u || stuff == 9u || (stuff == 7u && !slope)) && hit.level <= 2u) {
@@ -1259,7 +1326,9 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       // A shop's window (its own pale glass) is always lit.
       let w = max(litWindow(fine), select(0.0, 0.8, ci == 146u));
       let warm = mix(vec3f(1.0, 0.66, 0.34), vec3f(0.62, 0.78, 1.0), step(0.93, fract(w * 91.0)));
-      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0);
+      // The window screen (eggs.ts): a pane shows its pixel of it, and its own lamp as much as the picture leaves on.
+      let pic = screenOf(p);
+      col += warm * w * dark * (1.5 - 0.5 * f32(fine.y % 30) / 30.0) * (1.0 - pic.a) + pic.rgb * 0.8;
     }${world.options.surveyedWalls ? `
     // The real city's walls (#450): past the two finest boxes a house holds no glass cells, and its windows were dark
     // while the far model's (far.ts) were lit. Here they are lit by the far model's own rule: a pane in each bay of
@@ -1275,7 +1344,15 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let one = smoothstep(0.62, 0.66, hash2i(vec2i(floor(vec2f(fx, fy))) + vec2i(i32(n.x * 7.0), i32(n.z * 13.0))));
       let blur = smoothstep(0.3, 0.8, wide);
       let lampWall = mix(one * inPane, 0.26 * 0.2, blur) * clamp(dark * 3.0, 0.0, 1.0);
-      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur);
+      // The window screen (eggs.ts): each pane its own pixel of it, seen from where the pane's middle is; where panes
+      // are under two pixels, the wall shows it by the share of it that is glass.
+      var pic = vec4f(0.0);
+      if (g.air.z > 0.0) {
+        // From the point to its pane's middle, finest cells along the wall and up (a bay is 16, a storey 31).
+        let mid = (floor(vec2f(fx, fy)) + 0.5 - vec2f(fx, fy)) * vec2f(16.0, 31.0);
+        pic = screenOf(p + select(vec3f(mid.x, mid.y, 0.0), vec3f(0.0, mid.y, mid.x), abs(n.x) > abs(n.z)));
+      }
+      col += vec3f(1.0, 0.62, 0.3) * lampWall * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * mix(inPane * 1.6, 0.26 * 2.4, blur);
     }` : ''}
     // The street lamps: their light falls on what is under and round them. Where the lamps are is the town's rule
     // (city.rs), so the light is worked out from the place; a lamp knocked down still casts it. No lamp stands in
@@ -1528,6 +1605,8 @@ override FOGGY: bool = false;
       let fine = hit.cell * i32(1u << hit.level);
       let lot = inBlock(fine);
       if (g.weather.z > 0.0 && ((lot.x >= 140.0 && lot.y >= 140.0) || ${world.options.surveyedWalls ? 'true' : 'false'}) && (litWindow(fine) > 0.0 || ((hit.kind >> 8u) & 255u) == 146u)) { lamp = clamp(g.weather.z * 3.0, 0.0, 1.0); }
+      // A pane on the window screen (eggs.ts) shows its pixel, not what it mirrors.
+      if (g.air.z > 0.0) { lamp = max(lamp, screenOf(g.eye + rd * hit.t).a); }
       mirror = glassMirror(rd, n);
       // Polished glass is a mirror (more than a third: not looked through), what is behind it a dim room.
       if (polished) { mirror = max(mirror, 0.62); }
@@ -1732,6 +1811,12 @@ export interface Marcher {
   readonly day: number
   /** The air (#450): haze and cloud against the town's own (1), and a sky of its own by day (linear colours). */
   air: Air
+  /**
+   * The window screen (#450, eggs.ts): the picture the city's lit windows show (SCREEN_SIZE, rgba8: light, and how
+   * much of a pane's own lamp it puts out), how far it is up (0: off, and no window asks it), and how much larger
+   * than its own the moon's disc is drawn (0: its own).
+   */
+  readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number }
 }
 
 /** A realm's air: how thick its haze, how much cloud, and, by day, its own sky overhead and at the horizon. */
@@ -1747,7 +1832,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // The pipelines of a shader module: the march with mirrors and without (MIRRORS), and the sun's maps. Made in the background: nothing waits on them but whoever asked (`reshade` makes them again while the old ones go on drawing).
   // One layout for both, so that one binding serves either.
   const F = GPUShaderStage.FRAGMENT
-  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }] })] })
+  const marchLayout = device.createPipelineLayout({ bindGroupLayouts: [device.createBindGroupLayout({ entries: [{ binding: 0, visibility: F, buffer: {} }, { binding: 1, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 2, visibility: F, buffer: { type: 'read-only-storage' } }, { binding: 3, visibility: F, buffer: {} }, { binding: 4, visibility: F, texture: { sampleType: 'unfilterable-float', viewDimension: '2d-array' } }, { binding: 5, visibility: F, texture: {} }] })] })
   const marchingAs = (module: GPUShaderModule, mirrors: boolean, foggy = false) => device.createRenderPipelineAsync({ label: `march${mirrors ? '' : ' without mirrors'}${foggy ? ' in fog' : ''}`, layout: marchLayout, vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs', constants: { MIRRORS: mirrors ? 1 : 0, FOGGY: foggy ? 1 : 0 }, targets: mirrors ? [{ format }, { format: PANES_FORMAT }] : [{ format }] }, depthStencil: { format: 'depth24plus', depthWriteEnabled: true, depthCompare: 'always' } })
   const marching = (module: GPUShaderModule) => Promise.all([marchingAs(module, true), marchingAs(module, false)])
   const sunning = (module: GPUShaderModule) => device.createRenderPipelineAsync({ label: 'sun map', layout: 'auto', vertex: { module, entryPoint: 'vs' }, fragment: { module, entryPoint: 'fs_sun', targets: [{ format: 'r32float' }] } })
@@ -1781,9 +1866,12 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
+  // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
+  const screenTexture = device.createTexture({ label: 'window screen', size: [...SCREEN_SIZE], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.RENDER_ATTACHMENT })
+  const screen = { texture: screenTexture, view: screenTexture.createView(), up: 0, moon: 0 }
   const binding = () => device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
-    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }],
+    entries: [{ binding: 0, resource: { buffer: globals } }, { binding: 1, resource: { buffer: world.poolBuffer } }, { binding: 2, resource: { buffer: world.topBuffer } }, { binding: 3, resource: { buffer: looks } }, { binding: 4, resource: sunMaps.all }, { binding: 5, resource: screen.view }],
   })
   let bind = binding()
   // The pass that draws a tile of a sun map: the same rays, sent through, into one layer.
@@ -1812,9 +1900,13 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     // where the others are clear, so a dry clear day is told exactly what it was told before.)
     const overcast = Math.max(rain, cloud, 0.2 * fog)
     const some = 0.42 + 0.58 * day, grey = times([0.4, 0.43, 0.48], some), wet = (c: Colour, by = 0.85) => mix(c, grey, overcast * by)
+    // The real city's shade is lit by its sky and by the sunlit fronts across the street, and a photograph's white
+    // balance takes the blue out of it: lit by the sky's blue alone, every shaded road and front came out navy where
+    // the panel's photographs are grey (#450, render_checks.py shade).
+    const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
       ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
-      ...wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7), some,
+      ...fill(wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7)), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
       ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - overcast),
       ...wet(hour(dark, [0.5, 0.66, 0.88], [1.25, 0.5, 0.1])), sx / flat,
@@ -1878,7 +1970,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       if (starts) f.set([starts[0], starts[1], starts[2], starts[3] - starts[0] * anchor[0] - starts[1] * anchor[1] - starts[2] * anchor[2]], s); else f.fill(0, s, s + 4)
       // The air (#450, the realm's own or the town's), then the fog: how thick, its top, its front and the corner,
       // measured as the eye is; its colour is the hour's (colours).
-      f.set([air.haze, air.clouds, 0, 0], s + 4)
+      f.set([air.haze, air.clouds, screen.up, screen.moon], s + 4)
       f.set([fog * FOG_THICK, FOG_TOP, front - anchor[0], anchor[0]], s + 8)
       f[s + 15] = anchor[2]
       device.queue.writeBuffer(globals, 0, block)
@@ -1924,6 +2016,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
     get air() { return air },
     set air(a: Air) { air = a; colours() },
+    screen,
     pick(view, plain = false) {
       // One at a time: there is one buffer to read the answer from, and a tool and the wand may both be asking.
       const next = picking.then(() => once(view, plain))
