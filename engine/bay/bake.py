@@ -8,15 +8,15 @@ The frame every pack shares: a cell is 10 cm; x is east and z is south, counted 
 4,250,000 m north in UTM zone 10N (EPSG:26910); y is up from one metre above NAVD88's zero, which is about where
 the bay's water stands. What the pack holds, and how the core reads it: core/src/bay.rs.
 """
-import glob, json, os, struct, sys, zlib
+import json, os, struct, sys, zlib
 import numpy as np
 from PIL import Image, ImageDraw
-import laspy, pyproj, tifffile
+import laspy, pyproj
+from dem import PAD, ground_grid
 
 Image.MAX_IMAGE_PIXELS = None
-HOME = os.path.expanduser('~/.village/engine/bay')
+HOME = os.environ.get('VILLAGE_BAY_ROOT', os.path.expanduser('~/.village/engine/bay'))
 E0, N0, SEA = 500_000.0, 4_250_000.0, 1.0
-PAD = 16  # metres of raster kept round the square, so that a column at its edge has neighbours
 ROAD, PAVEMENT, GRASS, EARTH, SAND, WATER, YARD, ROCK, CANOPY = 0, 1, 2, 3, 4, 5, 6, 7, 8
 # kinds.rs: materials, and the one palette.
 PLASTER, WOOD, BRICK, CONCRETE, ROOFING = 9, 10, 8, 7, 14
@@ -113,12 +113,8 @@ def main():
         return (e - W) / step, (N - n) / step
 
     # ── Ground: the 1 m model, a sample at each whole metre.
-    with tifffile.TiffFile(glob.glob(f'{HOME}/raw/dem_*.tif')[0]) as t:
-        tie = t.geotiff_metadata['ModelTiepoint']
-        dem = t.pages[0].asarray()
-    gw = int(span) + 1
-    r0, c0 = int(round(tie[4] - N)), int(round(W - tie[3]))
-    ground = dem[r0:r0 + gw, c0:c0 + gw].astype(np.float32)
+    ground = np.load(f'{raw}/ground.npy') if os.path.exists(f'{raw}/ground.npy') else ground_grid(f'{HOME}/raw', e0, n0, size)
+    gw = ground.shape[0]
     # At half a metre, for telling what stands above it.
     g2 = np.asarray(Image.fromarray(ground).resize((half, half), Image.BILINEAR, box=(0, 0, gw - 1, gw - 1)))
 
@@ -147,7 +143,11 @@ def main():
             np.maximum.at(surface, row[inside] * half + col[inside], z[ok][inside].astype(np.float32))
             kept += int(inside.sum())
         surface = surface.reshape(half, half)
-        np.save(cache, surface)
+        if kept == 0:
+            raise ValueError('no lidar returns in this square')
+        with open(cache + '.part', 'wb') as f:
+            np.save(f, surface)
+        os.replace(cache + '.part', cache)
         print(f'lidar: {kept} points kept ({kept / span / span:.1f} a square metre); classes {classes}')
     seen = surface > -1e8
     surface, _ = spread(np.where(seen, surface, 0), seen, 6)
@@ -343,4 +343,5 @@ def main():
     Image.fromarray(what).save(f'{packs}/{name}-ground.png')
 
 
-main()
+if __name__ == '__main__':
+    main()

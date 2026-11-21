@@ -415,6 +415,7 @@ def coarsen(t, c, n, m, k, level):
     top = np.where(built | leafy, high, NONE)
     walls = np.where(built, m.max(-1) & 0xffff, 0)
     cls = (c[..., mid] & 7) | np.where(leafy & ~built, CANOPY, 0) | np.where(built, BUILT, 0)
+    cls |= np.where((cls == ROAD) & ((c[..., mid] & 135) == 128), 128, 0)
     return top, cls, n[..., mid], walls
 
 
@@ -447,14 +448,19 @@ def parts(frame, level, tx, tz):
     return g, top, cls, tint, walls, [], [], [], d['land']
 
 
+def tile_bytes(frame, level, tx, tz):
+    """Encode the planet tile, or empty bytes for open sea."""
+    size, gstep, tstep, margin, _ = LEVELS[level]
+    g, top, cls, tint, walls, rows, verts, trunks, land = parts(frame, level, tx, tz)
+    return pack(tx * size, tz * size, size, gstep, g, tstep, tx * size - margin, tz * size - margin, top, cls, tint, walls, rows, verts, trunks) if land else b''
+
+
 def tile(frame, level, tx, tz):
     """Makes a tile and returns its path; a tile that is all sea is an empty file."""
     path = f'{HOME}/tiles/{frame.name}/{level}/{tx}_{tz}.bay'
     if os.path.exists(path):
         return path
-    size, gstep, tstep, margin, _ = LEVELS[level]
-    g, top, cls, tint, walls, rows, verts, trunks, land = parts(frame, level, tx, tz)
-    blob = pack(tx * size, tz * size, size, gstep, g, tstep, tx * size - margin, tz * size - margin, top, cls, tint, walls, rows, verts, trunks) if land else b''
+    blob = tile_bytes(frame, level, tx, tz)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     open(path + f'.{os.getpid()}.{threading.get_ident()}', 'wb').write(blob)
     os.replace(path + f'.{os.getpid()}.{threading.get_ident()}', path)

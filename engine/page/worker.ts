@@ -34,6 +34,8 @@ export interface Answer {
   ms: number
   /** How many times one of these sectors refused an edit of finer cells whole (the core's `fine_refused`). */
   refused: number
+  /** A tile this column needs did not come (#450): what was made is water there, to be made again. */
+  lacking?: boolean
 }
 
 interface Core {
@@ -63,7 +65,9 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
   // A box of cells finer than the core's: its sectors are parts of the core's finest, and the span is theirs.
   const fine = ask.fine ?? 0, finer = Math.max(0, fine - ask.level), lod = Math.max(0, ask.level - fine)
   // In the Bay that comes in tiles (#373): the ones that know this column, before anything is asked of it.
-  { const wide = SIDE << lod, x0 = (ask.sx >> finer) * wide, z0 = (ask.sz >> finer) * wide; await need(core, x0, z0, x0 + wide, z0 + wide, 1 << lod) }
+  // A tile that did not come leaves water where it is: the answer says so, and the column is asked for again later.
+  let lacking = false
+  { const wide = SIDE << lod, x0 = (ask.sx >> finer) * wide, z0 = (ask.sz >> finer) * wide; lacking = !(await need(core, x0, z0, x0 + wide, z0 + wide, 1 << lod)) }
   const spanAt = core.sector_span(ask.sx >> finer, ask.sz >> finer, lod)
   const span = new Int32Array(core.memory.buffer, spanAt, 2)
   const lo = span[0] << finer, hi = ((span[1] + 1) << finer) - 1
@@ -89,6 +93,6 @@ self.onmessage = async (e: MessageEvent<Ask>) => {
   const words = new Uint32Array(total)
   let at = 0
   for (const p of parts) { words.set(p, at); at += p.length }
-  const answer: Answer = { id: ask.id, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, sizes, words, ms: performance.now() - t0, refused }
+  const answer: Answer = { id: ask.id, level: ask.level, sx: ask.sx, sz: ask.sz, y0: ask.y0, sizes, words, ms: performance.now() - t0, refused, ...(lacking ? { lacking: true } : {}) }
   ;(self as unknown as Worker).postMessage(answer, [sizes.buffer, words.buffer])
 }

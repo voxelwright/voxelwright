@@ -82,7 +82,7 @@ export async function sound(): Promise<Sound> {
   const session = (navigator as Navigator & { audioSession?: { type: string } }).audioSession
   if (session) try { session.type = 'playback' } catch { /* an older Safari: the switch decides */ }
   const context = new AudioContext({ latencyHint: 'interactive' })
-  await context.audioWorklet.addModule('/page/sound/dsp.ts')
+  await context.audioWorklet.addModule(new URL('./dsp.ts', import.meta.url))
   const node = new AudioWorkletNode(context, 'village-voice', { numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2] })
   node.connect(context.destination)
   let told: Told | null = null

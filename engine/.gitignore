@@ -2,3 +2,4 @@ node_modules/
 core/target/
 page/core.wasm
 dist/
+dist-sf*/

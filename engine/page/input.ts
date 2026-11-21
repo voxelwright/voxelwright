@@ -53,10 +53,15 @@ export interface Input {
   always(code: string, act: (e: KeyboardEvent) => boolean | void): void
   /** Does what a click with the pointer held does: for the checks and for buttons a lane adds. */
   use(): void
+  /** Holds a key down or lets it up, as a key on the keyboard would be (an on-screen key for a thumb: up and down in flight). Nothing in a text mode. */
+  hold(code: string, down: boolean): void
+  /** Where the left thumb went down to steer, and where it is now (client px), while it is down: for what shows the stick. */
+  readonly thumb: { readonly from: readonly [number, number]; readonly at: readonly [number, number] } | null
 }
 
-/** Whether keys typed there are letters of the page's own DOM (a line someone is writing on). */
-const written = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)
+/** Whether keys typed there are letters of the page's own DOM (a line someone is writing on). A key, a fader or a radio in focus takes no letters: W still walks (#450). */
+const PRESSED = new Set(['radio', 'checkbox', 'range', 'button'])
+const written = (target: EventTarget | null) => target instanceof HTMLElement && (target.isContentEditable || (target instanceof HTMLInputElement && !PRESSED.has(target.type)) || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement)
 
 export function input(canvas: HTMLCanvasElement, { phone = false, useButton = null as Element | null } = {}): Input {
   const stack: Mode[] = [], down = new Set<string>(), everywhere = new Map<string, (e: KeyboardEvent) => boolean | void>()
@@ -139,5 +144,11 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
     get locked() { return document.pointerLockElement === canvas },
     always(code, act) { everywhere.set(code, act) },
     use,
+    hold(code, on) {
+      if (!on) { down.delete(code); return }
+      if (top()?.text) return
+      down.add(code)
+    },
+    get thumb() { const m = touch.move; return m ? { from: [m.x, m.y] as const, at: [m.x + m.dx * 60, m.y + m.dy * 60] as const } : null },
   }
 }

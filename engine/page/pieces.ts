@@ -152,7 +152,8 @@ export interface Piece {
 }
 
 export interface Pieces {
-  add(born: Born): Piece
+  /** share: its faces may be drawn from one buffer with every other piece made from the same `born.faces`. */
+  add(born: Born, share?: boolean): Piece
   /** mirrors: false is the M key's mirrors off, under which glass is a pale face. */
   draw(encoder: GPUCommandEncoder, to: Target, view: View, sun: readonly [number, number, number], timing?: GPURenderPassTimestampWrites, mirrors?: boolean): void
   readonly count: number
@@ -185,20 +186,28 @@ export async function pieces(device: GPUDevice, format: GPUTextureFormat, march:
   /** count: all its faces; glass: how many of them, the last ones, are glass. */
   interface Held extends Piece { faces: GPUBuffer; uniforms: GPUBuffer; bind: GPUBindGroup; count: number; glass: number }
   const live = new Set<Held>()
+  /** Faces already on the GPU, by the array they came from: many pieces of one look (the street's cars, #450) draw from one buffer. */
+  const common = new WeakMap<Uint32Array, { faces: GPUBuffer; count: number; glass: number; users: number }>()
   return {
     get count() { return live.size },
     get faces() { let n = 0; for (const p of live) n += p.count; return n },
-    add(born) {
-      // The solid faces first, then the glass ones.
-      const all = born.faces, sorted = new Uint32Array(all.length)
-      let solid = 0, glass = 0
-      for (let i = 0; i < all.length; i += 2) if (((all[i + 1] >>> 16) & 15) !== 11) { sorted[solid * 2] = all[i]; sorted[solid * 2 + 1] = all[i + 1]; solid++ }
-      for (let i = 0; i < all.length; i += 2) if (((all[i + 1] >>> 16) & 15) === 11) { sorted[(solid + glass) * 2] = all[i]; sorted[(solid + glass) * 2 + 1] = all[i + 1]; glass++ }
-      const faces = device.createBuffer({ size: Math.max(8, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
-      device.queue.writeBuffer(faces, 0, sorted)
-      const uniforms = device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+    add(born, share = false) {
+      let made = share ? common.get(born.faces) : undefined
+      if (!made) {
+        // The solid faces first, then the glass ones.
+        const all = born.faces, sorted = new Uint32Array(all.length)
+        let solid = 0, glass = 0
+        for (let i = 0; i < all.length; i += 2) if (((all[i + 1] >>> 16) & 15) !== 11) { sorted[solid * 2] = all[i]; sorted[solid * 2 + 1] = all[i + 1]; solid++ }
+        for (let i = 0; i < all.length; i += 2) if (((all[i + 1] >>> 16) & 15) === 11) { sorted[(solid + glass) * 2] = all[i]; sorted[(solid + glass) * 2 + 1] = all[i + 1]; glass++ }
+        const faces = device.createBuffer({ size: Math.max(8, sorted.byteLength), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST })
+        device.queue.writeBuffer(faces, 0, sorted)
+        made = { faces, count: solid + glass, glass, users: 0 }
+        if (share) common.set(born.faces, made)
+      }
+      made.users++
+      const held = made, uniforms = device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
       const bind = device.createBindGroup({ layout: own, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: looks } }] })
-      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces, uniforms, bind, count: solid + glass, glass, destroy() { live.delete(piece); faces.destroy(); uniforms.destroy() } }
+      const piece: Held = { born, pos: [born.low[0] + born.com[0], born.low[1] + born.com[1], born.low[2] + born.com[2]], rot: [0, 0, 0, 1], cell: 1, faces: held.faces, uniforms, bind, count: held.count, glass: held.glass, destroy() { if (!live.delete(piece)) return; uniforms.destroy(); if (--held.users === 0) { held.faces.destroy(); if (common.get(born.faces) === held) common.delete(born.faces) } } }
       live.add(piece)
       return piece
     },

@@ -10,7 +10,7 @@ import { arg, chrome, has } from '../test/kit.mjs'
 
 const out = join(homedir(), '.village', 'engine', 'bay', 'shots')
 mkdirSync(out, { recursive: true })
-const pack = readFileSync(join(homedir(), '.village', 'engine', 'bay', 'packs', `${arg('square', '551.7_4183.5')}.bay`))
+const pack = readFileSync(join(process.env.VILLAGE_BAY_ROOT ?? join(homedir(), '.village', 'engine', 'bay'), 'packs', `${arg('square', '551.7_4183.5')}.bay`))
 const head = new Int32Array(pack.buffer, pack.byteOffset, 16), heights = new Int16Array(pack.buffer, pack.byteOffset + 64, head[5] * head[5])
 /** The ground at a place, in metres. */
 const ground = (x, z) => heights[Math.round((z * 10 - head[7]) / head[4]) * head[5] + Math.round((x * 10 - head[6]) / head[4])] / 10
