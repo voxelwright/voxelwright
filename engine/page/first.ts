@@ -89,11 +89,13 @@ export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
     canvas.addEventListener('pointerdown', (e) => { from = { id: e.pointerId, x: e.clientX, y: e.clientY } })
     canvas.addEventListener('pointermove', (e) => { if (from?.id === e.pointerId && e.buttons && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 12) engage() })
     for (const t of ['pointerup', 'pointercancel']) canvas.addEventListener(t, () => { from = null })
-    if (embedded) hear((m) => { if (m.type === 'explore') engage() })
+    // In a host's frame the keys are the host's until the frame has the focus: the realm is the page's picture, and takes it.
+    if (embedded) { window.focus(); hear((m) => { if (m.type === 'explore') engage() }) }
   }
   return {
     get engaged() { return engaged },
     engage,
-    credits(said) { list.replaceChildren(...said.map((c) => Object.assign(document.createElement('li'), { textContent: c }))) },
+    // (Said once each, however it was written: two releases name the same terrain with a capital and without.)
+    credits(said) { list.replaceChildren(...said.filter((c, i) => said.findIndex((d) => d.toLowerCase() === c.toLowerCase()) === i).map((c) => Object.assign(document.createElement('li'), { textContent: c }))) },
   }
 }

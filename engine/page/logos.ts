@@ -8,8 +8,8 @@ export const MARKS: Record<string, Mark> = {
   x: {
     name: 'X', ink: '#ffffff',
     glyph: 'M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z',
-    // (Its mark is white on black: a plate behind it with its corners taken off, and the glyph two thirds of it.)
-    under: { shape: 'M2.4 0h19.2a2.4 2.4 0 0 1 2.4 2.4v19.2a2.4 2.4 0 0 1-2.4 2.4H2.4a2.4 2.4 0 0 1-2.4-2.4V2.4a2.4 2.4 0 0 1 2.4-2.4Z', ink: '#000000' }, fills: 0.64,
+    // (Its mark is white on black: a plate behind it with its corners taken off, and the glyph three quarters of it.)
+    under: { shape: 'M2.4 0h19.2a2.4 2.4 0 0 1 2.4 2.4v19.2a2.4 2.4 0 0 1-2.4 2.4H2.4a2.4 2.4 0 0 1-2.4-2.4V2.4a2.4 2.4 0 0 1 2.4-2.4Z', ink: '#000000' }, fills: 0.76,
   },
   linkedin: {
     name: 'LinkedIn', ink: '#0a66c2',
