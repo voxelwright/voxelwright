@@ -3,9 +3,10 @@
     panel    buildings with a street wall within 45 m of each of the 16 panel places' street camera
     sample   500 buildings drawn at random (seed 450) from every surveyed square's street buildings, away from the panel
     city     every street building of the listed squares
+    cities   fill in the city's building number (facade_evidence `city_of`) on records that lack it, measuring nothing
 
-Records go to ~/.village/engine/bay/450-city-paint/evidence/records/<set>/<square>.json; the sample's draw is kept
-beside them so the same buildings are measured again.
+Records go to ~/.village/engine/bay/450-city-paint/evidence/<into>/<set>/<square>.json (`--into`, records by default);
+the sample's draw is kept under records/sample so the same buildings are measured again.
 
     evidence-venv/bin/python engine/bay/evidence_run.py panel
 """
@@ -60,10 +61,10 @@ def sample_targets(n=500, seed=450):
     return json.loads(path.read_text())
 
 
-def run(name, targets, material=True, refresh=False):
+def run(name, targets, material=True, refresh=False, into="records"):
     faces = fe.Faces(fe.Fetcher(), fe.Segmenter())
     classifier = fe.Classifier() if material else None
-    folder = fe.HOME / "records" / name
+    folder = fe.HOME / into / name
     folder.mkdir(parents=True, exist_ok=True)
     began = time.time()
     for square, rows in sorted(targets.items()):
@@ -78,18 +79,39 @@ def run(name, targets, material=True, refresh=False):
             print(name, square, len(done), "of", len(rows), "faces", faces.segmented, "calls", faces.fetcher.calls, round(time.time() - began), "s", flush=True)
 
 
+def cities(into):
+    """The city's building number on every record under `into` that lacks one (the far model finds records by it)."""
+    for path in sorted((fe.HOME / into).rglob("*.json")):
+        if path.name == "draw.json":
+            continue
+        recs = json.loads(path.read_text())
+        p = read(fe.CITY / "packs" / (next(iter(recs.values()))["square"] + ".bay")) if recs else None
+        filled = 0
+        for rec in recs.values():
+            if not rec.get("city"):
+                rec["city"] = fe.city_of(rec["square"], p["buildings"][rec["row"]][0])
+                filled += bool(rec["city"])
+        tmp = path.with_suffix(".part")
+        tmp.write_text(json.dumps(recs))
+        tmp.replace(path)
+        print(path.relative_to(fe.HOME), filled, "of", len(recs), flush=True)
+
+
 def main():
     cli = argparse.ArgumentParser(description=__doc__)
-    cli.add_argument("set", choices=["panel", "sample", "city"])
+    cli.add_argument("set", choices=["panel", "sample", "city", "cities"])
     cli.add_argument("--squares", nargs="*")
     cli.add_argument("--refresh", action="store_true", help="measure every building again (photos and labels are cached)")
+    cli.add_argument("--into", default="records", help="the records folder under the evidence home")
     a = cli.parse_args()
-    if a.set == "panel":
-        run("panel", panel_targets(), refresh=a.refresh)
+    if a.set == "cities":
+        cities(a.into)
+    elif a.set == "panel":
+        run("panel", panel_targets(), refresh=a.refresh, into=a.into)
     elif a.set == "sample":
-        run("sample", sample_targets()["squares"], refresh=a.refresh)
+        run("sample", sample_targets()["squares"], refresh=a.refresh, into=a.into)
     else:
-        run("city", {s: street_rows(read(fe.CITY / "packs" / (s + ".bay"))) for s in a.squares})
+        run("city", {s: street_rows(read(fe.CITY / "packs" / (s + ".bay"))) for s in a.squares}, into=a.into)
 
 
 if __name__ == "__main__":

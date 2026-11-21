@@ -4,9 +4,11 @@ The paint survey (facade_paint.py) drew Mapillary pixels onto walls: 30 cm cells
 wall from whatever stood in front of it that day, and white where the sun blew the photo out. Here the photographs are
 evidence for a building's parameters instead. Each chosen camera is cut into a perspective face aimed at the building,
 a segmentation model (UperNet ConvNeXt, ADE20K; .agents/skills/facade-evidence) labels every pixel, and only pixels
-labelled as wall that are neither clipped nor dark count towards a colour. Each view keeps the photo's own exposure,
-white-balanced on its road and pavement (facade_paint's asphalt gain turned well exposed walls white); views into the
-sun are dropped and walls the sun is behind count less. A building's record says, each with a confidence:
+labelled as wall that are neither clipped nor dark count towards a colour. A wall's colour is its albedo, not its
+pixels: each face is scaled so that its bright things (the 95th percentile of everything but the sky: white trim, frames,
+cars, pavement in sun) sit at WHITE, white-balanced on its road and pavement, and a view far darker than the building's
+brightest pair (its wall in shade while the bright things are in sun) is dropped. A building's record says, each with a
+confidence:
 
     wall        robust colour of the wall in linear light, its sRGB, and the palette entry the bake draws it in
     material    painted wood / clapboard, stucco / plaster, brick, stone or glass curtain wall (SigLIP, zero shot)
@@ -71,10 +73,23 @@ DRAWN_AS = {"clapboard": 9, "stucco": 7, "brick": 8, "stone": 7, "glass": 11}
 
 # A view counts towards a colour when it holds this many clean wall texels.
 MIN_TEXELS = 30
+# Exposure (#450, evidence-2). The cameras expose for the sky, so a sunlit cream front reads sRGB 130 to 140 in its own
+# pixels (North Beach, row 1368: four views, 108 to 140). Each face is scaled so that the 95th percentile of its
+# luminance outside the sky is WHITE (linear; sRGB 225, a white wall's paint), by a gain kept within GAIN. Chosen on the
+# 663 panel views against 82 walls classed by eye (evidence_eye.json) before the panel was measured again: the 95th
+# percentile at 0.75 put light walls at a median L* 74.5 and dark at 44, where the photo's own exposure gave 52 and 28.
+WHITE, GAIN = 0.75, (0.7, 6.0)
+SKY = 2
+# A view more than SHADE (L*) below the building's second brightest, and the same colour once brought up to its light,
+# saw the wall in shade while its bright things were in sun (or into the sun). It is dropped: the photographs' capture times are too often wrong to tell sun from shade by
+# the sun's position (a daylight frame with the sun in it is stamped 22:33 local).
+SHADE = 12.0
+LUMA = np.array([0.2126, 0.7152, 0.0722], "f4")
 # The trust test, fixed after the Nob Hill slice and before the panel and sample runs (the same for the old reading and
-# the new): two views or more whose colours lie within AGREE (CIELAB, lightness at half weight) of the building's,
-# carrying at least AGREE_SHARE of the weight, each with no more than CLIPPED of its wall texels blown out.
-AGREE, AGREE_SHARE, CLIPPED = 10.0, 0.6, 0.2
+# the new): two views or more whose colours lie within AGREE (CIELAB, lightness at 1 / KL weight) of the building's,
+# carrying at least AGREE_SHARE of the weight, each with no more than CLIPPED of its wall texels blown out. KL was 2 to
+# forgive the cameras' exposure; with exposure normalised the new reading holds lightness to 1.5.
+AGREE, AGREE_SHARE, CLIPPED, KL_OLD, KL = 10.0, 0.6, 0.2, 2.0, 1.5
 
 
 # ── Colour
@@ -99,29 +114,16 @@ def lab(lin):
 
 @lru_cache(maxsize=1)
 def table():
-    return palette()[1:] * 255
+    """The bake's palette (1 to 255) in CIELAB."""
+    return lab(linear(palette()[1:] * 255))
 
 
 def palette_index(srgb):
-    """The bake's palette entry for an sRGB colour, as appearance.py picks one."""
-    return int(np.argmin(((table() - np.asarray(srgb)) ** 2).sum(1))) + 1
-
-
-def sun(lon, lat, ms):
-    """The sun's azimuth (clockwise from north) and elevation in radians at a time in ms since 1970 (NOAA)."""
-    d = ms / 86_400_000 + 2440587.5 - 2451545.0
-    g = math.radians((357.529 + 0.98560028 * d) % 360)
-    q = (280.459 + 0.98564736 * d) % 360
-    ecl = math.radians(q + 1.915 * math.sin(g) + 0.020 * math.sin(2 * g))
-    eps = math.radians(23.439 - 0.00000036 * d)
-    ra = math.atan2(math.cos(eps) * math.sin(ecl), math.cos(ecl))
-    dec = math.asin(math.sin(eps) * math.sin(ecl))
-    gmst = (18.697374558 + 24.06570982441908 * d) % 24
-    ha = math.radians(gmst * 15 + lon) - ra
-    phi = math.radians(lat)
-    el = math.asin(math.sin(phi) * math.sin(dec) + math.cos(phi) * math.cos(dec) * math.cos(ha))
-    az = math.atan2(-math.sin(ha), math.tan(dec) * math.cos(phi) - math.sin(phi) * math.cos(ha))
-    return az % (2 * math.pi), el
+    """The bake's palette entry nearest an sRGB colour in CIELAB. Nearest in sRGB (appearance.py's way for pixels) put
+    71 of 134 measured panel walls on a grey: a step in sRGB weighs lightness far over hue, and the paint tones are
+    coarse in lightness, so a cream or tan a little off a tone's value went grey. In CIELAB 56 do, the walls whose own
+    chroma is under about 5."""
+    return int(np.argmin(((table() - lab(linear(srgb))) ** 2).sum(1))) + 1
 
 
 # ── Cameras and photographs
@@ -547,7 +549,6 @@ def view(p, walls, cam, faces):
     if pano is None:
         return None
     gain = exposure(p, a, b, eye, rot, pano)
-    az, el = sun(meta[5], meta[6], meta[4])
     texels = []
     for wi, w in enumerate(walls):
         dist = np.hypot(w["x"] - a, w["z"] - b).clip(1)
@@ -561,12 +562,7 @@ def view(p, walls, cam, faces):
         if not rr.size:
             continue
         world = np.column_stack((w["x"][cc] - a, b - w["z"][cc], w["y"][rr] - eye)) / 10
-        # The wall's outward normal faces the camera; the sun is behind the wall when it lights the other side.
-        nx, nz = dz / w["length"], -dx / w["length"]
-        if nx * (a - w["x"][0]) + nz * (b - w["z"][0]) < 0:
-            nx, nz = -nx, -nz
-        lit = el > 0.05 and (nx * math.sin(az) - nz * math.cos(az)) > 0.1
-        texels.append((wi, rr, cc, world, lit))
+        texels.append((wi, rr, cc, world))
     if not texels:
         return None
     heading = math.atan2(*np.concatenate([t[3] for t in texels])[:, :2].mean(0))
@@ -575,8 +571,8 @@ def view(p, walls, cam, faces):
     if got is None:
         return None
     face, labels = got
-    out = dict(camera=ident, at=(a, b), gain=gain, sun=(az, el), heading=heading, rows=[])
-    for wi, rr, cc, world, lit in texels:
+    out = dict(camera=ident, at=(a, b), gain=gain, heading=heading, rows=[])
+    for wi, rr, cc, world in texels:
         col, row = onto(world, bucket * BUCKET)
         inside = ~np.isnan(col)
         if not inside.any():
@@ -590,13 +586,12 @@ def view(p, walls, cam, faces):
                 label=labels[ri, ci],
                 rgb=face[ri, ci],
                 px=np.column_stack((ci, ri)),
-                lit=lit,
             )
         )
-    # Into the sun: the sun low and within 40 degrees of where the camera looks at the building.
-    off = abs((heading - az + math.pi) % (2 * math.pi) - math.pi)
-    out["backlit"] = bool(0.05 < el < math.radians(40) and off < math.radians(40))
     out["face"] = face
+    # The face's exposure: its bright things outside the sky (clipped ones count, at their clipped value) to WHITE.
+    ys = linear(face[labels != SKY]) @ LUMA
+    out["exposure"] = float(np.clip(WHITE / max(float(np.percentile(ys, 95)), 1e-3), *GAIN)) if ys.size else 1.0
     # Road and pavement are near grey: a light white balance from them, never more than a tenth on a channel. Their
     # brightness is no exposure reference: one panorama's road is ten times brighter in sun than in shade.
     ground = np.isin(labels, (6, 11)) & (face.max(2) < 250)
@@ -617,7 +612,6 @@ def view_colour(v, old=False):
     test is the same for both."""
     rgb = np.concatenate([r["rgb"] for r in v["rows"]])
     label = np.concatenate([r["label"] for r in v["rows"]])
-    lit = np.concatenate([np.full(len(r["rgb"]), r["lit"]) for r in v["rows"]])
     raw_clip = rgb.max(1) >= 250
     if old:
         r, g, b = rgb.T
@@ -629,33 +623,42 @@ def view_colour(v, old=False):
         col = linear(np.median(np.clip(rgb[keep] * v["gain"], 0, 255), 0))
         return col, int(keep.sum()), float(raw_clip[keep].mean()), 1.0
     wall = np.isin(label, WALL)
-    if wall.sum() < MIN_TEXELS or v["backlit"]:
+    if wall.sum() < MIN_TEXELS:
         return None
     clipped = float(raw_clip[wall].mean())
     lin = linear(rgb[wall]) * v["wb"]
-    lum = lin @ np.array([0.2126, 0.7152, 0.0722], "f4")
+    lum = lin @ LUMA
     # Windows are labelled building too: a texel under half the wall's median is a window (`openings`), not wall.
     keep = ~raw_clip[wall] & (lum > 0.01) & (lum >= 0.5 * np.median(lum))
     if keep.sum() < MIN_TEXELS:
         return None
-    col = np.median(lin[keep], 0)
-    # A wall the sun is behind is lit by the blue sky: it still says the colour, with less weight.
-    shade = lit[wall][keep].mean()
-    weight = (0.35 + 0.65 * shade) * min(1.0, keep.sum() / 200)
-    return col, int(keep.sum()), clipped, float(weight)
+    col = np.clip(np.median(lin[keep], 0) * v["exposure"], 0, 1)
+    return col, int(keep.sum()), clipped, float(min(1.0, keep.sum() / 200))
 
 
-def consensus(colours):
-    """The trust test on per-view colours [(linear rgb, texels, clipped, weight)]: (colour, confidence, agreeing, trusted)."""
+def consensus(colours, old=False):
+    """The trust test on per-view colours [(linear rgb, texels, clipped, weight)]: (colour, confidence, agreeing, trusted,
+    shaded). The new reading first drops views more than SHADE below the second brightest (`shaded` counts them)."""
     views = [c for c in colours if c is not None and c[2] <= CLIPPED]
     if not views:
-        return None, 0.0, 0, False
+        return None, 0.0, 0, False, 0
     labs = lab(np.array([c[0] for c in views]))
+    shaded = 0
+    if not old and len(views) >= 2:
+        # A view is the wall in shade when it is far darker than the second brightest and, brought up to that view's
+        # light, is the same colour. A darker view of another colour still votes.
+        ref = int(np.argsort(labs[:, 0])[-2])
+        lin = np.array([c[0] for c in views])
+        luma = np.maximum(lin @ LUMA, 1e-4)
+        same = np.linalg.norm(lab(lin * (luma[ref] / luma)[:, None]) - labs[ref], axis=1) <= AGREE
+        lit = ~((labs[:, 0] < labs[ref, 0] - SHADE) & same)
+        shaded = int((~lit).sum())
+        views, labs = [c for c, k in zip(views, lit) if k], labs[lit]
     w = np.array([c[3] for c in views])
-    # The weighted median of each CIELAB axis, then who agrees with it. Lightness counts half (kL = 2, as CIE94 has it
-    # for textiles): sun and shade on one wall move L far more than its hue.
+    # The weighted median of each CIELAB axis, then who agrees with it. Lightness counts 1 / kL (kL = 2, as CIE94 has
+    # it for textiles, for the old reading: sun and shade on one wall move L far more than its hue).
     mid = np.array([_wmedian(labs[:, k], w) for k in range(3)])
-    de = np.linalg.norm((labs - mid) / np.array([2.0, 1.0, 1.0]), axis=1)
+    de = np.linalg.norm((labs - mid) / np.array([KL_OLD if old else KL, 1.0, 1.0]), axis=1)
     agree = de <= AGREE
     share = w[agree].sum() / w.sum()
     n = int(agree.sum())
@@ -666,7 +669,7 @@ def consensus(colours):
         colour, spread = views[int(np.argmax(w))][0], AGREE
     trusted = bool(n >= 2 and share >= AGREE_SHARE)
     confidence = (0.5 * min(1.0, (n - 1) / 2) + 0.5 * max(0.0, 1 - spread / AGREE)) * share if n else 0.0
-    return colour, round(float(confidence), 3), n, trusted
+    return colour, round(float(confidence), 3), n, trusted, shaded
 
 
 def _wmedian(x, w):
@@ -786,6 +789,52 @@ def city_ids(square):
     return ids
 
 
+@lru_cache(maxsize=4)
+def footprints(square):
+    """A square's footprints (its archive's footprints.geojson) in the frame's decimetres, with the city's building
+    number of each, and a tree to find them by."""
+    path = CITY / "inputs" / (square + ".zip")
+    if not path.is_file():
+        return None
+    from shapely import STRtree
+    from shapely.geometry import shape
+    from shapely.ops import transform
+
+    from paint_cameras import TO_UTM
+
+    def frame(lon, lat, z=None):
+        e, n = TO_UTM.transform(lon, lat)
+        return (np.asarray(e) - 500000) * 10, (4250000 - np.asarray(n)) * 10
+
+    with zipfile.ZipFile(path) as z:
+        feats = json.loads(z.read("footprints.geojson"))["features"]
+    geoms = [transform(frame, shape(f["geometry"])) for f in feats]
+    names = [str(f["properties"].get("sf16_bldgid") or f["properties"].get("globalid") or n) for n, f in enumerate(feats, 1)]
+    return STRtree(geoms), geoms, names
+
+
+def city_of(square, verts):
+    """The city's building number of a pack building, as the footprint it overlaps most. The pack's rows are not one to
+    one with the archive's footprint parts in most squares (`city_ids` gave up on all but 22 of 717 records), and the far
+    model (landing/ina/looks.py `evidence`) finds a record by this number."""
+    found = footprints(square)
+    if found is None:
+        return None
+    from shapely.geometry import Polygon
+
+    tree, geoms, names = found
+    ring = []
+    for x, z, flags in verts:
+        ring.append((x, z))
+        if flags & 4:
+            break
+    if len(ring) < 3:
+        return None
+    poly = Polygon(ring).buffer(0)
+    best = max(((poly.intersection(geoms[i]).area, i) for i in tree.query(poly, predicate="intersects")), default=(0, None))
+    return names[best[1]] if best[0] > 0.5 * poly.area else None
+
+
 def measure(square, targets, faces, classifier=None, k=4):
     """Records for the buildings of a square whose row numbers are `targets`."""
     p = read(CITY / "packs" / (square + ".bay"))
@@ -813,7 +862,7 @@ def measure(square, targets, faces, classifier=None, k=4):
     for n in targets:
         verts, row = p["buildings"][n]
         walls, picked = chosen[n]
-        rec = dict(square=square, row=n, city=ids[n] if ids else None, walls=len(walls))
+        rec = dict(square=square, row=n, city=ids[n] if ids else city_of(square, verts), walls=len(walls))
         if not walls:
             rec["views"] = 0
             out[key_of(verts)] = rec
@@ -823,8 +872,8 @@ def measure(square, targets, faces, classifier=None, k=4):
         rec["views"] = len(views)
         new = [view_colour(v) for v in views]
         old = [view_colour(v, old=True) for v in views]
-        colour, conf, agree, trusted = consensus(new)
-        before = consensus(old)
+        colour, conf, agree, trusted, shaded = consensus(new)
+        before = consensus(old, old=True)
         rec["before"] = dict(trusted=before[3], agreeing=before[2], confidence=before[1])
         if before[0] is not None:
             rec["before"]["srgb"] = [int(round(v)) for v in encoded(before[0])]
@@ -838,9 +887,10 @@ def measure(square, targets, faces, classifier=None, k=4):
                 confidence=conf,
                 trusted=trusted,
                 clipped=[round(c[2], 2) for c in new if c is not None],
+                exposure=[round(v["exposure"], 2) for v in views],
             )
         rec["dropped"] = dict(
-            backlit=int(sum(v["backlit"] for v in views)),
+            shaded=shaded,
             blown=sum(1 for c in new if c is not None and c[2] > CLIPPED),
             few=sum(1 for c in new if c is None),
         )

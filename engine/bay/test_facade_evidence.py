@@ -30,7 +30,7 @@ def tile(rows, verts, tail=b""):
 class Trust(unittest.TestCase):
     def test_two_views_that_agree_are_trusted_and_one_alone_is_not(self):
         cream = [214, 200, 170]
-        colour, confidence, agreeing, trusted = fe.consensus([view(cream), view([210, 197, 168])])
+        colour, confidence, agreeing, trusted, _ = fe.consensus([view(cream), view([210, 197, 168])])
         self.assertTrue(trusted)
         self.assertEqual(agreeing, 2)
         self.assertLess(np.abs(fe.encoded(colour) - cream).max(), 5)
@@ -38,14 +38,23 @@ class Trust(unittest.TestCase):
         self.assertFalse(fe.consensus([view(cream), None])[3])
 
     def test_one_wall_a_little_darker_agrees_but_deep_shade_or_another_colour_does_not(self):
-        # Lightness counts half: the same cream exposed darker still agrees (L 81 against 70). Deep shade (L 58) is a
-        # second reading, not the same one, and a blue wall is another colour.
+        # Lightness counts 1 / 1.5: the same cream a little darker still agrees (L 81 against 70). With two views neither
+        # is the brighter pair's odd one out, so deep shade (L 58) is a second reading, not the same one; and a blue
+        # wall is another colour.
         self.assertTrue(fe.consensus([view([214, 200, 170]), view([180, 168, 143])])[3])
         self.assertFalse(fe.consensus([view([214, 200, 170]), view([150, 140, 122])])[3])
         self.assertFalse(fe.consensus([view([214, 200, 170]), view([120, 150, 200])])[3])
 
+    def test_a_shaded_view_does_not_drag_a_sunlit_front_down(self):
+        # Two views of a cream front in sun and one with it in shade: the shaded one is dropped, not averaged in.
+        colour, _, agreeing, trusted, shaded = fe.consensus([view([214, 200, 170]), view([210, 197, 168]), view([120, 112, 96])])
+        self.assertEqual((trusted, agreeing, shaded), (True, 2, 1))
+        self.assertGreater(fe.encoded(colour).min(), 160)
+        # The old reading keeps every view, as PR 484 measured it.
+        self.assertEqual(fe.consensus([view([214, 200, 170]), view([120, 112, 96])], old=True)[4], 0)
+
     def test_an_outlier_is_left_out_and_a_blown_view_says_nothing(self):
-        colour, _, agreeing, trusted = fe.consensus([view([214, 200, 170]), view([212, 199, 171]), view([60, 140, 60], weight=0.4)])
+        colour, _, agreeing, trusted, _ = fe.consensus([view([214, 200, 170]), view([212, 199, 171]), view([60, 140, 60], weight=0.4)])
         self.assertTrue(trusted)
         self.assertEqual(agreeing, 2)
         self.assertLess(np.abs(fe.encoded(colour) - [213, 200, 170]).max(), 4)
@@ -54,6 +63,39 @@ class Trust(unittest.TestCase):
         # A majority must agree: two of five with little weight is not enough.
         views = [view([214, 200, 170], weight=0.2), view([212, 199, 171], weight=0.2), view([60, 140, 60]), view([200, 60, 60]), view([60, 60, 200])]
         self.assertFalse(fe.consensus(views)[3])
+
+
+class Exposure(unittest.TestCase):
+    def face_view(self, wall, bright, sky=(255, 255, 255)):
+        """A view of a wall of one colour, in a face whose top fifth is sky and a tenth is something bright."""
+        face = np.zeros((fe.FACE_H, fe.FACE_W, 3), "f4")
+        labels = np.full((fe.FACE_H, fe.FACE_W), 6, "u1")
+        face[:] = (60, 60, 60)
+        face[: fe.FACE_H // 5] = sky
+        labels[: fe.FACE_H // 5] = fe.SKY
+        face[fe.FACE_H // 5 : fe.FACE_H // 5 + fe.FACE_H // 8] = bright
+        face[fe.FACE_H // 2 :, : fe.FACE_W // 2] = wall
+        labels[fe.FACE_H // 2 :, : fe.FACE_W // 2] = 1
+        ys = fe.linear(face[labels != fe.SKY]) @ fe.LUMA
+        exposure = float(np.clip(fe.WHITE / np.percentile(ys, 95), *fe.GAIN))
+        rgb = np.tile(np.array(wall, "f4"), (300, 1))
+        return dict(rows=[dict(rgb=rgb, label=np.ones(300, "u1"))], wb=np.ones(3, "f4"), exposure=exposure, gain=1.0)
+
+    def test_a_cream_front_under_a_dark_exposure_reads_as_cream_and_a_brick_one_stays_dark(self):
+        # The camera exposed for the sky: a cream front at sRGB 135 beside white trim at 160. Scaled so the trim is a
+        # white wall's paint, the front reads light; a brick front in the same light stays brick.
+        cream = fe.encoded(fe.view_colour(self.face_view([135, 128, 110], [160, 160, 158]))[0])
+        brick = fe.encoded(fe.view_colour(self.face_view([70, 40, 32], [160, 160, 158]))[0])
+        self.assertGreater(float(fe.lab(fe.linear(cream))[0]), 70)
+        self.assertLess(float(fe.lab(fe.linear(brick))[0]), 45)
+        # The sky's glare does not count: a blown sky leaves the exposure as it was.
+        same = fe.encoded(fe.view_colour(self.face_view([135, 128, 110], [160, 160, 158], sky=(90, 120, 200)))[0])
+        self.assertLess(np.abs(cream - same).max(), 1)
+
+    def test_a_cream_wall_takes_a_warm_palette_entry_not_a_grey(self):
+        for cream in ([226, 212, 184], [205, 190, 160], [190, 170, 140]):
+            self.assertGreaterEqual(fe.palette_index(cream), 16, cream)
+        self.assertLess(fe.palette_index([128, 128, 127]), 16)
 
 
 class Rows(unittest.TestCase):
@@ -97,11 +139,22 @@ class Rows(unittest.TestCase):
         coarse[12:16] = struct.pack("<i", 10000)
         self.assertEqual(evidence_tile.apply(bytes(coarse), {self.key: self.record}), bytes(coarse))
 
-    def test_brick_without_a_trusted_colour_is_drawn_in_brick_own_colour(self):
+    def test_brick_is_drawn_only_when_both_views_say_so_and_the_wall_is_a_brick_colour(self):
         blob = tile([(0, 4, 9 | 3 << 8, 9 | 1 << 8, 1234, 140)], self.verts)
-        rec = {"wall": {"palette": 57, "trusted": False}, "material": {"drawn": 8, "confidence": 0.7}}
-        row = self.rows(evidence_tile.apply(blob, {self.key: rec}))[0]
-        self.assertEqual((row[2], row[3] >> 16), (8, 1))
+
+        def drawn(srgb, p=0.93, confidence=0.93, views=2, trusted=True):
+            m = {"cls": "brick", "drawn": 8, "p": {"brick": p}, "confidence": confidence, "views": views}
+            rec = {"wall": {"palette": 57, "trusted": trusted, "srgb": srgb}, "material": m}
+            row = self.rows(evidence_tile.apply(blob, {self.key: rec}))[0]
+            return row[2] & 15
+
+        self.assertEqual(drawn([150, 80, 64]), 8)  # Dogpatch's red brick
+        self.assertEqual(drawn([226, 205, 160]), 9)  # Haight-Ashbury's cream corner: its colour is no brick's
+        self.assertEqual(drawn([150, 80, 64], p=0.69, confidence=0.69), 9)  # not sure enough
+        self.assertEqual(drawn([150, 80, 64], confidence=0.56), 9)  # the two views disagree
+        self.assertEqual(drawn([150, 80, 64], views=1, confidence=0.56), 9)
+        # Without a trusted colour a brick call no longer paints the wall brick red.
+        self.assertEqual(evidence_tile.apply(blob, {self.key: {"wall": {"palette": 57, "trusted": False, "srgb": [150, 80, 64]}, "material": {"cls": "brick", "drawn": 8, "p": {"brick": 0.93}, "confidence": 0.93, "views": 2}}}), blob)
 
 
 class Far(unittest.TestCase):
@@ -137,13 +190,6 @@ class Geometry(unittest.TestCase):
         self.assertLess(np.abs(got[:, 0] - u * 2).max(), 6)
         self.assertLess(np.abs(got[:, 1] - v * 4).max(), 6)
         self.assertTrue(np.isnan(fe.onto(np.array([[-3.0, -2.0, 0.0]]), heading)[0]).all())
-
-    def test_the_sun_over_san_francisco(self):
-        # 2025-06-21 20:00 UTC is about 13:00 local: high in the south; 2025-12-21 at the same hour, low.
-        az, el = fe.sun(-122.42, 37.77, 1750536000000)
-        self.assertAlmostEqual(math.degrees(el), 75, delta=2)
-        self.assertAlmostEqual(math.degrees(az), 180, delta=25)
-        self.assertAlmostEqual(math.degrees(fe.sun(-122.42, 37.77, 1766347200000)[1]), 29, delta=2)
 
 
 if __name__ == "__main__":

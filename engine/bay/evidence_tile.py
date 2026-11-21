@@ -5,12 +5,13 @@ Which rule reads which field (bay.rs `read`, `Evidence`, `front`, `measured_half
     record field                          tile                                     read by
     wall.palette, when wall.trusted       row[2] colour byte (bits 8 to 15)        Building.wall: every plain wall cell
     material.drawn, confidence >= 0.5     row[2] material (bits 0 to 3)            the same, and march.ts `paint`'s pattern
+      (brick only where `clear_brick`)
     (wall written)                        row[3] bit 16                            Building.wall wins over SFPT paint
     windows.ratio                         row[3] bits 17 to 23 (hundredths) + 24   front(): upper windows' half width;
                                           not written for now (see `fields`)
 
-A building whose colour is not trusted keeps the bake's wall unless its material is brick or glass with confidence
-0.6 or more: those are drawn in the material's own colour. The trim's kind stays in row[3]'s low 16 bits. Rows no
+A building whose colour is not trusted keeps the bake's wall unless its material is glass with confidence 0.6 or more:
+that is drawn in glass's own colour. The trim's kind stays in row[3]'s low 16 bits. Rows no
 record matches are left byte for byte, and so is everything after the rows (outlines, trunks, fixtures, paint).
 The far model reads the same records by the city's building number (landing/ina/looks.py `walls`).
 """
@@ -22,6 +23,26 @@ from pathlib import Path
 
 WALL_BIT, GLASS_BIT = 1 << 16, 1 << 24
 MATERIAL_MIN, OWN_COLOUR_MIN, WINDOWS_MIN = 0.5, 0.6, 0.5
+BRICK, GLASS = 8, 11
+# SigLIP's "red brick" answers from a crop's colour and era more than its courses (2 px at 10 m), so at 0.5 it called
+# 35 panel buildings brick, Haight-Ashbury's cream corner and North Beach's white row 1395 among them. Looked at by eye
+# beside the photographs (November 21), 9 of the 61 brick calls were brick. Brick is drawn only when both views say so
+# at BRICK_P or more and the wall's measured colour is a brick's: trusted, reddish (a* >= BRICK_RED) and not light
+# (L* <= BRICK_L). That keeps 4 of the 9 (Castro, Chinatown, Dogpatch, SoMa's red brick) and none of the 52 others.
+BRICK_P, BRICK_RED, BRICK_L = 0.85, 4.0, 62.0
+
+
+def clear_brick(rec):
+    """Whether a record's brick is clear enough to draw: see BRICK_P."""
+    w, m = rec.get("wall") or {}, rec.get("material") or {}
+    if m.get("cls") != "brick" or not w.get("trusted") or m.get("views", 0) < 2:
+        return False
+    # Two views that agree keep their mean as the confidence; disagreeing ones are cut to 0.6 of it (`material`).
+    agree = abs(m["confidence"] - m["p"]["brick"]) < 1e-3
+    import facade_evidence as fe
+
+    L, a, _ = (float(v) for v in fe.lab(fe.linear(w["srgb"])))
+    return agree and m["p"]["brick"] >= BRICK_P and a >= BRICK_RED and L <= BRICK_L
 
 
 @lru_cache(maxsize=2)
@@ -41,9 +62,11 @@ def fields(rec, wall, trim):
     flags = 0
     w, m = rec.get("wall"), rec.get("material")
     material = m["drawn"] if m and m["confidence"] >= MATERIAL_MIN else None
+    if material == BRICK and not clear_brick(rec):
+        material = None
     if w and w["trusted"]:
         mat, colour, flags = material or mat, w["palette"], WALL_BIT
-    elif material in (8, 11) and m["confidence"] >= OWN_COLOUR_MIN:
+    elif material == GLASS and m["confidence"] >= OWN_COLOUR_MIN:
         mat, colour, flags = material, 0, WALL_BIT
     # The glass share is not written (bits 17 to 24 stay clear). It is a floor (windows that mirror the sky are missed):
     # on the panel it drew upper windows at a median 20% of the bay's wall against the rule's 48%, and the judge failed
