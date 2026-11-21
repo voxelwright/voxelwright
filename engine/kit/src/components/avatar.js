@@ -9,7 +9,7 @@
 // initials behind it show, and the well takes the picture's alt as its own name, so the person
 // is still named once. It is the same with no voxels.
 
-import { hole, halo, warmth, lightName } from '../core/light.js';
+import { hole, halo, warmth, lightName, ring } from '../core/light.js';
 import { listeners } from './util.js';
 
 export const avatar = {
@@ -20,8 +20,15 @@ export const avatar = {
   glowStrength: halo(0.05),
 
   build(live, m) {
-    const D = Math.min(2, live.look.well); // keep the portrait clear of its two-course mounting lip
-    hole(live, m, { depth: D, wall: lightName(live.el, 'light-warm'), floor: 'floor' });
+    const mounted = live.el.dataset.vxMount === 'portrait';
+    const D = Math.min(2, live.look.well) * (mounted ? 2 : 1);
+    const { walls } = hole(live, m, { depth: D, wall: mounted ? 'gasket' : lightName(live.el, 'light-warm'), floor: 'floor' });
+    if (mounted) {
+      // A single stamped flange captures the print. The lower return catches
+      // warm light inside the opening while the rubber lining stays dark.
+      ring(m.part('retainer'), -1, -1, 0, live.W + 2, live.H + 2, 'steel', 1);
+      walls.box(3, live.H, -D, live.W - 6, 1, 1, 'warm-metal');
+    }
     // the CSS lays what is in the well on its floor, and must know how deep that is
     if (live.state.deep !== D) live.el.style.setProperty('--vx-avatar-deep', live.state.deep = D);
   },

@@ -19,7 +19,7 @@
 .vx-check input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
 .vx-check input:disabled { cursor: default; }
 .vx-check:has(input:disabled) { color: var(--vx-ink-quiet); cursor: default; }
-.vx-box { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 5); }
+.vx-box { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 7); }
 .vx-check input:focus-visible + .vx-box { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
 
 /* plain: a painted well; ticked, it is the accent's colour */

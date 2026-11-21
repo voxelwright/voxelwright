@@ -11,6 +11,20 @@
   .services { display: grid; inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
   .services > div { display: flex; align-items: center; justify-content: space-between; gap: calc(var(--vx) * 4); min-block-size: calc(var(--vx) * 10); }
   .services .name { font-weight: 600; min-inline-size: 0; overflow-wrap: anywhere; }
+  #harbor-status > .vx-lamp {
+    --vx: 1px;
+    --vx-look: harbor-pilot;
+    inline-size: 18px;
+    block-size: 10px;
+    align-self: center;
+    margin: 0;
+  }
+  #harbor-status .harbor-glass { position: absolute; inset: 0; isolation: isolate; pointer-events: none; }
+  #harbor-status > .vx-lamp:not([data-vx-live]) {
+    border: 2px solid #545850;
+    box-shadow: inset 0 1px #ffffff55;
+  }
+  #harbor-status > [data-vx-light="off"]:not([data-vx-live]) { background: #43534c; }
   .inbox { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 2) calc(var(--vx) * 8); }
   .inbox > span { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); font-weight: 500; }
   .title { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 2) calc(var(--vx) * 4); font-size: 1.5rem; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
@@ -30,7 +44,7 @@
   <section>
     <h2>In use: the services of a team</h2>
     <div class="services">
-      <div><span class="name">harbor-api</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span></div>
+      <div><span class="name">harbor-api</span><span class="vx-badge" id="harbor-status"><span class="vx-lamp" data-vx-light="go" aria-hidden="true"><span class="harbor-glass"></span></span>Live</span></div>
       <div><span class="name">fog-site</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="accent"></span>Building</span></div>
       <div><span class="name">tide-worker</span><span class="vx-badge"><span class="vx-lamp" data-vx-light="stop"></span>Failed</span></div>
       <div><span class="name">ferry-cron</span><span class="vx-badge">Paused</span></div>
@@ -60,7 +74,72 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show(); // nothing of its own to draw: the lamp is the kit's
+  import { defineLook } from '../../src/index.js';
+  import { lightName } from '../../src/core/light.js';
+
+  // A press-fit light pipe. The same window and retaining lip stay in the panel
+  // when power is cut. A recessed die lights the resin directly above it.
+  defineLook('harbor-pilot', {
+    from: 'lit',
+    materials: {
+      lens: { day: '#728e83', night: '#708a80', transmission: .52 },
+    },
+    parts: { lamp: {
+      pad: 4,
+      glowRadius: 2,
+      glowStrength: .018,
+      build(live, model) {
+        const fitting = model.part('ferrule');
+        fitting.slab(0, 0, 0, 18, 10, 2, 'steel', 3);
+        fitting.slab(1, 1, 1, 16, 8, 1, 'slate', 2);
+        fitting.carve(3, 2, 1, 12, 6, 1);
+        const die = model.part('die');
+        die.box(6, 4, 1, 6, 2, 1, live.el.dataset.vxLight === 'off' ? 'slate' : lightName(live.el, 'light-go'));
+        live.faceZ = 2;
+        live.state.litRevision = null;
+      },
+      pose(live) {
+        live.glowStrength = .018 * (1 + 2 * live.spring('pulse').x);
+        if (live.state.litRevision === live.tintRevision) return;
+        live.state.litRevision = live.tintRevision;
+        const glass = live.stage.lives.get(live.el.querySelector('.harbor-glass'));
+        glass?.recolor();
+        const { die, ferrule } = live.model.byName;
+        if (die.col[3] <= 0) return;
+        scatter(ferrule, die, .13);
+      },
+    } },
+  });
+  function scatter(part, die, response) {
+    for (let i = 0; i < part.count; i++) {
+      const x = part.rest[3 * i], y = part.rest[3 * i + 1];
+      const distance = Math.hypot(Math.max(0, Math.abs(x - 9) - 3), y - 5);
+      const strength = response * Math.exp(-distance / 2.6);
+      for (let c = 0; c < 3; c++) {
+        const at = 4 * i + c;
+        part.col[at] += (die.col[c] - part.col[at]) * strength;
+      }
+    }
+  }
+
+  // The lens transmits onto the socket below it. Each surface uses the same
+  // stage; separate canvases let the browser composite the glass over the die.
+  show({
+    name: 'harbor-glass', selector: '#harbor-status .harbor-glass', pad: 4,
+    build(live, model) {
+      model.part('window').slab(3, 2, 2, 12, 6, 1, 'lens', 2);
+      live.well = [3, 2, 15, 8];
+      live.faceZ = 2;
+      live.state.litRevision = null;
+    },
+    pose(live) {
+      if (live.state.litRevision === live.tintRevision) return;
+      live.state.litRevision = live.tintRevision;
+      const lamp = live.stage.lives.get(live.el.parentElement);
+      const die = lamp?.model.byName.die;
+      if (die?.col[3] > 0) scatter(live.model.byName.window, die, 1);
+    },
+  });
 </script>
 </body>
 </html>

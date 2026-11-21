@@ -18,6 +18,13 @@
   .about { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 1) calc(var(--vx) * 2); font-size: 0.9375rem; color: var(--vx-ink-quiet); }
   .about strong { color: var(--vx-ink); font-weight: 650; }
   .keys { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3); }
+  /* The joint occupies the old groove and its two margins, within the key gap. */
+  .key-seam { position: relative; isolation: isolate; flex: none; inline-size: calc(var(--vx) * 3); block-size: calc(var(--vx) * 11); }
+  .key-seam:not([data-vx-live])::before {
+    content: ""; position: absolute; inset-block: var(--vx);
+    left: calc(-2 * var(--vx)); width: calc(2 * var(--vx)); box-sizing: border-box;
+    background: var(--vx-slate); border-inline-end: 1px solid var(--vx-steel);
+  }
   .sizes { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 3) calc(var(--vx) * 3); }
   .cols { display: flex; gap: calc(var(--vx) * 5); inline-size: 100%; max-inline-size: calc(var(--vx) * 120); }
   .cols p { flex: 1 1 0; min-inline-size: 0; }
@@ -46,7 +53,7 @@
     <div class="keys" role="group" aria-label="Build">
       <button class="vx-button">Logs</button>
       <button class="vx-button">Files</button>
-      <span class="vx-groove vx-separator" data-vx-way="down" data-vx-size="key" role="separator" aria-orientation="vertical"></span>
+      <span class="key-seam" role="separator" aria-orientation="vertical"></span>
       <button class="vx-button">Roll back</button>
     </div>
   </section>
@@ -84,7 +91,20 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show();
+  import { hole } from '../../src/index.js';
+
+  show({
+    name: 'key-seam', selector: '.key-seam', pad: 3, glowStrength: 0,
+    build(live, model) {
+      // Centre the cut in the visible gap between the projected key housings.
+      // The exposed steel return catches light above the matte gasket.
+      const x = -2, w = live.W - 1, h = live.H - 2;
+      const { walls } = hole(live, model, {
+        x, y: 1, w, h, depth: 1, wall: 'panel', floor: 'gasket',
+      });
+      walls.box(x + w, 1, -1, 1, h, 1, 'steel');
+    },
+  });
 </script>
 </body>
 </html>

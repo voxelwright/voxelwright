@@ -9,6 +9,18 @@
 <style>
   .form { display: grid; gap: calc(var(--vx) * 6); inline-size: 100%; max-inline-size: calc(var(--vx) * 100); }
   .states { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, calc(var(--vx) * 60)), 1fr)); gap: calc(var(--vx) * 7) calc(var(--vx) * 9); inline-size: 100%; align-items: start; }
+  .legend-strip {
+    --vx: 2px;
+    position: relative;
+    isolation: isolate;
+    display: inline-block;
+    max-inline-size: 100%;
+    vertical-align: top;
+  }
+  .legend-strip[data-vx-live] {
+    padding: 0.2em calc(9 * var(--vx));
+    color: #fff7e5;
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -26,7 +38,7 @@
     <h2>In use: a new project</h2>
     <div class="form">
       <div class="vx-field">
-        <label class="vx-field-label" for="p-name">Project name<span class="vx-field-mark" aria-hidden="true">*</span></label>
+        <label class="vx-field-label" for="p-name"><span class="legend-strip">Project name<span class="vx-field-mark" aria-hidden="true">*</span></span></label>
         <span class="vx-well"><input id="p-name" value="harbor-api" required autocomplete="off" aria-describedby="p-name-hint"></span>
         <p class="vx-field-hint" id="p-name-hint">Lower case, with dashes. It becomes the address.</p>
       </div>
@@ -81,7 +93,24 @@
 </main>
 <script type="module">
   import { show } from './parts.js';
-  show();
+  show({
+    name: 'project-name-legend',
+    selector: '.legend-strip',
+    pad: 3,
+    build(live, model) {
+      const { W, H } = live;
+      const strip = model.part('inlaid-strip');
+      strip.slab(0, 0, 0, W, H, 1, 'slate', 1);
+      // Two flush slotted fixings capture the strip at the face of the panel.
+      const y = Math.floor(H / 2);
+      for (const x of [4, W - 5]) {
+        strip.box(x - 1, y - 1, 0, 3, 3, 1, 'steel');
+        strip.box(x - 2, y, 0, 5, 1, 1, 'steel');
+        strip.box(x - 1, y, 0, 3, 1, 1, 'gasket');
+      }
+      live.faceZ = 1;
+    },
+  });
 </script>
 </body>
 </html>

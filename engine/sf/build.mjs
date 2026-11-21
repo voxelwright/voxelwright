@@ -151,6 +151,14 @@ copyFileSync(join(root, 'sf/heroes.json'), join(out, 'bay/heroes.json'))
 // The engine's page with the realm's record in it (as the release made it), and its script beside it.
 put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,">`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
 
+// ── The eggs' videos (#450, page/eggs.ts): fetched only when an egg starts. From the site's landing, which made them
+// (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); kept on this machine, never in git. Without them the
+// page is the same, and the two video eggs say they didn't load. ──
+const eggsFrom = resolve(arg('eggs', join(VILLAGE, 'sf', 'eggs', 'media')))
+const EGG_VIDEOS = ['rick.mp4', 'bad-apple.mp4'].filter((f) => existsSync(join(eggsFrom, f)))
+for (const f of EGG_VIDEOS) { mkdirSync(join(out, 'sf', 'eggs'), { recursive: true }); copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f)) }
+if (EGG_VIDEOS.length < 2) console.log(`  the eggs' videos are not all at ${eggsFrom}: the video eggs will not load (copy the site's static/landing/eggs/*.mp4 there)`)
+
 // ── Kept living things ──
 for (const k of realm.kept ?? []) {
   mkdirSync(dirname(join(out, 'sf', k.file)), { recursive: true })
@@ -170,6 +178,7 @@ if (realm.street && !(manifest.life && manifest.cars) && !streetManifest) {
 put('sf/CREDITS.txt', [
   ...manifest.credits,
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
+  ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos (sf/eggs/), used as parody on the owner\'s ruling, for these two eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira.'] : []),
   '',
   'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0.',
   '',
@@ -191,10 +200,11 @@ for (const file of files(out)) {
     writeFileSync(cached, squeezed)
     compressed++
   }
-  // Worth it only where it is smaller.
-  if (squeezed.length < body.length) writeFileSync(`${file}.br`, squeezed)
-  raw += body.length; br += Math.min(squeezed.length, body.length)
-  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += Math.min(squeezed.length, body.length) }
+  // Worth it only where it is smaller, and never for video (H.264 and AAC are squeezed already; the eggs' videos).
+  if (squeezed.length < body.length && !file.endsWith('.mp4')) writeFileSync(`${file}.br`, squeezed)
+  const sent = file.endsWith('.mp4') ? body.length : Math.min(squeezed.length, body.length)
+  raw += body.length; br += sent
+  if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += sent }
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(1)} MB`

@@ -76,6 +76,9 @@ export async function quiet() {
     }
     return null
   }
+  // A turn this process already holds (or was given by what started it) is one of them, and is still held when these
+  // are given back: it must stay said (ENGINE_TURN), or a second quiet() here counts it as someone else's (#465).
+  const had = process.env.ENGINE_TURN
   for (let tries = 0; ; tries++) {
     const mine = [await turn({ mine: false })]
     for (const until = Date.now() + 120_000; mine.length < TURNS && Date.now() < until;) {
@@ -85,7 +88,7 @@ export async function quiet() {
     }
     if (mine.length === TURNS) {
       process.env.ENGINE_TURN = '1'
-      return () => { for (const back of mine) back(); delete process.env.ENGINE_TURN }
+      return () => { for (const back of mine) back(); if (!had) delete process.env.ENGINE_TURN }
     }
     for (const back of mine) back()
     if (tries === 0) console.log('  waiting for the GPU to be quiet: other checks are drawing')

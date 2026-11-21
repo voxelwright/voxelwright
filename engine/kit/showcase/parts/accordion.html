@@ -6,6 +6,21 @@
 <title>Accordion</title>
 <link rel="stylesheet" href="../../voxelmorphism.css">
 <link rel="stylesheet" href="parts.css">
+<style>
+  #faq { --answer-inset: 4.25rem; }
+  #faq summary { justify-content: start; gap: 0; padding-block: .75rem; }
+  #faq .faq-latch { display: none; }
+  #faq .faq-latch[data-vx-live] {
+    display: block; position: relative; isolation: isolate; pointer-events: none;
+    --vx: 2px; inline-size: 48px; block-size: 28px; flex: none;
+    margin-inline: 3px calc(var(--answer-inset) - 51px);
+  }
+  #faq summary:has(.faq-latch[data-vx-live])::after { content: none; }
+  #faq summary::after { margin-inline-start: auto; }
+  #faq details:has(.faq-latch[data-vx-live]) > p { margin-inline-start: var(--answer-inset); }
+  #faq details > p { max-inline-size: 59ch; line-height: 1.55; }
+  #faq details > p:last-child { padding-block-end: 1.25rem; }
+</style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
   (function () { var t = new URLSearchParams(location.search).get('theme'); if (t) document.documentElement.dataset.theme = t; setTimeout(function () { document.documentElement.dataset.ready = '1'; }, 5000); })();
@@ -22,18 +37,18 @@
     <h2>In use: before you deploy harbor-api (one open at a time)</h2>
     <div class="vx-accordion wide" id="faq">
       <details name="faq" id="faq-1" open>
-        <summary>What does a deploy do?</summary>
+        <summary><span class="faq-latch" aria-hidden="true"></span>What does a deploy do?</summary>
         <p>It builds the main branch, runs the tests, and swaps the new build in. The one before it is kept, so a rollback takes a few seconds.</p>
       </details>
       <div class="vx-groove"></div>
       <details name="faq" id="faq-2">
-        <summary>How long is a build kept?</summary>
+        <summary><span class="faq-latch" aria-hidden="true"></span>How long is a build kept?</summary>
         <p>The last three are kept. Older ones are removed the night after the fourth is made.</p>
         <p>A build that is live is never removed, however old it is.</p>
       </details>
       <div class="vx-groove"></div>
       <details name="faq" id="faq-3">
-        <summary>Who can roll back?</summary>
+        <summary><span class="faq-latch" aria-hidden="true"></span>Who can roll back?</summary>
         <p>Anyone on fogline who can deploy. Mina and Ada are told when it happens.</p>
       </details>
     </div>
@@ -61,7 +76,8 @@
 <script type="module">
   import { show } from './parts.js';
   import { accordion } from '../../src/components/accordion.js';
-  show(accordion);
+  import { faqLatch } from './faq-latch.js';
+  show(accordion, faqLatch);
 </script>
 </body>
 </html>

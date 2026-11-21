@@ -8,7 +8,8 @@
 //   Object.assign(LOOKS.lit.parts, parts);
 //
 // Their CSS under the look is css/existing.css.
-import { halo, byTheme, ring, hole, bezel, lightName, UNDER, cap as capOf } from '../core/light.js';
+import { halo, byTheme, ring, hole, bezel, rowLens, lightName, UNDER, cap as capOf } from '../core/light.js';
+import { SHEAR } from '../core/stage.js';
 import { clamp, wrapLabel } from '../components/util.js';
 
 const rtl = (el) => getComputedStyle(el).direction === 'rtl';
@@ -22,6 +23,8 @@ const rtl = (el) => getComputedStyle(el).direction === 'rtl';
 // bind (components/slider.js) only says "draw again", so pose reads the input every time.
 const KEY = 7, TRENCH = 7; // the knob's width and the slot's height: sizes, not depths. Depths are the look's.
 
+const INDEX_HEIGHT = 4; // top face of the fader's ivory index stripe
+
 const slider = {
   pad: 7,
   glowRadius: 3,
@@ -30,27 +33,49 @@ const slider = {
   build(live, m) {
     const { W, H, el } = live, look = live.look, DEEP = look.well;
     const input = live.state.input = el.querySelector('input');
-    const off = !!input?.disabled;
+    const off = !!input?.matches(':disabled');
     const y = live.state.y = Math.floor((H - TRENCH) / 2);
-    bezel(m, 0, y, W, TRENCH);
-    hole(live, m, { y, h: TRENCH, depth: DEEP, wall: 'slate', floor: 'slate' });
+    const instrument = Boolean(look.tooling);
+    const channelY = instrument ? y + 2 : y;
+    const channelH = instrument ? 3 : TRENCH;
+    bezel(m, 0, channelY, W, channelH);
+    if (instrument) {
+      // The scale is stamped in a separate rule. Its end marks register
+      // with the centre of the carriage at each hard stop.
+      const rule = m.part('scale');
+      rule.tx = -SHEAR[0]; // the marks are one course above the slot
+      rule.box(0, y - 2, 0, W, 2, 1, 'steel');
+      for (let i = 0; i <= 10; i++) {
+        const x = 1 + Math.floor(KEY / 2) + Math.round((W - KEY - 2) * i / 10);
+        const length = i % 5 === 0 ? 2 : 1;
+        rule.box(x, y - length, 0, 1, length, 1, 'gasket');
+      }
+    }
+    hole(live, m, { y: channelY, h: channelH, depth: DEEP, wall: 'gasket', floor: 'slate' });
     const lit = m.part('lit');
     lit.masked = true; lit.grounded = false; lit.sunk = true;
-    lit.box(0, y, -DEEP, W, TRENCH, 1, off ? 'steel' : 'light');
+    lit.box(0, instrument ? y + 3 : y, instrument ? -1 : -DEEP, W, instrument ? 1 : TRENCH, 1, off ? 'steel' : instrument ? 'backlight' : 'light');
     // The knob stands on the floor of the slot, on its own light. Its shoulder is as far above the
     // surface as a key travels, so it clears the bezel, and its top is a keycap's: a step smaller.
     const thumb = m.part('thumb');
     thumb.grounded = false;
-    const mat = off ? 'steel' : 'ivory', h = TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
-    if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
-    capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0); // square-cornered: a fader's cap is a block
-    // The line: painted across the middle of its top, as deep as a groove, and not cut: a cut
-    // splits a top this small into two lumps. It is enamel, the kit's one paint, which shows on the
-    // ivory by day and at night alike (ink turns light at night and is lost on it; steel is lost by
-    // day). Switched off, the knob is steel and the line is slate.
-    const mid = (KEY - 1) / 2, g = look.groove;
-    thumb.box(mid, 1, top - g, 1, h - 2, g, off ? 'slate' : 'enamel');
-    thumb.ty = y + 1;
+    const mat = off ? 'steel' : 'ivory', h = instrument ? TRENCH + 1 : TRENCH - 2, d = DEEP + look.travel, top = 1 - DEEP + d;
+    if (instrument) {
+      // A metal stem rides in the slot; the rubber saddle spans the slot.
+      thumb.box(2, 2, -DEEP, KEY - 4, 3, DEEP + 2, 'steel');
+      thumb.slab(0, 0, 2, KEY, h, 2, off ? 'steel' : 'gasket', 1);
+      for (const x of [1, KEY - 2]) thumb.box(x, 1, 4, 1, h - 2, 1, off ? 'steel' : 'slate');
+      thumb.box(3, 0, INDEX_HEIGHT - 1, 1, h, 1, off ? 'slate' : 'ivory');
+      if (!off) {
+        // Enamel tips take the theme color; the ivory centre reads in low light.
+        for (const end of [0, h - 1]) thumb.plot(3, end, INDEX_HEIGHT - 1, 'enamel');
+      }
+    } else {
+      if (!off) ring(thumb, 0, 0, -DEEP, KEY, h, 'light');
+      capOf(thumb, 0, 0, 1 - DEEP, KEY, h, d, mat, 0);
+      thumb.box(3, 1, top - look.groove, 1, h - 2, look.groove, off ? 'slate' : 'enamel');
+    }
+    thumb.ty = instrument ? y - 1 : y + 1;
     live.state.travel = Math.max(0, W - 2 - KEY);
     live.state.flip = rtl(el);
   },
@@ -62,8 +87,10 @@ const slider = {
     const t = max > min ? clamp((Number(input?.value) - min) / (max - min), 0, 1) : 0;
     const at = live.state.flip ? 1 - t : t;
     const x = 1 + at * live.state.travel;
-    thumb.tx = x;
     thumb.tz = live.spring('press').x;
+    // Register the stripe's visible face with the native thumb, including
+    // the parallax of a saddle held down in the channel.
+    thumb.tx = live.look.tooling ? x - SHEAR[0] * (INDEX_HEIGHT + thumb.tz) : x;
     // lit from the end the value starts at up to the middle of the knob
     const edge = x + KEY / 2;
     for (let i = 0; i < lit.count; i++) {
@@ -75,42 +102,30 @@ const slider = {
 };
 
 // ---------------------------------------------------------------------------------------------
-// List. Rows of words on the surface, parted by hairlines (CSS). The only voxels are the mark of
-// the current row: an accent groove at its start. Tool: none, and a groove.
-// bind (components/list.js) reads state.rows[i].li and .press, and rebuilds on any change under
-// the list, so build must not touch the DOM once the rows are wrapped.
+// List. Each row has a smoked lens at its leading edge. Selected lenses emit
+// light. The legend can depress without moving the socket.
 const list = {
   pad: 6,
   glowRadius: 2.8,
   glowStrength: halo(0.06),
 
   build(live, m) {
-    const { W, el, vx } = live, GROOVE = live.look.groove;
+    const { W, el, vx } = live;
     const rows = live.state.rows = [];
-    const marks = [];
+    const lens = m.part('lens');
     const x = rtl(el) ? W - 2 : 1;
     [...el.children].filter((n) => n.tagName === 'LI').forEach((li, i) => {
       const top = Math.round(li.offsetTop / vx), h = Math.max(2, Math.round(li.offsetHeight / vx));
       const current = li.getAttribute('aria-current') === 'true' || li.getAttribute('aria-selected') === 'true';
       const row = { li, part: null, current, press: live.spring('row' + i) };
       rows.push(row);
-      if (current && h > 4) marks.push([top + 2, h - 4]);
+      const inset = h > 4 ? 2 : 0;
+      rowLens(lens, x, top + inset, 1, h - inset * 2, current);
       // the words answer a press: they go a little way into the surface with it
       live.label(wrapLabel(li, 'vx-row'), () => row.press.x);
     });
     live.faceZ = 0;
-    if (!marks.length) return;
-    // One groove a current row, all in one column. The stage knows one hole a part, so the hole
-    // is the column from the first mark to the last, and each mark has its own walls and floor.
-    const walls = m.part('walls'), bed = m.part('floor');
-    walls.sunk = true; walls.tz = UNDER; bed.sunk = true;
-    for (const [y, h] of marks) {
-      walls.box(x - 1, y, -GROOVE, 1, h, GROOVE, 'light').box(x + 1, y, -GROOVE, 1, h, GROOVE, 'light');
-      bed.box(x - 1, y, -GROOVE - 1, 3, h, 1, 'light');
-    }
-    const first = marks[0], last = marks[marks.length - 1];
-    walls.box(x - 1, first[0] - 1, -GROOVE, 3, 1, GROOVE, 'light').box(x - 1, last[0] + last[1], -GROOVE, 3, 1, GROOVE, 'light');
-    live.well = [x, first[0], x + 1, last[0] + last[1]];
+
   },
 
   pose(live) {
@@ -142,7 +157,7 @@ const menu = {
     // the light and the slab are one part, so both are built out of the corner together
     const panel = m.part('panel');
     ring(panel, 0, 0, 0, W, H, 'light', 1);
-    panel.slab(0, 0, 1, W, H, d - 1, 'key', 1); // a float is a plate, not a keycap
+    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'key', 1); // a float is a plate, not a keycap
     const items = live.state.items = [...el.querySelectorAll('[role^="menuitem"]')];
     const h = items[0] ? Math.max(2, Math.round(items[0].offsetHeight / vx)) : 2;
     live.state.ys = items.map((it) => Math.round(it.offsetTop / vx));
@@ -160,21 +175,13 @@ const menu = {
   },
 
   pose(live) {
-    const { pick, panel } = live.model.byName, a = live.state.active;
-    // not while the slab is still being built: the mark would hang in the air
-    pick.hidden = !(a >= 0) || !!panel.fx;
+    const { pick } = live.model.byName, a = live.state.active;
+    pick.hidden = !(a >= 0);
     const danger = live.model.byName.danger;
     danger.hidden = pick.hidden || live.state.items[a]?.dataset.vxKind !== 'danger';
     if (!danger.hidden) pick.hidden = true;
-    if (a >= 0) danger.ty = pick.ty = live.state.ys[a] ?? 0;
+    if (a >= 0) danger.ty = pick.ty = (live.state.ys[a] ?? 0) - (live.state.scrollY ?? 0);
     live.glowStrength = halo(MENU_GLOW) * (live.theme === 'day' ? 1.2 : 1);
-  },
-
-  // one more drawing after the build ends, so the mark appears on the finished slab
-  step(live) {
-    const building = !!live.model.byName.panel?.fx, was = live.state.building;
-    live.state.building = building;
-    return !!was && !building;
   },
 };
 
@@ -194,8 +201,30 @@ const dialog = {
   build(live, m) {
     const { W, H, el, vx } = live, d = live.look.dialog, r = live.look.round, GROOVE = live.look.groove;
     const panel = m.part('panel');
+    const display = el.querySelector(':scope[data-vx-command-deck] > .vx-command-scroll');
+    if (display) {
+      // A removable faceplate over the case, with the display behind its cutout.
+      const x = Math.round(display.offsetLeft / vx), y = Math.round(display.offsetTop / vx);
+      const w = Math.round(display.offsetWidth / vx), h = Math.round(display.offsetHeight / vx);
+      panel.slab(1, 1, 0, W - 2, H - 2, 1, 'gasket', r);
+      panel.slab(0, 0, 1, W, H, 3, 'chalk', r);
+      panel.slab(0, 0, 4, W, H, 1, 'gasket', r);
+      panel.slab(0, 0, 5, W, H, 1, live.look.readingPlate ?? 'chalk', r);
+      panel.carve(x, y, 4, w, h, 2).box(x, y, 3, w, h, 1, 'gasket');
+      // Two steel keepers seat the removable faceplate along its far edge.
+      // The readout and its fittings stay together on the solid carrier.
+      if (W >= 28) {
+        const keepers = m.part('keepers');
+        for (const start of [6, W - 12]) {
+          panel.carve(start, 0, 3, 6, 2, 3);
+          keepers.box(start, 0, 3, 6, 2, 2, 'steel').box(start + 1, 0, 5, 4, 2, 1, 'steel');
+        }
+      }
+      live.faceZ = 6;
+      return;
+    }
     ring(panel, 0, 0, 0, W, H, lightName(el, 'light'), r);
-    panel.slab(0, 0, 1, W, H, d - 1, 'chalk', r);
+    panel.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'chalk', r);
     const head = el.querySelector(':scope > header');
     const y = head ? Math.round((head.offsetTop + head.offsetHeight) / vx) - 1 : 0;
     if (y > 1 && y < H - 2 && W > INSET * 2 + 2) {

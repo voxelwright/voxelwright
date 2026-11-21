@@ -3,8 +3,10 @@
 
 import { Model } from './model.js';
 import { lookOf, lightOf } from './look.js';
-import { Spring, assemble, crumble, plateMotion, settle, reducedMotion } from './motion.js';
+import { Spring, assemble, crumble, surfaceCourses, settle, reducedMotion } from './motion.js';
 import { listeners } from '../components/util.js';
+
+const MAX_CANVAS = 8192;
 
 export const SHEAR = [0.5, 0.5]; // screen shift per voxel of height: right, down
 
@@ -19,6 +21,7 @@ export class Live {
     this.visible = true;
     this.dirty = true;
     this.fxCount = 0;
+    this.tintRevision = 0;
     this.canvas = document.createElement('canvas');
     this.canvas.className = 'vx-canvas';
     this.canvas.setAttribute('aria-hidden', 'true');
@@ -49,14 +52,18 @@ export class Live {
     this.pad = this.form.pad ?? 6;
     this.faceZ = 0;
     this.well = null;
+    const previousSurface = this.surface;
     this.stopMotion();
     this.model = new Model();
     for (const l of this.labels) { l.node.style.transform = ''; l.last = undefined; } // a label's nudge belongs to the model it was on
     this.labels.length = 0;
     this.form.build(this, this.model);
+    // how proud the face stands, for the stylesheet (a live key's focus ring frames its body)
+    el.style.setProperty('--vx-face-z', String(this.faceZ));
     this.model.bake(this.theme, this.look);
     let n = 0, glows = false;
     for (const p of this.model.parts) { n += p.count; for (let i = 0; i < p.count; i++) if (p.col[i * 4 + 3] > 0) { glows = true; break; } }
+    this.normals = this.model.parts.some(p => p.normals) ? new Int8Array(n * 4) : null;
     this.capacity = n;
     this.pos = new Float32Array(n * 8);
     this.col = new Float32Array(n * 4);
@@ -65,6 +72,7 @@ export class Live {
     this.layout();
     this.form.pose?.(this);
     this.invalidate();
+    return previousSurface;
   }
 
   retint() {
@@ -73,14 +81,26 @@ export class Live {
     if (lookOf(cs) !== this.look) return this.rebuild(); // another look is another shape
     if (theme === this.theme) return;
     this.theme = theme;
-    this.model.tint(theme, this.look);
+    this.recolor();
+  }
+
+  recolor() {
+    this.tintRevision++;
+    this.model.tint(this.theme, this.look);
+    this.glows = this.model.parts.some(p => p.col.some((channel, i) => i % 4 === 3 && channel > 0));
     this.invalidate();
   }
 
   layout() {
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
     const padPx = this.pad * this.vx;
     const cw = this.cssW + padPx * 2, ch = this.cssH + padPx * 2;
+    // A canvas may be no larger than the smallest texture every GPU must allow (8192 px a side).
+    // A part bigger than that at this screen's density (a long code block, a long list, on a
+    // phone at 3x) is drawn at a lower one, a whole number of pixels a voxel: softer, never
+    // missing. (Past 32768 CSS px, one pixel a voxel is still too many; no page has needed it.)
+    let dpr = Math.max(1, window.devicePixelRatio || 1);
+    const most = Math.max(cw, ch);
+    if (most * dpr > MAX_CANVAS) dpr = Math.max(1, Math.floor(this.vx * MAX_CANVAS / most)) / this.vx;
     const c = this.canvas;
     this.wpx = Math.round(cw * dpr); this.hpx = Math.round(ch * dpr);
     if (c.width !== this.wpx) c.width = this.wpx;
@@ -115,47 +135,67 @@ export class Live {
     let top = 1;
     for (const p of this.model.parts) for (let i = 0; i < p.count; i++) top = Math.max(top, p.rest[i * 3 + 2] + 0.5);
     const shared = { W: this.W, H: this.H, top, ...opts };
-    const exiting = effect === 'crumble' || effect === 'lower';
-    const carried = this.form.carryPlate && effect !== 'crumble';
-    const still = reducedMotion(), start = this.carried?.progress;
-    this.clearPlate();
+    const out = effect === 'crumble' || effect === 'lower', still = reducedMotion();
+    const surface = opts.surface ?? this.form.surface;
+    const prior = this.surface ?? opts.resume;
+    const contactInk = opts.contact && prior ? Number(this.el.style.getPropertyValue('--vx-surface-ink')) : undefined;
+    this.clearSurface();
+    // Resolve superseded runs now. Their callers can distinguish cancellation from landing.
+    this.waiters = (this.waiters ?? []).filter(waiter => {
+      if (!waiter.list.some(part => list.includes(part))) return true;
+      waiter.resolve(false);
+      return false;
+    });
     for (const p of list) {
-      if (carried || effect === 'lower') p.fx = plateMotion(p, { ...shared, out: exiting, still, start });
-      else if (still) p.fx = settle(p, { out: exiting });
-      else p.fx = (effect === 'crumble' ? crumble : assemble)(p, shared);
+      if (surface) {
+        let contactPose;
+        if (!still && opts.contact && out && prior?.kind === 'assemble' && p.fx) {
+          contactPose = new Float32Array(p.count * 8);
+          p.fx.write(contactPose, 0, p);
+        }
+        p.fx = surfaceCourses(p, { duration: 0.3, ...shared, out, still, contactPose,
+          rim: surface === 'rim', previousRelease: prior?.release, start: prior?.progress ?? (out ? 1 : 0),
+          from: contactPose ? opts.from : prior?.from ?? opts.from ?? [0, this.H] });
+      } else if (still) p.fx = settle(p, { out });
+      else p.fx = (out ? crumble : assemble)(p, shared);
       p.hidden = false;
     }
-    if (carried && list.length) {
-      this.carried = list[0].fx;
-      this.el.dataset.vxCarried = still ? 'still' : 'moving';
-      this.el.removeAttribute('data-vx-cover-legends');
-      this.carryWords();
+    if (surface && list.length) {
+      this.surface = list[0].fx;
+      if (contactInk !== undefined) this.surface.contactInk = contactInk;
+      this.el.dataset.vxSurface = still ? 'still' : surface;
+      this.paintSurface();
     }
     this.invalidate();
-    if (!list.length) return Promise.resolve();
-    return new Promise((resolve) => { (this.waiters ??= []).push({ list, resolve }); });
+    if (!list.length) return Promise.resolve(true);
+    return new Promise(resolve => this.waiters.push({ list, resolve }));
   }
 
-  carryWords() {
-    const { dz, progress } = this.carried;
-    this.el.style.setProperty('--vx-plate-x', dz * SHEAR[0] * this.vx + 'px');
-    this.el.style.setProperty('--vx-plate-y', dz * SHEAR[1] * this.vx + 'px');
-    const ink = this.el.dataset.vxCarried === 'still' ? progress : Number(progress > 0);
-    this.el.style.setProperty('--vx-plate-ink', Math.max(0, Math.min(1, ink)));
+  paintSurface() {
+    const { progress, still, rim, release } = this.surface;
+    const alpha = still ? progress : rim && release ? Math.min(1, progress * 2) : 1;
+    const reveal = release ? (progress - 0.9) / 0.1 : (progress - 0.78) / 0.18;
+    let ink = still || rim ? alpha : Math.max(0, Math.min(1, reveal));
+    if (!still && this.surface.contactInk !== undefined) {
+      ink = this.surface.contactInk * Math.max(0, 1 - this.surface.t / Math.min(.10, this.surface.end));
+    }
+    this.el.style.setProperty('--vx-surface-alpha', alpha);
+    this.el.style.setProperty('--vx-surface-ink', ink);
   }
 
   stopMotion() {
-    this.clearPlate();
+    this.clearSurface();
     for (const part of this.model?.parts ?? []) part.fx = null;
-    for (const waiter of this.waiters ?? []) waiter.resolve();
+    for (const waiter of this.waiters ?? []) waiter.resolve(false);
     this.waiters = [];
   }
 
-  clearPlate() {
-    if (!this.carried) return;
-    this.carried = null;
-    this.el.removeAttribute('data-vx-carried');
-    for (const name of ['--vx-plate-x', '--vx-plate-y', '--vx-plate-ink']) this.el.style.removeProperty(name);
+  clearSurface() {
+    if (!this.surface) return;
+    this.surface = null;
+    delete this.el.dataset.vxSurface;
+    this.el.style.removeProperty('--vx-surface-alpha');
+    this.el.style.removeProperty('--vx-surface-ink');
   }
 
   invalidate() {
@@ -177,7 +217,7 @@ export class Live {
       p.fx.t += dt;
       if (p.fx.t >= p.fx.end && (!this.visible || p.hidden || !p.count)) {
         // draw() skips hidden geometry, including a menu's inactive selection mark.
-        if (p.fx.kind === 'lower' || p.fx.kind === 'crumble') p.hidden = true;
+        if (p.fx.kind === 'crumble') p.hidden = true;
         p.fx = null;
         this.dirty = true;
         this.settled(p);
@@ -201,27 +241,31 @@ export class Live {
         if (done) {
           const kind = p.fx.kind;
           p.fx = null;
-          if (kind === 'crumble' || kind === 'lower') p.hidden = true;
+          if (kind === 'crumble') p.hidden = true;
           this.settled(p);
           if (p.hidden) continue; // nothing left to draw
           this.writeRest(p, o);
         }
       } else this.writeRest(p, o);
+      if (this.normals) {
+        if (p.normals) this.normals.set(p.normals, n * 4);
+        else this.normals.fill(0, n * 4, (n + cnt) * 4);
+      }
       col.set(p.col, n * 4);
       ao.set(p.ao, n * 2);
       o += cnt * 8; n += cnt;
     }
     const ok = this.stage.renderer.draw({
-      pos, col, ao, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
+      pos, col, ao, normals: this.normals, count: n, wpx: this.wpx, hpx: this.hpx, ox: this.ox, oy: this.oy, s: this.s,
       bounds: this.bounds, light: lightOf(this.look, this.theme), shear: SHEAR, glows: this.glows,
       soft: this.form.soft, groundSoft: this.look.groundSoft, surfaceBytes: !!this.look.finishes,
       // a part may turn its own light up and down as it is used (live.glowStrength, live.glowRadius)
       glowRadius: this.glowRadius ?? this.form.glowRadius, glowStrength: this.glowStrength ?? this.form.glowStrength,
       well: this.well, groundShadow: this.well ? 0 : 1,
     }, this.ctx ?? this.canvas);
-    if (ok && this.carried) {
-      this.carryWords();
-      if (this.carried.t >= this.carried.end && this.carried.kind !== 'lower') this.clearPlate();
+    if (ok && this.surface) {
+      this.paintSurface();
+      if (this.surface.t >= this.surface.end && this.surface.kind !== 'crumble') this.clearSurface();
     }
     // labels follow their faces
     const k = this.vx;
@@ -238,6 +282,22 @@ export class Live {
 
   writeRest(p, o) {
     const pos = this.pos, rest = p.rest, sc = p.scales;
+    // The encoder turns as one solid. Rotate cube centres and their normals about the same axle.
+    if (p.axle) {
+      const { x, y, angle } = p.axle;
+      const c = Math.cos(angle), s = Math.sin(angle);
+      const qz = Math.sin(angle / 2), qw = Math.cos(angle / 2);
+      for (let i = 0; i < p.count; i++, o += 8) {
+        const dx = rest[i * 3] - x, dy = rest[i * 3 + 1] - y;
+        pos[o] = x + c * dx - s * dy + p.tx;
+        pos[o + 1] = y + s * dx + c * dy + p.ty;
+        pos[o + 2] = rest[i * 3 + 2] + p.tz;
+        pos[o + 3] = 1;
+        pos[o + 4] = pos[o + 5] = 0;
+        pos[o + 6] = qz; pos[o + 7] = qw;
+      }
+      return;
+    }
     for (let i = 0; i < p.count; i++, o += 8) {
       pos[o] = rest[i * 3] + p.tx; pos[o + 1] = rest[i * 3 + 1] + p.ty; pos[o + 2] = rest[i * 3 + 2] + p.tz;
       pos[o + 3] = sc ? sc[i] : 1; pos[o + 4] = 0; pos[o + 5] = 0; pos[o + 6] = 0; pos[o + 7] = 1;
@@ -248,7 +308,7 @@ export class Live {
     if (!this.waiters) return;
     this.waiters = this.waiters.filter((w) => {
       if (w.list.some((p) => p.fx)) return true;
-      w.resolve();
+      w.resolve(true);
       return false;
     });
   }
@@ -260,6 +320,7 @@ export class Live {
     this.canvas.remove();
     this.el.removeAttribute('data-vx-live');
     this.el.removeAttribute('data-vx-cover-legends');
+    this.el.style.removeProperty('--vx-face-z');
     for (const l of this.labels) l.node.style.transform = '';
   }
 }

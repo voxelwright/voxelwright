@@ -15,6 +15,25 @@
   .states > .vx-button:nth-of-type(3) { margin-block-start: calc(var(--vx) * 5); }
   /* Both examples stay open. Leave room for the long plate to flip above its key. */
   .states > .vx-button:nth-of-type(4) { margin-block-start: calc(var(--vx) * 41); }
+
+  #t-deploy {
+    --vx: 3px;
+    max-inline-size: min(18rem, calc(100vw - 24px));
+    padding: calc(var(--vx) * 2) calc(var(--vx) * 4);
+    color: #f7edd7;
+    line-height: 1.45;
+    user-select: text;
+  }
+  #t-deploy code { color: #ffda9c; font: 600 .96em/1 ui-monospace, monospace; }
+  #t-deploy:not([data-vx-live]) {
+    background: #25302c;
+    box-shadow: inset 0 0 0 2px #837e70, 0 2px 0 #353a34;
+  }
+  @media (forced-colors: active) {
+    #t-deploy { background: Canvas; color: CanvasText; border: 1px solid CanvasText; }
+    #t-deploy code { color: inherit; }
+    #t-deploy canvas { visibility: hidden; }
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -34,7 +53,7 @@
       <strong>harbor-api</strong>
       <div class="row" id="keys">
         <button class="vx-button" id="k-deploy" data-vx-kind="main" aria-describedby="t-deploy">Deploy</button>
-        <span class="vx-tooltip" id="t-deploy" role="tooltip" popover="manual">Builds main and swaps it in</span>
+        <span class="vx-tooltip" id="t-deploy" data-vx-fitting="legend" role="tooltip" popover="manual">Builds and publishes <code>main</code></span>
         <button class="vx-button" id="k-back" aria-describedby="t-back">Roll back</button>
         <span class="vx-tooltip" id="t-back" role="tooltip" popover="manual">To build 213, from yesterday</span>
         <button class="vx-button" id="k-logs" aria-describedby="t-logs">Logs</button>
@@ -61,7 +80,13 @@
   import { tooltip } from '../../src/components/tooltip.js';
   await show(tooltip);
   // the page's picture shows them open; ?hand leaves everything closed for a check with a real mouse
-  if (!new URLSearchParams(location.search).has('hand')) for (const id of ['t-back', 'ts-above', 'ts-below', 'ts-long', 'ts-edge']) document.getElementById(id).showPopover();
+  if (!new URLSearchParams(location.search).has('hand')) {
+    // The staged Roll back example yields as soon as someone reads Deploy.
+    document.querySelector('#t-deploy').addEventListener('beforetoggle', event => {
+      if (event.newState === 'open') document.querySelector('#t-back').hidePopover();
+    }, { once: true });
+    for (const id of ['t-back', 'ts-above', 'ts-below', 'ts-long', 'ts-edge']) document.getElementById(id).showPopover();
+  }
 </script>
 </body>
 </html>

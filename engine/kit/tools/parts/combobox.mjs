@@ -40,7 +40,7 @@ const read = (id) => p.evaluate(async (id) => {
     shown: seen.map((o) => o.textContent.trim().split(/\s{2,}| (?=Frankfurt|Amsterdam|Warsaw|Київ|archived)/)[0]), active: act ? act.firstChild.textContent.trim() : null,
     selected: opts.filter((o) => o.getAttribute('aria-selected') === 'true').length, focus: document.activeElement === input,
     under: Math.round(f.top - w.bottom), sameW: Math.abs(f.width - w.width) <= 4, left: Math.round(f.left - w.left),
-    body: made(parts?.body), light: made(parts?.light), pick: made(parts?.pick), pickShown: parts ? !parts.pick.hidden : null,
+    body: made(parts?.body), slides: made(parts?.panel), pick: made(parts?.pick), pickShown: parts ? !parts.pick.hidden : null,
     pickY: parts ? parts.pick.ty * l.vx : null, actY: act ? Math.round(act.getBoundingClientRect().top - f.top) : null,
     empty: empty && !empty.hidden ? empty.textContent : null,
   };
@@ -56,7 +56,7 @@ await press('#use-q');
 m = await read('use');
 say(m.open && m.expanded === 'true' && m.focus && m.shown.length === 9 && m.active === null, `a press in the field opens the rows (${m.shown.length}), marks none, and the focus stays in the field`);
 say(m.under >= 4 && m.under <= 24 && m.sameW && m.left === 0, `the float lies under the well, as wide as it (${m.under} px under)`);
-say(m.body === 'key' && m.light === 'light' && m.pick === 'light', `it is a float: a plate of ${m.body} on a ring of ${m.light}, and a mark of ${m.pick}`);
+say(m.body === 'lens+panel+slate' && m.slides === 'steel' && m.pick === 'light', 'the primary tray carries its reading face and smoked channel on steel slides, with a lit cursor');
 
 // typing: what matches, and the first marked
 await p.keyboard.type('fe', { delay: 40 }); await p.waitForTimeout(400);
@@ -164,6 +164,31 @@ m = await read('use');
 const fits = await p.evaluate(() => { const f = document.querySelector('#use .vx-combobox-float').getBoundingClientRect(); return f.left >= 0 && f.right <= innerWidth && document.documentElement.scrollWidth <= innerWidth; });
 say(m.open && m.shown.includes('Розгорнути на сервері') && fits, `at 390 px the float stays in the window, and a Ukrainian row is found by its letters (${m.shown.join(', ')}; ${fits ? 'inside' : 'cut'}; "${m.value}", ${m.open ? 'out' : 'shut'}, focus ${m.focus})`);
 await p.screenshot({ path: 'shots/parts/combobox/hand-phone.png' });
+await p.setViewportSize({ width: 1180, height: 900 });
+await p.locator('#use-q').fill('Розгорнути');
+await p.waitForFunction(() => document.querySelector('#use [data-vx-active]')?.offsetHeight === 44);
+await p.setViewportSize({ width: 320, height: 720 });
+await p.waitForFunction(() => {
+  const tray = document.querySelector('#use .vx-combobox-float'), live = window.vx.live(tray);
+  const row = tray.querySelector('[data-vx-active]');
+  if (!row || !live || live.model.byName.pick?.hidden !== false || row.offsetHeight <= 11 * live.vx) return false;
+  const center = row.getBoundingClientRect().top - tray.getBoundingClientRect().top + row.offsetHeight / 2;
+  return Math.abs((live.model.byName.pick.ty + 5.5) * live.vx - center) <= live.vx / 2;
+});
+say(true, 'cursor is centered on the complete Ukrainian row at 320px');
+await open('&closed');
+await p.locator('#use-q').focus();
+await p.evaluate(() => scrollTo(0, 0));
+await p.keyboard.press('ArrowDown');
+const float = p.locator('#use .vx-combobox-float');
+await p.waitForFunction(() => window.vx.live(document.querySelector('#use .vx-combobox-float')).state.above);
+const initialTop = await float.evaluate(el => el.style.top);
+await float.evaluate(el => {
+  const live = window.vx.live(el), well = document.querySelector('#use .vx-well');
+  scrollBy(0, Math.round(well.getBoundingClientRect().bottom + (2 + live.faceZ / 2) * live.vx - parseFloat(el.style.top)));
+});
+await p.waitForFunction(() => window.vx.live(document.querySelector('#use .vx-combobox-float')).model.byName.panel.ty === 0);
+say(await float.evaluate(el => el.style.top) === initialTop, 'slides flip to the field when the tray changes sides at the same viewport position');
 await p.setViewportSize({ width: 1180, height: 900 });
 
 // plain

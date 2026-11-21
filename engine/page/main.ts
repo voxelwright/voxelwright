@@ -273,6 +273,8 @@ async function main() {
   // The town's residents (#218): by rule from place and from the clock every page of a world shares. `?people=0` leaves them out.
   const folkClock = { now: () => Date.now() / 1000 }
   const shocks: Shock[] = []
+  /** Where the cutter cut (street life closes the roads it broke, as a blast's). */
+  const cuts: { at: [number, number, number]; radius: number }[] = []
   /** Residents a rule of the world has taken as its actors: the town's rule leaves them out (presence.ts). */
   const takenOff = new Set<number>()
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
@@ -312,9 +314,17 @@ async function main() {
     water.light(sun, day)
   }
   // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
+  /** The realm's own light (#450): the sun and grade of the afternoon it is seen in, the hour unset (the eggs give it back, eggs.ts). */
+  const ownLight = () => {
+    if (!LOCAL?.air?.sun) return setHour(null)
+    hour = null
+    const sun = LOCAL.air.sun
+    march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1)
+    if (LOCAL.air.grade) grade = LOCAL.air.grade
+  }
   if (LOCAL?.air) {
     march.air = { haze: Number(query.get('haze') ?? LOCAL.air.haze ?? 1), clouds: Number(query.get('clouds') ?? LOCAL.air.clouds ?? 1), sky: LOCAL.air.sky }
-    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) { const sun = LOCAL.air.sun; march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1); if (LOCAL.air.grade) grade = LOCAL.air.grade }
+    if (LOCAL.air.sun && !query.has('hour') && LOCAL.look?.hour === undefined) ownLight()
   }
   if (query.has('hour')) setHour(Number(query.get('hour')))
   else if (LOCAL?.look?.hour !== undefined) setHour(LOCAL.look.hour)
@@ -477,7 +487,9 @@ async function main() {
     // For whoever measures (test/sf.mjs): the first picture handed to the GPU, and the first with every box of the world made.
     if (!seen.first) seen.first = performance.now()
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
-    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) seen.near = performance.now()
+    // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
+    // view, so that the skyline is in the first picture; only then does the far model fetch the rest.
+    if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
@@ -777,7 +789,7 @@ async function main() {
       shadow?.postMessage({ forget: true })
       for (const piece of moving.values()) piece.destroy()
       for (const l of lying) l.piece.destroy()
-      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+      moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
       heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; flames = new Float32Array(0)
       for (const id of [...made.all.keys()]) made.heard({ by: '', gone: id }, false)
       // The sun's maps are drawn again where the old world's edits were, once those sectors have been made again.
@@ -836,6 +848,7 @@ async function main() {
       runs.push(at[0] - half, at[0] + half + 1, at[1] + dy, at[2] + dz, 0)
     }
     make(rows(Int32Array.from(runs), [at[0] - reach, at[1], at[2] - reach, at[0] + reach + 1, at[1] + 2, at[2] + reach + 1]), at)
+    cuts.push({ at, radius: reach })
     return { at, ...hit }
   }
 
@@ -1252,7 +1265,7 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
     streetLife = life
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
@@ -1294,8 +1307,11 @@ async function main() {
    * core): letting go of the edits is the whole of it, and nothing is sent anywhere. The eye goes back to where the
    * realm begins, on foot if it was, and the kept things are set down again.
    */
+  /** What else is put back with the world (the eggs, eggs.ts). */
+  const resetting = new Set<() => void>()
   const reset = async () => {
     if (far) return over.notice('A shared world is put back by its keeper, not by one page', 5000)
+    for (const each of resetting) each()
     const afoot = me.on
     alive.forget()
     if (afoot) me.walk(false)
@@ -1303,7 +1319,7 @@ async function main() {
     moverAge++
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
-    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0
+    moving.clear(); lying = []; putting = []; asked.length = 0; shocks.length = 0; cuts.length = 0
     heard = 0; waiting = 0; bodies = 0; burning = 0; running = false; ticking = false; owed = 0; flames = new Float32Array(0)
     spoiled.push(...world.swap([]))
     farModel.forget()
@@ -1347,7 +1363,33 @@ async function main() {
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) }) })
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
+    // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and its signs (signs-stand-in.ts,
+    // the shape of feature/450-boards' signs.ts until it lands). Fetched once the park is shown, so that nothing
+    // of them is in the bytes before it.
+    let hushed: AudioContext | null = null
+    const hatch = () => {
+      if (!seen.near) return
+      watchers.delete(hatch)
+      void Promise.all([import('./eggs.ts'), import('./signs-stand-in.ts')]).then(([{ eggs }, { standInSigns }]) => {
+        const signs = standInSigns()
+        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
+          device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          mood: (m) => { realmLook.grade = m?.grade ? [m.grade[0], m.grade[1]] : null; realmLook.tint = m?.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] },
+          notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
+          watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          // The city's sound steps aside for an egg's: taken off the speakers, and put back.
+          hush: (on) => {
+            const voice = ears?.voice
+            if (!voice) return
+            if (on && !hushed) { try { voice.out.disconnect(voice.context.destination); hushed = voice.context } catch { /* not connected */ } }
+            else if (!on && hushed) { voice.out.connect(hushed.destination); hushed = null }
+          },
+        }) })
+      })
+    }
+    watchers.add(hatch)
   }
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.

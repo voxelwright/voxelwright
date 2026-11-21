@@ -19,6 +19,25 @@
   /* a caption stands four voxels above what it names: a keycap's side and the light at its foot are drawn two and a half voxels above its face, and a bezel reaches two past its slot */
   .state { display: grid; gap: calc(var(--vx) * 4); justify-items: start; }
   .state > span { color: var(--vx-ink-quiet); font-size: 0.875rem; }
+  #replicas {
+    --vx: 1px; --vx-look: replicas;
+    justify-self: start; gap: 4px; padding: 4px 16px 16px;
+  }
+  #replicas > :is(button, .vx-well) { --vx: 2px; }
+  #replicas > button {
+    width: 28px; height: 28px; margin: 8px; padding: 0; text-indent: 0;
+    font: 600 20px/1 var(--vx-mono);
+  }
+  #replicas > button::after { inset: -8px; }
+  #replicas > button[data-vx-live] .vx-label { visibility: hidden; }
+  #replicas > .vx-well { width: 72px; }
+  #replicas input {
+    min-height: 44px; padding: 3px 6px 0 8px; color: #232c24; caret-color: currentColor;
+    font: 400 22px/1 "Vox Text", var(--vx-mono); font-variant-numeric: tabular-nums;
+  }
+  #replicas .vx-well:has(:focus-visible) { outline: 2px solid #f9d28d; outline-offset: 0; }
+  #replicas:not([data-vx-live]) { background: #494f4f; }
+  #replicas .vx-well:not([data-vx-live]) { background: #c6cdad; box-shadow: inset 0 0 0 3px #262c29; }
   @media (max-width: 600px) { .scale { grid-template-columns: 1fr; gap: calc(var(--vx) * 2); } .scale .vx-stepper { margin-block-end: calc(var(--vx) * 3); } }
 </style>
 </head>
@@ -83,10 +102,11 @@
 <script type="module">
   import { show } from './parts.js';
   import { stepper } from '../../src/components/stepper.js';
+  import { replicaPlate } from './replicas.js';
   const said = document.getElementById('said');
   const words = { replicas: (v) => `${v} replicas`, memory: (v) => `${v} MB each`, timeout: (v) => `Requests end after ${v} s` };
   document.querySelector('.scale').addEventListener('change', (e) => { const f = words[e.target.closest('.vx-stepper')?.id]; if (f) said.textContent = f(e.target.value); });
-  show(stepper);
+  show(stepper, replicaPlate);
 </script>
 </body>
 </html>

@@ -37,7 +37,7 @@ const block = (p, group) => p.evaluate((g) => {
   const caps = l.state.caps, at = l.state.at;
   const under = caps.every((c, i) => { const [, , w, h] = at[i], s = seats[i]; return Math.abs((c.tx + (w - 2) / 2) * l.vx + (l.cssW - l.W * l.vx) / 2 - (s.offsetLeft + s.offsetWidth / 2)) <= 1 && Math.abs((c.ty + (h - 2) / 2) * l.vx + (l.cssH - l.H * l.vx) / 2 - (s.offsetTop + s.offsetHeight / 2)) <= 1; });
   const down = caps.map((c, i) => (c.tz <= -travel + 0.01 ? i : -1)).filter((i) => i >= 0);
-  const lit = caps.map((c, i) => (l.model.byName['lamp' + i].hidden ? -1 : i)).filter((i) => i >= 0);
+  const lit = caps.map((c, i) => (l.model.byName['lens' + i].col.some((component, n) => n % 4 === 3 && component > 0) ? i : -1)).filter((i) => i >= 0);
   const moving = caps.some((c, i) => l.spring('on' + i).moving || l.spring('hold' + i).moving);
   const tz = caps.map((c) => +c.tz.toFixed(2));
   return { index, down: down.join(), lit: lit.join(), under, tz: tz.join(' '), moving, on: under && !moving && down.join() === (index >= 0 ? String(index) : '') && tz.every((z, i) => (i === index ? z === -travel : z === 0)) };
@@ -61,10 +61,12 @@ const words = await p.evaluate(() => {
   const top = (e) => { const w = document.createTreeWalker(e, NodeFilter.SHOW_TEXT); let n; while ((n = w.nextNode()) && !n.textContent.trim()); const r = document.createRange(); r.selectNodeContents(n); const t = new DOMMatrix(getComputedStyle(n.parentElement).transform); return +(r.getBoundingClientRect().top - t.f - e.getBoundingClientRect().top).toFixed(2); };
   const moved = (e) => +new DOMMatrix(getComputedStyle(e.querySelector('.vx-label')).transform).f.toFixed(2);
   const [chosen, up] = document.querySelectorAll('#two label'), l = window.vx.live(document.getElementById('two'));
-  return [top(chosen), top(up), top(document.querySelector('#style button[aria-pressed="false"]')), moved(up) - moved(chosen), l.look.travel * 0.5 * l.vx];
+  const seatStyle = getComputedStyle(up);
+  const lensAllowance = (parseFloat(seatStyle.paddingBottom) - parseFloat(seatStyle.paddingTop)) / 2;
+  return [top(chosen), top(up), top(document.querySelector('#style button[aria-pressed="false"]')), moved(up) - moved(chosen), l.look.travel * 0.5 * l.vx, lensAllowance];
 });
 // (each is put on a whole pixel of the page by the stage, so they may differ by a part of one)
-say(Math.abs(words[0] - words[2]) < 1 && Math.abs(words[1] - words[2]) < 1, `a seat's words stand where a key's do (${words[0]} and ${words[1]} px down in a seat, ${words[2]} px down in the key)`);
+say(Math.abs(words[0] + words[5] - words[2]) < 1 && Math.abs(words[1] + words[5] - words[2]) < 1, `the seat legends center above their lower lens (${words[0]} and ${words[1]} px down in a seat, ${words[2]} px down in the key)`);
 say(Math.abs(words[3] - words[4]) < 1, `and lie on their own key's face: the words on a key that stands up are ${words[3]} px lower than on the latched one, as its face is (${words[4]})`);
 
 // ---- one of many: a radio group

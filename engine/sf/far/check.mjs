@@ -9,7 +9,7 @@
 // alone and with the far model (paired at full size). Pictures go to ~/.village/engine/sf/far/.
 //
 //   node sf/far/check.mjs [--no-build] [--far <dir>] [--only park,street] [--name run] [--query "&farreach=800"] [--night] [--quiet]
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -47,7 +47,10 @@ const VIEWS = {
   'palace-far': { size: [1280, 720], fov: 50, at: [50200, 40, 65600], look: [258.7, -0.5] },
 }
 const squeezed = new Map()
-const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(dist, 'sf', path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
+// The far model's paths are its listing's: beside the page (sf/far.json), or in the pinned release beside its manifest.
+const pointer = JSON.parse(readFileSync(join(dist, 'sf', 'current.json'), 'utf8'))
+const farBase = existsSync(join(dist, 'sf', 'far.json')) ? join(dist, 'sf') : join(dist, 'sf', pointer.manifest, '..')
+const brotli = (path) => { let n = squeezed.get(path); if (n === undefined) { n = brotliCompressSync(readFileSync(join(farBase, path)), { params: { [constants.BROTLI_PARAM_QUALITY]: 5 } }).length; squeezed.set(path, n) } return n }
 // The four of round one unless asked: `--only landmarks` for the twelve landmark views, `--only all` for every one.
 const only = { landmarks: Object.keys(VIEWS).filter((k) => k.includes('-')), all: Object.keys(VIEWS) }[arg('only', '')] ?? arg('only', 'park,downtown,pyramid,street').split(',')
 

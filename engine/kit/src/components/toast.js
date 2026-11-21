@@ -21,14 +21,15 @@ async function shatter(el, live, e) {
   const r = el.getBoundingClientRect();
   const from = e && (e.clientX || e.clientY) ? [(e.clientX - r.left) / live.vx, (e.clientY - r.top) / live.vx] : undefined;
   if (from) cue('break');
-  await live.play('crumble', null, { duration: 0.28, from });
+  const duration = el.dataset.vxSpecimen === 'deploy' ? 0.29 : 0.19;
+  await live.play('crumble', null, { duration, from, contact: !!from });
 }
 
 export const toastDef = {
   name: 'toast',
+  surface: 'courses',
   selector: '.vx-toast',
   pad: 9,
-  carryPlate: true,
 
   build(live, m) {
     const { W, H, el } = live;
@@ -71,6 +72,7 @@ export function makeToast(adopt, liveOf) {
     el.className = 'vx-toast';
     el.setAttribute('role', opts.kind === 'failed' ? 'alert' : 'status');
     el.dataset.vxKind = opts.kind || 'note';
+    if (opts.specimen === 'deploy') el.dataset.vxSpecimen = 'deploy';
     const text = document.createElement('span');
     text.className = 'vx-toast-text';
     text.textContent = message;
@@ -79,7 +81,7 @@ export function makeToast(adopt, liveOf) {
     owned.add(el);
     adopt(el);
     const live = liveOf(el);
-    live?.play('assemble', null, { duration: 0.3 });
+    live?.play('assemble', null, { duration: opts.specimen === 'deploy' ? 0.40 : 0.25 });
     cue(opts.kind === 'failed' ? 'failed' : opts.kind === 'done' ? 'done' : 'tick');
 
     let left = opts.duration ?? 4200, since = performance.now(), timer = 0, gone = false;
@@ -88,19 +90,29 @@ export function makeToast(adopt, liveOf) {
       if (gone) return;
       gone = true;
       clearTimeout(timer);
+      document.removeEventListener('visibilitychange', syncTimer);
       await shatter(el, live, e);
       el.dispatchEvent(new CustomEvent('vx-dismiss', { bubbles: true }));
       el.remove();
     };
     el.addEventListener('click', dismiss);
     // the clock stops while the pointer is over it, while it has focus, and while the tab is hidden
-    const run = () => { since = performance.now(); if (left !== Infinity) timer = setTimeout(() => dismiss(), left); };
-    const hold = () => { clearTimeout(timer); left -= performance.now() - since; };
-    el.addEventListener('pointerenter', hold);
-    el.addEventListener('pointerleave', run);
-    const vis = () => { if (gone) return document.removeEventListener('visibilitychange', vis); document.hidden ? hold() : run(); };
-    document.addEventListener('visibilitychange', vis);
-    if (left !== Infinity) run();
+    const syncTimer = () => {
+      if (gone || left === Infinity) return;
+      if (document.hidden || el.matches(':hover, :focus-within')) {
+        if (timer) left -= performance.now() - since;
+        clearTimeout(timer);
+        timer = 0;
+      } else if (!timer) {
+        since = performance.now();
+        timer = setTimeout(dismiss, left);
+      }
+    };
+    for (const event of ['pointerenter', 'pointerleave', 'focusin', 'focusout']) {
+      el.addEventListener(event, () => queueMicrotask(syncTimer));
+    }
+    document.addEventListener('visibilitychange', syncTimer);
+    syncTimer();
     return dismiss;
   };
 }

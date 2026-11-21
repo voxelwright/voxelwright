@@ -106,22 +106,7 @@ struct Building {
     high: [i32; 2],
 }
 
-struct WallPaint {
-    base: i32,
-    width: usize,
-    cells: Vec<u8>,
-}
-
-impl WallPaint {
-    fn colour(&self, along: f32, altitude: i32) -> Option<u8> {
-        let y = usize::try_from(altitude.checked_sub(self.base)?).ok()? / 3;
-        let x = (along / 3.0) as usize;
-        self.cells.get(y.checked_mul(self.width)?.checked_add(x.min(self.width - 1))?).copied().filter(|&v| v != 0)
-    }
-}
-
 struct Pack {
-    paint: std::collections::BTreeMap<u32, WallPaint>,
     /// The ground: a sample every `gstep` cells, `gw` a side, the first at (`gx0`, `gz0`).
     gstep: i32,
     gw: i32,
@@ -236,7 +221,7 @@ fn read(b: &[u8]) -> Option<Pack> {
     let tint = take(tw * tw)?.to_vec();
     let walls = if head[15] & 1 == 1 { take(tw * tw * 2)?.chunks_exact(2).map(|w| u16::from_le_bytes([w[0], w[1]])).collect() } else { Vec::new() };
     let rows = ints(take(nb.checked_mul(24)?)?);
-    let verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
+    let mut verts: Vec<[i32; 3]> = ints(take(nv.checked_mul(12)?)?).chunks_exact(3).map(|v| [v[0], v[1], v[2]]).collect();
     let trunks: Vec<[i32; 4]> = ints(take(nt.checked_mul(16)?)?).chunks_exact(4).map(|v| [v[0], v[1], v[2], v[3]]).collect();
     let mut fixtures = Vec::new();
     if b.get(from..).is_some_and(|tail| tail.starts_with(b"SFST")) {
@@ -261,13 +246,12 @@ fn read(b: &[u8]) -> Option<Pack> {
         tail = tail.get(8..)?;
         for _ in 0..n {
             let edge = u32::from_le_bytes(tail.get(..4)?.try_into().ok()?);
-            let base = i32::from_le_bytes(tail.get(4..8)?.try_into().ok()?);
+            // Bytes 4..8 are the wall's lowest cell: one colour for a building needs no place on its wall.
             let width = u16::from_le_bytes(tail.get(8..10)?.try_into().ok()?) as usize;
             let height = u16::from_le_bytes(tail.get(10..12)?.try_into().ok()?) as usize;
             if edge as usize >= nv || width == 0 || height == 0 { return None; }
             let end = 12 + width.checked_mul(height)?;
-            let cells = tail.get(12..end)?.to_vec();
-            if paint.insert(edge, WallPaint { base, width, cells }).is_some() { return None; }
+            if paint.insert(edge, tail.get(12..end)?).is_some() { return None; }
             tail = tail.get(end..)?;
         }
         if !tail.is_empty() { return None; }
@@ -275,15 +259,19 @@ fn read(b: &[u8]) -> Option<Pack> {
     let mut buildings = Vec::with_capacity(nb);
     for r in rows.chunks_exact(6) {
         let (first, count) = (r[0] as usize, r[1] as usize);
-        let own = verts.get(first..first.checked_add(count)?)?;
+        let own = verts.get_mut(first..first.checked_add(count)?)?;
         if own.is_empty() {
             return None;
         }
+        join_cornices(own);
         let style = r[4] as u32;
         buildings.push(Building {
             first,
             count,
-            wall: r[2] as Kind,
+            wall: match painted_colour((first..first + count).filter_map(|e| paint.get(&(e as u32)).copied())) {
+                Some(tint) => kind(material(r[2] as Kind), tint),
+                None => r[2] as Kind,
+            },
             trim: r[3] as Kind,
             storey: (style & 255).max(20) as i32 * if style >> 19 & 1 == 1 { 3 } else { 1 },
             module: (style >> 8 & 255).max(16) as i32,
@@ -297,7 +285,7 @@ fn read(b: &[u8]) -> Option<Pack> {
         });
     }
     let under_leaf_road = road_greys(&class, &tint, tw);
-    let mut p = Pack { paint, gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
+    let mut p = Pack { gstep: head[4], gw: head[5], gx0: head[6], gz0: head[7], ground, tstep: head[8], tw: tw as i32, tx0: head[10], tz0: head[11], top, class, tint, under_leaf_road, walls, buildings, verts, trunks, near: Vec::new(), stems: Vec::new(), fixtures, fixtures_near: Vec::new(), pw: 0, lows: Vec::new(), highs: Vec::new(), bw: 0 };
     // Which buildings and trunks reach into each patch.
     let wide = (p.gw - 1) * p.gstep;
     p.pw = (wide >> PATCH) + 1;
@@ -363,6 +351,66 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     Some(p)
+}
+
+/// What a building's photographs (bay/facade_paint.py: a colour every 30 cm of a wall it was seen on) say its walls
+/// are: the colour most of their light cells agree on. Drawn cell by cell they were a mosaic (#450), each cell keeping
+/// whatever stood before the wall that day (leaves, shade, a sign, a passer-by) and the dark of windows the rules did
+/// not draw. Dark cells (windows, shade) are not counted; where under three in ten of the rest agree, or there are
+/// too few to say, the photographs say nothing and the building keeps the colour its bake gave it. Nor do they where
+/// they agree on white: most painted walls are white by that count, cream and ochre fronts among them, a wall
+/// blown out by the sun as often as a white one (North Beach), and the bake's colour (appearance.py) stands.
+fn painted_colour<'a>(walls: impl Iterator<Item = &'a [u8]>) -> Option<u8> {
+    // Greys from the ninth down, and each hue's deep, dark and dusty dark tones (kinds.rs `colour`).
+    let dark = |v: u8| if v < 16 { v >= 9 } else { matches!((v - 16) % 10, 5 | 6 | 9) };
+    let mut count = [0u32; 256];
+    for cells in walls {
+        for &c in cells.iter().filter(|&&c| c != 0 && !dark(c)) {
+            count[c as usize] += 1;
+        }
+    }
+    let total: u32 = count.iter().sum();
+    let (best, &n) = count.iter().enumerate().max_by_key(|&(i, &n)| (n, std::cmp::Reverse(i)))?;
+    (total >= 24 && n * 10 >= total * 3 && best > 2).then_some(best as u8)
+}
+
+/// A street front surveyed as a chain of bays is many short edges, and the bake (street_detail.py `facades`) gives
+/// its details only to edges of 0.7 m or more. The cornice stood on the long edges and not on the short ones between
+/// them: blocks with gaps, battlements along every bayed roofline (#450). An edge under 0.7 m whose nearest long
+/// edges on either side both face the street with a cornice is part of that front: it takes their facing, their
+/// cornice and, where both were surveyed, the mean of their eaves.
+fn join_cornices(ring_verts: &mut [[i32; 3]]) {
+    const SHORT: f32 = 7.0;
+    const CORNICE: i32 = 2 << 24;
+    const EAVE: i32 = 0xff_ff00;
+    let mut start = 0;
+    while start < ring_verts.len() {
+        let end = (start..ring_verts.len()).find(|&i| ring_verts[i][2] & 4 != 0).unwrap_or(ring_verts.len() - 1) + 1;
+        let ring = &mut ring_verts[start..end];
+        let n = ring.len();
+        let long: Vec<bool> = (0..n).map(|i| {
+            let (a, c) = (ring[i], ring[(i + 1) % n]);
+            (((c[0] - a[0]) as f32).powi(2) + ((c[1] - a[1]) as f32).powi(2)).sqrt() >= SHORT
+        }).collect();
+        if long.iter().any(|&l| l) {
+            let looks: Vec<i32> = ring.iter().map(|v| v[2]).collect();
+            let corniced = |i: usize| long[i] && looks[i] & 3 == 3 && looks[i] & CORNICE != 0;
+            for i in (0..n).filter(|&i| !long[i]) {
+                let before = (1..n).map(|k| (i + n - k) % n).find(|&k| long[k]).unwrap();
+                let after = (1..n).map(|k| (i + k) % n).find(|&k| long[k]).unwrap();
+                if !(corniced(before) && corniced(after)) {
+                    continue;
+                }
+                let mut v = looks[i] | 3 | CORNICE;
+                if v & 128 == 0 && looks[before] & looks[after] & 128 != 0 {
+                    let eave = |l: i32| (l >> 8) as i16 as i32;
+                    v = (v & !EAVE) | 128 | ((eave(looks[before]) + eave(looks[after])) / 2 & 0xffff) << 8;
+                }
+                ring[i][2] = v;
+            }
+        }
+        start = end;
+    }
 }
 
 impl Pack {
@@ -510,7 +558,10 @@ impl Pack {
             let t = if length > 0.0 { ((ux*dx+uz*dz)/length).clamp(0.0,1.0) } else { 0.0 };
             let cable = r[6] <= 3;
             if cable && size > 2 { continue; }
-            let rad = r[6] as f32/10.0 + if cable && size == 2 { 0.3 } else { size as f32*0.71 };
+            // A cell is in a rod when its middle is within the rod's radius, and never less than the 0.71 of a cell
+            // that keeps a thin one whole at any slant. Added to the radius, it made a stop sign's plate a red box
+            // 1 m across and 24 cm deep and every lamp's mast 38 cm thick (#450).
+            let rad = if cable { r[6] as f32/10.0 + if size == 2 { 0.3 } else { size as f32*0.71 } } else { (r[6] as f32/10.0).max(size as f32*0.71) };
             let far = (ux-dx*t).powi(2)+(uz-dz*t).powi(2);
             if far > rad*rad { continue; }
             let height = |v:f32| r[1] as f32 + v*(r[4]-r[1]) as f32;
@@ -520,6 +571,21 @@ impl Pack {
             spans.push(FixtureSpan { low: (a.min(b)-rad).floor() as i32, high: (a.max(b)+rad).floor() as i32, rod: r });
         }
         spans
+    }
+
+    /// How high a front's wall stands near where a column meets it (`on`, with `inward` a unit step into the
+    /// building), where no eave was surveyed: the middle of five readings of the roof 0.4 m in from the outline,
+    /// 0.6 m apart along it. Read once a column, a corniced front's cornice followed the lidar's returns up and
+    /// down in teeth (#450); 17% of the corniced street edges in the panel's tiles have no surveyed eave.
+    fn eave_near(&self, on: [f32; 2], inward: [f32; 2]) -> Option<i32> {
+        let mut seen: Vec<i32> = [-12.0f32, -6.0, 0.0, 6.0, 12.0].iter().filter_map(|&k| {
+            self.top((on[0] + inward[0] * 4.0 - inward[1] * k) as i32, (on[1] + inward[1] * 4.0 + inward[0] * k) as i32)
+        }).collect();
+        if seen.len() < 3 {
+            return None;
+        }
+        seen.sort_unstable();
+        Some(seen[seen.len() / 2])
     }
 
     /// The trunk nearest a column, if one stands within reach: how far off it is, and the trunk.
@@ -683,7 +749,6 @@ impl FixtureSpan {
 }
 
 struct Column<'a> {
-    paint: Option<&'a WallPaint>,
     g: i32,
     road_top4: Option<i32>,
     /// The ground's top cell's kind, and how many cells of it stand over the ground (a pavement's kerb).
@@ -727,7 +792,7 @@ fn hero_at(x: i32, z: i32, size: i32) -> Option<(Hero, f32, f32)> {
 fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
     let hero = hero_at(x, z, size);
     let Some(p) = pick(packs, x, z, size) else {
-        return Column { paint: None, g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
+        return Column { g: BED, road_top4: None, ground: kind(SAND, OWN), kerb: 0, fixtures: Vec::new(), what: What::Open, hero };
     };
     let ground_height = p.ground_height(x, z);
     let g = (ground_height + 0.5).floor() as i32;
@@ -761,7 +826,16 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             let roof = if probe.looks & 128 != 0 && probe.far < 15.0 {
                 let eave = (probe.looks >> 8) as i16 as i32;
                 let blend = ((probe.far - 5.0) / 10.0).clamp(0.0, 1.0);
-                (eave as f32 + (raster - eave) as f32 * blend).round() as i32
+                let blended = (eave as f32 + (raster - eave) as f32 * blend).round() as i32;
+                // Behind a cornice (kind_at `By`, to three cells over the eave) the roof's railings and the lidar's
+                // mixed returns stood up in teeth over it (#450): within 1.5 m of the front it is the wall's top.
+                if probe.looks >> 24 & 2 != 0 { blended.min(eave + 3) } else { blended }
+            } else if probe.looks >> 24 & 2 != 0 && probe.far < 15.0 {
+                let (far, cx, cz) = (probe.far.max(0.01), x as f32 + 0.5, z as f32 + 0.5);
+                match p.eave_near(probe.on, [(cx - probe.on[0]) / far, (cz - probe.on[1]) / far]) {
+                    Some(eave) => raster.min(eave + 3),
+                    None => raster,
+                }
             } else { raster }.max(g + 22);
             What::In(b, probe, roof, tint)
         }
@@ -770,7 +844,14 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             let (dx, dz) = (probe.on[0] - (x as f32 + 0.5), probe.on[1] - (z as f32 + 0.5));
             let far = probe.far.max(0.01);
             let (ix, iz) = ((probe.on[0] + dx / far * 4.0) as i32, (probe.on[1] + dz / far * 4.0) as i32);
-            match if probe.looks & 128 != 0 { Some((probe.looks >> 8) as i16 as i32) } else { p.top(ix, iz) } {
+            let eave = if probe.looks & 128 != 0 {
+                Some((probe.looks >> 8) as i16 as i32)
+            } else if probe.looks >> 24 & 2 != 0 {
+                p.eave_near(probe.on, [dx / far, dz / far]).or_else(|| p.top(ix, iz))
+            } else {
+                p.top(ix, iz)
+            };
+            match eave {
                 Some(roof) => What::By(b, probe, roof),
                 None => What::Open,
             }
@@ -794,7 +875,10 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
                         let middle = g as f32 + high as f32 - deep / 2.0;
                         let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
                         let foot = (under as i32 + ragged).max(g + 18).min(t - 3);
-                        What::Crown { foot, top: t, trunk: (far <= (trunk[3] & 255) as f32 + 0.5).then(|| t - 8),
+                        // The trunk goes a third of the way up into its crown, where its limbs take over. Up to the
+                        // crown's top it showed through the crown's openings as a bare rod from above (#450).
+                        let crown = ((g as f32 + high as f32 - deep) as i32).max(g + 18);
+                        What::Crown { foot, top: t, trunk: (far <= (trunk[3] & 255) as f32 + 0.5).then(|| crown + (t - crown) / 3),
                             tint, edge: (far/rim.max(1.0)).min(1.0) }
                     }
                     // A bush or a hedge is leaves to the ground.
@@ -806,11 +890,7 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
         },
         _ => What::Open,
     };
-    let paint = match &what {
-        What::In(_, probe, _, _) | What::By(_, probe, _) => p.paint.get(&probe.side),
-        _ => None,
-    };
-    Column { paint, g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
+    Column { g, road_top4, ground, kerb, fixtures: p.fixture_spans(x,z,size), what, hero }
 }
 
 fn measured_foliage(tint: u8) -> bool {
@@ -909,9 +989,6 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
             } else if let Some(form) = tower_base(b, p, mid - c.g, size) {
                 form
             } else if p.far < 3.0 * size as f32 && size <= 8 {
-                if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
-                    return kind(material(b.wall), tint);
-                }
                 front(b, p, mid - b.base, *roof - b.base, mid - c.g, p.far, size)
             } else {
                 b.wall
@@ -943,7 +1020,9 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
                     return kind(STEEL, grey(13));
                 }
             }
-            if detail & 2 != 0 && p.far <= 4.0 && up >= top-4 && up <= top+3 { return b.trim; }
+            // A cornice is a painted moulding in the trim's colour: concrete's slab joints every 1.6 m cut it into
+            // merlons (#450).
+            if detail & 2 != 0 && p.far <= 4.0 && up >= top-4 && up <= top+3 { return kind(PLASTER, (b.trim >> 8) as u8); }
             // The cornice stands a cell or two out from the wall's top.
             if p.far < 2.0 && up >= top - 3 && up <= top {
                 return b.trim;
@@ -966,9 +1045,6 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
             let out = 6.0 - (mu.abs() - 5.0).max(0.0);
             if p.far >= out {
                 return 0;
-            }
-            if let Some(tint) = c.paint.and_then(|patch| patch.colour(p.along, mid)) {
-                return kind(material(b.wall), tint);
             }
             let fy = up.rem_euclid(b.storey);
             if up >= top - 6 {
@@ -1182,7 +1258,7 @@ mod tests {
     #[test]
     fn measured_crowns_have_openings_and_keep_the_trunk() {
         let tint = colour(6, 5);
-        let mut c = Column { paint: None, g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
+        let mut c = Column { g: 0, road_top4: None, ground: kind(EARTH, OWN), kerb: 0,
             what: What::Crown { foot: 25, top: 70, trunk: None, tint, edge: 0.9 }, fixtures: Vec::new(), hero: None };
         let mut gaps = 0;
         let mut leaves = 0;
@@ -1203,7 +1279,7 @@ mod tests {
     #[test]
     fn a_surveyed_grade_has_quarter_cell_risers_on_both_sides_of_zero() {
         let ground = kind(ASPHALT, grey(5));
-        let mut c = Column { paint: None, g: 3, road_top4: Some(17), ground, kerb: 0,
+        let mut c = Column { g: 3, road_top4: Some(17), ground, kerb: 0,
             what: What::Open, fixtures: Vec::new(), hero: None };
         let mut rows = Vec::new();
         grade_rows(&c, 4, 2, 0, &mut rows);
@@ -1252,24 +1328,65 @@ mod tests {
         assert!(read(&wrong).is_none());
     }
 
-    #[test]
-    fn projected_wall_reads_only_its_measured_cells() {
+    /// A pack with one painted wall on the house's first side: `cells` 6 wide, 5 high.
+    fn painted(cells: &[u8; 30]) -> Vec<u8> {
         let mut bytes = pack();
         bytes.extend(b"SFPT");
         bytes.extend(1u32.to_le_bytes());
         bytes.extend(0u32.to_le_bytes());
         bytes.extend(40i32.to_le_bytes());
-        bytes.extend(2u16.to_le_bytes());
-        bytes.extend(2u16.to_le_bytes());
-        bytes.extend([8, 0, 111, 26]);
-        let p = read(&bytes).unwrap();
-        let face = &p.paint[&0];
-        assert_eq!(face.colour(0.0, 40), Some(8));
-        assert_eq!(face.colour(4.0, 40), None);
-        assert_eq!(face.colour(4.0, 43), Some(26));
-        assert_eq!(face.colour(4.0, 47), None);
-        assert_eq!(face.colour(1.0, 39), None);
-        assert!(read(&bytes[..bytes.len()-1]).is_none());
+        bytes.extend(6u16.to_le_bytes());
+        bytes.extend(5u16.to_le_bytes());
+        bytes.extend(cells);
+        bytes
+    }
+
+    #[test]
+    fn photographs_give_a_house_one_wall_colour_not_a_mosaic() {
+        let (cream, sky, window) = (colour(4, 7), colour(16, 1), colour(16, 6));
+        // Mostly cream, windows dark, a few cells of whatever stood before the wall: the house is cream throughout.
+        let mut cells = [cream; 30];
+        cells[..3].copy_from_slice(&[window; 3]);
+        cells[3..6].copy_from_slice(&[sky, colour(8, 2), 0]);
+        let p = read(&painted(&cells)).unwrap();
+        assert_eq!(p.buildings[0].wall, kind(PLASTER, cream));
+        // Cells that do not agree (under three in ten of the light ones on any colour) say nothing.
+        let mosaic: [u8; 30] = std::array::from_fn(|i| colour(i as u8 % 24, [0, 1, 2, 3, 7][i / 6]));
+        assert_eq!(read(&painted(&mosaic)).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
+        // White, or dark cells alone (windows, shade), say nothing either.
+        let mut white = [WHITE; 30];
+        white[..6].copy_from_slice(&[cream; 6]);
+        assert_eq!(painted_colour([&white[..]].into_iter()), None);
+        assert_eq!(painted_colour([&cells[..]].into_iter()), Some(cream));
+        assert_eq!(read(&painted(&[window; 30])).unwrap().buildings[0].wall, kind(PLASTER, WHITE));
+        let bytes = painted(&cells);
+        assert!(read(&bytes[..bytes.len() - 1]).is_none());
+    }
+
+    #[test]
+    fn an_unsurveyed_eave_is_the_middle_of_five_readings_not_one_spike() {
+        let mut p = read(&pack()).unwrap();
+        // The house's roof is 260 throughout; one reading of it 0.4 m in from its north side stands at 300.
+        assert_eq!(p.top(300, 204), Some(260));
+        p.top[40 * 128 + 60] = 300;
+        assert_eq!(p.top(300, 204), Some(300));
+        assert_eq!(p.eave_near([300.0, 200.0], [0.0, 1.0]), Some(260));
+    }
+
+    #[test]
+    fn short_edges_between_corniced_bays_carry_the_cornice() {
+        // A front of three bays, 1.2 m each, joined by 0.4 m edges the bake gave no detail; and a 0.4 m edge turning
+        // the corner onto a side with no cornice keeps none.
+        let corniced = |eave: i32| 3 | 2 << 24 | 128 | eave << 8;
+        let mut ring = [[0, 0, corniced(300)], [12, 0, 0], [16, 0, corniced(320)], [28, 0, 0], [32, 0, corniced(300)],
+            [44, 0, 0], [48, 0, 1], [48, 40, 1], [0, 40, 4 | 1]];
+        join_cornices(&mut ring);
+        for i in [1, 3] {
+            assert_eq!(ring[i][2] & (3 | 2 << 24 | 128), 3 | 2 << 24 | 128, "edge {i}");
+        }
+        assert_eq!(ring[1][2] >> 8 & 0xffff, 310);
+        assert_eq!(ring[5][2], 0);
+        assert_eq!(ring[8][2], 4 | 1);
     }
 
     #[test]

@@ -1,0 +1,405 @@
+/* ---------- Fittings ----------
+   Made by tools/fittings-css.mjs from src/looks/fittings.js. Do not edit: edit that, and run it again.
+   An instrument named in the page's HTML is fitted before any script runs, and where none runs:
+     <html data-vx-look="lit" data-shell="walnut" data-caps="field" data-profile="high">
+   At night (the system's dark setting, or data-theme="dark") the same enclosure has its lights
+   down; data-theme="light" keeps it by day. The first adopt() reads these attributes and gives
+   the voxels the same materials (fitInstrument() called earlier wins). */
+
+:root[data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #355347;
+  --vx-ground: #efece3;
+  --vx-chalk: #b98c65;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3d8be;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #253e4e;
+  --vx-ground: #26323a;
+  --vx-chalk: #445964;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #40545c;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #433e53;
+  --vx-ground: #25242d;
+  --vx-chalk: #49505c;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #363b49;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #4c6560;
+  --vx-ground: #e5e9e5;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3e7dd;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #365b62;
+  --vx-ground: #dfe8e7;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #d2e4dc;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell] {
+  --vx-hw-steel: #9d998a;
+  --vx-hw-gasket: #232824;
+  --vx-hw-slate: #515754;
+  --vx-hw-ivory: #dcd5c1;
+}
+
+/* at night */
+:root[data-theme="dark"][data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #16231d;
+  --vx-ground: #151a17;
+  --vx-chalk: #b98c65;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #262b26;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #0f1a21;
+  --vx-ground: #10171b;
+  --vx-chalk: #445964;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #24323a;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1c1a24;
+  --vx-ground: #131218;
+  --vx-chalk: #49505c;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #272a34;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1d2a28;
+  --vx-ground: #131918;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #283130;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #172629;
+  --vx-ground: #10191b;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #253234;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-shell="walnut"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #16231d;
+    --vx-ground: #151a17;
+    --vx-chalk: #b98c65;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #262b26;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="alloy"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #0f1a21;
+    --vx-ground: #10171b;
+    --vx-chalk: #445964;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #24323a;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="smoke"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1c1a24;
+    --vx-ground: #131218;
+    --vx-chalk: #49505c;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #272a34;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="frost"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1d2a28;
+    --vx-ground: #131918;
+    --vx-chalk: #ece9dd;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #283130;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="clear"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #172629;
+    --vx-ground: #10191b;
+    --vx-chalk: #c4e4df;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #253234;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+:root[data-caps="field"] {
+  --vx-key: #e9dfc5;
+  --vx-lamp-resin: #e9dfc5;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="linen"] {
+  --vx-key: #eee4cd;
+  --vx-lamp-resin: #eee4cd;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="carbon"] {
+  --vx-key: #393f3f;
+  --vx-lamp-resin: #393f3f;
+  --lit-legend: #f7ead4;
+  --vx-danger-legend: #ffd4c9;
+}
+:root[data-caps="opal"] {
+  --vx-key: #c8dfdf;
+  --vx-lamp-resin: #c8dfdf;
+  --lit-legend: #152c32;
+  --vx-danger-legend: #85261c;
+}
+
+/* the Ridgeline print, plain: inlay at the horizon, ridge below it */
+[data-caps="field"] {
+  --vx-cap-inlay: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 100' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath fill='%23909b80' d='M0 100V74.0H1V75.7H2V77.3H3V78.8H4V80.1H5V81.1H6V81.9H7V82.3H8V82.4H9V82.3H10V81.9H11V81.3H12V80.6H13V79.8H14V79.1H15V78.4H16V77.8H17V77.4H18V77.2H19V77.2H20V77.3H21V77.7H22V78.1H23V78.6H24V79.1H25V79.5H26V79.8H27V79.9H28V79.8H29V79.4H30V78.8H31V77.9H32V76.7H33V75.3H34V73.8H35V72.2H36V70.5H37V68.9H38V67.4H39V66.1H40V65.1H41V64.4H42V63.9H43V63.8H44V64.1H45V64.6H46V65.3H47V66.2H48V67.2H49V68.3H50V69.3H51V70.3H52V71.1H53V71.8H54V72.2H55V72.4H56V72.5H57V72.4H58V72.1H59V71.8H60V71.5H61V71.2H62V71.1H63V71.1H64V71.3H65V71.8H66V72.5H67V73.4H68V74.6H69V75.9H70V77.4H71V78.8H72V80.3H73V81.7H74V82.9H75V83.8H76V84.5H77V84.9H78V84.9H79V84.6H80V84.0H81V83.2H82V82.1H83V80.8H84V79.5H85V78.1H86V76.8H87V75.6H88V74.6H89V73.8H90V73.2H91V72.9H92V72.8H93V72.8H94V73.0H95V73.3H96V73.5H97V73.8H98V73.9H99V73.9H100V73.7H101V73.3H102V72.7H103V71.8H104V70.8H105V69.7H106V68.4H107V67.2H108V66.0H109V65.0H110V64.2H111V63.6H112V63.3H113V63.3H114V63.7H115V64.4H116V65.4H117V66.6H118V68.0H119V69.5H120V71.1H121V72.7H122V74.1H123V75.4H124V76.5H125V77.3H126V77.9H127V78.2H128V100Z'/%3E%3C/svg%3E");
+  --vx-cap-ridge: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 100' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath fill='%23637a6c' d='M0 100V74.0H1V75.7H2V77.3H3V78.8H4V80.1H5V81.1H6V81.9H7V82.3H8V82.4H9V82.3H10V81.9H11V81.3H12V80.6H13V79.8H14V79.1H15V78.4H16V77.8H17V77.4H18V77.2H19V77.2H20V77.3H21V77.7H22V78.1H23V78.6H24V79.1H25V79.5H26V79.8H27V79.9H28V79.8H29V79.4H30V78.8H31V77.9H32V76.7H33V75.3H34V73.8H35V72.2H36V70.5H37V68.9H38V67.4H39V66.1H40V65.1H41V64.4H42V63.9H43V63.8H44V64.1H45V64.6H46V65.3H47V66.2H48V67.2H49V68.3H50V69.3H51V70.3H52V71.1H53V71.8H54V72.2H55V72.4H56V72.5H57V72.4H58V72.1H59V71.8H60V71.5H61V71.2H62V71.1H63V71.1H64V71.3H65V71.8H66V72.5H67V73.4H68V74.6H69V75.9H70V77.4H71V78.8H72V80.3H73V81.7H74V82.9H75V83.8H76V84.5H77V84.9H78V84.9H79V84.6H80V84.0H81V83.2H82V82.1H83V80.8H84V79.5H85V78.1H86V76.8H87V75.6H88V74.6H89V73.8H90V73.2H91V72.9H92V72.8H93V72.8H94V73.0H95V73.3H96V73.5H97V73.8H98V73.9H99V73.9H100V73.7H101V73.3H102V72.7H103V71.8H104V70.8H105V69.7H106V68.4H107V67.2H108V66.0H109V65.0H110V64.2H111V63.6H112V63.3H113V63.3H114V63.7H115V64.4H116V65.4H117V66.6H118V68.0H119V69.5H120V71.1H121V72.7H122V74.1H123V75.4H124V76.5H125V77.3H126V77.9H127V78.2H128V100Z'/%3E%3C/svg%3E");
+  --vx-lamp-print: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 100' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath fill='%23637a6c' d='M0 100V90.0H1V92.7H2V95.2H3V97.4H4V99.2H5V100.0H6V100.0H7V100.0H8V100.0H9V100.0H10V98.9H11V97.6H12V96.3H13V95.1H14V94.1H15V93.4H16V93.0H17V93.0H18V93.2H19V93.7H20V94.2H21V94.7H22V95.1H23V95.1H24V94.8H25V94.0H26V92.8H27V91.1H28V89.1H29V86.8H30V84.4H31V82.1H32V80.0H33V78.2H34V76.9H35V76.2H36V76.1H37V76.6H38V77.7H39V79.3H40V81.2H41V83.4H42V85.6H43V87.7H44V89.6H45V91.1H46V92.3H47V93.0H48V93.3H49V93.3H50V93.0H51V92.5H52V92.1H53V91.8H54V91.8H55V92.0H56V92.6H57V93.5H58V94.7H59V96.2H60V97.8H61V99.3H62V100.0H63V100.0H64V100Z'/%3E%3C/svg%3E"), url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 100' preserveAspectRatio='none' shape-rendering='crispEdges'%3E%3Cpath fill='%23909b80' d='M0 100V82.0H1V84.7H2V87.2H3V89.4H4V91.2H5V92.4H6V93.1H7V93.2H8V92.8H9V92.0H10V90.9H11V89.6H12V88.3H13V87.1H14V86.1H15V85.4H16V85.0H17V85.0H18V85.2H19V85.7H20V86.2H21V86.7H22V87.1H23V87.1H24V86.8H25V86.0H26V84.8H27V83.1H28V81.1H29V78.8H30V76.4H31V74.1H32V72.0H33V70.2H34V68.9H35V68.2H36V68.1H37V68.6H38V69.7H39V71.3H40V73.2H41V75.4H42V77.6H43V79.7H44V81.6H45V83.1H46V84.3H47V85.0H48V85.3H49V85.3H50V85.0H51V84.5H52V84.1H53V83.8H54V83.8H55V84.0H56V84.6H57V85.5H58V86.7H59V88.2H60V89.8H61V91.3H62V92.6H63V93.6H64V100Z'/%3E%3C/svg%3E");
+}

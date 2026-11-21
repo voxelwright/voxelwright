@@ -22,8 +22,11 @@ VIEWS = ("street", "100 m")
 # Lamp masts, trunks and distant towers against the sky stand in the fixed renders with every unspanned pole gone:
 # at most three more than the photograph shows (Embarcadero, Fishermans Wharf, SoMa). Nob Hill's pillars made seven.
 PILLAR_EXCESS = 4
+# Shade bluer than this (render_checks.shade: blue less red) fails a street view. The 16 photographs read -12 to 19;
+# renders lit in shade by the sky's blue alone read 21 to 40, 11 of the 16 at 28 or more (#450).
+SHADE_BLUE = 22
 # Bump when a check or its threshold changes: cached inspections are keyed by it.
-VERSION = 2
+VERSION = 3
 
 
 def places():
@@ -97,10 +100,14 @@ def inspect(place, view, render, cache, judge=True):
         checks["pillars"] = dict(render=len(found), reference=len(seen), excess=excess, limit=PILLAR_EXCESS, at=found[:16])
         if excess >= PILLAR_EXCESS:
             defects.append(f"pillars: {len(found)} thin uprights against the sky, {len(seen)} in the photograph")
+        blue = rc.shade(shot)
+        checks["shade"] = dict(render=blue, reference=rc.shade(photo), limit=SHADE_BLUE)
+        if blue is not None and blue > SHADE_BLUE:
+            defects.append(f"shade: blue {blue} over red in the street's shade, more than {SHADE_BLUE}")
         checks["banding"] = dict(render=rc.banding(shot), reference=rc.banding(photo), decides=False)
         checks["windows"] = dict(render=rc.windows(shot), reference=rc.windows(photo), decides=False)
     else:
-        for name in ("pillars", "banding", "windows"):
+        for name in ("pillars", "shade", "banding", "windows"):
             checks[name] = "not applicable to a view from 100 m"
     replies = None
     if judge:
@@ -167,11 +174,13 @@ def summary(report):
             band = r["checks"].get("banding")
             ribs = (f"ribs {band['render']['ribs']} vs {band['reference']['ribs']}"
                     if isinstance(band, dict) and band["render"] and band["reference"] else "ribs n/a")
+            tint = r["checks"].get("shade")
+            blue = f"shade {tint['render']} vs {tint['reference']}" if isinstance(tint, dict) else "shade n/a"
             readings = r["judge"] or []
             named = "judge " + (" / ".join(
                 ",".join(f"{d['name']}{'' if d['clear'] else '?'}" for d in x["defects"] if d["name"] != "other") or "clean"
                 if "defects" in x else "error" for x in readings) or "off")
-            lines.append(f"{'PASS' if r['passed'] else 'FAIL'}  {place:19s} {r['view']:7s} {pillars:18s} {ribs:18s} {named}")
+            lines.append(f"{'PASS' if r['passed'] else 'FAIL'}  {place:19s} {r['view']:7s} {pillars:18s} {blue:20s} {ribs:18s} {named}")
     return "\n".join(lines)
 
 

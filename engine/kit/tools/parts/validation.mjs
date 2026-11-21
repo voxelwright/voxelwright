@@ -14,7 +14,7 @@ for (const mode of ['live', 'plain']) {
   p.on('pageerror', (e) => errors.push(String(e)));
   p.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   const say = (ok, what) => { if (!ok) bad++; console.log(`${ok ? 'ok  ' : 'FAIL'} ${mode}: ${what}`); };
-  const press = async (sel) => { const b = await p.locator(sel).first().boundingBox(); await p.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 6 }); await p.mouse.down(); await p.waitForTimeout(80); await p.mouse.up(); };
+  const press = (sel) => p.locator(sel).click({ delay: 80 });
   const state = (id) => p.evaluate((id) => {
     const i = document.getElementById(id), note = document.getElementById(id + '-error'), hint = document.getElementById(id + '-hint');
     const seen = (el) => !!el && getComputedStyle(el).visibility === 'visible' && el.getClientRects().length > 0;
@@ -47,8 +47,13 @@ for (const mode of ['live', 'plain']) {
   say(m.tall === tall, `nothing below moved (the page is ${m.tall} px tall, was ${tall})`);
   say(await p.evaluate(() => document.getElementById('said').textContent) === '', 'and nothing was sent');
   if (mode === 'live') {
-    const red = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS['light-stop'].id; });
-    say(red, "the well's rim is the red light");
+    const red = await p.evaluate(async () => {
+      const { MATERIALS } = await import('/kit/src/index.js');
+      const { walls, tell } = window.vx.live(document.getElementById('mail').closest('.vx-well')).model.byName;
+      const stop = MATERIALS['light-stop'].id;
+      return !walls.mats.includes(stop) && tell?.mats.includes(stop) && tell.rest[2] < 0;
+    });
+    say(red, 'the red tube sits inside the well below its rim');
   }
   await p.screenshot({ path: `shots/parts/validation/hand-${mode}-wrong.png` });
 
@@ -61,8 +66,8 @@ for (const mode of ['live', 'plain']) {
   say(m.invalid === null && !m.tied && !m.shown && m.words === '', 'a whole address clears the mark, the message and the tie at once');
   if (mode === 'live') {
     await p.waitForTimeout(200);
-    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.walls.mats[0] === MATERIALS.light.id; });
-    say(lit, 'and the rim is the accent again: it has focus');
+    const lit = await p.evaluate(async () => { const { MATERIALS } = await import('/kit/src/index.js'); const w = window.vx.live(document.getElementById('mail').closest('.vx-well')); return w.model.byName.frame.mats.includes(MATERIALS.light.id) && !w.model.byName.walls.mats.includes(MATERIALS.light.id); });
+    say(lit, 'the focus window stays lit after the fault clears');
   }
 
   // Tab to the next, type something wrong, Tab away: it is marked on leaving

@@ -15,6 +15,20 @@
   .room { min-block-size: calc(var(--vx) * 100); }
   .short { min-block-size: calc(var(--vx) * 48); }
   .vx-combobox { inline-size: min(calc(var(--vx) * 80), 100%); }
+  #use { --vx-look: project-register; }
+  #use-q { min-block-size: calc(var(--vx) * 12); }
+  #use .vx-well[data-vx-live] input {
+    padding-inline: calc(var(--vx) * 10) calc(var(--vx) * 4);
+    color: #f3efda; caret-color: #ffcb73;
+  }
+  #use .vx-well[data-vx-live] input::placeholder { color: #c5cebb; }
+  #use .vx-well[data-vx-live]:has(:focus-visible)::after {
+    content: ""; position: absolute; pointer-events: none;
+    inset-block: calc(var(--vx) * 2); inset-inline: calc(var(--vx) * 7) calc(var(--vx) * 2);
+    outline: 2px solid #cfac6e; outline-offset: -2px;
+  }
+  #use .vx-combobox-float[data-vx-live] { --vx-ink: #202b25; --vx-ink-quiet: #40493e; }
+  #use-list [role="option"], #use .vx-combobox-empty { padding-inline-start: calc(var(--vx) * 8); }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -117,8 +131,10 @@
 <script type="module">
   import { show } from './parts.js';
   import { combobox } from '../../src/components/combobox.js';
+  import { connectRegister } from './project-register.js';
   const $ = (id) => document.getElementById(id);
   $('use-q').addEventListener('vx-choose', (e) => { $('chosen').textContent = `Chosen: ${e.detail.value}.`; });
+  connectRegister($('use'));
   await show(combobox);
   // two are shown open, so that they can be looked at; the part reads aria-expanded and
   // aria-activedescendant from the markup like any other state. ?closed leaves them shut.

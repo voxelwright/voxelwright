@@ -51,4 +51,4 @@
 /* plain: theirs is a painted floor with the wall along the right and the bottom; yours a painted
    plate with its shadow */
 .vx-bubble:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset calc(var(--_wall) * -1) calc(var(--_wall) * -1) 0 var(--vx-slate); }
-.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk-top)); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }
+.vx-bubble:is([data-vx-from="me"], .vx-message[data-vx-from="me"] .vx-bubble:not([data-vx-from])):not([data-vx-live]) { background: var(--vx-reading-plate, var(--vx-key, var(--vx-chalk-top))); box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow); }

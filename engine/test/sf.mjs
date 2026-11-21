@@ -412,6 +412,9 @@ try {
   }))
   // ── A phone's class (bay.ts DEVICE): Chrome at an iPhone's screen with touch, which the page takes for a phone ──
   phase('a phone\'s class (Chrome at 390 x 844, touch)', 4)
+  // The desktop page is left pinned at full size, drawing about 30 ms of GPU work a frame; beside it a second page's
+  // requestDevice waits until it stops (#450). The phone's class is measured alone: the desktop page rests meanwhile.
+  await page.evaluate(() => { globalThis.engine.resting = true })
   const handheld = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   const small = await handheld.newPage()
   small.on('pageerror', (e) => errors.push(`phone: ${e.message}`))

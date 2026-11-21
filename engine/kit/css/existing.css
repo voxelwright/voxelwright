@@ -39,8 +39,11 @@
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:not(:has(a, button)) { background: none; }
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: none; }
 [data-vx-look="lit"] .vx-list:not([data-vx-live]) > li + li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset 0 1px 0 var(--vx-slate); }
-[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li::before {
   content: ""; position: absolute; inset-block: calc(var(--vx) * 2); inset-inline-start: var(--vx); inline-size: var(--vx);
+  background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate));
+}
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
   background: var(--lit-accent);
 }
 
@@ -60,7 +63,7 @@
 [data-vx-look="lit"] .vx-menu [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) { color: var(--vx-ink-quiet); cursor: default; }
 /* plain: a painted float; the active row has the same mark, painted */
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) {
-  background: var(--vx-key);
+  background: var(--vx-reading-plate, var(--vx-key));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]) {
@@ -82,7 +85,7 @@
 }
 /* plain: a painted float, and a painted groove under the header */
 [data-vx-look="lit"] .vx-dialog:not([data-vx-live]) {
-  background: var(--vx-chalk);
+  background: var(--vx-reading-plate, var(--vx-chalk));
   box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-dialog:not([data-vx-live]) > header {
@@ -96,7 +99,7 @@
 [data-vx-look="lit"] .vx-toast { cursor: pointer; }
 /* plain: the light it stands on is a line of its kind's colour round it */
 [data-vx-look="lit"] .vx-toast:not([data-vx-live]) {
-  background: var(--vx-key); border: 0; padding-inline-start: calc(var(--vx) * 8);
+  background: var(--vx-reading-plate, var(--vx-key)); border: 0; padding-inline-start: calc(var(--vx) * 8);
   box-shadow: 0 0 0 1px var(--lit-accent), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
 }
 [data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="done"] { box-shadow: 0 0 0 1px var(--lit-go), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }

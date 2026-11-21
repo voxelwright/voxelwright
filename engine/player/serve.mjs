@@ -9,7 +9,7 @@ import { createReadStream, existsSync, statSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml', '.png': 'image/png', '.svg': 'image/svg+xml', '.bay': 'application/octet-stream', '.far': 'application/octet-stream' }
+const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json', '.wasm': 'application/wasm', '.css': 'text/css; charset=utf-8', '.woff2': 'font/woff2', '.md': 'text/markdown; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml', '.png': 'image/png', '.svg': 'image/svg+xml', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.mp4': 'video/mp4' }
 /**
  * A host of plain files, as a static site's is: each file with its usual type, an ETag, and leave to keep it ten
  * minutes (what GitHub Pages sends). No header of the page server's: no COOP, no COEP, no CSP. `asked` is every

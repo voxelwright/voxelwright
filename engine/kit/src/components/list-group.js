@@ -1,6 +1,6 @@
-// List group. Rows of words parted by hairlines; the current row is marked by an accent groove
-// at its start. The rows and the hairlines are plain HTML and CSS: the part draws only the mark.
-// Tool: groove (a channel one voxel deep, full of the accent's light). Nothing stands up.
+// List group. Rows of words parted by hairlines; every row has a smoked lens at its start, and the
+// current row's is lit. The rows and the hairlines are plain HTML and CSS: the part draws only the mark.
+// Tool: the row lens (core/light.js rowLens): smoked glass one course proud, lit by the accent.
 // Markup: <ul class="vx-list-group">
 //           <li><a href="/harbor-api" aria-current="page">harbor-api</a></li>
 //           <li><a href="/fog-site">fog-site</a></li>
@@ -8,7 +8,7 @@
 // The current row is the first with aria-current on it, or on the link or button in it. The mark
 // is drawn from that and from nothing else: set it from code and the mark is drawn again.
 
-import { hole, halo, byTheme } from '../core/light.js';
+import { rowLens, halo, byTheme } from '../core/light.js';
 import { listeners } from './util.js';
 
 const rowsOf = (el) => [...el.children].filter((n) => n.tagName === 'LI');
@@ -24,16 +24,22 @@ export const listGroup = {
 
   build(live, m) {
     const { W, el, vx } = live;
-    const li = rowsOf(el).find(isCurrent);
-    if (!li) return; // no current row: nothing to draw
-    const top = Math.round(li.offsetTop / vx), h = Math.max(1, Math.round(li.offsetHeight / vx));
-    // two voxels short of the row at each end, one voxel in from the start of the line
-    const inset = h > 4 ? 2 : 0;
     const x = getComputedStyle(el).direction === 'rtl' ? W - 2 : 1;
-    hole(live, m, { x, y: top + inset, w: 1, h: h - inset * 2, depth: live.look.groove, wall: 'light', floor: 'light' });
+    // every row has its lens; only the current row's is lit
+    const lens = m.part('lens');
+    let lit = false;
+    for (const li of rowsOf(el)) {
+      const top = Math.round(li.offsetTop / vx), h = Math.max(1, Math.round(li.offsetHeight / vx));
+      // two voxels short of the row at each end, one voxel in from the start of the line
+      const inset = h > 4 ? 2 : 0;
+      const current = !lit && isCurrent(li);
+      lit ||= current;
+      rowLens(lens, x, top + inset, 1, h - inset * 2, current);
+    }
+    live.state.lit = lit;
   },
 
-  pose(live) { live.glowStrength = halo(0.05) * byTheme(live); },
+  pose(live) { live.glowStrength = live.state.lit ? halo(0.05) * byTheme(live) : 0; },
 
   bind(live) {
     const hear = listeners();

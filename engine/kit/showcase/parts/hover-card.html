@@ -18,6 +18,23 @@
   .people dt { font-weight: 600; }
   .people dd { margin: 0; color: var(--vx-ink-quiet); }
   .online { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); }
+  #c-mina {
+    inline-size: min(calc(var(--vx) * 76), calc(100vw - 24px));
+    padding: calc(var(--vx) * 5) calc(var(--vx) * 5) calc(var(--vx) * 2);
+    /* Keep the insert and lamp rail aligned through the native close transition. */
+    gap: calc(var(--vx) * 2); align-content: start;
+  }
+  #c-mina h3 { font-size: 1.125rem; }
+  #c-mina .duty {
+    display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap;
+    gap: 0 var(--vx); margin-block-start: var(--vx);
+    padding-block: calc(var(--vx) * 2); color: #f0f2e9;
+  }
+  #c-mina .duty a { color: inherit; font-variant-numeric: tabular-nums; }
+  #c-mina .duty a:focus-visible { outline-color: currentColor; }
+  #c-mina:not([data-vx-live]) .duty {
+    background: #292f2d; margin-inline: calc(var(--vx) * -4); padding-inline: calc(var(--vx) * 4);
+  }
 </style>
 <script>
   // ?theme=dark or ?theme=light fixes the time of day; otherwise the system's own setting holds
@@ -35,11 +52,11 @@
     <h2>In use: who deployed</h2>
     <ul class="log">
       <li><time>10:52</time>Deployed by <a href="#mina" id="l-mina" data-vx-card="c-mina">Mina Okafor</a>
-        <div class="vx-hover-card" id="c-mina" popover="manual">
+        <div class="vx-hover-card" id="c-mina" data-vx-duty-plate popover="manual">
           <h3>Mina Okafor</h3>
           <p class="vx-hover-card-meta">Platform, fogline</p>
           <p>Looks after harbor-api and the build cache.</p>
-          <p class="vx-hover-card-meta"><span class="online"><span class="vx-lamp"></span>On call this week</span> · <a href="#mina" id="c-mina-link">214 deploys</a></p>
+          <p class="vx-hover-card-meta duty"><span class="online"><span class="vx-lamp" aria-hidden="true"></span>On call this week</span> <a href="#mina" id="c-mina-link">214 deploys</a></p>
         </div>
       </li>
       <li><time>09:17</time>Rolled back by <a href="#ada" id="l-ada" data-vx-card="c-ada">Ada Lindqvist</a>

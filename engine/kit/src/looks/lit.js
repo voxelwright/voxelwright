@@ -5,11 +5,11 @@
 import { defineLook, LOOKS } from '../core/look.js';
 import { defineMaterial } from '../core/materials.js';
 import { CALM, SLIDE } from '../core/motion.js';
-import { seatIndicator, pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel } from '../core/light.js';
+import { seatIndicator, pilot, FULL, halo, byTheme, warmth, lightName, kindOf, seatedKey, keyLight, ring, hole, cap as capOf, bezel, rowLens } from '../core/light.js';
 import { inlineX } from '../plain.js';
 import { toggle, KNOB } from '../components/toggle.js';
 import { meter } from '../components/meter.js';
-import { wrapLabel } from '../components/util.js';
+import { wrapLabel, listeners } from '../components/util.js';
 import { cardSpine } from '../components/card.js';
 import { capIcon } from '../components/button.js';
 import { parts as existing } from './lit-existing.js';
@@ -23,14 +23,18 @@ const key = {
 
   build(live, m) {
     const { el } = live;
-    const off = el.disabled || el.getAttribute('aria-disabled') === 'true';
+    const off = el.matches(':disabled') || el.getAttribute('aria-disabled') === 'true';
     const kind = kindOf(el);
     const cap = seatedKey(live, m, off, kind === 'main' ? 'enamel' : 'key', lightName(el, kind === 'danger' ? 'light-stop' : 'light'));
     capIcon(live, cap, live.faceZ - 1, !off && kind === 'main' ? 'ivory' : 'ink');
     live.state.off = off;
     live.label(el.querySelector(':scope > .vx-label'), () => live.state.top + cap.tz);
     // a key that is already held down as the page arrives (open, or pressed) is drawn down
-    if (live.state.first === undefined) { live.state.first = false; if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-m.keyTravel); }
+    if (live.state.first === undefined || live.state.pressTravel !== m.keyTravel) {
+      live.state.first = false;
+      live.state.pressTravel = m.keyTravel;
+      if (!off && (el.getAttribute('aria-expanded') === 'true' || el.getAttribute('aria-pressed') === 'true')) live.spring('press').snap(-m.keyTravel);
+    }
   },
 
   pose(live) {
@@ -71,13 +75,63 @@ const well = {
     const { W, H, el } = live, D = live.look.well;
     const input = el.querySelector('input, textarea');
     const bad = input?.getAttribute('aria-invalid') === 'true', focus = !!input?.matches(':focus');
-    hole(live, m, { depth: D, wall: bad ? 'light-stop' : focus ? 'light' : lightName(el, 'light-warm'), floor: input?.disabled ? 'slate' : 'floor' });
-    live.spring('lit', 0, CALM.k * 2, CALM.c * 1.4).to(focus || bad ? 1 : 0);
+    const off = input?.matches(':disabled');
+    const lined = live.look.tooling;
+    const rtl = lined && getComputedStyle(el).direction === 'rtl';
+    const depth = lined ? Math.min(2, D) : D;
+    const wall = lined || bad && !focus ? 'gasket' : focus ? 'light' : lightName(el, 'light-warm');
+    hole(live, m, { depth, wall, floor: off ? 'slate' : 'floor' });
+    if (lined) {
+      const frame = m.part('frame');
+      ring(frame, -1, -1, 0, W + 2, H + 2, 'steel', 1);
+      // The frosted rail is always fitted. Focus lights a short segment at
+      // the entry end, keeping the text surface quiet during editing.
+      const n = Math.min(5, W - 2);
+      frame.box(rtl ? W - n - 1 : 1,
+        -1, 0, n, 1, 1, focus ? 'light' : 'lens');
+    }
+    if (el.hasAttribute('data-vx-mail-pilot')) {
+      // An end fitting keyed into the liner, flush with the edge of the well.
+      const w = Math.min(7, W);
+      const x = rtl ? 0 : W - w;
+      const y = Math.floor((H - 2) / 2);
+      const center = x + Math.floor(w / 2);
+      const socket = m.part('socket');
+      socket.sunk = true;
+      socket.box(x, 0, -depth, w, H, depth, 'slate');
+      socket.box(x, 0, -1, w, H, 1, 'chalk');
+      if (w >= 5) {
+        socket.box(center - 2, y - 1, -1, 5, 4, 1, 'gasket');
+        socket.carve(center - 1, y, -depth, 3, 2, depth);
+        const tell = m.part('tell');
+        tell.sunk = true;
+        const on = bad && !off;
+        // Two bright cells in a red diffuser. The lower course stays non-emissive.
+        tell.box(center - 1, y, -1, 3, 2, 1, on ? 'brick' : 'lens');
+        if (on) {
+          tell.box(center - 1, y, -1, 2, 1, 1, 'light-stop');
+          tell.plot(center + 1, y, -1, 'stop-wash');
+        }
+        // Case material covers the back of the package at the upper shoulder.
+        socket.carve(center - 1, y - 2, -depth, 3, 3, 1);
+        tell.box(center - 1, y - 2, -depth, 3, 3, 1, on ? 'light-stop' : 'gasket');
+      }
+    } else if (bad || (lined && el.closest('.vx-field')?.querySelector('.vx-field-error'))) {
+      const tell = m.part('tell');
+      tell.sunk = true;
+      const w = lined ? Math.min(9, W - 2) : W;
+      const x = rtl ? W - w - 1 : lined ? 1 : 0;
+      tell.box(x, H - 1, -depth, w, 1, 1, bad && !off ? 'light-stop' : 'lens');
+      if (bad && !off) m.byName.floor.box(x, H - 2, -depth - 1, w, 1, 1, 'stop-wash');
+    }
+    live.state.bad = bad;
+    live.spring('lit').snap(focus ? 1 : 0);
   },
 
   pose(live) {
     const lit = live.spring('lit').x;
-    live.glowStrength = halo(WELL_GLOW) * (0.2 + lit * (live.theme === 'day' ? 2.2 : 1.6));
+    // the tube's light stays in the well: only a breath of it reaches the surface
+    live.glowStrength = halo(WELL_GLOW) * (0.2 + lit * (live.theme === 'day' ? 2.2 : 1.6)) + (live.state.bad ? halo(0.006) : 0);
     live.glowRadius = 3.2 + lit * 1.2;
   },
 };
@@ -94,6 +148,37 @@ export const groove = {
 
   build(live, m) {
     const { W, H, el } = live;
+    // A row lens (data-vx-lens): every row of a list carries the same smoked lens, and only the
+    // current row's is lit. Nothing appears from nowhere when the choice moves; a lens lights.
+    if (el.hasAttribute('data-vx-lens')) {
+      const on = currentRow(el);
+      live.state.lens = on;
+      if (el.dataset.vxLens === 'flush') {
+        hole(live, m, { depth: 2, wall: 'steel', floor: 'gasket' });
+        // Seat the light under smoked resin; the unpowered ends stay dark.
+        live.state.resinTint = null;
+        const core = m.part('core');
+        core.sunk = true;
+        core.box(1, 1, -2, W - 2, H - 2, 1, 'gasket');
+        const lamp = on ? lightName(el) : 'lens';
+        const vertical = H >= W;
+        const x = vertical ? 1 : 2, y = vertical ? 2 : 1;
+        const width = Math.max(1, W - 2 * x), height = Math.max(1, H - 2 * y);
+        core.box(x, y, -2, width, height, 1, lamp);
+        const lens = m.part('lens');
+        lens.sunk = true;
+        lens.box(1, 1, -1, W - 2, H - 2, 1, 'groove-resin');
+        // The polished exit stripe carries the core's light up to the flush face.
+        lens.box(x, y, -1, vertical ? 1 : width, vertical ? height : 1, 1, lamp);
+        return;
+      }
+      const w = Math.min(W, H), h = Math.max(W, H);
+      if (W >= H) rowLens(m.part('lens'), 0, 0, h, w, on, lightName(el, 'light'));
+      else rowLens(m.part('lens'), 0, 0, w, h, on, lightName(el, 'light'));
+      live.faceZ = 0;
+      return;
+    }
+    live.state.lens = undefined;
     const mat = lightName(el, 'light-warm');
     const header = !el.dataset.vxLight && W > H && el.parentElement?.matches('.vx-card')
       && el.parentElement.querySelector(':scope > .vx-groove') === el;
@@ -105,8 +190,56 @@ export const groove = {
     }
   },
 
-  pose(live) { live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live)); },
+  pose(live) {
+    if (live.el.dataset.vxLens === 'flush') {
+      if (live.state.lens && live.state.resinTint !== live.tintRevision) {
+        live.state.resinTint = live.tintRevision;
+        const { core, lens } = live.model.byName;
+        const source = core.col.findIndex((value, i) => i % 4 === 3 && value > 0) - 3;
+        if (source >= 0) {
+          for (let i = 0; i < lens.count; i++) {
+            // Frost carries light to adjacent resin. Preserve its transmission channel.
+            if (lens.col[4 * i + 3] >= 0) continue;
+            const axis = live.H >= live.W ? 1 : 0;
+            const along = lens.rest[3 * i + axis];
+            const endDistance = Math.max(0, 2.5 - along, along - (Math.max(live.W, live.H) - 2.5));
+            const scatter = .45 / (1 + endDistance * endDistance);
+            for (let c = 0; c < 3; c++) {
+              const at = 4 * i + c;
+              lens.col[at] += (core.col[source + c] - lens.col[at]) * scatter;
+            }
+          }
+        }
+      }
+      live.glowRadius = 1.5;
+      live.glowStrength = live.state.lens ? halo(0.018) * byTheme(live) : 0;
+      return;
+    }
+    if (live.state.lens !== undefined) { live.glowStrength = live.state.lens ? halo(0.05) * byTheme(live) : 0; return; }
+    live.glowStrength = halo(0.05) * (live.el.dataset.vxLight ? byTheme(live) : warmth(live));
+  },
+
+  // a lens follows its row: when aria-current moves, the old lens goes dark and the new one lights
+  bind(live) {
+    if (!live.el.hasAttribute('data-vx-lens')) return null;
+    const row = rowOf(live.el);
+    if (!row) return null;
+    const on = listeners();
+    on.watch(row, { attributes: true, attributeFilter: ['aria-current', 'aria-selected'] }, () => {
+      if (currentRow(live.el) !== live.state.lens) live.rebuild?.();
+    });
+    return on.done;
+  },
 };
+
+// the row a lens belongs to, and whether it is the current one
+const rowOf = (el) => el.closest('li, a, [role="option"], [role="tab"], [role="treeitem"]');
+function currentRow(el) {
+  const row = rowOf(el);
+  if (!row) return false;
+  const c = row.getAttribute('aria-current'), s = row.getAttribute('aria-selected');
+  return (c !== null && c !== 'false') || s === 'true';
+}
 
 // ---------------------------------------------------------------------------------------------
 // Bar. A trench in the surface that fills with light, one column at a time.
@@ -168,6 +301,18 @@ export const recess = {
 
   build(live, m) {
     const { W, H, el } = live, D = live.look.well;
+    if (el.dataset.vxTray === 'build-log') {
+      // The folded metal edge finishes flush with the plate. A dark seal seats
+      // the reading surface four courses below it, behind the fixed opening.
+      const { walls } = hole(live, m, { depth: D, wall: 'steel', floor: 'floor' });
+      ring(walls, 0, 0, -1, W, H, 'steel', 1);
+      for (let z = -D + 1; z < -1; z++) ring(walls, 0, 0, z, W, H, 'slate');
+      ring(walls, 0, 0, -D, W, H, 'gasket');
+      if (el.dataset.vxReflection === 'warm') {
+        walls.box(2, H - 1, -D + 1, W - 4, 1, 1, 'warm-metal');
+      }
+      return;
+    }
     const { walls } = hole(live, m, { depth: D, wall: lightName(el, 'light-warm'), floor: 'floor' });
     if (el.dataset.vxReflection === 'warm' && W > 4) {
       walls.box(2, H, -D, W - 4, 1, Math.min(D, 2), 'warm-metal');
@@ -182,7 +327,7 @@ export const recess = {
 // Markup: <span class="vx-lamp" data-vx-light="go"></span>
 export const lamp = {
   name: 'lamp',
-  selector: '.vx-lamp',
+  selector: '.vx-lamp:not([data-vx-rail="pilot-strip"] > li > .vx-lamp)',
   pad: 6,
   glowRadius: 3.4,
   glowStrength: halo(0.16),
@@ -225,6 +370,14 @@ const surface = {
     body.slab(0, 0, 2, W, H, top - 4, 'chalk', r);
     ring(body, 0, 0, top - 3, W, H, 'gasket', r);
     body.slab(1, 1, top - 2, W - 2, H - 2, 2, 'chalk', r);
+    if (live.look.tooling && W >= 16 && H >= 12) {
+      // Removable reading plate inside the case: words on an instrument's card lie on the plate,
+      // whatever the card's size (the plain version paints the same plate), so they keep their
+      // contrast by day and at night. The light pipe is let into a large case's edge, outside
+      // the plate, leaving a clear view of its four walls.
+      body.slab(4, 4, top - 1, W - 8, H - 8, 1, 'panel', 1);
+      if (large) m.part('pipe').box(8, H - 1, top - 3, W - 16, 1, 1, 'backlight');
+    }
     if (el.dataset.vxLight) ring(m.part('light'), 1, 1, 0, W - 2, H - 2, lightName(el), r);
     if (wide && el.dataset.vxBolts !== 'none') {
       for (const x of [4, W - 5]) for (const y of [4, H - 5]) {
@@ -244,6 +397,30 @@ const surface = {
 // Notice. A small slab that floats above the surface on a light that says what kind of news it is.
 const NEWS = { done: 'light-go', failed: 'light-stop', note: 'light' };
 
+// A deployment receipt has one mounted pilot and a dark reading window. Keeping
+// the fittings in the casting's model lets every moving brick carry its inlay.
+function deployReceipt(live, m) {
+  const { W, H } = live;
+  const x = inlineX(live);
+  const body = m.part('body');
+  body.slab(1, 1, 0, W - 2, H - 2, 2, 'gasket', 2);
+  body.slab(0, 0, 2, W, H, 2, 'steel', 2);
+  body.slab(1, 1, 4, W - 2, H - 2, 1, 'warm-metal', 1);
+
+  // The glass sits one course below the face of the brass surround.
+  body.carve(x(11, W - 14), 2, 4, W - 14, H - 4, 1);
+  body.box(x(11, W - 14), 2, 3, W - 14, H - 4, 1, 'gasket');
+
+  const y = Math.floor((H - 5) / 2);
+  // The smoked insert sits below the collar. Its emitter finishes flush
+  // with the metal, so it cannot rise above the forming brick.
+  body.box(x(2, 7), y, 4, 7, 5, 1, 'steel');
+  body.carve(x(3, 5), y + 1, 4, 5, 3, 1);
+  body.box(x(3, 5), y + 1, 3, 5, 3, 1, 'lens');
+  body.box(x(4, 3), y + 2, 4, 3, 1, 1, 'light-go');
+  live.faceZ = 4;
+}
+
 const notice = {
   pad: 11,
   glowRadius: 2.2,
@@ -251,10 +428,11 @@ const notice = {
 
   build(live, m) {
     const { W, H, el } = live, d = live.look.float;
+    if (el.dataset.vxSpecimen === 'deploy') return deployReceipt(live, m);
     ring(m.part('light'), 0, 0, 0, W, H, NEWS[el.dataset.vxKind] || 'light', 1);
     const body = m.part('body');
     body.grounded = false;
-    body.slab(0, 0, 1, W, H, d - 1, 'key', 1);
+    body.slab(0, 0, 1, W, H, d - 1, live.look.readingPlate ?? 'key', 1);
     live.faceZ = d;
   },
 
@@ -280,6 +458,19 @@ const ARROW = [
   '#...#o#.',
   '.....##.',
 ];
+// A brass face and an ivory sight line inside the dark perimeter.
+const DEMO_TIP = [
+  '#',
+  'b#',
+  'bi#',
+  'bib#',
+  'bibb#',
+  'bibbb#',
+  'bib####',
+  'b#.#b',
+  '#..#b#',
+  '....##',
+];
 const HOVER = 6;
 export const pointer = {
   name: 'cursor',
@@ -289,7 +480,14 @@ export const pointer = {
   build(live, m) {
     const arrow = m.part('arrow');
     arrow.grounded = false;
-    ARROW.forEach((row, j) => [...row].forEach((c, i) => { if (c !== '.') arrow.box(i, j, HOVER, 1, 1, 2, c === '#' ? 'pointer-edge' : 'ivory'); }));
+    const demo = live.el.hasAttribute('data-demo-pointer');
+    const shape = demo ? DEMO_TIP : ARROW;
+    shape.forEach((row, y) => [...row].forEach((cell, x) => {
+      if (cell === '.') return;
+      const face = cell === '#' ? 'pointer-edge' : cell === 'b' ? 'warm-metal' : 'ivory';
+      arrow.plot(x, y, HOVER, demo ? 'pointer-edge' : face);
+      arrow.plot(x, y, HOVER + 1, face);
+    }));
     live.faceZ = HOVER + 2;
   },
 
@@ -378,15 +576,19 @@ const choice = {
 };
 
 // ---------------------------------------------------------------------------------------------
+const grooveResin = { day: '#999b90', night: '#737b7a', jitter: 0.004, transmission: 0.64 };
+defineMaterial('groove-resin', grooveResin);
+
 defineLook('lit', {
   // Objects, not flat faces: the cubes show on every face, slabs and caps are thick, a key is a
   // keycap, what slides has a bezel, a panel is bolted down.
   quiet: false,
   groundSoft: 1,
   finishes: {
+    'groove-resin': { chamfer: 55, specular: 105 },
     chalk: { chamfer: 75 }, floor: { chamfer: 0 }, slate: { chamfer: 80 },
     steel: { chamfer: 195, specular: 165 }, enamel: { chamfer: 175, specular: 105 },
-    key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 },
+    key: { chamfer: 135, specular: 30 }, ivory: { chamfer: 150, specular: 38 }, lens: { chamfer: 40, specular: 150 },
   },
   rise: 6, travel: 4, step: 1,
   slab: 5, round: 2, float: 6, dialog: 7, well: 4,
@@ -395,6 +597,7 @@ defineLook('lit', {
     night: { glow: FULL, seam: 0.016, sun: 0.63, shadow: [0, 0, 0.02, 0.6] },
   },
   materials: {
+    'groove-resin': grooveResin,
     chalk: { day: '#e9dcc5', night: '#23313b', jitter: 0.006 },   // the surface
     floor: { day: '#c8bda7', night: '#141a1f', jitter: 0.004 },   // the bottom of a well
     slate: { day: '#9f998a', night: '#283038', jitter: 0.008 },   // trays, trenches
@@ -428,9 +631,13 @@ export const THEMES = {
 export function applyTheme(t = 'bay') {
   const th = typeof t === 'string' ? THEMES[t] ?? THEMES.bay : t;
   const look = LOOKS.lit;
+  look.appliedTheme = th;
   look.materials.enamel = th.cap;
   look.materials.light = { ...th.light, glow: 0.68 };
   look.materials.signal = { ...th.light, glow: 1 };
+  if (LOOKS.instrument) {
+    for (const name of ['enamel', 'light', 'signal']) LOOKS.instrument.materials[name] = look.materials[name];
+  }
   defineMaterial('light', { ...th.light, glow: 1, jitter: 0 }); // and every look's colours are read again
   const root = globalThis.document?.documentElement;
   if (root) {

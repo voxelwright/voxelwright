@@ -14,8 +14,10 @@
 
 import { halo } from '../core/light.js';
 import { cue } from '../core/sound.js';
-import { listeners } from './util.js';
+import { watchFieldsets, listeners } from './util.js';
 import { latch, latchPose, latchTo, latchHold } from './checkbox.js';
+
+import { pilotRadio, posePilot } from './pilot-radio.js';
 
 const GLOW = 0.06, REACH = 3; // the checkbox's own light
 
@@ -35,14 +37,19 @@ export const radio = {
 
   build(live, m) {
     const input = live.state.input = inputOf(live.el);
-    latch(live, m, { r: 1, off: !!input?.matches(':disabled') });
+    live.state.tintPilot = null;
+    const build = live.el.hasAttribute('data-vx-pilot-radio') ? pilotRadio : latch;
+    build(live, m, { r: 2, off: !!input?.matches(':disabled') });
     // the first drawing is as it is, with nothing moving
     const s = live.spring('on', level(input));
     if (live.state.built === undefined) s.snap(level(input));
     live.state.built = true;
   },
 
-  pose: latchPose,
+  pose(live) {
+    if (live.state.tintPilot) posePilot(live);
+    else latchPose(live);
+  },
 
   bind(live) {
     const on = listeners();
@@ -55,14 +62,22 @@ export const radio = {
     // Choosing one radio empties another, and the one that is emptied is told nothing: no event,
     // no property set. So each listens for a choice anywhere in its group.
     const mine = (e) => e.target?.type === 'radio' && e.target.name === input.name && e.target.form === input.form;
-    on(input.getRootNode(), 'change', (e) => { if (!mine(e)) return; if (e.target === input) cue('tick'); set(); });
+    on(input.getRootNode(), 'change', (e) => {
+      if (!mine(e)) return;
+      const pilot = live.el.hasAttribute('data-vx-pilot-radio');
+      if (e.target === input) cue('tick');
+      else if (pilot && e.isTrusted && live.spring('on').target === 1) cue('release');
+      if (pilot && e.target.matches(':focus-visible')) {
+        live.spring('on').snap(level(input));
+        live.invalidate();
+      } else set();
+    });
     // set from code: the whole group follows, without a sound
     on.heed(input, 'checked', () => { for (const r of group(input)) live.stage.lives.get(r.parentElement?.querySelector('.vx-dot'))?.state.sync?.(); });
     // a form put back to how it began: the inputs change after the event, so look a moment later
     if (input.form) on(input.form, 'reset', () => setTimeout(set));
     on.watch(input, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
-    const set_ = input.closest('fieldset');
-    if (set_) on.watch(set_, { attributes: true, attributeFilter: ['disabled'] }, () => live.rebuild());
+    watchFieldsets(input, on, () => live.rebuild());
     return on.done;
   },
 };

@@ -3,6 +3,7 @@
 // menu (arrow keys, closing on a choice, telling its trigger it is open). With voxels each part
 // does this itself; without them adopt() wires the same behaviour here, and draws nothing.
 
+import { wireDialog } from './components/dialog.js';
 import { place } from './components/popover.js';
 import { listeners } from './components/util.js';
 
@@ -35,6 +36,18 @@ export function menuAnchor(el, on, gap) {
   let source;
   const invoker = () => source ?? (el.id ? document.querySelector(`[popovertarget="${CSS.escape(el.id)}"]`) : null);
   const put = () => {
+    // Only a menu taller than the window needs a scrollport. Leave the plate fixed
+    // and scroll its rows, so End, pointer selection and the rim share one coordinate system.
+    if (el.offsetHeight > innerHeight - 24 && !el.querySelector(':scope > .vx-menu-rows')) {
+      const rows = document.createElement('div');
+      rows.className = 'vx-menu-rows';
+      const children = [...el.childNodes].filter(child => !child.classList?.contains('vx-canvas'));
+      const focused = el.contains(document.activeElement) ? document.activeElement : null;
+      el.append(rows);
+      for (const child of children) rows.append(child);
+      focused?.focus({ preventScroll: true });
+      if (focused) rows.scrollTop = Math.max(0, focused.offsetTop + focused.offsetHeight - rows.clientHeight);
+    }
     const t = invoker();
     return t ? place(el, t, { gap: gap() }) : [0, 0];
   };
@@ -44,6 +57,7 @@ export function menuAnchor(el, on, gap) {
     const t = invoker();
     if (t && changes.some(({ target }) => target.contains(t))) put();
   });
+  on(window, 'resize', () => { if (el.matches(':popover-open') && invoker()) put(); });
   return { invoker, put };
 }
 
@@ -95,15 +109,7 @@ const parts = [
       all()[to].focus();
     });
   }],
-  ['dialog.vx-dialog', (el, on) => {
-    on(el, 'click', (e) => {
-      const b = e.target.closest('[data-vx-close]');
-      if (b) { e.preventDefault(); el.close(b.value || b.dataset.vxClose || ''); }
-      else if (e.target === el && el.hasAttribute('data-vx-light-dismiss')) el.close('cancel');
-    });
-    // Escape gives "cancel", as it does with voxels
-    on(el, 'cancel', (e) => { if (e.cancelable) { e.preventDefault(); el.close('cancel'); } });
-  }],
+  ['dialog.vx-dialog', wireDialog],
   ['.vx-menu', (el, on) => {
     const items = () => [...el.querySelectorAll('[role^="menuitem"]')];
     const { invoker, put } = menuAnchor(el, on, () => 12);
