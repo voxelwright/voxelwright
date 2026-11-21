@@ -28,7 +28,7 @@
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, SCREEN, type Marcher, type View } from './march.ts'
+import { AIR, FOG, GLOBALS, HANDOVER, LIGHT, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -187,12 +187,18 @@ struct Drawn { @location(0) colour: vec4f }
   // of them a scatter. Where panes are under two pixels the wall glows by the share of them that are lit.
   if (g.weather.z > 0.0 && in.style != 0u && in.style < 14u) {
     let one = smoothstep(0.62, 0.66, hashf(floor(vec2f(fx, fy)), in.id + in.way * 7919u));
-    // (Where panes are under two pixels, their share lit, a fifth, spread over the wall: brighter made a tower a lantern.)
-    let lamp = mix(one * pane, pane * 0.2, blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
+    // (Where panes are under two pixels, their share lit spread over the wall: a fifth of them over the whole wall, and
+    // brighter made a tower a lantern. Not the same share everywhere, which made every tower from the park one flat
+    // orange slab: offices are lit a run of a floor at a time, so the share is by runs of three bays of a storey, most
+    // of them dark and a third lit.)
+    let run = hashf(floor(vec2f(fx / 3.0, fy)), in.id + in.way * 7919u + 31u);
+    let lamp = mix(one * pane, pane * (0.07 + 0.42 * smoothstep(0.62, 0.74, run)), blur) * clamp(g.weather.z * 3.0, 0.0, 1.0);
     // The window screen (march.ts SCREEN, eggs.ts): the panes show the picture where they are in the view, and their
     // own lamps as much as it leaves on.
     let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
-    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(2.4, 1.5, blur) * (1.0 - pic.a) + pic.rgb * pane * 2.4;
+    // (A pane some pixels across is a lit room and no lamp, march.ts PANE_LIGHT: from a pixel and a half wide to four.)
+    let near = smoothstep(1.5, 4.0, st.size.z / ax);
+    col += vec3f(1.0, 0.62, 0.3) * lamp * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, blur) * (1.0 - pic.a) + pic.rgb * pane * 2.4;
   }
   col = air(col, rd, dist);
   // The march's fog (FOG), as over the cells: the faces begin 100 m off in the wedge, and the bank had stopped there.
