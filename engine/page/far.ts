@@ -24,7 +24,7 @@
 //
 //   ?farreach=500        metres from the eye where faces begin (0: no far model)
 //   ?farnear=100         metres from the eye where they begin in the wedge
-//   ?farlight=3.44,1.23  the faces' light, fill and gain (the listing's \`light\`: #423's, which their colours were fitted under)
+//   ?farlight=3.44,1.23  the faces' light, fill and gain (the listing's `light`: #423's, which their colours were fitted under)
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
