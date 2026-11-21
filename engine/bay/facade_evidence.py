@@ -4,9 +4,9 @@ The paint survey (facade_paint.py) drew Mapillary pixels onto walls: 30 cm cells
 wall from whatever stood in front of it that day, and white where the sun blew the photo out. Here the photographs are
 evidence for a building's parameters instead. Each chosen camera is cut into a perspective face aimed at the building,
 a segmentation model (UperNet ConvNeXt, ADE20K; .agents/skills/facade-evidence) labels every pixel, and only pixels
-labelled as wall that are neither clipped nor dark count towards a colour. Each view is normalised by the lidar's
-asphalt grey (facade_paint `exposure`) in linear light; views into the sun are dropped and walls the sun is behind
-count less. A building's record says, each with a confidence:
+labelled as wall that are neither clipped nor dark count towards a colour. Each view keeps the photo's own exposure,
+white-balanced on its road and pavement (facade_paint's asphalt gain turned well exposed walls white); views into the
+sun are dropped and walls the sun is behind count less. A building's record says, each with a confidence:
 
     wall        robust colour of the wall in linear light, its sRGB, and the palette entry the bake draws it in
     material    painted wood / clapboard, stucco / plaster, brick, stone or glass curtain wall (SigLIP, zero shot)

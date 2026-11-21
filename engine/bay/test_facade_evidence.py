@@ -67,10 +67,10 @@ class Rows(unittest.TestCase):
 
     def rows(self, blob):
         h = struct.unpack_from("<16i", blob)
-        at = 64 + 2 * h[5] ** 2 + 4 * h[9] ** 2
+        at = evidence_tile.rows_at(h)
         return [struct.unpack_from("<6i", blob, at + 24 * n) for n in range(h[12])]
 
-    def test_a_matched_row_takes_its_wall_material_and_glass_and_nothing_else_moves(self):
+    def test_a_matched_row_takes_its_wall_and_material_but_not_its_glass_and_nothing_else_moves(self):
         trim = 9 | 1 << 8
         tail = b"SFPT" + struct.pack("<I", 0)
         blob = tile([(0, 4, 7 | 3 << 8, trim, 1234, 140)], self.verts, tail)
@@ -80,7 +80,7 @@ class Rows(unittest.TestCase):
         row = self.rows(out)[0]
         self.assertEqual(row[2], 9 | 57 << 8)
         self.assertEqual(row[3] & 0xFFFF, trim)
-        self.assertEqual(row[3] >> 16, 1 | 42 << 1 | 1 << 8)
+        self.assertEqual(row[3] >> 16, 1)
         self.assertEqual(len(out), len(blob))
         self.assertEqual(out[-8:], tail)
         changed = [i for i in range(len(blob)) if blob[i] != out[i]]

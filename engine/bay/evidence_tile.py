@@ -6,7 +6,8 @@ Which rule reads which field (bay.rs `read`, `Evidence`, `front`, `measured_half
     wall.palette, when wall.trusted       row[2] colour byte (bits 8 to 15)        Building.wall: every plain wall cell
     material.drawn, confidence >= 0.5     row[2] material (bits 0 to 3)            the same, and march.ts `paint`'s pattern
     (wall written)                        row[3] bit 16                            Building.wall wins over SFPT paint
-    windows.ratio, confidence >= 0.5      row[3] bits 17 to 23 (hundredths) + 24   front(): upper windows' half width
+    windows.ratio                         row[3] bits 17 to 23 (hundredths) + 24   front(): upper windows' half width;
+                                          not written for now (see `fields`)
 
 A building whose colour is not trusted keeps the bake's wall unless its material is brick or glass with confidence
 0.6 or more: those are drawn in the material's own colour. The trim's kind stays in row[3]'s low 16 bits. Rows no
@@ -38,17 +39,23 @@ def fields(rec, wall, trim):
     """A building's new wall kind and trim word from its record, or None where the record changes nothing."""
     mat, colour = wall & 15, wall >> 8 & 255
     flags = 0
-    w, m, g = rec.get("wall"), rec.get("material"), rec.get("windows")
+    w, m = rec.get("wall"), rec.get("material")
     material = m["drawn"] if m and m["confidence"] >= MATERIAL_MIN else None
     if w and w["trusted"]:
         mat, colour, flags = material or mat, w["palette"], WALL_BIT
     elif material in (8, 11) and m["confidence"] >= OWN_COLOUR_MIN:
         mat, colour, flags = material, 0, WALL_BIT
-    if g and g["confidence"] >= WINDOWS_MIN and g["views"] >= 2:
-        flags |= GLASS_BIT | min(100, round(g["ratio"] * 100)) << 17
+    # The glass share is not written (bits 17 to 24 stay clear). It is a floor (windows that mirror the sky are missed):
+    # on the panel it drew upper windows at a median 20% of the bay's wall against the rule's 48%, and the judge failed
+    # Mission and Haight-Ashbury for narrow windows that the round-2 render did not have (November 21).
     if not flags:
         return None
     return mat | colour << 8, (trim & 0xFFFF) | flags
+
+
+def rows_at(h):
+    """Where a level-0 tile's building rows begin, from its 16-number head (bay.rs `read`: walls when head[15] bit 0)."""
+    return 64 + 2 * h[5] ** 2 + (4 + 2 * (h[15] & 1)) * h[9] ** 2
 
 
 def apply(blob, records, stats=None):
@@ -57,11 +64,11 @@ def apply(blob, records, stats=None):
     if h[3] != 2500 or not records:
         return blob
     out = bytearray(blob)
-    rows_at = 64 + 2 * h[5] ** 2 + (4 + 2 * (h[15] & 1)) * h[9] ** 2
-    verts_at = rows_at + 24 * h[12]
+    at0 = rows_at(h)
+    verts_at = at0 + 24 * h[12]
     verts = list(struct.iter_unpack("<3i", blob[verts_at : verts_at + 12 * h[13]]))
     for n in range(h[12]):
-        at = rows_at + 24 * n
+        at = at0 + 24 * n
         first, count, wall, trim = struct.unpack_from("<2iIi", blob, at)
         key = ";".join(f"{x},{z}" for x, z, _ in verts[first : first + count])
         rec = records.get(key)
