@@ -23,21 +23,15 @@ export const MARKS: Record<string, Mark> = {
   },
 }
 
-/** How much of a logo sign's height is the frame it stands on. */
-export const LEGS = 0.2
-
 /**
- * A mark as a rooftop sign, on a picture `w` by `h` that is clear wherever the sign is not: the mark over the top of
- * it, and under the mark the dark steel it stands on (two legs and a rail), which is `LEGS` of the whole.
+ * A mark as a sign on a building's face, on a square picture that is clear wherever the sign is not: the mark alone,
+ * as a head office wears its company's, with nothing under it (a sign on posts on a roof is not how towers carry them).
  */
 export function sign(pen: OffscreenCanvasRenderingContext2D, mark: Mark, w: number, h: number): void {
   pen.clearRect(0, 0, w, h)
-  const top = h * (1 - LEGS), side = Math.min(w, top), x0 = (w - side) / 2, y0 = 0
-  pen.fillStyle = '#1b1e24'
-  for (const at of [0.3, 0.7]) pen.fillRect(w * at - w * 0.02, y0 + side * 0.6, w * 0.04, h - y0 - side * 0.6)
-  pen.fillRect(w * 0.2, h - h * 0.035, w * 0.6, h * 0.035)
+  const side = Math.min(w, h)
   pen.save()
-  pen.translate(x0, y0)
+  pen.translate((w - side) / 2, (h - side) / 2)
   pen.scale(side / 24, side / 24)
   if (mark.under) { pen.fillStyle = mark.under.ink; pen.fill(new Path2D(mark.under.shape)) }
   const f = mark.fills ?? 1

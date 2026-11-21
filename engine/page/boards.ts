@@ -11,8 +11,8 @@
 //               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
 //               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
 //               of the panel whose cabinet is gone is dark.
-//   logo        the mark of a network the owner is on, standing on a tower's crown as a company's sign stands on its
-//               head office: lit of itself, on a frame of dark steel, turned whichever way its record says. It is a
+//   logo        the mark of a network the owner is on, flat on a tower's face under its crown, as a head office
+//               wears its company's: lit of itself, lying on the face whichever way that looks. It is a
 //               face and no cells (the towers of the skyline are past the cells' reach, where the far model draws
 //               them: far.ts), so no tool breaks it; it leads to the owner's page on that network.
 //   banner      a small plane flying a long round across the park's sky, before the towers, towing a strip of cloth
@@ -31,7 +31,7 @@ import type { View } from './march.ts'
 import type { Piece, Pieces } from './pieces.ts'
 import { screens as screensOf, type Screen, type Style } from './screens.ts'
 import { signs, type Content } from './signs.ts'
-import { LEGS, MARKS, sign as signOf } from './logos.ts'
+import { MARKS, sign as signOf } from './logos.ts'
 import type { Target } from '../probe/gpu.ts'
 
 export interface Board {
@@ -43,7 +43,7 @@ export interface Board {
   building: [number, number]
   /** Where it stands: the middle of its foot on that roof, cells. */
   at: [number, number, number]
-  /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. A logo turns freely: `turn` is where its face looks, degrees clockwise from north. */
+  /** Which way its face looks: 0 west, 1 north, 2 east, 3 south. A logo lies on a wall that may look any way: `turn` is where its face looks, degrees clockwise from north. */
   facing: 0 | 1 | 2 | 3
   turn?: number
   /** A logo's mark: one of logos.ts `MARKS`. */
@@ -116,8 +116,8 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
  */
 export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
   if (b.type === 'logo') {
-    // A face alone: its mark over the frame it stands on, its foot on the roof.
-    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = ((b.size as number) * M) / (1 - LEGS), wide = (b.size as number) * M, y0 = b.at[1] + (b.lift ?? 0) * M
+    // A face alone, flat on a wall: `at` is the middle of its lower edge, a little out from the wall.
+    const t = ((b.turn ?? 270) * Math.PI) / 180, n: [number, number, number] = [Math.sin(t), 0, -Math.cos(t)], high = (b.size as number) * M, wide = (b.size as number) * M, y0 = b.at[1] + (b.lift ?? 0) * M
     return { runs: new Int32Array(0), box: [b.at[0], y0, b.at[2], b.at[0] + 1, y0 + 1, b.at[2] + 1], middle: [b.at[0], y0 + high / 2, b.at[2]], right: [n[2], 0, -n[0]], normal: n, wide, high }
   }
   const [nx, nz] = NORMALS[b.facing], rx = nz, rz = -nx, snap = (v: number) => Math.round(v / 8) * 8
@@ -302,7 +302,7 @@ export async function boards(o: Needs): Promise<Boards> {
     if (b.type === 'logo') {
       const mark = MARKS[b.logo ?? '']
       if (!mark) throw new Error(`the logo "${b.logo}" of the board ${b.id} is none of ${Object.keys(MARKS).join(', ')}`)
-      s.screen = drawn.add({ pixels: [320, Math.round(320 / (1 - LEGS))], style: { ground: '#000', ink: '#fff', glows: true } })
+      s.screen = drawn.add({ pixels: [320, 320], style: { ground: '#000', ink: '#fff', glows: true } })
       s.screen.paint((pen, w, h) => signOf(pen, mark, w, h))
       stood.set(b.id, s)
       stand(s)
@@ -474,7 +474,11 @@ export async function boards(o: Needs): Promise<Boards> {
     const sh = s.shape, rect = o.canvas.getBoundingClientRect(), v = o.view(), across = Math.atan(v.tanHalf * (rect.width / Math.max(1, rect.height)))
     // Far enough off that the whole face is in the picture, and not further than 90 m: a narrow picture sees less of it.
     const off = Math.min(s.b.type === 'logo' ? 1800 : 900, Math.max(80, (sh.wide * 0.9) / Math.tan(across), (sh.high * 1.1) / v.tanHalf))
-    const to = { x: (sh.middle[0] + sh.normal[0] * off) / M, y: sh.middle[1] / M, z: (sh.middle[2] + sh.normal[2] * off) / M, yaw: Math.atan2(-sh.normal[0], sh.normal[2]), pitch: 0 }
+    // Before it on the line to where the realm begins, where that is before its face at all: a board is placed to be
+    // seen from there, so that line is clear, while straight out from its face another roof may stand (one did, #450).
+    const park = [o.began.x * M - sh.middle[0], o.began.y * M - sh.middle[1], o.began.z * M - sh.middle[2]], far = Math.hypot(park[0], park[1], park[2]) || 1
+    const along = (park[0] * sh.normal[0] + park[2] * sh.normal[2]) / far > 0.3 ? park.map((v) => v / far) : sh.normal
+    const to = { x: (sh.middle[0] + along[0] * off) / M, y: (sh.middle[1] + along[1] * off) / M, z: (sh.middle[2] + along[2] * off) / M, yaw: Math.atan2(-along[0], along[2]), pitch: -Math.asin(along[1]) }
     const from = { ...o.pose }, mine = ++flight, began = performance.now(), ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2200
     o.aloft()
     let turn = (to.yaw - from.yaw) % (2 * Math.PI)

@@ -220,15 +220,15 @@ try {
   results.park = {}
   for (const s of seen) {
     const w = s.where, inside = !!w && w.x - w.wide / 2 > 0 && w.x + w.wide / 2 < 1280 && w.y - w.high / 2 > 0 && w.y + w.high / 2 < 720
-    // A letter of lamp is five sevenths of its panel; a logo's mark is the face less the frame it stands on (logos.ts LEGS); a screen's words about half of it.
-    const letter = w ? (s.type === 'lettering' ? (w.tall * 5) / 7 : s.type === 'logo' ? w.tall * 0.8 : w.tall * 0.5) : 0
+    // A letter of lamp is five sevenths of its panel; a logo's mark is its whole face; a screen's words about half of it.
+    const letter = w ? (s.type === 'lettering' ? (w.tall * 5) / 7 : s.type === 'logo' ? w.tall : w.tall * 0.5) : 0
     const r = (results.park[s.id] = { metres: w && round(w.far), at: w && [Math.round(w.x), Math.round(w.y)], widePx: w && Math.round(w.wide), letterPx: round(letter), clear: s.clear, standing: s.standing.letters })
     check(inside && s.clear && s.standing.whole && letter >= (s.type === 'logo' ? 24 : 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its mark' : 'a letter'} ${r.letterPx} px tall, nothing between the eye and it`)
     if (s.type === 'logo') {
       // The picture where its mark is: how much of it is one of its brand's two colours, and whether both are there.
-      const brand = BRAND[s.logo], half = letter / 2, cy = w.y - w.tall * 0.1, near = [0, 0]
+      const brand = BRAND[s.logo], half = letter / 2, cy = w.y, near = [0, 0]
       let n = 0
-      for (let y = Math.round(cy - half); y <= cy + half; y++) for (let x = Math.round(w.x - half); x <= w.x + half; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < 90) near[k]++ }) }
+      for (let y = Math.round(cy - half); y <= cy + half; y++) for (let x = Math.round(w.x - w.wide / 2); x <= w.x + w.wide / 2; x++) { const i = (y * picture.w + x) * 4; n++; brand.forEach((c, k) => { if (Math.hypot(picture.data[i] - c[0], picture.data[i + 1] - c[1], picture.data[i + 2] - c[2]) < 90) near[k]++ }) }
       r.read = { ink: round(near[0] / n, 2), ground: round(near[1] / n, 2) }
       check(near[0] / n > 0.05 && near[1] / n > 0.05 && (near[0] + near[1]) / n > 0.5, `${s.id} reads in the picture at scale 0.7: ${Math.round((near[0] / n) * 100)}% of its mark is its brand's colour and ${Math.round((near[1] / n) * 100)}% what that stands on`)
     }
@@ -386,7 +386,7 @@ try {
         Object.assign(e.pose, park, { yaw: Math.atan2(to[0] - park.x, -(to[2] - park.z)), pitch: Math.atan2(to[1] - park.y, Math.hypot(to[0] - park.x, to[2] - park.z)) })
         await new Promise((r) => setTimeout(r, 400))
         const w = e.boards.where(id)
-        out.push({ id, markPx: w ? Math.round(w.tall * 0.8 * 10) / 10 : 0 })
+        out.push({ id, markPx: w ? Math.round(w.tall * 10) / 10 : 0 })
       }
       Object.assign(e.pose, park)
       return out
