@@ -38,10 +38,10 @@ import { before as beforeEye, block, inHand as carried } from './held.ts'
 import { passes as pluginPasses, plugins } from './plugins.ts'
 import { workshop } from './workshop.ts'
 import { LIBRARY, caster, known, type Spell } from './spells.ts'
-import { World } from './world.ts'
+import { SIDE, World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -53,7 +53,7 @@ import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { boards } from './boards.ts'
 import { firstView } from './first.ts'
-import { tell } from './host.ts'
+import { embedded, hear, tell } from './host.ts'
 import { signs } from './signs.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
@@ -78,6 +78,13 @@ const { report, post: send } = reporter('city-4')
 const post: typeof send = LOCAL ? async () => false : send
 if (query.get('status') === '1') document.body.classList.add('status')
 const flying = !LOCAL && (query.get('fly') ?? (location.pathname === '/' ? '1' : '0')) === '1'
+
+/**
+ * The host's `explore` (host.ts), heard from the moment this script runs: said before there is anyone to take it (the
+ * GPU, the core and the first tiles are waited for first), it is kept for whoever does.
+ */
+let explores: (() => void) | null = null, explored = false
+if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores(); else explored = true } })
 
 async function main() {
   report.env = environment()
@@ -175,7 +182,7 @@ async function main() {
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
   // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
-  const first = LOCAL ? firstView(canvas, query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  const first = LOCAL ? firstView(query.get('first') !== '0' && query.get('boards') !== 'edit') : null
   // The line of numbers is for whoever measures: a realm the page runs alone shows it only when asked (`?debug=1`; first.ts hides it).
   if (LOCAL && query.get('debug') !== '1') document.documentElement.classList.add('plain')
   if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
@@ -185,6 +192,35 @@ async function main() {
   // tool picked. `own.keys` and `own.use` are filled in below, where the things they do are made.
   const own = { use: (): boolean | void => {}, keys: new Map<string, () => void>() }
   controls.push({ name: 'moving', use: () => own.use(), key: (code) => { const act = own.keys.get(code); act?.(); return !!act }, wheel: (deltaY) => { speed = Math.max(1, Math.min(400, speed * (deltaY < 0 ? 1.25 : 0.8))); return true } })
+  // A realm's first view is a still picture (first.ts): until the visitor is in the realm a mode lies over the page's
+  // own that takes every key and leaves the pointer free. Nothing done by chance moves the eye.
+  if (first && !first.engaged) first.onEngage(controls.push({ name: 'landing', solid: true, still: true }))
+  // The way in (#450, explore.ts): where the world's boxes are made round in place of the eye (the roof a flight is on
+  // its way to), and who places the eye after the page's own movers have.
+  let ahead: readonly [number, number, number] | null = null
+  let shot: { before?(): void; after(dt: number): void } | null = null
+  // Its EXPLORE board asked twice, or the host's `explore`, which is meant: kept if it comes before the flow has
+  // (it is fetched once the park is shown), or before this (it is heard from the script's first line). Where nothing leads in (a realm with no such board,
+  // `?boards=0`, boards or a flow that could not be had) the first view ends as it used to, on a key or a click on
+  // the picture: nobody is left before a still picture with no way past it.
+  let way: import('./explore.ts').Explore | null = null, meant = false, openly = false
+  const enter = (host: boolean) => { if (!first || first.engaged) return; if (way) { if (host) void way.go(); else way.act() } else if (openly) first.engage(); else if (host) meant = true }
+  const noWayIn = () => {
+    if (!first || first.engaged || openly) return
+    openly = true
+    if (meant) return first.engage()
+    addEventListener('keydown', (e) => { if (!['Shift', 'Control', 'Alt', 'Meta', 'Tab'].includes(e.key)) first.engage() }, true)
+    canvas.addEventListener('click', () => first.engage())
+  }
+  explores = () => enter(true)
+  if (explored) enter(true)
+  // A click that is to do nothing more than its press has done (explore.ts: the press that cut a flight short), stopped
+  // before the boards or the picture hear it: the click of the press that was down then, however long it is held (it
+  // comes with the press's end, or a moment after it), and no other.
+  let deaf = false, deafUntil = 0
+  addEventListener('pointerdown', () => { deaf = false; deafUntil = 0 }, true)
+  for (const type of ['pointerup', 'pointercancel']) addEventListener(type, () => { if (deaf) { deaf = false; deafUntil = performance.now() + 400 } }, true)
+  addEventListener('click', (e) => { if (deaf || performance.now() < deafUntil) { deaf = false; deafUntil = 0; e.stopImmediatePropagation(); e.preventDefault() } }, true)
 
   const view = (): View => {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
@@ -436,7 +472,9 @@ async function main() {
     if (frames % 120 === 119) { screenMs = Math.max(4, shortest); shortest = Infinity }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
+    shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
+    shot?.after(dt)
     steer(Math.max(1000 / 60, screenMs), gap)
     const v = view(), to = fit()
     march.roofed = roomedBy(dt)
@@ -450,7 +488,7 @@ async function main() {
     lap('fallOn')
     streetLife?.frame(dt, v)
     lap('street')
-    world.update(v.eye)
+    world.update(ahead ?? v.eye)
     lap('update')
     if (spoiled.length && !off.has('spoil') && world.stats.stale === 0 && world.stats.wanted === 0) { for (const edit of spoiled) march.sun.spoil(edit); spoiled.length = 0 }
     lap('spoil')
@@ -571,7 +609,7 @@ async function main() {
   /** In a shared world: whose ask each answer that is still to come answers, in order (true for this page's own). */
   const asked: boolean[] = []
   // The Bay in tiles (#373): this page's core and the one that moves things hold what is round the eye, asked again as it moves.
-  if (STREAM) { const tell = () => { const x = Math.round(pose.x * M), z = Math.round(pose.z * M); void near(inner, x, z); mover.postMessage({ bay: [x, z] } as never) }; tell(); setInterval(tell, 500) }
+  if (STREAM) { const tell = () => { const x = Math.round(ahead ? ahead[0] : pose.x * M), z = Math.round(ahead ? ahead[2] : pose.z * M); void near(inner, x, z); mover.postMessage({ bay: [x, z] } as never) }; tell(); setInterval(tell, 500) }
   const moving = new Map<number, Piece>()
   /** Bodies that are cells again, drawn where they lay until those cells are in the picture. */
   let lying: { piece: Piece; shown: number }[] = []
@@ -1309,10 +1347,12 @@ async function main() {
     // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
     kept: (box) => farModel.keep(box),
     reach: () => farModel.reach * M, handover: (x, z) => (farModel.reach > 0 ? farModel.handover(x, z) : Infinity),
+    cell: (x, y, z) => { const p = [x, y, z]; for (const l of world.levels) { const size = SIDE << l.index; if (p.every((v, a) => v >= l.origin[a] * size && v < (l.origin[a] + l.grid[a]) * size)) return 1 << l.index } return Infinity },
     done: () => world.done().length,
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
     pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
     aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
+    does: (b) => { if (b.does === 'explore') enter(false) },
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
   // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
@@ -1404,9 +1444,27 @@ async function main() {
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
     let hushed: AudioContext | null = null
+    const leads = signboards?.records.find((b) => b.does === 'explore')
+    if (!leads) noWayIn()
     const hatch = () => {
       if (!seen.near) return
       watchers.delete(hatch)
+      if (first && leads && signboards && !first.engaged) void import('./explore.ts').then(({ explore }) => {
+        way = explore({
+          board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi,
+          fov: () => fov, setFov: (v) => { fov = v },
+          feet: (x, z) => core.feet_at(x, z),
+          // Round the roof: this page's own core and the mover hold it, and the finest tiles the makers of sectors
+          // will want there are fetched ahead of them (as far out as the boxes of cells up to 80 cm reach: bay.ts `need`).
+          // (The mover, whose body it is, does nothing it is asked until its own tiles there have been asked for: mover.ts `here`.)
+          near: (x, z) => { mover.postMessage({ bay: [x, z] } as never); return Promise.all([near(inner, x, z), warm(x, z, (grid[0] * SIDE * 8) / 2 + 96)]).then(([had]) => had) },
+          focus: (at) => { ahead = at }, whole: () => world.stats.wanted === 0 && world.stats.stale === 0 && farModel.whole,
+          shot: (by) => { shot = by }, watch: (each) => { watchers.add(each); return () => void watchers.delete(each) },
+          hush: () => { deaf = true },
+        })
+        Object.assign((globalThis as unknown as { engine: object }).engine, { explore: way })
+        if (meant) void way.go()
+      }).catch(noWayIn)
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,

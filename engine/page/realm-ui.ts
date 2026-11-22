@@ -50,6 +50,9 @@ const STYLE = /* css */ `
 /* What a thumb has: only where the pointer is coarse. */
 #realm .thumbs { display: none; }
 #realm .fold { display: none; }
+/* Folded behind its key where something else has the corner (explore.ts: what a roof is for), as on a phone. */
+#realm.folds .fold { display: block; position: absolute; right: max(16px, env(safe-area-inset-right)); top: max(16px, env(safe-area-inset-top)); }
+#realm.folds .sky { top: calc(max(16px, env(safe-area-inset-top)) + 60px); }
 @media (pointer: coarse) {
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
   #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); }
@@ -200,5 +203,5 @@ export function realmControls(page: RealmPage) {
     const at = new URL('../kit/src/index.js', import.meta.url).href
     void import(at).then((k) => { kit = k; k.adopt(root) }).catch(() => {})
   }
-  return { sky, root, get kit() { return kit } }
+  return { sky, root, get kit() { return kit }, /** Folds the hour's panel behind its key, on a wide page too, or opens it. */ fold(on: boolean) { root.classList.add('folds'); folded(on) } }
 }

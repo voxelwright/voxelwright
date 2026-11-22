@@ -1,0 +1,483 @@
+// The way into the SF realm, checked (#450, page/explore.ts): the folder `node sf/build.mjs` writes, served as plain
+// files and held in a frame by a host page, as the site holds it. Chrome with WebGPU; one GPU is shared, so a failed
+// run is worth one more before it is believed.
+//
+//   node test/sf-explore.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/explore/check] [--mbit 25]
+//
+// It fails unless:
+//   - the park is shown within 8 MB over the wire on a cold cache (25 Mbit/s, 40 ms), and the way in is none of it;
+//   - the first view has no Explore key, and the EXPLORE board is in it at 1280 x 720 and on an upright phone, under
+//     nothing, over no other board, and read from the picture's own pixels (brighter where a letter's lamp is);
+//   - nothing done by chance enters: keys (none means what it means in the realm), a drag, a click on the picture
+//     that is on no board; a double click and a key held until it repeats are one ask;
+//   - one click on the board does not enter: it lights the letters (the picture is brighter there), says how to go
+//     on, and starts the roof's tiles coming; Esc, a click elsewhere, the pointer taken away and a few seconds each
+//     put it back, the eye where it was;
+//   - two clicks enter: the host is told `engaged`, the eye ends behind the visitor's own body on the roof, in 6 to 10 s,
+//     the controls come, the hour's panel is folded and the card says the two keys;
+//   - on the throttled link everything asked for after the first click has come, and every box of the world round the
+//     roof is made, when the eye settles (or the round was drawn out for it, which is said);
+//   - a step off the roof is a fall that gathers speed; Space in the air opens a canopy that sinks slowly, is steered
+//     and lands; B flies; then the card goes;
+//   - the host's `explore` enters with nothing asked twice, sent before `ready` too; a click in the flight cuts to
+//     the end and opens no board; Enter twice on the board's button enters, and a key in the flight cuts to the end
+//     and does nothing else (Backspace does not put the world back); where motion is not wanted there is no flight;
+//   - a realm with no board that leads in (`?boards=0`) still lets a key end its first view;
+//   - on a phone two taps enter, and a thumb has keys for the same.
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { chromium } from 'playwright'
+import { arg, CHROME, has, here, turn } from './kit.mjs'
+import { plain } from '../player/serve.mjs'
+
+const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'explore', 'check')), mbit = Number(arg('mbit', '25'))
+const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
+const failures = []
+const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
+if (!has('no-build')) {
+  const built = spawnSync(process.execPath, [join(here, 'sf/build.mjs'), '--out', dist], { cwd: here, encoding: 'utf8' })
+  if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
+}
+mkdirSync(shots, { recursive: true })
+const pointer = JSON.parse(readFileSync(join(dist, 'sf/current.json'), 'utf8')), releaseAt = `/sf/${pointer.manifest.replace(/manifest\.json$/, '')}`
+// The host: a page with the realm in a frame over the whole of it, keeping what the realm tells it.
+const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
+<iframe id="realm" src="/sf/index.html?knock=0" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
+// A host that does not wait: it says `explore` once, when its frame has loaded, long before it is told `ready` (the
+// realm has no GPU, no core and no tile yet), and never again.
+const EARLY = HOST.replace('</script>', ';document.getElementById(\'realm\').addEventListener(\'load\',()=>ask({type:\'explore\'}))</script>')
+const site = await plain(dist, '127.0.0.1', 0, { extra: (req, res) => { const path = new URL(req.url, 'http://x').pathname; if (path !== '/host.html' && path !== '/host-early.html') return false; res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(path === '/host.html' ? HOST : EARLY); return true } })
+const back = await turn()
+for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { back(); process.exit(1) })
+const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
+const results = {}, errors = []
+const mb = (n) => round(n / 1048576, 2)
+const WIDE = { viewport: { width: 1280, height: 720 } }, PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }
+/** What was sent between two moments (ms since 1970): how many requests, the bytes on the wire, and of what. */
+const sent = (from, to) => {
+  const all = { requests: 0, wire: 0 }, kinds = {}
+  for (const a of site.asked) {
+    if (a.status !== 200 || a.at < from || a.at > to) continue
+    all.requests++; all.wire += a.wire
+    const kind = a.path.startsWith(releaseAt + 'tiles/') ? 'tiles' : a.path.startsWith(releaseAt) ? a.path.slice(releaseAt.length).split('/')[0] : a.path.startsWith('/page/') || a.path.startsWith('/kit/') || a.path.startsWith('/blocks/') ? 'code' : 'other'
+    kinds[kind] = (kinds[kind] ?? 0) + a.wire
+  }
+  return { requests: all.requests, wireMB: mb(all.wire), of: Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, mb(v)])) }
+}
+/** A page of the realm: in the host's frame or by itself, throttled or not. Returns the page, the realm's frame and what lifts the throttle. */
+const open = async (options, { hosted = false, slow = false, early = false } = {}) => {
+  const context = await browser.newContext(options), page = await context.newPage()
+  page.on('pageerror', (e) => errors.push(e.message))
+  let lift = async () => {}
+  if (slow) { const cdp = await context.newCDPSession(page); await cdp.send('Network.enable'); await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 }); lift = () => cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }) }
+  const from = Date.now()
+  await page.goto(hosted ? `${site.url}/${early ? 'host-early' : 'host'}.html` : `${site.url}/sf/index.html?knock=0`)
+  const realm = hosted ? page.frames().find((f) => f.url().includes('/sf/index.html')) : page.mainFrame()
+  await realm.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 240_000 })
+  const shown = await realm.evaluate(() => performance.timeOrigin + globalThis.engine.seen.near)
+  await realm.waitForFunction(() => globalThis.engine.seen.whole > 0 && globalThis.engine.boards && globalThis.engine.far.whole && globalThis.engine.explore, null, { timeout: 300_000 })
+  return { context, page, realm, lift, from, shown }
+}
+const at = (realm) => realm.evaluate(() => { const w = globalThis.engine.boards.where('explore'); return w && { x: w.x, y: w.y, wide: w.wide, high: w.high, tall: w.tall } })
+const state = (realm) => realm.evaluate(() => globalThis.engine.explore.state)
+const eye = (realm) => realm.evaluate(() => { const e = globalThis.engine, p = e.pose; return { at: [p.x, p.y, p.z], yaw: p.yaw, pitch: p.pitch, fov: e.fov, engaged: e.first.engaged, locked: e.input.locked, top: e.input.top } })
+const same = (a, b) => Math.hypot(a.at[0] - b.at[0], a.at[1] - b.at[1], a.at[2] - b.at[2]) < 0.01 && Math.abs(a.yaw - b.yaw) < 1e-4 && Math.abs(a.pitch - b.pitch) < 1e-4 && Math.abs(a.fov - b.fov) < 1e-3
+/** How much brighter the picture is where the board's letters are lamp than where they are panel (0 to 255), from a screenshot of the page. */
+const read = async (page, realm) => {
+  const marks = await realm.evaluate(() => globalThis.engine.boards.marks('explore')), w = await at(realm)
+  const clip = { x: Math.max(0, Math.floor(w.x - w.wide / 2 - 4)), y: Math.max(0, Math.floor(w.y - w.high / 2 - 4)), width: Math.ceil(w.wide + 8), height: Math.ceil(w.high + 8) }
+  const png = await page.screenshot({ clip }), scale = (await page.evaluate(() => devicePixelRatio)) || 1
+  const picture = await page.evaluate(async ({ data, wide, high }) => { const image = await createImageBitmap(await (await fetch(data)).blob()), c = new OffscreenCanvas(image.width, image.height), g = c.getContext('2d'); g.drawImage(image, 0, 0); return { w: image.width, data: [...g.getImageData(0, 0, image.width, image.height).data], wide, high } }, { data: `data:image/png;base64,${png.toString('base64')}`, wide: clip.width, high: clip.height })
+  const lum = (m) => { const x = Math.round((m.x - clip.x) * scale), y = Math.round((m.y - clip.y) * scale), i = (y * picture.w + x) * 4; return i >= 0 && i + 2 < picture.data.length ? 0.2126 * picture.data[i] + 0.7152 * picture.data[i + 1] + 0.0722 * picture.data[i + 2] : null }
+  const mean = (list) => { const v = list.map(lum).filter((n) => n !== null); return v.reduce((a, b) => a + b, 0) / Math.max(1, v.length) }
+  return { lamp: round(mean(marks.filter((m) => m.lit))), panel: round(mean(marks.filter((m) => !m.lit))), marks: marks.length }
+}
+const click = (page, phone, x, y) => (phone ? page.touchscreen.tap(x, y) : page.mouse.click(x, y))
+const until = (realm, what, ms = 60_000) => realm.waitForFunction(what, null, { timeout: ms }).then(() => true, () => false)
+
+try {
+  // ── The first view on an ordinary link, in the host's frame ──
+  console.log(`\nthe first view (cold cache, ${mbit} Mbit/s, 40 ms)`)
+  const first = await open(WIDE, { hosted: true, slow: true })
+  const { page, realm } = first
+  const untilPark = sent(0, first.shown), parkCode = site.asked.filter((a) => a.at <= first.shown && /\/page\/explore\.js/.test(a.path)).length
+  results.park = untilPark
+  check(untilPark.wireMB < 8, `${untilPark.wireMB} MB over the wire until the park is shown (bound 8 MB): ${JSON.stringify(untilPark.of)}`)
+  check(parkCode === 0, 'the way in (page/explore.js) is fetched after the park is shown, not before')
+  const view = await realm.evaluate(() => {
+    const b = globalThis.engine.boards, box = (id) => { const w = b.where(id); return w && { x0: w.x - w.wide / 2, y0: w.y - w.high / 2, x1: w.x + w.wide / 2, y1: w.y + w.high / 2 } }
+    const meet = (p, q) => p.x0 < q.x1 && p.x1 > q.x0 && p.y0 < q.y1 && p.y1 > q.y0, mine = box('explore')
+    const laid = [...document.querySelectorAll('#first > button, #realm .sky, #realm .tools, #hud')].filter((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((el) => { const r = el.getBoundingClientRect(); return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom } })
+    return { key: !!document.querySelector('#first .explore'), mine, inside: mine && mine.x0 > 0 && mine.y0 > 0 && mine.x1 < innerWidth && mine.y1 < innerHeight, over: b.records.filter((r) => r.id !== 'explore').filter((r) => { const o = box(r.id); return o && meet(mine, o) }).map((r) => r.id), under: laid.filter((l) => meet(mine, l)).length, faced: b.faced('explore'), blogFaced: b.faced('blog'), button: document.querySelector('nav [data-board="explore"]')?.tagName, record: b.records.find((r) => r.id === 'explore'), tall: b.where('explore').tall, blog: b.where('blog').tall, state: globalThis.engine.explore.state, engaged: globalThis.engine.first.engaged }
+  })
+  // (The picture's own scale held where a quiet machine has it: the GPU is shared with other checks, and at a third of the pixels no sign of 56 px is read.)
+  await realm.evaluate(() => { globalThis.engine.scale = 0.75 })
+  await page.waitForTimeout(1500)
+  await page.screenshot({ path: join(shots, 'first-1280x720.png') })
+  check(!view.key && view.state === 'idle' && !view.engaged, 'the first view has no Explore key, and nobody is in the realm yet')
+  check(view.record?.type === 'lettering' && view.record.does === 'explore' && view.button === 'BUTTON', `EXPLORE is a lettering board of the file that does "explore", and a button in the page for a keyboard (${view.button})`)
+  check(view.inside && view.over.length === 0 && view.under === 0, `the board is in the picture at 1280 x 720, over no other board and under nothing${view.over.length ? ` (over ${view.over})` : ''}`)
+  check(view.faced && !view.blogFaced, 'from the park EXPLORE is shown as its face and BLOG as its cells, as it always was')
+  check(view.tall >= 14 && view.tall < view.blog * 0.6, `its face is ${round(view.tall)} px tall: 14 or more, and well under BLOG's ${round(view.blog)} (it does not compete)`)
+  const idle = await read(page, realm)
+  check(idle.marks >= 100 && idle.lamp - idle.panel > 60, `read from the picture: where its letters are lamp the picture is ${idle.lamp}, where panel ${idle.panel} (60 or more apart; ${idle.marks} squares)`)
+  const began = await eye(realm), told = () => page.evaluate(() => window.told.map((m) => m.type))
+  check((await told()).includes('ready') && (await page.evaluate(() => window.told.find((m) => m.type === 'ready').boards.some((b) => b.id === 'explore'))), 'the host is told `ready` with the board')
+
+  // ── Nothing done by chance ──
+  console.log('\nnothing done by chance')
+  await realm.evaluate(() => window.focus())
+  // (B, which takes a body up or sets it down everywhere in the realm, before Enter and the slash, which open a line to write on: each alone, and what has the keys looked at after each.)
+  const keyed = []
+  for (const key of ['KeyB', 'KeyW', 'Space', 'KeyO', 'Backspace', 'Enter', 'Slash', 'ArrowUp']) { await page.keyboard.press(key); await page.waitForTimeout(120); const e = await eye(realm), body = await realm.evaluate(() => ({ on: globalThis.engine.me.on, writing: document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA' })); if (!same(e, began) || e.engaged || e.top !== began.top || body.on || body.writing) keyed.push(key) }
+  await page.keyboard.down('KeyW'); await page.waitForTimeout(600); await page.keyboard.up('KeyW')
+  check(keyed.length === 0 && same(await eye(realm), began) && !(await eye(realm)).engaged, `keys move nothing, bring nothing and mean nothing: B, W, Space, O, Backspace, Enter, the slash, W held${keyed.length ? ` (${keyed.join(', ')} did something)` : ''}`)
+  await page.mouse.move(300, 200); await page.mouse.down(); await page.mouse.move(520, 260, { steps: 8 }); await page.mouse.up()
+  await page.mouse.click(1000, 120)
+  await page.waitForTimeout(400)
+  const afterClicks = await eye(realm)
+  check(same(afterClicks, began) && !afterClicks.engaged && !afterClicks.locked && (await state(realm)) === 'idle', 'a drag and a click on the sky move nothing, take no pointer and bring nothing')
+
+  // ── Asked once ──
+  console.log('\nasked once')
+  const armAt = Date.now()
+  let w = await at(realm)
+  await page.mouse.click(w.x, w.y)
+  await page.waitForTimeout(1100)
+  const armed = await realm.evaluate(() => { const h = document.querySelector('#explore-hint'), r = h.getBoundingClientRect(), w = globalThis.engine.boards.where('explore'); return { state: globalThis.engine.explore.state, engaged: globalThis.engine.first.engaged, hint: h.textContent, on: h.classList.contains('on') && getComputedStyle(h).opacity > 0.9, under: r.top - (w.y + w.high / 2), across: Math.abs((r.left + r.right) / 2 - w.x), faced: globalThis.engine.boards.faced('explore') } })
+  await page.screenshot({ path: join(shots, 'armed-1280x720.png') })
+  const lit = await read(page, realm), leaned = await eye(realm)
+  check(armed.state === 'armed' && !armed.engaged && !(await told()).includes('engaged'), 'one click does not enter: the board is asked, nobody is in the realm, the host is told nothing')
+  check(armed.on && /Click again to explore/.test(armed.hint) && /Esc to stay/.test(armed.hint) && armed.under > 0 && armed.under < 30 && armed.across < 40, `a line under the board says how to go on: "${armed.hint}" (${round(armed.under)} px under it)`)
+  // (Its lamp brighter by 25 of 255 or more, and further from its panel than before: a face 56 px wide lets a lit letter's light a little into the panel beside it.)
+  check(lit.lamp - idle.lamp > 25 && lit.lamp - lit.panel > idle.lamp - idle.panel + 10, `its letters light: the picture there is ${lit.lamp} from ${idle.lamp}, its panels ${lit.panel} from ${idle.panel}`)
+  const turned = Math.hypot(leaned.yaw - began.yaw, leaned.pitch - began.pitch) * 180 / Math.PI
+  check(turned > 0.02 && turned < 1.5 && leaned.fov < began.fov && leaned.fov > began.fov * 0.94, `the eye leans to it a little: ${round(turned, 2)} degrees, the lens ${round(began.fov, 2)} to ${round(leaned.fov, 2)}`)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(350)
+  const escaped = await realm.evaluate(() => ({ state: globalThis.engine.explore.state, on: document.querySelector('#explore-hint').classList.contains('on') }))
+  await page.waitForTimeout(1600)
+  check(escaped.state === 'idle' && !escaped.on && same(await eye(realm), began), 'Esc puts it back: no line, and the eye where it was')
+  const back1 = await read(page, realm)
+  check(Math.abs(back1.lamp - idle.lamp) < 12, `and its letters as they were (${back1.lamp} against ${idle.lamp})`)
+  // A double click is one ask, and so is Enter held until it repeats: the line has to have been there to read.
+  w = await at(realm)
+  await page.mouse.click(w.x, w.y); await page.waitForTimeout(110); await page.mouse.click(w.x, w.y)
+  await page.waitForTimeout(500)
+  const doubled = await state(realm)
+  await page.keyboard.press('Escape'); await page.waitForTimeout(1500)
+  await realm.evaluate(() => document.querySelector('nav [data-board="explore"]').focus())
+  await page.keyboard.down('Enter'); await page.waitForTimeout(450); for (let i = 0; i < 6; i++) { await page.keyboard.down('Enter'); await page.waitForTimeout(40) } await page.keyboard.up('Enter')
+  await page.waitForTimeout(300)
+  const held = await state(realm)
+  await page.keyboard.press('Escape'); await realm.evaluate(() => document.activeElement.blur()); await page.waitForTimeout(1500)
+  check(doubled === 'armed' && held === 'armed' && (await state(realm)) === 'idle' && !(await eye(realm)).engaged, `a double click asks once (${doubled}), and so does Enter held until it repeats (${held})`)
+  // A click anywhere else; the pointer taken well away; a few seconds.
+  w = await at(realm)
+  await page.mouse.click(w.x, w.y); await page.waitForTimeout(300)
+  await page.mouse.click(1000, 120); await page.waitForTimeout(300)
+  check((await state(realm)) === 'idle' && !(await eye(realm)).engaged, 'asked once, then a click elsewhere: put back, and nobody is in')
+  await page.mouse.click(w.x, w.y); await page.waitForTimeout(300)
+  const stayed = await state(realm)
+  await page.mouse.move(w.x + 60, w.y + 30, { steps: 4 }); await page.waitForTimeout(200)
+  const near = await state(realm)
+  await page.mouse.move(w.x + 420, w.y + 200, { steps: 6 }); await page.waitForTimeout(300)
+  check(stayed === 'armed' && near === 'armed' && (await state(realm)) === 'idle', 'the pointer a little off the board leaves it asked; taken well away, it is put back')
+  await page.mouse.move(w.x, w.y, { steps: 4 })
+  await page.mouse.click(w.x, w.y)
+  await page.waitForTimeout(5200)
+  const late = await state(realm)
+  await page.waitForTimeout(1500)
+  check(late === 'armed' && (await state(realm)) === 'idle', 'left alone it stands for six seconds, then is put back')
+  await page.waitForTimeout(1500)
+
+  // ── Asked twice, on the throttled link ──
+  console.log(`\nasked twice (${mbit} Mbit/s, 40 ms)`)
+  w = await at(realm)
+  await page.mouse.click(w.x, w.y)
+  await page.waitForTimeout(800)
+  w = await at(realm)
+  const wentAt = Date.now()
+  // In the page, every frame: when the eye settles, what the world still wants, and the eye's path (for whether it went round).
+  const watching = realm.evaluate(() => new Promise((done) => {
+    const e = globalThis.engine, path = []
+    const stop = e.watch(() => {
+      const s = e.explore.state, f = e.me.feet
+      if (s === 'going' && f) path.push(Math.atan2(e.pose.x * 10 - f.at[0], -(e.pose.z * 10 - f.at[2])))
+      if (s !== 'in') return
+      stop()
+      let turned = 0
+      for (let i = 1; i < path.length; i++) { let d = path[i] - path[i - 1]; if (d > Math.PI) d -= 2 * Math.PI; if (d < -Math.PI) d += 2 * Math.PI; turned += d }
+      done({ wanted: e.world.stats.wanted, stale: e.world.stats.stale, far: e.far.whole, times: e.explore.times, turned: Math.abs(turned), now: performance.timeOrigin + performance.now() })
+    })
+  }))
+  await page.mouse.click(w.x, w.y)
+  const settled = await Promise.race([watching, new Promise((r) => setTimeout(() => r(null), 60_000))])
+  check(!!settled, 'two clicks enter')
+  if (!settled) throw new Error('the flight did not end')
+  await realm.waitForFunction(() => globalThis.engine.me.feet, null, { timeout: 10_000 })
+  const took = (settled.times.settled - settled.times.went) / 1000, fetched = sent(armAt, settled.now), late2 = site.asked.filter((a) => a.at > settled.now && a.at < settled.now + 2500 && a.status === 200 && a.path.startsWith(releaseAt + 'tiles/')).length
+  results.flight = { seconds: round(took, 2), turned: round(settled.turned * 180 / Math.PI), waited: settled.times.waited ? round((settled.times.settled - settled.times.waited) / 1000, 2) : 0, loadedBeforeSettle: round((settled.times.settled - settled.times.loaded) / 1000, 2), sinceFirstClick: fetched, afterGo: sent(wentAt, settled.now) }
+  console.log(JSON.stringify(results.flight, null, 1))
+  check(took >= 6 && took <= (settled.times.waited ? 18 : 10), `from the second click to the eye settled: ${round(took, 1)} s (6 to 10${settled.times.waited ? '; the round was drawn out to wait for the roof' : ''})`)
+  check(settled.turned > Math.PI, `the eye went round the body: ${round(settled.turned * 180 / Math.PI)} degrees in one sweep`)
+  check(settled.times.loaded > 0 && settled.times.loaded <= settled.times.settled && settled.wanted === 0 && settled.stale === 0 && (settled.far || settled.times.waited > 0), `what the roof needs was in before the eye settled: its tiles ${round((settled.times.settled - settled.times.loaded) / 1000, 1)} s before, no box of the world still to make (${settled.wanted} wanted), the far model whole for the view: ${settled.far}`)
+  check(late2 === 0, `no tile comes in the 2.5 s after it settles (${late2})`)
+  check(fetched.requests > 0, `${fetched.wireMB} MB in ${fetched.requests} requests between the first click and the eye settled: ${JSON.stringify(fetched.of)}`)
+  await first.lift()
+  await page.waitForTimeout(2500)
+  const inside = await realm.evaluate(() => {
+    const e = globalThis.engine, f = e.me.feet, s = e.explore.stand, card = document.querySelector('#realm .help'), vis = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+    const r = card?.getBoundingClientRect(), sky = document.querySelector('#realm .sky'), fold = document.querySelector('#realm .fold')?.getBoundingClientRect()
+    return { engaged: e.first.engaged, first: document.documentElement.classList.contains('first'), on: e.me.on, view: e.me.view, back: e.me.back, off: f && Math.hypot(f.at[0] - s.x, f.at[2] - s.z), high: f && f.at[1] - e.feet(Math.round(f.at[0]), Math.round(f.at[2])), yaw: Math.abs(e.pose.yaw - s.yaw), fov: e.fov, card: vis(card), keys: [...(card?.querySelectorAll('kbd') ?? [])].map((k) => k.textContent.trim()), words: card?.textContent, right: r && innerWidth - r.right, top: r?.top, sky: vis(sky), fold: fold && [fold.right, fold.bottom], tools: vis(document.querySelector('#realm .tools')), faced: e.boards.faced('explore'), mode: e.input.top }
+  })
+  await page.screenshot({ path: join(shots, 'third-1280x720.png') })
+  check(inside.engaged && !inside.first && (await told()).filter((t) => t === 'engaged').length === 1, 'the visitor is in: the controls are shown, and the host is told `engaged` once')
+  check(inside.on && inside.view === 'behind' && inside.back > 20 && inside.off < 15 && Math.abs(inside.high) < 4 && inside.yaw < 0.01, `the eye is behind their own body, which stands where the record says (${round(inside.off / 10, 2)} m off, the eye ${round(inside.back / 10, 1)} m back)`)
+  check(inside.card && inside.keys.join() === 'Space,B' && /in the air to deploy a parachute/.test(inside.words) && /to fly/.test(inside.words) && inside.right < 40 && inside.top < 120, `the card at the top right says the two keys: ${inside.keys.join(' and ')}`)
+  check(!inside.sky && inside.fold && inside.top >= inside.fold[1], 'the hour\'s panel is folded behind its key, and the card is under that key')
+  check(!inside.faced, 'from the roof the board is its cells, not its face')
+
+  // ── The fall, the canopy, flying ──
+  console.log('\nthe fall and the canopy')
+  const roof = await realm.evaluate(() => globalThis.engine.me.feet.at[1])
+  const track = () => realm.evaluate(() => { const m = globalThis.engine.me, f = m.feet; return { t: performance.now(), y: f.at[1], x: f.at[0], z: f.at[2], aloft: m.aloft, canopy: m.canopy } })
+  await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW')
+  const offEdge = await until(realm, () => globalThis.engine.me.aloft, 15_000)
+  const f0 = await track(); await page.waitForTimeout(700); const f1 = await track(); await page.waitForTimeout(300); const f2 = await track()
+  await page.screenshot({ path: join(shots, 'fall-1280x720.png') })
+  const early = (f0.y - f1.y) / (f1.t - f0.t) * 100, later = (f1.y - f2.y) / (f2.t - f1.t) * 100
+  // (Over 4 m/s by the second look and half as fast again as at the first: the body is stepped by the frame, and on a GPU shared with other checks a second of the fall is fewer steps than a second.)
+  check(offEdge && f2.aloft && later > early * 1.5 && later > 4, `a step off the edge is a fall that gathers speed: ${round(early)} then ${round(later)} m/s down`)
+  await page.keyboard.up('KeyW'); await page.keyboard.up('ShiftLeft')
+  // Back on the roof for the canopy: a fall of 19 m is over in two seconds.
+  await realm.evaluate(() => { const e = globalThis.engine, s = e.explore.stand; e.me.walk(false); Object.assign(e.pose, { x: s.x / 10 + 4, y: e.pose.y + 60, z: s.z / 10 + 2 }); e.me.walk(true) })
+  await until(realm, () => globalThis.engine.me.aloft && globalThis.engine.me.feet, 10_000)
+  await page.waitForTimeout(500)
+  await page.keyboard.press('Space')
+  await page.waitForTimeout(900)
+  const c0 = await track()
+  await page.keyboard.down('KeyW'); await page.waitForTimeout(1500); const c1 = await track(); await page.keyboard.up('KeyW')
+  await page.screenshot({ path: join(shots, 'canopy-1280x720.png') })
+  const sink = (c0.y - c1.y) / (c1.t - c0.t) * 100, glide = Math.hypot(c1.x - c0.x, c1.z - c0.z) / (c1.t - c0.t) * 100
+  check(c0.canopy && c1.canopy && sink > 2.5 && sink < 5.5, `Space in the air opens a canopy that sinks at ${round(sink)} m/s (4)`)
+  check(glide > 3, `it is steered: ${round(glide)} m/s across with W held`)
+  const landed = await until(realm, () => !globalThis.engine.me.aloft && !globalThis.engine.me.canopy, 40_000), down = await track()
+  await page.screenshot({ path: join(shots, 'landed-1280x720.png') })
+  check(landed && down.y < roof + 600, `it lands and the canopy is gone (${round((down.y) / 10)} m, on its feet: ${!down.aloft})`)
+  await page.keyboard.press('KeyB')
+  await page.waitForTimeout(400)
+  check(!(await realm.evaluate(() => globalThis.engine.me.on)), 'B flies: the body is taken up')
+  const gone = await until(realm, () => !document.querySelector('#realm .help'), 8000)
+  check(gone, 'both done, the card goes')
+  await first.context.close()
+
+  // ── The host's word ──
+  console.log('\nthe host\'s `explore`')
+  {
+    // Asked once, and the eye then taken to another board (the host's `fly`): the ask is over, and the lens as it was.
+    const { context, page, realm } = await open(WIDE, { hosted: true })
+    const calm = await eye(realm), w0 = await at(realm)
+    await page.mouse.click(w0.x, w0.y); await page.waitForTimeout(900)
+    const leant = await eye(realm)
+    await page.evaluate(() => window.ask({ type: 'fly', board: 'blog' }))
+    await page.waitForTimeout(3000)
+    const flown = { state: await state(realm), eye: await eye(realm) }
+    check(leant.fov < calm.fov && flown.state === 'idle' && Math.abs(flown.eye.fov - calm.fov) < 1e-3 && Math.hypot(flown.eye.at[0] - calm.at[0], flown.eye.at[2] - calm.at[2]) > 20, `asked once and then flown to BLOG by the host: the ask is over (${flown.state}) and the lens as it was (${round(calm.fov, 2)}, leant ${round(leant.fov, 2)}, then ${round(flown.eye.fov, 2)})`)
+    await context.close()
+  }
+  {
+    // From the park, as a host's visitor is.
+    const { context, page, realm } = await open(WIDE, { hosted: true })
+    await page.evaluate(() => window.ask({ type: 'explore' }))
+    await page.waitForTimeout(300)
+    const going = await state(realm)
+    // A press in the flight on BLOG, while it is in the picture (seen frame by frame, from the moment a press cuts),
+    // held until the visitor is in and let go only then: it cuts to the end, and the click that comes of it opens no
+    // board and takes no pointer.
+    const blog = await realm.evaluate(() => new Promise((done) => { const look = () => { const e = globalThis.engine, w = e.boards.where('blog'); if (e.explore.state !== 'going') return done(null); if (performance.now() - e.explore.times.went > 380 && w && w.x > 10 && w.x < innerWidth - 10 && w.y > 10 && w.y < innerHeight - 10) return done([w.x, w.y]); requestAnimationFrame(look) }; look() }))
+    if (blog) { await page.mouse.move(...blog); await page.mouse.down() }
+    const cutting = await realm.evaluate(() => new Promise((done) => setTimeout(() => done(globalThis.engine.explore.state === 'in' || !!document.querySelector('#explore-still')), 350)))
+    const in1 = await until(realm, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 30_000)
+    await page.waitForTimeout(500)
+    await page.mouse.up()
+    await page.waitForTimeout(2500)
+    const after = await realm.evaluate(() => { const e = globalThis.engine, f = e.me.feet, s = e.explore.stand; return { off: f ? Math.hypot(f.at[0] - s.x, f.at[2] - s.z) : null, on: e.me.on, locked: !!document.pointerLockElement || e.input.locked } })
+    const heard = await page.evaluate(() => window.told.map((m) => m.type))
+    check(going === 'going' && in1 && heard.filter((t) => t === 'engaged').length === 1, 'it is meant: the flight at once, nothing asked twice, and `engaged` told')
+    check(!!blog && cutting && !heard.includes('navigate') && !after.locked && after.on && after.off !== null && after.off < 30, `a press in the flight on BLOG${blog ? '' : ' (which was not in the picture)'} cuts to the end at once (${cutting}), and let go half a second after the visitor is in it does no more: no board is opened, the pointer is not taken (${after.locked ? 'taken' : 'free'}), the body stands on the roof (${after.off === null ? 'no body' : `${round(after.off / 10, 1)} m off`})`)
+    // The next click is a click again.
+    await page.mouse.click(640, 300); await page.waitForTimeout(400)
+    check(await realm.evaluate(() => !!document.pointerLockElement || globalThis.engine.input.locked), 'and the next click is heard as any click in the realm is: it takes the pointer')
+    await context.close()
+  }
+  {
+    // Said before `ready`, by a host that does not wait for it, on the throttled link from a cold cache: the tight
+    // case, with no ask before the flight for the roof's tiles to come in. All of them cross the wire in the flight.
+    const context = await browser.newContext(WIDE), page = await context.newPage()
+    page.on('pageerror', (e) => errors.push(e.message))
+    const cdp = await context.newCDPSession(page)
+    await cdp.send('Network.enable')
+    await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 })
+    const lift = () => cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 })
+    await page.goto(`${site.url}/host-early.html`)
+    const realm = page.frames().find((f) => f.url().includes('/sf/index.html'))
+    // (Watched from the frame the way in comes in: the flight begins with it.)
+    await realm.waitForFunction(() => globalThis.engine?.explore && globalThis.engine.watch, null, { timeout: 240_000, polling: 'raf' })
+    const settled = await realm.evaluate(() => new Promise((done) => { const e = globalThis.engine, stop = e.watch(() => { if (e.explore.state !== 'in') return; stop(); done({ wanted: e.world.stats.wanted, stale: e.world.stats.stale, far: e.far.whole, times: e.explore.times, feet: !!e.me.on, late: performance.now() - e.explore.times.settled, now: performance.timeOrigin + e.explore.times.settled }) }); setTimeout(() => { stop(); done(null) }, 90_000) }))
+    await realm.waitForFunction(() => globalThis.engine.me.feet, null, { timeout: 10_000 }).catch(() => null)
+    // Where its feet are a little after: on the roof it was to stand on, not through it.
+    const place = () => realm.evaluate(() => { const e = globalThis.engine, f = e.me.feet, s = e.explore.stand, b = e.boards.records.find((r) => r.id === 'explore'); return f ? { off: Math.hypot(f.at[0] - s.x, f.at[2] - s.z), high: f.at[1] - b.at[1], aloft: e.me.aloft } : null })
+    const stood = await place()
+    const took = settled ? (settled.times.settled - settled.times.went) / 1000 : 0, waited = settled?.times.waited ? (settled.times.settled - settled.times.waited) / 1000 : 0
+    const inFlight = settled ? sent(settled.now - took * 1000, settled.now) : null, afterIt = settled ? sent(settled.now, settled.now + 5000) : null
+    await page.waitForTimeout(5200)
+    const after5 = settled ? sent(settled.now, settled.now + 5000) : null, stays = await place()
+    results.tight = { seconds: round(took, 2), waited: round(waited, 2), loadedBeforeSettle: settled ? round((settled.times.settled - settled.times.loaded) / 1000, 2) : null, inFlight, afterSettle5s: after5 }
+    console.log(JSON.stringify(results.tight, null, 1))
+    void afterIt
+    await lift()
+    check(!!settled && (await page.evaluate(() => window.told.filter((m) => m.type === 'engaged').length)) === 1, 'said before `ready` it is kept: the flight as soon as the way in has come')
+    check(!!settled && settled.late < 100, `the eye's settling was watched as it happened (${Math.round(settled?.late ?? -1)} ms after)`)
+    check(!!settled && settled.feet && settled.times.loaded > 0 && settled.times.loaded <= settled.times.settled && settled.wanted === 0 && settled.stale === 0 && (settled.far || waited > 0), `with no ask before it, on ${mbit} Mbit/s: ${inFlight?.wireMB} MB crossed in the flight (${JSON.stringify(inFlight?.of)}), the roof's tiles in ${round((settled?.times.settled - settled?.times.loaded) / 1000, 1)} s before the eye settled, no box of the world still to make, the far model whole: ${settled?.far}; ${round(took, 1)} s${waited ? `, the round drawn out ${round(waited, 1)} s` : ''}`)
+    check(!!stood && !!stays && stood.off < 30 && stays.off < 30 && Math.abs(stood.high) < 30 && Math.abs(stays.high) < 30 && !stays.aloft, `its body stands on the roof by the sign, then and five seconds on: ${stood ? `${round(stood.off / 10, 1)} m from its place, ${round(stood.high / 10, 1)} m over the sign's foot` : 'no body'}; ${stays ? `${round(stays.off / 10, 1)} m, ${round(stays.high / 10, 1)} m${stays.aloft ? ', in the air' : ''}` : 'no body'}`)
+    check(took >= 6 && took <= 18 && (after5?.of.tiles ?? 0) === 0, `it took ${round(took, 1)} s (6 to 10, or to 18 with the round drawn out), and in the 5 s after it no tile came: ${JSON.stringify(after5?.of)} (${after5?.wireMB} MB)`)
+    await context.close()
+  }
+
+  // ── The keyboard; a key in the flight ──
+  console.log('\nthe keyboard')
+  {
+    const { context, page, realm } = await open(WIDE)
+    let focused = false
+    for (let i = 0; i < 12 && !focused; i++) { await page.keyboard.press('Tab'); focused = await realm.evaluate(() => document.activeElement?.dataset?.board === 'explore') }
+    const seen = focused && (await realm.evaluate(() => { const r = document.activeElement.getBoundingClientRect(); return r.left >= 0 && r.top >= 0 && r.width > 20 }))
+    await page.keyboard.press('Enter'); await page.waitForTimeout(500)
+    const once = await realm.evaluate(() => ({ state: globalThis.engine.explore.state, hint: document.querySelector('#explore-hint').textContent }))
+    // The second Enter held down, saying itself again through the first second of the flight: it is the key that asked, and cuts nothing.
+    await page.keyboard.down('Enter'); await page.waitForTimeout(500); await page.keyboard.down('Enter'); await page.waitForTimeout(400); await page.keyboard.down('Enter'); await page.waitForTimeout(150)
+    const twice = await realm.evaluate(() => ({ state: globalThis.engine.explore.state, cut: !!document.querySelector('#explore-still') }))
+    await page.keyboard.up('Enter')
+    check(focused && seen && once.state === 'armed' && /Press Enter again/.test(once.hint) && twice.state === 'going' && !twice.cut, `Tab reaches the board's button, which is then seen; Enter asks ("${once.hint}"), Enter again goes; held on into the flight it cuts nothing (${twice.state}${twice.cut ? ', cut' : ''})`)
+    // Late in the flight, when the roof is made and the cut is at once: Backspace, which in the realm puts the world back and the eye at the park.
+    await page.waitForTimeout(4000)
+    const pressed = Date.now()
+    await page.keyboard.press('Backspace')
+    const atOnce = await realm.evaluate(() => new Promise((done) => setTimeout(() => done(globalThis.engine.explore.state === 'in' ? 'in' : document.querySelector('#explore-still') ? 'fading' : null), 300)))
+    const cut = await until(realm, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 20_000), took = Date.now() - pressed
+    await page.waitForTimeout(2000)
+    const there = await realm.evaluate(() => { const e = globalThis.engine, f = e.me.feet, s = e.explore.stand; return { off: f ? Math.hypot(f.at[0] - s.x, f.at[2] - s.z) : null, eye: Math.hypot(e.pose.x * 10 - s.x, e.pose.z * 10 - s.z), on: e.me.on } })
+    check(cut && !!atOnce && took < 12_000, `a key in the flight cuts to the end, at once: 0.3 s after it the visitor is ${atOnce ?? 'still flying'} (in and on its feet ${round(took / 1000, 1)} s after)`)
+    check(there.on && there.off !== null && there.off < 30 && there.eye < 200, `and does no more: Backspace did not put the world back (the body ${there.off === null ? 'is gone' : `${round(there.off / 10, 1)} m from where it stands`}, the eye ${round(there.eye / 10)} m from it)`)
+    await context.close()
+  }
+
+  // ── A realm with no board that leads in ──
+  console.log('\nno way in')
+  {
+    const context = await browser.newContext(WIDE), page = await context.newPage()
+    page.on('pageerror', (e) => errors.push(e.message))
+    await page.goto(`${site.url}/sf/index.html?knock=0&boards=0`)
+    await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.first, null, { timeout: 300_000 })
+    await page.waitForTimeout(1500)
+    const before = await page.evaluate(() => globalThis.engine.first.engaged)
+    await page.keyboard.press('KeyW')
+    await page.waitForTimeout(600)
+    check(!before && (await page.evaluate(() => globalThis.engine.first.engaged)), 'with ?boards=0 nothing leads in: a key ends the first view, as it used to')
+    await context.close()
+  }
+  {
+    // The board is there and what it does could not be fetched: a click on the board itself ends the first view.
+    const context = await browser.newContext(WIDE), page = await context.newPage()
+    await page.route('**/page/explore.js', (route) => route.abort())
+    await page.goto(`${site.url}/sf/index.html?knock=0`)
+    await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.first && globalThis.engine.boards?.where('explore') && globalThis.engine.eggs, null, { timeout: 300_000 })
+    await page.waitForTimeout(1500)
+    const before = await page.evaluate(() => ({ engaged: globalThis.engine.first.engaged, way: !!globalThis.engine.explore }))
+    const w = await at(page)
+    await page.mouse.click(w.x, w.y)
+    await page.waitForTimeout(600)
+    check(!before.engaged && !before.way && (await page.evaluate(() => globalThis.engine.first.engaged)), 'with the board there and its flow not to be had (the fetch refused), a click on the board itself ends the first view')
+    await context.close()
+  }
+
+  // ── Where motion is not wanted ──
+  console.log('\nreduced motion')
+  {
+    const { context, page, realm } = await open({ ...WIDE, reducedMotion: 'reduce' })
+    const w = await at(realm), before = await eye(realm)
+    await page.mouse.click(w.x, w.y); await page.waitForTimeout(500)
+    const once = await eye(realm)
+    // Every frame from before the second click until it is in: how far the eye is from the park and from the roof. A flight passes between; a cut does not.
+    const watching = realm.evaluate(() => new Promise((done) => { const e = globalThis.engine, s = e.explore.stand, from = [e.pose.x, e.pose.z], seen = []; const stop = e.watch(() => { seen.push([Math.hypot(e.pose.x - from[0], e.pose.z - from[1]), Math.hypot(e.pose.x - s.x / 10, e.pose.z - s.z / 10)]); if (e.explore.state === 'in') { stop(); done(seen) } }); setTimeout(() => { stop(); done(seen) }, 30_000) }))
+    // And the still picture laid over the page meanwhile: that it is a picture (the first view, which has sky and city in it), not a blank.
+    const laid = realm.evaluate(() => new Promise((done) => { const t0 = performance.now(), look = () => { const c = document.querySelector('#explore-still'); if (c) { const small = new OffscreenCanvas(64, 36), g = small.getContext('2d'); g.drawImage(c, 0, 0, 64, 36); const d = g.getImageData(0, 0, 64, 36).data; let sum = 0, squares = 0; for (let i = 0; i < d.length; i += 4) { const l = (d[i] + d[i + 1] + d[i + 2]) / 3; sum += l; squares += l * l } const mean = sum / (d.length / 4); return done({ mean: Math.round(mean), spread: Math.round(Math.sqrt(squares / (d.length / 4) - mean * mean)) }) } if (performance.now() - t0 > 8000) return done(null); requestAnimationFrame(look) }; look() }))
+    await page.waitForTimeout(200)
+    await page.mouse.click(w.x, w.y)
+    // While the still picture waits for the roof, the eye is on the roof already, under it: a click where a board
+    // that leads somewhere stands in that view (unseen, under the still picture) opens nothing.
+    const under = await realm.evaluate(() => new Promise((done) => { const t0 = performance.now(), look = () => { const e = globalThis.engine, b = e.boards; if (document.querySelector('#explore-still')) for (const r of b.records) { const w = r.to && b.where(r.id); if (w && w.x > 20 && w.x < innerWidth - 20 && w.y > 20 && w.y < innerHeight - 20) return done({ id: r.id, x: w.x, y: w.y, state: e.explore.state }) } if (e.explore.state === 'in' || performance.now() - t0 > 8000) return done(null); requestAnimationFrame(look) }; look() }))
+    const told = []
+    // (What it would open is asked for and refused here: nothing leaves this machine, and the page stays to be looked at.)
+    page.on('request', (r) => { if (r.isNavigationRequest() && r.frame() === page.mainFrame()) told.push(r.url()) })
+    await page.route((url) => !url.href.startsWith(site.url), (route) => route.abort())
+    if (under) await page.mouse.click(under.x, under.y)
+    const path = await watching, still = await laid
+    await page.waitForTimeout(2600)
+    check(!!under && under.state === 'going' && told.length === 0 && page.url().includes('/sf/index.html') && (await state(realm)) === 'in', `a click where ${under ? `${under.id} stands` : 'a board would stand (none was in the view)'} under the still picture, while the roof is waited for, opens nothing${told.length ? ` (it asked for ${told[0]})` : ''}: the page is where it was, and the visitor in`)
+    const between = path.filter(([park, roof]) => park > 30 && roof > 30).length, started = path.length > 0 && path[0][0] < 1, ended = path.length > 0 && path.at(-1)[1] < 30
+    await page.waitForTimeout(1200)
+    check(same(once, before), 'asked once, the eye does not lean')
+    check((await state(realm)) === 'in' && started && ended && between === 0 && !(await realm.evaluate(() => document.querySelector('#explore-still'))), `asked twice, no flight: the eye is at the park and then on the roof (${between} of ${path.length} frames between), the still picture faded away`)
+    check(!!still && still.spread > 20 && still.mean > 40, `the still picture that fades is the first view, not a blank: its light ${still?.mean} of 255, spread ${still?.spread} (20 or more)`)
+    await context.close()
+  }
+
+  // ── A phone ──
+  console.log('\nan upright phone')
+  {
+    const { context, page, realm } = await open(PHONE)
+    await realm.evaluate(() => { globalThis.engine.scale = 0.5 })
+    await page.waitForTimeout(1500)
+    const v = await realm.evaluate(() => { const b = globalThis.engine.boards, w = b.where('explore'), o = b.where('blog'); return { inside: w.x - w.wide / 2 > 0 && w.x + w.wide / 2 < innerWidth && w.y > 0 && w.y < innerHeight, wide: w.wide, tall: w.tall, blog: o.tall, faced: b.faced('explore'), blogFaced: b.faced('blog'), clear: Math.abs(w.y - o.y) > (w.high + o.high) / 2 } })
+    await page.screenshot({ path: join(shots, 'first-390x844.png') })
+    const idleP = await read(page, realm)
+    check(v.inside && v.clear && v.tall >= 14 && v.tall < v.blog * 0.6, `the board is in the phone's picture, ${round(v.wide)} px wide and ${round(v.tall)} tall, clear of BLOG (${round(v.blog)} tall)`)
+    check(v.faced && !v.blogFaced && idleP.lamp - idleP.panel > 60, `shown as its face there (BLOG as its cells, as it always was), and read from the picture: lamp ${idleP.lamp}, panel ${idleP.panel}`)
+    let w = await at(realm)
+    await page.touchscreen.tap(w.x, w.y); await page.waitForTimeout(900)
+    const once = await realm.evaluate(() => ({ state: globalThis.engine.explore.state, hint: document.querySelector('#explore-hint').textContent, engaged: globalThis.engine.first.engaged }))
+    await page.screenshot({ path: join(shots, 'armed-390x844.png') })
+    w = await at(realm)
+    await page.touchscreen.tap(w.x, w.y)
+    const in2 = await until(realm, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 60_000)
+    await page.waitForTimeout(3000)
+    await page.screenshot({ path: join(shots, 'third-390x844.png') })
+    const thumbs = await realm.evaluate(() => { const vis = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }), t = (s) => document.querySelector(s)?.textContent.trim(); return { walks: vis(document.querySelector('#realm .walks')) && t('#realm .walks'), up: vis(document.querySelector('#realm .act .up')) && t('#realm .act .up'), card: [...document.querySelectorAll('#realm .help kbd')].map((k) => k.textContent.trim()), fov: globalThis.engine.fov } })
+    check(once.state === 'armed' && !once.engaged && /Tap again to explore/.test(once.hint) && in2, `one tap asks ("${once.hint}"), a second enters`)
+    check(thumbs.walks === 'Fly' && thumbs.up === 'Jump' && thumbs.card.join() === 'Chute,Fly', `a thumb has the keys: ${thumbs.up} (in the air: Chute), ${thumbs.walks}; the card names ${thumbs.card.join(' and ')}`)
+    // The key that rises opens the canopy in the air.
+    await realm.evaluate(() => { const e = globalThis.engine; e.me.walk(false); e.pose.y += 60; e.me.walk(true) })
+    await until(realm, () => globalThis.engine.me.aloft && globalThis.engine.me.feet, 10_000)
+    await page.waitForTimeout(400)
+    const label = await realm.evaluate(() => document.querySelector('#realm .act .up').textContent.trim()), key = await realm.evaluate(() => { const r = document.querySelector('#realm .act .up').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
+    await page.touchscreen.tap(key[0], key[1])
+    await page.waitForTimeout(700)
+    await page.screenshot({ path: join(shots, 'canopy-390x844.png') })
+    check(label === 'Chute' && (await realm.evaluate(() => globalThis.engine.me.canopy)), 'in the air that key says Chute, and a tap on it opens the canopy')
+    await context.close()
+  }
+  check(errors.length === 0, `no errors on any page${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`)
+} catch (e) {
+  console.log(`  FAIL ${e.message.split('\n')[0]}`)
+  failures.push(e.message.split('\n')[0])
+} finally {
+  await browser.close()
+  site.stop()
+  back()
+}
+writeFileSync(join(shots, 'results.json'), JSON.stringify(results, null, 1))
+console.log(failures.length ? `\nsf-explore: ${failures.length} failed\n${failures.map((f) => `  - ${f}`).join('\n')}` : '\nsf-explore: passed')
+process.exit(failures.length ? 1 : 0)

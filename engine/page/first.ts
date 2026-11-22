@@ -1,15 +1,17 @@
-// The first view of a realm the page runs alone (#450): the picture, one key that says Explore, and who the place is
-// made from behind a small key. The line of numbers, the aim, the hour and weather, the tools and the street's name
-// (and whatever else the page lays over the picture) are the page's still, and hidden until the visitor engages: a key pressed, a drag on the picture, the pointer taken
-// by a click on it, the Explore key, or the host's `explore`. Then they come, once, and stay.
+// The first view of a realm the page runs alone (#450): the picture, and who the place is made from behind a small
+// key. The line of numbers, the aim, the hour and weather, the tools and the street's name (and whatever else the page
+// lays over the picture) are the page's still, and hidden until the visitor engages. Nothing done by chance engages:
+// the picture is a still one, no key moves the eye and no click takes the pointer (main.ts keeps a mode over the
+// page's own until then). The way in is the EXPLORE board, asked twice (explore.ts), or the host's `explore`; either
+// ends in `engage`. Then the controls come, once, and stay.
 //
-// The two keys here are the Voxelmorphism kit's (engine/kit): plain HTML first, voxels when the kit comes. Nothing of
+// The key here is the Voxelmorphism kit's (engine/kit): plain HTML first, voxels when the kit comes. Nothing of
 // the page's own is made or owned here: it is hidden by one class on <html> (`first`), which this file takes away.
 //
 //   ?first=0   no first view: the controls are there from the start (the boards' editor asks for the same)
 //   ?debug=1   the line of numbers (frames, the march's time, memory, where the eye is) is shown with the controls;
 //              without it a realm the page runs alone never shows it (main.ts sets `plain` on <html>)
-import { embedded, hear, tell } from './host.ts'
+import { embedded, tell } from './host.ts'
 
 export interface First {
   /** Whether the visitor has engaged: the controls are shown. */
@@ -26,6 +28,8 @@ const STYLE = /* css */ `
 /* Until the visitor engages, nothing of the page's own is over the picture. */
 html.first :is(#hud, #aim, #realm, #where, #over) { visibility: hidden; opacity: 0; }
 html.plain #hud { display: none; }
+/* A tap on the picture is a tap on a board (boards.ts), not on a link: no flash of the browser's own over the whole of it. */
+canvas { -webkit-tap-highlight-color: transparent; }
 html.first #realm .sky { translate: 0 -10px; }
 html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 /* They come as one: the picture's own marks first, the hardware a moment after, settling into place. */
@@ -34,22 +38,19 @@ html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 #realm :is(.sky, .tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
-/* The Explore key is in the bottom right corner: the middle of the foot of the picture is the BLOG board's, on a wide picture and a phone's alike. */
-#first .explore { position: absolute; right: max(24px, calc(env(safe-area-inset-right) + 16px)); bottom: max(24px, calc(env(safe-area-inset-bottom) + 16px)); min-inline-size: calc(var(--vx) * 28); justify-content: center; transition: opacity 0.28s ease-in, translate 0.4s ease-in; }
-html:not(.first) #first .explore { opacity: 0; translate: 0 14px; pointer-events: none; }
 #first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; font-size: 12px; opacity: 0.86; }
 #first .credits:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
 /* By touch the bottom corners are the thumbs': the credits key is at the top, where a phone shows no line of numbers. */
 /* (Its voxel body stands out past its box to the left and up: further in from the corner than 12 px, or the screen's edge cuts it.) */
-@media (pointer: coarse) { #first .credits { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } #first .explore { min-inline-size: calc(var(--vx) * 22); } }
+@media (pointer: coarse) { #first .credits { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } }
 #first-credits { max-block-size: min(60vh, 420px); overflow: auto; }
 #first-credits ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--vx) * 2); font-size: 0.8125rem; line-height: 1.4; color: var(--vx-ink-quiet); }
 /* The street's name stands over the credits key. */
 #where { bottom: 58px !important; }
-@media (prefers-reduced-motion: reduce) { :is(#hud, #aim, #where, #over, #realm, #realm *, #first .explore) { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { :is(#hud, #aim, #where, #over, #realm, #realm *) { transition: none !important; } }
 `
 
-export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
+export function firstView(on: boolean): First {
   const html = document.documentElement
   let engaged = !on
   const style = document.createElement('style')
@@ -57,11 +58,10 @@ export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
   const root = document.createElement('div')
   root.id = 'first'
   root.innerHTML = /* html */ `
-    <button class="vx-button explore" type="button" data-vx-kind="main">Explore</button>
     <button class="vx-button credits" type="button" popovertarget="first-credits" aria-label="Credits: whose data this place is made from">Credits</button>
     <div class="vx-popover" id="first-credits" popover aria-label="Credits"><h3>This place is made from</h3><ul></ul></div>`
-  const explore = root.querySelector<HTMLButtonElement>('.explore')!, list = root.querySelector<HTMLUListElement>('ul')!
-  if (on) html.classList.add('first'); else explore.hidden = true
+  const list = root.querySelector<HTMLUListElement>('ul')!
+  if (on) html.classList.add('first')
   // The kit's stylesheet and look, as the realm's controls ask for them too (realm-ui.ts): these keys are there first.
   const sheet = document.createElement('link')
   sheet.rel = 'stylesheet'
@@ -81,26 +81,12 @@ export function firstView(canvas: HTMLCanvasElement, on: boolean): First {
     engaged = true
     for (const run of waiting.splice(0)) run()
     html.classList.remove('first')
-    // The hardware builds itself as it comes (the kit's own assembling; still, where motion is not wanted), and the Explore key, its work done, goes.
+    // The hardware builds itself as it comes (the kit's own assembling; still, where motion is not wanted).
     for (const el of document.querySelectorAll('#realm [data-vx-live]')) void kit?.live(el)?.play('assemble')
-    void kit?.live(explore)?.play('crumble')
-    setTimeout(() => { explore.hidden = true }, 450)
-    if (document.activeElement === explore) explore.blur()
     tell('engaged')
   }
-  if (on) {
-    explore.addEventListener('click', engage)
-    // A key that is not only held with another: Shift alone says nothing yet.
-    addEventListener('keydown', (e) => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) engage() }, true)
-    document.addEventListener('pointerlockchange', () => { if (document.pointerLockElement === canvas) engage() })
-    // A drag on the picture (a thumb steering, or looking round): a tap is a board's, and not this.
-    let from: { id: number; x: number; y: number } | null = null
-    canvas.addEventListener('pointerdown', (e) => { from = { id: e.pointerId, x: e.clientX, y: e.clientY } })
-    canvas.addEventListener('pointermove', (e) => { if (from?.id === e.pointerId && e.buttons && Math.hypot(e.clientX - from.x, e.clientY - from.y) > 12) engage() })
-    for (const t of ['pointerup', 'pointercancel']) canvas.addEventListener(t, () => { from = null })
-    // In a host's frame the keys are the host's until the frame has the focus: the realm is the page's picture, and takes it.
-    if (embedded) { window.focus(); hear((m) => { if (m.type === 'explore') engage() }) }
-  }
+  // In a host's frame the keys are the host's until the frame has the focus: the realm is the page's picture, and takes it.
+  if (on && embedded) window.focus()
   return {
     get engaged() { return engaged },
     engage,

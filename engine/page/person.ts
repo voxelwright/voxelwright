@@ -41,10 +41,27 @@ const turned = (q: readonly number[], v: readonly number[]): [number, number, nu
  * its fly pace, which is also how fast it rises and sinks; on its feet at its run pace (#366: in the air it went at
  * its run pace, and at a walk without Shift).
  */
-const motorOf = (can: Can, flying: boolean): Motor => {
-  const top = flying ? can.fly : can.pace
-  return { ...ON_FOOT, top, power: 300 * Math.max(1, top / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: can.fly }
+const motorOf = (can: Can, flying: boolean, canopy = false): Motor => {
+  const top = canopy ? CANOPY.glide : flying ? can.fly : can.pace
+  return { ...ON_FOOT, top, power: 300 * Math.max(1, top / 45), jump: Math.sqrt(2 * 98 * Math.max(can.fall, 0.05) * can.jump), lift: canopy ? CANOPY.sink : can.fly }
 }
+/**
+ * A canopy (#450): opened in the air (Space, off one's feet with room under them), it carries the body as the air
+ * carries one who flies, but only down: it sinks at `sink` and is steered at `glide` (cells a second), and is gone
+ * when the feet are on something. A fall of 20 m is at 20 m/s in two seconds; under it the same roof is five seconds away.
+ */
+export const CANOPY = { glide: 75, sink: 40, room: 30 }
+const CLOTH = '#d9482b', LINE = '#ece6d6'
+/** What is seen of it: a dome over the head, four lines down to the shoulders and the pack they come from. On the chest, which is what hangs. */
+const RIG: Extra[] = [
+  { on: 'chest', at: [0, 31, 0.5], size: [34, 8, 24], colour: CLOTH, form: [3, 1, 1, 0.9, 0] },
+  { on: 'chest', at: [0, 27.4, 0.5], size: [34.6, 0.8, 24.6], colour: LINE, form: [3, 1, 1, 0, 0] },
+  ...[[-2.4, -1], [2.4, -1], [-2.4, 2], [2.4, 2]].map(([x, z]): Extra => ({ on: 'chest', at: [x, 16, z], size: [0.25, 23, 0.25], colour: LINE })),
+  { on: 'chest', at: [0, 3.1, 1.75], size: [3.1, 4.2, 1.5], colour: '#2a2c30' },
+]
+/** Hung from it by the hands; and falling free, arms and legs out to the air. */
+const HUNG: Move = { hold: true, keys: [{ t: 0.3, liftL: 2.7, liftR: 2.7, outL: 0.3, outR: 0.3, bendL: 0.45, bendR: 0.45 }] }
+const FALLING: Move = { hold: true, keys: [{ t: 0.35, liftL: 1.45, liftR: 1.45, outL: 1.05, outR: 1.05, lean: 0.4 }] }
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
 /** How near its own head the eye behind comes before its figure is in its way and is not drawn (cells). */
@@ -75,6 +92,10 @@ export interface Me {
   can: Partial<Can>
   /** What a rule gave the figure: a look, and a move (`world.person`). In the console: `engine.me.limbs = {move: {n: 1, name: 'strike'}}`. */
   limbs: Limbs
+  /** Whether the body has no foot on anything: in the air, falling or under a canopy. */
+  readonly aloft: boolean
+  /** Whether a canopy is open over it (CANOPY). Set true to open one, as Space does: only in the air, with room under the feet. */
+  canopy: boolean
   /** What its right hand carries (#246, held.ts): boxes on the hand, over whatever a rule's look carries. Undefined for an empty hand. */
   carry: Extra[] | undefined
   /** The figure as it is drawn (people.ts), whether or not it is in view. */
@@ -110,9 +131,22 @@ export function person(o: {
   const M = 10
   let on = false, id = 0, asked = false, view: Me['view'] = 'behind', can: Can = AS_IT_IS, clock = 1
   // Whether the core last said the body is in the air, and whether its motor is the flying one: told again only when that changes.
-  let aloft = false, flyingMotor = false
-  const flying = () => can.fly > 0 && aloft
-  const tellCan = () => { if (id) { flyingMotor = flying(); o.send({ motor: { id, numbers: numbers(motorOf(can, flyingMotor)) }, ways: { id, fall: can.fall, climb: can.climb }, down: { id, way: can.down ?? [0, 0, 0], cling: can.cling } }) } }
+  // (`aloft` is the core's word for one the air carries: one who flies, or hangs from a canopy. `off` is any body with no foot on anything.)
+  let aloft = false, off = false, flyingMotor = '', canopy = false, opened = 0
+  const flying = () => (can.fly > 0 || canopy) && aloft
+  /** Which motor the body has: told again only when it is another. */
+  const motorNow = () => `${flying()}${canopy}`
+  const tellCan = () => { if (id) { flyingMotor = motorNow(); o.send({ motor: { id, numbers: numbers(motorOf(can, flying(), canopy)) }, ways: { id, fall: can.fall, climb: can.climb }, down: { id, way: can.down ?? [0, 0, 0], cling: can.cling } }) } }
+  /** Opens a canopy: off its feet, one who does not fly, with CANOPY.room clear under the feet (a hop off a kerb opens none). */
+  const open = () => {
+    const f = feet()
+    if (!on || !f || !off || canopy || can.fly > 0) return false
+    for (let d = 1; d <= CANOPY.room; d++) if (o.kind?.(Math.floor(f.at[0]), Math.floor(f.at[1] - d), Math.floor(f.at[2]))) return false
+    canopy = true; since = 0; opened = performance.now(); airborne = opened / 1000
+    return true
+  }
+  /** How fast it is going down (cells a second, eased), and when it last left its feet or opened its canopy: for what its limbs do in the air. */
+  let sinking = 0, airborne = 0, hung = 0
   // Which way is up for the body as the core last said (the turn from its own upright to the world's), and the eye's, which follows it over a fifth of a second.
   let frame: Q = [0, 0, 0, 1], tilt: Q = [0, 0, 0, 1]
   const tilted = () => Math.abs(frame[3]) < 0.9999
@@ -147,9 +181,19 @@ export function person(o: {
     // In the head nobody sees their own figure; on a wall the eye is in the head (below). The figure itself stands by its own up.
     if (!on || !at || view === 'head' || tilted() || backNow < NEAR) return []
     const now = performance.now() / 1000, d = turned(frame, [0, -(com[1] + LEG), 0])
-    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking, running: runningAt(speed), pace: speed, down: lying, time: seconds, look: carry ? { ...(limbs.look ?? {}), carry } : limbs.look, move: doing ? part(doing, now) : undefined, was: before && doing ? part(before, now) : undefined })
+    // In the air its limbs are the air's: hung from a canopy, or out to a fall of more than a jump's.
+    // (Only one who does not fly, and whom no rule has given a move: theirs are theirs.)
+    const air: Under | null = canopy ? { n: -2, move: HUNG, since: airborne } : off && sinking > 60 && can.fly === 0 && (!doing || doing.move === REST) ? { n: -3, move: FALLING, since: airborne } : null
+    Object.assign(shown, { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]], yaw: heading + Math.PI / 2, frame: tilted() ? frame : undefined, stride, walking: air ? 0 : walking, running: runningAt(speed), pace: speed, down: lying, time: seconds, look: dressed(), move: air ? part(air, now) : doing ? part(doing, now) : undefined, was: air ? undefined : before && doing ? part(before, now) : undefined })
     return [shown]
   })
+  // What it has on: a rule's look, what its hand carries, and its canopy while one is open. Made again only when one of them is another.
+  let worn: { of: Limbs['look']; carry: Extra[] | undefined; canopy: boolean; look: Limbs['look'] } | null = null
+  const dressed = () => {
+    if (worn && worn.of === limbs.look && worn.carry === carry && worn.canopy === canopy) return worn.look
+    worn = { of: limbs.look, carry, canopy, look: carry || canopy ? { ...(limbs.look ?? {}), ...(carry ? { carry } : {}), ...(canopy ? { extra: [...(limbs.look?.extra ?? []), ...RIG] } : {}) } : limbs.look }
+    return worn.look
+  }
   const feet = () => { if (!at) return null; const d = turned(frame, [0, -(com[1] + LEG), 0]); return { at: [at[0] + d[0], at[1] + d[1], at[2] + d[2]] as [number, number, number], yaw: heading + Math.PI / 2, speed, frame: tilted() ? frame : undefined } }
   const walk = (to: boolean) => {
     if (to === on) return
@@ -160,19 +204,21 @@ export function person(o: {
       if (id) o.send({ vanish: id })
       // Up from where the body stood, the eye where the head was.
       if (at) { o.pose.x = at[0] / M; o.pose.z = at[2] / M; o.pose.y = (at[1] - com[1] - LEG + EYES) / M }
-      id = 0; at = null; asked = false; aloft = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
+      id = 0; at = null; asked = false; aloft = false; off = false; canopy = false; frame = [0, 0, 0, 1]; tilt = [0, 0, 0, 1]; o.pose.tilt = undefined
       return
     }
     // The body is made where the eye is, the eye in its head: from the air it falls to whatever is under it.
     const low: [number, number, number] = [Math.round(o.pose.x * M) - 2, Math.round(o.pose.y * M - EYES + LEG), Math.round(o.pose.z * M) - 1]
     heading = o.pose.yaw - Math.PI / 2
+    sinking = 0
     eyeY = o.pose.y * M
     asked = true
     aloft = false
     o.send({ figure: { low, size: BODY, motor: numbers(motorOf(can, false)) } })
     o.wake()
     // On foot the page's own keys still do what they did (tools, the wand); Space jumps and V changes where the eye rides.
-    leave = o.input.push({ name: 'afoot', key: (code) => { if (code === 'Space') { jump = true; return true } if (code === 'KeyV') { view = view === 'behind' ? 'head' : 'behind'; return true } return false } })
+    // (In the air Space opens a canopy, where there is room for one.)
+    leave = o.input.push({ name: 'afoot', key: (code) => { if (code === 'Space') { if (!open()) jump = true; return true } if (code === 'KeyV') { view = view === 'behind' ? 'head' : 'behind'; return true } return false } })
   }
   return {
     get on() { return on },
@@ -180,6 +226,9 @@ export function person(o: {
     get view() { return view },
     set view(v) { view = v },
     get feet() { return on ? feet() : null },
+    get aloft() { return on && off },
+    get canopy() { return canopy },
+    set canopy(to) { if (to) open(); else canopy = false },
     get carry() { return carry },
     set carry(c) { carry = c },
     get limbs() { return limbs },
@@ -200,8 +249,14 @@ export function person(o: {
       if (asked && answer.spawned !== undefined && told.figures.length) { id = answer.spawned; asked = false; const f = told.figures.find((f) => f.id === id); if (f) { com = f.com; at = null } tellCan() }
       if (!id) return
       for (const m of told.moves) if (m.id === id) at = m.pos
-      for (const l of told.live) if (l.id === id) { frame = l.frame; aloft = l.aloft }
-      if (flying() !== flyingMotor) o.send({ motor: { id, numbers: numbers(motorOf(can, flyingMotor = flying())) } })
+      for (const l of told.live) if (l.id === id) {
+        frame = l.frame
+        if (l.feet === 0 && !off) airborne = performance.now() / 1000
+        // Its feet on something, the canopy is done: the air had it and has let it go, or it never took the air at all.
+        if (canopy && !l.aloft && (aloft || (l.feet > 0 && performance.now() - opened > 300))) canopy = false
+        aloft = l.aloft; off = l.feet === 0
+      }
+      if (motorNow() !== flyingMotor) { flyingMotor = motorNow(); o.send({ motor: { id, numbers: numbers(motorOf(can, flying(), canopy)) } }) }
     },
     frame(dt) {
       if (!on) return false
@@ -225,8 +280,8 @@ export function person(o: {
       const looks = o.pose.yaw - Math.PI / 2
       let ask: NonNullable<Ask['walk']> | null = null
       if (id) {
-        // One who flies rises with Space and sinks with C.
-        const rise = can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0
+        // One who flies rises with Space and sinks with C; a canopy only sinks (the air takes what is told to rise: a touch up as it opens).
+        const rise = canopy ? (aloft ? -1 : 0.05) : can.fly > 0 ? (held('Space') ? 1 : 0) - (held('KeyC') ? 1 : 0) : 0
         if (view === 'head' || tilted()) { heading = looks; ask = { id, heading, go: Math.max(-1, Math.min(1, go)), side: Math.max(-1, Math.min(1, side)), rise, jump } }
         else { if (long > 0.01) heading = looks + Math.atan2(side, go); ask = { id, heading, go: Math.min(1, long), side: 0, rise, jump } }
       }
@@ -247,6 +302,7 @@ export function person(o: {
         const mine = turned(frame, [0, 1, 0]), d = [f.at[0] - was[0], f.at[1] - was[1], f.at[2] - was[2]], rise = d[0] * mine[0] + d[1] * mine[1] + d[2] * mine[2]
         const step = Math.hypot(d[0] - mine[0] * rise, d[1] - mine[1] * rise, d[2] - mine[2] * rise)
         if (step < 20) { stride += step / strideAt(speed); speed += ((dt > 0 ? step / dt : 0) - speed) * Math.min(1, dt * 10) }
+        if (dt > 0 && Math.abs(rise) < 60) sinking += (-rise / dt - sinking) * Math.min(1, dt * 10)
         walking += ((speed > 3 ? 1 : 0) - walking) * Math.min(1, dt * 8)
         shown.at = f.at
         // The eye: in the head, or behind and above it, the height eased so that a kerb is not a jolt.
@@ -264,7 +320,9 @@ export function person(o: {
         const head = level ? [f.at[0], eyeY, f.at[2]] : [f.at[0] + up[0] * EYES, f.at[1] + up[1] * EYES, f.at[2] + up[2] * EYES]
         // Behind: back from the head, over it, and a little to the right, so that what is aimed at is not behind one's own head.
         // On a wall the eye is in the head: behind and above, it would be inside the wall or the ground as often as not (nothing keeps the eye out of what is solid).
-        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32, over = inHead ? 0 : 6, aside = inHead ? 0 : 5
+        // Under a canopy it stands off further and higher: from close behind, the cloth was the top half of the picture.
+        hung += ((canopy ? 1 : 0) - hung) * (1 - Math.exp(-dt * 3))
+        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32 + 30 * hung, over = inHead ? 0 : 6 + 12 * hung, aside = inHead ? 0 : 5
         const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
         // Not through a wall (`clearWay`): it comes in at once and goes out again slowly.
         // And what will be in the way where the body is going brings it in before it gets there (`roomAfter`).

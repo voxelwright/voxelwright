@@ -7,8 +7,9 @@
 // It fails unless:
 //   - the park is shown within 8 MB over the wire on a cold cache, the boards' code among it, the editor's not;
 //   - the host is told `ready` with every board, and every board is a link with its name in the frame;
-//   - the first view is clean: until the visitor engages, nothing is over the picture but the Explore key and the
-//     credits key (which holds every credit); a key pressed, or the Explore key on a phone, brings the controls;
+//   - the first view is clean: until the visitor is in the realm, nothing is over the picture but the credits key
+//     (which holds every credit), and no key pressed ends it; the controls come when the visitor is in (the way in
+//     is the EXPLORE board's, test/sf-explore.mjs);
 //   - from the park's camera every board is in the picture and none over another, nothing stands between the eye and
 //     it, a letter is 9 px tall or more, the picture itself is brighter where a letter's lamp is than where its panel
 //     is, and where a logo is the picture has its brand's colours;
@@ -95,7 +96,7 @@ const BRAND = { x: [[13, 13, 13], [255, 255, 255]], linkedin: [[255, 255, 255], 
 /** In a page at its first view: watches it for some seconds and says what it shows (each board in the picture, the banner's cloth whole and readable, the keys' boxes) and what lies over what. */
 const COMPOSED = async (ms) => {
   const e = globalThis.engine, b = e.boards, box = (el) => { const r = el.getBoundingClientRect(); return { x0: r.left, y0: r.top, x1: r.right, y1: r.bottom } }
-  const keys = { explore: box(document.querySelector('#first .explore')), credits: box(document.querySelector('#first .credits')) }
+  const keys = { credits: box(document.querySelector('#first .credits')) }
   const boards = b.records.map((r) => { const w = b.where(r.id); return { id: r.id, type: r.type, box: w && { x0: w.x - w.wide / 2, y0: w.y - w.high / 2, x1: w.x + w.wide / 2, y1: w.y + w.high / 2 } } })
   const inside = (k) => !!k && k.x0 >= 0 && k.y0 >= 0 && k.x1 <= innerWidth && k.y1 <= innerHeight, meet = (a, c, by = 0) => a.x0 < c.x1 + by && a.x1 > c.x0 - by && a.y0 < c.y1 + by && a.y1 > c.y0 - by
   // The banner, every 200 ms: whole in the picture and readable, and whether a key was ever over it.
@@ -230,16 +231,16 @@ try {
   // What the boards themselves add is exact: their five modules as sent, and their data in the page's record. The
   // whole (which stops at a moment, so it moves by a tile or two from run to run) is held to the realm's 8 MB where
   // the realm without boards is within it; where that is over already, it is said and the boards' own share is the check.
-  check(own < 25 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 25 KB: 24 until the plane had two rounds, its own far off and a near one to speak on)`)
+  check(own < 27 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 27 KB: 24 until the plane had two rounds, its own far off and a near one to speak on; 25 until a lettering board had a face to be read by from further off than its cells show it, 1.6 KB of boards.js, and the EXPLORE board its record)`)
   const whole = `${shown.wireMB} MB over the wire until the park is shown in ${shown.ms} ms; without boards ${without.wireMB} MB in ${without.ms} ms (the realm's bound 8 MB)`
   if (without.wireMB >= 8) console.log(`  WARN ${whole}: the realm is over its bound before any board`); else check(shown.wireMB < 8, whole)
   check(code.length === 5 && !site.asked.some((a) => a.path.endsWith('boards-edit.js')), `the boards' code is asked for (${code.length} modules) and the editor's is not`)
   const ready = await page.evaluate(() => window.told.find((m) => m.type === 'ready'))
-  check(ready.boards.length === file.boards.length && file.boards.every((b) => ready.boards.some((r) => r.id === b.id && r.to === b.to && r.name === b.name)) && ready.signs.some((s) => s.id === 'banner'), `the host is told ready with ${ready.boards.length} boards (${ready.boards.map((b) => `${b.id} to ${b.to}`).join(', ')}) and ${ready.signs.length} signs`)
+  check(ready.boards.length === file.boards.length && file.boards.every((b) => ready.boards.some((r) => r.id === b.id && r.to === (b.to ?? null) && r.name === b.name)) && ready.signs.some((s) => s.id === 'banner'), `the host is told ready with ${ready.boards.length} boards (${ready.boards.map((b) => `${b.id} to ${b.to}`).join(', ')}) and ${ready.signs.length} signs`)
   const links = await realm.evaluate(() => [...document.querySelectorAll('nav[aria-label="Billboards"] a')].map((a) => ({ name: a.textContent, to: a.getAttribute('href'), focusable: a.tabIndex === 0 })))
   check(links.length === file.boards.filter((b) => b.to).length && links.every((l, i) => l.name === file.boards[i].name && l.to === file.boards[i].to && l.focusable), `every board is a link of the page by its name: ${links.map((l) => l.name).join(', ')}`)
   await realm.waitForFunction(() => globalThis.engine.seen.whole > 0, null, { timeout: 300_000 })
-  // ── The first view: the picture, the Explore key and the credits key, and nothing else ──
+  // ── The first view: the picture and the credits key, and nothing else ──
   console.log('\nthe first view')
   /** What of the page is over the picture now: each thing that is seen and has a box, by what it is. */
   const over = (target) => target.evaluate(() => {
@@ -255,12 +256,12 @@ try {
   const composedCheck = (c, name) => {
     // (A wide picture's round leaves it on one side and is brought back: some eight seconds of a lap of thirty-six the cloth is going or coming.)
     check(c.lettering && c.logos >= 2 && c.banner.round >= 66 && c.banner.some >= c.banner.looks * 0.6 && c.banner.whole >= c.banner.looks * 0.25, `${name}'s first view (${c.size.join(' x ')}) shows ${c.shown.join(', ')}; the banner's cloth is whole in the picture for ${c.banner.round} of 120 places on its round, and over twelve seconds some of it was in the picture at ${c.banner.some} of ${c.banner.looks} looks, the whole of it at ${c.banner.whole}, readable at ${c.banner.read} (asked: the lettering, two logos, the cloth whole for 66 places, in the picture three looks in five and whole at one in four)`)
-    check(c.atop.length === 0 && c.banner.under === 0 && c.keysInside && c.creditsIn >= 12, `${name}: the Explore key and the credits key are over no board and never over the banner${c.atop.length ? ` (${c.atop.join(', ')})` : ''}, and the credits key is ${c.creditsIn} px in from the picture's edge (bound 12: its voxel body stands out past its box)`)
+    check(c.atop.length === 0 && c.banner.under === 0 && c.keysInside && c.creditsIn >= 12, `${name}: the credits key is over no board and never over the banner${c.atop.length ? ` (${c.atop.join(', ')})` : ''}, and the credits key is ${c.creditsIn} px in from the picture's edge (bound 12: its voxel body stands out past its box)`)
   }
   results.first.composed = await realm.evaluate(COMPOSED, 12000)
   composedCheck(results.first.composed, 'the desktop')
   check(firstView.first && !firstView.engaged && !firstView.hud && !firstView.aim && !firstView.sky && !firstView.tools && !firstView.where && firstView.wall === 0 && firstView.focus !== 'A', `before the visitor engages nothing is over the picture: no line of numbers, no aim, no hour and weather, no tools, no street name, no focus on a link, no wall of words (${JSON.stringify({ hud: firstView.hud, aim: firstView.aim, sky: firstView.sky, tools: firstView.tools, where: firstView.where, wall: firstView.wall })})`)
-  check(firstView.explore && firstView.credits && firstView.creditsBox[0] <= 96 && firstView.creditsBox[1] <= 40 && firstView.sources.length >= 3 && firstView.sources.some((c) => /OpenStreetMap/.test(c)), `the Explore key and a credits key of ${firstView.creditsBox.join(' x ')} px are there, and the credits key holds ${firstView.sources.length} sources (${firstView.sources.map((c) => c.slice(0, 28)).join(' | ')})`)
+  check(!firstView.explore && firstView.credits && firstView.creditsBox[0] <= 96 && firstView.creditsBox[1] <= 40 && firstView.sources.length >= 3 && firstView.sources.some((c) => /OpenStreetMap/.test(c)), `no Explore key (a board is the way in), and a credits key of ${firstView.creditsBox.join(' x ')} px are there, and the credits key holds ${firstView.sources.length} sources (${firstView.sources.map((c) => c.slice(0, 28)).join(' | ')})`)
   const settle = () => realm.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 60_000, polling: 250 }).catch(() => null)
   await settle(); await page.waitForTimeout(3000)
   const park = await realm.evaluate(() => ({ ...globalThis.engine.pose }))
@@ -428,21 +429,24 @@ try {
   }
   await realm.evaluate(() => { globalThis.engine.hour = 15; globalThis.engine.scale = 0.7 }); await page.waitForTimeout(1500)
 
-  // ── The visitor engages: a key, and the controls come ──
+  // ── The visitor is in the realm (as the way in ends, explore.ts): the controls come. A key pressed before that brings nothing. ──
   console.log('\nthe controls come')
   {
     const still = await over(realm)
     await page.mouse.move(400, 300); await page.mouse.move(700, 420)
     const hovered = await over(realm)
     await page.keyboard.press('KeyW')
+    await page.waitForTimeout(300)
+    const keyed = await over(realm)
+    await realm.evaluate(() => globalThis.engine.first.engage())
     await page.waitForTimeout(160)
     await page.screenshot({ path: join(shots, 'reveal-desktop.png') })
     await page.waitForTimeout(1400)
     const after = await over(realm), toldEngaged = await page.evaluate(() => window.told.filter((m) => m.type === 'engaged').length)
     await page.screenshot({ path: join(shots, 'engaged-desktop.png') })
     results.first.engaged = after
-    check(still.first && hovered.first && !hovered.sky, 'the first view holds through every check until here, and a mouse moved over the picture does not end it')
-    check(!after.first && after.engaged && !after.hud && after.aim && after.sky && after.tools && after.where && !after.explore && after.credits && toldEngaged === 1, `a key pressed brought the aim, the hour and weather, the tools and the street's name, and no line of numbers (that is ?debug=1's); the Explore key went, the credits key stayed, and the host was told once (${toldEngaged})`)
+    check(still.first && hovered.first && !hovered.sky && keyed.first && !keyed.sky, 'the first view holds through every check until here, and neither a mouse moved over the picture nor a key pressed ends it')
+    check(!after.first && after.engaged && !after.hud && after.aim && after.sky && after.tools && after.where && !after.explore && after.credits && toldEngaged === 1, `in the realm, the aim, the hour and weather, the tools and the street's name are there, and no line of numbers (that is ?debug=1's); the credits key stayed, and the host was told once (${toldEngaged})`)
     // With the controls there, the banner's whole round against the hour's panel: it passes under it nowhere, and can be read on a good part of the round.
     results.first.clear = await realm.evaluate(CLEAR)
     check(results.first.clear.under.length === 0 && results.first.clear.read >= 40, `with the controls shown, the banner passes under the hour's panel (${results.first.clear.laid.map((r) => r.join(' ')).join('; ')}) at ${results.first.clear.under.length} of 120 places on its round, and can be read at ${results.first.clear.read} (asked: none, and a third of the round)`)
@@ -525,7 +529,7 @@ try {
     await page.waitForTimeout(1500)
   }
   // Flying free: from the park by the keys towards a board, then O.
-  const last = built.at(-1)
+  const last = built.filter((b) => b.to).at(-1)
   await toPark()
   const free = await realm.evaluate(async (id) => {
     const e = globalThis.engine, b = e.boards, r = b.records.find((r) => r.id === id), to = [r.at[0] / 10, (r.at[1] + 44) / 10, r.at[2] / 10]
@@ -560,7 +564,7 @@ try {
     const firstPhone = await over(held)
     await small.screenshot({ path: join(shots, 'first-phone.png') })
     results.first.phone = firstPhone
-    check(firstPhone.first && !firstPhone.hud && !firstPhone.sky && !firstPhone.tools && !firstPhone.fold && !firstPhone.thumbs && !firstPhone.where && firstPhone.wall === 0 && firstPhone.explore && firstPhone.credits, `a phone's first view is the picture, the Explore key and the credits key (${firstPhone.creditsBox.join(' x ')} px): no fold, no thumbs, no tools`)
+    check(firstPhone.first && !firstPhone.hud && !firstPhone.sky && !firstPhone.tools && !firstPhone.fold && !firstPhone.thumbs && !firstPhone.where && firstPhone.wall === 0 && !firstPhone.explore && firstPhone.credits, `a phone's first view is the picture and the credits key (${firstPhone.creditsBox.join(' x ')} px): no fold, no thumbs, no tools`)
     const inView = await held.evaluate(() => { const b = globalThis.engine.boards; return b.records.map((r) => ({ id: r.id, type: r.type, to: r.to, w: b.where(r.id), standing: b.standing(r.id) })).map((r) => ({ ...r, inside: !!r.w && r.w.x - r.w.wide / 2 > 0 && r.w.x + r.w.wide / 2 < innerWidth && r.w.y - r.w.high / 2 > 0 && r.w.y + r.w.high / 2 < innerHeight })) })
     const across = round((Math.atan(Math.tan((25.05 * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)
     results.phone = { inPicture: inView.filter((r) => r.inside).map((r) => r.id), of: inView.length }
@@ -623,13 +627,12 @@ try {
       check(lamp - panel > 80 && lamp < 235 && share > 0.2 && share < 0.6, `${blog.id} reads by night on the phone: lamp ${Math.round(lamp)} against panel ${Math.round(panel)} of 255 (the brightest and darkest fifths of its face; bound 80 apart, and the lamp not burnt out past 235), ${Math.round(share * 100)}% of the face lamp (bounds 20% to 60%)`)
       await held.evaluate(() => { globalThis.engine.hour = 15 }); await small.waitForTimeout(1500)
     }
-    // The Explore key brings a thumb's controls.
-    const key = await held.evaluate(() => { const r = document.querySelector('#first .explore').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
-    await small.touchscreen.tap(key[0], key[1])
+    // In the realm (as the way in ends, explore.ts), a thumb's controls come.
+    await held.evaluate(() => globalThis.engine.first.engage())
     await small.waitForTimeout(1500)
     const afterPhone = await over(held)
     await small.screenshot({ path: join(shots, 'engaged-phone.png') })
-    check(!afterPhone.first && afterPhone.fold && afterPhone.thumbs && afterPhone.tools && !afterPhone.explore && afterPhone.credits, 'a tap on the Explore key brought the phone its fold, its thumbs and its tools; the credits key stayed')
+    check(!afterPhone.first && afterPhone.fold && afterPhone.thumbs && afterPhone.tools && !afterPhone.explore && afterPhone.credits, 'in the realm the phone has its fold, its thumbs and its tools; the credits key stayed')
     results.phone.covered = await held.evaluate(COVERED)
     // (The tools were a column over the LinkedIn sign until round 5, and the keys to fly and the resting stick over BLOG.)
     check(results.phone.covered.under.length === 0 && results.phone.covered.boards.filter(Boolean).length >= 3, `on the phone with the controls shown (390 x 844), no board is under one (${results.phone.covered.under.join(', ') || 'none'}): ${results.phone.covered.boards.filter(Boolean).join('; ')} against ${results.phone.covered.laid.join('; ')}`)

@@ -7,6 +7,9 @@
 //   lettering   letters of lamp on panels of wood, one panel and one steel post a letter, all cells of the world:
 //               every tool breaks them as it breaks a wall, a letter whose post is cut falls by itself. By night it is
 //               lit as a billboard is: a lamp on an arm over each panel, whose light the march lays on the face.
+//               From further off than the world's cells there can hold its letters (they are coarser than a
+//               letter's stroke, or the far model has the roof) it is shown as a face, a picture of its own cells
+//               as they stand: so a board may stand on a far roof and be read from the park, on a phone too.
 //   digital     an LED billboard as a roof carries one: a dark cabinet of cells with a rim round its face, on steel
 //               posts braced back to the roof, a walkway under its foot; and on its face a panel of LEDs
 //               (screens.ts), one every 10 cm, that shows words, an image or a video and glows by night. The part
@@ -26,7 +29,8 @@
 // What each says is set through signs.ts (`realm.signs.set`), which this file brings every sign to.
 // A click or tap on a board from where the pointer is free flies the eye to it and then tells the host page where to
 // go (host.ts `navigate`); flying free, O opens the board ahead. Each board is also a link in the page, for a
-// keyboard and a screen reader.
+// keyboard and a screen reader. A board that leads nowhere may do something instead (`does`): the EXPLORE board
+// takes the visitor into the realm, and whoever does that (explore.ts) is told of a click on it, and lights it.
 import { rows, type Edit } from './edits.ts'
 import { thing } from './fine.ts'
 import { embedded, hear, tell } from './host.ts'
@@ -66,6 +70,10 @@ export interface Board {
   colors?: { ground: string | [string, string]; ink: string }
   /** Where the host page goes when it is opened: a path of the site, or for a logo the address of the owner's page on that network. A board with none is only looked at. */
   to?: string
+  /** What a click on it does, where it leads nowhere: `explore` takes the visitor into the realm (explore.ts). */
+  does?: 'explore'
+  /** Where whoever it takes into the realm stands on its roof, and which way they look: [x, z] in cells, and degrees clockwise from north. Before its middle, looking as it looks, where not said. */
+  stand?: [number, number, number]
 }
 export interface Banner {
   content: { text: string } | { image: string }
@@ -123,7 +131,7 @@ const FONT: Record<string, string> = {
 export const lettered = (text: string) => [...text.toUpperCase()].map((c) => (c in FONT ? c : ' ')).join('').slice(0, 14)
 
 /** What a board is made of: its cells as rows, the box they lie in, and its face (middle, half its width along its right, how high, where its foot is). */
-interface Shape { runs: Int32Array<ArrayBuffer>; box: Edit['box']; middle: [number, number, number]; right: [number, number, number]; normal: [number, number, number]; wide: number; high: number }
+interface Shape { runs: Int32Array<ArrayBuffer>; box: Edit['box']; middle: [number, number, number]; right: [number, number, number]; normal: [number, number, number]; wide: number; high: number; /** A lettering board: world cells a cell of its face. */ px?: number }
 
 /** Cells as rows: sorted by y, then z, then x, neighbours of one kind joined. */
 function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
@@ -159,9 +167,9 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
     const z = rz ? cz + rz * along - (rz < 0 ? 1 : 0) : nz > 0 ? cz - 1 - d : cz + d
     cells.push([x, y, z, kind])
   }
-  let wide: number, high: number
+  let wide: number, high: number, size: number | undefined
   if (b.type === 'lettering') {
-    const said = lettered(text), px = Math.max(2, Math.round(((b.size as number) * M) / 5 / 2) * 2), pitch = 4 * px
+    const said = lettered(text), px = (size = Math.max(2, Math.round(((b.size as number) * M) / 5 / 2) * 2)), pitch = 4 * px
     wide = Math.max(1, said.length) * pitch; high = 7 * px
     ;[...said].forEach((letter, i) => {
       if (letter === ' ') return
@@ -204,7 +212,7 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
   const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
   for (const [x, y, z] of cells) { box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.min(box[2], z); box[3] = Math.max(box[3], x + 1); box[4] = Math.max(box[4], y + 1); box[5] = Math.max(box[5], z + 1) }
   if (!cells.length) box.splice(0, 6, cx, y0, cz, cx + 1, y0 + 1, cz + 1)
-  return { runs: asRows(cells), box: box as unknown as Edit['box'], middle: [cx, y0 + high / 2, cz], right: [rx, 0, rz], normal: [nx, 0, nz], wide, high }
+  return { runs: asRows(cells), box: box as unknown as Edit['box'], middle: [cx, y0 + high / 2, cz], right: [rx, 0, rz], normal: [nx, 0, nz], wide, high, px: size }
 }
 
 /** The plane: a small high-winged one, its nose along +x, in cells of 20 cm. */
@@ -240,6 +248,12 @@ export interface Boards {
   fly(id: string): Promise<boolean>
   /** Tells the host page to go where the board leads. */
   open(id: string): boolean
+  /** Lights a lettering board's letters, 0 (as they stand) to 1 (fully lit): it is then shown as its face, wherever the eye is. */
+  light(id: string, lit: number): void
+  /** Whether a lettering board is shown as its face now, and not as its cells: for the checks. */
+  faced(id: string): boolean
+  /** The box a board's cells lie in (finest cells, low corner and high), or null: for whoever flies an eye round it. */
+  box(id: string): readonly number[] | null
   /** Where a board is on the picture now, client px (its middle and its box), or null if it is behind the eye: for the checks and the host. */
   where(id: string): { x: number; y: number; wide: number; high: number; /** How tall its face is down its middle, px. */ tall: number; far: number } | null
   marks(id: string): { x: number; y: number; lit: boolean }[]
@@ -306,6 +320,10 @@ export interface Needs {
   aloft(): void
   /** How far from the eye the far model's faces take over from cells (0: never), cells. */
   reach(): number
+  /** How big the cells the world shows at a point are now, in its finest cells (1, 2, 4 and so on): the finest of its boxes that holds the point. */
+  cell(x: number, y: number, z: number): number
+  /** A board that does something (`does`) was clicked or tapped, or its button pressed. */
+  does?(board: Board): void
   /** The same for what stands at a point (finest cells, x and z): nearer in the far model's wedge. Infinity where there is no far model. */
   handover(x: number, z: number): number
   edit: boolean
@@ -319,22 +337,32 @@ const CLOTH: Style = { ground: '#f6f1e4', ink: '#c2261c', glows: false, least: 0
 const LED = 1
 /** The rim of the cabinet round its panel, cells. */
 const RIM = 4
+/**
+ * A lettering board as a face: its panel, its posts and its letters as the day shows its cells, and its letters fully
+ * lit. Further off than CELLS_TO (cells) it is never its cells: a 4 m letter is 16 px there through the park's lens.
+ */
+const FACE = { panel: [20, 20, 20], post: [58, 60, 64], lamp: [198, 198, 190], lit: [255, 250, 232] }, CELLS_TO = 4000
 
 export async function boards(o: Needs): Promise<Boards> {
   const drawn = await screensOf(o.device, o.format)
   o.passes.add('signs', (encoder, to, view, time) => {
     // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
     const reach = o.reach()
+    let turned = false
     for (const s of stood.values()) {
-      if (!s.screen || !s.shape) continue
+      if (!s.shape) continue
+      // A lettering board: its cells, or from too far for them its face (`asCells`), painted again if the world changed under it.
+      if (s.far) { const face = !asCells(s, view.eye), dusk = Math.round((1 - o.day()) * 6); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
       else if (s.b.type === 'logo') seat(s, view.eye)
     }
+    if (turned) keep()
     drawn.draw(encoder, to, view, time, o.day(), o.dull(), o.faced())
   })
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
-  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
+  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A lettering board's face (FACE): how big its picture is, how much of each pixel of it is panel, post and lamp (three shares of 255), whether the world changed since it was painted, whether it is shown now in place of the cells, and how far its letters are lit (`light`). */ far?: Screen; farSize?: string; farKinds?: Uint8Array; stale?: boolean; faced?: boolean; lit?: number; dusk?: number; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
   const stood = new Map<string, Stood>()
   let laid = 0
   const lay = (edit: Edit) => { laid++; o.lay(edit) }
@@ -359,9 +387,55 @@ export async function boards(o: Needs): Promise<Boards> {
     sc.hu = [sh.right[0] * (sh.wide / 2 - RIM), 0, sh.right[2] * (sh.wide / 2 - RIM)]
     sc.hv = [0, sh.high / 2 - RIM, 0]
   }
-  /** The lettering boards' box, grown by two of the coarsest cells the march meets them in from the park (80 cm). */
+  /**
+   * Whether a lettering board is shown as its cells from an eye: near enough (CELLS_TO, and the far model's reach),
+   * the world's cells there no coarser than a letter's stroke (on a phone they are 1.6 m from 200 m off, and a 4 m
+   * letter was a smear), and its letters not lit (`light`). Otherwise as its face.
+   */
+  const asCells = (s: Stood, eye: readonly number[]) => {
+    const sh = s.shape!, reach = o.reach()
+    return !s.lit && Math.hypot(sh.middle[0] - eye[0], sh.middle[1] - eye[1], sh.middle[2] - eye[2]) < Math.min(CELLS_TO, reach > 0 ? reach : Infinity) && o.cell(sh.middle[0], sh.middle[1], sh.middle[2]) <= (sh.px ?? 1)
+  }
+  /**
+   * A lettering board's face: a picture of the front of its cells as the world has them now (a letter that fell is
+   * not on it), from its posts' feet to its panels' top, a cell proud of them.
+   */
+  const paintFar = (s: Stood) => {
+    // A pixel of it a quarter of a letter's stroke, and what it is the mean of the cells under it: from where a face
+    // is shown a stroke is a pixel or two of the picture, and one cell picked out of nine lost a letter's diagonals.
+    const sh = s.shape!, low = sh.box[1], tall = sh.box[4] - low, step = Math.max(1, Math.round((sh.px ?? 4) / 4)), w = Math.ceil(sh.wide / step), h = Math.ceil(tall / step)
+    if (s.farSize !== `${w}x${h}`) { s.far?.destroy(); s.far = drawn.add({ pixels: [w, h], style: { ground: '#000', ink: '#fff', glows: true, glow: 0.5, dim: 0.9 } }); s.farSize = `${w}x${h}`; s.far.hidden = !s.faced }
+    const kinds = (s.farKinds = new Uint8Array(w * h * 3)), each = 255 / (step * step)
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
+      const share = [0, 0, 0]
+      for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
+        const along = i * step + u + 0.5 - sh.wide / 2
+        const kind = o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(low + tall - j * step - v - 0.5), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15
+        if (kind) share[kind === LAMP ? 2 : kind === STEEL ? 1 : 0] += each
+      }
+      kinds.set(share, (j * w + i) * 3)
+    }
+    s.stale = false
+    s.far!.at = [sh.middle[0] + sh.normal[0], low + tall / 2, sh.middle[2] + sh.normal[2]]; s.far!.hu = [(sh.right[0] * sh.wide) / 2, 0, (sh.right[2] * sh.wide) / 2]; s.far!.hv = [0, tall / 2, 0]
+    inkFar(s)
+  }
+  /** Its picture from what each pixel is, its lamp as far lit as it is (`light`); lit, it glows by night as a lit sign does. By night its letters are warm, as the lamps over the cells' own make them (they were a cold grey beside BLOG's). */
+  const inkFar = (s: Stood) => {
+    const kinds = s.farKinds!, lit = Math.max(s.lit ?? 0, 0.55 * (1 - o.day())), lamp = FACE.lamp.map((v, k) => v + (FACE.lit[k] - v) * lit)
+    ;(s.far as Screen & { style: Style }).style.glow = 0.5 + (s.lit ?? 0)
+    s.far!.paint((pen, w, h) => {
+      const picture = pen.createImageData(w, h)
+      for (let i = 0; i < w * h; i++) {
+        const panel = kinds[i * 3], post = kinds[i * 3 + 1], lit = kinds[i * 3 + 2], all = panel + post + lit
+        // (Cut where under half of it is anything: a post's edge, the gap under the beam.)
+        if (all >= 127) picture.data.set([0, 1, 2].map((k) => (FACE.panel[k] * panel + FACE.post[k] * post + lamp[k] * lit) / all).concat(255), i * 4)
+      }
+      pen.putImageData(picture, 0, 0)
+    })
+  }
+  /** The box round the lettering boards shown as their cells, grown by two of the coarsest cells the march meets them in from the park (80 cm). */
   const keep = () => {
-    const boxes = [...stood.values()].filter((s) => s.b.type === 'lettering' && s.shape).map((s) => s.shape!.box), grow = 16
+    const boxes = [...stood.values()].filter((s) => s.b.type === 'lettering' && s.shape && !s.faced).map((s) => s.shape!.box), grow = 16
     o.kept?.(boxes.length ? [0, 1, 2].map((k) => Math.min(...boxes.map((b) => b[k])) - grow).concat([3, 4, 5].map((k) => Math.max(...boxes.map((b) => b[k])) + grow)) : null)
   }
   /**
@@ -403,7 +477,7 @@ export async function boards(o: Needs): Promise<Boards> {
     s.shape = shape(b, text); s.text = text
     if (s.shape.runs.length) lay(rows(s.shape.runs, s.shape.box))
     place(s)
-    if (b.type === 'lettering') keep()
+    if (b.type === 'lettering') { s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M]); paintFar(s); keep() }
   }
   const bring = (b: Board) => {
     const s: Stood = { b, shape: null, text: '', screen: null, content: null, tiles: [1, 1], gone: () => {} }
@@ -429,7 +503,7 @@ export async function boards(o: Needs): Promise<Boards> {
     stood.set(b.id, s)
     s.gone = signs.add({ id: b.id, kind: b.type, name: b.name, accepts: b.type === 'lettering' ? ['text'] : ['text', 'image', 'video'], own: b.content, show: (content) => { s.content = content; if (b.type === 'lettering') stand(s); else { if (!s.shape) stand(s); s.screen!.show(content) } } })
   }
-  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.gone(); stood.delete(id); keep() }
+  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.far?.destroy(); s.gone(); stood.delete(id); keep() }
   for (const b of records) bring(b)
 
   // ── What still stands: a letter by its lamp, a screen's tile by the housing behind it ──
@@ -474,7 +548,7 @@ export async function boards(o: Needs): Promise<Boards> {
   }
   // Asked only when the world has changed since: nothing a frame.
   let seenEdits = -1
-  setInterval(() => { const n = o.done(); if (n !== seenEdits) { seenEdits = n; masks() } }, 400)
+  setInterval(() => { const n = o.done(); if (n !== seenEdits) { seenEdits = n; masks(); for (const s of stood.values()) if (s.far) s.stale = true } }, 400)
 
   // ── The plane and its banner ──
   const whole_ = o.file.banner ?? null, shape0 = o.canvas.getBoundingClientRect()
@@ -646,7 +720,8 @@ export async function boards(o: Needs): Promise<Boards> {
     let best: Stood | null = null, nearest = Infinity
     for (const s of stood.values()) {
       if (!s.shape) continue
-      const ps = corners(s.shape, 6).map((p) => onPicture(p, v, rect.width / rect.height))
+      // (A little grown, and more from far off: a board a kilometre away is a few dozen pixels, and a thumb is wider than its letters.)
+      const ps = corners(s.shape, Math.max(6, 0.008 * Math.hypot(s.shape.middle[0] - v.eye[0], s.shape.middle[1] - v.eye[1], s.shape.middle[2] - v.eye[2]))).map((p) => onPicture(p, v, rect.width / rect.height))
       if (ps.some((p) => !p)) continue
       // Inside all four edges, whichever way round they run.
       let sign = 0, inside = true
@@ -715,7 +790,7 @@ export async function boards(o: Needs): Promise<Boards> {
     const s = under(e.clientX, e.clientY)
     if (!s) return
     e.stopImmediatePropagation(); e.preventDefault()
-    if (editor) editor.select(s.b.id); else void visit(s.b.id)
+    if (editor) editor.select(s.b.id); else if (s.b.does) o.does?.(s.b); else void visit(s.b.id)
   }, true)
   addEventListener('mousemove', (e) => { if (!o.input.locked) o.canvas.style.cursor = e.target === o.canvas && under(e.clientX, e.clientY) ? 'pointer' : '' })
   /** The board straight ahead, within 90 m: flying free, O opens it. */
@@ -739,15 +814,18 @@ export async function boards(o: Needs): Promise<Boards> {
   links.setAttribute('aria-label', 'Billboards')
   links.style.cssText = 'position:fixed;left:12px;top:12px;z-index:30;display:flex;gap:8px;flex-wrap:wrap'
   const listLinks = () => {
-    links.replaceChildren(...records.filter((b) => b.to).map((b) => {
-      const a = document.createElement('a')
-      a.href = b.to!; a.textContent = b.name; a.dataset.board = b.id
-      a.style.cssText = 'font:600 15px system-ui,sans-serif;padding:8px 12px;border-radius:8px;background:#111a;color:#fff;text-decoration:none;position:absolute;left:-9999px'
+    links.replaceChildren(...records.filter((b) => b.to || b.does).map((b) => {
+      // A board that leads somewhere is a link; one that does something is a button.
+      const a = b.to ? Object.assign(document.createElement('a'), { href: b.to }) : Object.assign(document.createElement('button'), { type: 'button' })
+      const act = () => { if (b.to) void visit(b.id); else o.does?.(b) }
+      a.textContent = b.name; a.dataset.board = b.id
+      a.style.cssText = 'font:600 15px system-ui,sans-serif;padding:8px 12px;border:0;border-radius:8px;background:#111a;color:#fff;text-decoration:none;position:absolute;left:-9999px'
       a.onfocus = () => { a.style.position = 'static' }
       a.onblur = () => { a.style.position = 'absolute' }
-      a.onclick = (e) => { e.preventDefault(); void visit(b.id) }
+      a.onclick = (e) => { e.preventDefault(); act() }
       // Enter is the page's own key everywhere else (input.ts): on a link it follows the link, and goes no further.
-      a.onkeydown = (e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); void visit(b.id) }
+      // (A key held until it repeats is pressed once.)
+      a.onkeydown = (e) => { if (e.key !== 'Enter') return; e.preventDefault(); e.stopPropagation(); if (!e.repeat) act() }
       return a
     }))
   }
@@ -839,6 +917,9 @@ export async function boards(o: Needs): Promise<Boards> {
     get edits() { return laid },
     relay() { laid = 0; for (const s of stood.values()) stand(s, true); seenEdits = -1 },
     fly, open, where, marks, standing, propose, listed,
+    light(id, lit) { const s = stood.get(id); if (!s?.far || (s.lit ?? 0) === lit) return; s.lit = lit; inkFar(s) },
+    faced: (id) => stood.get(id)?.faced === true,
+    box: (id) => stood.get(id)?.shape?.box ?? null,
 
     get plane() { return flown },
     editor,

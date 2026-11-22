@@ -384,6 +384,17 @@ export async function need(core: object, x0: number, z0: number, x1: number, z1:
   return whole
 }
 
+/**
+ * Has the page fetch the finest tiles within `reach` cells of a place, for whichever core asks for them next (`tile`
+ * keeps them): what the makers of sectors will want once the world's boxes are round it (#450: the roof a flight is
+ * on its way to). No core is made to hold them. Resolves when they have come, whether or not each did.
+ */
+export async function warm(x: number, z: number, reach: number): Promise<void> {
+  if (!STREAM) return
+  const { size } = (await where()).levels[0], coming: Promise<unknown>[] = []
+  for (let tz = Math.floor((z - reach) / size); tz <= Math.floor((z + reach) / size); tz++) for (let tx = Math.floor((x - reach) / size); tx <= Math.floor((x + reach) / size); tx++) coming.push(tile(0, `${tx}_${tz}`).catch(() => null))
+  await Promise.all(coming)
+}
 /** Has a core hold the finest tiles round someone, for what is asked of the ground underfoot: what the page needs before its first picture. */
 export const underfoot = (core: object, x: number, z: number): Promise<boolean> => need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1)
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */

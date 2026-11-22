@@ -182,6 +182,8 @@ try {
   const f = (results.features = {})
   f.residents = results.frames.street.residentsDrawn
   console.log(`  (report) residents drawn at street level on Taylor St: ${f.residents}; at the park: ${results.frames.park.residentsDrawn}`)
+  // In the realm from here (#450: its first view is a still picture, and no key means anything in it; the way in is test/sf-explore.mjs's).
+  await page.evaluate(() => globalThis.engine.first?.engage())
   // Sound from plain files: its worklet is beside its module. A key is a gesture, which lets the page make sound.
   await page.keyboard.press('KeyH'); await page.keyboard.press('KeyH')
   f.sound = await page.waitForFunction(() => globalThis.engine.ears !== null, null, { timeout: 15_000 }).then(() => true, () => false)

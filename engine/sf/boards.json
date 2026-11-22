@@ -169,6 +169,32 @@
       },
       "to": "https://www.twitch.tv/p_bender",
       "mount": "roof"
+    },
+    {
+      "id": "explore",
+      "name": "Explore",
+      "type": "lettering",
+      "building": [
+        519968,
+        666112
+      ],
+      "at": [
+        519968,
+        523,
+        666112
+      ],
+      "facing": 0,
+      "size": 3,
+      "lift": 4.2,
+      "content": {
+        "text": "EXPLORE"
+      },
+      "does": "explore",
+      "stand": [
+        519987,
+        666227,
+        115
+      ]
     }
   ]
 }

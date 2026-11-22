@@ -57,6 +57,8 @@ export function wrong(file) {
     if (b.type === 'lettering' ? typeof b.content?.text !== 'string' : typeof b.content?.text !== 'string' && typeof b.content?.image !== 'string') say('lettering shows { text }; a digital board { text } or { image }')
     if (b.colors !== undefined && !(b.type === 'digital' && typeof b.colors?.ink === 'string' && (typeof b.colors.ground === 'string' || (Array.isArray(b.colors.ground) && b.colors.ground.length === 2)))) say('colors are a digital board\'s: { ground: a colour or two, ink: a colour }')
     if (b.to !== undefined && (typeof b.to !== 'string' || !b.to.startsWith('/'))) say('it leads to a path of the site, from /')
+    if (b.does !== undefined && (b.does !== 'explore' || b.type !== 'lettering' || b.to !== undefined)) say('only a lettering board that leads nowhere does something, and what it does is explore')
+    if (b.stand !== undefined && !(whole(b.stand) && b.stand.length === 3 && b.does)) say('a board that does something may say where its visitor stands: [x, z] in cells and which way they look, degrees clockwise from north')
   }
   const t = file.banner
   if (t?.upright !== undefined && (typeof t.upright !== 'object' || 'content' in t.upright)) out.push('the banner\'s upright is the round flown where the picture is taller than wide: any of around, radius, bearing, height, rise, speed, size, start')

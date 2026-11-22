@@ -4,11 +4,13 @@
 //   realm to host   ready { boards, signs }       the place is shown; what boards there are, and what signs can be set
 //                   error { message, fatal? }     the realm could not open (or, with fatal false, an ask was refused)
 //                   navigate { board, name, to }  a board was opened: the host goes to `to`
-//                   engaged {}                    the visitor made a first move: the realm's controls are shown (first.ts)
+//                   engaged {}                    the visitor is in the realm: its controls are shown (first.ts)
 //   host to realm   fly { board }                 fly the eye to a board
 //                   open { board }                fly to it, then navigate
 //                   signs.set { id, content }     realm.signs.set, with { text }, { image: url } or null
-//                   explore {}                    show the realm's controls, as the visitor's first move does
+//                   explore {}                    take the visitor into the realm, as the EXPLORE board asked twice does (explore.ts): the
+//                                                 host's word is meant, and is not asked again. Heard from when the realm's script
+//                                                 first runs (by the frame's `load` it has), and kept until it can be done
 //
 // A realm run as a page of its own has no host: nothing is sent, and a board opened takes the page there itself.
 

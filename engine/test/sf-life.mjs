@@ -372,6 +372,8 @@ try {
   check(!!car, `a parked car on Taylor St to get into${car ? ` (${car.name})` : ''}`)
   if (car) {
     // On foot beside it: it comes to life, and E gets in.
+    // (In the realm from here, #450: in its first view, a still picture, no key means anything.)
+    await page.evaluate(() => globalThis.engine.first?.engage())
     // (The eye there first: on foot, the person is set down where the eye is, and moving the eye after leaves them.)
     await page.evaluate((c) => { const e = globalThis.engine; e.me.walk(false); const side = c.heading + Math.PI / 2; Object.assign(e.pose, { x: (c.x + Math.cos(side) * 30) / 10, z: (c.z + Math.sin(side) * 30) / 10, y: e.ground((c.x + Math.cos(side) * 30) / 10, (c.z + Math.sin(side) * 30) / 10) + 2, yaw: Math.atan2(-Math.cos(side), Math.sin(side)) }); e.me.walk(true) }, car)
     await page.evaluate(() => { const e = globalThis.engine; globalThis.__gaps = []; globalThis.__stop = e.watch((g) => globalThis.__gaps.push(g)) })
