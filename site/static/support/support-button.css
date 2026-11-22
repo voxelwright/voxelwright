@@ -1,0 +1,572 @@
+/* The tsundere support button. Loaded into the element's shadow root by support-button.js.
+   Two versions, [data-version="unbiased"] (flat ink, a speech bubble that came alive) and
+   [data-version="skeuomorphic"] (an arcade button with googly eyes and label-maker tape),
+   each for [data-theme="light"] and [data-theme="dark"].
+   Motion rules follow .claude/skills/site-craft: transform and opacity only, named
+   properties, the three site curves, transitions for anything that can be retriggered. */
+
+:host {
+  all: initial;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --blue: #0e22ff;
+  --yellow: #fff600;
+  --ink: #070b45;
+  --s: 60px;
+  font-size: 16px;
+  line-height: 1.25;
+  color: var(--text);
+  opacity: 0;
+  transition: opacity 240ms var(--ease-out);
+}
+.root[data-ready] { opacity: 1; }
+.root[data-paused] *, .root[data-paused] *::before, .root[data-paused] *::after { animation-play-state: paused !important; }
+
+/* ── Tokens ─────────────────────────────────────────────────────────────── */
+.root[data-version="unbiased"] {
+  --font: "Support Fraunces", "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+  --body: var(--blue);
+  --feature: #fff;
+  --sclera: #fff;
+  --pupil: var(--ink);
+  --accent: var(--yellow);
+  --paper: #fff;
+  --text: var(--ink);
+  --line: var(--blue);
+  --letter: var(--yellow);
+  --letter-edge: var(--ink);
+  --letter-drop: var(--blue);
+  --glove: #fff;
+  --glove-edge: var(--ink);
+  --veil: rgba(7, 11, 69, 0.34);
+}
+.root[data-version="unbiased"][data-theme="dark"] {
+  --body: var(--yellow);
+  --feature: #0b0d2e;
+  --sclera: #fff;
+  --pupil: #0b0d2e;
+  --accent: var(--blue);
+  --paper: #10122e;
+  --text: #f2f1e6;
+  --line: var(--yellow);
+  --letter: var(--yellow);
+  --letter-edge: #05061c;
+  --letter-drop: var(--blue);
+  --glove: #fff;
+  --glove-edge: #05061c;
+  --veil: rgba(0, 0, 10, 0.5);
+}
+.root[data-version="skeuomorphic"] {
+  --font: "Support Overpass Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --body: var(--yellow);
+  --feature: #1b1a12;
+  --sclera: #fbfbf6;
+  --pupil: #0c0c0c;
+  --accent: var(--blue);
+  --paper: var(--blue);
+  --text: #fff;
+  --line: #0717c9;
+  --letter: var(--yellow);
+  --letter-edge: #14110a;
+  --letter-drop: var(--blue);
+  --glove: var(--blue);
+  --glove-edge: #050a66;
+  --veil: rgba(10, 10, 16, 0.4);
+  --cast: rgba(20, 22, 40, 0.42);
+}
+.root[data-version="skeuomorphic"][data-theme="dark"] {
+  --veil: rgba(0, 0, 0, 0.55);
+  --cast: rgba(0, 0, 0, 0.7);
+}
+
+/* ── The mover: one transform each, written by the script ───────────────── */
+.mover, .tilt { position: absolute; left: 0; top: 0; }
+.mover[data-moving] { will-change: transform; }
+.mover[data-gone] { visibility: hidden; }
+.root[data-dock-away] .corner { display: none; }
+.root[data-dock-away]:not([data-scene]) .mover { visibility: hidden; }
+:host([dock]) .root[data-scene] .body { pointer-events: none; }
+
+.body {
+  position: absolute;
+  left: calc(var(--s) / -2);
+  top: calc(var(--s) / -2);
+  width: var(--s);
+  height: var(--s);
+  display: block;
+  appearance: none; -webkit-appearance: none; border: 0; padding: 0; margin: 0; background: none; font: inherit;
+  pointer-events: auto;
+  cursor: pointer;
+  color: inherit;
+  border-radius: 50%;
+  outline: none;
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* The hit area is a little larger than the drawing, so a near miss with a thumb still lands. */
+.body::before { content: ""; position: absolute; inset: -6px; border-radius: 50%; }
+.body:focus-visible { outline: 2px solid var(--focus, var(--blue)); outline-offset: 6px; }
+.root[data-theme="dark"] .body:focus-visible { outline-color: var(--yellow); }
+
+.sr {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+}
+
+.shell { position: absolute; inset: 0; display: block; transition: transform 140ms var(--ease-out); }
+.body[data-pressed] .shell { transform: scale(0.93); }
+
+.cast, .base, .cap, .face, .gloss, .eye, .pupil, .lid, .brow, .mouth, .blush, .vein, .sweat, .gloom, .tag { position: absolute; display: block; }
+
+/* ── Face, shared geometry (px at --s: 60px) ────────────────────────────── */
+.face { left: 50%; top: 50%; width: 0; height: 0; }
+.eye {
+  width: 15px; height: 15px; margin: -7.5px; border-radius: 50%; overflow: hidden;
+  background: var(--sclera);
+  transition: transform 120ms var(--ease-out);
+}
+.eye.l { left: -9px; top: -4px; }
+.eye.r { left: 9px; top: -4px; }
+.eye[data-blink] { transform: scaleY(0.12); }
+.pupil { left: 50%; top: 50%; width: 7px; height: 7px; margin: -3.5px; border-radius: 50%; background: var(--pupil); }
+.pupil::after { content: ""; position: absolute; left: 1px; top: 1px; width: 2px; height: 2px; border-radius: 50%; background: #fff; opacity: 0.9; }
+.lid { inset: 0; background: var(--body); transform: translateY(-101%); transition: transform 180ms var(--ease-out); }
+.brow {
+  width: 13px; height: 3.5px; margin: -1.75px -6.5px; border-radius: 2px; background: var(--feature);
+  opacity: 0; top: -15px;
+  transition: transform 180ms var(--ease-out), opacity 140ms ease;
+}
+.brow.l { left: -10px; }
+.brow.r { left: 10px; }
+.mouth { left: -7px; top: 8px; width: 14px; height: 8px; overflow: visible; }
+.mouth path { fill: none; stroke: var(--feature); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity 140ms ease; }
+.mouth .m-open { fill: var(--feature); stroke: none; }
+.blush {
+  top: 5px; width: 9px; height: 5px; margin: -2.5px -4.5px; opacity: 0; transition: opacity 240ms ease;
+  background: repeating-linear-gradient(115deg, var(--accent) 0 1.6px, transparent 1.6px 3.4px);
+}
+.blush.l { left: -19px; }
+.blush.r { left: 19px; }
+.vein { right: -5px; top: -6px; width: 19px; height: 19px; opacity: 0; transform: scale(0.9) rotate(-12deg); transition: opacity 120ms ease, transform 260ms cubic-bezier(0.34, 1.56, 0.64, 1); }
+.vein path { fill: none; stroke: var(--accent); stroke-width: 2.8; stroke-linecap: round; }
+.vein .v-edge { stroke: var(--pupil); stroke-width: 6; }
+.sweat { left: -3px; top: 0; width: 9px; height: 13px; opacity: 0; transform: translateY(-3px); transition: opacity 160ms ease, transform 400ms var(--ease-out); }
+.sweat path { fill: #bfe9ff; stroke: var(--pupil); stroke-width: 1.2; }
+.gloom { inset: 0; border-radius: inherit; opacity: 0; transition: opacity 260ms ease; pointer-events: none; }
+
+/* Moods. Each sets its own transforms; nothing is driven through a variable on a parent. */
+.body[data-mood="idle"] .m-pout, .body[data-mood="wary"] .m-pout, .body[data-mood="shy"] .m-pout { opacity: 1; }
+.body[data-mood="wary"] .brow { opacity: 1; }
+.body[data-mood="wary"] .brow.l { transform: rotate(12deg); }
+.body[data-mood="wary"] .brow.r { transform: rotate(-12deg); }
+.body[data-mood="wary"] .lid { transform: translateY(-82%); }
+
+.body[data-mood="annoyed"] .brow, .body[data-mood="menace"] .brow { opacity: 1; }
+.body[data-mood="annoyed"] .brow.l, .body[data-mood="menace"] .brow.l { transform: translateY(4px) rotate(26deg); }
+.body[data-mood="annoyed"] .brow.r, .body[data-mood="menace"] .brow.r { transform: translateY(4px) rotate(-26deg); }
+.body[data-mood="annoyed"] .lid { transform: translateY(-66%); }
+.body[data-mood="annoyed"] .m-zig, .body[data-mood="menace"] .m-flat { opacity: 1; }
+.body[data-mood="annoyed"] .vein, .body[data-mood="rage"] .vein { opacity: 1; transform: none; }
+.body[data-mood="annoyed"] .blush, .body[data-mood="shy"] .blush, .body[data-mood="rage"] .blush { opacity: 1; }
+
+.body[data-mood="menace"] .lid { transform: translateY(-56%); }
+.body[data-mood="menace"] .gloom { opacity: 1; }
+
+.body[data-mood="rage"] .brow { opacity: 1; }
+.body[data-mood="rage"] .brow.l { transform: translateY(5px) rotate(32deg); }
+.body[data-mood="rage"] .brow.r { transform: translateY(5px) rotate(-32deg); }
+.body[data-mood="rage"] .lid { transform: translateY(-72%); }
+.body[data-mood="rage"] .m-open { opacity: 1; }
+
+.body[data-mood="tired"] .brow, .body[data-mood="grief"] .brow { opacity: 1; }
+.body[data-mood="tired"] .brow.l { transform: rotate(-16deg); }
+.body[data-mood="tired"] .brow.r { transform: rotate(16deg); }
+.body[data-mood="tired"] .lid { transform: translateY(-48%); }
+.body[data-mood="tired"] .m-open, .body[data-mood="grief"] .m-flat { opacity: 1; }
+.body[data-mood="tired"] .sweat, .body[data-mood="grief"] .sweat { opacity: 1; transform: none; }
+.body[data-mood="grief"] .brow { transform: translateY(3px); }
+.body[data-mood="grief"] .lid { transform: translateY(-46%); }
+
+/* Panting, and the head shake after a hit: short keyframes on the shell's child, not the mover. */
+@keyframes pant { 50% { transform: scale(1.045, 0.955) translateY(1.5px); } }
+@keyframes shake-head { 20% { transform: rotate(-9deg); } 45% { transform: rotate(8deg); } 70% { transform: rotate(-5deg); } 88% { transform: rotate(2deg); } }
+@keyframes seethe { 0% { transform: translate(0.6px, -0.4px); } 100% { transform: translate(-0.6px, 0.5px); } }
+.body[data-mood="tired"] .shell { animation: pant 620ms ease-in-out infinite; }
+.body[data-shake] .shell { animation: shake-head 420ms var(--ease-out); }
+.body[data-mood="menace"] .shell, .body[data-mood="rage"] .shell { animation: seethe 90ms steps(2) infinite alternate; }
+
+/* ── Unbiased: a flat speech bubble with a face ─────────────────────────── */
+.root[data-version="unbiased"] .base { inset: 0; }
+.root[data-version="unbiased"] .base svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.root[data-version="unbiased"] .base path { fill: var(--body); }
+.root[data-version="unbiased"] .cap { inset: 0; }
+.root[data-version="unbiased"] .face { top: 44%; }
+.root[data-version="unbiased"] .cast, .root[data-version="unbiased"] .gloss { display: none; }
+.root[data-version="unbiased"] .gloom {
+  inset: 6% 6% 26% 6%; border-radius: 12px 12px 0 0;
+  background: repeating-linear-gradient(90deg, var(--pupil) 0 1.5px, transparent 1.5px 4px);
+  -webkit-mask-image: linear-gradient(#000 20%, transparent 70%); mask-image: linear-gradient(#000 20%, transparent 70%);
+}
+.root[data-version="unbiased"] .tag {
+  left: 50%; top: calc(100% + 2px); transform: translateX(-50%);
+  font: 620 0.72rem/1 var(--font); font-variation-settings: "SOFT" 100; letter-spacing: 0.04em;
+  color: var(--body); white-space: nowrap;
+  transition: opacity 200ms ease;
+}
+.root[data-version="unbiased"][data-theme="light"] .tag { text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff; }
+.root[data-version="unbiased"][data-theme="dark"] .tag { text-shadow: 0 0 2px #000, 0 0 3px #000; }
+
+/* ── Skeuomorphic: bezel, dome, googly eyes, embossed tape ──────────────── */
+.root[data-version="skeuomorphic"] .cast {
+  left: 4%; right: 4%; top: 22%; bottom: -14%; border-radius: 50%;
+  background: radial-gradient(closest-side, var(--cast), transparent);
+  transition: transform 140ms var(--ease-out), opacity 140ms ease;
+}
+.root[data-version="skeuomorphic"] .base {
+  inset: 0; border-radius: 50%;
+  background:
+    radial-gradient(circle, #23252b 0 61%, transparent 62%),
+    conic-gradient(from 20deg, #fbfbfd, #8d929c 12%, #f1f2f5 24%, #70757f 38%, #e8e9ee 52%, #868b95 64%, #fafafc 78%, #9da2ab 90%, #fbfbfd);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55), 0 0 0 1px rgba(20, 22, 30, 0.55), 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+.root[data-version="skeuomorphic"] .base svg { display: none; }
+.root[data-version="skeuomorphic"] .cap {
+  inset: 10.5%; border-radius: 50%;
+  background: radial-gradient(circle at 36% 26%, #fffbd0 0, #fff600 34%, #f1d800 66%, #b89b00 100%);
+  box-shadow: inset 0 -4px 5px rgba(96, 74, 0, 0.5), inset 0 2px 2px rgba(255, 255, 255, 0.75), 0 3px 3px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(60, 46, 0, 0.6);
+  transform: translateY(-1.5px);
+  transition: transform 110ms var(--ease-out);
+}
+.root[data-version="skeuomorphic"] .body[data-pressed] .shell { transform: none; }
+.root[data-version="skeuomorphic"] .body[data-pressed] .cap { transform: translateY(1.5px) scale(0.975); }
+.root[data-version="skeuomorphic"] .body[data-pressed] .cast { transform: scale(0.94); opacity: 0.8; }
+.root[data-version="skeuomorphic"] .gloss {
+  left: 16%; right: 16%; top: 4%; height: 40%; border-radius: 50%;
+  background: radial-gradient(ellipse at 50% 0, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0) 68%);
+  pointer-events: none;
+}
+.root[data-version="skeuomorphic"] .face { top: 52%; }
+.root[data-version="skeuomorphic"] .eye {
+  width: 17px; height: 17px; margin: -8.5px;
+  box-shadow: inset 0 -1.5px 2px rgba(0, 0, 0, 0.28), 0 1px 1.5px rgba(60, 40, 0, 0.6), 0 0 0 0.75px rgba(40, 30, 0, 0.55);
+}
+.root[data-version="skeuomorphic"] .eye::after {
+  content: ""; position: absolute; inset: 0; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.95) 0 12%, rgba(255, 255, 255, 0) 34%);
+}
+.root[data-version="skeuomorphic"] .pupil { width: 8.5px; height: 8.5px; margin: -4.25px; }
+.root[data-version="skeuomorphic"] .pupil::after { display: none; }
+.root[data-version="skeuomorphic"] .lid { background: linear-gradient(#f3da00, #d9bf00); box-shadow: 0 1px 1px rgba(0, 0, 0, 0.35); }
+/* Eyebrows of black tape. */
+.root[data-version="skeuomorphic"] .brow { width: 14px; height: 4px; margin: -2px -7px; border-radius: 0.5px; top: -17px; box-shadow: 0 0.75px 0.75px rgba(0, 0, 0, 0.4); }
+.root[data-version="skeuomorphic"] .mouth { top: 9px; }
+.root[data-version="skeuomorphic"] .blush { background: radial-gradient(closest-side, rgba(255, 92, 120, 0.75), rgba(255, 92, 120, 0)); width: 11px; height: 7px; margin: -3.5px -5.5px; top: 7px; }
+.root[data-version="skeuomorphic"] .blush.l { left: -18px; }
+.root[data-version="skeuomorphic"] .blush.r { left: 18px; }
+.root[data-version="skeuomorphic"] .gloom { background: linear-gradient(rgba(30, 20, 0, 0.62), rgba(30, 20, 0, 0) 62%); }
+.root[data-version="skeuomorphic"] .tag, .strip {
+  font: 800 0.6rem/1 var(--font); letter-spacing: 0.14em; text-transform: uppercase; white-space: nowrap;
+  color: #fff; background: linear-gradient(#2a3cff, var(--blue) 45%, #0a1bd6);
+  padding: 0.42em 0.6em 0.36em 0.72em; border-radius: 1.5px;
+  text-shadow: 0 1px 0 rgba(0, 4, 90, 0.75), 0 -0.5px 0 rgba(255, 255, 255, 0.45);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), inset 0 -1px 0 rgba(0, 0, 60, 0.4), 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+.root[data-version="skeuomorphic"] .tag { left: 50%; top: calc(100% + 1px); transform: translateX(-50%) rotate(-4deg); transition: opacity 200ms ease; }
+.body[data-mood="rage"] .tag, .body[data-mood="menace"] .tag, .root[data-scene] .tag { opacity: 0; }
+
+/* ── What it says ───────────────────────────────────────────────────────── */
+.say {
+  position: absolute; top: -22px; width: max-content; max-width: min(15.5rem, calc(100vw - 7rem));
+  opacity: 0; transform: scale(0.96); pointer-events: none;
+  transition: opacity 130ms ease, transform 180ms var(--ease-out);
+}
+.say[data-side="left"] { right: calc(var(--s) / 2 + 16px); transform-origin: 100% 22px; }
+.say[data-side="right"] { left: calc(var(--s) / 2 + 16px); transform-origin: 0 22px; }
+.say[data-v="up"] { top: auto; bottom: -22px; }
+.say[data-v="up"][data-side="left"] { transform-origin: 100% calc(100% - 22px); }
+.say[data-v="up"][data-side="right"] { transform-origin: 0 calc(100% - 22px); }
+.say[data-side^="under"] { transform-origin: 50% 0; }
+.say[data-side^="under"][data-v="up"] { transform-origin: 50% 100%; }
+.say[data-on] { opacity: 1; transform: none; }
+
+.root[data-version="unbiased"] .say {
+  padding: 0.55em 0.85em 0.6em; border: 2.5px solid var(--line); border-radius: 1.1em;
+  background: var(--paper); color: var(--text);
+  font: 560 1rem/1.25 var(--font); font-variation-settings: "SOFT" 100; text-wrap: balance;
+  box-shadow: 4px 4px 0 var(--line);
+}
+.root[data-version="unbiased"] .say::after {
+  content: ""; position: absolute; top: 14px; width: 12px; height: 12px; background: var(--paper);
+  border: 2.5px solid var(--line); border-left: 0; border-bottom: 0;
+}
+.root[data-version="unbiased"] .say[data-side="left"]::after { right: -8.5px; transform: rotate(45deg) skew(8deg, 8deg); }
+.root[data-version="unbiased"] .say[data-side="right"]::after { left: -8.5px; transform: rotate(-135deg) skew(8deg, 8deg); }
+.root[data-version="unbiased"] .say[data-v="up"]::after { top: auto; bottom: 14px; }
+.root[data-version="unbiased"] .say[data-side^="under"]::after { top: -8.5px; bottom: auto; transform: rotate(-45deg) skew(8deg, 8deg); }
+.root[data-version="unbiased"] .say[data-side^="under"][data-v="up"]::after { top: auto; bottom: -8.5px; transform: rotate(135deg) skew(8deg, 8deg); }
+.root[data-version="unbiased"] .say[data-side="under-left"]::after { right: calc(var(--tail) - 8px); }
+.root[data-version="unbiased"] .say[data-side="under-right"]::after { left: calc(var(--tail) - 8px); }
+.root[data-version="unbiased"] .say[data-loud] { font-weight: 900; font-size: 1.35rem; letter-spacing: -0.015em; line-height: 1.1; padding: 0.5em 0.8em 0.55em; }
+.root[data-version="unbiased"] .say[data-soft] { font-style: italic; font-weight: 480; }
+.root[data-version="unbiased"] .strip { all: unset; }
+.root[data-version="unbiased"] .strip + .strip::before { content: " "; }
+
+/* Skeuomorphic speech is label-maker tape, one strip a line, each stuck on a little crooked. */
+.root[data-version="skeuomorphic"] .say { display: flex; flex-direction: column; gap: 3px; max-width: none; top: -12px; }
+.root[data-version="skeuomorphic"] .say[data-side$="left"] { align-items: flex-end; }
+.root[data-version="skeuomorphic"] .say[data-side$="right"] { align-items: flex-start; }
+.root[data-version="skeuomorphic"] .say[data-v="up"] { top: auto; bottom: -12px; }
+.strip { display: block; font-size: 0.68rem; }
+.root[data-version="skeuomorphic"] .strip:nth-child(odd) { transform: rotate(-1.6deg); }
+.root[data-version="skeuomorphic"] .strip:nth-child(even) { transform: rotate(1.2deg) translateX(-3px); }
+.root[data-version="skeuomorphic"] .say[data-loud] .strip { font-size: 0.86rem; background: linear-gradient(#fffb7a, var(--yellow) 45%, #e6dd00); color: #0a0f6e; text-shadow: 0 1px 0 rgba(255, 255, 255, 0.7), 0 -0.5px 0 rgba(90, 80, 0, 0.55); }
+
+/* ── The sound switch and the note it leaves ────────────────────────────── */
+.corner { position: absolute; left: 0; top: 0; }
+.mute {
+  all: unset; position: absolute; box-sizing: border-box; left: -14px; top: calc(var(--s) / 2 + 30px); width: 28px; height: 28px;
+  display: grid; place-items: center; border-radius: 50%; cursor: pointer; pointer-events: none;
+  color: var(--line); background: var(--paper); border: 2px solid var(--line);
+  opacity: 0; transform: scale(0.96);
+  transition: opacity 160ms ease, transform 160ms var(--ease-out);
+}
+.mute::before { content: ""; position: absolute; inset: -9px; }
+.mute[data-on], .mute:focus-visible { opacity: 1; transform: none; pointer-events: auto; }
+.mute:active { transform: scale(0.94); }
+.mute:focus-visible { outline: 2px solid var(--line); outline-offset: 3px; }
+.mute svg { width: 16px; height: 16px; display: block; }
+.mute path { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.mute .spk { fill: currentColor; }
+.mute[aria-pressed="true"] .wave { display: none; }
+.mute[aria-pressed="false"] .cross { display: none; }
+.root[data-version="skeuomorphic"] .mute {
+  color: #1c1d22; border: 0;
+  background: radial-gradient(circle at 36% 28%, #fdfdfd, #c9ccd3 58%, #878b95);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 0 0 1px rgba(20, 22, 30, 0.6), 0 2px 3px rgba(0, 0, 0, 0.45);
+}
+
+.note {
+  /* Under home and left of the sound switch: clear of a page's nav row. */
+  position: absolute; right: 24px; top: calc(var(--s) / 2 + 12px); width: max-content; max-width: min(15rem, calc(100vw - 5rem));
+  opacity: 0; transform: scale(0.97); transform-origin: 100% 0; visibility: hidden; pointer-events: none;
+  transition: opacity 220ms ease, transform 260ms var(--ease-out), visibility 0s 260ms;
+}
+.note[data-on] { opacity: 1; transform: none; visibility: visible; pointer-events: auto; transition-delay: 0s; }
+.note p { margin: 0; }
+.note button:focus-visible { outline: 2px solid var(--line); outline-offset: 2px; }
+.note button { all: unset; cursor: pointer; position: absolute; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; }
+.note button::before { content: ""; position: absolute; inset: -10px; }
+.note button svg { width: 12px; height: 12px; }
+.note button path { stroke: currentColor; stroke-width: 2; stroke-linecap: round; fill: none; }
+.root[data-version="unbiased"] .note {
+  padding: 0.7em 2.2em 0.75em 0.9em; border: 2.5px solid var(--line); border-radius: 1.1em;
+  background: var(--paper); color: var(--text); box-shadow: 4px 4px 0 var(--line);
+  font: 520 0.95rem/1.3 var(--font); font-variation-settings: "SOFT" 100;
+}
+.root[data-version="unbiased"] .note button { right: 4px; top: 4px; color: var(--line); }
+.root[data-version="skeuomorphic"] .note { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; padding: 4px 30px 0 0; }
+.root[data-version="skeuomorphic"] .note p { display: contents; }
+.root[data-version="skeuomorphic"] .note .strip { font-size: 0.68rem; }
+.root[data-version="skeuomorphic"] .note button { right: 0; top: 2px; color: #1c1d22; background: radial-gradient(circle at 36% 28%, #fdfdfd, #c9ccd3 58%, #878b95); box-shadow: 0 0 0 1px rgba(20, 22, 30, 0.6), 0 2px 3px rgba(0, 0, 0, 0.45); }
+
+/* ── The standoff (elements are made by standoff.js, and only for its ten seconds) ── */
+.scene { position: fixed; inset: 0; overflow: hidden; pointer-events: none; contain: strict; }
+.scene > * { position: absolute; left: 0; top: 0; }
+.veil { inset: 0; width: 100%; height: 100%; background: radial-gradient(ellipse at var(--vx, 70%) var(--vy, 20%), transparent 0 18%, var(--veil) 70%); opacity: 0; transition: opacity 420ms ease; }
+.veil[data-on] { opacity: 1; }
+.rays { inset: 0; width: 100%; height: 100%; opacity: 0; transition: opacity 160ms ease; }
+.rays[data-on] { opacity: 1; }
+.rays svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.rays path { fill: var(--letter-edge); opacity: 0.9; }
+.root[data-theme="dark"] .rays path { fill: #fff; }
+/* Drawn on twos: the two drawings take turns. */
+@keyframes rays { 0% { opacity: 1; } 50%, 100% { opacity: 0; } }
+.rays[data-on] svg { animation: rays 200ms steps(1, end) infinite; }
+.rays[data-on] svg + svg { animation-delay: -100ms; }
+
+.flash { inset: 0; width: 100%; height: 100%; opacity: 0; background: #fff; }
+.flash[data-tone="ink"] { background: var(--letter-edge); }
+
+.glyph { width: 0; height: 0; }
+.glyph svg { position: absolute; overflow: visible; }
+.glyph .drop { fill: var(--letter-drop); stroke: var(--letter-drop); stroke-width: 9; stroke-linejoin: round; }
+.glyph .edge { fill: var(--letter-edge); stroke: var(--letter-edge); stroke-width: 9; stroke-linejoin: round; }
+.glyph .fill { fill: var(--letter); }
+.root[data-version="skeuomorphic"] .glyph svg { filter: drop-shadow(0 3px 2px rgba(0, 0, 0, 0.35)); }
+
+.fist, .star, .puff, .zero, .ring, .spark, .streak { width: 0; height: 0; opacity: 0; }
+.fist svg { position: absolute; left: -29px; top: -25px; width: 58px; height: 50px; overflow: visible; }
+.fist .g-fill { fill: var(--glove); stroke: var(--glove-edge); stroke-width: 3; stroke-linejoin: round; }
+.fist .g-line { fill: none; stroke: var(--glove-edge); stroke-width: 2.4; stroke-linecap: round; }
+.fist .g-shine { fill: #fff; opacity: 0; }
+.root[data-version="skeuomorphic"] .fist .g-shine { opacity: 0.55; }
+.streak::before { content: ""; position: absolute; left: -170px; top: -6px; width: 150px; height: 12px; background: linear-gradient(90deg, transparent, var(--line) 85%); border-radius: 6px; }
+.star svg { position: absolute; left: -30px; top: -30px; width: 60px; height: 60px; overflow: visible; }
+.star path { fill: var(--letter); stroke: var(--letter-edge); stroke-width: 3; stroke-linejoin: round; }
+.puff::before { content: ""; position: absolute; left: -16px; top: -16px; width: 32px; height: 32px; border-radius: 50%; background: var(--puff, #fff); border: 2.5px solid var(--letter-edge); box-sizing: border-box; }
+.root[data-version="skeuomorphic"] .puff::before { border: 0; background: radial-gradient(circle at 40% 35%, #fff, #d9d9de 70%, #b9bac2); }
+.zero { font: 900 2.1rem/1 var(--font); font-variation-settings: "SOFT" 0; color: var(--letter); -webkit-text-stroke: 5px var(--letter-edge); paint-order: stroke fill; white-space: nowrap; }
+.zero span { position: absolute; transform: translate(-50%, -50%); }
+.ring::before { content: ""; position: absolute; left: -22px; top: -22px; width: 44px; height: 44px; border-radius: 50%; border: 3px solid var(--letter); box-shadow: 0 0 0 2px var(--letter-edge), inset 0 0 0 2px var(--letter-edge); box-sizing: border-box; }
+.spark svg { position: absolute; left: -14px; top: -14px; width: 28px; height: 28px; overflow: visible; }
+.spark path { fill: #fff; stroke: var(--letter-edge); stroke-width: 2; stroke-linejoin: round; }
+.finger { width: 0; height: 0; opacity: 0; transition: opacity 200ms ease; }
+.finger[data-on] { opacity: 1; }
+.finger::before { content: ""; position: absolute; left: -19px; top: -19px; width: 38px; height: 38px; border-radius: 50%; border: 2.5px dashed var(--letter-edge); background: rgba(255, 246, 0, 0.35); box-sizing: border-box; }
+/* With no pointer at all (a keyboard press), what it attacks is the focus ring it left behind. */
+.finger[data-kind="focus"]::before { left: -38px; top: -38px; width: 76px; height: 76px; border-radius: 50%; border: 2.5px solid var(--focus, var(--blue)); background: none; }
+.root[data-theme="dark"] .finger[data-kind="focus"]::before { border-color: var(--yellow); }
+
+.dozer { width: 0; height: 0; }
+.dozer-flip, .dozer-tip, .dozer-squash, .dozer-part { position: absolute; left: 0; top: 0; }
+.dozer svg { position: absolute; overflow: visible; }
+.dozer .d-body { fill: var(--yellow); stroke: var(--d-edge, var(--ink)); stroke-width: 5; stroke-linejoin: round; }
+.dozer .d-dark { fill: var(--d-edge, var(--ink)); stroke: var(--d-edge, var(--ink)); stroke-width: 5; stroke-linejoin: round; }
+.dozer .d-glass { fill: var(--blue); stroke: var(--d-edge, var(--ink)); stroke-width: 4; stroke-linejoin: round; }
+.dozer .d-steel { fill: #e9ecf3; stroke: var(--d-edge, var(--ink)); stroke-width: 5; stroke-linejoin: round; }
+.dozer .d-line { fill: none; stroke: var(--d-edge, var(--ink)); stroke-width: 4; stroke-linecap: round; }
+.dozer .d-hub { fill: var(--yellow); stroke: none; }
+.dozer .d-shine { fill: #fff; opacity: 0; stroke: none; }
+.root[data-theme="dark"] .dozer { --d-edge: #05061c; }
+.root[data-version="skeuomorphic"] .dozer { --d-edge: #1d1a08; }
+.root[data-version="skeuomorphic"] .dozer .d-shine { opacity: 0.5; }
+.root[data-version="skeuomorphic"] .dozer .d-body { stroke-width: 2.5; }
+.root[data-version="skeuomorphic"] .dozer svg.d-main { filter: drop-shadow(0 6px 4px rgba(0, 0, 0, 0.4)); }
+.dozer .wheel { position: absolute; width: 30px; height: 30px; margin: -15px; border-radius: 50%; background: conic-gradient(var(--yellow) 0 12%, transparent 12% 25%, var(--yellow) 25% 37%, transparent 37% 50%, var(--yellow) 50% 62%, transparent 62% 75%, var(--yellow) 75% 87%, transparent 87%); }
+@keyframes wheel { to { transform: rotate(360deg); } }
+.dozer[data-drive] .wheel { animation: wheel 320ms linear infinite; }
+.dozer[data-drive="strain"] .wheel { animation-duration: 150ms; }
+@keyframes strain { 0% { transform: translate(0.8px, -0.6px); } 100% { transform: translate(-0.8px, 0.7px); } }
+.dozer[data-drive="strain"] .dozer-squash { animation: strain 70ms steps(2) infinite alternate; }
+
+/* The calm telling: four still panels, one after another, opacity only. */
+.strip-card {
+  position: fixed; left: auto; right: max(1rem, env(safe-area-inset-right)); top: calc(var(--support-top-px, 16px) + var(--s) + 70px);
+  width: min(21rem, calc(100vw - 2rem)); display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 6px;
+  background: var(--panel-edge, var(--ink)); border-radius: 6px; opacity: 0; transition: opacity 240ms ease; pointer-events: none;
+}
+.strip-card[data-on] { opacity: 1; }
+.panel { position: relative; aspect-ratio: 4 / 3; background: var(--panel, #fff); overflow: hidden; opacity: 0; transition: opacity 320ms ease; border-radius: 2px; }
+.panel[data-on] { opacity: 1; }
+.panel svg { position: absolute; overflow: visible; }
+.panel p { position: absolute; margin: 0; left: 6%; right: 6%; bottom: 6%; font: 800 0.8rem/1.15 var(--font); font-variation-settings: "SOFT" 100; color: var(--ink); text-wrap: balance; }
+.root[data-version="skeuomorphic"] .panel p { font-size: 0.62rem; letter-spacing: 0.08em; text-transform: uppercase; }
+.root[data-theme="dark"] .strip-card { --panel-edge: var(--yellow); --panel: #10122e; }
+.root[data-theme="dark"] .panel p { color: #f2f1e6; }
+
+/* ── Less motion: it stays put, looks away, and still says its lines ─────── */
+@media (prefers-reduced-motion: reduce) {
+  .shell, .cap, .lid, .brow, .vein, .sweat { transition-duration: 1ms; }
+  .body[data-mood] .shell, .body[data-shake] .shell { animation: none; }
+  .body[data-pressed] .shell, .root[data-version="skeuomorphic"] .body[data-pressed] .cap { transform: none; }
+  .body[data-pressed] { opacity: 0.86; }
+  .say, .note, .mute { transform: none; transition: opacity 200ms ease, visibility 0s; }
+  .say[data-on], .note[data-on] { transform: none; }
+}
+.root[data-calm] .shell, .root[data-calm] .cap, .root[data-calm] .lid, .root[data-calm] .brow, .root[data-calm] .vein, .root[data-calm] .sweat { transition-duration: 1ms; }
+.root[data-calm] .body[data-mood] .shell, .root[data-calm] .body[data-shake] .shell { animation: none; }
+.root[data-calm] .body[data-pressed] .shell, .root[data-calm][data-version="skeuomorphic"] .body[data-pressed] .cap { transform: none; }
+.root[data-calm] .say, .root[data-calm] .note, .root[data-calm] .mute { transform: none; transition: opacity 200ms ease, visibility 0s; }
+.root[data-calm] .mover { transition: opacity 320ms ease; }
+.root[data-calm] .mover[data-fade] { opacity: 0; }
+
+@media print { :host { display: none; } }
+
+/* Signal Desk finish. The key's ivory legend and amber lenses sit on a blue
+   enamel cap in a machined aluminium switch housing. All geometry is CSS. */
+.root[data-version="instrument"] {
+  --font: "Support Overpass Mono", ui-monospace, monospace;
+  --body: #314c61;
+  --feature: #f7eed4;
+  --sclera: #f6db95;
+  --pupil: #192a36;
+  --accent: #ffbb6e;
+  --paper: #f3efdd;
+  --text: #152c3d;
+  --line: #374c59;
+  --letter: #ffd589;
+  --letter-edge: #1c303e;
+  --letter-drop: #a84922;
+  --glove: #bdcbd0;
+  --glove-edge: #203240;
+  --veil: #1b303b86;
+  --ink: #1c303e;
+  --blue: #406980;
+  --yellow: #f3bc67;
+  --focus: #133d7c;
+  --panel-edge: #293843;
+  --panel: #f3efdd;
+}
+.root[data-version="instrument"][data-theme="dark"] {
+  --focus: #ffd589;
+  --veil: #0a1823aa;
+  --panel: #283641;
+  --panel-edge: #b9a67c;
+}
+.root[data-version="instrument"] .body { border-radius: 8px; }
+.root[data-version="instrument"] .base {
+  inset: 0;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #d4d7cf, #88959a 44%, #4e606a 80%);
+  box-shadow: inset 1px 1px 0 #fff9, inset -1px -2px 0 #29363d, 0 1px 0 #18252a, 0 4px 6px #11212d66;
+}
+.root[data-version="instrument"] .base svg { display: none; }
+.root[data-version="instrument"] .cap {
+  inset: 4px 4px 6px;
+  border-radius: 5px;
+  background: linear-gradient(155deg, #526d7c 0%, var(--body) 52%, #263e51 100%);
+  box-shadow: inset 1px 1px 0 #b5cbce96, inset -1px -1px 0 #0f2334, 0 2px 0 1px #182a34;
+}
+.root[data-version="instrument"] .face { top: 44%; }
+.root[data-version="instrument"] .eye {
+  border-radius: 4px;
+  background: linear-gradient(#fff2c8, var(--sclera) 50%, #dca966);
+  box-shadow: 0 -1px 0 1px #192e3e, 0 1px 0 1px #79929c;
+}
+.root[data-version="instrument"] .pupil { border-radius: 2px; }
+.root[data-version="instrument"] .brow { height: 3px; top: -14px; border-radius: 1px; }
+.root[data-version="instrument"] .mouth { top: 5px; }
+.root[data-version="instrument"] .gloom { background: linear-gradient(#0c172ab3, transparent 65%); }
+.root[data-version="instrument"] .tag {
+  inset: auto 0 8px;
+  color: var(--feature);
+  text-align: center;
+  text-shadow: 0 1px #142b3a;
+  font: 600 10px/1 var(--font);
+}
+.root[data-version="instrument"] :is(.say, .note) {
+  box-sizing: border-box;
+  padding: .56rem .75rem;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  box-shadow: 0 2px 0 #0e26388c;
+  background: var(--paper);
+  color: var(--text);
+  font: 550 .9rem/1.35 var(--font);
+}
+.root[data-version="instrument"] .say { border-left: 4px solid var(--blue); }
+.root[data-version="instrument"] .say[data-loud] { font-weight: 730; border-left-color: var(--letter-drop); }
+.root[data-version="instrument"] .note { padding-right: 2.5rem; }
+.root[data-version="instrument"] .note button { right: 6px; top: 5px; }
+.root[data-version="instrument"] .mute {
+  border: 1px solid var(--glove-edge);
+  border-radius: 5px;
+  box-shadow: inset 1px 1px 0 #fff9, 0 2px 0 var(--glove-edge);
+  background: #c6cfcf;
+  color: var(--ink);
+}
+.root[data-version="instrument"] .strip-card { border-radius: 3px; }
+.root[data-version="instrument"] .glyph svg { filter: drop-shadow(0 2px 0 #10212d70); }
+.root[data-version="instrument"] .d-shine { opacity: .4; }

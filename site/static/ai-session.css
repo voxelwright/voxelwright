@@ -1,0 +1,663 @@
+/* The ai-session block. Structure lives here; its colours and faces are the Voxelmorphism kit's
+   tokens (the instrument the page is fitted as, by day and at night), its controls are the
+   kit's latching keys, and it is parted from the article by the kit's grooves.
+
+   The idea: a session reads like a code block. A gutter of exchange numbers that are links,
+   as line numbers are. The person's words in the author's face; the agents' words in the
+   look's model face on the model-note surface; tool calls and subagents folded into one quiet
+   line each, there when you want them. Folded, the block is its own table of contents: every
+   prompt, and the first sentence of what came back. */
+
+ai-session {
+  display: block;
+}
+
+.ais {
+  --_bg: transparent;
+  --_panel: var(--vx-ground);
+  --_ink: var(--vx-ink);
+  --_muted: var(--vx-ink-quiet);
+  --_rule: var(--vx-slate);
+  --_accent: var(--vx-link);
+  --_hi: color-mix(in oklab, var(--lit-accent) 32%, transparent);
+  --_hi-ink: var(--vx-ink);
+  --_model-bg: color-mix(in oklab, var(--vx-floor) 55%, transparent);
+  --_model-ink: var(--vx-ink);
+  --_model-mark: var(--lit-go);
+  --_model-line: transparent;
+  --_person: var(--vx-serif);
+  --_model: var(--vx-font);
+  --_mono: var(--vx-mono);
+  --_title: var(--vx-font);
+  --_radius: 0;
+  --_inner: 0;
+  --_mark: 0;
+  --_gut: 3.25rem;
+  --_pad: 1.25rem;
+  --_ease: cubic-bezier(0.23, 1, 0.32, 1);
+
+  margin: 0;
+  padding: 0;
+  background: var(--_bg);
+  color: var(--_ink);
+  border-radius: var(--_radius);
+  font-size: 0.9375em;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+/* ---- head ---------------------------------------------------------------- */
+
+/* The head is a figcaption; looks style captions (italic, muted, a top margin), so reset. */
+.ais .ais-head {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0 0 calc(var(--vx) * 4);
+  color: var(--_ink);
+  font-style: normal;
+}
+.ais .ais-head p {
+  margin: 0;
+}
+.ais-title {
+  font-family: var(--_title);
+  font-size: 1.0625rem;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+}
+.ais-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  margin-right: 0.35em;
+  font-weight: 500;
+  color: var(--_accent);
+}
+.ais-kind::before {
+  content: "";
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: var(--_mark);
+  background: currentColor;
+}
+.ais-who,
+.ais-facts {
+  font-family: var(--_title);
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--_muted);
+  font-variant-numeric: tabular-nums;
+}
+.ais-who strong {
+  font-weight: 600;
+  color: var(--_ink);
+}
+.ais .ais-data {
+  color: var(--_muted);
+  text-decoration-color: var(--_rule);
+  text-underline-offset: 0.18em;
+}
+.ais-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--vx) * 3);
+  margin-top: calc(var(--vx) * 3);
+}
+.ais-controls[hidden] {
+  display: none;
+}
+/* ---- the log: a gutter of numbers, like a code block's line numbers ----- */
+
+.ais-log {
+  margin: 0;
+  padding: 0.35rem 0 0.6rem;
+  list-style: none;
+}
+.ais .ais-log > li {
+  margin: 0;
+  padding: 0;
+}
+.ais .ais-log > li::before {
+  content: none;
+}
+/* Same weight as the list reset above, so the right padding survives it. */
+.ais .ais-log > .ais-ex {
+  display: grid;
+  grid-template-columns: var(--_gut) minmax(0, 1fr);
+  padding-right: var(--_pad);
+  scroll-margin-top: 1.5rem;
+}
+.ais .ais-num {
+  position: relative;
+  align-self: start;
+  padding: 0.95rem 0.8rem 0 0;
+  font-family: var(--_mono);
+  font-size: 0.8125rem;
+  line-height: 1.5rem;
+  text-align: right;
+  color: var(--_muted);
+  text-decoration: none;
+  font-variant-numeric: tabular-nums;
+  transition: color 150ms ease;
+}
+.ais-num::before {
+  content: "";
+  position: absolute;
+  inset: 0.35rem 0 auto 0;
+  height: 44px;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ais .ais-num:hover {
+    color: var(--_accent);
+  }
+}
+.ais-ex-body {
+  min-width: 0;
+  padding: 0.85rem 0 0.35rem 1rem;
+  border-left: 1px solid var(--_rule);
+}
+.ais-ex + .ais-ex .ais-ex-body {
+  border-top: 1px solid var(--_rule);
+}
+.ais-ex + .ais-ex .ais-num {
+  border-top: 1px solid transparent;
+}
+
+/* the exchange someone linked to */
+.ais .ais-ex:target .ais-num,
+.ais .ais-ex.ais-here .ais-num {
+  color: var(--_hi-ink);
+  background: var(--_hi);
+}
+
+/* ---- the person's words -------------------------------------------------- */
+
+.ais-by {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.1rem 0.6rem;
+  margin: 0 0 0.25rem;
+  font-family: var(--_title);
+  font-size: 0.8125rem;
+  line-height: 1.5rem;
+  color: var(--_muted);
+  font-variant-numeric: tabular-nums;
+}
+.ais-by time {
+  font-family: var(--_mono);
+  font-size: 0.75rem;
+}
+.ais-name,
+.ais-model {
+  font-weight: 700;
+  color: var(--_ink);
+}
+.ais-text {
+  min-width: 0;
+}
+.ais .ais-text > * {
+  max-width: none;
+}
+.ais .ais-text p,
+.ais .ais-text ul,
+.ais .ais-text ol,
+.ais .ais-text blockquote {
+  margin: 0 0 0.65em;
+}
+.ais .ais-text > :last-child {
+  margin-bottom: 0;
+}
+.ais .ais-text li {
+  margin: 0.2em 0;
+}
+.ais .ais-text ul,
+.ais .ais-text ol {
+  padding-left: 1.3em;
+}
+.ais-person-text {
+  font-family: var(--_person);
+  font-size: 1.0625em;
+  line-height: 1.6;
+  text-wrap: pretty;
+}
+.ais-note {
+  font-size: 0.8125rem;
+  color: var(--_muted);
+}
+
+/* ---- what came back ------------------------------------------------------- */
+
+.ais-answer {
+  margin: 0.6rem 0 0.5rem;
+}
+.ais-answer > summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.1rem 0.75rem;
+  align-items: baseline;
+  padding: 0.55rem 0.75rem 0.6rem 0.7rem;
+  border-radius: var(--_inner);
+  background: var(--_model-bg);
+  box-shadow: inset 0 0 0 1px var(--_model-line);
+  color: var(--_model-ink);
+  cursor: pointer;
+  list-style: none;
+  transition: background-color 160ms ease;
+}
+.ais-answer > summary::-webkit-details-marker {
+  display: none;
+}
+.ais-sum-who {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-family: var(--_title);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+/* the fold mark: a small chevron that turns when the fold opens */
+.ais-sum-who::before {
+  content: "";
+  flex: none;
+  align-self: center;
+  width: 0.42rem;
+  height: 0.42rem;
+  margin-right: 0.15rem;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(-45deg);
+  transition: transform 180ms var(--_ease);
+}
+.ais-answer[open] > summary .ais-sum-who::before {
+  transform: rotate(45deg) translate(-0.1rem, -0.1rem);
+}
+.ais-sum-facts {
+  font-weight: 400;
+  color: color-mix(in oklab, var(--_model-ink) 78%, var(--_model-bg));
+}
+.ais-gist {
+  min-width: 0;
+  font-family: var(--_model);
+  font-size: 0.875rem;
+  line-height: 1.45;
+}
+.ais-answer[open] > summary .ais-gist {
+  display: none;
+}
+.ais-answer[open] > summary {
+  grid-template-columns: auto;
+  background: transparent;
+  box-shadow: none;
+  padding-inline: 0;
+  color: var(--_muted);
+}
+.ais-turns {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.15rem;
+}
+.ais-turn {
+  scroll-margin-top: 1.5rem;
+}
+
+/* a reply: the look's model face, on the model-note surface */
+.ais-reply {
+  padding: 0.75rem 1rem 0.85rem;
+  border-radius: var(--_inner);
+  background: var(--_model-bg);
+  box-shadow: inset 0 0 0 1px var(--_model-line);
+  color: var(--_model-ink);
+}
+.ais-model-text {
+  font-family: var(--_model);
+  font-size: 0.9375em;
+  line-height: 1.6;
+}
+.ais-by-model {
+  color: color-mix(in oklab, var(--_model-ink) 78%, var(--_model-bg));
+}
+.ais-by-model .ais-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45em;
+  color: var(--_model-ink);
+}
+.ais-by-model .ais-model::before {
+  content: "";
+  width: 0.55em;
+  height: 0.55em;
+  border-radius: var(--_mark);
+  background: var(--_model-mark);
+}
+.ais .ais-perma {
+  position: relative;
+  margin-left: auto;
+  padding: 0 0.2rem;
+  font-family: var(--_mono);
+  color: inherit;
+  text-decoration: none;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+.ais-perma::before {
+  content: "";
+  position: absolute;
+  inset: -0.6rem -0.6rem;
+}
+.ais-turn:hover .ais-perma,
+.ais-turn:focus-within .ais-perma,
+.ais .ais-perma:focus-visible {
+  opacity: 1;
+}
+@media (hover: none) {
+  .ais .ais-perma {
+    opacity: 0.6;
+  }
+}
+.ais .ais-turn:target,
+.ais .ais-turn.ais-here {
+  box-shadow:
+    inset 0 0 0 1px var(--_model-line),
+    -0.5rem 0 0 0 var(--_hi);
+}
+
+/* tool calls and subagents: one quiet line each */
+.ais-act > summary,
+.ais-sub > summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 0.6rem;
+  padding: 0.1rem 0;
+  font-family: var(--_mono);
+  font-size: 0.78125rem;
+  line-height: 1.6;
+  color: var(--_muted);
+  cursor: pointer;
+  list-style: none;
+}
+.ais-act > summary::-webkit-details-marker,
+.ais-sub > summary::-webkit-details-marker {
+  display: none;
+}
+.ais-act > summary::before,
+.ais-sub > summary::before {
+  content: "+";
+  display: inline-block;
+  width: 0.8em;
+  text-align: center;
+  font-weight: 700;
+}
+.ais-act[open] > summary::before,
+.ais-sub[open] > summary::before {
+  content: "\2212";
+}
+.ais-act-n,
+.ais-sub-kind {
+  font-weight: 700;
+}
+.ais-sub-task {
+  color: var(--_ink);
+  font-family: var(--_title);
+  font-size: 0.8125rem;
+}
+.ais-status {
+  padding: 0 0.35rem;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+}
+.ais-tools {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0.35rem 0 0.2rem;
+  padding: 0.55rem 0.75rem;
+  list-style: none;
+  background: var(--_panel);
+  border-radius: var(--_inner);
+  font-size: 0.8125rem;
+  line-height: 1.45;
+}
+.ais .ais-tools li {
+  display: grid;
+  grid-template-columns: 6.5rem minmax(0, 1fr);
+  gap: 0.6rem;
+  margin: 0;
+}
+.ais .ais-tools li::before {
+  content: none;
+}
+.ais-tool {
+  font-family: var(--_mono);
+  font-size: 0.75rem;
+  color: var(--_muted);
+}
+.ais-label {
+  color: var(--_ink);
+}
+.ais-sub-body {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.2rem;
+  padding: 0.75rem 1rem 0.85rem;
+  border-radius: var(--_inner);
+  background: var(--_model-bg);
+  box-shadow: inset 0 0 0 1px var(--_model-line);
+  color: var(--_model-ink);
+}
+.ais .ais-sub-body > p {
+  margin: 0;
+}
+.ais-sub-tools {
+  font-family: var(--_mono);
+  font-size: 0.75rem;
+  color: color-mix(in oklab, var(--_model-ink) 78%, var(--_model-bg));
+}
+.ais[data-tools="off"] .ais-act {
+  display: none;
+}
+
+/* a decision: the agent asked, the person chose */
+.ais-decision {
+  padding: 0.75rem 1rem 0.9rem;
+  border: 1px solid var(--_rule);
+  border-radius: var(--_inner);
+  background: var(--_panel);
+}
+.ais-q + .ais-q {
+  margin-top: 0.8rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--_rule);
+}
+.ais .ais-q p {
+  margin: 0;
+}
+.ais-q-head {
+  font-family: var(--_title);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--_accent);
+}
+.ais-q-text {
+  font-family: var(--_model);
+  font-weight: 600;
+}
+.ais .ais-opts {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0.45rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+.ais .ais-opts li {
+  position: relative;
+  display: grid;
+  gap: 0.05rem;
+  margin: 0;
+  padding: 0.4rem 0.6rem 0.4rem 1.8rem;
+  border-radius: calc(var(--_inner) - 2px);
+  font-family: var(--_model);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
+.ais .ais-opts li::before {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  top: 0.62rem;
+  width: 0.62rem;
+  height: 0.62rem;
+  border: 1.5px solid var(--_muted);
+  border-radius: 50%;
+  background: none;
+}
+.ais .ais-opts li.ais-picked {
+  background: var(--_model-bg);
+  color: var(--_model-ink);
+}
+.ais .ais-opts li.ais-picked::before {
+  border-color: var(--_model-mark);
+  background: var(--_model-mark);
+}
+.ais-opt {
+  font-weight: 600;
+}
+.ais-chosen {
+  font-weight: 400;
+  color: color-mix(in oklab, currentColor 75%, transparent);
+}
+.ais-opt-d {
+  color: var(--_muted);
+  font-size: 0.8125rem;
+}
+.ais-picked .ais-opt-d {
+  color: inherit;
+}
+.ais .ais-typed {
+  margin-top: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  border-left: 2px solid var(--_accent);
+  font-family: var(--_person);
+  font-size: 0.9375rem;
+}
+.ais-typed span {
+  margin-right: 0.35rem;
+  font-family: var(--_title);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  color: var(--_accent);
+}
+
+/* markers: a command, a compaction, an interruption */
+.ais .ais-event {
+  margin: 0;
+  font-family: var(--_title);
+  font-size: 0.8125rem;
+  color: var(--_muted);
+}
+.ais-event code {
+  font-size: 0.95em;
+}
+
+/* ---- text inside turns ---------------------------------------------------- */
+
+.ais .ais-h {
+  margin: 0.9em 0 0.35em;
+}
+.ais .ais-text pre {
+  max-width: 100%;
+  margin: 0.6em 0 0.75em;
+  padding: 0.7rem 0.85rem;
+  border-radius: calc(var(--_inner) - 2px);
+  background: var(--_panel) !important;
+  font-size: 0.8125rem;
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.ais .ais-text :not(pre) > code {
+  padding: 0.05em 0.28em;
+  border-radius: 3px;
+  background: color-mix(in oklab, currentColor 9%, transparent);
+  font-family: var(--_mono);
+  font-size: 0.86em;
+}
+.ais .ais-text blockquote {
+  padding-left: 0.8em;
+  border-left: 2px solid currentColor;
+  font-style: normal;
+}
+.ais .ais-text a {
+  color: inherit;
+  text-decoration-color: var(--_accent);
+  text-underline-offset: 0.18em;
+}
+.ais-table {
+  max-width: 100%;
+  margin: 0.6em 0 0.75em;
+  overflow-x: auto;
+  background: var(--_panel);
+  border-radius: calc(var(--_inner) - 2px);
+}
+.ais .ais-table table {
+  display: table;
+  width: max-content;
+  min-width: 100%;
+  max-width: none;
+  margin: 0;
+  border-collapse: collapse;
+  font-size: 0.78125rem;
+  line-height: 1.4;
+}
+.ais .ais-table th,
+.ais .ais-table td {
+  min-width: 0;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--_rule);
+  text-align: left;
+  vertical-align: top;
+}
+
+/* ---- focus and motion ----------------------------------------------------- */
+
+.ais a:focus-visible,
+.ais summary:focus-visible {
+  outline: 2px solid var(--vx-focus);
+  outline-offset: 2px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ais-sum-who::before {
+    transition: none;
+  }
+}
+
+/* ---- phones: the block runs to the screen edges, like code ---------------- */
+
+@media (max-width: 40rem) {
+  .ais {
+    --_gut: 2.35rem;
+    --_pad: 1rem;
+  }
+  .ais .ais-num {
+    padding-right: 0.55rem;
+  }
+  .ais-ex-body {
+    padding-left: 0.75rem;
+  }
+  .ais-reply,
+  .ais-sub-body,
+  .ais-decision {
+    padding-inline: 0.8rem;
+  }
+  .ais .ais-tools li {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .ais-answer > summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

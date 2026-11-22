@@ -1,0 +1,28 @@
+/* The Signal Desk's page: the desk (the kit's showcase hardware, vendor/.../showcase/desk.css)
+   beside its fittings, a panel of the kit's own parts. Layout only. */
+[data-page="voxelmorphism"] { --vx-page-width: calc(var(--vx) * 330); }
+[data-page="voxelmorphism"] .page-lead { max-inline-size: 44rem; }
+.signal-desk .workbench { grid-template-columns: minmax(0, 1fr) minmax(16rem, 22rem); }
+.signal-desk [hidden] { display: none; }
+.desk-note { margin: calc(var(--vx) * 3) 0 0; font: 400 0.8125rem/1.5 var(--vx-mono); color: var(--vx-ink-quiet); }
+
+/* the fittings: one panel, its choices parted by grooves */
+.fittings { display: grid; gap: calc(var(--vx) * 6); color: var(--vx-ink); font-family: var(--vx-font); }
+.fittings > * + * { margin: 0; }
+.fittings h2 { margin: 0; font: 600 1.5rem/1.2 var(--vx-serif); letter-spacing: -0.01em; }
+.fittings-note { margin: 0; font-size: 0.875rem; line-height: 1.5; color: var(--vx-ink-quiet); }
+.fitting { display: grid; gap: calc(var(--vx) * 3); justify-items: start; min-inline-size: 0; margin: 0; padding: 0; border: 0; }
+.fitting > legend, .fitting > label { display: flex; justify-content: space-between; inline-size: 100%; padding: 0; margin-block-end: calc(var(--vx) * 3); font-size: 0.875rem; font-weight: 600; }
+.fitting output { font-weight: 400; color: var(--vx-ink-quiet); }
+.fitting .vx-select { inline-size: 100%; }
+.fitting .samples { inline-size: 100%; }
+.fitting .samples label { min-block-size: calc(var(--vx) * 11); }
+.fitting .samples span { color: var(--vx-ink-quiet); }
+.fitting .samples label:has(:checked) i { outline-color: var(--vx-ink); }
+.fitting .samples label:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+.fitting-sound { font-size: 0.875rem; font-weight: 600; }
+.fitting-sound small { display: block; font-weight: 400; color: var(--vx-ink-quiet); }
+
+@media (max-width: 760px) {
+  .signal-desk .workbench { grid-template-columns: minmax(0, 1fr); }
+}

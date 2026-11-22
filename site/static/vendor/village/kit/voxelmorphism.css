@@ -1,0 +1,2501 @@
+/* Voxelmorphism, from Village 26e971357e0386a55ec4d49e2d6e094c525f4686. Made by scripts/refresh-voxelmorphism.mjs. */
+
+/* Voxelmorphism. Everything here works with no script: it is the plain version.
+   Where the script runs, each element gets data-vx-live and its painted faces step aside
+   for real voxels. Sizes are counted in voxels: 1 voxel is --vx. */
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  src: url("fonts/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2") format("woff2");
+  font-weight: 100 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("fonts/ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  src: url("fonts/ibm-plex-mono/ibm-plex-mono-latin-600-normal.woff2") format("woff2");
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+/* Ukrainian for the text face: fetched only by a page that has Cyrillic in it. */
+
+
+/* Script faces from IBM/plex at 2e90fe3, licensed in fonts/ibm-plex-sans. */
+
+
+
+
+/* Vox Text: the voxel glyphs laid flat, for what is written on a key. Two weights, 4 KB each. */
+@font-face {
+  font-family: "Vox Text";
+  src: url("fonts/vox-text/vox-text-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Vox Text";
+  src: url("fonts/vox-text/vox-text-700-normal.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+/* The voxel glyph sets as flat fonts, for the plain version of lettering. They are inlined
+   (about 2 KB each) because a heading must never be drawn in a fallback of another height: its
+   box is the box the voxels will take. Rebuild with tools/vox-text-build.py and
+   tools/type-inline.py after changing a glyph. */
+@font-face { font-family: "Vox Block"; src: url("data:font/woff2;base64,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") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "Vox Sign"; src: url("data:font/woff2;base64,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") format("woff2"); font-weight: 400; font-display: block; }
+
+:root {
+  --vx: 4px;
+  --vx-theme: day;
+  --vx-font: "IBM Plex Sans", "IBM Plex Sans Arabic", "IBM Plex Sans Hebrew", "Avenir Next", "Segoe UI", sans-serif;
+  --vx-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* the reading face for display words in an article: headings and quotes in an instrument's prose */
+  --vx-serif: Georgia, "Times New Roman", serif;
+  /* What is written on a key (buttons, tabs, menu items) is cut from the same cells as the key.
+     Five voxels to the em, so a cell is half a voxel and every edge lands on a pixel. */
+  --vx-key-font: "Vox Text", var(--vx-font);
+  --vx-key-size: calc(var(--vx) * 5);
+  --vx-link: #0e22ff;
+
+  --vx-ground: #e4e8f4;
+  --vx-ink: #0a0f3d;
+  --vx-ink-quiet: #474d7a;
+  --vx-enamel: #0e22ff;
+  --vx-enamel-top: #4a59ff;
+  --vx-enamel-side: #0b1bc9;
+  --vx-on-enamel: #ffffff;
+  --vx-signal: #fff600;
+  --vx-signal-top: #fffa73;
+  --vx-signal-side: #cfc800;
+  --vx-on-signal: #0a0f3d;
+  --vx-chalk: #fbfcff;
+  --vx-chalk-top: #ffffff;
+  --vx-chalk-side: #d0d4e6;
+  --vx-slate: #c3c9de;
+  --vx-slate-side: #a2a8c0;
+  --vx-steel: #aab1c9;
+  --vx-walnut: #7c4a29;
+  --vx-walnut-top: #9a6238;
+  --vx-walnut-side: #5f3920;
+  --vx-leaf: #23a84b;
+  --vx-brick: #d42c18;
+  --vx-on-brick: #ffffff;
+  --vx-knob: #fbfcff;
+  --vx-danger-text: #d42c18;
+  --vx-shadow: rgb(10 18 97 / 0.3);
+  --vx-focus: #0e22ff;
+
+  --vx-ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --vx-ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --vx-theme: night;
+    --vx-ground: #080b28;
+    --vx-ink: #eceefb;
+    --vx-ink-quiet: #c2c7ec;
+    --vx-enamel: #2b3dff;
+    --vx-enamel-top: #5f6dff;
+    --vx-enamel-side: #1c2ac4;
+    --vx-chalk: #3a4692;
+    --vx-chalk-top: #4854a6;
+    --vx-chalk-side: #262f69;
+    --vx-slate: #222963;
+    --vx-slate-side: #141940;
+    --vx-steel: #33375a;
+    --vx-walnut: #5a3520;
+    --vx-walnut-top: #71452b;
+    --vx-walnut-side: #402515;
+    --vx-leaf: #2ec25c;
+    --vx-brick: #ff5340;
+    --vx-on-brick: #0a0f3d;
+    --vx-knob: #ccd1f2;
+    --vx-danger-text: #ffb3a8;
+    --vx-shadow: rgb(0 0 12 / 0.55);
+    --vx-focus: #fff600;
+    --vx-link: #9aa5ff;
+  }
+}
+:root[data-theme="dark"] {
+  --vx-theme: night;
+  --vx-ground: #080b28;
+  --vx-ink: #eceefb;
+  --vx-ink-quiet: #c2c7ec;
+  --vx-enamel: #2b3dff;
+  --vx-enamel-top: #5f6dff;
+  --vx-enamel-side: #1c2ac4;
+  --vx-chalk: #3a4692;
+  --vx-chalk-top: #4854a6;
+  --vx-chalk-side: #262f69;
+  --vx-slate: #222963;
+  --vx-slate-side: #141940;
+  --vx-steel: #33375a;
+  --vx-walnut: #5a3520;
+  --vx-walnut-top: #71452b;
+  --vx-walnut-side: #402515;
+  --vx-leaf: #2ec25c;
+  --vx-brick: #ff5340;
+  --vx-on-brick: #0a0f3d;
+  --vx-knob: #ccd1f2;
+  --vx-danger-text: #ffb3a8;
+  --vx-shadow: rgb(0 0 12 / 0.55);
+  --vx-focus: #fff600;
+  --vx-link: #9aa5ff;
+}
+
+.vx-canvas {
+  position: absolute;
+  z-index: -1;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* What every part obeys. A part that sets its own display would otherwise undo the hidden attribute. */
+[class^="vx-"][hidden], [class*=" vx-"][hidden] { display: none !important; }
+/* Words for a screen reader only. */
+.vx-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* ---------- Button ---------- */
+
+.vx-button {
+  --_face: var(--vx-enamel);
+  --_top: var(--vx-enamel-top);
+  --_side: var(--vx-enamel-side);
+  --_on: var(--vx-on-enamel);
+  --_lift: calc(var(--vx) * 1.5);
+
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11);
+  min-inline-size: calc(var(--vx) * 11);
+  padding: 0 calc(var(--vx) * 5);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--_on);
+  font: 700 1rem/1 var(--vx-font);
+  letter-spacing: 0.01em;
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-button[data-vx-material="signal"] { --_face: var(--vx-signal); --_top: var(--vx-signal-top); --_side: var(--vx-signal-side); --_on: var(--vx-on-signal); }
+.vx-button[data-vx-material="chalk"] { --_face: var(--vx-chalk); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--vx-ink); }
+.vx-button[data-vx-material="walnut"] { --_face: var(--vx-walnut); --_top: var(--vx-walnut-top); --_side: var(--vx-walnut-side); --_on: #fff; }
+.vx-button[data-vx-material="brick"] { --_face: var(--vx-brick); --_top: color-mix(in oklab, var(--vx-brick), #fff 25%); --_side: color-mix(in oklab, var(--vx-brick), #000 22%); --_on: var(--vx-on-brick); }
+.vx-button[data-vx-material="leaf"] { --_face: var(--vx-leaf); --_top: color-mix(in oklab, var(--vx-leaf), #fff 25%); --_side: color-mix(in oklab, var(--vx-leaf), #000 22%); --_on: #06260f; }
+.vx-button:disabled, .vx-button[aria-disabled="true"] { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink); --_lift: 0px; cursor: default; }
+.vx-button:disabled .vx-label, .vx-button[aria-disabled="true"] .vx-label { opacity: 0.6; }
+
+.vx-button[data-vx-icon] { padding-inline-end: calc(var(--vx) * 15); }
+.vx-button .vx-label { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); position: relative; }
+
+.vx-button:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
+
+/* plain: the face is a painted box; two borders stand in for the top and the side */
+.vx-button:not([data-vx-live]) { background: var(--_face); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow); }
+.vx-button:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
+  border-top: var(--_lift) solid var(--_top);
+  border-left: var(--_lift) solid var(--_side);
+  border-right: var(--_lift) solid transparent;
+  border-bottom: var(--_lift) solid transparent;
+  box-sizing: border-box;
+  z-index: -1;
+  pointer-events: none;
+}
+.vx-button:not([data-vx-live]):is(:active, [aria-expanded="true"], [aria-pressed="true"]):not(:disabled) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
+
+/* ---------- Shared ---------- */
+
+:where(.vx-toggle, .vx-field, .vx-card, .vx-list, .vx-tabs, .vx-menu, .vx-dialog, .vx-toast) {
+  font-family: var(--vx-font);
+  color: var(--vx-ink);
+}
+:where(.vx-switch, .vx-slider, .vx-well, .vx-card, .vx-list, .vx-tabs, .vx-meter, .vx-toast, .vx-sign, .vx-lettering, .vx-block) {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Physical transforms and inset shadows follow the inline direction. */
+:where(.vx-switch, .vx-list > li) { --_inline-sign: 1; }
+:where(.vx-switch, .vx-list > li):dir(rtl) { --_inline-sign: -1; }
+
+/* ---------- Toggle ---------- */
+
+.vx-toggle {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  min-block-size: calc(var(--vx) * 11);
+  font-weight: 500;
+  font-size: 1rem;
+  line-height: 1.3;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-toggle input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.vx-toggle input:disabled { cursor: default; }
+.vx-toggle:has(input:disabled) { color: var(--vx-ink-quiet); cursor: default; }
+.vx-switch { flex: none; inline-size: calc(var(--vx) * 16); block-size: calc(var(--vx) * 8); }
+.vx-toggle input:focus-visible + .vx-switch { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
+.vx-switch:not([data-vx-live]) { background: var(--vx-slate); box-shadow: inset 0 0 0 var(--vx) var(--vx-steel); }
+.vx-switch:not([data-vx-live])::after {
+  content: ""; position: absolute; inset-block: var(--vx); inset-inline-start: var(--vx);
+  inline-size: calc(var(--vx) * 6); background: var(--vx-knob);
+  box-shadow: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5) 0 var(--vx-shadow);
+  transition: transform 160ms var(--vx-ease-out);
+}
+.vx-toggle input:checked + .vx-switch:not([data-vx-live]) { background: var(--vx-signal); }
+.vx-toggle input:checked + .vx-switch:not([data-vx-live])::after { transform: translateX(calc(var(--vx) * 8 * var(--_inline-sign))); }
+
+/* ---------- Slider ---------- */
+
+.vx-slider { display: block; block-size: calc(var(--vx) * 11); min-inline-size: calc(var(--vx) * 30); }
+.vx-slider input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; accent-color: var(--vx-enamel); cursor: grab; touch-action: pan-y; }
+.vx-slider input:active { cursor: grabbing; }
+.vx-slider[data-vx-live] input { opacity: 0; appearance: none; -webkit-appearance: none; }
+.vx-slider[data-vx-live] input::-webkit-slider-thumb { -webkit-appearance: none; inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 11); }
+.vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 5); block-size: calc(var(--vx) * 11); border: 0; }
+.vx-slider:has(input:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }
+
+/* ---------- Text field ---------- */
+
+.vx-field { display: grid; gap: calc(var(--vx) * 2); }
+.vx-field-label { font-weight: 600; font-size: 0.9375rem; line-height: 1.3; }
+.vx-field-hint { font-size: 0.875rem; line-height: 1.4; color: var(--vx-ink-quiet); margin-block-start: calc(var(--vx) * 1); }
+.vx-well { display: block; }
+.vx-well :is(input, textarea) {
+  display: block; box-sizing: border-box; inline-size: 100%;
+  min-block-size: calc(var(--vx) * 11);
+  padding: 0 calc(var(--vx) * 4);
+  margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
+  color: var(--vx-ink); caret-color: var(--vx-enamel);
+  font: 500 1rem/1.5 var(--vx-font);
+}
+.vx-well textarea { padding-block: calc(var(--vx) * 3); min-block-size: calc(var(--vx) * 24); resize: none; }
+.vx-well ::placeholder { color: var(--vx-ink-quiet); opacity: 1; }
+.vx-well:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+.vx-well:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+/* invalid: a red line inside the far lower edge, not a ring */
+.vx-well:not([data-vx-live]):has([aria-invalid="true"]) { box-shadow: inset 0 calc(var(--vx) * -1) 0 var(--lit-stop, var(--vx-brick)); }
+
+/* ---------- Note card ---------- */
+
+.vx-card { display: block; box-sizing: border-box; padding: calc(var(--vx) * 5) calc(var(--vx) * 6); line-height: 1.5; }
+.vx-card[data-vx-edge] { padding-inline-start: calc(var(--vx) * 8); }
+.vx-card > :first-child:not(canvas), .vx-card > .vx-canvas + * { margin-block-start: 0; }
+.vx-card > :last-child { margin-block-end: 0; }
+.vx-card > * + * { margin-block-start: 0.5em; }
+.vx-card > :is(p, h3, h4) { margin-block: 0; } /* the card's own words only: a part set on a card keeps its own spacing */
+.vx-card:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+.vx-card:not([data-vx-live])[data-vx-edge] { border-inline-start: calc(var(--vx) * 2) solid var(--vx-steel); padding-inline-start: calc(var(--vx) * 6); }
+.vx-card:not([data-vx-live])[data-vx-edge="leaf"] { border-color: var(--vx-leaf); }
+.vx-card:not([data-vx-live])[data-vx-edge="brick"] { border-color: var(--vx-brick); }
+.vx-card:not([data-vx-live])[data-vx-edge="signal"] { border-color: var(--vx-signal); }
+.vx-card:not([data-vx-live])[data-vx-edge="enamel"] { border-color: var(--vx-enamel); }
+.vx-card:not([data-vx-live])[data-vx-edge="walnut"] { border-color: var(--vx-walnut); }
+
+/* ---------- List ---------- */
+
+.vx-list { list-style: none; margin: 0; padding: var(--vx); display: grid; gap: var(--vx); }
+.vx-list > li { display: flex; min-block-size: calc(var(--vx) * 11); }
+.vx-row { position: relative; display: flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; inline-size: 100%; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
+/* With voxels the part wraps each row's content in a .vx-row. A row written without one takes
+   the same box, so a list is the same height plain and live. */
+.vx-list > li:not(:has(> .vx-row)) { position: relative; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box; padding-block: calc(var(--vx) * 2); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 4); line-height: 1.35; }
+/* Its link takes the row's line height too, as it does in a .vx-row. A page that sets a line
+   height on every element would otherwise make a wrapped row taller plain than live. */
+.vx-list > li:not(:has(> .vx-row)) > :is(a, button) { font: inherit; }
+.vx-list > li:is([aria-current="true"], [aria-selected="true"]) { font-weight: 700; }
+.vx-row :is(a, button) { color: inherit; font: inherit; text-decoration: none; background: none; border: 0; padding: 0; text-align: start; cursor: pointer; }
+.vx-row :is(a, button)::after { content: ""; position: absolute; inset: 0; }
+.vx-row :is(a, button):focus-visible { outline: 0; }
+.vx-row:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
+.vx-row-meta { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+.vx-list:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-list:not([data-vx-live]) > li { background: var(--vx-chalk); }
+.vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset calc(var(--vx) * 2 * var(--_inline-sign)) 0 0 var(--vx-signal); }
+
+/* ---------- Tabs ---------- */
+
+.vx-tabs { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.vx-tabs > [role="tab"] {
+  appearance: none; margin: 0; border: 0; border-radius: 0; background: none;
+  min-block-size: calc(var(--vx) * 11); padding: 0 calc(var(--vx) * 5);
+  font: 600 1rem/1 var(--vx-font); color: var(--vx-ink); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-tabs > [role="tab"] .vx-label { display: inline-block; }
+/* For a narrow column (four words in a phone-wide dialog): tighter seats, smaller labels, the same height to hit. */
+.vx-tabs[data-vx-size="small"] > [role="tab"] { padding-inline: calc(var(--vx) * 2); font-size: 0.875rem; }
+.vx-tabs > [role="tab"][aria-selected="true"] { color: var(--vx-ink); }
+.vx-tabs > [role="tab"] .vx-label { padding-block-start: 0.3em; }
+.vx-tabs > [role="tab"]:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+.vx-tabs:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-signal); color: var(--vx-on-signal); }
+
+/* ---------- Meter ---------- */
+
+.vx-meter { display: block; block-size: calc(var(--vx) * 7); min-inline-size: calc(var(--vx) * 30); }
+.vx-meter[data-vx-kind="growth"] { inline-size: calc(var(--vx) * 26); min-inline-size: 0; block-size: calc(var(--vx) * 36); }
+.vx-meter :is(progress, meter) { inline-size: 100%; accent-color: var(--vx-leaf); }
+.vx-meter[data-vx-live] :is(progress, meter) { position: absolute; inline-size: 1px; block-size: 1px; opacity: 0; pointer-events: none; }
+
+/* ---------- Menu ---------- */
+
+.vx-menu {
+  position: fixed; inset: auto; margin: 0; border: 0; overflow: visible; isolation: isolate;
+  padding: calc(var(--vx) * 2) 0; background: none;
+  min-inline-size: calc(var(--vx) * 44);
+}
+.vx-menu-rows {
+  max-block-size: calc(100dvh - 24px - var(--vx) * 4);
+  overflow: hidden auto;
+  overscroll-behavior: contain;
+}
+.vx-menu [role^="menuitem"] {
+  display: flex; align-items: center; box-sizing: border-box; inline-size: 100%;
+  min-block-size: calc(var(--vx) * 10); padding: 0 calc(var(--vx) * 5);
+  margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
+  font: 500 1rem/1.2 var(--vx-font); color: inherit; text-align: start; cursor: pointer;
+}
+.vx-menu [role^="menuitem"][data-vx-kind="danger"] { color: var(--vx-danger-text); }
+.vx-menu [role^="menuitem"][data-vx-active] { color: var(--vx-on-enamel); }
+.vx-menu:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow); }
+.vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible) { background: var(--vx-enamel); color: var(--vx-on-enamel); }
+
+/* ---------- Dialog ---------- */
+
+dialog.vx-dialog {
+  border: 0; padding: 0; background: none; overflow: visible; isolation: isolate;
+  inline-size: min(calc(var(--vx) * 112), calc(100vw - 32px));
+  max-block-size: calc(100dvh - 64px);
+}
+/* A page's own rules for header, footer or :focus-visible must not reach in. The dialog itself
+   takes focus when it opens with nothing to focus; it shows no ring, its controls show theirs. */
+.vx-dialog > :is(header, footer) { margin: 0; border: 0; background: none; }
+dialog.vx-dialog:focus-visible { outline: none; }
+.vx-dialog::backdrop { background: rgb(10 15 61 / 0.5); transition: opacity 200ms ease-out; }
+.vx-dialog[data-vx-native-exit]::backdrop { opacity: 0; }
+.vx-dialog > header { padding: calc(var(--vx) * 4) calc(var(--vx) * 6) calc(var(--vx) * 3.5); font-weight: 700; font-size: 1.125rem; line-height: 1.25; color: var(--vx-on-enamel); }
+.vx-dialog-body { padding: calc(var(--vx) * 5) calc(var(--vx) * 6); line-height: 1.55; overflow: auto; }
+.vx-dialog-body > :first-child { margin-block-start: 0; }
+.vx-dialog-body > :last-child { margin-block-end: 0; }
+.vx-dialog > footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: calc(var(--vx) * 4); padding: calc(var(--vx) * 1) calc(var(--vx) * 6) calc(var(--vx) * 6); }
+[data-vx-surface="courses"] > :not(.vx-canvas) { opacity: var(--vx-surface-ink); transition: none; }
+[data-vx-surface="rim"], [popover][data-vx-surface="still"] { opacity: var(--vx-surface-alpha); }
+[data-vx-surface="still"]:not([popover]) > * { opacity: var(--vx-surface-alpha); transition: none; }
+[popover][data-vx-native-exit], dialog.vx-dialog[data-vx-native-exit] {
+  display: var(--vx-exit-display);
+  transition: overlay 150ms allow-discrete;
+}
+dialog.vx-dialog[data-vx-native-exit]:not([open]) {
+  position: fixed;
+  inset: var(--vx-exit-y) auto auto var(--vx-exit-x);
+  margin: 0;
+  box-sizing: border-box;
+  width: var(--vx-exit-w);
+  height: var(--vx-exit-h);
+  transition-duration: 240ms;
+}
+[data-vx-native-exit]::backdrop { pointer-events: none; }
+[data-vx-native-exit]:not([open], :popover-open) { pointer-events: none; interactivity: inert; }
+.vx-dialog:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow); }
+.vx-dialog:not([data-vx-live]) > header { background: var(--vx-enamel); }
+
+/* ---------- Toast ---------- */
+
+.vx-toasts { position: fixed; inset-inline: 0; inset-block-end: calc(var(--vx) * 8); z-index: 1000; display: grid; justify-items: center; gap: calc(var(--vx) * 4); pointer-events: none; }
+.vx-toast { pointer-events: auto; box-sizing: border-box; max-inline-size: min(calc(100vw - 32px), 30rem); padding-block: calc(var(--vx) * 3.5); padding-inline: calc(var(--vx) * 8) calc(var(--vx) * 6); font-weight: 600; line-height: 1.35; }
+.vx-menu[data-vx-cover-legends] [role^="menuitem"] { opacity: 0; }
+.vx-toast-text { transition: opacity 120ms ease; }
+.vx-toast[data-vx-leaving] .vx-toast-text { opacity: 0; }
+.vx-toast[data-vx-surface] > .vx-toast-text { opacity: var(--vx-surface-ink); transition: none; }
+.vx-toast:not([data-vx-live]) { background: var(--vx-chalk); border-inline-start: calc(var(--vx) * 2) solid var(--vx-signal); padding-inline-start: calc(var(--vx) * 6); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+.vx-toast:not([data-vx-live])[data-vx-kind="done"] { border-color: var(--vx-leaf); }
+.vx-toast:not([data-vx-live])[data-vx-kind="failed"] { border-color: var(--vx-brick); }
+
+/* ---------- Block ---------- */
+
+.vx-block { display: inline-block; inline-size: calc(var(--vx) * 12); block-size: calc(var(--vx) * 12); }
+.vx-block:not([data-vx-live]) { background: var(--vx-chalk); box-shadow: calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+.vx-block:not([data-vx-live])[data-vx-material="enamel"] { background: var(--vx-enamel); }
+.vx-block:not([data-vx-live])[data-vx-material="signal"] { background: var(--vx-signal); }
+.vx-block:not([data-vx-live])[data-vx-material="slate"] { background: var(--vx-slate); }
+.vx-block:not([data-vx-live])[data-vx-material="steel"] { background: var(--vx-steel); }
+.vx-block:not([data-vx-live])[data-vx-material="walnut"] { background: var(--vx-walnut); }
+.vx-block:not([data-vx-live])[data-vx-material="leaf"] { background: var(--vx-leaf); }
+.vx-block:not([data-vx-live])[data-vx-material="brick"] { background: var(--vx-brick); }
+
+/* ---------- Legends: the words on keys ---------- */
+
+:is(.vx-button, .vx-tabs > [role="tab"], .vx-menu [role^="menuitem"]) {
+  font-family: var(--vx-key-font); font-size: var(--vx-key-size); letter-spacing: 0;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+:is(.vx-button, .vx-tabs > [role="tab"]) { line-height: 1; white-space: nowrap; } /* a key carries one line */
+.vx-tabs[data-vx-size="small"] > [role="tab"] { font-size: var(--vx-key-size); }
+
+/* ---------- Lettering: a sign, or a heading ---------- */
+
+:is(.vx-sign, .vx-lettering) { display: block; margin: 0; max-inline-size: 100%; -webkit-tap-highlight-color: transparent; }
+/* With voxels: a thumb moving up or down still scrolls the page; sideways is left to the part. */
+:is(.vx-sign, .vx-lettering)[data-vx-live] { font-size: 0; line-height: 0; color: transparent; cursor: pointer; touch-action: pan-y pinch-zoom; }
+/* The words are still text. They sit in a transparent box of the same glyphs, laid over the
+   voxel letters, so they can be selected, copied and found. The part sets what it chose: the
+   glyph set, the voxels per cell (--_s), the cells between glyphs (--_gap, which a flat line
+   carries at its end and the voxels do not), the line height and the board's margin. */
+.vx-lettering-text {
+  position: absolute; inset-block-start: 0; inset-inline-start: 0; box-sizing: border-box;
+  inline-size: calc(100% + var(--vx) * var(--_gap, 0) * var(--_s, 1));
+  padding: calc(var(--vx) * var(--_pt, 0)) calc(var(--vx) * var(--_pi, 0)) 0;
+  font: 400 calc(var(--vx) * 10 * var(--_s, 1))/var(--_lh, 1.5) "Vox Block", var(--vx-font); font-synthesis: none; letter-spacing: 0;
+  text-box: trim-both cap alphabetic; white-space: normal; text-wrap: wrap; color: transparent;
+  user-select: text; -webkit-user-select: text;
+}
+/* While lettering is being brushed nothing on the page can be selected: the same drag would
+   otherwise go on selecting, in the lettering's own text too. */
+:root[data-vx-brushing], :root[data-vx-brushing] * { user-select: none !important; -webkit-user-select: none !important; }
+.vx-lettering-text[data-vx-caps] { text-transform: uppercase; }
+.vx-lettering-text[data-vx-set="sign"] { font-family: "Vox Sign", var(--vx-font); }
+:is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text { text-align: center; }
+.vx-lettering-text::selection, .vx-lettering-text ::selection { color: transparent; background: color-mix(in oklab, var(--vx-link) 38%, transparent); }
+:is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text::selection, :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text ::selection { background: color-mix(in oklab, white 40%, transparent); }
+/* The plain version is the same glyphs as a flat font, one voxel per cell: ten cells to the em,
+   so the size is ten voxels times the scale, and the box is trimmed to the cap line and the
+   baseline, which is exactly the box the voxels are given. Nothing moves when they arrive. */
+:is(.vx-sign, .vx-lettering):not([data-vx-live]) {
+  --_s: 1; cursor: default; color: var(--vx-ink);
+  font: 400 calc(var(--vx) * 10 * var(--_s))/1.5 "Vox Block", var(--vx-font); font-synthesis: none; letter-spacing: 0; text-transform: uppercase; text-wrap: balance;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; text-box: trim-both cap alphabetic;
+}
+/* A flat glyph carries the gap that follows it, so a line is one gap wider than its voxels and
+   would wrap a word early. The box gives that gap back (two cells in Vox Block, one in Vox Sign). */
+:is(.vx-sign, .vx-lettering)[data-vx-board="none"]:not([data-vx-live]) { --_gap: 2; margin-inline-end: calc(var(--vx) * -1 * var(--_gap) * var(--_s)); max-inline-size: none; }
+:is(.vx-sign, .vx-lettering)[data-vx-board="none"][data-vx-font^="sign"]:not([data-vx-live]) { --_gap: 1; }
+:is(.vx-sign, .vx-lettering)[data-vx-scale="2"]:not([data-vx-live]) { --_s: 2; }
+:is(.vx-sign, .vx-lettering)[data-vx-scale="3"]:not([data-vx-live]) { --_s: 3; }
+:is(.vx-sign, .vx-lettering)[data-vx-font^="sign"]:not([data-vx-live]) { font-family: "Vox Sign", var(--vx-font); line-height: 1; }
+/* A board: the lettering, a margin and a frame one voxel in. Plain, it cannot ask the script which
+   glyph set fits its column, so it starts in Vox Sign, which fits a phone. A page that knows its
+   own word sets the wider steps itself with a container query (the showcase does). */
+:is(.vx-sign, .vx-lettering):not([data-vx-board="none"]):not([data-vx-live]) {
+  display: inline-block; inline-size: fit-content; white-space: nowrap; padding: calc(var(--vx) * 4); padding-inline-end: calc(var(--vx) * 3);
+  font-family: "Vox Sign", var(--vx-font); line-height: 1;
+  background: var(--vx-enamel); color: var(--vx-signal);
+  box-shadow: inset 0 0 0 var(--vx) var(--vx-enamel), inset 0 0 0 calc(var(--vx) * 2) var(--vx-signal), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-switch:not([data-vx-live])::after { transition: none; }
+}
+
+/* ============================================================================================
+   The lit look: one system of depth and light. Put data-vx-look="lit" on <html> (or on any
+   element, for what is inside it). Its parts are drawn in src/looks/lit.js with the tools in
+   src/core/light.js. A theme (theme('rose') from the script) sets the --lit-*-day and
+   --lit-*-night tokens read here; without one the theme is Bay.
+   ============================================================================================ */
+
+[data-vx-look="lit"] {
+  --vx-look: lit;
+  --vx-bubble-deep: 4;
+  --vx-ground: #e9e7e0;
+  --vx-ink: #1b1d2a;
+  --vx-ink-quiet: #5a5d6e;
+  --vx-enamel: var(--lit-cap-day, #174ec6);
+  --vx-enamel-top: color-mix(in oklab, var(--vx-enamel), #fff 22%);
+  --vx-enamel-side: color-mix(in oklab, var(--vx-enamel), #000 20%);
+  --vx-on-enamel: #ffffff;
+  --vx-signal: var(--lit-accent-day, #388de6);
+  --vx-signal-top: color-mix(in oklab, var(--vx-signal), #fff 22%);
+  --vx-signal-side: color-mix(in oklab, var(--vx-signal), #000 20%);
+  --vx-on-signal: #101421;
+  --vx-chalk: #e9dcc5;
+  --vx-chalk-top: #fffdf6;
+  --vx-chalk-side: #d5d1c2;
+  --vx-slate: #9f998a;
+  --vx-slate-side: #bdb9ab;
+  --vx-steel: #cfcbbd;
+  --vx-key: #f2ebda;
+  --vx-floor: #c8bda7;
+  --vx-knob: #fffefa;
+  --vx-shadow: rgb(41 33 26 / 0.24);
+  --vx-focus: var(--lit-cap-day, #174ec6);
+  --vx-link: var(--lit-link-day, #1f40c4);
+  --vx-danger-text: #9c1f14;
+  --lit-accent: var(--lit-accent-day, #388de6);
+  --lit-legend: var(--vx-ink);
+  --lit-warm: #b97a00;
+  --lit-go: #0d7a3a;
+  --lit-stop: #c5301c;
+  --lit-night: 0; /* 1 at night: what shines only then is multiplied by it */
+}
+:root[data-theme="dark"]:not([data-shell])[data-vx-look="lit"], :root[data-theme="dark"]:not([data-shell]) [data-vx-look="lit"] {
+  --vx-ground: #08090f;
+  --vx-ink: #e8eaf4;
+  --vx-ink-quiet: #d1d5e3;
+  --vx-enamel: var(--lit-cap-night, #315aca);
+  --vx-signal: var(--lit-accent-night, #458fe3);
+  --vx-chalk: #23313b;
+  --vx-chalk-top: #252938;
+  --vx-chalk-side: #10121c;
+  --vx-slate: #283038;
+  --vx-slate-side: #090a12;
+  --vx-steel: #262938;
+  --vx-key: #505966;
+  --vx-floor: #141a1f;
+  --vx-knob: #d7dbf0;
+  --vx-shadow: rgb(0 0 5 / 0.6);
+  --vx-focus: var(--lit-link-night, #9db8ff);
+  --vx-link: var(--lit-link-night, #9db8ff);
+  --vx-danger-text: #ffb3a8;
+  --lit-accent: var(--lit-accent-night, #458fe3);
+  --lit-legend: var(--lit-legend-night, #dfe8ff);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+/* an instrument (data-shell) has its own night: its night enclosure, in css/fittings.css */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"], [data-shell])[data-vx-look="lit"], :root:not([data-theme="light"], [data-shell]) [data-vx-look="lit"] {
+    --vx-ground: #08090f;
+    --vx-ink: #e8eaf4;
+    --vx-ink-quiet: #d1d5e3;
+    --vx-enamel: var(--lit-cap-night, #315aca);
+    --vx-signal: var(--lit-accent-night, #458fe3);
+    --vx-chalk: #23313b;
+    --vx-chalk-top: #252938;
+    --vx-chalk-side: #10121c;
+    --vx-slate: #283038;
+    --vx-slate-side: #090a12;
+    --vx-steel: #262938;
+    --vx-key: #505966;
+    --vx-floor: #141a1f;
+    --vx-knob: #d7dbf0;
+    --vx-shadow: rgb(0 0 5 / 0.6);
+    --vx-focus: var(--lit-link-night, #9db8ff);
+    --vx-link: var(--lit-link-night, #9db8ff);
+    --vx-danger-text: #ffb3a8;
+    --lit-accent: var(--lit-accent-night, #458fe3);
+    --lit-legend: var(--lit-legend-night, #dfe8ff);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+/* The case shoulder occupies its own box above the cover in both rendering modes.
+   The canvas is positioned from the inside edge of this border. */
+[data-vx-look="lit"] .vx-card { border-top: calc(var(--vx) * 7) solid transparent; }
+@media (max-width: 600px) {
+  [data-vx-look="lit"] .vx-card { border-top-width: calc(var(--vx) * 4); }
+}
+
+/* ---------- lit: keys ---------- */
+
+/* An ordinary key is the colour of the surface's own material; data-vx-kind="main" is the one
+   main action of a group (the accent cap); data-vx-kind="danger" destroys something (a red light). */
+[data-vx-look="lit"] .vx-button { --_face: var(--vx-key); --_top: var(--vx-chalk-top); --_side: var(--vx-chalk-side); --_on: var(--lit-legend); font-weight: 400; }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="main"], [data-vx-material="enamel"]) { --_face: var(--vx-enamel); --_top: var(--vx-enamel-top); --_side: var(--vx-enamel-side); --_on: var(--vx-on-enamel); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
+[data-vx-look="lit"] .vx-button:is([data-vx-kind="danger"], [data-vx-material="brick"]):not([data-vx-live]) { --_on: var(--vx-danger-legend, var(--vx-danger-text)); }
+[data-vx-look="lit"] .vx-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); }
+[data-vx-look="lit"] .vx-button:focus-visible { outline-offset: calc(var(--vx) * 2); }
+/* at night the legend shines through, and flares with the light as the key goes down (--lit is
+   set by the part, 0 to 1) */
+[data-vx-look="lit"] .vx-button[data-vx-live]:not(:disabled) .vx-label {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+[data-vx-look="lit"] .vx-button[data-vx-live]:is([data-vx-kind="main"], [data-vx-material="enamel"]):not(:disabled) .vx-label {
+  text-shadow: 0 0 calc((4px + var(--lit, 0) * 10px) * var(--lit-night)) rgb(255 255 255 / calc(var(--lit-night) * (0.35 + var(--lit, 0) * 0.5)));
+}
+[data-vx-look="lit"] .vx-tabs > [role="tab"] { color: var(--vx-ink); font-weight: 400; }
+/* The short reading face leaves a fixed row for the latch mechanism. */
+[data-vx-look="lit"] :is(.vx-tabs[data-vx-live] [role="tab"], .vx-toggle-button[data-vx-live], .vx-toggle-group[data-vx-live] > label, .vx-pagination-pages[data-vx-live] a) > .vx-label { position: relative; top: calc(-1 * var(--vx)); }
+[data-vx-look="lit"] .vx-tabs > [role="tab"] .vx-label { padding-block-start: 0; }
+[data-vx-look="lit"] .vx-tabs > [role="tab"][aria-selected="true"] { color: var(--lit-legend); }
+[data-vx-look="lit"] .vx-tabs:not([data-vx-live]) > [role="tab"][aria-selected="true"] { background: var(--vx-key); color: var(--vx-ink); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent); }
+
+/* ---------- lit: groove, lamp, recess, pointer ---------- */
+
+/* Groove: a thin lit channel that parts what is on one surface. data-vx-way="down" stands it up. */
+.vx-groove { position: relative; isolation: isolate; display: block; flex: none; block-size: var(--vx); border: 0; margin: 0; overflow: visible; }
+.vx-groove[data-vx-way="down"] { block-size: auto; inline-size: var(--vx); align-self: stretch; }
+.vx-groove:not([data-vx-live]) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-groove[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+/* a row lens: smoked and unlit until its row is the current one */
+.vx-groove[data-vx-lens]:not([data-vx-live]) { background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate)); }
+:is(li, a, [role="option"], [role="tab"])[aria-current]:not([aria-current="false"]) > .vx-groove[data-vx-lens]:not([data-vx-live]),
+[aria-selected="true"] > .vx-groove[data-vx-lens]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* Lamp: a small light that says a state. data-vx-light: go (the default), stop, warm, accent. */
+.vx-lamp { position: relative; isolation: isolate; display: inline-block; flex: none; inline-size: calc(var(--vx) * 2); block-size: calc(var(--vx) * 2); }
+.vx-lamp:not([data-vx-live]) { background: var(--lit-go, var(--vx-leaf)); }
+.vx-lamp[data-vx-light="stop"]:not([data-vx-live]) { background: var(--lit-stop, var(--vx-brick)); }
+.vx-lamp[data-vx-light="warm"]:not([data-vx-live]) { background: var(--lit-warm, var(--vx-steel)); }
+.vx-lamp[data-vx-light="accent"]:not([data-vx-live]) { background: var(--lit-accent, var(--vx-enamel)); }
+
+/* Recess: a level below the surface for what is read as set apart (a log, code). */
+.vx-recess { position: relative; isolation: isolate; display: block; }
+.vx-recess:not([data-vx-live]) { background: var(--vx-floor, var(--vx-chalk)); box-shadow: inset 0 0 0 var(--vx) var(--vx-slate); }
+
+/* Pointer: an arrow of the same voxels. Move it with CSS translate; data-on shows it. */
+.vx-cursor { position: absolute; z-index: 40; inset-block-start: 0; inset-inline-start: 0; inline-size: calc(var(--vx) * 8); block-size: calc(var(--vx) * 13); pointer-events: none; isolation: isolate; opacity: 0; transition: opacity 240ms var(--vx-ease-out); }
+.vx-cursor[data-on] { opacity: 1; }
+.vx-cursor:not([data-vx-live]) { display: none; }
+
+/* ---------- lit: wells ---------- */
+
+[data-vx-look="lit"] .vx-well[data-vx-live]:has(:focus-visible) { outline: 0; } /* the rim's own light is the focus */
+[data-vx-look="lit"] .vx-well :is(input, textarea) { caret-color: var(--lit-accent); }
+[data-vx-look="lit"] .vx-well:not([data-vx-live]) { background: var(--vx-floor); }
+
+@media (prefers-reduced-motion: reduce) {
+  .vx-cursor { transition: none; }
+}
+
+
+/* ==== css/badge.css ==== */
+
+/* ---------- Badge ---------- */
+
+/* A lamp and a word. A count is words. No box: a badge is read, not pressed, so nothing of it
+   stands up. The lamp is the kit's own (.vx-lamp); its light says the state (go: done or live,
+   stop: failed, accent: at work), and the word says it again, so the colour is never the only
+   sign. A state that is none of these (paused, a draft) has no lamp: the warm light is the
+   room's own and says nothing.
+   Markup: <span class="vx-badge"><span class="vx-lamp" data-vx-light="go"></span>Live</span>
+           <span class="vx-badge">12<span class="vx-badge-aloud"> unread</span></span>   a count */
+
+.vx-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--vx) * 2);
+  min-inline-size: 0;
+  font-family: var(--vx-font);
+  font-size: 0.875rem;
+  font-weight: 600;
+  line-height: calc(var(--vx) * 5);
+  font-variant-numeric: tabular-nums;
+  color: var(--vx-ink-quiet);
+  vertical-align: middle;
+  overflow-wrap: anywhere;
+}
+/* the lamp stays on the first line when a long word wraps under it */
+.vx-badge > .vx-lamp { align-self: flex-start; margin-block-start: calc(var(--vx) * 1.5); }
+/* beside a title, or wherever it is the thing being read */
+.vx-badge[data-vx-size="large"] { font-size: 1rem; line-height: calc(var(--vx) * 6); }
+.vx-badge[data-vx-size="large"] > .vx-lamp { margin-block-start: calc(var(--vx) * 2); }
+/* words for a screen reader only: what a bare number counts */
+.vx-badge-aloud { position: absolute; inline-size: 1px; block-size: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+
+/* ==== css/callout.css ==== */
+
+/* ---------- Callout (alert) ---------- */
+
+/* Words on the surface with a standing groove at their start, in the light of its kind. Not a
+   card: nothing is raised and nothing is boxed.
+   Markup: <div class="vx-callout" data-vx-kind="failed" role="alert">
+             <p class="vx-callout-title">The build failed</p>
+             <p>Step 3 of 5 ran out of memory.</p>
+             <div class="vx-callout-actions"><button class="vx-button">Run it again</button></div>
+           </div>
+   data-vx-kind: note (the default; the accent), done (green), warning (warm), failed (red).
+   The role is yours to write, because it must hold with no script: role="alert" for a failure
+   that has just happened, role="status" for the others when they arrive while the page is open,
+   and for what is simply part of the page a plain region (<aside aria-labelledby>) with the
+   title as its heading. Say the kind in the title's words: a light alone tells nobody. */
+
+.vx-callout {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  gap: calc(var(--vx) * 1);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  padding-block: calc(var(--vx) * 1);
+  padding-inline-start: calc(var(--vx) * 5);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--vx-ink);
+  overflow-wrap: anywhere;
+}
+.vx-callout > :is(p, h2, h3, h4, h5, h6) { margin: 0; }
+.vx-callout-title { font-size: 1rem; line-height: 1.5; font-weight: 650; }
+.vx-callout-actions { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 4); margin-block: calc(var(--vx) * 2) calc(var(--vx) * 1); }
+
+/* plain: the groove is a painted line */
+.vx-callout:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-callout[data-vx-kind="done"]:not([data-vx-live])::before { background: var(--lit-go, var(--vx-leaf)); }
+.vx-callout[data-vx-kind="warning"]:not([data-vx-live])::before { background: var(--lit-warm, var(--vx-walnut)); }
+.vx-callout[data-vx-kind="failed"]:not([data-vx-live])::before { background: var(--lit-stop, var(--vx-brick)); }
+
+
+/* ==== css/code-block.css ==== */
+
+/* ---------- Code block ----------
+   Code, read as set apart: a recess (the kit's .vx-recess), with the code a level below the
+   surface. Tool: well. No script: the text is the page's own, so it selects and copies as written.
+     <div class="vx-code vx-recess"><pre tabindex="0" role="region" aria-label="…"><code>…</code></pre></div>
+   With a name above it (a file, a shell), which is words on the surface:
+     <figure class="vx-code"><figcaption>deploy.sh</figcaption>
+       <div class="vx-recess"><pre tabindex="0" role="region" aria-label="deploy.sh"><code>…</code></pre></div></figure>
+   A long line scrolls inside the block; the page never moves sideways. The <pre> is what scrolls,
+   so it takes focus (tabindex="0") and the arrow keys move it.
+   data-vx-wrap on .vx-code wraps long lines instead. data-vx-lines numbers the lines: write each
+   line as <span class="vx-line">…</span>; the numbers are not text, and are not copied.
+   --vx-code-max is the most it may be tall before it scrolls down as well. */
+
+.vx-code { display: block; min-inline-size: 0; max-inline-size: 100%; margin: 0; }
+figure.vx-code { display: grid; gap: calc(var(--vx) * 2); grid-template-columns: minmax(0, 1fr); }
+.vx-code figcaption { font: 500 0.8125rem/1.4 var(--vx-mono); line-height: round(up, 1.4em, var(--vx)); color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+
+/* the recess: its rim is one voxel all round, and the code keeps clear of it */
+.vx-code.vx-recess, .vx-code > .vx-recess { box-sizing: border-box; min-inline-size: 0; padding: var(--vx); }
+
+.vx-code pre {
+  box-sizing: border-box;
+  margin: 0;
+  max-block-size: var(--vx-code-max, none);
+  overflow: auto;
+  color: var(--vx-ink);
+  font: 400 0.875rem/1.45 var(--vx-mono);
+  line-height: round(up, 1.4em, var(--vx)); /* 20 px: five voxels a line */
+  font-variant-ligatures: none;
+  tab-size: 2;
+  white-space: pre;
+  text-align: start;
+  direction: ltr; /* code reads left to right whatever the page does */
+  unicode-bidi: isolate;
+  scrollbar-width: thin;
+  scrollbar-color: var(--vx-steel) transparent;
+  -webkit-text-size-adjust: 100%;
+}
+/* the padding is the code's, so the end of the longest line has room when it is scrolled to */
+.vx-code pre > code { display: block; inline-size: max-content; min-inline-size: 100%; box-sizing: border-box; padding: calc(var(--vx) * 3) calc(var(--vx) * 4); font: inherit; }
+.vx-code[data-vx-wrap] pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.vx-code[data-vx-wrap] pre > code { inline-size: auto; }
+
+/* in focus (it scrolls, so it can be): the ring is drawn round the recess, clear of its light */
+.vx-code pre:focus { outline: 0; }
+.vx-code.vx-recess:has(pre:focus-visible), .vx-code > .vx-recess:has(pre:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+
+/* what is said quietly in code: a comment, a prompt, output */
+.vx-code .vx-code-quiet { color: var(--vx-ink-quiet); }
+
+/* numbered lines */
+.vx-code[data-vx-lines] pre { counter-reset: vx-line; }
+.vx-code[data-vx-lines] .vx-line::before {
+  counter-increment: vx-line;
+  content: counter(vx-line);
+  display: inline-block;
+  inline-size: 2ch;
+  margin-inline-end: calc(var(--vx) * 4);
+  text-align: end;
+  color: var(--vx-ink-quiet);
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+
+/* ==== css/empty-state.css ==== */
+
+/* ---------- Empty state ---------- */
+
+/* Words and one key, on the surface it belongs to: no box, no picture, no light of its own.
+   Markup: <div class="vx-empty">
+             <h3 class="vx-empty-title">No deploys yet</h3>
+             <p class="vx-empty-text">Push to main, or deploy by hand.</p>
+             <button class="vx-button" data-vx-kind="main">Deploy harbor-api</button>
+           </div>
+   The heading's level is the page's to choose. data-vx-align="start" sets it at the start of its
+   column, for a narrow place (a sidebar, a menu). */
+.vx-empty {
+  display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: calc(var(--vx) * 2);
+  box-sizing: border-box; inline-size: 100%; max-inline-size: calc(var(--vx) * 110); margin-inline: auto;
+  padding-block: calc(var(--vx) * 10);
+  font-family: var(--vx-font); color: var(--vx-ink); text-align: center; overflow-wrap: anywhere;
+}
+.vx-empty-title { margin: 0; font-size: 1.125rem; line-height: 1.3; font-weight: 650; text-wrap: balance; }
+.vx-empty-text { margin: 0; color: var(--vx-ink-quiet); line-height: 1.55; text-wrap: pretty; }
+/* the one key stands clear of the words; a long legend may take the whole line and wrap there */
+.vx-empty > .vx-button { margin-block-start: calc(var(--vx) * 4); max-inline-size: 100%; }
+.vx-empty[data-vx-align="start"] { justify-items: start; text-align: start; margin-inline: 0; padding-block: calc(var(--vx) * 5); }
+
+
+/* ==== css/existing.css ==== */
+
+/* The lit look for parts the kit already had: slider, list, menu, dialog, toast, lettering.
+   Their voxels are in src/looks/lit-existing.js. Link this after voxelmorphism.css. Every rule
+   holds only inside data-vx-look="lit". Sizes are in voxels. */
+
+/* ---------- lit: slider ---------- */
+
+/* A fader. Its knob is seven voxels wide and stops a voxel short of each end of the slot. The
+   browser's own thumb is made nine wide (and stays unseen), so its middle is always the knob's
+   middle and the knob stays under the pointer. */
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-webkit-slider-thumb { inline-size: calc(var(--vx) * 9); }
+[data-vx-look="lit"] .vx-slider[data-vx-live] input::-moz-range-thumb { inline-size: calc(var(--vx) * 9); }
+[data-vx-look="lit"] .vx-slider input { accent-color: var(--lit-accent); }
+[data-vx-look="lit"] .vx-slider input:disabled { cursor: default; }
+
+/* ---------- lit: list ---------- */
+
+/* Rows of words on the surface. No tray, no tiles: a hairline between rows, and an accent groove
+   at the start of the current one. The hairline is a shadow, so a row is still a whole number of
+   voxels high. */
+[data-vx-look="lit"] .vx-list { padding: 0; gap: 0; }
+[data-vx-look="lit"] .vx-list > li { position: relative; }
+/* a line is six voxels, so a row that wraps is still a whole number of voxels high */
+[data-vx-look="lit"] .vx-list .vx-row, [data-vx-look="lit"] .vx-list > li:not(:has(> .vx-row)) { line-height: calc(var(--vx) * 6); }
+[data-vx-look="lit"] .vx-list > li + li { box-shadow: inset 0 1px 0 var(--vx-slate); }
+[data-vx-look="lit"] .vx-list > li:is([aria-current="true"], [aria-selected="true"]) { font-weight: 650; }
+/* a row that holds a link or a button answers the pointer: a tint that keeps clear of the mark */
+[data-vx-look="lit"] .vx-list > li:has(a, button) { background: linear-gradient(var(--_tint, transparent), var(--_tint, transparent)) no-repeat; background-size: calc(100% - var(--vx) * 3) 100%; background-position: calc(var(--vx) * 3) 0; }
+[data-vx-look="lit"] .vx-list > li:has(a, button):dir(rtl) { background-position: 0 0; }
+[data-vx-look="lit"] .vx-list > li:has(a, button):hover { --_tint: color-mix(in oklab, var(--vx-ink) 5%, transparent); }
+[data-vx-look="lit"] .vx-list > li:has(a, button):active { --_tint: color-mix(in oklab, var(--vx-ink) 10%, transparent); }
+/* A row written without a .vx-row (the part wraps it when it draws) holds its link or button
+   bare. It is the row's words, and the whole row is its target, as in a .vx-row. */
+[data-vx-look="lit"] .vx-list > li > :is(a, button) { color: inherit; font: inherit; text-decoration: none; background: none; border: 0; padding: 0; margin: 0; text-align: start; cursor: pointer; }
+[data-vx-look="lit"] .vx-list > li > :is(a, button)::after { content: ""; position: absolute; inset: 0; }
+[data-vx-look="lit"] .vx-list > li > :is(a, button):focus-visible { outline: 0; }
+[data-vx-look="lit"] .vx-list > li:has(> :focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -1); }
+/* plain: the same rows; the mark is painted */
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) { background: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:not(:has(a, button)) { background: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: none; }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li + li:is([aria-current="true"], [aria-selected="true"]) { box-shadow: inset 0 1px 0 var(--vx-slate); }
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li::before {
+  content: ""; position: absolute; inset-block: calc(var(--vx) * 2); inset-inline-start: var(--vx); inline-size: var(--vx);
+  background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate));
+}
+[data-vx-look="lit"] .vx-list:not([data-vx-live]) > li:is([aria-current="true"], [aria-selected="true"])::before {
+  background: var(--lit-accent);
+}
+
+/* ---------- lit: menu ---------- */
+
+/* A float of rows. The rows are words, so they are in the text face, not the key face; a row is
+   eleven voxels high, the size of anything pressed. The active row keeps its own colour: its mark
+   is the accent groove at its start (voxels), not a coloured tile. */
+[data-vx-look="lit"] .vx-menu [role^="menuitem"] {
+  min-block-size: calc(var(--vx) * 11); padding-inline: calc(var(--vx) * 6) calc(var(--vx) * 5);
+  font: 500 1rem/1.2 var(--vx-font); letter-spacing: normal; color: var(--vx-ink);
+  -webkit-font-smoothing: auto; -moz-osx-font-smoothing: auto;
+}
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-active] { color: var(--vx-ink); }
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-kind="danger"],
+[data-vx-look="lit"] .vx-menu [role^="menuitem"][data-vx-kind="danger"][data-vx-active] { color: var(--vx-danger-text); }
+[data-vx-look="lit"] .vx-menu [role^="menuitem"]:is(:disabled, [aria-disabled="true"]) { color: var(--vx-ink-quiet); cursor: default; }
+/* plain: a painted float; the active row has the same mark, painted */
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) {
+  background: var(--vx-reading-plate, var(--vx-key));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]) {
+  color: var(--vx-ink);
+  background: linear-gradient(var(--lit-accent), var(--lit-accent)) no-repeat;
+  background-size: var(--vx) calc(100% - var(--vx) * 4); background-position: calc(var(--vx) * 2) 50%;
+}
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"]:is(:hover, :focus-visible, [data-vx-active]):dir(rtl) { background-position: calc(100% - var(--vx) * 2) 50%; }
+[data-vx-look="lit"] .vx-menu:not([data-vx-live]) [role^="menuitem"][data-vx-kind="danger"]:is(:hover, :focus-visible, [data-vx-active]) { color: var(--vx-danger-text); background-image: linear-gradient(var(--lit-stop), var(--lit-stop)); }
+
+/* ---------- lit: dialog ---------- */
+
+/* A float at dialog height. The header is words, fourteen voxels high; its last row of voxels is
+   the groove that parts it from the body. */
+[data-vx-look="lit"] .vx-dialog::backdrop { background: rgb(8 9 15 / 0.5); }
+[data-vx-look="lit"] .vx-dialog > header {
+  padding: calc(var(--vx) * 4) calc(var(--vx) * 6);
+  font: 700 1.125rem/calc(var(--vx) * 6) var(--vx-font); color: var(--vx-ink);
+}
+/* plain: a painted float, and a painted groove under the header */
+[data-vx-look="lit"] .vx-dialog:not([data-vx-live]) {
+  background: var(--vx-reading-plate, var(--vx-chalk));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--lit-accent) 60%, transparent), calc(var(--vx) * 2) calc(var(--vx) * 2.5) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-dialog:not([data-vx-live]) > header {
+  background: linear-gradient(color-mix(in oklab, var(--lit-warm) 55%, transparent), color-mix(in oklab, var(--lit-warm) 55%, transparent)) no-repeat;
+  background-size: calc(100% - var(--vx) * 8) var(--vx); background-position: 50% 100%;
+}
+
+/* ---------- lit: notice ---------- */
+
+/* A click dismisses a notice (it shatters under the click), so it says it can be pressed. */
+[data-vx-look="lit"] .vx-toast { cursor: pointer; }
+/* plain: the light it stands on is a line of its kind's colour round it */
+[data-vx-look="lit"] .vx-toast:not([data-vx-live]) {
+  background: var(--vx-reading-plate, var(--vx-key)); border: 0; padding-inline-start: calc(var(--vx) * 8);
+  box-shadow: 0 0 0 1px var(--lit-accent), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="done"] { box-shadow: 0 0 0 1px var(--lit-go), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+[data-vx-look="lit"] .vx-toast:not([data-vx-live])[data-vx-kind="failed"] { box-shadow: 0 0 0 1px var(--lit-stop), calc(var(--vx) * 1) calc(var(--vx) * 1.25) 0 var(--vx-shadow); }
+
+/* ---------- lit: lettering ---------- */
+
+/* The lit heading is asked for with data attributes on the element (see showcase/parts/lettering.html):
+   data-vx-material="key" data-vx-frame="light" data-vx-ink="ink": a board of the key's material,
+   a frame of the accent's light, letters of ink. Plain, a board in this look is painted the same,
+   whatever it asks for: the kit's own plain board is enamel with signal letters, which in this
+   look are one colour. */
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]):not([data-vx-live]) {
+  background: var(--vx-key); color: var(--vx-ink);
+  box-shadow: inset 0 0 0 var(--vx) var(--vx-key), inset 0 0 0 calc(var(--vx) * 2) var(--lit-accent), calc(var(--vx) * 1.5) calc(var(--vx) * 2) 0 var(--vx-shadow);
+}
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text::selection,
+[data-vx-look="lit"] :is(.vx-sign, .vx-lettering):not([data-vx-board="none"]) > .vx-lettering-text ::selection { background: color-mix(in oklab, var(--vx-link) 38%, transparent); }
+
+/* ---------- lit: block ---------- */
+
+/* plain: the look's own materials and lights, which the kit's plain block does not know */
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="key"] { background: var(--vx-key); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="floor"] { background: var(--vx-floor); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light"] { background: var(--lit-accent); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-warm"] { background: var(--lit-warm); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-go"] { background: var(--lit-go); }
+[data-vx-look="lit"] .vx-block:not([data-vx-live])[data-vx-material="light-stop"] { background: var(--lit-stop); }
+
+
+/* ==== css/figure.css ==== */
+
+/* ---------- Figure and image ----------
+   A picture set in a recess (the kit's .vx-recess), with its caption as words under it.
+   Tool: well for the picture; none for the caption. No script.
+     <figure class="vx-figure">
+       <div class="vx-recess"><img src="…" alt="What the picture shows" width="640" height="360"></div>
+       <figcaption>What it is. <small>Who made it</small></figcaption>
+     </figure>
+   The picture may be an <img>, a <picture>, an inline <svg> or a <video>. It is as wide as the
+   figure and keeps its own shape; for a shape of your choosing put a .vx-ratio between the
+   recess and the picture (css/aspect-ratio.css). An image with no figure round it:
+     <span class="vx-figure"><span class="vx-recess"><img …></span></span>
+   The figure is as wide as its place; give it an inline-size to make it smaller. */
+
+.vx-figure { display: grid; grid-template-columns: minmax(0, 1fr); gap: calc(var(--vx) * 3); margin: 0; min-inline-size: 0; max-inline-size: 100%; }
+span.vx-figure { display: inline-grid; vertical-align: top; }
+/* a picture alone in its paragraph (Markdown's ![…](…)) is a block, as wide as its place */
+p > span.vx-figure:only-child { display: grid; }
+
+/* the recess: its rim is one voxel all round, and the picture lies on its floor inside the rim */
+.vx-figure > .vx-recess { display: block; box-sizing: border-box; min-inline-size: 0; padding: var(--vx); line-height: 0; }
+.vx-figure > .vx-recess > :is(img, svg, video), .vx-figure > .vx-recess > picture > img { display: block; inline-size: 100%; block-size: auto; max-inline-size: 100%; }
+.vx-figure > .vx-recess > picture { display: block; }
+/* a picture that has not come (or never will) shows its words on the floor, not a broken box */
+.vx-figure img { color: var(--vx-ink-quiet); font: 400 0.875rem/1.4 var(--vx-font); }
+
+.vx-figure figcaption {
+  max-inline-size: 34rem;
+  color: var(--vx-ink-quiet);
+  font: 400 0.875rem/1.45 var(--vx-font);
+  line-height: round(up, 1.4em, var(--vx)); /* 20 px: five voxels a line */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.vx-figure figcaption :is(strong, b) { color: var(--vx-ink); font-weight: 600; }
+/* who made it, after what it is */
+.vx-figure figcaption small { display: block; font-size: 0.8125rem; }
+.vx-figure figcaption a { color: var(--vx-link); text-underline-offset: 0.2em; }
+.vx-figure figcaption a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+
+
+/* ==== css/fittings.css ==== */
+
+/* ---------- Fittings ----------
+   Made by tools/fittings-css.mjs from src/looks/fittings.js. Do not edit: edit that, and run it again.
+   An instrument named in the page's HTML is fitted before any script runs, and where none runs:
+     <html data-vx-look="lit" data-shell="walnut" data-caps="field" data-profile="high">
+   At night (the system's dark setting, or data-theme="dark") the same enclosure has its lights
+   down; data-theme="light" keeps it by day. The first adopt() reads these attributes and gives
+   the voxels the same materials (fitInstrument() called earlier wins). */
+
+:root[data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #355347;
+  --vx-ground: #efece3;
+  --vx-chalk: #b98c65;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3d8be;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #253e4e;
+  --vx-ground: #26323a;
+  --vx-chalk: #445964;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #40545c;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #433e53;
+  --vx-ground: #25242d;
+  --vx-chalk: #49505c;
+  --vx-ink: #fbf5e9;
+  --vx-ink-quiet: #e0e7e5;
+  --vx-floor: #313b40;
+  --panel: #363b49;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-danger-text: #ffd4c9;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #4c6560;
+  --vx-ground: #e5e9e5;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #e3e7dd;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+:root[data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: day;
+  --mat: #365b62;
+  --vx-ground: #dfe8e7;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #262b25;
+  --vx-ink-quiet: #3e4037;
+  --vx-floor: #d4cbb5;
+  --panel: #d2e4dc;
+  --vx-steel: #a79d88;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-day,#aa4a27);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #b95329;
+  --vx-danger-text: #85261c;
+  --vx-link: var(--lit-link-day,#1f40c4);
+  --vx-on-enamel: #fff8e8;
+}
+
+/* at night */
+:root[data-theme="dark"][data-shell="walnut"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #16231d;
+  --vx-ground: #151a17;
+  --vx-chalk: #b98c65;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #262b26;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="alloy"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #0f1a21;
+  --vx-ground: #10171b;
+  --vx-chalk: #445964;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #24323a;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="smoke"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1c1a24;
+  --vx-ground: #131218;
+  --vx-chalk: #49505c;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #272a34;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="frost"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #1d2a28;
+  --vx-ground: #131918;
+  --vx-chalk: #ece9dd;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #283130;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+:root[data-theme="dark"][data-shell="clear"] {
+  --vx-look: instrument;
+  --vx-theme: night;
+  --mat: #172629;
+  --vx-ground: #10191b;
+  --vx-chalk: #c4e4df;
+  --vx-ink: #ece6d6;
+  --vx-ink-quiet: #c9c3b2;
+  --vx-floor: #0e110f;
+  --panel: #253234;
+  --vx-slate: #3a403b;
+  --vx-steel: #5d5b52;
+  --vx-knob: #d8c5a1;
+  --vx-enamel: var(--lit-cap-night,#b9562f);
+  --vx-signal: var(--lit-accent);
+  --vx-focus: #ffb58f;
+  --vx-shadow: rgb(0 0 0 / 0.55);
+  --vx-danger-text: #ffc2b5;
+  --vx-link: var(--lit-link-night,#9db8ff);
+  --vx-on-enamel: #fff8e8;
+  --lit-accent: var(--lit-accent-night,#458fe3);
+  --lit-warm: #c9a264;
+  --lit-go: #5fe894;
+  --lit-stop: #ff7a66;
+  --lit-night: 1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-shell="walnut"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #16231d;
+    --vx-ground: #151a17;
+    --vx-chalk: #b98c65;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #262b26;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="alloy"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #0f1a21;
+    --vx-ground: #10171b;
+    --vx-chalk: #445964;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #24323a;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="smoke"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1c1a24;
+    --vx-ground: #131218;
+    --vx-chalk: #49505c;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #272a34;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="frost"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #1d2a28;
+    --vx-ground: #131918;
+    --vx-chalk: #ece9dd;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #283130;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+  :root:not([data-theme="light"])[data-shell="clear"] {
+    --vx-look: instrument;
+    --vx-theme: night;
+    --mat: #172629;
+    --vx-ground: #10191b;
+    --vx-chalk: #c4e4df;
+    --vx-ink: #ece6d6;
+    --vx-ink-quiet: #c9c3b2;
+    --vx-floor: #0e110f;
+    --panel: #253234;
+    --vx-slate: #3a403b;
+    --vx-steel: #5d5b52;
+    --vx-knob: #d8c5a1;
+    --vx-enamel: var(--lit-cap-night,#b9562f);
+    --vx-signal: var(--lit-accent);
+    --vx-focus: #ffb58f;
+    --vx-shadow: rgb(0 0 0 / 0.55);
+    --vx-danger-text: #ffc2b5;
+    --vx-link: var(--lit-link-night,#9db8ff);
+    --vx-on-enamel: #fff8e8;
+    --lit-accent: var(--lit-accent-night,#458fe3);
+    --lit-warm: #c9a264;
+    --lit-go: #5fe894;
+    --lit-stop: #ff7a66;
+    --lit-night: 1;
+  }
+}
+
+:root[data-caps="field"] {
+  --vx-key: #e9dfc5;
+  --vx-lamp-resin: #e9dfc5;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="linen"] {
+  --vx-key: #eee4cd;
+  --vx-lamp-resin: #eee4cd;
+  --lit-legend: #352c23;
+  --vx-danger-legend: #85261c;
+}
+:root[data-caps="carbon"] {
+  --vx-key: #393f3f;
+  --vx-lamp-resin: #393f3f;
+  --lit-legend: #f7ead4;
+  --vx-danger-legend: #ffd4c9;
+}
+:root[data-caps="opal"] {
+  --vx-key: #c8dfdf;
+  --vx-lamp-resin: #c8dfdf;
+  --lit-legend: #152c32;
+  --vx-danger-legend: #85261c;
+}
+
+
+/* ==== css/instrument.css ==== */
+
+/* Material and cap profile remain legible when the blocks cannot draw. */
+[data-profile="high"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * 2.25); }
+[data-profile="low"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { --_lift: calc(var(--vx) * .75); }
+[data-profile] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):is(:active,[aria-pressed="true"],[aria-expanded="true"]) { --_lift: calc(var(--vx) * .5); }
+[data-caps="field"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]):not([data-vx-kind],[data-vx-step],[data-lamp]) {
+ background: radial-gradient(ellipse at 26% 160%,#677c6d 0 45%,#96a089 45% 50%,transparent 51%),var(--vx-key);
+}
+[data-caps="opal"] :is(.vx-button,.vx-toggle-button):not([data-vx-live]):not(:disabled,[aria-disabled="true"]) { background-color: color-mix(in srgb,var(--vx-key) 82%,transparent); }
+[data-caps="carbon"] :is(.vx-button,.vx-toggle-button):not(:disabled):not([data-vx-kind],[data-lamp]) .vx-label {
+ color: color-mix(in srgb,var(--case-lamp) calc(58% * var(--lamp-level)),#eee9de);
+ text-shadow: 0 0 calc(4px * var(--lamp-level)) color-mix(in srgb,var(--case-lamp) calc(50% * var(--lamp-level)),transparent);
+}
+/* The plate lies in the case; the case's shoulder above it (the card's top border in the lit
+   look) is the case's own material, as it is with voxels. */
+[data-shell] .vx-card:not([data-vx-live]) { background-color: var(--panel); background-clip: padding-box; border-top-color: color-mix(in srgb, var(--vx-chalk) 82%, #000); box-shadow: inset 0 0 0 var(--vx) var(--vx-chalk),2px 4px var(--vx-slate),4px 8px 12px #14181355; }
+/* The rubber saddle and its index stripe sit on the native range thumb. */
+[data-shell] .vx-slider:not([data-vx-live]) input {
+  appearance: none;
+  --saddle: linear-gradient(var(--vx-enamel),var(--vx-enamel)) center top / 12% var(--vx) no-repeat,
+    linear-gradient(var(--vx-enamel),var(--vx-enamel)) center bottom / 12% var(--vx) no-repeat,
+    linear-gradient(90deg,#424641,#222926 15%,#626661 25%,#323732 37% 44%,#e8dfc7 44% 56%,#303531 56% 68%,#60655e 76%,#292e2a 87%,#404440);
+  background: transparent;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input:disabled {
+  --saddle: linear-gradient(90deg,#9d998a 44%,#575d55 44% 56%,#aaa698 56%);
+}
+[data-shell] .vx-slider:not([data-vx-live]) input::-webkit-slider-runnable-track {
+  height: calc(var(--vx) * 3); background: #313833; border: 1px solid #837f72;
+  box-shadow: inset 1px 2px 2px #171e18, 0 1px #c6bda6;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input::-moz-range-track {
+  height: calc(var(--vx) * 3); background: #313833; border: 1px solid #837f72;
+  box-shadow: inset 1px 2px 2px #171e18, 0 1px #c6bda6;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input::-webkit-slider-thumb {
+  appearance: none; margin-top: calc(-2.5 * var(--vx)); width: calc(7 * var(--vx)); height: calc(8 * var(--vx));
+  background: var(--saddle); border: 1px solid #484c45; border-radius: 3px;
+  box-shadow: inset 0 1px #96988b, 1px 3px 3px #18201b70;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input:active:not(:disabled)::-webkit-slider-thumb {
+  transform: translateY(1px); box-shadow: inset 0 1px #797c72, 0 1px 2px #18201b70;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input::-moz-range-thumb {
+  appearance: none; width: calc(7 * var(--vx)); height: calc(8 * var(--vx));
+  background: var(--saddle); border: 1px solid #484c45; border-radius: 3px;
+  box-shadow: inset 0 1px #96988b, 1px 3px 3px #18201b70;
+}
+[data-shell] .vx-slider:not([data-vx-live]) input:active:not(:disabled)::-moz-range-thumb {
+  transform: translateY(1px); box-shadow: inset 0 1px #797c72, 0 1px 2px #18201b70;
+}
+[data-shell] .vx-toggle-group[data-vx-live] > label:not(:has(:disabled)),
+[data-shell] .vx-tabs[data-vx-live] > [aria-selected="true"] { color: var(--lit-legend); }
+
+[data-shell] { --vx-reading-plate: var(--panel); }
+
+[data-shell] .vx-nav[data-vx-mark="seats"] { color: #f5f2e5; --vx-slate: #515754; }
+[data-shell] .vx-nav[data-vx-mark="seats"] a:hover { color: inherit; }
+[data-shell] .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend); }
+
+/* A flanged liner keeps the floor continuous under the text and caret.
+   Focus and fault have independent windows so both can be read together. */
+[data-shell] .vx-well:not([data-vx-live]) {
+  --rail: #736e62;
+  --tell: transparent;
+  background: linear-gradient(var(--rail),var(--rail)) left 5px top 2px / 20px 3px no-repeat,
+    linear-gradient(var(--tell),var(--tell)) left 5px bottom 2px / 36px 3px no-repeat, var(--vx-floor);
+  box-shadow: 0 0 0 2px var(--vx-steel), inset 1px 2px 3px #151b185c;
+}
+[data-shell] .vx-well:not([data-vx-live]):dir(rtl) { background-position: right 5px top 2px, right 5px bottom 2px; }
+[data-shell] .vx-well:has(:focus) { --rail: var(--lit-accent); }
+[data-shell] .vx-field:has(.vx-field-error) > .vx-well:not([data-vx-live]) { --tell: #736e62; }
+[data-shell] .vx-field > .vx-well:not([data-vx-live]):has([aria-invalid="true"]:enabled) { --tell: var(--lit-stop,var(--vx-brick)); }
+[data-shell] .vx-well:has(:disabled) { filter: saturate(.35); }
+
+[data-shell] .vx-stepper {
+  border-radius: 3px;
+  background: linear-gradient(175deg,#b4b0a0,#8a8676);
+  box-shadow: inset 1px 1px #d8d0bc, inset -1px -1px #665f52, 1px 2px 2px #26271f55;
+}
+[data-shell] .vx-stepper input { font-family: var(--vx-key-font); }
+
+[data-shell] :is(.vx-check,.vx-radio) :is(.vx-box,.vx-dot):not([data-vx-live]) {
+  --glass: #53594e;
+  --drop: 3px;
+  background: var(--vx-key); border: 2px solid #67695e;
+  clip-path: none;
+  box-shadow: inset 1px 1px #efead8, 0 var(--drop) #888678, 0 0 0 2px #a39a87;
+}
+[data-shell] .vx-radio .vx-dot:not([data-vx-live]) { --vx-radio-insert: ""; border-radius: 50%; }
+[data-shell] :is(.vx-box,.vx-dot):not([data-vx-live])::before {
+  content: ""; position: absolute; inset: 29% 10%; border-radius: 2px;
+  background: var(--glass); box-shadow: inset 0 1px 2px #1c201c70;
+}
+[data-shell] .vx-radio input:is(:enabled,:disabled) + .vx-dot:not([data-vx-live])::before {
+  content: ""; inset: 18%; border-radius: 50%; background: var(--glass);
+}
+[data-shell] :is(.vx-check,.vx-radio) input:checked + :is(.vx-box,.vx-dot):not([data-vx-live]) {
+  --glass: var(--lit-accent); --drop: 0px; background: var(--vx-key);
+}
+[data-shell] .vx-check input:indeterminate + .vx-box:not([data-vx-live]) {
+  background: var(--vx-key); --glass: linear-gradient(#626459 30%,var(--lit-accent) 30% 70%,#626459 70%); --drop: 1px;
+}
+[data-shell] :is(.vx-check,.vx-radio):active:has(input:enabled) :is(.vx-box,.vx-dot):not([data-vx-live]) {
+  translate: 0 2px; --drop: 0px;
+}
+[data-shell] :is(.vx-check,.vx-radio) input:disabled + :is(.vx-box,.vx-dot):not([data-vx-live]) {
+  --glass: #868578; --drop: 0px; background: var(--vx-steel);
+}
+[data-shell] :is(.vx-check,.vx-radio) input:disabled:checked + :is(.vx-box,.vx-dot):not([data-vx-live]) { --glass: #414741; }
+
+/* Centre the legend on the usable key face above its lower lamp. */
+[data-shell] .vx-toggle-group:not([role="toolbar"], [data-vx-size="small"]) > label {
+  padding-block: calc(var(--vx) * 1.5) calc(var(--vx) * 2.5);
+}
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label {
+  border: 0; background: var(--vx-key); color: var(--lit-legend);
+  box-shadow: inset 0 0 0 2px #62655b, inset 3px 4px #ffffff65, inset -3px -6px #302d2545;
+}
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label::after {
+  content: ""; position: absolute; pointer-events: none; inset-block-end: 3px; inset-inline: 28%;
+  height: 3px; background: #4e534b;
+}
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label:has(:checked)::after { background: var(--lit-accent); }
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label:has(:checked),
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label:active:has(:enabled) { box-shadow: inset 1px 2px 3px #34332b55; }
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label:has(:disabled) { background: var(--vx-steel); color: #403f39; }
+[data-shell] .vx-toggle-group:not([data-vx-live]) > label:has(:disabled)::after { background: #66675e; }
+
+[data-shell] .vx-select:not([data-vx-live]) {
+  background: linear-gradient(165deg,#ffffff14 15%,transparent 55%),var(--vx-key);
+  box-shadow: inset 1px 1px #fff8, inset -1px -2px #443e382f, 1px 3px #898271, 2px 5px 3px #211e1a55;
+}
+[data-shell] .vx-select:not([data-vx-live])::before {
+  content: ""; position: absolute; pointer-events: none; inset-inline-end: calc(4 * var(--vx));
+  inset-block-start: calc(50% - 3 * var(--vx)); width: calc(9 * var(--vx)); height: calc(6 * var(--vx));
+  border-radius: 2px; background: #343a34; box-shadow: inset 1px 1px 2px #2229, 0 1px #fff8;
+}
+[data-shell] .vx-select:not([data-vx-live])::after { color: #e9e4d6; }
+
+[data-shell] .vx-field > .vx-select { margin-block-start: calc(var(--vx) * 3); }
+[data-shell] .vx-select:not([data-vx-live]):has(select:open) {
+  translate: calc(var(--vx) * -.5) calc(var(--vx) * -.5);
+  box-shadow: inset 0 0 0 1px #78796c;
+}
+[data-shell] .vx-select:not([data-vx-live]):has(select:disabled) { background: var(--vx-steel); box-shadow: inset 0 0 0 1px #77756c; }
+[data-shell] .vx-button:not([data-vx-live]), [data-shell] .vx-toggle-button:not([data-vx-live]) {
+  --_top: color-mix(in srgb,var(--_face) 82%,white);
+  --_side: color-mix(in srgb,var(--_face) 77%,#282b26);
+}
+[data-shell] .vx-stepper > .vx-button:not([data-vx-live]) {
+  --_lift: var(--vx); border-radius: 2px;
+}
+[data-shell] .vx-stepper > .vx-button[aria-disabled="true"]:not([data-vx-live]) { --_lift: 0px; transform: none; }
+[data-shell] .vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled,[aria-disabled="true"]) {
+  --_top: var(--vx-steel); --_side: var(--vx-steel);
+  box-shadow: 0 0 0 2px #5a5b50;
+}
+/* A tall cap projects backwards beyond its box. A bank reserves this room
+   above the first key as well as between rows. */
+[data-shell] .vx-toggle-group[role="toolbar"] { margin-block-start: calc(var(--vx) * 2); row-gap: calc(var(--vx) * 5); }
+
+/* A nested instrument inherits the height of its nearest profile. */
+:where([data-profile]) { --vx-lamp-apron: 3; --vx-lamp-throw: 1; }
+:where([data-profile="low"]) { --vx-lamp-apron: 1.5; --vx-lamp-throw: .5; }
+/* Material settings inherit from the nearest cap set. Compute the powered
+   tint at the button, where the local lamp supply and color are available. */
+:where([data-caps]) { --vx-lamp-print: none; --vx-lamp-scatter: 0; }
+:where([data-caps="field"]) { --vx-lamp-print: radial-gradient(ellipse at 30% 155%,#637a6c 0 43%,#909b80 43% 48%,transparent 49%); }
+:where([data-caps="opal"]) { --vx-lamp-scatter: 1; }
+/* A lamp key includes the floor and flange within the button's hit target. */
+.vx-button[data-lamp] {
+  aspect-ratio: 1.18; height: auto; min-width: max(44px,calc(16 * var(--vx))); min-height: max(44px,calc(16 * var(--vx)));
+  justify-content: start; padding: 0; padding-inline-start: 29%; color: var(--lit-legend,#352c23);
+}
+.vx-button[data-lamp] i { display: none; }
+[data-shell] .vx-button[data-lamp] .vx-label { color: var(--lit-legend,#352c23); text-shadow: none; }
+:root .vx-button[data-lamp]:not([data-vx-live]),
+:root .vx-button[data-lamp]:not([data-vx-live]):is([aria-pressed],:active):not(:disabled) {
+  --_resin: var(--vx-lamp-resin,var(--vx-key,#eee4cd));
+  --_apron: color-mix(in srgb,var(--_resin) 77%,#282b26);
+  --_shoulder: color-mix(in srgb,var(--_resin) 82%,white);
+  --_drop: calc(-1 * var(--vx) * var(--vx-lamp-throw,1));
+  isolation: isolate; transform: none;
+  background: linear-gradient(var(--_strip,#414a42),var(--_strip,#414a42)) right 6% center / var(--vx) 19% no-repeat,#1c211d;
+  box-shadow: inset 0 0 0 var(--vx) #343a34;
+}
+.vx-button[data-lamp]:not([data-vx-live])::before {
+  content: ""; position: absolute; inset: 7% 7% 8%; z-index: -1;
+  background: var(--vx-lamp-print,none) var(--_resin); border: 0;
+  border-inline: calc(var(--vx) * 1.5) solid var(--_apron);
+  border-bottom: calc(var(--vx) * var(--vx-lamp-apron,3)) solid var(--_apron);
+  box-shadow: inset 1px 1px 0 var(--_shoulder);
+}
+.vx-button[data-lamp]:not([data-vx-live])::after {
+  content: ""; position: absolute; top: 31%; left: 29%; width: 12%; height: var(--vx);
+  background: #414a42; pointer-events: none;
+}
+.vx-button[data-lamp][aria-pressed="true"]:not(:disabled,[aria-disabled="true"]) {
+  --_strip: color-mix(in srgb,var(--case-lamp,#71e2cd) calc(100% * var(--lamp-level,1)),#414a42);
+}
+.vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::before {
+  --_face-wash: calc(24% * var(--vx-lamp-scatter,0) * var(--vx-pilot-level,var(--lamp-level,1)));
+  --_side-wash: calc(32% * var(--vx-lamp-scatter,0) * var(--lamp-level,1));
+  background-image: var(--vx-lamp-print,none),
+    radial-gradient(ellipse at 28% 27%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_face-wash),transparent),transparent 52%),
+    radial-gradient(ellipse at right 65%,color-mix(in srgb,var(--case-lamp,#71e2cd) var(--_side-wash),transparent),transparent 44%);
+}
+.vx-button[data-vx-pilot="status"] { --vx-pilot-level: 1; }
+.vx-button[data-lamp][aria-pressed="true"]:not([data-vx-live],:disabled,[aria-disabled="true"])::after {
+  background: color-mix(in srgb,var(--case-lamp,#71e2cd) calc(100% * var(--vx-pilot-level,var(--lamp-level,1))),#414a42);
+}
+:root .vx-button[data-lamp]:not([data-vx-live]):active:enabled:not([aria-disabled="true"])::before {
+  translate: var(--_drop) var(--_drop); border-bottom-width: var(--vx);
+}
+.vx-button[data-lamp]:not([data-vx-live]):active:enabled:not([aria-disabled="true"]) .vx-label,
+.vx-button[data-lamp]:not([data-vx-live]):active:enabled:not([aria-disabled="true"])::after { translate: var(--_drop) var(--_drop); }
+
+@media (max-width: 400px) {
+  .vx-button[data-lamp] { justify-content: center; padding-inline: 0; }
+}
+
+
+/* ==== css/instrument-library.css ==== */
+
+[data-shell] .vx-calendar-cell:is([data-vx-mark="one"], [data-vx-mark="start"], [data-vx-mark="end"]) > .vx-calendar-day,
+[data-shell] .vx-pagination-pages > li > a { color: var(--lit-legend); }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) { background: #414844; }
+[data-shell] .vx-pagination-gap { color: #f2eddd; }
+[data-shell] .vx-pagination-pages:not([data-vx-live]) > li > a:is(:not([aria-current]), [aria-current="false"]) {
+  background: var(--vx-key);
+  box-shadow: inset 1px 1px #ffffff52, inset -2px -3px #252c2560, inset -3px -4px #0002;
+}
+
+[data-shell] .vx-date-float .vx-calendar-cell[data-vx-mark="mid"] > .vx-calendar-day { color: var(--vx-ink); }
+
+/* Reading. Set the article like the inside of a field manual. Only things
+   that actually display machine output get a window. */
+[data-shell] .vx-prose :is(h2, h3, blockquote) { font-family: var(--vx-serif); font-weight: 500; }
+[data-shell] .vx-prose h2 { font-size: clamp(1.8rem, 4vw, 2.5rem); line-height: round(up, 1.12em, var(--vx)); letter-spacing: -.035em; }
+[data-shell] .vx-prose blockquote { font-style: italic; max-inline-size: 45ch; }
+[data-shell] .vx-prose blockquote footer { font: 400 .8125rem/1.25rem var(--vx-mono); margin-block-start: .5rem; }
+[data-shell] .vx-code pre {
+  --vx-ink-quiet: #a9bcad;
+  color: #e9f0df; background: linear-gradient(150deg, #26322e, #1d2522 68%);
+  box-shadow: inset 0 2px 4px #101713a6, inset 0 -1px #808f7c;
+}
+[data-shell] .vx-code[data-vx-lines] .vx-line::before {
+  inline-size: 3ch; padding-inline-end: .6em; margin-inline-end: .85em; border-inline-end: 1px solid #596960;
+}
+[data-shell] :is(.vx-figure figcaption, .vx-code figcaption) { padding-inline-start: .75rem; border-inline-start: 2px solid currentColor; }
+[data-shell] :is(.vx-table thead th, .vx-table .vx-num, .vx-data-table-count, .vx-avatar-initials, .vx-badge) { font-family: var(--vx-mono); }
+[data-shell] .vx-table tbody tr + tr > :is(th, td) { border-color: color-mix(in srgb, currentColor 21%, transparent); }
+[data-shell] .vx-data-table tbody tr:has(input:checked) { background: color-mix(in srgb, var(--vx-ink) 9%, transparent); }
+[data-shell] .vx-breadcrumb [aria-current="page"] { text-decoration: underline; text-underline-offset: .35em; }
+
+[data-shell] .vx-scroll-bar::before {
+  background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 12.5%) left center / 3px 100% no-repeat;
+  opacity: .6;
+}
+[data-shell] .vx-list-group > li + li { box-shadow: inset 0 1px color-mix(in srgb, currentColor 22%, transparent); }
+[data-shell] :is(.vx-item-trail, .vx-separator:not(.vx-groove)) { font-family: var(--vx-mono); }
+[data-shell] .vx-callout-title { font-weight: 650; letter-spacing: -.012em; }
+[data-shell] .vx-empty-title { font: 500 1.5rem/1.25 Georgia, "Times New Roman", serif; }
+
+/* Navigation. An engraved registration mark stays at each stop on the rail;
+   the existing moving indicator identifies the selected stop. */
+[data-shell] :is(.vx-nav[data-vx-mark="groove"], .vx-spy) a {
+  background: linear-gradient(currentColor, currentColor) left .5rem bottom / 1px .25rem no-repeat;
+}
+[data-shell] :is(.vx-nav[data-vx-way="down"], .vx-spy:not([data-vx-way="across"])) a {
+  background-position: left center; background-size: .25rem 1px;
+}
+[data-shell] :is(.vx-nav[data-vx-way="down"], .vx-spy:not([data-vx-way="across"])) a:dir(rtl) { background-position: right center; }
+[data-shell] .vx-nav[data-vx-mark="seats"]:not([data-vx-live]) { background-color: #505653; }
+[data-shell] .vx-nav[data-vx-mark="seats"] a:is(:not([aria-current]), [aria-current="false"]):not([aria-disabled="true"]) { color: #fff9e9; }
+[data-shell] :is(.vx-nav-title, .vx-command-title, .vx-combobox-title, .vx-option-trail, .vx-nav-trail) { font-family: var(--vx-mono); }
+[data-shell] :is(.vx-menubar, .vx-navigation-menu) { border-block-end: 1px solid color-mix(in srgb, currentColor 30%, transparent); }
+[data-shell] :is(.vx-menubar, .vx-navigation-menu) [aria-expanded="true"],
+[data-shell] :is(.vx-command, .vx-combobox-float) [role="option"][data-vx-active] { font-weight: 650; }
+
+/* Data. The scale and the readout share a smoked face behind the glass.
+   Place every tick on the chart's actual axis label, including sparse axes. */
+[data-shell] :is(.vx-chart, .vx-command-scroll) {
+  --vx-ink: #eef3e6; --vx-ink-quiet: #c1cfc2;
+  background: linear-gradient(135deg, #35433c, #242e2b 62%, #26312e);
+}
+[data-shell] .vx-command-scroll { box-shadow: inset 0 2px 4px #10171394, inset 0 -1px #8a9587; }
+[data-shell] .vx-chart {
+  padding: 1rem; border: 1px solid #282e29; border-radius: 4px;
+  box-shadow: inset 0 1px #667367, inset 0 0 0 3px #313b36, 0 1px 0 #ffffff45;
+}
+[data-shell] .vx-chart > figcaption { font-size: 1.125rem; font-weight: 600; }
+[data-shell] :is(.vx-chart-x, .vx-chart-y, .vx-chart-key) { font-family: var(--vx-mono); }
+[data-shell] .vx-chart-y > span::after {
+  content: ""; position: absolute; inset-inline-start: calc(100% + 3px); top: 50%; inline-size: 5px; border-top: 1px solid currentColor;
+}
+[data-shell] .vx-chart-x > span::before {
+  content: ""; position: absolute; left: 50%; bottom: calc(100% + 1px); height: 4px; border-left: 1px solid currentColor;
+}
+[data-shell] .vx-chart-window:not([data-vx-live]) { background: #232824; box-shadow: inset 1px 2px 4px #101713, inset 0 -1px #708273; }
+[data-shell] .vx-chart-marks [data-vx-light="stud"] { --_light: #555d58; }
+[data-shell] .vx-calendar-names { border-block: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
+[data-shell] :is(.vx-calendar-name, .vx-calendar-day, .vx-theme-picker-name) { font-family: var(--vx-mono); }
+[data-shell] .vx-carousel-lamps { outline: 1px solid color-mix(in srgb, currentColor 28%, transparent); outline-offset: 2px; }
+
+[data-shell] .vx-chart-reading { background: #1b2621; box-shadow: inset 0 1px 2px #101811; }
+[data-shell] .vx-resizable[data-vx-on] > .vx-resizable-groove:not([aria-disabled="true"])::before {
+  content: ""; position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%);
+  inline-size: .65rem; block-size: 1.75rem; pointer-events: none;
+  border: 1px solid #4e544b; border-radius: 2px;
+  background: repeating-linear-gradient(0deg, #bdbbad 0 2px, #787c71 2px 3px, #d3d0bc 3px 4px);
+  box-shadow: inset 1px 1px #e9e7d3, 1px 2px 2px #15191180;
+}
+[data-shell] .vx-resizable[data-vx-way="down"] > .vx-resizable-groove::before { transform: translate(-50%, -50%) rotate(90deg); }
+[data-shell] .vx-resizable[data-vx-on] > [data-vx-held]::before { border-color: var(--vx-ink); }
+
+[data-shell] .vx-otp-cell::after {
+  content: ""; position: absolute; inset: auto 28% .4rem; height: 1px;
+  background: color-mix(in srgb, var(--vx-ink) 40%, transparent); pointer-events: none;
+}
+
+/* Conversation. Use one quiet typographic register for time, files and
+   machine state. Let people and their words occupy the foreground. */
+[data-shell] :is(.vx-message-when, .vx-attachment-size, .vx-marker, .vx-trace-state, .vx-questionnaire-note) {
+  font-family: var(--vx-mono); font-variant-numeric: tabular-nums;
+}
+[data-shell] .vx-message-head { column-gap: .75rem; }
+[data-shell] .vx-message-when { border-inline-start: 1px solid color-mix(in srgb, currentColor 40%, transparent); padding-inline-start: .75rem; }
+[data-shell] .vx-marker { letter-spacing: .025em; }
+[data-shell] .vx-attachment-tile { border-inline-start: 3px double currentColor; }
+[data-shell] .vx-trace > li[data-vx-state="failed"] .vx-trace-state { color: color-mix(in srgb, var(--vx-ink) 80%, #cd5430); }
+
+
+/* ==== css/item.css ==== */
+
+/* ---------- Item ---------- */
+
+/* A row of words: a title, a line under it, something trailing, and something leading if you
+   like (an avatar, a lamp). None of the tools: no box, nothing raised.
+   Markup: <div class="vx-item">
+             <span class="vx-item-lead">…</span>                       optional
+             <span class="vx-item-text">
+               <span class="vx-item-title">harbor-api</span>
+               <span class="vx-item-line">Deployed four minutes ago by Mina</span>
+             </span>
+             <span class="vx-item-trail">…</span>                      optional: words, a badge, a key
+           </div>
+   A row you can press is the same thing written as a link or a button: <a class="vx-item" href>.
+   A long title wraps; data-vx-clip on the item keeps title and line to one line each, cut short
+   with an ellipsis (give the full words in a title attribute where they matter). */
+
+.vx-item {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  min-block-size: calc(var(--vx) * 11);
+  padding-block: calc(var(--vx) * 2);
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: 1.375;
+  color: var(--vx-ink);
+  text-align: start;
+  text-decoration: none;
+}
+.vx-item-lead { flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.vx-item-text { flex: 1 1 auto; display: grid; gap: calc(var(--vx) * 0.5); min-inline-size: 0; }
+.vx-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.vx-item-line { font-size: 0.875rem; line-height: 1.43; color: var(--vx-ink-quiet); overflow-wrap: anywhere; }
+.vx-item-trail { flex: none; display: inline-flex; align-items: center; gap: calc(var(--vx) * 3); max-inline-size: 50%; margin-inline-start: auto; font-size: 0.875rem; color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+
+.vx-item[data-vx-clip] :is(.vx-item-title, .vx-item-line) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
+/* a row that is read (a list of articles): a larger title */
+.vx-item[data-vx-size="large"] .vx-item-title { font-size: 1.25rem; line-height: 1.3; }
+.vx-item[data-vx-size="large"] .vx-item-line { font-size: 0.9375rem; }
+.vx-item[data-vx-size="large"] > .vx-item-trail { align-self: start; padding-block-start: calc(var(--vx) * 1); }
+
+/* where the row is too narrow for both, what trails goes onto a line of its own under the words */
+.vx-item:not([data-vx-clip]) { flex-wrap: wrap; }
+.vx-item:not([data-vx-clip]) > .vx-item-text { flex: 1 1 calc(var(--vx) * 50); }
+
+/* a row you can press: still words. The title is underlined under the pointer, and the row
+   takes the browser's focus ring, since there is no light in it to brighten. */
+:is(a, button).vx-item { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+button.vx-item { appearance: none; inline-size: 100%; margin: 0; padding-inline: 0; border: 0; border-radius: 0; background: none; }
+:is(a, button).vx-item:hover .vx-item-title { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
+:is(a, button).vx-item:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+button.vx-item:disabled { cursor: default; }
+button.vx-item:disabled :is(.vx-item-title, .vx-item-line) { color: var(--vx-ink-quiet); text-decoration: none; }
+
+
+/* ==== css/list-group.css ==== */
+
+/* ---------- List group ---------- */
+
+/* Rows of words parted by hairlines. The current row is marked by an accent groove at its start.
+   No tray, no tiles: the rows lie on the surface they are on.
+   Markup: <ul class="vx-list-group">
+             <li><a href="/harbor-api" aria-current="page">harbor-api</a></li>
+             <li><a href="/fog-site">fog-site</a></li>
+             <li>Words alone are a row too</li>
+           </ul>
+   The current row is the one with aria-current, on the row or on the link or button in it
+   ("page" for a link to where you are, "true" otherwise). Set it from code and the mark follows.
+   A row may hold an item (<a class="vx-item">): title, a line under it, something trailing. */
+
+.vx-list-group {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-family: var(--vx-font);
+  font-size: 1rem;
+  line-height: 1.375;
+  color: var(--vx-ink);
+}
+.vx-list-group > li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--vx) * 3);
+  box-sizing: border-box;
+  min-inline-size: 0;
+  min-block-size: calc(var(--vx) * 11);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 2);
+  padding-inline-start: calc(var(--vx) * 5);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+/* the hairline is drawn inside the row, so a row stays a whole number of voxels high */
+.vx-list-group > li + li { box-shadow: inset 0 1px 0 var(--vx-slate); }
+.vx-list-group > li:is([aria-current], :has(> [aria-current])):not([aria-current="false"], :has(> [aria-current="false"])) { font-weight: 650; }
+
+/* a row you can press is a link or a button that fills the row */
+.vx-list-group > li > :is(a, button) {
+  flex: 1 1 auto; min-inline-size: 0; margin: 0; padding: 0; border: 0; border-radius: 0; background: none;
+  color: inherit; font: inherit; text-align: start; text-decoration: none; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-list-group > li > :is(a, button)::after { content: ""; position: absolute; inset: 0; }
+.vx-list-group > li > :is(a, button):hover { text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 0.2em; }
+.vx-list-group > li > :is(a, button):focus-visible { outline: 0; }
+.vx-list-group > li:has(> :is(a, button):focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+.vx-list-group > li > button:disabled { color: var(--vx-ink-quiet); cursor: default; text-decoration: none; }
+/* an item in a row: the row has the padding and the height already; the item's own underline
+   (on its title) stands for the row's */
+.vx-list-group > li > .vx-item { min-block-size: 0; padding-block: 0; }
+.vx-list-group > li > .vx-item:hover { text-decoration: none; }
+.vx-list-group > li > .vx-item:focus-visible { outline: 0; }
+
+/* plain: every row has its lens painted where the voxel one will be; the current row's is lit */
+.vx-list-group:not([data-vx-live]) > li::before {
+  content: "";
+  position: absolute;
+  inset-block: calc(var(--vx) * 2);
+  inset-inline-start: var(--vx);
+  inline-size: var(--vx);
+  background: color-mix(in oklab, var(--vx-ink) 62%, var(--vx-slate));
+}
+.vx-list-group:not([data-vx-live]) > li:is([aria-current], :has(> [aria-current])):not([aria-current="false"], :has(> [aria-current="false"]))::before {
+  background: var(--lit-accent, var(--vx-enamel));
+}
+
+
+/* ==== css/navbar.css ==== */
+
+/* ---------- Navbar ---------- */
+
+/* The bar across the top of a site or an app. It lies on a surface; its links are navs with the
+   accent groove; it has one key at the end at most, and one more that folds the links away
+   where the bar is narrow.
+   Markup: <header class="vx-card vx-navbar-surface" data-vx-bolts="none">
+             <div class="vx-navbar">
+               <a class="vx-navbar-brand" href="/">fogline</a>
+               <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="top">Menu</button>
+               <div class="vx-navbar-fold" id="top">
+                 <nav class="vx-nav" data-vx-mark="groove" aria-label="Main">…</nav>
+                 <a class="vx-button" data-vx-kind="main" href="/new">New project</a>
+               </div>
+             </div>
+           </header>
+   The bar folds by its own width (160 voxels), so one in a narrow column folds on a wide screen
+   too. Folding needs the script: without it (no data-vx-on) the links wrap and are never hidden. */
+
+/* a surface that is only a bar: three voxels above and below what is on it, room for a key's sides */
+.vx-card.vx-navbar-surface { padding: calc(var(--vx) * 3) calc(var(--vx) * 6); }
+
+.vx-navbar {
+  container: vx-navbar / inline-size;
+  position: relative; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 6); box-sizing: border-box; min-inline-size: 0;
+  font-family: var(--vx-font); color: var(--vx-ink);
+}
+.vx-card > .vx-navbar { margin-block-start: 0; }
+.vx-navbar-brand {
+  display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11); margin: 0;
+  font: 700 1.0625rem/calc(var(--vx) * 6) var(--vx-font); letter-spacing: -0.005em; color: var(--vx-ink); text-decoration: none; overflow-wrap: anywhere;
+}
+a.vx-navbar-brand:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 0.5); }
+.vx-navbar-fold { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: center; column-gap: calc(var(--vx) * 6); min-inline-size: 0; }
+.vx-navbar-fold > .vx-nav { flex: 0 1 auto; }
+/* the one key at the end: a key, or a key that latches (a theme's night, a mute) */
+.vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: auto; }
+/* the key that folds the links away: only where the bar is narrow, and only with the script */
+.vx-navbar-key { display: none; margin-inline-start: auto; }
+
+@container vx-navbar (max-width: 639.98px) {
+  .vx-navbar[data-vx-on] > .vx-navbar-key { display: inline-flex; }
+  .vx-navbar[data-vx-on] > .vx-navbar-key[aria-expanded="false"] ~ .vx-navbar-fold { display: none; }
+  /* out: a column under the bar, on the same surface */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold { flex: 1 0 100%; flex-direction: column; flex-wrap: nowrap; align-items: stretch; row-gap: calc(var(--vx) * 3); padding-block: calc(var(--vx) * 2) calc(var(--vx) * 3); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > :is(.vx-button, .vx-toggle-button) { margin-inline-start: 0; align-self: start; }
+  /* plain: the groove stands at the start of the current link, as in any column */
+  .vx-navbar[data-vx-on] > .vx-navbar-fold > .vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+    inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+  }
+}
+
+
+/* ==== css/navs.css ==== */
+
+/* ---------- Navs ---------- */
+
+/* A row or a column of links to places. Words on the surface they are on: no box, nothing raised.
+   Markup: <nav class="vx-nav" data-vx-mark="groove" aria-label="harbor-api">
+             <a href="/overview">Overview</a>
+             <a href="/deploys" aria-current="page">Deploys</a>
+             <a role="link" aria-disabled="true">Billing</a>
+           </nav>
+   data-vx-mark: leave it out (the current link is heavier), "groove" (an accent groove under it,
+   or at its start in a column) or "seats" (a trench; the current link is the key in it).
+   data-vx-way="down" stacks the links. They may stand in a list, under titles (.vx-nav-title). */
+
+.vx-nav {
+  position: relative; isolation: isolate; display: flex; flex-wrap: wrap; align-items: center;
+  column-gap: calc(var(--vx) * 2); box-sizing: border-box; min-inline-size: 0; max-inline-size: 100%;
+  margin: 0; padding: 0;
+  font-family: var(--vx-font); font-size: 1rem; font-weight: 500; line-height: calc(var(--vx) * 6);
+  color: var(--vx-ink-quiet);
+}
+.vx-nav :is(ul, ol) { display: contents; margin: 0; padding: 0; list-style: none; }
+.vx-nav li { display: contents; }
+.vx-nav a {
+  position: relative; display: inline-flex; align-items: center; gap: calc(var(--vx) * 3); box-sizing: border-box;
+  min-inline-size: 0; min-block-size: calc(var(--vx) * 11); padding: calc(var(--vx) * 2) calc(var(--vx) * 2);
+  color: inherit; font: inherit; text-decoration: none; overflow-wrap: anywhere; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.vx-nav a:hover, .vx-nav a[aria-current]:not([aria-current="false"]) { color: var(--vx-ink); }
+/* no light in a word to brighten: the browser's ring, just inside the link */
+.vx-nav a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * -0.5); }
+/* one that leads nowhere yet */
+.vx-nav a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); cursor: default; }
+/* plain: nothing is drawn, so the current link says so with its weight */
+.vx-nav:not([data-vx-mark]) a[aria-current]:not([aria-current="false"]) { font-weight: 650; }
+
+/* a column */
+.vx-nav[data-vx-way="down"] { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+.vx-nav[data-vx-way="down"][data-vx-mark="groove"] a { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav[data-vx-way="down"] a[data-vx-level="2"] { padding-inline-start: calc(var(--vx) * 9); }
+.vx-nav-trail { margin-inline-start: auto; color: var(--vx-ink-quiet); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+/* a title over a group of links: words, smaller and quiet */
+.vx-nav-title {
+  box-sizing: border-box; margin: 0; padding: calc(var(--vx) * 4) calc(var(--vx) * 2) calc(var(--vx) * 1);
+  font: 600 0.8125rem/calc(var(--vx) * 5) var(--vx-font); color: var(--vx-ink-quiet);
+}
+.vx-nav[data-vx-mark="groove"] .vx-nav-title { padding-inline-start: calc(var(--vx) * 5); }
+.vx-nav-title:first-child, .vx-canvas + .vx-nav-title { padding-block-start: calc(var(--vx) * 1); }
+
+/* seats: a trench as wide as its links; the legends are in the key face, as on tabs */
+.vx-nav[data-vx-mark="seats"] { display: inline-flex; gap: 0; }
+.vx-nav[data-vx-mark="seats"] a {
+  justify-content: center; padding: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  font: 400 var(--vx-key-size)/calc(var(--vx) * 6) var(--vx-key-font); letter-spacing: 0; text-align: center;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-nav[data-vx-mark="seats"] a:hover, .vx-nav[data-vx-mark="seats"] a[aria-current]:not([aria-current="false"]) { color: var(--lit-legend, var(--vx-ink)); }
+.vx-nav[data-vx-mark="seats"] a[aria-disabled="true"] { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); }
+.vx-nav[data-vx-mark="seats"] a:focus-visible { outline-offset: calc(var(--vx) * -1); }
+
+/* plain: the groove is a painted line where it will be cut */
+.vx-nav[data-vx-mark="groove"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  content: ""; position: absolute; inset-inline: calc(var(--vx) * 2); inset-block-end: var(--vx); block-size: var(--vx);
+  background: var(--lit-accent, var(--vx-enamel));
+}
+.vx-nav[data-vx-mark="groove"][data-vx-way="down"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"])::before {
+  inset-block: calc(var(--vx) * 2); inset-inline: var(--vx) auto; inline-size: var(--vx); block-size: auto;
+}
+/* plain: a painted trench; the current seat is a painted key with the accent under it */
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) { background: var(--vx-slate); }
+.vx-nav[data-vx-mark="seats"]:not([data-vx-live]) a[aria-current]:not([aria-current="false"]) {
+  background: var(--vx-key, var(--vx-chalk));
+  box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-signal)), inset 0 0 0 var(--vx) var(--vx-slate);
+}
+
+
+/* ==== css/page.css ==== */
+
+/* ---------- Page ----------
+   The page itself: the ground every part stands on, and the column a site is laid out in.
+   Tool: none. Most of a page is words on the ground; parts stand on it where they belong.
+     <body class="vx-page">
+       <div class="vx-page-column">
+         <header class="vx-card vx-navbar-surface" data-vx-bolts="none">…the navbar…</header>
+         <main>…</main>
+         <footer class="vx-page-foot">…words and links…</footer>
+       </div>
+     </body>
+   --vx-page-width is the widest the column grows. The page clips sideways (overflow-x: clip),
+   so a part's shadow and light may pass its edge without the page scrolling. */
+
+html:has(> body.vx-page) { background: var(--vx-ground); overflow-x: clip; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.vx-page {
+  margin: 0;
+  min-block-size: 100dvh;
+  overflow-x: clip;
+  background: var(--vx-ground);
+  color: var(--vx-ink);
+  font: 400 1rem/1.55 var(--vx-font);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vx-page-column {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: calc(var(--vx) * 10);
+  box-sizing: border-box;
+  inline-size: 100%;
+  max-inline-size: var(--vx-page-width, calc(var(--vx) * 280));
+  min-block-size: 100dvh;
+  margin-inline: auto;
+  padding: calc(var(--vx) * 4) clamp(16px, 4vw, calc(var(--vx) * 10)) calc(var(--vx) * 8);
+}
+/* the foot keeps to the bottom of a short page */
+.vx-page-column > .vx-page-foot { align-self: end; }
+
+/* the foot: words and links on the ground, parted from what is above by a groove when it has one */
+.vx-page-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: calc(var(--vx) * 1) calc(var(--vx) * 8);
+  font-size: 0.875rem; color: var(--vx-ink-quiet);
+}
+.vx-page-foot :is(ul, ol) { display: flex; flex-wrap: wrap; gap: 0 calc(var(--vx) * 6); margin: 0; padding: 0; list-style: none; }
+/* a standalone link down here is still a 44 px target, though its words are small */
+.vx-page-foot a { display: inline-flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: inherit; text-underline-offset: 0.22em; }
+.vx-page-foot a:hover { color: var(--vx-ink); text-decoration-thickness: 2px; }
+.vx-page-foot a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+
+@media (max-width: 35rem) {
+  .vx-page-column { gap: calc(var(--vx) * 8); }
+}
+
+
+/* ==== css/prose.css ==== */
+
+/* ---------- Prose ----------
+   What an article is set in. One class on a container; everything inside is plain HTML:
+     <article class="vx-prose"> h2 h3 h4, p, a, ul ol dl, blockquote, small, code, hr … </article>
+   Tool: none. Words on the surface, in the text face. The one exception is a quote's rule, which
+   is a standing groove (src/components/prose.js draws it; with no script it is a painted line in
+   the same place).
+   Every line is a whole number of voxels tall, so what follows a paragraph lands on the grid. */
+
+.vx-prose {
+  --vx-measure: 33rem; /* about 65 characters of the text face at this size */
+  max-inline-size: var(--vx-measure);
+  color: var(--vx-ink);
+  font-family: var(--vx-font);
+  font-weight: 400;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  line-height: round(up, 1.6em, var(--vx)); /* 28 px: seven voxels */
+  min-inline-size: 0;
+  /* a long word or address wraps, and counts as able to wrap when a grid or a row measures the
+     article: it never pushes the page sideways */
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* ---- rhythm: space above a block, by what the block is ---- */
+
+.vx-prose :is(h2, h3, h4, p, ul, ol, dl, dd, blockquote, pre, figure, table, hr) { margin: 0; }
+.vx-prose :not(.vx-canvas) + :is(p, ul, ol, dl, blockquote, pre, table) { margin-block-start: calc(var(--vx) * 5); }
+/* what is set apart from the words (code, a picture, a table, a rule) gets more room */
+.vx-prose :not(.vx-canvas) + :is(figure, hr) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :not(.vx-canvas) + :where(.vx-code, .vx-figure, .vx-table, .vx-separator, .vx-groove) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :is(figure, hr) + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :is(.vx-code, .vx-figure, .vx-table, .vx-separator, .vx-groove) + :is(p, ul, ol, dl, blockquote, pre, table) { margin-block-start: calc(var(--vx) * 7); }
+.vx-prose :not(.vx-canvas) + h2 { margin-block-start: calc(var(--vx) * 12); }
+.vx-prose :not(.vx-canvas) + h3 { margin-block-start: calc(var(--vx) * 9); }
+.vx-prose :not(.vx-canvas) + h4 { margin-block-start: calc(var(--vx) * 7); }
+/* a heading belongs to what follows it */
+.vx-prose h2 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 3); }
+.vx-prose h3 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose h4 + :not(.vx-canvas) { margin-block-start: calc(var(--vx) * 1); }
+
+/* ---- headings: real h2 to h4 (the page's h1 is the page's own) ---- */
+
+.vx-prose :is(h2, h3, h4) { color: var(--vx-ink); font-family: var(--vx-font); text-wrap: balance; }
+.vx-prose h2 { font-size: 1.625rem; line-height: 1.25; line-height: round(up, 1.2em, var(--vx)); font-weight: 700; letter-spacing: -0.02em; }
+.vx-prose h3 { font-size: 1.3125rem; line-height: 1.3; line-height: round(up, 1.25em, var(--vx)); font-weight: 700; letter-spacing: -0.012em; }
+.vx-prose h4 { font-size: 1.0625rem; line-height: 1.6; line-height: round(up, 1.4em, var(--vx)); font-weight: 700; letter-spacing: 0; }
+
+/* ---- words ---- */
+
+.vx-prose :is(strong, b) { font-weight: 650; }
+.vx-prose a { color: var(--vx-link); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.2em; text-decoration-skip-ink: auto; }
+.vx-prose a:hover { text-decoration-thickness: 2px; }
+.vx-prose a:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: 2px; text-decoration-thickness: 2px; }
+/* code in a line of words is words too: the mono face, no box */
+.vx-prose :not(pre) > code { font-family: var(--vx-mono); font-size: 0.9em; overflow-wrap: anywhere; }
+.vx-prose :is(sup, sub) { font-size: 0.75em; line-height: 0; }
+.vx-prose abbr[title] { text-decoration: underline dotted; text-underline-offset: 0.2em; cursor: help; }
+.vx-prose :is(img, svg, video) { max-inline-size: 100%; block-size: auto; }
+
+/* small print: <small>, alone in a paragraph or among other words */
+.vx-prose small { font-size: 0.875rem; color: var(--vx-ink-quiet); }
+.vx-prose p:has(> small:only-child) { max-inline-size: 29rem; font-size: 0.875rem; line-height: 1.5; line-height: round(up, 1.5em, var(--vx)); }
+.vx-prose p:has(> small:only-child) > small { font-size: inherit; }
+
+/* ---- lists ---- */
+
+.vx-prose :is(ul, ol) { padding-inline-start: calc(var(--vx) * 6); }
+.vx-prose ul { list-style: square; }
+.vx-prose li { padding-inline-start: calc(var(--vx) * 1); }
+.vx-prose li::marker { color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.vx-prose li + li { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose li > :is(ul, ol) { margin-block-start: calc(var(--vx) * 2); }
+.vx-prose dt { font-weight: 650; }
+.vx-prose dd { color: var(--vx-ink-quiet); }
+.vx-prose dd + dt { margin-block-start: calc(var(--vx) * 3); }
+
+/* ---- a quote: larger words beside a standing groove ---- */
+
+.vx-prose blockquote {
+  position: relative;
+  isolation: isolate;
+  box-sizing: border-box;
+  padding-block: calc(var(--vx) * 1);
+  padding-inline: calc(var(--vx) * 5) 0;
+  /* the rule, where the groove is cut: the same colour as a groove with no voxels */
+  border-inline-start: var(--vx) solid color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent);
+  font-size: 1.1875rem;
+  line-height: 1.5;
+  line-height: round(up, 1.45em, var(--vx));
+  font-weight: 500;
+}
+.vx-prose blockquote[data-vx-live] { border-inline-start-color: transparent; }
+.vx-prose blockquote > :not(.vx-canvas) + p { margin-block-start: calc(var(--vx) * 3); }
+/* who said it */
+.vx-prose blockquote > :is(footer, cite) { display: block; font-size: 0.9375rem; line-height: 1.5; line-height: round(up, 1.5em, var(--vx)); font-weight: 400; font-style: normal; color: var(--vx-ink-quiet); }
+.vx-prose blockquote > :not(.vx-canvas) + footer { margin-block-start: calc(var(--vx) * 2); }
+
+/* ---- a rule: write <hr class="vx-groove"> for the groove itself; a bare <hr> is the painted line ---- */
+
+.vx-prose hr { block-size: var(--vx); border: 0; overflow: visible; /* a browser clips an hr: the groove's light must not be cut */ }
+.vx-prose hr:not(.vx-groove) { background: color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+
+/* a bare <pre> (no code block round it) still keeps to the page: it scrolls inside itself */
+.vx-prose > pre { overflow-x: auto; font: 400 0.875rem/1.45 var(--vx-mono); }
+
+
+/* ==== css/rotary.css ==== */
+
+.vx-rotary { position: relative; display: inline-block; isolation: isolate; width: 5rem; height: 5rem; --vx: 2px; }
+.vx-rotary input { position: absolute; inset: 0; z-index: 1; opacity: 0; width: 100%; height: 100%; margin: 0; touch-action: none; cursor: grab; }
+.vx-rotary input:active { cursor: grabbing; }
+.vx-rotary:has(:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: 5px; border-radius: 50%; }
+.vx-rotary:not([data-vx-live])::before { content: ""; position: absolute; inset: 4%; border-radius: 50%; background: repeating-radial-gradient(circle at center,transparent 0 1px,#7f613117 1.5px 2px),conic-gradient(from 60deg,#b49263,#efdaa7 58deg,#a08057 120deg,#ad8a5a 172deg,#f4deb2 235deg,#ac895e 290deg,#b49263); border: 4px solid #655747; box-shadow: inset 0 1px 2px #ffedcc, 0 3px 0 2px #35352e, 0 8px 10px #0007; }
+.vx-rotary:not([data-vx-live])::after { content: ""; position: absolute; inset: 10%; border-radius: 50%; background: linear-gradient(#24281f,#24281f) center 7% / 3px 25% no-repeat; transform: rotate(var(--angle,0rad)); }
+
+
+/* ==== css/select.css ==== */
+
+/* ---------- Select (native) ---------- */
+
+/* Tool: a key with a chevron. It opens the browser's own picker.
+   Markup: <span class="vx-select"><select id="region">…</select></span>
+           with a real <label for="region"> beside or above it.
+   The key is as wide as its longest choice; give .vx-select an inline-size to make it wider, and
+   a choice too long for it ends in an ellipsis. */
+
+.vx-select {
+  position: relative; isolation: isolate;
+  display: inline-flex; vertical-align: middle;
+  box-sizing: border-box; max-inline-size: 100%; justify-self: start;
+  min-block-size: calc(var(--vx) * 11); min-inline-size: calc(var(--vx) * 22);
+  color: var(--lit-legend, var(--vx-ink));
+}
+/* with voxels the part wraps the select in this span, which goes down with the cap */
+.vx-select-face { display: flex; flex: 1 1 auto; min-inline-size: 0; }
+.vx-select select {
+  appearance: none; -webkit-appearance: none;
+  box-sizing: border-box; flex: 1 1 auto; inline-size: 100%; min-inline-size: 0;
+  min-block-size: calc(var(--vx) * 11);
+  /* The words start five voxels in: four from the edge of the cap's top, which is a voxel
+     smaller all round. The far end keeps room for the chevron: five voxels (four on the top),
+     its 7, and 3 before it. */
+  padding: 0; padding-inline: calc(var(--vx) * 5) calc(var(--vx) * 15);
+  margin: 0; border: 0; border-radius: 0; background: none; outline: 0;
+  color: inherit;
+  /* a legend on a key: the key face */
+  font: 400 var(--vx-key-size)/1 var(--vx-key-font); letter-spacing: 0;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  text-overflow: ellipsis; white-space: nowrap;
+  cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+/* the rows of the picker are read, not pressed: the text face, in the page's ink on its surface
+   (where the browser draws the picker itself; a system picker keeps its own look) */
+.vx-select option, .vx-select optgroup { font: 500 1rem var(--vx-font); color: var(--vx-ink); background: var(--vx-chalk); }
+.vx-select select:disabled { cursor: default; color: var(--vx-ink-quiet); opacity: 1; }
+/* under its label in a field it stands two voxels further down than a well would: a keycap's
+   side and the light at its foot are drawn two and a half voxels above its face, and must not
+   lie on the label's words */
+.vx-field > .vx-select { margin-block-start: calc(var(--vx) * 2); }
+.vx-select:has(select:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
+
+/* at night the legend shines through, and flares with the light as the key goes down (--lit is
+   set by the part, 0 to 1), as on the look's other keys */
+[data-vx-look="lit"] .vx-select[data-vx-live] select:not(:disabled) {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+
+/* plain: a painted cap with a painted chevron, the same box */
+.vx-select:not([data-vx-live]) { background: var(--vx-key, var(--vx-chalk)); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow), inset 0 0 0 1px var(--vx-chalk-side); }
+.vx-select:not([data-vx-live]):has(select:disabled) { background: var(--vx-steel); box-shadow: none; }
+.vx-select:not([data-vx-live])::after {
+  content: ""; position: absolute; pointer-events: none;
+  inset-inline-end: calc(var(--vx) * 5); inset-block-start: calc(50% - var(--vx) * 2);
+  inline-size: calc(var(--vx) * 7); block-size: calc(var(--vx) * 4);
+  background: currentColor;
+  --_u: var(--vx);
+  clip-path: polygon(
+    0 0, var(--_u) 0, var(--_u) var(--_u), calc(var(--_u) * 2) var(--_u), calc(var(--_u) * 2) calc(var(--_u) * 2), calc(var(--_u) * 3) calc(var(--_u) * 2), calc(var(--_u) * 3) calc(var(--_u) * 3),
+    calc(var(--_u) * 4) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 2), calc(var(--_u) * 5) var(--_u), calc(var(--_u) * 6) var(--_u), calc(var(--_u) * 6) 0, calc(var(--_u) * 7) 0,
+    calc(var(--_u) * 7) var(--_u), calc(var(--_u) * 6) var(--_u), calc(var(--_u) * 6) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 2), calc(var(--_u) * 5) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 3), calc(var(--_u) * 4) calc(var(--_u) * 4),
+    calc(var(--_u) * 3) calc(var(--_u) * 4), calc(var(--_u) * 3) calc(var(--_u) * 3), calc(var(--_u) * 2) calc(var(--_u) * 3), calc(var(--_u) * 2) calc(var(--_u) * 2), var(--_u) calc(var(--_u) * 2), var(--_u) var(--_u), 0 var(--_u));
+}
+.vx-select:not([data-vx-live]):has(select:disabled)::after { color: var(--vx-ink-quiet); }
+.vx-select:not([data-vx-live]):has(select:active:not(:disabled)) { translate: calc(var(--vx) * 0.5) calc(var(--vx) * 0.5); box-shadow: inset 0 0 0 1px var(--vx-chalk-side); }
+
+
+/* ==== css/table.css ==== */
+
+/* ---------- Table ----------
+   Words on the surface, in rows and columns. Tool: none. One groove between the head and the
+   body (src/components/table.js cuts it; with no script it is the head's own bottom border, in
+   the same place). Rows are parted by a hairline in --vx-slate. No box round it, no stripes.
+     <div class="vx-table">
+       <div class="vx-table-scroll" tabindex="0" role="region" aria-labelledby="deploys-caption">
+         <table>
+           <caption id="deploys-caption">Deploys this week <small>What it is, said quietly</small></caption>
+           <thead><tr><th scope="col">Service</th><th scope="col" class="vx-num">Builds</th></tr></thead>
+           <tbody><tr><th scope="row">harbor-api</th><td class="vx-num">14</td></tr></tbody>
+           <tfoot>…</tfoot>
+         </table>
+       </div>
+     </div>
+   A table wider than its place scrolls inside .vx-table-scroll, which takes focus so the arrow
+   keys can move it; the page never moves sideways. A cell keeps to one line, so a table too wide
+   for its place scrolls before its words are broken up; .vx-wrap on a cell lets a sentence in it
+   wrap. .vx-num on a cell: a number, set to the end. data-vx-size="small" on .vx-table: rows
+   closer together.
+   Every row of the caption and the head is a whole number of voxels tall, so the groove lands on
+   the grid. */
+
+/* as wide as its place: it is a container (the caption is sized by it), so it has no width of its
+   own to fall back on in a row or a grid */
+.vx-table { position: relative; isolation: isolate; display: block; box-sizing: border-box; inline-size: 100%; min-inline-size: 0; max-inline-size: 100%; container-type: inline-size; --_pad: calc(var(--vx) * 3); }
+.vx-table[data-vx-size="small"] { --_pad: calc(var(--vx) * 2); }
+.vx-table-scroll { overflow-x: auto; scrollbar-width: thin; scrollbar-color: var(--vx-steel) transparent; }
+.vx-table-scroll:focus { outline: 0; }
+.vx-table:has(.vx-table-scroll:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+
+.vx-table table {
+  inline-size: 100%;
+  border-collapse: separate; /* each cell's border is its own: the head's is where the groove is cut */
+  border-spacing: 0;
+  color: var(--vx-ink);
+  font: 400 0.9375rem/1.4 var(--vx-font);
+  line-height: round(up, 1.3em, var(--vx)); /* 20 px: five voxels a line */
+  font-variant-numeric: tabular-nums;
+  text-align: start;
+  white-space: nowrap; /* a cell is one line; the table scrolls before its words are broken up */
+  overflow-wrap: normal;
+}
+
+.vx-table caption {
+  caption-side: top;
+  padding: 0 0 calc(var(--vx) * 2);
+  text-align: start;
+  font-size: 1rem;
+  line-height: 1.5;
+  line-height: round(up, 1.5em, var(--vx)); /* 24 px: six voxels a line */
+  font-weight: 650;
+  color: var(--vx-ink);
+  white-space: normal;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+  /* the caption keeps to the place the table is shown in, and stays put while the table scrolls */
+  position: sticky;
+  inset-inline-start: 0;
+  max-inline-size: 100cqi;
+}
+/* what the table is, said quietly under its name */
+.vx-table caption small { display: block; font-size: 0.875rem; line-height: 1.4; line-height: round(up, 1.4em, var(--vx)); font-weight: 400; color: var(--vx-ink-quiet); text-wrap: pretty; }
+
+.vx-table :is(th, td) { padding: var(--_pad) calc(var(--vx) * 3); text-align: start; vertical-align: top; font-weight: 400; }
+/* with no box round the table, the first and last columns stand on the edge of the words above */
+.vx-table :is(th, td):first-child { padding-inline-start: 0; }
+.vx-table :is(th, td):last-child { padding-inline-end: 0; }
+.vx-table .vx-num { text-align: end; }
+.vx-table .vx-wrap { white-space: normal; min-inline-size: calc(var(--vx) * 50); text-wrap: pretty; }
+
+/* the head: quiet words, then the groove */
+.vx-table thead th {
+  padding-block: calc(var(--vx) * 2);
+  vertical-align: bottom;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  line-height: round(up, 1.5em, var(--vx)); /* 20 px */
+  font-weight: 600;
+  color: var(--vx-ink-quiet);
+}
+.vx-table thead tr:last-child th { border-block-end: var(--vx) solid color-mix(in oklab, var(--lit-warm, var(--vx-steel)) 55%, transparent); }
+.vx-table[data-vx-live] thead tr:last-child th { border-block-end-color: transparent; }
+
+/* the body: the first cell of a row names it; rows are parted by a hairline */
+.vx-table tbody th { font-weight: 600; }
+.vx-table tbody tr + tr > :is(th, td) { border-block-start: 1px solid var(--vx-slate); }
+.vx-table td small, .vx-table tbody th small { display: block; font-size: 0.8125rem; font-weight: 400; color: var(--vx-ink-quiet); }
+
+/* the foot: what the rows come to, under a hairline of its own */
+.vx-table tfoot :is(th, td) { border-block-start: 1px solid var(--vx-steel); font-weight: 600; }
+
+
+/* ==== css/toggle-button.css ==== */
+
+/* ---------- Toggle button ---------- */
+
+/* The latch uses the same cap profile and switch travel as a momentary key. */
+.vx-toggle-button {
+  --_face: var(--vx-key, var(--vx-chalk));
+  --_top: var(--vx-chalk-top);
+  --_side: var(--vx-chalk-side);
+  --_on: var(--lit-legend, var(--vx-ink));
+  --_lift: calc(var(--vx) * 1.5);
+
+  position: relative;
+  isolation: isolate;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11);
+  min-inline-size: calc(var(--vx) * 11);
+  padding: 0 calc(var(--vx) * 5);
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--_on);
+  font: 400 var(--vx-key-size)/1 var(--vx-key-font);
+  letter-spacing: 0;
+  white-space: nowrap; /* a key carries one line */
+  text-decoration: none;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-toggle-button:is(:disabled, [aria-disabled="true"]) { --_face: var(--vx-steel); --_top: var(--vx-steel); --_side: var(--vx-steel); --_on: var(--vx-ink-quiet); --_lift: 0px; cursor: default; }
+.vx-toggle-button:is(:disabled, [aria-disabled="true"]) .vx-label { opacity: 0.6; }
+.vx-toggle-button .vx-label { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); position: relative; }
+.vx-toggle-button:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 2); }
+
+/* at night the legend shines through, as a key's does; --lit is set by the part, and is held
+   above nothing while the key is on */
+[data-vx-look="lit"] .vx-toggle-button[data-vx-live]:not(:disabled, [aria-disabled="true"]) .vx-label {
+  text-shadow: 0 0 calc((6px + var(--lit, 0) * 10px) * var(--lit-night)) color-mix(in oklab, var(--lit-accent), transparent calc(100% - var(--lit-night) * (55% + var(--lit, 0) * 40%)));
+}
+
+/* plain: the face is a painted box; two borders stand in for the top and the side */
+.vx-toggle-button:not([data-vx-live]) { background: var(--_face); box-shadow: calc(var(--vx) * 0.75) calc(var(--vx) * 1) 0 var(--vx-shadow); }
+.vx-toggle-button:not([data-vx-live])::before {
+  content: "";
+  position: absolute;
+  inset: calc(var(--_lift) * -1) 0 0 calc(var(--_lift) * -1);
+  border-top: var(--_lift) solid var(--_top);
+  border-left: var(--_lift) solid var(--_side);
+  border-right: var(--_lift) solid transparent;
+  border-bottom: var(--_lift) solid transparent;
+  box-sizing: border-box;
+  z-index: -1;
+  pointer-events: none;
+}
+/* The shutter is a dark, unlit slit until the switch latches. */
+.vx-toggle-button:not([data-vx-live]):not(:disabled, [aria-disabled="true"])::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(#545951, #343a33) center calc(100% - var(--vx)) / calc(var(--vx) * 4) var(--vx) no-repeat;
+}
+/* plain, down: while it is held, and for as long as it is on */
+.vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"]) { --_lift: calc(var(--vx) * 0.5); transform: translate(calc(var(--vx) * -1), calc(var(--vx) * -1)); box-shadow: 0 0 0 var(--vx-shadow); }
+/* plain: painted down, it lies a voxel up and left of its own box. What can be hit stays where the box is. */
+.vx-toggle-button:not([data-vx-live]):is(:active, [aria-pressed="true"]):not(:disabled, [aria-disabled="true"])::after { content: ""; position: absolute; inset: 0 calc(var(--vx) * -1) calc(var(--vx) * -1) 0; }
+/* plain, on: the accent's light all round its foot */
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"]) { --_top: var(--lit-accent, var(--vx-enamel)); --_side: var(--lit-accent, var(--vx-enamel)); box-shadow: 0 0 0 calc(var(--vx) * 0.5) var(--lit-accent, var(--vx-enamel)); }
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:not(:disabled, [aria-disabled="true"])::after {
+  background: linear-gradient(var(--lit-accent), var(--lit-accent)) center calc(100% - var(--vx) * 2) / calc(var(--vx) * 4) var(--vx) no-repeat;
+}
+/* plain, off while on: a dent, no light */
+.vx-toggle-button:not([data-vx-live])[aria-pressed="true"]:is(:disabled, [aria-disabled="true"]) { box-shadow: inset 0 0 0 calc(var(--vx) * 0.5) var(--vx-slate); }
+
+
+/* ==== css/toggle-group.css ==== */
+
+/* ---------- Toggle group ---------- */
+
+.vx-toggle-group { position: relative; isolation: isolate; max-inline-size: 100%; box-sizing: border-box; }
+
+/* Several of many: a bank of toggle buttons, three voxels apart as the keys of a button group
+   are (nearer, each cap's side would be drawn over the one before it). On a narrow page they wrap. */
+.vx-toggle-group[role="toolbar"] { display: inline-flex; flex-wrap: wrap; gap: calc(var(--vx) * 3); }
+.vx-toggle-group[role="toolbar"][data-vx-way="down"] { flex-direction: column; align-items: stretch; }
+
+/* One of many: a slot of equal seats over real radio buttons, a latching keycap in each; the
+   chosen one is latched down. In voxels the slot has a bezel, which reaches two voxels past this
+   box on every side. */
+.vx-toggle-group:not([role="toolbar"]) { display: inline-grid; grid-auto-flow: column; grid-auto-columns: 1fr; }
+.vx-toggle-group:not([role="toolbar"])[data-vx-way="down"] { grid-auto-flow: row; grid-auto-columns: auto; }
+.vx-toggle-group > label {
+  position: relative;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-block-size: calc(var(--vx) * 11);
+  /* Two voxels above and below the words and a line of six: a seat of one line is 11 voxels
+     (its words where a key's and a tab's are, measured), one of two lines is 16. On the grid. */
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 5);
+  color: var(--vx-ink-quiet);
+  font: 400 var(--vx-key-size)/calc(var(--vx) * 6) var(--vx-key-font);
+  letter-spacing: 0;
+  text-align: center;
+  overflow-wrap: anywhere; /* a seat is narrower than its words on a phone: they wrap */
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+.vx-toggle-group[data-vx-size="small"] > label { padding-inline: calc(var(--vx) * 2); }
+.vx-toggle-group > label > .vx-label { display: inline-block; }
+/* the real control lies over the whole seat, so the whole seat is the target */
+.vx-toggle-group > label > input { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.vx-toggle-group > label:has(input:checked) { color: var(--lit-legend, var(--vx-ink)); }
+.vx-toggle-group > label:has(input:disabled) { cursor: default; }
+.vx-toggle-group > label:has(input:disabled) > input { cursor: default; }
+.vx-toggle-group > label:has(input:disabled) { color: color-mix(in oklab, var(--vx-ink-quiet) 60%, transparent); }
+.vx-toggle-group > label:has(input:focus-visible) { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1); }
+
+/* plain: a painted slot; the chosen seat is a key in it with the accent under it */
+.vx-toggle-group:not([role="toolbar"]):not([data-vx-live]) { background: var(--vx-slate); }
+.vx-toggle-group:not([data-vx-live]) > label:has(input:checked) { background: var(--vx-key, var(--vx-chalk)); box-shadow: inset 0 calc(var(--vx) * -0.5) 0 var(--lit-accent, var(--vx-enamel)); }
+.vx-toggle-group:not([data-vx-live]) > label:has(input:checked:disabled) { background: var(--vx-steel); box-shadow: none; }

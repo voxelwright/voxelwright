@@ -1,0 +1,277 @@
+/* Lost in the fog: the 404 page. The city's poster (landing/ina.webp) under the marine layer,
+   with a park sign holding the ways out. Everything here is scoped to that page.
+
+   The fog stands still in CSS: a veil and four banks. That is the whole picture without a script
+   and under reduced motion. With motion allowed, lost/fog.js paints the same veil and banks on a
+   canvas, drifts them, and the CSS banks step aside (.lost[data-fog="live"]).
+
+   Colours: the fog's follow the 3D marine layer in landing/fog.js (grey-blue by day; navy at
+   night, lit orange from the city below). The sign's are the park directory's enamel, brass and
+   cream from landing/sign-paint.js. */
+
+.lost {
+  --fog: #dbe0e5;
+  --fog-crest: #f6f6f3;
+  --fog-deep: #c9d0d7;
+  --glow: rgb(255 214 170 / 0);
+  --city: saturate(0.72) brightness(1.04) contrast(0.92);
+  --sky: rgb(222 226 230 / 0.55);
+
+  --enamel: #123d39;
+  --enamel-lit: #21524a;
+  --rim: #c4c599;
+  --cream: #fff1ce;
+  --cream-quiet: #f3ead0; /* 7.4:1 on the lightest enamel */
+  --brass: #f6cb73;
+  --plate: #082a29;
+  --plate-lit: #eec17e;
+  --plate-pressed: #ddaa54;
+  --rivet: #76877a;
+  --rivet-lit: #d8dac0;
+  --post: #2b3530;
+  --post-lit: #56665b;
+}
+/* night: the system's, unless the Night key said day; or the Night key's */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .lost {
+    --fog: #2c3651;
+    --fog-crest: #1c2337;
+    --fog-deep: #6e4a33;
+    --glow: rgb(255 124 32 / 0.46);
+    --city: brightness(0.3) saturate(0.5) contrast(1.2);
+    --sky: rgb(12 16 34 / 0.62);
+  }
+}
+:root[data-theme="dark"] .lost {
+  --fog: #2c3651;
+  --fog-crest: #1c2337;
+  --fog-deep: #6e4a33;
+  --glow: rgb(255 124 32 / 0.46);
+  --city: brightness(0.3) saturate(0.5) contrast(1.2);
+  --sky: rgb(12 16 34 / 0.62);
+}
+
+/* ---- the page: bar on top, the sign standing low, the foot on the ground ---- */
+body[data-page="not-found"] .vx-page-column { grid-template-rows: auto 1fr auto; }
+body[data-page="not-found"] main { align-content: end; }
+.lost {
+  display: grid;
+  align-items: end;
+  padding-block: calc(var(--vx) * 10) clamp(calc(var(--vx) * 10), 9dvh, calc(var(--vx) * 24));
+}
+
+/* ---- the scene: fixed behind the page, never taking a press ---- */
+.lost-scene {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  background: var(--fog);
+}
+.lost-scene > * { position: absolute; inset: 0; inline-size: 100%; block-size: 100%; }
+.lost-city {
+  object-fit: cover;
+  object-position: 28% 30%;
+  filter: var(--city);
+  transition: filter 300ms ease;
+}
+/* the city's own light at night, caught in the fog: the bank glows from below */
+.lost-glow {
+  z-index: 1;
+  background:
+    radial-gradient(75% 34% at 34% 86%, var(--glow), transparent 74%),
+    radial-gradient(50% 26% at 84% 76%, var(--glow), transparent 72%),
+    radial-gradient(40% 20% at 62% 64%, color-mix(in srgb, var(--glow) 50%, transparent), transparent 70%);
+  mix-blend-mode: screen;
+}
+.lost-scene::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  /* the veil: a grey sky, the footings sunk, thick at the foot of the page */
+  background: linear-gradient(
+    to bottom,
+    var(--sky) 0%,
+    color-mix(in srgb, var(--fog) 26%, transparent) 30%,
+    color-mix(in srgb, var(--fog) 46%, transparent) 45%,
+    color-mix(in srgb, var(--fog) 80%, transparent) 60%,
+    color-mix(in srgb, var(--fog) 92%, transparent) 76%,
+    var(--fog-deep) 100%
+  );
+}
+.lost[data-fog="live"] .lost-scene::after { display: none; }
+
+/* the banks: soft ellipses in three depths, the nearest the thickest */
+.lost-banks > i { position: absolute; inset-inline: -12%; display: block; }
+.lost-banks > i:nth-child(1) {
+  inset-block: 18% 60%;
+  background:
+    radial-gradient(28% 34% at 14% 52%, color-mix(in srgb, var(--fog-crest) 38%, transparent), transparent 72%),
+    radial-gradient(34% 30% at 52% 38%, color-mix(in srgb, var(--fog-crest) 26%, transparent), transparent 72%),
+    radial-gradient(26% 40% at 86% 60%, color-mix(in srgb, var(--fog-crest) 34%, transparent), transparent 72%);
+}
+.lost-banks > i:nth-child(2) {
+  inset-block: 40% 26%;
+  background:
+    radial-gradient(30% 46% at 8% 60%, color-mix(in srgb, var(--fog) 78%, transparent), transparent 70%),
+    radial-gradient(26% 40% at 36% 48%, color-mix(in srgb, var(--fog) 62%, transparent), transparent 70%),
+    radial-gradient(32% 50% at 64% 64%, color-mix(in srgb, var(--fog) 74%, transparent), transparent 70%),
+    radial-gradient(24% 38% at 92% 46%, color-mix(in srgb, var(--fog) 60%, transparent), transparent 70%);
+}
+.lost-banks > i:nth-child(3) {
+  inset-block: 54% 8%;
+  background:
+    radial-gradient(34% 44% at 22% 56%, color-mix(in srgb, var(--fog) 86%, transparent), transparent 70%),
+    radial-gradient(28% 40% at 54% 40%, color-mix(in srgb, var(--fog) 70%, transparent), transparent 70%),
+    radial-gradient(36% 48% at 84% 58%, color-mix(in srgb, var(--fog) 84%, transparent), transparent 70%);
+}
+.lost-banks > i:nth-child(4) {
+  inset-block: 70% -6%;
+  background:
+    radial-gradient(40% 50% at 10% 50%, color-mix(in srgb, var(--fog-deep) 92%, transparent), transparent 72%),
+    radial-gradient(34% 44% at 46% 60%, color-mix(in srgb, var(--fog-deep) 86%, transparent), transparent 72%),
+    radial-gradient(40% 52% at 88% 46%, color-mix(in srgb, var(--fog-deep) 92%, transparent), transparent 72%);
+}
+.lost[data-fog="live"] .lost-banks { display: none; }
+
+/* ---- the sign: the park directory's enamel, standing on two posts that vanish in the fog ---- */
+.lost-sign {
+  position: relative;
+  z-index: 1;
+  box-sizing: border-box;
+  --inset: clamp(0px, 5vw - 16px, 4rem);
+  inline-size: min(100% - var(--inset), 35rem);
+  margin-inline-start: var(--inset);
+  padding: calc(var(--vx) * 9) calc(var(--vx) * 9) calc(var(--vx) * 8);
+  color: var(--cream);
+  background:
+    radial-gradient(circle at 22px 23px, var(--rivet-lit) 0 2.5px, var(--rivet) 3px 6px, transparent 6.5px),
+    radial-gradient(circle at calc(100% - 22px) 23px, var(--rivet-lit) 0 2.5px, var(--rivet) 3px 6px, transparent 6.5px),
+    radial-gradient(circle at 22px calc(100% - 23px), var(--rivet-lit) 0 2.5px, var(--rivet) 3px 6px, transparent 6.5px),
+    radial-gradient(circle at calc(100% - 22px) calc(100% - 23px), var(--rivet-lit) 0 2.5px, var(--rivet) 3px 6px, transparent 6.5px),
+    linear-gradient(160deg, var(--enamel-lit), var(--enamel) 62%);
+  outline: 3px solid var(--rim);
+  outline-offset: -14px;
+  /* the board's edge, then its shadow on the fog */
+  box-shadow: 0 7px 0 #0b2522, 0 34px 60px -22px rgb(0 0 0 / 0.5);
+}
+.lost-sign::before,
+.lost-sign::after {
+  content: "";
+  position: absolute;
+  inset-block-start: calc(100% + 7px);
+  inline-size: 16px;
+  /* short enough never to reach past the foot, however tall the screen */
+  block-size: min(16dvh, 7rem);
+  background: linear-gradient(90deg, var(--post), var(--post-lit) 45%, var(--post));
+  mask-image: linear-gradient(#000 0, transparent 100%);
+}
+.lost-sign::before { inset-inline-start: 18%; }
+.lost-sign::after { inset-inline-end: 18%; }
+
+.lost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--vx) * 4);
+  margin: 0 0 calc(var(--vx) * 4);
+  font: 700 0.8125rem/1.2 var(--vx-font);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--brass);
+}
+.lost-code {
+  padding: 0.3em 0.55em 0.25em 0.65em;
+  border: 2px solid var(--brass);
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
+}
+.lost-title {
+  margin: 0;
+  font: 560 clamp(2.125rem, 4.4vw, 3.25rem)/1.05 var(--vx-serif);
+  font-optical-sizing: auto;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+}
+.lost-note {
+  margin: calc(var(--vx) * 4) 0 calc(var(--vx) * 7);
+  max-inline-size: 30rem;
+  font-size: 1.0625rem;
+  line-height: 1.5;
+  color: var(--cream-quiet);
+  text-wrap: pretty;
+}
+.lost-path {
+  padding: 0.05em 0.3em;
+  font: 500 0.9em/1.4 var(--vx-mono);
+  color: var(--brass);
+  background: rgb(0 0 0 / 0.22);
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+
+/* the plates: dark until pointed at, focused or pressed, then brass, as on the directory */
+.lost-ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: calc(var(--vx) * 2); }
+.lost-ways a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-block-size: calc(var(--vx) * 13);
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4);
+  font: 650 1.0625rem/1.2 var(--vx-font);
+  text-align: center;
+  text-decoration: none;
+  color: var(--cream);
+  background: var(--plate);
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 150ms ease, color 150ms ease, transform 140ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.lost-ways .lost-home { grid-column: 1 / -1; }
+@media (hover: hover) and (pointer: fine) {
+  .lost-ways a:hover { color: var(--plate); background: var(--plate-lit); }
+}
+.lost-ways a:focus-visible {
+  color: var(--plate);
+  background: var(--plate-lit);
+  outline: 3px solid var(--plate);
+  outline-offset: -8px;
+}
+.lost-ways a:active { color: var(--plate); background: var(--plate-pressed); transform: scale(0.97); }
+@media (prefers-reduced-motion: reduce) {
+  .lost-ways a:active { transform: none; }
+  .lost-city { transition: none; }
+}
+
+/* ---- the foot stands on the ground, the fog thinning into it ---- */
+body[data-page="not-found"] .site-foot { position: relative; z-index: 1; border-block-start: 0; }
+body[data-page="not-found"] .site-foot::before,
+body[data-page="not-found"] .site-foot::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  /* the foot is centred in the page, so this spans the screen */
+  inset-inline: calc(50% - 50vw);
+  pointer-events: none;
+}
+body[data-page="not-found"] .site-foot::before {
+  inset-block-end: 100%;
+  block-size: calc(var(--vx) * 16);
+  background: linear-gradient(transparent, var(--vx-ground));
+}
+/* down to the column's own bottom padding, so nothing scrolls */
+body[data-page="not-found"] .site-foot::after { inset-block: 0 calc(var(--vx) * -8); background: var(--vx-ground); }
+
+@media (max-width: 35rem) {
+  .lost-sign { padding: calc(var(--vx) * 8) calc(var(--vx) * 6) calc(var(--vx) * 7); }
+  .lost-ways a { font-size: 1rem; padding-inline: calc(var(--vx) * 2); }
+}
+
+/* forced colours: the system draws the sign; the picture and its fog stay out of the way */
+@media (forced-colors: active) {
+  .lost-scene { display: none; }
+  .lost-sign { outline-color: CanvasText; }
+  .lost-sign::before, .lost-sign::after { display: none; }
+}

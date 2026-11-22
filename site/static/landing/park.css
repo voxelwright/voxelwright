@@ -1,0 +1,382 @@
+/* The landing. The plain page is the site's: the kit's ground, bar and foot (generator/pages.mjs),
+   its lettering for the name, its recess for the view, its list for recent writing, its keys.
+   This sheet lays them out. In the city (data-scene) the scene draws everything and this page's
+   own controls become invisible hit targets on the painted signs (below). */
+.overlook {
+  --paper: var(--vx-ground);
+  --ink: var(--vx-ink);
+  --muted: var(--vx-ink-quiet);
+  --hair: var(--vx-slate);
+  --serif: var(--vx-serif);
+  --sans: var(--vx-font);
+  --margin: clamp(1.1rem, 4.4vw, 5rem); /* the city's own inset for what it lays over the view */
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(var(--vx) * 8);
+  color: var(--ink);
+}
+.overlook [hidden],
+.scene-only {
+  display: none !important;
+}
+.overlook a {
+  color: inherit;
+}
+.overlook-title {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: calc(var(--vx) * 4);
+  padding-block-start: calc(var(--vx) * 6);
+  padding-inline-end: calc(60px + 1rem); /* room for the support character's dock */
+}
+.overlook-title > div:not(.bearing) { display: grid; gap: calc(var(--vx) * 5); justify-items: start; }
+.bearing {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex: none;
+  font: 400 0.8125rem/1.4 var(--vx-mono);
+  color: var(--muted);
+}
+.bearing i {
+  display: inline-block;
+  transform: rotate(120deg);
+}
+.bearing i::after {
+  content: "▲";
+}
+.park {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: calc(var(--vx) * 4);
+  margin: 0;
+  min-width: 0;
+}
+/* the view is a picture set in the kit's recess (it gets .vx-recess on the plain page) */
+.park-view {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+.park-skyline {
+  display: block;
+  width: 100%;
+  height: clamp(12rem, 30vw, 34rem);
+  object-fit: cover;
+}
+/* the directory: the same two places as the bar, set as the park sign's words */
+.park-sign {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 calc(var(--vx) * 8);
+}
+.park-sign a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font: 600 1.375rem/1.2 var(--serif);
+  color: var(--vx-link);
+  text-underline-offset: 0.18em;
+}
+.park-caption {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--vx) * 1);
+}
+.park-caption strong {
+  font: 600 1.5rem/1.25 var(--serif);
+}
+.park-caption span,
+.park-credit {
+  color: var(--muted);
+}
+.park-caption-actions { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 4); margin-block-start: calc(var(--vx) * 3); }
+.park-caption-actions:not(:has(> :not([hidden]))) { display: none; }
+.park-writing {
+  display: grid;
+  gap: calc(var(--vx) * 3);
+}
+.park-writing h2 {
+  margin: 0;
+  font: 600 0.875rem/1.4 var(--vx-mono);
+  color: var(--muted);
+}
+.park-credit {
+  max-width: 40rem;
+  padding-block-start: calc(var(--vx) * 4);
+  border-block-start: 1px solid var(--hair);
+}
+.park-credit summary {
+  cursor: pointer;
+  width: fit-content;
+  line-height: 2.75rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+.park-credit p {
+  max-width: 65ch;
+  margin: 0 0 1rem;
+}
+.overlook :focus-visible {
+  outline: 2px solid var(--vx-focus);
+  outline-offset: 2px;
+}
+@media (max-width: 640px) {
+  .bearing {
+    display: none;
+  }
+  /* the name in smaller voxels, so it keeps clear of the support character */
+  .overlook-title .vx-sign { --vx: 3px; }
+}
+
+/* The support character's dock, beside the name on the plain page. */
+[data-page="home"] main { position: relative; }
+#support-dock {
+  position: absolute;
+  inset: calc(var(--vx) * 6) 0 auto auto;
+  width: 60px;
+  height: clamp(15rem, 25vw, 25rem);
+  pointer-events: none;
+}
+
+/* In the city the overlook is the whole window: the page's column, bar and foot step aside. */
+body:has(.overlook[data-scene]) :is(.site-bar, .site-foot) { display: none; }
+body:has(.overlook[data-scene]) .vx-page-column { max-inline-size: none; padding: 0; gap: 0; }
+body:has(:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene]))) .vx-page-column { max-inline-size: none; padding: 0; gap: 0; }
+body:has(:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene]))) :is(.site-bar, .site-foot) { display: none; }
+
+/* Only the plain document flows. Both the surveyed still and the live renderer
+   own the whole viewport, including on browsers with retractable address bars. */
+.overlook[data-scene] {
+  position: relative;
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: #8db9df;
+}
+[data-scene] .park-view {
+  position: absolute;
+  inset: 0;
+}
+[data-scene] .park-canvas,
+[data-scene] .park-still {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+[data-scene] .park-skyline {
+  position: absolute;
+  max-width: none;
+}
+[data-scene][data-live] .park-skyline {
+  visibility: hidden;
+}
+body:has(.overlook[data-scene]) support-button:not([data-summoned]),
+[data-scene] :is(.park-writing, .park-credit) {
+  display: none;
+}
+[data-scene] .overlook-title,
+[data-scene] .park-caption > :not(.offline-car) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  padding: 0;
+  margin: 0;
+}
+[data-scene]
+  :is(
+    .park-sign,
+    .park-tools,
+    .park figcaption,
+    .park-caption,
+    .display-settings,
+    .view-panel,
+    .view-panel fieldset
+  ) {
+  display: contents;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+[data-scene] .view-panel legend {
+  display: none;
+}
+/* Native links and inputs occupy the projected faces. All visible ink, edges,
+   fixtures and feedback are drawn by the scene. */
+[data-scene] [data-sign] {
+  display: none !important;
+  position: absolute;
+  z-index: 1;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-height: 0;
+  max-width: none;
+  opacity: 0;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+[data-scene] [data-sign][data-hit]:not([hidden]) {
+  display: block !important;
+}
+[data-scene] [data-sign] :is(select, input) {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+[data-scene] [data-sign="scale"] input {
+  left: 42%;
+  width: 36%;
+}
+[data-scene] [data-sign] .breakable-b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 25%;
+}
+[data-scene] .egg-status {
+  position: absolute;
+  bottom: 0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  pointer-events: none;
+}
+[data-scene] .egg-status:not(:empty) {
+  padding: 0.35rem 0.8rem;
+  background: #153a32;
+  color: #fff3d4;
+  border: 1px solid #d4bd84;
+  width: max-content;
+  max-width: 90vw;
+}
+[data-scene] .park-log:not(:target) {
+  display: none;
+}
+[data-scene] .park-log:target {
+  position: absolute;
+  z-index: 3;
+  inset: auto 1rem 1rem;
+  margin: auto;
+  max-width: 32rem;
+  padding: 1.25rem;
+  max-height: 85%;
+  overflow: auto;
+  background: var(--paper);
+  border: 2px solid var(--hair);
+}
+body:has(.overlook[data-scene]) #support-dock {
+  position: fixed;
+  inset: auto;
+  top: var(--dock-y, 40%);
+  left: var(--dock-x, 50%);
+  width: 60px;
+  height: 64px;
+}
+[data-scene] [data-sign] {
+  z-index: 3;
+}
+[data-scene] [data-sign="blog"],
+[data-scene] [data-sign="voxel"] {
+  z-index: 1;
+}
+[data-scene] .fixture-face {
+  z-index: 2;
+  cursor: default;
+}
+/* The poster and ordinary anchors also work while the scene modules arrive. From the first
+   paint: the head's early script marks a page that will try the city (data-city on <html>). */
+:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene])) .park-view {
+  height: 100vh;
+  height: 100dvh;
+}
+:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene])) .park-skyline {
+  height: 100%;
+}
+:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene])) .overlook-title {
+  position: absolute;
+  clip-path: inset(50%);
+}
+:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene])) .park-sign {
+  position: absolute;
+  left: var(--margin);
+  bottom: 5%;
+  width: auto;
+  padding: 0.35rem 1rem;
+  background: #173d32;
+  color: #fff1ce;
+}
+:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene])) .park-sign a { color: inherit; }
+body:has(:is(.overlook[data-starting], :root[data-city] .overlook:not([data-scene]))) support-button {
+  display: none;
+}
+
+/* On the plain page the directory is the park's own sign, standing in the corner of the view as
+   it stands in the city: the same green plate and cream words the scene paints. */
+:root:not([data-city]) .overlook:not([data-scene], [data-starting]) .park-view > .park-sign {
+  position: absolute;
+  inset: auto auto calc(var(--vx) * 4) calc(var(--vx) * 4);
+  padding: calc(var(--vx) * 1) calc(var(--vx) * 5);
+  background: #173d32;
+  box-shadow: inset 0 0 0 2px #d4bd84, calc(var(--vx) * 1) calc(var(--vx) * 1.5) 0 var(--vx-shadow);
+}
+:root:not([data-city]) .overlook:not([data-scene], [data-starting]) .park-view > .park-sign a { color: #fff1ce; }
+
+/* Postcards (static/landing/postcard.js). The shutter is a white flash over the view that
+   lands with the press and fades as the print comes out. It is rare, so it may be felt; under
+   reduced motion it is left out and the preview only fades in. */
+.postcard-flash {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+}
+.postcard-flash[data-on] { opacity: 0.88; }
+.postcard-flash[data-fade] { transition: opacity 420ms var(--vx-ease-out); }
+@media (prefers-reduced-motion: reduce) {
+  .postcard-flash { display: none; }
+}
+
+/* The preview is the kit's dialog. The print sits in it at its own shape, never taller than
+   the window leaves room for, so a phone sees the whole card and its three actions. */
+dialog.postcard { inline-size: min(calc(var(--vx) * 196), calc(100vw - 32px)); }
+dialog.postcard[data-portrait] { inline-size: min(calc(var(--vx) * 128), calc(100vw - 32px)); }
+.postcard .vx-dialog-body { padding-block-end: calc(var(--vx) * 3); }
+.postcard a.vx-button { color: var(--_on); } /* the overlook's links inherit; a button keeps its ink */
+.postcard-print {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100dvh - 15rem);
+  margin-inline: auto;
+  box-shadow: 0 0 0 1px rgb(20 30 40 / 0.12), calc(var(--vx) * 1) calc(var(--vx) * 1.5) 0 var(--vx-shadow);
+}
+.postcard-status { margin: calc(var(--vx) * 3) 0 0; color: var(--vx-ink); }
+.postcard-status:empty { margin: 0; }
+.postcard[open] {
+  transition: opacity 240ms var(--vx-ease-out), transform 320ms var(--vx-ease-out);
+}
+@starting-style {
+  .postcard[open] { opacity: 0; transform: translateY(14px) scale(0.97); }
+}
+/* Opened from the keyboard, or under reduced motion, the preview only fades in. */
+.postcard[data-keyed][open] { transition: opacity 200ms ease; }
+@starting-style {
+  .postcard[data-keyed][open] { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .postcard[open] { transition: opacity 200ms ease; }
+  @starting-style {
+    .postcard[open] { transform: none; }
+  }
+}
