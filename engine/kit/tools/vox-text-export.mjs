@@ -3,6 +3,8 @@ import { FONTS, kern } from '../src/core/fonts/index.js';
 import '../src/core/fonts/sign.js';
 import '../src/core/fonts/sentence.js';
 import '../src/core/fonts/block.js';
+import '../src/core/fonts/zakon.js';
+import '../src/core/fonts/zakon-text.js';
 
 const font = FONTS[process.argv[2] || 'sentence'];
 const chars = Object.keys(font.glyphs);

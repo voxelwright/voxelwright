@@ -80,9 +80,8 @@ cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
 // ── The realm's controls (page/realm-ui.ts): the Voxelmorphism kit beside the page ──
 // The page asks for the kit by address, not by import, so the walk above does not reach it: its modules (the .js as
 // they are, with .ts addresses written .js), the engine's renderer they draw with (blocks/renderer.ts and what it
-// reaches), its stylesheet, and of its fonts only IBM Plex, which has a licence (OFL). The kit's own faces (Vox Text,
-// and Vox Block and Vox Sign inlined in the stylesheet) have none yet: they stay out, and the controls set their
-// legends in Plex.
+// reaches), its stylesheet, and every font it names: IBM Plex for text, and the kit's own faces (page/typeface.ts picks
+// which of them sets the legends on the keys and the lettering on the boards).
 {
   const kitTodo = []
   for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
@@ -96,20 +95,19 @@ cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
     for (const [, , , to] of text.matchAll(NAMED)) { const next = relative(root, resolve(root, dirname(path), `${to}.ts`)); if (!modules.has(next)) { modules.add(next); kitTodo.push(next) } }
     put(path.replace(/\.ts$/, '.js'), js(text))
   }
-  // Every @font-face of a face with no licence is taken out of the stylesheet; Plex's files and licences go beside it.
-  const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8').replace(/@font-face\s*\{[^}]*font-family:\s*"Vox [^"]*"[^}]*\}\s*/g, '')
+  // The stylesheet as it is, and each font file it names beside it (with Plex's OFL.txt).
+  const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
   put('kit/voxelmorphism.css', sheet)
   for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {
-    if (!existsSync(join(root, 'kit', dirname(font), 'OFL.txt'))) { console.error(`kit font ${font} has no licence beside it: leave it out of the stylesheet`); process.exit(1) }
     mkdirSync(dirname(join(out, 'kit', font)), { recursive: true })
     copyFileSync(join(root, 'kit', font), join(out, 'kit', font))
-    copyFileSync(join(root, 'kit', dirname(font), 'OFL.txt'), join(out, 'kit', dirname(font), 'OFL.txt'))
+    const ofl = join('kit', dirname(font), 'OFL.txt')
+    if (existsSync(join(root, ofl))) copyFileSync(join(root, ofl), join(out, ofl))
   }
-  // What the controls need is there, and no face without a licence.
-  for (const need of ['page/realm-ui.js', 'page/weather.js', 'kit/src/index.js', 'kit/src/engine.js', 'blocks/renderer.js', 'blocks/stage.js', 'kit/voxelmorphism.css', 'kit/fonts/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'kit/fonts/ibm-plex-sans/OFL.txt']) {
+  // What the controls and the faces need is there.
+  for (const need of ['page/realm-ui.js', 'page/weather.js', 'page/typeface.js', 'kit/src/index.js', 'kit/src/engine.js', 'kit/src/core/fonts/block.js', 'kit/src/core/fonts/zakon.js', 'blocks/renderer.js', 'blocks/stage.js', 'kit/voxelmorphism.css', 'kit/fonts/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2', 'kit/fonts/vox-text/vox-text-400-normal.woff2', 'kit/fonts/vox-zakon/vox-zakon-text-400-normal.woff2']) {
     if (!existsSync(join(out, need))) { console.error(`${need} is not in ${relative(root, out)}: the realm's controls would not work`); process.exit(1) }
   }
-  if (/@font-face\s*\{[^}]*"Vox /.test(sheet) || existsSync(join(out, 'kit/fonts/vox-text'))) { console.error('a kit face without a licence is in the folder'); process.exit(1) }
 }
 // The engine's page with the realm's record in it, and its script beside it.
 const page = readFileSync(join(root, 'page/index.html'), 'utf8')

@@ -4,7 +4,8 @@
 // its building by a point on its roof, its type, its size, which way it faces and what it says. Nothing here places
 // one: `propose` only offers roofs to whoever is editing (`?boards=edit`, sf/boards.mjs), and the file is what counts.
 //
-//   lettering   letters of lamp on panels of wood, one panel and one steel post a letter, all cells of the world:
+//   lettering   letters of lamp on panels of wood, one panel and one steel post a letter, all cells of the world,
+//               set in the realm's lettering face (typeface.ts: a glyph set of the kit's, a cell of it a square of cells):
 //               every tool breaks them as it breaks a wall, a letter whose post is cut falls by itself. By night it is
 //               lit as a billboard is: a lamp on an arm over each panel, whose light the march lays on the face.
 //               From further off than the world's cells there can hold its letters (they are coarser than a
@@ -41,6 +42,9 @@ import type { Piece, Pieces } from './pieces.ts'
 import { screens as screensOf, type Screen, type Style } from './screens.ts'
 import { signs, type Content } from './signs.ts'
 import { MARKS, sign as signOf } from './logos.ts'
+import { DISPLAY_CAP, lettering as letteringFace, lettersAsked, type Lettering, type Size } from './typeface.ts'
+import { DEVICE } from './bay.ts'
+import { ARMS, letterLight, type LetterLight, type LitLetter } from './letterlight.ts'
 import type { Target } from '../probe/gpu.ts'
 
 export interface Board {
@@ -61,7 +65,7 @@ export interface Board {
   search?: number
   /** A logo's mark: one of logos.ts `MARKS`. */
   logo?: string
-  /** Lettering: how tall a letter is, metres. Digital: how wide and how tall its housing is, metres. A logo: how tall its sign is, metres (how wide follows from its mark, logos.ts). */
+  /** Lettering: how tall a capital is, metres, as near as whole cells of its face allow (shape). Digital: how wide and how tall its housing is, metres. A logo: how tall its sign is, metres (how wide follows from its mark, logos.ts). */
   size: number | [number, number]
   /** How far its foot is over the roof, metres. */
   lift?: number
@@ -122,16 +126,13 @@ const DEEP = 6
 const NORMALS = [[-1, 0], [0, -1], [1, 0], [0, 1]] as const
 /** A roof sign's frame: how tall its legs are for the sign's height, and how far they go down into the roof, cells (the far model's roof and the cells' are not at one height). */
 export const STAND = 0.16, SUNK = 30
-/** Three across and five up, a row a digit (4, 2, 1 from the left), from the top. */
-const FONT: Record<string, string> = {
-  A: '25755', B: '65656', C: '34443', D: '65556', E: '74647', F: '74644', G: '34553', H: '55755', I: '72227', J: '11152', K: '55655', L: '44447', M: '57755',
-  N: '65555', O: '75557', P: '65644', Q: '25573', R: '65655', S: '34216', T: '72222', U: '55557', V: '55552', W: '55775', X: '55255', Y: '55222', Z: '71247',
-  0: '25552', 1: '26227', 2: '61247', 3: '61216', 4: '55711', 5: '74616', 6: '34652', 7: '71222', 8: '25252', 9: '25316', '!': '22202', '?': '61202', '.': '00002', '-': '00700', '+': '02720', '/': '11244',
-}
-export const lettered = (text: string) => [...text.toUpperCase()].map((c) => (c in FONT ? c : ' ')).join('').slice(0, 14)
+/** What a lettering board can say in its face: capitals where the face has only capitals, a character it has no glyph for a space, 14 at most. */
+export const lettered = (text: string, face: Lettering) => [...(face.set.upper ? text.toUpperCase() : text)].map((c) => (c in face.set.glyphs ? c : ' ')).join('').slice(0, 14)
 
-/** What a board is made of: its cells as rows, the box they lie in, and its face (middle, half its width along its right, how high, where its foot is). */
-interface Shape { runs: Int32Array<ArrayBuffer>; box: Edit['box']; middle: [number, number, number]; right: [number, number, number]; normal: [number, number, number]; wide: number; high: number; /** A lettering board: world cells a cell of its face. */ px?: number }
+/** A letter of a lettering board as laid: along the face from its left edge (cells), where its panel starts and how far to the next, its square of the face's grid, and the middle of each of the glyph's squares with whether it is lamp. */
+interface Laid { ch: string; k0: number; pitch: number; mid: number; /** How wide its glyph is, cells. */ wide: number; /** Half way up its capitals, cells. */ up: number; squares: { along: number; y: number; lit: boolean }[] }
+/** What a board is made of: its cells as rows, the box they lie in, and its face (middle, half its width along its right, how high, where its foot is). A lettering board: its letters, one for each character of what it says (a space none), and how tall a capital is. */
+interface Shape { runs: Int32Array<ArrayBuffer>; box: Edit['box']; middle: [number, number, number]; right: [number, number, number]; normal: [number, number, number]; wide: number; high: number; letters?: (Laid | null)[]; cap?: number; /** A lettering board: world cells a cell of its face. */ px?: number }
 
 /** Cells as rows: sorted by y, then z, then x, neighbours of one kind joined. */
 function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
@@ -146,10 +147,11 @@ function asRows(cells: number[][]): Int32Array<ArrayBuffer> {
 }
 
 /**
- * A board's cells. Its face lies on a plane of the grid of 8 cells and its letters on that grid too, so that the
- * world's coarser copies of it, which is what a far eye is shown, hold whole letters and not a smear of them.
+ * A board's cells. Its face lies on a plane of the grid of 8 cells, and a phone's letters (the compact set, 8 cells a
+ * cell) on that grid too, so that the world's coarser copies of it, which is what a far eye is shown, hold whole
+ * letters and not a smear of them.
  */
-export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''): Shape {
+export function shape(b: Board, text = 'text' in b.content ? b.content.text : '', face?: Lettering): Shape {
   if (b.type === 'logo') {
     // A face alone, flat on a wall: `at` is the middle of its lower edge, a little out from the wall.
     // (On a roof it stands on its frame's legs: its own lower edge is that much over the roof.)
@@ -167,17 +169,62 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
     const z = rz ? cz + rz * along - (rz < 0 ? 1 : 0) : nz > 0 ? cz - 1 - d : cz + d
     cells.push([x, y, z, kind])
   }
-  let wide: number, high: number, size: number | undefined
+  let wide: number, high: number
+  let letters: (Laid | null)[] | undefined, cap: number | undefined, cell: number | undefined
   if (b.type === 'lettering') {
-    const said = lettered(text), px = (size = Math.max(2, Math.round(((b.size as number) * M) / 5 / 2) * 2)), pitch = 4 * px
-    wide = Math.max(1, said.length) * pitch; high = 7 * px
-    ;[...said].forEach((letter, i) => {
-      if (letter === ' ') return
-      const k0 = i * pitch, glyph = FONT[letter]
+    if (!face) throw new Error(`the lettering board ${b.id} is laid without its face (typeface.ts)`)
+    // A cell of the face is `px` of the world's. The display set (capitals 11 cells): a capital as tall as the board's
+    // size says, in whole cells (4 m: 4 cells, 4.4 m). The compact set (7), on a phone: in whole cells of 8, which the
+    // coarser cells a phone's march draws a board in from the park keep whole (4 m: 8 cells, 5.6 m), where the display
+    // set's 4 were a smear (#450, ~/.village/engine/sf/type/probe). A board too small for the display set (boards()) is
+    // at least as tall as asked (3 m: 5 cells, 3.5 m; EXPLORE's face from the park needs it), and on a phone as near as
+    // whole cells allow (4 cells, 2.8 m): from the park it is its face, never its cells, and at 8 cells (5.6 m) or 5 it
+    // stood under a phone's column of tools.
+    const said = lettered(text, face), metres = (b.size as number) * M
+    const px = (cell = face.size === 'display' ? Math.max(2, Math.round(metres / face.set.cap)) : DEVICE === 'phone' && Math.round(metres / DISPLAY_CAP) >= 4 ? Math.max(8, Math.round(metres / face.set.cap / 8) * 8) : DEVICE === 'phone' ? Math.max(4, Math.round(metres / face.set.cap)) : Math.max(4, Math.ceil(metres / face.set.cap))), line = face.layout(said)
+    // Each glyph where the face sets it, but never so close to the one before that their boxes share a column: a
+    // letter is a part of its own, on a panel of its own (the face's kerning may tuck one under the next). What a
+    // glyph is pushed along by that, everything after it is pushed too, a word space with it.
+    const at: number[] = []
+    let shift = 0
+    line.glyphs.forEach(({ x }, i) => { const prev = line.glyphs[i - 1], to = prev ? Math.max(x + shift, at[i - 1] + prev.g.w + 1) : x; shift = to - x; at.push(to) })
+    // Its panel round it: half way to the next letter of its word, a cell of the face beyond a word's ends.
+    const words: boolean[] = [] // whether a glyph begins a word
+    for (let i = 0, was = true; i < said.length; i++) { if (said[i] === ' ') { was = true; continue } words.push(was); was = false }
+    const spans = line.glyphs.map(({ g }, i) => {
+      const prev = line.glyphs[i - 1], within = (j: number) => j < line.glyphs.length && !words[j]
+      const left = within(i) ? Math.round(((at[i - 1] + prev.g.w + at[i]) / 2) * px) : (at[i] - 1) * px
+      const right = within(i + 1) ? Math.round(((at[i] + g.w + at[i + 1]) / 2) * px) : (at[i] + g.w + 1) * px
+      return [left, right]
+    })
+    const from = spans.length ? spans[0][0] : 0
+    // As wide as whole pairs of the face's cells (the last panel takes what that adds), so that from its middle, on the
+    // grid of 8, every cell of the face lies on the grid of its own size: a phone's cells of 8 on the grid of 8.
+    wide = Math.max(2 * px, spans.length ? spans[spans.length - 1][1] - from : 2 * px)
+    if (wide % (2 * px)) { const more = 2 * px - (wide % (2 * px)); wide += more; if (spans.length) spans[spans.length - 1][1] += more }
+    // A cell of the face over its highest mark and under its lowest, and the cap line that far under the panel's top.
+    const top = line.top, bottom = line.bottom
+    high = (bottom - top + 2) * px; cap = (face.set.cap * px) / high
+    const capLine = y0 + high - (1 - top) * px
+    letters = []
+    let g = 0
+    for (const ch of said) {
+      if (ch === ' ') { letters.push(null); continue }
+      const { g: glyph } = line.glyphs[g], k0 = spans[g][0] - from, pitch = spans[g][1] - spans[g][0], left = at[g] * px - spans[g][0]
+      g++
+      // Its lamp: the glyph's cells at px a cell, along the panel from its left edge and up from the cap line.
+      const ink = new Set<number>()
+      for (const [vx, vy] of face.voxels(glyph, px)) ink.add((left + vx) * 4096 + (capLine - 1 - vy - y0))
+      const squares: Laid['squares'] = []
+      for (let r = 0; r < glyph.rows.length; r++) for (let c = 0; c < glyph.w; c++) {
+        // (The cell at its middle, or of an even number of cells the one past it.)
+        const k = left + c * px + Math.floor(px / 2), y = capLine - 1 - (r + glyph.y) * px - Math.floor(px / 2)
+        squares.push({ along: k0 + k + 0.5 - wide / 2, y: y + 0.5, lit: ink.has(k * 4096 + (y - y0)) })
+      }
+      letters.push({ ch, k0, pitch, mid: k0 + left + (glyph.w * px) / 2 - wide / 2, wide: glyph.w * px, up: capLine - (face.set.cap * px) / 2, squares })
       // Its panel, a cell short of the next one's: the letters are parts of their own.
       for (let k = 0; k < pitch - 1; k++) for (let y = 0; y < high; y++) {
-        const col = Math.floor((k - px / 2) / px), row = Math.floor(y / px) - 1
-        const lit = k >= px / 2 && col < 3 && row >= 0 && row < 5 && ((Number(glyph[4 - row]) >> (2 - col)) & 1) === 1
+        const lit = ink.has(k * 4096 + y)
         for (let d = 0; d < 2; d++) put(wide, k0 + k, d, y0 + y, lit ? LETTER : PANEL)
       }
       // Its lamp, as a billboard is lit: an arm up from the panel's top, a hood at its end hung out before the face, and
@@ -186,12 +233,15 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
       // hung before the top row of the panel was a block over the letters' heads. What its light does to the face is
       // the march's (march.ts: the box `kept` tells it is washed by night, and its letters are lit by that and not
       // of themselves).
-      for (let d = 0; d < 2; d++) for (let k = pitch / 2 - 1; k < pitch / 2 + 1; k++) for (let y = 0; y < 4; y++) put(wide, k0 + k, d, y0 + high + y, POST)
-      for (let d = -ARM; d < 2; d++) for (let k = pitch / 2 - 4; k < pitch / 2 + 4; k++) for (let y = 2; y < 6; y++) put(wide, k0 + k, d, y0 + high + y, y === 2 && d < 0 ? BULB : HOOD)
+      const post = Math.round(pitch / 2)
+      if (ARMS) {
+        for (let d = 0; d < 2; d++) for (let k = post - 1; k < post + 1; k++) for (let y = 0; y < 4; y++) put(wide, k0 + k, d, y0 + high + y, POST)
+        for (let d = -ARM; d < 2; d++) for (let k = post - 4; k < post + 4; k++) for (let y = 2; y < 6; y++) put(wide, k0 + k, d, y0 + high + y, y === 2 && d < 0 ? BULB : HOOD)
+      }
       // Its beam and its post.
       for (let k = 0; k < pitch - 1; k++) for (let d = 0; d < 2; d++) for (let y = 1; y <= 2; y++) put(wide, k0 + k, d, y0 - y, POST)
-      for (let k = pitch / 2 - 2; k < pitch / 2 + 2; k++) for (let d = 0; d < 2; d++) for (let y = foot - 2; y < y0 - 2; y++) put(wide, k0 + k, d, y, POST)
-    })
+      for (let k = post - 2; k < post + 2; k++) for (let d = 0; d < 2; d++) for (let y = foot - 2; y < y0 - 2; y++) put(wide, k0 + k, d, y, POST)
+    }
   } else {
     const [w, h] = b.size as [number, number]
     wide = Math.max(16, Math.round((w * M) / 8) * 8); high = Math.max(16, Math.round((h * M) / 8) * 8)
@@ -212,7 +262,7 @@ export function shape(b: Board, text = 'text' in b.content ? b.content.text : ''
   const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
   for (const [x, y, z] of cells) { box[0] = Math.min(box[0], x); box[1] = Math.min(box[1], y); box[2] = Math.min(box[2], z); box[3] = Math.max(box[3], x + 1); box[4] = Math.max(box[4], y + 1); box[5] = Math.max(box[5], z + 1) }
   if (!cells.length) box.splice(0, 6, cx, y0, cz, cx + 1, y0 + 1, cz + 1)
-  return { runs: asRows(cells), box: box as unknown as Edit['box'], middle: [cx, y0 + high / 2, cz], right: [rx, 0, rz], normal: [nx, 0, nz], wide, high, px: size }
+  return { runs: asRows(cells), box: box as unknown as Edit['box'], middle: [cx, y0 + high / 2, cz], right: [rx, 0, rz], normal: [nx, 0, nz], wide, high, letters, cap, px: cell }
 }
 
 /** The plane: a small high-winged one, its nose along +x, in cells of 20 cm. */
@@ -259,6 +309,10 @@ export interface Boards {
   marks(id: string): { x: number; y: number; lit: boolean }[]
   /** How many of a lettering board's letters still stand (most of their lamp there), and a digital board's tiles lit. */
   standing(id: string): { letters: string; whole: boolean }
+  /** The lettering boards' own light (letterlight.ts): its clock can be held, and it says when it has settled and how lit each letter is. */
+  readonly glow: LetterLight
+  /** A lettering board's letters as laid, for the checks: each one's middle and glyph width (cells), how tall a capital is (cells, and as a share of the panel), and the face they are in. */
+  letters(id: string): { face: string; px: number; cap: number; capShare: number; middles: { ch: string; at: [number, number, number]; wide: number }[]; middle: [number, number, number]; right: [number, number, number]; normal: [number, number, number]; wide: number; high: number } | null
   /** Roofs a board could stand on, seen from where the realm begins, best first. An offer to the editor: the file decides. */
   propose(count?: number, size?: number): Omit<Board, 'id' | 'name' | 'content' | 'to'>[]
   /**
@@ -310,6 +364,10 @@ export interface Needs {
   input: Input
   hud: Hud
   day(): number
+  /** How far windows, lamps and signs are lit, 0 to 1 (march.ts `lights`): the lettering boards' letters strike from a half. */
+  lights?(): number
+  /** Tells the march the lettering boards' own light (letterlight.ts, march.ts `letters`). */
+  letters?(data: Float32Array | null): void
   /** The far model's depth as its last draw left it, if there is one (far.ts). */
   faced(): GPUTextureView | null
   /** How far cloud, rain or fog take the daylight off what the day lights, 0 to 1. */
@@ -344,7 +402,14 @@ const RIM = 4
 const FACE = { panel: [20, 20, 20], post: [58, 60, 64], lamp: [198, 198, 190], lit: [255, 250, 232] }, CELLS_TO = 4000
 
 export async function boards(o: Needs): Promise<Boards> {
-  const drawn = await screensOf(o.device, o.format)
+  // The face's display set, or on a phone (bay.ts `DEVICE`: one fewer level of cells) its compact set (shape).
+  // A face that does not come leaves the lettering boards out, and only them: the screens, logos and banner need none.
+  // A board too small for the display set's cells to be four of the world's (EXPLORE, 3 m) is set in the compact set
+  // too: the display set's hairlines a cell wide were finer than its face from the park holds (618 of its 748 squares).
+  const sizeOf = (b: Board): Size => lettersAsked ?? (DEVICE === 'phone' || Math.round(((b.size as number) * M) / DISPLAY_CAP) < 4 ? 'compact' : 'display')
+  const sizes = [...new Set(o.file.boards.filter((b) => b.type === 'lettering').map(sizeOf))]
+  const [drawn, glow, faces] = await Promise.all([screensOf(o.device, o.format), letterLight(o.device, o.format, () => o.lights?.() ?? 0), Promise.all(sizes.map((z) => letteringFace(z))).then((got) => new Map(sizes.map((z, i) => [z, got[i]]))).catch((e: unknown) => { console.warn(`no lettering boards: their face did not come (${e instanceof Error ? e.message : String(e)})`); return null })])
+  const faceOf = (b: Board) => faces?.get(sizeOf(b)) ?? null
   o.passes.add('signs', (encoder, to, view, time) => {
     // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
     const reach = o.reach()
@@ -352,17 +417,22 @@ export async function boards(o: Needs): Promise<Boards> {
     for (const s of stood.values()) {
       if (!s.shape) continue
       // A lettering board: its cells, or from too far for them its face (`asCells`), painted again if the world changed under it.
-      if (s.far) { const face = !asCells(s, view.eye), dusk = Math.round((1 - o.day()) * 6); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      if (s.far) { const face = !asCells(s, view.eye), dusk = (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
       else if (s.b.type === 'logo') seat(s, view.eye)
     }
     if (turned) keep()
+    // The letters' own light: the march is told it for the next frame, and their halos are drawn over this one.
+    o.letters?.(glow.step(o.lights?.() ?? 0, seen))
     drawn.draw(encoder, to, view, time, o.day(), o.dull(), o.faced())
+    glow.draw(encoder, to, view, o.faced())
   })
+  /** Whether a board is in the picture now (its middle before the eye and on the picture). */
+  const seen = (id: string) => { const w = where(id), r = o.canvas.getBoundingClientRect(); return !!w && w.x > r.left && w.x < r.right && w.y > r.top && w.y < r.bottom }
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
-  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A lettering board's face (FACE): how big its picture is, how much of each pixel of it is panel, post and lamp (three shares of 255), whether the world changed since it was painted, whether it is shown now in place of the cells, and how far its letters are lit (`light`). */ far?: Screen; farSize?: string; farKinds?: Uint8Array; stale?: boolean; faced?: boolean; lit?: number; dusk?: number; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
+  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A lettering board's face (FACE): how big its picture is, how much of each pixel of it is panel, post and lamp (three shares of 255), whether the world changed since it was painted, whether it is shown now in place of the cells, and how far its letters are lit (`light`). */ far?: Screen; farSize?: string; farKinds?: Uint8Array; stale?: boolean; faced?: boolean; lit?: number; /** Which letter each of its picture's columns is (-1 none), and how lit its letters were when it was last inked (letterlight.ts, in eighths). */ farLetter?: Int16Array; dusk?: string; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
   const stood = new Map<string, Stood>()
   let laid = 0
   const lay = (edit: Edit) => { laid++; o.lay(edit) }
@@ -406,6 +476,8 @@ export async function boards(o: Needs): Promise<Boards> {
     const sh = s.shape!, low = sh.box[1], tall = sh.box[4] - low, step = Math.max(1, Math.round((sh.px ?? 4) / 4)), w = Math.ceil(sh.wide / step), h = Math.ceil(tall / step)
     if (s.farSize !== `${w}x${h}`) { s.far?.destroy(); s.far = drawn.add({ pixels: [w, h], style: { ground: '#000', ink: '#fff', glows: true, glow: 0.5, dim: 0.9 } }); s.farSize = `${w}x${h}`; s.far.hidden = !s.faced }
     const kinds = (s.farKinds = new Uint8Array(w * h * 3)), each = 255 / (step * step)
+    const letters = (sh.letters ?? []).filter((l): l is Laid => !!l)
+    s.farLetter = Int16Array.from({ length: w }, (_, i) => letters.findIndex((l) => i * step + step / 2 >= l.k0 && i * step + step / 2 < l.k0 + l.pitch))
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
       const share = [0, 0, 0]
       for (let v = 0; v < step; v++) for (let u = 0; u < step; u++) {
@@ -419,15 +491,22 @@ export async function boards(o: Needs): Promise<Boards> {
     s.far!.at = [sh.middle[0] + sh.normal[0], low + tall / 2, sh.middle[2] + sh.normal[2]]; s.far!.hu = [(sh.right[0] * sh.wide) / 2, 0, (sh.right[2] * sh.wide) / 2]; s.far!.hv = [0, tall / 2, 0]
     inkFar(s)
   }
-  /** Its picture from what each pixel is, its lamp as far lit as it is (`light`); lit, it glows by night as a lit sign does. By night its letters are warm, as the lamps over the cells' own make them (they were a cold grey beside BLOG's). */
+  /**
+   * Its picture from what each pixel is, its lamp as far lit as it is (`light`); lit, it glows by night as a lit sign does.
+   * By night each letter is as lit as its own lamp is (letterlight.ts: they strike a beat apart as the lights come on),
+   * warm, as the lamps over the cells' own make them (they were a cold grey beside BLOG's).
+   */
   const inkFar = (s: Stood) => {
-    const kinds = s.farKinds!, lit = Math.max(s.lit ?? 0, 0.55 * (1 - o.day())), lamp = FACE.lamp.map((v, k) => v + (FACE.lit[k] - v) * lit)
+    const kinds = s.farKinds!, power = glow.power[s.b.id] ?? [], w = s.farLetter?.length ?? 1
+    const lamps = Array.from({ length: Math.max(1, power.length) }, (_, k) => { const lit = Math.max(s.lit ?? 0, 0.55 * Math.min(1, power[k] ?? 0)); return FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * lit) })
+    const unlit = FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * (s.lit ?? 0))
     ;(s.far as Screen & { style: Style }).style.glow = 0.5 + (s.lit ?? 0)
     s.far!.paint((pen, w, h) => {
       const picture = pen.createImageData(w, h)
       for (let i = 0; i < w * h; i++) {
         const panel = kinds[i * 3], post = kinds[i * 3 + 1], lit = kinds[i * 3 + 2], all = panel + post + lit
         // (Cut where under half of it is anything: a post's edge, the gap under the beam.)
+        const letter = s.farLetter?.[i % w] ?? -1, lamp = letter >= 0 ? lamps[letter] ?? unlit : unlit
         if (all >= 127) picture.data.set([0, 1, 2].map((k) => (FACE.panel[k] * panel + FACE.post[k] * post + lamp[k] * lit) / all).concat(255), i * 4)
       }
       pen.putImageData(picture, 0, 0)
@@ -471,15 +550,34 @@ export async function boards(o: Needs): Promise<Boards> {
     if (out !== s.out) { s.out = out; place(s) }
   }
   const stand = (s: Stood, again = false) => {
-    const b = s.b, text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '') : ''
+    const b = s.b, face = faceOf(b), text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '', face!) : ''
     if (!again && s.shape && s.text === text) return
     if (!again && s.shape) lay(emptied(s.shape))
-    s.shape = shape(b, text); s.text = text
+    s.shape = shape(b, text, face ?? undefined); s.text = text
     if (s.shape.runs.length) lay(rows(s.shape.runs, s.shape.box))
     place(s)
-    if (b.type === 'lettering') { s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M]); paintFar(s); keep() }
+    if (b.type === 'lettering') { s.faced ??= !asCells(s, [o.pose.x * M, o.pose.y * M, o.pose.z * M]); paintFar(s); keep(); glow.board(b.id, litOf(b, s.shape)) }
   }
+  /** A lettering board's letters as their light knows them (letterlight.ts): each one's box, which way it faces, the middle of each cell of its lamp. */
+  const litOf = (b: Board, sh: Shape): LitLetter[] => (sh.letters ?? []).filter((l): l is Laid => !!l).map((l) => {
+    const y0 = sh.middle[1] - sh.high / 2, at = (along: number, back: number) => [sh.middle[0] + sh.right[0] * along - sh.normal[0] * back, sh.middle[2] + sh.right[2] * along - sh.normal[2] * back]
+    const a = at(l.k0 - sh.wide / 2, 2.5), c = at(l.k0 + l.pitch - sh.wide / 2, -1)
+    return {
+      lo: [Math.min(a[0], c[0]), y0, Math.min(a[1], c[1])], hi: [Math.max(a[0], c[0]), y0 + sh.high, Math.max(a[1], c[1])], facing: b.facing, cell: sh.px!,
+      // (A square's middle: its `along` and `y` are a cell's to sample, half a cell along and down from it.)
+      cells: l.squares.filter((q) => q.lit).map((q) => [sh.middle[0] + sh.right[0] * (q.along - 0.5), q.y + 0.5, sh.middle[2] + sh.right[2] * (q.along - 0.5)] as [number, number, number]),
+    }
+  })
+  // What stands of each lettering board's lamp, twice a second: a halo only over the cells of it that are there.
+  setInterval(() => {
+    for (const s of stood.values()) {
+      const sh = s.shape
+      if (s.b.type !== 'lettering' || !sh?.letters) continue
+      glow.standing(s.b.id, sh.letters.filter((l): l is Laid => !!l).map((l) => l.squares.filter((q) => q.lit).map(({ along, y }) => (o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(y), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15) === LAMP)))
+    }
+  }, 500)
   const bring = (b: Board) => {
+    if (b.type === 'lettering' && !faceOf(b)) return
     const s: Stood = { b, shape: null, text: '', screen: null, content: null, tiles: [1, 1], gone: () => {} }
     if (b.type === 'logo') {
       const mark = MARKS[b.logo ?? '']
@@ -503,16 +601,15 @@ export async function boards(o: Needs): Promise<Boards> {
     stood.set(b.id, s)
     s.gone = signs.add({ id: b.id, kind: b.type, name: b.name, accepts: b.type === 'lettering' ? ['text'] : ['text', 'image', 'video'], own: b.content, show: (content) => { s.content = content; if (b.type === 'lettering') stand(s); else { if (!s.shape) stand(s); s.screen!.show(content) } } })
   }
-  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.far?.destroy(); s.gone(); stood.delete(id); keep() }
+  const drop = (id: string) => { const s = stood.get(id); if (!s) return; if (s.shape) lay(emptied(s.shape)); s.screen?.destroy(); s.far?.destroy(); s.gone(); stood.delete(id); keep(); glow.board(id, null) }
   for (const b of records) bring(b)
 
   // ── What still stands: a letter by its lamp, a screen's tile by the housing behind it ──
   const letterStands = (s: Stood, i: number) => {
-    const sh = s.shape!, px = sh.high / 7, pitch = 4 * px, glyph = FONT[s.text[i]]
-    if (!glyph) return true
+    const sh = s.shape!, letter = sh.letters?.[i]
+    if (!letter) return true
     let lamp = 0, there = 0
-    for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) if ((Number(glyph[4 - row]) >> (2 - col)) & 1) {
-      const along = i * pitch + px / 2 + col * px + px / 2 - sh.wide / 2, y = sh.middle[1] - sh.high / 2 + (row + 1) * px + px / 2
+    for (const { along, y } of letter.squares.filter((q) => q.lit)) {
       lamp++
       if ((o.kind(Math.floor(sh.middle[0] + sh.right[0] * along - sh.normal[0] * 0.5), Math.floor(y), Math.floor(sh.middle[2] + sh.right[2] * along - sh.normal[2] * 0.5)) & 15) === LAMP) there++
     }
@@ -734,15 +831,11 @@ export async function boards(o: Needs): Promise<Boards> {
   const marks = (id: string) => {
     const s = stood.get(id), rect = o.canvas.getBoundingClientRect(), out: { x: number; y: number; lit: boolean }[] = []
     if (!s?.shape || s.b.type !== 'lettering') return out
-    const sh = s.shape, px = sh.high / 7, v = o.view()
-    ;[...s.text].forEach((letter, i) => {
-      const glyph = FONT[letter]
-      if (!glyph) return
-      for (let row = 0; row < 5; row++) for (let col = 0; col < 3; col++) {
-        const along = i * 4 * px + px / 2 + col * px + px / 2 - sh.wide / 2, p = onPicture([sh.middle[0] + sh.right[0] * along, sh.middle[1] - sh.high / 2 + (row + 1.5) * px, sh.middle[2] + sh.right[2] * along], v, rect.width / rect.height)
-        if (p) out.push({ x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height, lit: ((Number(glyph[4 - row]) >> (2 - col)) & 1) === 1 })
-      }
-    })
+    const sh = s.shape, v = o.view()
+    for (const letter of sh.letters ?? []) for (const { along, y, lit } of letter?.squares ?? []) {
+      const p = onPicture([sh.middle[0] + sh.right[0] * along, y, sh.middle[2] + sh.right[2] * along], v, rect.width / rect.height)
+      if (p) out.push({ x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height, lit })
+    }
     return out
   }
   let flight = 0
@@ -792,7 +885,8 @@ export async function boards(o: Needs): Promise<Boards> {
     e.stopImmediatePropagation(); e.preventDefault()
     if (editor) editor.select(s.b.id); else if (s.b.does) o.does?.(s.b); else void visit(s.b.id)
   }, true)
-  addEventListener('mousemove', (e) => { if (!o.input.locked) o.canvas.style.cursor = e.target === o.canvas && under(e.clientX, e.clientY) ? 'pointer' : '' })
+  // A board under the pointer is brightened, as one with the focus is (its link, below).
+  addEventListener('mousemove', (e) => { if (o.input.locked) return; const s = e.target === o.canvas ? under(e.clientX, e.clientY) : null; o.canvas.style.cursor = s ? 'pointer' : ''; if (!document.activeElement?.closest?.('nav[aria-label="Billboards"]')) glow.hot = s?.b.id ?? null })
   /** The board straight ahead, within 90 m: flying free, O opens it. */
   const ahead = (): Stood | null => {
     const v = o.view()
@@ -820,8 +914,8 @@ export async function boards(o: Needs): Promise<Boards> {
       const act = () => { if (b.to) void visit(b.id); else o.does?.(b) }
       a.textContent = b.name; a.dataset.board = b.id
       a.style.cssText = 'font:600 15px system-ui,sans-serif;padding:8px 12px;border:0;border-radius:8px;background:#111a;color:#fff;text-decoration:none;position:absolute;left:-9999px'
-      a.onfocus = () => { a.style.position = 'static' }
-      a.onblur = () => { a.style.position = 'absolute' }
+      a.onfocus = () => { a.style.position = 'static'; glow.hot = b.id }
+      a.onblur = () => { a.style.position = 'absolute'; if (glow.hot === b.id) glow.hot = null }
       a.onclick = (e) => { e.preventDefault(); act() }
       // Enter is the page's own key everywhere else (input.ts): on a link it follows the link, and goes no further.
       // (A key held until it repeats is pressed once.)
@@ -916,10 +1010,16 @@ export async function boards(o: Needs): Promise<Boards> {
     records,
     get edits() { return laid },
     relay() { laid = 0; for (const s of stood.values()) stand(s, true); seenEdits = -1 },
-    fly, open, where, marks, standing, propose, listed,
+    fly, open, where, marks, standing, propose, listed, glow,
     light(id, lit) { const s = stood.get(id); if (!s?.far || (s.lit ?? 0) === lit) return; s.lit = lit; inkFar(s) },
     faced: (id) => stood.get(id)?.faced === true,
     box: (id) => stood.get(id)?.shape?.box ?? null,
+    letters(id) {
+      const sh = stood.get(id)?.shape
+      if (!sh?.letters) return null
+      const middles = sh.letters.filter((l): l is Laid => !!l).map((l) => ({ ch: l.ch, at: [sh.middle[0] + sh.right[0] * l.mid, l.up, sh.middle[2] + sh.right[2] * l.mid] as [number, number, number], wide: l.wide }))
+      return { face: faceOf(stood.get(id)!.b)!.set.name, px: sh.px!, cap: sh.cap! * sh.high, capShare: sh.cap!, middles, middle: sh.middle, right: sh.right, normal: sh.normal, wide: sh.wide, high: sh.high }
+    },
 
     get plane() { return flown },
     editor,

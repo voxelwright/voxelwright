@@ -1,5 +1,6 @@
 # Build a web font from a voxel glyph set: every cell becomes a square of outline.
 # Needs fonttools and brotli. Usage: python tools/vox-text-build.py glyphs.json out-dir "Family Name" file-stem
+# [--bold: a 700 made from the set by the smear below] [--as-bold: the set is a bold already: written as the 700 alone]
 # 10 cells to the em, so one cell is 2 px at 20 px and 4 px (one voxel) at 40 px.
 import json, sys, os
 from fontTools.fontBuilder import FontBuilder
@@ -103,7 +104,8 @@ def outline(cs):
 NAMES = {' ': 'space'}
 def gname(ch): return NAMES.get(ch) or ('uni%04X' % ord(ch))
 
-def build(bold, path):
+def build(bold, path, smear=None):
+    smear = bold if smear is None else smear
     order = ['.notdef'] + [gname(c) for c in d['glyphs']] + (['space'] if ' ' not in d['glyphs'] else [])
     order = list(dict.fromkeys(order))
     cmap = {ord(c): gname(c) for c in d['glyphs']}
@@ -118,7 +120,7 @@ def build(bold, path):
     for ch, g in d['glyphs'].items():
         if ch == ' ': continue
         pen = TTGlyphPen(None)
-        cs = cells(g, bold, ch)
+        cs = cells(g, smear, ch)
         for loop in outline(cs):
             pen.moveTo(loop[0])
             for p in loop[1:]: pen.lineTo(p)
@@ -148,5 +150,7 @@ def build(bold, path):
     print(path, os.path.getsize(path), 'bytes,', len(order), 'glyphs')
 
 os.makedirs(out, exist_ok=True)
-build(False, os.path.join(out, STEM + '-400-normal.woff2'))
-if '--bold' in sys.argv: build(True, os.path.join(out, STEM + '-700-normal.woff2'))
+if '--as-bold' in sys.argv: build(True, os.path.join(out, STEM + '-700-normal.woff2'), smear=False)
+else:
+    build(False, os.path.join(out, STEM + '-400-normal.woff2'))
+    if '--bold' in sys.argv: build(True, os.path.join(out, STEM + '-700-normal.woff2'))

@@ -38,9 +38,7 @@ for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
   const text = readFileSync(join(root, file), 'utf8')
   if (file.endsWith('.js')) { reach(file, text); put(file, js(text)) } else put(file, text)
 }
-// Of the fonts only the files the stylesheet names, with each family's licence where it has one. The kit's own faces
-// (Vox Text, and Vox Block and Vox Sign inside the stylesheet) have no licence yet: this folder is for looking at on
-// this machine, and goes to no host until the owner says so.
+// Of the fonts only the files the stylesheet names, with Plex's OFL.txt beside its own.
 const sheet = readFileSync(join(root, 'kit/voxelmorphism.css'), 'utf8')
 put('kit/voxelmorphism.css', sheet)
 for (const [, font] of sheet.matchAll(/url\("?(fonts\/[^")]+)/g)) {

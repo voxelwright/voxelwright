@@ -12,6 +12,7 @@
 //   ?debug=1   the line of numbers (frames, the march's time, memory, where the eye is) is shown with the controls;
 //              without it a realm the page runs alone never shows it (main.ts sets `plain` on <html>)
 import { embedded, tell } from './host.ts'
+import { legends } from './typeface.ts'
 
 export interface First {
   /** Whether the visitor has engaged: the controls are shown. */
@@ -38,7 +39,7 @@ html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 #realm :is(.sky, .tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
-#first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; font-size: 12px; opacity: 0.86; }
+#first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; --vx-key-size: var(--vx-key-small); opacity: 0.86; }
 #first .credits:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
 /* By touch the bottom corners are the thumbs': the credits key is at the top, where a phone shows no line of numbers. */
 /* (Its voxel body stands out past its box to the left and up: further in from the corner than 12 px, or the screen's edge cuts it.) */
@@ -68,6 +69,7 @@ export function firstView(on: boolean): First {
   sheet.href = new URL('../kit/voxelmorphism.css', import.meta.url).href
   html.dataset.vxLook = 'lit'
   document.head.append(sheet, style)
+  legends()
   document.body.append(root)
 
   const kitAt = new URL('../kit/src/index.js', import.meta.url).href

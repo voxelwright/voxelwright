@@ -33,6 +33,8 @@ export function palette(): Float32Array<ArrayBuffer> {
 
 /** How bright a lit window's pane is, for the march's windows and the far model's (see PANE_LIGHT in the shader). */
 export const PANE_LIGHT = 1.25
+/** How many lettering boards' letters have a light of their own (letterlight.ts, Looks.letters). */
+export const LIT_LETTERS = 32
 /**
  * The landmarks' own lights by night (#450, heroes.rs `night`): the crown of lamps on Salesforce Tower, the Pyramid's
  * lit spire and its beacon. Whatever is drawn inside a landmark's lit part, cells or the far model's faces, gives
@@ -794,7 +796,10 @@ struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32
 // far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
 // is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
 // 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER).
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f }
+// letters: the lettering boards' own light (#450, letterlight.ts): the box their light reaches (low corner and how many
+// letters; high corner and 1 where 489's lamps on arms wash the boards), then two a letter (LIT_LETTERS at most): its
+// box's low corner and how far it is lit, its high corner and which way it faces plus its hue.
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f, letters: array<vec4f, ${2 + 2 * LIT_LETTERS}> }
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
@@ -1343,6 +1348,45 @@ fn openness(p: vec3f, n: vec3f, hit: Hit, ground: bool) -> f32 {
   return mix(mix(c00, c10, fu), mix(c01, c11, fu), fv) / 3.0;
 }
 
+// The lettering boards' own light (#450, letterlight.ts): channel letters, lit from within. \`lamp\`: the cell is a
+// letter's lamp. Within the box the letters' light reaches (none of this is asked elsewhere): whether the point is on a
+// board (one of its letters' panels), the light of a lamp it is a letter's own (its face hot and near white, its sides,
+// the returns, softer; \`own\`), and else what the lit letters throw on it, falling off as a lamp's light does with the
+// distance from the middle of each letter's face, and on what faces it.
+struct Lettered { light: vec3f, own: bool, board: bool }
+fn lettered(p: vec3f, n: vec3f, lamp: bool) -> Lettered {
+  var out = Lettered(vec3f(0.0), false, false);
+  let count = u32(looks.letters[0].w);
+  if (count == 0u || any(p < looks.letters[0].xyz) || any(p > looks.letters[1].xyz)) { return out; }
+  for (var i = 0u; i < min(count, ${LIT_LETTERS}u); i++) {
+    let a = looks.letters[2u + 2u * i];
+    let b = looks.letters[3u + 2u * i];
+    let facing = u32(floor(b.w));
+    let hue = (fract(b.w) - 0.5) * 2.0;
+    let out_ = array<vec3f, 4>(vec3f(-1.0, 0.0, 0.0), vec3f(0.0, 0.0, -1.0), vec3f(1.0, 0.0, 0.0), vec3f(0.0, 0.0, 1.0))[min(facing, 3u)];
+    // A warm white, each letter a little warmer or cooler than the next (its tubes and its acrylic are not one batch).
+    let colour = vec3f(1.0, 0.74 + 0.06 * hue, 0.46 + 0.12 * hue);
+    let inside = all(p >= a.xyz - vec3f(0.5)) && all(p <= b.xyz + vec3f(0.5));
+    if (inside) {
+      out.board = true;
+      if (lamp) {
+        out.own = true;
+        // Its face burns towards white (kept under what the last pass spreads by night, 1.2: a blot from the park was
+        // the letters' light over it, #450); its returns take a third of that.
+        out.light = min(mix(colour, vec3f(1.0, 0.95, 0.84), 0.4) * 1.15 * select(0.35, 1.0, dot(n, out_) > 0.5) * a.w, vec3f(1.19));
+        return out;
+      }
+    }
+    if (a.w <= 0.0) { continue; }
+    let size = max(b.y - a.y, 1.0);
+    let to = (a.xyz + b.xyz) * 0.5 + out_ * size * 0.25 - p;
+    let falls = 1.0 / (1.0 + dot(to, to) / (size * size * 0.3));
+    out.light += colour * a.w * falls * max(dot(n, normalize(to)), 0.0);
+  }
+  out.light *= 0.6;
+  return out;
+}
+
 // How bright a lit window's pane is (#450): a lit room, which is about as bright as a wall in the sun, and not a lamp.
 // Over 1.2 a pixel says it is brighter than any lit surface and the last pass spreads it (glow.ts: at night ten times
 // what is over). That is right for a street lamp a few pixels across; a pane at 2.4, which from before a tower is a
@@ -1509,9 +1553,14 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     // lamp's, and BLOG from the park was four blots. A billboard is lit by lamps on arms before its face: the box the
     // boards keep, looks.keep, is washed by them, brighter towards the lamps at its top, and its pale letters are
     // read by that light against their dark panels, under what is spread. Nor are its panels a wall with windows.)
-    let board = kept(p, looks.keep0, looks.keep1);
-    if (sign && !board) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
-    if (board && n.y > -0.5) {
+    // (Which board, by the boxes of its letters, not by the box round all of them: two boards on two roofs and the
+    // windows between them were one board.)
+    let letters = lettered(p, n, stuff == 15u && ci == 6u);
+    let board = letters.board;
+    if (sign && !letters.own) { col += max(albedo + (albedo - vec3f(dot(albedo, vec3f(0.333)))) * 5.0, vec3f(0.0)) * 3.2 * dark; }
+    // A lit letter is its own light; what is round it takes the letters' light by what it is made of.
+    if (letters.own) { col = mix(col, letters.light, clamp(dot(letters.light, vec3f(1.0)), 0.0, 1.0)); } else { col += albedo * letters.light; }
+    if (board && !letters.own && n.y > -0.5 && looks.letters[1].w > 0.0) {
       let up = clamp((p.y - looks.keep0.y) / max(looks.keep1.y - looks.keep0.y, 1.0), 0.0, 1.0);
       col += albedo * vec3f(1.0, 0.92, 0.78) * (1.5 + 1.5 * up) * clamp(dark * 3.0, 0.0, 1.0);
     }
@@ -2021,6 +2070,10 @@ export interface Marcher {
   under: boolean
   /** How far the eye is in a room, 0 to 1 (main.ts says): what is shaded is lit by the daylight a room lets in (shade). */
   roofed: number
+  /** How far windows, lamps and signs are lit, 0 (by day) to 1: what the shaders are told (Globals weather.z). */
+  readonly lights: number
+  /** The lettering boards' own light (letterlight.ts): Looks.letters in world cells, (2 + 2 * LIT_LETTERS) vec4s; null for none. */
+  letters(data: Float32Array | null): void
   /** Where the light comes from, how much of the day it is (1 day, 0 night) and how low the sun (1 at the horizon). */
   light(sun: readonly [number, number, number], day: number, low: number): void
   readonly day: number
@@ -2082,7 +2135,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64 + (2 + 2 * LIT_LETTERS) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
@@ -2110,6 +2163,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
    * light at a tenth, a night to see by, as films light it.
    */
+  /** How far windows, lamps and signs are lit (Globals weather.z): as the day goes (the same ease as a shader's smoothstep), in rain, and a little in fog and under cloud. */
+  const lightsNow = () => Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain, 0.45 * fog, 0.25 * cloud)
   const colours = () => {
     type Colour = readonly [number, number, number]
     const mix = (a: Colour, b: Colour, t: number): Colour => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
@@ -2134,7 +2189,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       ...times(hour(cloudy, white, [0.4, 0.26, 0.4]), 1 - 0.5 * overcast), sz / flat,
       ...times(hour(cloudy, white, [1.5, 0.66, 0.22]), 1 - 0.5 * overcast), (30 - 18 * low) * (1 - overcast),
       // Lights come on as the day goes (the same ease as a shader's smoothstep), in rain, and a little in fog and under cloud.
-      rain, rain, Math.max(1 - ((t) => t * t * (3 - 2 * t))(Math.max(0, Math.min(1, (day - 0.55) / 0.4))), 0.7 * rain, 0.45 * fog, 0.25 * cloud), roofed,
+      rain, rain, lightsNow(), roofed,
     ], 36 + MAX_LEVELS * 32)
     // The fog's colour: by day white lit through, grey under cloud, warm under a low sun; at night the city's lamps
     // light it from under, a dull amber over a dark blue.
@@ -2157,12 +2212,15 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let farWedge: readonly number[] | null = null
   /** The box the wedge leaves to the cells (farCover's `keep`): low and high corners, cells from the frame's corner. */
   let farKeep: readonly number[] | null = null
+  /** The lettering boards' own light (letters): world cells, as `Looks.letters` lays it out; null for none. */
+  let lit: Float32Array | null = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
       // Everything the shader is told is measured from a corner near the eye, so its numbers stay small enough to be exact.
       const anchor = view.eye.map((v) => Math.floor(v / SIDE) * SIDE)
       // The far model's map is measured from the same corner (farCover).
       if (farMap[3] > 0) device.queue.writeBuffer(looks, 256 * 16 + 16 * 32, new Float32Array([farMap[0] - anchor[0], farMap[1] - anchor[2], farMap[2], farMap[3]]))
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, farWedge ? new Float32Array([farWedge[0] - anchor[0], farWedge[1] - anchor[2], farWedge[2], farWedge[3], farWedge[4], farWedge[5], 0, 0]) : new Float32Array(8))
+      if (lit) { const r = lit.slice(); for (let i = 0; i < r.length; i += 4) { r[i] -= anchor[0]; r[i + 1] -= anchor[1]; r[i + 2] -= anchor[2] } device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, r) }
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, farKeep ? new Float32Array([farKeep[0] - anchor[0], farKeep[1] - anchor[1], farKeep[2] - anchor[2], 0, farKeep[3] - anchor[0], farKeep[4] - anchor[1], farKeep[5] - anchor[2], 1]) : new Float32Array(8))
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
@@ -2298,6 +2356,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       bind = binding()
       return words.length > 8 ? words[7] : 0
     },
+    letters(data) { lit = data ?? new Float32Array((2 + 2 * LIT_LETTERS) * 4) },
+    get lights() { return lightsNow() },
     farCover(corner, size, reach, held, wedge = null, keep = null) {
       farMap = [corner[0] * size, corner[1] * size, size, reach]
       farWedge = wedge

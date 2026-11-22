@@ -66,6 +66,23 @@
   src: url("fonts/vox-text/vox-text-700-normal.woff2") format("woff2");
   font-weight: 700; font-style: normal; font-display: swap;
 }
+/* Vox Zakon: the Zakon glyph sets laid flat (src/core/fonts/zakon.js, zakon-text.js). Vox Zakon Text is
+   for keys, as Vox Text is; Vox Zakon is the lettering set. Fetched only by a page that sets them. */
+@font-face {
+  font-family: "Vox Zakon Text";
+  src: url("fonts/vox-zakon/vox-zakon-text-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Vox Zakon Text";
+  src: url("fonts/vox-zakon/vox-zakon-text-700-normal.woff2") format("woff2");
+  font-weight: 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: "Vox Zakon";
+  src: url("fonts/vox-zakon/vox-zakon-400-normal.woff2") format("woff2");
+  font-weight: 400; font-style: normal; font-display: swap;
+}
 /* The voxel glyph sets as flat fonts, for the plain version of lettering. They are inlined
    (about 2 KB each) because a heading must never be drawn in a fallback of another height: its
    box is the box the voxels will take. Rebuild with tools/vox-text-build.py and

@@ -35,7 +35,7 @@
 //     logo is as big as READABLE asks when the eye is turned to it;
 //   - realm.signs sets words on a lettering board (and refuses a picture there), an image and a video on the banner
 //     (and on a digital board, if the file has one), from the page and from the host;
-//   - a charge breaks a letter and leaves the others, and reset puts every board back;
+//   - a charge breaks a letter and leaves the others (by night the broken one gives no light, the others do), and reset puts every board back;
 //   - the plane goes round far off, past the towers: its banner whole in the park's picture, small (the cloth 26 px
 //     tall at most) and its words 10 px tall or more; with something to say it comes in to its near round, words 20 px,
 //     and goes back out; on the phone its words are 11 px or more;
@@ -231,7 +231,7 @@ try {
   // What the boards themselves add is exact: their five modules as sent, and their data in the page's record. The
   // whole (which stops at a moment, so it moves by a tile or two from run to run) is held to the realm's 8 MB where
   // the realm without boards is within it; where that is over already, it is said and the boards' own share is the check.
-  check(own < 27 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 27 KB: 24 until the plane had two rounds, its own far off and a near one to speak on; 25 until a lettering board had a face to be read by from further off than its cells show it, 1.6 KB of boards.js, and the EXPLORE board its record)`)
+  check(own < 29 * 1024, `the boards add ${results.load.boardsOwnKB} KB before the park is shown: five modules as sent (${results.load.boardsCodeRawKB} KB unpacked) and their data in the page's record (bound 29 KB: 24 until the plane had two rounds, its own far off and a near one to speak on; 25 until a lettering board had a face to be read by from further off than its cells show it, 1.6 KB of boards.js, and the EXPLORE board its record; 27 until the letters were laid from the kit's glyph sets and lit of themselves, 1.2 KB more; the face's glyph set, which sf-type says, and letterlight.js, 4.8 KB as sent, are modules of their own and not counted here)`)
   const whole = `${shown.wireMB} MB over the wire until the park is shown in ${shown.ms} ms; without boards ${without.wireMB} MB in ${without.ms} ms (the realm's bound 8 MB)`
   if (without.wireMB >= 8) console.log(`  WARN ${whole}: the realm is over its bound before any board`); else check(shown.wireMB < 8, whole)
   check(code.length === 5 && !site.asked.some((a) => a.path.endsWith('boards-edit.js')), `the boards' code is asked for (${code.length} modules) and the editor's is not`)
@@ -350,16 +350,21 @@ try {
       let clear = true
       if (r.type === 'logo') return { id: r.id, type: r.type, logo: r.logo, where: w, clear, standing: s, marks }
       for (let d = 20; d < far - 20 && clear; d += 2) if (e.kind(eye[0] + ((to[0] - eye[0]) * d) / far, eye[1] + ((to[1] - eye[1]) * d) / far, eye[2] + ((to[2] - eye[2]) * d) / far)) clear = false
-      return { id: r.id, type: r.type, logo: r.logo, where: w, clear, standing: s, marks }
+      return { id: r.id, type: r.type, logo: r.logo, where: w, clear, standing: s, marks, letters: b.letters(r.id) }
     })
   })
   const picture = await pixelsOf(await page.screenshot())
+  // How many of a lettering board's squares are read right is asked of it by how big a square is on the picture: nine in
+  // ten from 2 px; under that four in five, where the one pixel read at a square's middle has its neighbours' light in it
+  // (EXPLORE's squares are 1.5 px from the park in the kit's faces of 7 and 11 rows, where the 5 rows of the bitmap
+  // they were set in before #450 made them 3; read by eye it says EXPLORE, ~/.village/engine/sf/type).
+  const asked = (s) => { const px = s.where && s.letters ? (s.where.tall / s.letters.high) * s.letters.px : 0; return px >= 2 ? { px: round(px, 2), share: 0.9, says: `nine squares in ten, a square ${round(px, 2)} px` } : { px: round(px, 2), share: 0.8, says: `four squares in five, a square ${round(px, 2)} px, under 2` } }
   const light = (x, y) => { const i = (Math.round(y) * picture.w + Math.round(x)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
   results.park = {}
   for (const s of seen) {
     const w = s.where, inside = !!w && w.x - w.wide / 2 > 0 && w.x + w.wide / 2 < 1280 && w.y - w.high / 2 > 0 && w.y + w.high / 2 < 720
-    // A letter of lamp is five sevenths of its panel; a logo's mark is its whole face; a screen's words about half of it.
-    const letter = w ? (s.type === 'lettering' ? (w.tall * 5) / 7 : s.type === 'logo' ? w.tall : w.tall * 0.5) : 0
+    // A capital of lamp is the share of its panel its face says (boards.letters); a logo's mark is its whole face; a screen's words about half of it.
+    const letter = w ? (s.type === 'lettering' ? w.tall * s.letters.capShare : s.type === 'logo' ? w.tall : w.tall * 0.5) : 0
     const r = (results.park[s.id] = { metres: w && round(w.far), at: w && [Math.round(w.x), Math.round(w.y)], widePx: w && Math.round(w.wide), letterPx: round(letter), clear: s.clear, standing: s.standing.letters })
     check(inside && s.clear && s.standing.whole && (s.type === 'logo' ? readable(s.logo, w.tall, w.wide, READABLE.wide) : letter >= 9), `${s.id}: whole, in the picture at ${r.at} from ${r.metres} m, ${r.widePx} px wide, ${s.type === 'logo' ? 'its sign' : 'a letter'} ${r.letterPx} px tall${s.type === 'logo' ? ` (asked: a mark ${READABLE.wide.mark} to ${READABLE.wide.most} px each way)` : ''}, nothing between the eye and it`)
     if (s.type === 'logo') {
@@ -372,8 +377,9 @@ try {
       const lit = s.marks.filter((m) => m.lit).map((m) => light(m.x, m.y)), dark = s.marks.filter((m) => !m.lit).map((m) => light(m.x, m.y)), mean = (a) => a.reduce((n, v) => n + v, 0) / a.length
       // Each square of each letter as the picture has it: lamp where the letter is, panel where it is not.
       const cut = (mean(lit) + mean(dark)) / 2, right = lit.filter((v) => v > cut).length + dark.filter((v) => v <= cut).length
-      r.read = { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), squaresRight: `${right}/${s.marks.length}` }
-      check(mean(lit) - mean(dark) > 40 && right >= s.marks.length * 0.9, `${s.id} reads in the picture at scale 0.7: lamp ${r.read.lamp} against panel ${r.read.panel} of 255, ${r.read.squaresRight} squares of its letters as they should be`)
+      const ask = asked(s)
+      r.read = { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), squaresRight: `${right}/${s.marks.length}`, squarePx: ask.px }
+      check(mean(lit) - mean(dark) > 40 && right >= s.marks.length * ask.share, `${s.id} reads in the picture at scale 0.7: lamp ${r.read.lamp} against panel ${r.read.panel} of 255, ${r.read.squaresRight} squares of its letters as they should be (${ask.says})`)
     }
   }
   // No board over another on the picture.
@@ -434,7 +440,8 @@ try {
     for (const s of seen.filter((s) => s.type === 'lettering')) {
       const r = lettersRead(night, s.marks)
       results.night[s.id] = r
-      check(r.lamp - r.panel > 40 && r.right >= r.of * 0.9, `${s.id} reads by night from the park: lamp ${r.lamp} against panel ${r.panel} of 255, ${r.right}/${r.of} squares of its letters as they should be (bounds: 40 apart, nine squares in ten)`)
+      const ask = asked(s)
+      check(r.lamp - r.panel > 40 && r.right >= r.of * ask.share, `${s.id} reads by night from the park: lamp ${r.lamp} against panel ${r.panel} of 255, ${r.right}/${r.of} squares of its letters as they should be (bounds: 40 apart, ${ask.says})`)
     }
   }
   await realm.evaluate(() => { globalThis.engine.hour = 15; globalThis.engine.scale = 0.7 }); await page.waitForTimeout(1500)
@@ -740,10 +747,10 @@ try {
   await page.waitForTimeout(1500); await settle()
   const broke = await realm.evaluate(async ({ id, digital }) => {
     const e = globalThis.engine, b = e.boards, wait = (ms) => new Promise((r) => setTimeout(r, ms)), r = b.records.find((r) => r.id === id)
-    // Two charges at the last letter, a third of the way up it and two thirds: where a visitor would aim.
-    const n = [[-1, 0], [0, -1], [1, 0], [0, 1]][r.facing], right = [n[1], -n[0]], y0 = Math.ceil((r.at[1] + (r.lift ?? 1.6) * 10) / 8) * 8, wide = 32 * b.standing(id).letters.length
-    const snap = (v) => Math.round(v / 8) * 8, along = wide / 2 - 16
-    for (const up of [18, 40]) { e.strike([snap(r.at[0]) + right[0] * along, y0 + up, snap(r.at[2]) + right[1] * along], 12); await wait(2500) }
+    // Charges across the last letter, at its middle and a quarter of its width and height from it each way: where a
+    // visitor would aim. (One column of them took a third of the lamp of a glyph as wide as Vox Zakon's G.)
+    const laid = b.letters(id), last = laid.middles.at(-1), snap = (v) => Math.round(v / 8) * 8
+    for (const [u, v] of [[0, 0], [-0.25, -0.25], [0.25, -0.25], [-0.25, 0.25], [0.25, 0.25]]) { e.strike([last.at[0] + laid.right[0] * u * last.wide, last.at[1] + v * laid.cap, last.at[2] + laid.right[2] * u * last.wide], 12); await wait(2500) }
     await wait(2500)
     if (digital) {
       const d = b.records.find((r) => r.id === digital), dn = [[-1, 0], [0, -1], [1, 0], [0, 1]][d.facing]
@@ -756,7 +763,21 @@ try {
   await page.screenshot({ path: join(shots, 'broken.png') })
   results.broken = broke
   const text = lettered(blog.content.text)
-  check(broke.lettering.letters === text.slice(0, -1) && (!digital || !broke.digital.whole), `two charges at the ${text.at(-1)} of ${text} left ${broke.lettering.letters} standing${digital ? `; a big charge at ${digital.id} left ${broke.digital.letters} of its screen lit` : ''}`)
+  check(broke.lettering.letters === text.slice(0, -1) && (!digital || !broke.digital.whole), `five charges at the ${text.at(-1)} of ${text} left ${broke.lettering.letters} standing${digital ? `; a big charge at ${digital.id} left ${broke.digital.letters} of its screen lit` : ''}`)
+  // By night the broken board's lit letters strike and its broken one gives no light: no face, no halo (letterlight.ts).
+  const dark = await realm.evaluate(async (id) => {
+    const e = globalThis.engine, was = e.hour
+    e.hour = 21.5
+    // (The lights come on over some frames: first the letters' strike, then all of them settled.)
+    for (let i = 0; i < 100 && e.boards.glow.power[id].every((v) => v === 0); i++) await new Promise((r) => setTimeout(r, 100))
+    for (let i = 0; i < 100 && !e.boards.glow.settled; i++) await new Promise((r) => setTimeout(r, 100))
+    await new Promise((r) => setTimeout(r, 1200))
+    const power = e.boards.glow.power[id]
+    e.hour = was
+    return power.map((v) => Math.round(v * 100) / 100)
+  }, blog.id)
+  results.brokenByNight = dark
+  check(dark.at(-1) === 0 && dark.slice(0, -1).every((v) => v > 0.8), `by night the broken ${text.at(-1)} gives no light and the letters left are lit: ${dark.join(', ')}`)
   const reset = await realm.evaluate(async () => {
     const e = globalThis.engine
     await e.reset()

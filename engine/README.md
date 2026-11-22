@@ -1652,6 +1652,15 @@ node test/sf-boards.mjs [--no-build]
 
 In the editor, fly to a roof and press `new here`, or `propose` for the next roof the rule offers; every change is laid at once, and `save` writes `sf/boards.json`. A logo's place on a far tower is `seat`'s to work out: the editor moves, sizes and removes it, and cannot pick a far wall. The check covers the first view at 1280 x 720 and on an upright phone (the BLOG board, two logos and the banner in the picture, the keys over none of them), the controls coming (no line of numbers without `?debug=1`; the banner's whole round clear of the hour's panel), each logo big enough to be read from the park at both sizes (the check's `READABLE` says how big and why), on its tower's roof as the release's far tiles have it with no tower before it, under none of the controls once they are shown, the signs read from the picture's pixels, the night before a tower's lit windows not burnt out to white, every way of opening one, the signs API, breaking and reset, the banner's words in pixels, and the bytes and frames they cost; it keeps pictures in `~/.village/engine/sf/boards/r4/`.
 
+The realm's words are set in the kit's own faces, picked in one place (`page/typeface.ts`): `?face=zakon` (the default) or `?face=block`. A lettering board is built from the face's display set (Vox Zakon or Vox Block, capitals 11 cells tall, a cell 4 world cells), on a phone from its compact set (Vox Zakon Text Caps or Vox Sign 2, 7 cells tall, a cell 8 world cells, which the phone's coarser cells keep whole); the words on the keys are its key font (Vox Zakon Text or Vox Text). Only the chosen face is fetched. `?letters=display|compact` lays the other size to look at.
+
+By night a lettering board glows as a real letter sign does (`page/letterlight.ts`): as the lights come on, or when it first comes into view with them on, its letters strike a beat apart and not in order, some with a stutter, and warm up over half a second; a lit letter's face burns warm white with softer returns, a halo hugs its strokes, and its light falls on the panel, the roof and the wall round it. By day they are painted letters; hover and focus brighten a board; a broken letter gives no light. `?arms=0` leaves out PR 489's lamps on arms over the letters. `engine.boards.glow` holds the strike's clock (`hold`), says when it has `settled` and how lit each letter is (`power`).
+
+```
+node test/sf-type.mjs [--no-build]        # BLOG's and EXPLORE's lamp cell for cell against the kit's glyphs, every key in the face's loaded key font and inside its key (a tool's words clear of its key's side walls, the bank clear of the place's name), at 1280 x 720 and on a phone, in both faces
+node sf/type-shots.mjs [--no-build]       # the same pictures in both faces, and sheets of them side by side (~/.village/engine/sf/type)
+```
+
 ## Checks and tools
 
 ```sh

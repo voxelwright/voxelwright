@@ -10,6 +10,7 @@
 import { skies, UNSET, WEATHERS, type Weather } from './weather.ts'
 import type { Input } from './input.ts'
 import type { Marcher } from './march.ts'
+import { legends } from './typeface.ts'
 
 export interface RealmPage {
   march: Marcher
@@ -31,7 +32,7 @@ const NAMES: Record<Weather, string> = { clear: 'Clear', overcast: 'Overcast', f
 const clock = (h: number) => { const m = Math.round(h * 60) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
 
 const STYLE = /* css */ `
-#realm { position: fixed; inset: 0; pointer-events: none; z-index: 5; --vx-key-font: var(--vx-font); --vx-key-size: calc(var(--vx) * 3.5); font: 400 14px/1.4 var(--vx-font); color: var(--vx-ink); }
+#realm { position: fixed; inset: 0; pointer-events: none; z-index: 5; font: 400 14px/1.4 var(--vx-font); color: var(--vx-ink); }
 #realm > * { pointer-events: auto; }
 #realm [hidden] { display: none !important; }
 /* The sky: one panel at the top right. */
@@ -41,12 +42,17 @@ const STYLE = /* css */ `
 #realm .sky output { font: 600 20px/1 var(--vx-mono); font-variant-numeric: tabular-nums; color: var(--vx-ink); }
 #realm .sky .ticks { display: flex; justify-content: space-between; margin: calc(var(--vx) * -2) 2px 0; font: 400 11px/1 var(--vx-mono); color: var(--vx-ink-quiet); }
 #realm .sky .vx-toggle-group { inline-size: 100%; }
-#realm .sky .vx-toggle-group > label { padding-inline: calc(var(--vx) * 1); }
+/* The weather: four seats two by two. A raised cap's left wall stands over the first two voxels of its face, so the words
+   keep that far in, and Overcast (84 px in Vox Zakon Text at the key size, 78 in Vox Text) has no room for that four across. */
+#realm .sky .weather { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+#realm .sky .vx-toggle-group > label { padding-inline: calc(var(--vx) * 2.5); white-space: nowrap; }
 #realm .sky .foot { display: flex; justify-content: flex-end; }
-/* The tools: a bank along the bottom. */
-#realm .tools { position: absolute; left: 50%; bottom: max(30px, env(safe-area-inset-bottom)); transform: translateX(-50%); }
-#realm .tools > label { padding-inline: calc(var(--vx) * 3); white-space: nowrap; }
-#realm .tools .n { margin-inline-end: 6px; color: var(--vx-ink-quiet); font-family: var(--vx-mono); }
+/* The tools: a bank along the bottom, in the smaller size of the key font (typeface.ts), so that the bank stands clear of
+   the place's name in the corner. The kit draws a key's side walls over its padding, the left one the wider: five and a
+   half cells before its words and four after, so a word's first figure stands clear of the wall (3 Big charge, #450). */
+#realm .tools { position: absolute; left: 50%; bottom: max(30px, env(safe-area-inset-bottom)); transform: translateX(-50%); --vx-key-size: var(--vx-key-small); }
+#realm .tools > label { padding-inline: calc(var(--vx) * 5.5) calc(var(--vx) * 4); white-space: nowrap; }
+#realm .tools .n { margin-inline-end: 6px; color: var(--vx-ink-quiet); }
 /* What a thumb has: only where the pointer is coarse. */
 #realm .thumbs { display: none; }
 #realm .fold { display: none; }
@@ -55,13 +61,14 @@ const STYLE = /* css */ `
 #realm.folds .sky { top: calc(max(16px, env(safe-area-inset-top)) + 60px); }
 @media (pointer: coarse) {
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
-  #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); }
+  /* (On a phone the panel is words a column wide: the smaller size of the key font, as the tools have, its cells still whole pixels, typeface.ts.) */
+  #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); --vx-key-size: var(--vx-key-small); }
   /* Down the right edge. Held upright, standing on the thumb's key: under the skyline's signs, which are the upper third of an upright
      phone's picture (at 390 x 844 the column is from 340 px down and the skyline's lowest sign ends at 296). Set at
      the middle of the picture's height, it was over the LinkedIn sign. */
   #realm .tools { left: auto; right: max(12px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-62%); }
   @media (orientation: portrait) { #realm .tools { top: auto; bottom: calc(max(84px, env(safe-area-inset-bottom) + 84px) + 112px); transform: none; } }
-  #realm .tools > label { padding-inline: calc(var(--vx) * 2); min-inline-size: calc(var(--vx) * 20); }
+  #realm .tools > label { min-inline-size: calc(var(--vx) * 20); }
   /* Open, the sky's panel is over where the tools stand: they step aside until it is folded. */
   #realm.open .tools { display: none; }
   #realm .thumbs { display: block; pointer-events: none; }
@@ -90,6 +97,7 @@ export function realmControls(page: RealmPage) {
   sheet.rel = 'stylesheet'
   sheet.href = new URL('../kit/voxelmorphism.css', import.meta.url).href
   document.head.append(sheet, style)
+  legends()
   const html = document.documentElement
   html.dataset.vxLook = 'lit'
   const plainOnly = new URLSearchParams(location.search).get('kit') === 'plain'

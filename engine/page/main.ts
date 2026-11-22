@@ -1346,6 +1346,7 @@ async function main() {
     lay: (edit) => { put(); change(edit, false); mover.postMessage({ edit: edit.words, after: heard } satisfies Ask) },
     // Their letters are cells: the far model's wedge, which takes over from 100 m, leaves their box to them.
     kept: (box) => farModel.keep(box),
+    lights: () => march.lights, letters: (data) => march.letters(data),
     reach: () => farModel.reach * M, handover: (x, z) => (farModel.reach > 0 ? farModel.handover(x, z) : Infinity),
     cell: (x, y, z) => { const p = [x, y, z]; for (const l of world.levels) { const size = SIDE << l.index; if (p.every((v, a) => v >= l.origin[a] * size && v < (l.origin[a] + l.grid[a]) * size)) return 1 << l.index } return Infinity },
     done: () => world.done().length,

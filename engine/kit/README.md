@@ -68,5 +68,8 @@ backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`
 Text is IBM Plex Sans and IBM Plex Mono, under the SIL Open Font License (`fonts/*/OFL.txt`).
 Lettering is the kit's own glyph sets, Vox Block and Vox Sign, in `src/core/fonts/`, with flat
 copies inlined in the stylesheet for the plain version. The words on keys are Vox Text
-(`fonts/vox-text/`), the same glyphs as a font. Latin and Ukrainian are drawn. The other folders in `fonts/` are the
+(`fonts/vox-text/`), the same glyphs as a font. Vox Zakon is a second face drawn after Zakon in
+the same grid: a display set (`zakon.js`, its spacing in `zakon-spacing.js`), a key set and a
+compact set of capitals (`zakon-text.js`), and its web fonts in `fonts/vox-zakon/`; a page picks
+it by setting `--vx-key-font` to "Vox Zakon Text" (the SF realm does, `page/typeface.ts`). Latin and Ukrainian are drawn. The other folders in `fonts/` are the
 candidates the type study compared (`showcase/type.html`); the kit does not load them.
