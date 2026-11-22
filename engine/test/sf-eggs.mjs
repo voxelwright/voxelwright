@@ -15,9 +15,9 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, turn } from './kit.mjs'
+import { arg, CHROME, has, here, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
-import { TOWERS, framed, moved as rainMoved } from './sf-towers.mjs'
+import { TOWERS } from './sf-towers.mjs'
 
 const shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'eggs'))
 const round = (n, to = 2) => Math.round(n * 10 ** to) / 10 ** to
@@ -105,24 +105,65 @@ const mean = (cs, f) => cs.reduce((s, c) => s + f(c), 0) / cs.length
 const light = (c) => 0.3 * c[0] + 0.59 * c[1] + 0.11 * c[2]
 const corr = (a, b) => { const ma = a.reduce((s, v) => s + v, 0) / a.length, mb = b.reduce((s, v) => s + v, 0) / b.length; let ab = 0, aa = 0, bb = 0; for (let i = 0; i < a.length; i++) { ab += (a[i] - ma) * (b[i] - mb); aa += (a[i] - ma) ** 2; bb += (b[i] - mb) ** 2 } return ab / Math.sqrt(aa * bb || 1) }
 
+/**
+ * The green of each tower's box in the picture now (sf-towers.mjs TOWERS: `towers`), read in the page, since carrying a
+ * whole picture out of it takes over a second. Pixels under a sign are -1. A picture of the towers is one screenshot of
+ * the box that holds them all.
+ */
+const greens = async (page, towers) => {
+  const boxes = { ...towers.landmarks, ...towers.ordinary }, all = Object.values(boxes), size = page.viewportSize()
+  const clip = { x: Math.max(0, Math.min(...all.map((b) => b.x0)) - 2), y: Math.max(0, Math.min(...all.map((b) => b.y0)) - 2) }
+  clip.width = Math.min(size.width, Math.max(...all.map((b) => b.x1)) + 2) - clip.x; clip.height = Math.min(size.height, Math.max(...all.map((b) => b.y1)) + 2) - clip.y
+  const png = await page.screenshot({ clip })
+  return page.evaluate(async ({ b64, boxes, signs, clip }) => {
+    const bitmap = await createImageBitmap(await (await fetch(`data:image/png;base64,${b64}`)).blob()), c = new OffscreenCanvas(bitmap.width, bitmap.height), g = c.getContext('2d')
+    g.drawImage(bitmap, 0, 0)
+    const px = g.getImageData(0, 0, bitmap.width, bitmap.height).data, out = {}
+    for (const [k, b] of Object.entries(boxes)) {
+      const list = []
+      for (let y = Math.max(0, b.y0 - clip.y); y < Math.min(bitmap.height, b.y1 - clip.y); y++) for (let x = Math.max(0, b.x0 - clip.x); x < Math.min(bitmap.width, b.x1 - clip.x); x++) {
+        list.push(signs.some((s) => x >= s.x0 - clip.x && x < s.x1 - clip.x && y >= s.y0 - clip.y && y < s.y1 - clip.y) ? -1 : px[(y * bitmap.width + x) * 4 + 1])
+      }
+      out[k] = list
+    }
+    return out
+  }, { b64: png.toString('base64'), boxes, signs: towers.signs, clip })
+}
+
 /** Frame gaps for a few seconds: p50 and p99, ms, with the march's own GPU time. */
 const frames = async (page, seconds = 4) => {
   const w = await page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, gpuMs: e.gpuMs } }, seconds * 1000)
   const g = w.gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => round(g[Math.min(g.length - 1, Math.floor(g.length * p))], 1)
   return { frames: g.length, p50: q(0.5), p99: q(0.99), marchMs: round(w.gpuMs, 1) }
 }
-/** What an egg costs: the frames with it up, then the same sky with the window screen down (the picture still drawn, the windows not asking it). */
-const cost = async (page, name) => {
-  const on = await frames(page)
-  await page.evaluate(() => { const e = globalThis.engine; e.eggsScreenHeld = e.march.screen.up; const keep = () => { if (e.eggsScreenHeld !== undefined) e.march.screen.up = 0 }; e.eggsKeep = e.watch(keep) })
-  await page.waitForTimeout(800)
-  const off = await frames(page)
-  await page.evaluate(() => { const e = globalThis.engine; e.eggsKeep(); delete e.eggsScreenHeld })
-  results[name] = { ...(results[name] ?? {}), frames: on, sameSkyNoScreen: off }
-  console.log(`  ${name} frames: ${JSON.stringify(on)}; same sky, no screen: ${JSON.stringify(off)}`)
-  // Measured beside other lanes' checks on one GPU: only a gross cost fails (the screen is a texel read per window pixel).
-  return on.p50 <= off.p50 * 1.25 + 2
-}
+/**
+ * What an egg costs: the frames with it up, against the same sky with the window screen down (the picture still drawn, the
+ * windows not asking it). Three rounds of one then the other, and the mean gap over each three: another lane's check
+ * drawing on this GPU slows whichever one it lands on (the median gap is a step of the display's 16.7 ms and jumped
+ * between them). A miss is measured again with every turn on the GPU held (kit.mjs `timed`).
+ */
+const cost = (page, name, what) => timed({
+  check,
+  idle: (on) => page.evaluate((on) => { globalThis.engine.resting = on }, on),
+  measure: async () => {
+    const ROUNDS = 3, SECONDS = 2, on = [], off = []
+    for (let round = 0; round < ROUNDS; round++) {
+      on.push(await frames(page, SECONDS))
+      await page.evaluate(() => { const e = globalThis.engine; e.eggsKeep = e.watch(() => { e.march.screen.up = 0 }) })
+      await page.waitForTimeout(500)
+      off.push(await frames(page, SECONDS))
+      await page.evaluate(() => { globalThis.engine.eggsKeep(); delete globalThis.engine.eggsKeep })
+      // (The screen comes back up over a second.)
+      await page.waitForTimeout(1200)
+    }
+    const gap = (list) => round((ROUNDS * SECONDS * 1000) / list.reduce((sum, f) => sum + f.frames, 0), 1)
+    results[name] = { ...(results[name] ?? {}), frames: on, sameSkyNoScreen: off }
+    return { with: gap(on), without: gap(off) }
+  },
+  // Only a gross cost fails (the screen is a texel read per window pixel).
+  passes: (r) => r.with <= r.without * 1.25 + 2,
+  say: (r) => `${what} costs no more than a quarter more than its sky without the screen: mean frame gap ${r.with} ms with it, ${r.without} ms without`,
+})
 
 try {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
@@ -202,7 +243,7 @@ try {
   const moved = mean(city1.map((c, i) => [c, city2[i]]), ([a, b]) => Math.abs(light(a) - light(b)))
   check(moved > 0.4, `the code falls: the city's light moved ${round(moved)} a cell in 0.4 s`)
   // The landmarks are in it as the towers round them are (sf-towers.mjs): how far each one's green moves from one
-  // picture to the next, the middle of eleven such steps. Salesforce Tower's shaft against the towers under the logos (from half
+  // picture to the next, the mean of every step in 50 s (below). Salesforce Tower's shaft against the towers under the logos (from half
   // the least of them to twice the most); its crown against its shaft and the Pyramid's lit spire against the
   // Pyramid's own windows under it (a third to three times). With no window screen on a landmark's glass the shaft was still;
   // with the whole of it on its crown's lamps, the crown was the brightest thing in the Matrix.
@@ -217,23 +258,35 @@ try {
       await frame()
     }, TOWERS.toString())
     await page.waitForTimeout(800)
-    const sums = {}
-    let last = null
-    for (let i = 0; i < 12; i++) {
-      const m = await framed(page, await page.evaluate(TOWERS))
-      if (last) for (const [k, box] of Object.entries(m.boxes)) (sums[k] ??= []).push(rainMoved(last.picture, m.picture, box, m.signs))
-      last = m
-      await page.waitForTimeout(350)
+    // The rain's columns stand where they are and a landmark is a few of them wide (the Pyramid's spire is eight pixels, one
+    // or two columns), each with three drops of its own, one slower than the next: the slowest takes some 35 s to come
+    // round (eggs-pictures.ts `codeRain`). In a few pictures a drop is on a part or it is not, and the middle of eleven
+    // pairs of pictures came to anything from 0.06 to 6.8 times its body's, at one commit. So each picture is paired with
+    // the one before it for longer than any drop takes to come round, and each pixel is counted once.
+    const SECONDS = 50, sums = {}, counts = {}
+    let last = null, pairs = 0
+    const from = Date.now()
+    while (!last || Date.now() - from < SECONDS * 1000) {
+      const now = await greens(page, await page.evaluate(TOWERS))
+      if (last) {
+        pairs++
+        for (const [k, was] of Object.entries(now)) {
+          if (was.length !== last[k].length) continue
+          for (let j = 0; j < was.length; j++) if (was[j] >= 0 && last[k][j] >= 0) { sums[k] = (sums[k] ?? 0) + Math.abs(was[j] - last[k][j]); counts[k] = (counts[k] ?? 0) + 1 }
+        }
+      }
+      last = now
     }
-    // (The middle one of the eleven.)
-    const of = (k) => round([...(sums[k] ?? [0])].sort((a, b) => a - b)[Math.floor((sums[k]?.length ?? 1) / 2)], 2), round_ = Object.keys(sums).filter((k) => k.endsWith('tower')).map(of), lo = Math.min(...round_), hi = Math.max(...round_)
+    results.matrix.rainPairs = pairs
+    // (How far the green moves a pixel from one picture to the next, of 255.)
+    const of = (k) => round((sums[k] ?? 0) / Math.max(1, counts[k] ?? 0), 2), round_ = Object.keys(sums).filter((k) => k.endsWith('tower')).map(of), lo = Math.min(...round_), hi = Math.max(...round_)
     results.matrix.towers = Object.fromEntries(Object.keys(sums).map((k) => [k, of(k)]))
     await page.evaluate(() => { globalThis.engine.boards.plane.hold = null })
     const within = (v, a, b) => v >= a && v <= b
     check(round_.length >= 2 && within(of('salesforce'), lo * 0.5, hi * 2), `Salesforce Tower's shaft shows the rain as the towers round it do: its green moves ${of('salesforce')} a pixel from picture to picture, theirs ${round_.join(', ')} (asked: ${round(lo * 0.5, 2)} to ${round(hi * 2, 2)})`)
-    check(within(of("salesforce's crown"), of('salesforce') / 3, of('salesforce') * 3) && within(of("pyramid's spire"), of('pyramid') / 3, of('pyramid') * 3), `the landmarks' own lamps show it as their windows do: Salesforce's crown ${of("salesforce's crown")} against its shaft's ${of('salesforce')}, the Pyramid's spire ${of("pyramid's spire")} against its body's ${of('pyramid')} (asked: a third to three times: which columns of the rain cross a part is luck)`)
+    check(within(of("salesforce's crown"), of('salesforce') / 3, of('salesforce') * 3) && within(of("pyramid's spire"), of('pyramid') / 3, of('pyramid') * 3), `the landmarks' own lamps show it as their windows do: Salesforce's crown ${of("salesforce's crown")} against its shaft's ${of('salesforce')} (${round(of("salesforce's crown") / of('salesforce'))} times), the Pyramid's spire ${of("pyramid's spire")} against its body's ${of('pyramid')} (${round(of("pyramid's spire") / of('pyramid'))} times) (asked: a third to three times, each the mean of ${pairs} pairs of pictures over ${SECONDS} s: which columns of the rain cross a part is luck, and over a full round of it that evens out)`)
   }
-  check(await cost(page, 'matrix'), 'the Matrix costs no more than a quarter more than its sky without the screen')
+  await cost(page, 'matrix', 'the Matrix')
   await sayTo(page, 'blue pill')
   // On the way out too: the fog thins in the dark before the day is back, so no picture is a day washed pale under it
   // (as light as half the day's city and with under a third of its contrast).
@@ -261,7 +314,7 @@ try {
   s = await state(page)
   check(s.running === 'apple' && s.playing && !s.muted && s.sound > 0, `typed, it plays with its sound: ${s.sound} bytes decoded`)
   await still(page)
-  check(await cost(page, 'bad-apple'), 'Bad Apple!! costs no more than a quarter more than its sky without the screen')
+  await cost(page, 'bad-apple', 'Bad Apple!!')
   const follows = async (at, name) => {
     await page.evaluate((t) => globalThis.engine.eggs.hold(t), at)
     await page.waitForFunction((t) => { const m = globalThis.engine.eggs.media; return m && !m.seeking && Math.abs(m.currentTime - t) < 0.2 }, at, { timeout: 10_000 }).catch(() => null)
@@ -310,7 +363,7 @@ try {
   const rick = cells(await grid(page, 'rickroll'), CITY)
   check(mean(rick, light) > mean(city0, light) * 0.25, `the windows show him: the city's light ${round(mean(rick, light), 1)}`)
   await page.evaluate(() => globalThis.engine.eggs.hold(null))
-  check(await cost(page, 'rickroll'), 'the Rickroll costs no more than a quarter more than its sky without the screen')
+  await cost(page, 'rickroll', 'the Rickroll')
   await sayTo(page, 'stop')
   await page.waitForTimeout(300)
   check((await state(page)).running === null, '"stop" ends it')
