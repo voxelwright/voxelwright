@@ -126,6 +126,8 @@ const DEEP = 6
 const NORMALS = [[-1, 0], [0, -1], [1, 0], [0, 1]] as const
 /** A roof sign's frame: how tall its legs are for the sign's height, and how far they go down into the roof, cells (the far model's roof and the cells' are not at one height). */
 export const STAND = 0.16, SUNK = 30
+/** How many pixels tall a logo's sign is on its picture (its frame's legs are more). */
+const LOGO_PX = 256
 /** What a lettering board can say in its face: capitals where the face has only capitals, a character it has no glyph for a space, 14 at most. */
 export const lettered = (text: string, face: Lettering) => [...(face.set.upper ? text.toUpperCase() : text)].map((c) => (c in face.set.glyphs ? c : ' ')).join('').slice(0, 14)
 
@@ -307,6 +309,8 @@ export interface Boards {
   /** Where a board is on the picture now, client px (its middle and its box), or null if it is behind the eye: for the checks and the host. */
   where(id: string): { x: number; y: number; wide: number; high: number; /** How tall its face is down its middle, px. */ tall: number; far: number } | null
   marks(id: string): { x: number; y: number; lit: boolean }[]
+  /** Whether the logos are drawn: a check reads a logo off the picture as what it changes there (test/sf-logos.mjs). */
+  logos: boolean
   /** How many of a lettering board's letters still stand (most of their lamp there), and a digital board's tiles lit. */
   standing(id: string): { letters: string; whole: boolean }
   /** The lettering boards' own light (letterlight.ts): its clock can be held, and it says when it has settled and how lit each letter is. */
@@ -420,7 +424,7 @@ export async function boards(o: Needs): Promise<Boards> {
       if (s.far) { const face = !asCells(s, view.eye), dusk = (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
-      else if (s.b.type === 'logo') seat(s, view.eye)
+      else if (s.b.type === 'logo') { seat(s, view.eye); sharpen(s, view, to.size) }
     }
     if (turned) keep()
     // The letters' own light: the march is told it for the next frame, and their halos are drawn over this one.
@@ -432,7 +436,7 @@ export async function boards(o: Needs): Promise<Boards> {
   const seen = (id: string) => { const w = where(id), r = o.canvas.getBoundingClientRect(); return !!w && w.x > r.left && w.x < r.right && w.y > r.top && w.y < r.bottom }
   const records: Board[] = o.file.boards.map((b) => ({ ...b }))
   /** A board as it stands: its record, its cells as laid, its screen if it has one. */
-  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A lettering board's face (FACE): how big its picture is, how much of each pixel of it is panel, post and lamp (three shares of 255), whether the world changed since it was painted, whether it is shown now in place of the cells, and how far its letters are lit (`light`). */ far?: Screen; farSize?: string; farKinds?: Uint8Array; stale?: boolean; faced?: boolean; lit?: number; /** Which letter each of its picture's columns is (-1 none), and how lit its letters were when it was last inked (letterlight.ts, in eighths). */ farLetter?: Int16Array; dusk?: string; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
+  interface Stood { b: Board; shape: Shape | null; text: string; screen: Screen | null; content: Content | null; tiles: [number, number]; gone: () => void; /** A lettering board's face (FACE): how big its picture is, how much of each pixel of it is panel, post and lamp (three shares of 255), whether the world changed since it was painted, whether it is shown now in place of the cells, and how far its letters are lit (`light`). */ far?: Screen; farSize?: string; farKinds?: Uint8Array; stale?: boolean; faced?: boolean; lit?: number; /** Which letter each of its picture's columns is (-1 none), and how lit its letters were when it was last inked (letterlight.ts, in eighths). */ farLetter?: Int16Array; dusk?: string; /** A logo: how far out from `at` along its normal its face is now, cells (`seat`), and when its wall as cells was last looked for. */ out?: number; /** A logo: how many pixels of the picture across and up its sign was last painted for (`sharpen`), and how to paint it for a size. */ seen?: string; sharp?: (seen?: [number, number]) => void; /** A logo: how wide its mark is for its height (logos.ts). */ wide?: number; looked?: number; cells?: number | null; /** A roof sign: how far over `at` the cells' roof is, cells, while the eye is near enough for the tower to be cells. */ up?: number }
   const stood = new Map<string, Stood>()
   let laid = 0
   const lay = (edit: Edit) => { laid++; o.lay(edit) }
@@ -549,6 +553,27 @@ export async function boards(o: Needs): Promise<Boards> {
     const out = near && s.cells != null ? s.cells : 0
     if (out !== s.out) { s.out = out; place(s) }
   }
+  /**
+   * A logo's picture drawn for the size it is seen at (logos.ts `sign`): how many of the drawn picture's pixels its
+   * sign covers across and up, from its edges' middles as they stand (`place`), so that a sign seen from one side or
+   * from under is as narrow or as short as it looks. Painted again when that changes, in whole pixels, until it is as
+   * big as its picture (LOGO_PX) both ways, past which it is the picture itself.
+   */
+  const sharpen = (s: Stood, view: View, size: readonly number[]) => {
+    const sh = s.shape!, out = s.out ?? 0, m = [sh.middle[0] + sh.normal[0] * out, sh.middle[1] + (s.up ?? 0), sh.middle[2] + sh.normal[2] * out], k = size[1] / (2 * view.tanHalf)
+    const on = (u: number, v: number) => {
+      const d = [m[0] + sh.right[0] * u - view.eye[0], m[1] + v - view.eye[1], m[2] + sh.right[2] * u - view.eye[2]], far = d[0] * view.forward[0] + d[1] * view.forward[1] + d[2] * view.forward[2]
+      return far > 1 ? [(k * (d[0] * view.right[0] + d[1] * view.right[1] + d[2] * view.right[2])) / far, (k * (d[0] * view.up[0] + d[1] * view.up[1] + d[2] * view.up[2])) / far] : null
+    }
+    const l = on(-sh.wide / 2, 0), r = on(sh.wide / 2, 0), t = on(0, sh.high / 2), b = on(0, -sh.high / 2)
+    if (!s.sharp) return
+    // (Part of it beside or behind the eye: it is near, and its picture is the whole one.)
+    const seen: [number, number] | undefined = l && r && t && b ? [Math.floor(Math.hypot(r[0] - l[0], r[1] - l[1])), Math.floor(Math.hypot(t[0] - b[0], t[1] - b[1]))] : undefined
+    const key = !seen || (seen[0] >= LOGO_PX * (s.wide ?? 1) && seen[1] >= LOGO_PX) ? 'whole' : [Math.min(seen[0], LOGO_PX * (s.wide ?? 1)), Math.min(seen[1], LOGO_PX)].join('x')
+    if (key === s.seen) return
+    s.seen = key
+    s.sharp(key === 'whole' ? undefined : seen)
+  }
   const stand = (s: Stood, again = false) => {
     const b = s.b, face = faceOf(b), text = b.type === 'lettering' ? lettered(s.content && 'text' in s.content ? s.content.text : '', face!) : ''
     if (!again && s.shape && s.text === text) return
@@ -583,9 +608,10 @@ export async function boards(o: Needs): Promise<Boards> {
       const mark = MARKS[b.logo ?? '']
       if (!mark) throw new Error(`the logo "${b.logo}" of the board ${b.id} is none of ${Object.keys(MARKS).join(', ')}`)
       // (Lit as channel letters are, not as a screen is: a screen's light on a mark's white was a blot by night from before it.)
-      const roof = b.mount === 'roof', wide = Math.round((256 * mark.wide) / 4) * 4, legs = roof ? Math.round((256 * (STAND + SUNK / ((b.size as number) * M))) / 4) * 4 : 0
+      const roof = b.mount === 'roof', wide = Math.round((LOGO_PX * mark.wide) / 4) * 4, legs = roof ? Math.round((LOGO_PX * (STAND + SUNK / ((b.size as number) * M))) / 4) * 4 : 0
       // (A roof sign is read from behind too, the right way round, as the banner is.)
-      s.screen = drawn.add({ pixels: [wide, 256 + legs], both: roof, style: { ground: '#000', ink: '#fff', glows: true, glow: 0.3, dim: 0.72 } })
+      s.screen = drawn.add({ pixels: [wide, LOGO_PX + legs], both: roof, style: { ground: '#000', ink: '#fff', glows: true, glow: 0.3, dim: 0.72 } })
+      s.sharp = (seen) => s.screen!.paint((pen, w, h) => signOf(pen, mark, w, h - legs, legs, seen)); s.wide = mark.wide
       s.screen.paint((pen, w, h) => signOf(pen, mark, w, h - legs, legs))
       stood.set(b.id, s)
       stand(s)
@@ -1022,6 +1048,8 @@ export async function boards(o: Needs): Promise<Boards> {
     },
 
     get plane() { return flown },
+    get logos() { return [...stood.values()].some((s) => s.b.type === 'logo' && !s.screen?.hidden) },
+    set logos(on: boolean) { for (const s of stood.values()) if (s.b.type === 'logo' && s.screen) s.screen.hidden = !on },
     editor,
   }
 }
