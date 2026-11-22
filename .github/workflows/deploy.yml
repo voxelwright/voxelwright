@@ -1,0 +1,68 @@
+name: deploy
+
+# zahynailo.dev (#450): on every push to main, build the SF realm and the site and deploy both as the one Worker
+# (deploy/README.md). A failed step fails the run before `cf deploy`, and a failed `cf deploy` makes no new version
+# live, so the site stays on the last good version either way.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            deploy/package-lock.json
+
+      # The site, under /blog/.
+      - run: npm ci
+        working-directory: site
+      - run: npm test
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+
+      # The realm: its core, then the page with the pinned release, from the data bundle (deploy/data.mjs) the pin names.
+      - run: rustup target add wasm32-unknown-unknown
+      - run: node deploy/data.mjs fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: npm run core
+        working-directory: engine
+      - run: node sf/build.mjs
+        working-directory: engine
+
+      # One folder, one Worker.
+      - run: npm ci
+        working-directory: deploy
+      - run: node assemble.mjs
+        working-directory: deploy
+      - run: npx cf deploy --message "${{ github.sha }}"
+        working-directory: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # What is live now answers: the realm's page, its release pointer and the blog.
+      - name: live check
+        run: |
+          for path in / /current.json /blog/; do
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://zahynailo.dev$path")
+            echo "$path $code"
+            test "$code" = 200
+          done

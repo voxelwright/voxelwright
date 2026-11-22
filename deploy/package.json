@@ -1,0 +1,14 @@
+{
+  "name": "village-deploy",
+  "private": true,
+  "type": "module",
+  "description": "zahynailo.dev: the SF realm at / and the site under /blog/, one Cloudflare Worker (#450).",
+  "scripts": {
+    "assemble": "node assemble.mjs",
+    "deploy": "cf deploy"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-rc.0",
+    "wrangler": "4.163.0"
+  }
+}
