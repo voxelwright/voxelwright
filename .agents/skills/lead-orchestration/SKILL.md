@@ -8,7 +8,7 @@ description: How Village's lead (orchestrator) agent runs many builder agents at
 This skill holds what the leads have learned from running Village's factory
 since November 2026. AGENTS.md has the rules. This skill explains how to follow
 them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
--speed.md, -parts-and-kits.md) and in issue #465.
+-speed.md, -parts-and-kits.md, 2026-11-21/report.md) and in issue #465.
 
 ## Taking stock
 
@@ -48,11 +48,25 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
   small and names it.
 - Start dependent work as soon as the work it depends on is pushed. Stack it on
   that branch rather than waiting for the merge.
+- One unit per delegate. New owner notes or a second unit go to a fresh
+  delegate, stacked on the pushed branch, never queued into a running turn. On
+  Nov 21 a lane ran as one turn for over six hours, kept alive by polling loops,
+  so the lead's queued messages reached it 53 and 150 minutes late.
+- Check file ownership at dispatch, against the lanes already running. On
+  Nov 21 three lanes all edited `boards.ts`, `boards.json` and `sf-boards.mjs`.
+  That cost four conflicted rebases and four failed budget runs.
 - A brief is the agent's only context. It contains:
   - the repo, the worktree path and the branch;
   - the current state, with numbers;
   - a numbered list of tasks;
-  - what proves the work, as commands;
+  - what proves the work, as commands. Iterate with `--changed` checks, and
+    run the full suite once, on the head you report. On Nov 21 the full suite
+    reran after every change: up to 15.6 of 40.8 lane-hours;
+  - done means proven. The report needs a before/after crop at the same camera
+    for each owner note, and its `npm run sf` bytes against main. Before the
+    report, a fresh agent hunts for defects in the shots;
+  - end the turn while checks run: run them in the background and wake on the
+    notification, with no polling loops or long foreground timeouts;
   - constraints: off-limit files, the shared GPU, disk, and Mapillary photos
     kept out of git and public posts;
   - commit format: `[#issue] change`, no co-author lines;
@@ -60,6 +74,9 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
 - Have each agent make its own worktree from the right remote branch
   (`git worktree add <path> -b <branch> origin/<base>`). The root checkout is
   old and detached. Never build in it.
+- Run the lead itself from a checkout that is current with main, not the root
+  checkout. The root checkout is at a Nov 6 commit with no `.claude/hooks`, so
+  the dispatch-log hook never fired for the lead's 13 dispatches on Nov 21.
 - Ask for the lane's open questions and requests to other lanes, and route each
   one within an hour. Requests left in issue comments went unanswered for 8 to
   10 hours.
@@ -98,7 +115,8 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
 ## The machine
 
 - There is one GPU, and every page check takes a turn (`engine/test/kit.mjs`,
-  `ENGINE_TURNS`). Rerun a red page check once, and keep its output, before
+  `ENGINE_TURNS`). Never wrap a check in a private lock: on Nov 21 one waited
+  90 minutes on its own parent. Rerun a red page check once, and keep its output, before
   calling it a regression. Nine checks fail under load. Track this in #465
   rather than retrying forever.
 - Disk: `scripts/hygiene.sh` runs hourly from launchd. It removes clean, merged
