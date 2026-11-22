@@ -1,0 +1,62 @@
+.breakable-b { position: relative; font-style: normal; }
+@media (pointer: coarse) {
+  .park-sign a:has(.breakable-b) { -webkit-touch-callout: none; user-select: none; }
+}
+.log-tail { font-style: normal; display: inline-block; }
+.overlook[data-live] .park-sign a:first-of-type > span { text-transform: uppercase; }
+.b-chips, .glyph-rain { position: absolute; pointer-events: none; user-select: none; }
+.b-chips { inset: 0; }
+.b-chips i { position: absolute; background: currentColor; box-shadow: 1px 1px #766a47; }
+.park-log { display: grid; gap: calc(var(--vx) * 3); max-width: 40rem; }
+.park-log h2 { margin: 0; font: 600 1.75rem/1.2 var(--serif); }
+.park-log time { font: .8125rem/1.4 var(--vx-mono); color: var(--muted); }
+.park-log ul { margin: 0; padding-left: 1.2em; }
+.park-log-actions { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 6); margin: calc(var(--vx) * 2) 0 0; }
+.park-log-actions a { color: var(--vx-link); }
+.park-secrets { margin-bottom: 1rem; }
+.park-secrets summary { cursor: pointer; line-height: 2.75rem; font-weight: 600; }
+/* the secrets are the kit's keys; IDDQD latches while it holds */
+.egg-actions { display: flex; flex-wrap: wrap; gap: calc(var(--vx) * 4) calc(var(--vx) * 4); max-width: 40rem; padding-block: calc(var(--vx) * 2); }
+[data-egg="moon"] i {
+  display: inline-block; width: .6em; height: .6em; border-radius: 50%;
+  margin: 0 .45em; background: currentColor; vertical-align: middle;
+}
+.egg-status { margin: 0; color: var(--ink); font-size: .95rem; }
+.egg-status:not(:empty) { padding: .25rem 0 1rem; }
+.glyph-rain {
+  top: 35%; height: 38%; overflow: hidden; left: 33%; right: 3%;
+  color: #c4ffe2; text-shadow: 0 1px 2px #143328; font: bold .85rem/1 monospace;
+}
+.overlook:not([data-live]) .glyph-rain { top: 12%; }
+.glyph-rain i { position: absolute; writing-mode: vertical-rl; font-style: normal; }
+.sign-dancer {
+  position: absolute; pointer-events: none; image-rendering: pixelated;
+  width: 16px; height: 16px; left: 62%; bottom: 100%; transform-origin: bottom;
+}
+.offline-car {
+  display: flex; align-items: center; gap: .5em; width: fit-content;
+  color: var(--ink); background: none; border: none; padding: 0; min-height: 44px;
+  font: inherit; font-size: .9rem; cursor: pointer;
+}
+.offline-car i { position: relative; width: 3.5rem; height: 16px; border-bottom: 2px solid var(--muted); }
+.offline-car canvas { position: absolute; left: 0; bottom: 0; width: 24px; height: 14px; image-rendering: pixelated; }
+.offline-car[data-across] canvas { left: auto; right: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .offline-car[data-across] canvas { animation: cable-hop 290ms ease-out; }
+  @keyframes cable-hop {
+    from { transform: translateX(-2rem); }
+    45% { transform: translate(-1rem,-.6rem); }
+    to { transform: none; }
+  }
+}
+/* The video eggs' media element is the clock and the sound, never seen: the windows
+   show its frames. Kept in the layout (not display:none) so every browser decodes it. */
+.egg-media {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 2px;
+  height: 2px;
+  opacity: 0;
+  pointer-events: none;
+}

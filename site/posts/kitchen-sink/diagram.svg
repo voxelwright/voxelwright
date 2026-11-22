@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675">
+  <rect width="1200" height="675" fill="#35594a"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.35" stroke-width="2">
+    <path d="M0 520 L300 360 L520 470 L780 300 L1200 500"/>
+    <circle cx="930" cy="170" r="70"/>
+  </g>
+  <text x="60" y="110" font-family="system-ui, sans-serif" font-size="48" fill="#ffffff">Example image</text>
+  <text x="60" y="165" font-family="system-ui, sans-serif" font-size="28" fill="#ffffff" fill-opacity="0.8">Placeholder poster</text>
+</svg>

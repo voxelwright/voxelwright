@@ -1,0 +1,142 @@
+/* The site's layout on Voxelmorphism. Colours, controls, lists, the article and the code window
+   are the kit's (vendor/village/kit/voxelmorphism.css); this sheet places them and gives the
+   site's own headings their sizes. No colour is written here: every one is a kit token. */
+
+/* The reading face for display words: post titles and an article's headings (the kit's
+   --vx-serif). Source Serif 4, OFL (fonts/source-serif-4). Upright only: a quote stands upright. */
+@font-face {
+  font-family: "Source Serif 4";
+  src: url(fonts/source-serif-4/source-serif-4-latin-opsz-normal.woff2) format("woff2");
+  font-weight: 200 900; font-style: normal; font-display: swap;
+}
+:root { --vx-serif: "Source Serif 4", "Iowan Old Style", Georgia, serif; --measure: 40rem; }
+[data-shell] .vx-prose blockquote { font-style: normal; }
+
+.skip {
+  position: absolute; inset-inline-start: calc(var(--vx) * 4); inset-block-start: calc(var(--vx) * 4); z-index: 10;
+  padding: calc(var(--vx) * 2) calc(var(--vx) * 4); background: var(--vx-ink); color: var(--vx-ground);
+  translate: 0 -200%;
+}
+.skip:focus-visible { translate: 0; outline: 2px solid var(--vx-focus); outline-offset: 2px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: calc(var(--vx) * 10); min-inline-size: 0; }
+main:focus { outline: 0; }
+
+/* ---- the bar ---- */
+.site-bar { position: relative; z-index: 2; }
+.site-bar .vx-navbar-brand { font-family: var(--vx-serif); font-size: 1.25rem; font-weight: 650; letter-spacing: -0.01em; }
+.site-bar [hidden] { display: none !important; }
+
+/* ---- an index page's head: the lettering, and one line under it ---- */
+.page-head { display: grid; gap: calc(var(--vx) * 5); justify-items: start; padding-block-start: calc(var(--vx) * 6); }
+.page-title { max-inline-size: 100%; }
+.page-lead { margin: 0; max-inline-size: 36rem; font-size: 1.125rem; line-height: 1.55; color: var(--vx-ink-quiet); text-wrap: pretty; }
+.page-kicker { margin: 0; font: 500 0.875rem/1.4 var(--vx-mono); }
+.page-kicker a { color: var(--vx-ink-quiet); }
+.page-tools { display: flex; flex-wrap: wrap; gap: 0 calc(var(--vx) * 6); margin: calc(var(--vx) * -4) 0 0; }
+.page-tools a { display: inline-flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: var(--vx-link); text-underline-offset: 0.22em; }
+
+/* ---- lists of posts: the kit's list group, an item in each row ---- */
+.year { display: grid; gap: calc(var(--vx) * 3); }
+.year-title { margin: 0; font: 600 0.875rem/1.4 var(--vx-mono); color: var(--vx-ink-quiet); font-variant-numeric: tabular-nums; }
+.post-list { max-inline-size: 48rem; }
+.post-list .vx-item-title { font-family: var(--vx-serif); font-weight: 600; }
+.post-list .vx-item-line { max-inline-size: 38rem; }
+.post-list time { font-family: var(--vx-mono); font-size: 0.8125rem; white-space: nowrap; }
+
+/* ---- a post ---- */
+.post { display: grid; grid-template-columns: minmax(0, var(--measure)); justify-content: center; gap: calc(var(--vx) * 8); padding-block: calc(var(--vx) * 6) calc(var(--vx) * 10); }
+.post-head { display: grid; gap: calc(var(--vx) * 5); }
+.post-title { margin: 0; font: 600 clamp(2.25rem, 5.5vw, 3.5rem)/1.06 var(--vx-serif); letter-spacing: -0.025em; text-wrap: balance; font-optical-sizing: auto; }
+.post-standfirst { margin: 0; font-size: 1.25rem; line-height: 1.5; color: var(--vx-ink-quiet); text-wrap: pretty; }
+.post-meta { display: flex; flex-wrap: wrap; align-items: center; gap: calc(var(--vx) * 1) calc(var(--vx) * 5); font: 400 0.8125rem/1.5 var(--vx-mono); color: var(--vx-ink-quiet); }
+.post-tags { display: flex; flex-wrap: wrap; gap: 0 calc(var(--vx) * 4); margin: 0; padding: 0; list-style: none; }
+.post-tags a { display: inline-flex; align-items: center; min-block-size: calc(var(--vx) * 11); color: var(--vx-link); text-underline-offset: 0.22em; }
+.post-tags a::before { content: "#"; color: var(--vx-ink-quiet); }
+.post-body { --vx-measure: var(--measure); font-size: 1.125rem; }
+.post-body h2 { font-size: 1.75rem; }
+/* a model's words read as not the author's: a callout, in the text face at a smaller size */
+.model-note { display: block; }
+.model-note .vx-callout { font-size: 0.9375rem; }
+.model-note .vx-callout > :not(.vx-callout-title, .vx-canvas) { margin: calc(var(--vx) * 2) 0 0; }
+.model-note .vx-callout-title { font-weight: 400; color: var(--vx-ink-quiet); }
+.model-note .vx-callout-title strong { color: var(--vx-ink); font-weight: 650; }
+
+/* ---- not found ---- */
+.not-found { padding-block: calc(var(--vx) * 16); }
+.not-found .page-title { margin-block-end: calc(var(--vx) * 6); }
+
+/* ---- the foot ---- */
+.site-foot { padding-block-start: calc(var(--vx) * 6); border-block-start: 1px solid var(--vx-slate); }
+.site-foot [hidden] { display: none; }
+
+@media (max-width: 35rem) {
+  .post-title { font-size: 2.125rem; }
+  .post-body { font-size: 1.0625rem; }
+}
+
+/* an AI session in an article: set apart from the words as code and pictures are */
+.post-body > ai-session { margin-block-start: calc(var(--vx) * 10); }
+.post-body > ai-session + * { margin-block-start: calc(var(--vx) * 10); }
+
+/* ---- between pages ----
+   Cross-document view transitions; the head's script (generator/pages.mjs, BETWEEN) names the
+   stand-ins and sorts each move. The bar stays put. The page's title travels into the next page's
+   title: from a list's row into its post, and from the city's sign into the Blog's lettering,
+   arriving from the flight the city has just played. Back to the city is instant. Reduced motion
+   keeps one short cross-fade and nothing that moves. Without support, links just navigate. */
+@view-transition { navigation: auto; }
+:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1); }
+.site-bar { view-transition-name: site-bar; }
+.page-title, .post-title { view-transition-name: page-title; }
+/* the home page's title is the city's, hidden inside it: it never takes part */
+[data-page="home"] .page-title { view-transition-name: none; }
+
+@keyframes vt-fade-in { from { opacity: 0; } }
+@keyframes vt-fade-out { to { opacity: 0; } }
+@keyframes vt-onward { to { opacity: 0; transform: scale(1.08); } }
+@keyframes vt-arrive { from { opacity: 0; transform: translateY(0.75rem); } }
+@keyframes vt-rise { from { opacity: 0; transform: translateY(1.5rem); } }
+@keyframes vt-drop { from { opacity: 0; transform: translateY(-0.5rem); } }
+
+/* page to page: a cross-fade, the bar held, the title moved */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: 220ms; animation-timing-function: var(--ease-out); }
+/* the bar: the old one is held while the new page's kit wakes (the new image is live, so by the
+   time it shows, the bar is usually lit as before), then a short cross-fade covers any change */
+@keyframes vt-hold-out { 0%, 55% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes vt-hold-in { 0%, 55% { opacity: 0; } 100% { opacity: 1; } }
+::view-transition-group(site-bar) { animation-duration: 320ms; }
+::view-transition-old(site-bar) { animation: vt-hold-out 320ms linear both; }
+::view-transition-new(site-bar) { animation: vt-hold-in 320ms linear both; }
+/* a bar with no partner (the last page was scrolled past its bar) simply fades */
+::view-transition-new(site-bar):only-child { animation: vt-fade-in 200ms var(--ease-out) both; }
+::view-transition-old(site-bar):only-child { animation: vt-fade-out 160ms var(--ease-out) both; }
+/* the title: it answers a press, so it leaves at once and settles (ease-out, not ease-in-out's
+   slow start). Its images scale with the group's height, not its width: a title's box can be
+   much wider than its words, and the words should grow from one size to the other. */
+::view-transition-group(page-title) { animation-duration: 340ms; animation-timing-function: var(--ease-out); }
+::view-transition-old(page-title), ::view-transition-new(page-title) { block-size: 100%; inline-size: auto; }
+::view-transition-old(page-title) { animation-duration: 180ms; animation-timing-function: var(--ease-out); }
+::view-transition-new(page-title) { animation-duration: 300ms; animation-timing-function: var(--ease-out); }
+
+/* from the city: the window keeps flying onward as the page arrives under it; the title rises
+   out of the sign that was pressed (or from below, when the sign was out of sight), and the bar
+   settles in last */
+:root:active-view-transition-type(from-city)::view-transition-old(root) { animation: vt-onward 340ms var(--ease-out) both; }
+:root:active-view-transition-type(from-city)::view-transition-new(root) { animation: vt-arrive 340ms var(--ease-out) 40ms both; }
+/* the one long move on the site, and a rare one: the flight ends at rest, so the word sets off
+   from rest too, lifts out of the dissolving city and glides into place */
+:root:active-view-transition-type(from-city)::view-transition-group(page-title) { animation-duration: 520ms; animation-timing-function: var(--ease-in-out); }
+:root:active-view-transition-type(from-city)::view-transition-new(page-title) { animation: vt-fade-in 320ms var(--ease-out) both; }
+:root:active-view-transition-type(from-city)::view-transition-new(page-title):only-child { animation: vt-rise 520ms var(--ease-out) both; }
+:root:active-view-transition-type(from-city)::view-transition-new(site-bar):only-child { animation: vt-drop 280ms var(--ease-out) 200ms both; }
+
+/* into the city by a link: the page fades and the city's window opens behind it */
+:root:active-view-transition-type(to-city)::view-transition-old(root) { animation: vt-fade-out 200ms var(--ease-out) both; }
+:root:active-view-transition-type(to-city)::view-transition-new(root) { animation: vt-fade-in 320ms var(--ease-out) both; }
+:root:active-view-transition-type(to-city)::view-transition-old(*):only-child { animation: vt-fade-out 160ms var(--ease-out) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .site-bar, .page-title, .post-title { view-transition-name: none; }
+  ::view-transition-old(root) { animation: vt-fade-out 160ms ease both; }
+  ::view-transition-new(root) { animation: vt-fade-in 160ms ease both; }
+}

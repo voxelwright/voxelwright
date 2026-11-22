@@ -1,0 +1,96 @@
+name: deploy
+
+# zahynailo.dev (#450): on every push to main, build the SF realm and the site and deploy both as the one Worker
+# (deploy/README.md). A step that fails before `cf deploy` deploys nothing, a failed `cf deploy` makes no new version
+# live, and a new version that fails the live check after it is rolled back to the one before. Either way the run
+# fails and the site stays on the last good version. Only main deploys: the job is guarded, and the Cloudflare
+# secrets live in the `production` environment, which only main may use.
+on:
+  push:
+    branches: [main]
+    # What the deployed folder is made from; a merge that changes none of it leaves the site as it is.
+    paths: [engine/**, site/**, deploy/**, .github/workflows/deploy.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 25
+          cache: npm
+          cache-dependency-path: |
+            site/package-lock.json
+            deploy/package-lock.json
+
+      # The site, under /blog/.
+      - run: npm ci
+        working-directory: site
+      - run: npm test
+        working-directory: site
+      - run: npm run build
+        working-directory: site
+
+      # The realm: its core, then the page with the pinned release, from the data bundle (deploy/data.mjs) the pin names.
+      - run: rustup target add wasm32-unknown-unknown
+      - run: node deploy/data.mjs fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - run: npm run core
+        working-directory: engine
+      - run: node sf/build.mjs
+        working-directory: engine
+
+      # One folder, one Worker.
+      - run: npm ci
+        working-directory: deploy
+      - run: npm test
+        working-directory: deploy
+      - run: node assemble.mjs
+        working-directory: deploy
+      - id: deploy
+        run: npx cf deploy --message "${{ github.sha }}"
+        working-directory: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # What is live now: this commit's version on all traffic, the realm's page and the blog, and the pinned release's
+      # manifest through worker.mjs as its own Brotli.
+      - name: live check
+        working-directory: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          npx wrangler deployments status --name zahynailo | tee status.txt
+          grep -q "${{ github.sha }}" status.txt
+          get() { curl -s --retry 4 --retry-all-errors --max-time 30 -o /dev/null -D headers.txt -w '%{http_code}' -H 'Accept-Encoding: br, gzip' "https://zahynailo.dev$1"; }
+          for page in / /current.json /blog/ /blog/feed.xml; do
+            code=$(get "$page"); echo "$page $code"; test "$code" = 200
+          done
+          manifest="/$(node -p "require('../engine/sf/pilot/current.json').manifest")"
+          code=$(get "$manifest"); echo "$manifest $code"; test "$code" = 200
+          # worker.mjs's own copy, byte for byte: the edge's Brotli of the plain file would have no length, or another.
+          grep -qi '^content-encoding: br' headers.txt
+          grep -qi "^content-length: $(stat -c%s "dist$manifest.br")"$'\r'"\?$" headers.txt
+
+      - name: roll back a version that failed or did not finish its live check
+        if: (failure() || cancelled()) && steps.deploy.outcome == 'success'
+        working-directory: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx wrangler rollback --name zahynailo -y -m "live check failed for ${{ github.sha }}"

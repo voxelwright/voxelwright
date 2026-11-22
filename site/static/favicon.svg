@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" shape-rendering="crispEdges">
+  <!-- a keycap of the Signal Desk: walnut case, parchment cap, its light on -->
+  <rect x="0" y="1" width="16" height="15" fill="#262b25"/>
+  <rect x="1" y="1" width="15" height="14" fill="#b98c65"/>
+  <rect x="3" y="3" width="11" height="9" fill="#e3d8be"/>
+  <rect x="4" y="4" width="9" height="7" fill="#f2ebda"/>
+  <rect x="5" y="9" width="5" height="1" fill="#388de6"/>
+  <rect x="3" y="12" width="11" height="1" fill="#8f6a4b"/>
+</svg>

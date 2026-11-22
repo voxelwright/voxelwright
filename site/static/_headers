@@ -1,0 +1,19 @@
+# How long browsers keep the site's files (Workers static assets reads this at deploy, without
+# running the Worker; scripts/serve.mjs follows it locally; test/cache.test.mjs holds the rules).
+# A file not named here keeps the platform default, "public, max-age=0, must-revalidate" with an
+# ETag: the browser checks before reusing it, so a deploy shows at once. Pages, Markdown twins,
+# feeds and every unhashed script stay that way. Only a file whose name changes when its bytes do
+# is kept for good.
+
+# The kit's shared modules are named by their content hash (chunk-<hash>.js).
+/vendor/village/kit/shared/chunk-*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Fonts keep their names when they change, but they almost never change: kept a week, then
+# checked in the background for a month, so text doesn't wait on a check every page.
+/fonts/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+/vendor/village/kit/fonts/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000
+/support/fonts/*
+  Cache-Control: public, max-age=604800, stale-while-revalidate=2592000

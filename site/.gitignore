@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-*/
+.dev/
+.dev-*/
+.shots/
+.cloudflare/
+.wrangler/
+.dev.vars*
+.env*
+!.env.example
+.DS_Store
+.dev-writing/
+writing/node_modules/
+writing/worker/node_modules/
+.seeds/

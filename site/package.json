@@ -1,0 +1,30 @@
+{
+  "name": "site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Personal site and blog: a custom static generator, Markdown twins for agents, and a small Cloudflare Worker.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "new": "node scripts/new.mjs",
+    "session": "node scripts/session.mjs",
+    "dev": "node scripts/dev.mjs",
+    "build": "node scripts/build.mjs",
+    "cards": "node scripts/cards.mjs",
+    "flag-proof": "node scripts/flag-proof.mjs",
+    "check": "node scripts/check.mjs && node --test \"test/*.test.mjs\"",
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "markdown-it": "15.0.3",
+    "shiki": "4.6.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-rc.0",
+    "fast-xml-parser": "5.12.0",
+    "wrangler": "4.163.0"
+  }
+}
