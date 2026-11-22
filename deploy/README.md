@@ -49,6 +49,10 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 - Each request to `/releases/*` or `/bay/*` runs the Worker, and the Free plan allows 100,000 a day. A visit that only loads the landing makes about 140 of them, and exploring makes more, so the cap is roughly 700 such visits a day. Past it those requests get 429 and the city stops loading until midnight UTC. Workers Paid ($5 a month) removes the cap. That is the owner's call.
 - A static asset can be at most 25 MiB (the largest today is 10.5 MB), and a version can have at most 20,000 files on the Free plan.
 - `CLOUDFLARE_API_TOKEN` is an Account API token with the "Edit Cloudflare Workers" permission policy, scoped to this account. `CLOUDFLARE_ACCOUNT_ID` is the account. Both are secrets of the repo's `production` environment, which only main may use, so a branch's workflow can't reach them.
+- The park is shown after 7.3 MB on the wire: under the 8 MB limit, over the 6.75 MB budget. About 0.25 MB of that is the edge compressing the code less tightly than the local quality-11 copies.
+- Static assets answer a `Range` request with the whole file (200, not 206). Safari's video asks for ranges, so the eggs' videos (`/eggs/*.mp4`) may not play there. This is untested.
+- `zahynailo.workers.dev` also serves the site (`workersDev` in `cloudflare.config.ts`).
+- Only a machine with `~/.village` can run `node deploy/data.mjs pack`, and it needs a local `node engine/sf/build.mjs` first, for the release's quality-11 copies.
 
 ## Later
 
