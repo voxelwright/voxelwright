@@ -27,7 +27,7 @@ import type { Board, Boards } from './boards.ts'
 import type { First } from './first.ts'
 import type { Input } from './input.ts'
 import type { View } from './march.ts'
-import type { Me } from './person.ts'
+import { behindAt, type Me } from './person.ts'
 
 export interface Needs {
   /** The board that leads in, and whoever lays it. */
@@ -66,6 +66,8 @@ export interface Explore {
   readonly state: 'idle' | 'armed' | 'going' | 'in'
   /** The board was asked: once arms it, again within a few seconds goes. */
   act(): void
+  /** The first view was framed again (a phone turned): the eye as it is now is the one an ask leans from and goes back to. */
+  reframed(): void
   /** As it was before it was asked. */
   disarm(): void
   /** Goes, unasked: the host's word, which is meant. Resolves when the visitor stands on the roof. */
@@ -82,9 +84,12 @@ const STANDS = 6000, LEAN = 0.08, PUSH = 0.965
 /** How soon after the first ask a second counts, ms: a double click, or a key held until it repeats, is one ask, and the line that says how to go on has been there to read. */
 const AGAIN = 300
 /** The lens in the realm, degrees (wider where the picture is taller than wide, which sees a third as much across); how long the flight is, s; the round: how far out and how high over the body's feet it begins and comes to, m, its turn in radians a second, the least of it before it comes down, how long the coming down is and how long the roof is waited for, s, and how far over whatever is under it the eye keeps, m. */
-const LENS = { wide: 58, upright: 80 }, FLY = 3, ROUND = { far: [17, 11.5], high: [12.5, 5.5], turn: 1.35, least: 1.5, down: 2.2, wait: 8, clear: 2.5 }
+const LENS = { wide: 58, upright: 80 }, FLY = 3, ROUND = { far: [26, 18], high: [24, 12], turn: 1.35, least: 1.5, down: 2.2, wait: 8, clear: 2.5 }
 /** How the body looks from behind its shoulder as the eye becomes its own, radians down. */
-const DOWN = -0.25
+const DOWN = -0.1
+/** How far the body's eye stands off where it arrives (person.ts `standOff`): out from the roof, so that the body is seen whole beside the sign and the sign's face is read. */
+const STAND_OFF = 1
+
 /** How high the eyes are over the feet, cells (person.ts). */
 const EYES = 16.5
 
@@ -238,8 +243,10 @@ export function explore(o: Needs): Explore {
       lift += (want - lift) * (1 - Math.exp(-dt * (want > lift ? 9 : 2.5)))
       return round(a, far, high + lift, foot)
     }
-    /** The world's boxes round the roof from now, and whether they have been long enough for `whole` to be the roof's. */
-    const focus = () => { o.focus([stand.x, foot, stand.z]); focused ||= performance.now() }
+    /** The world's boxes round where the eye will settle from now, and whether they have been long enough for `whole` to be the roof's. */
+    // (Round where the eye will settle, stood off the roof (`STAND_OFF`): what it sees then is the roof and the sign from there.)
+    const settles = () => behindAt([stand.x, foot, stand.z], stand.yaw, DOWN, STAND_OFF)
+    const focus = () => { o.focus(settles()); focused ||= performance.now() }
     const made = () => focused > 0 && performance.now() - focused > 300 && times.loaded > 0 && o.whole()
     /** The body, set down where it is to stand, the eye in its head for the moment it is made. Not before the roof's tiles have come: it would fall through a world that is not there, and the visitor is then an eye over the roof. */
     const body = () => {
@@ -248,6 +255,8 @@ export function explore(o: Needs): Explore {
       foot = feetAt()
       Object.assign(pose, { x: stand.x / M, y: (foot + EYES + 2) / M, z: stand.z / M, yaw: stand.yaw, pitch: DOWN })
       o.me.view = 'behind'
+      // (Stood off, so that the body is seen whole and the sign beside it: in to its own place once it walks.)
+      o.me.standOff = STAND_OFF
       o.me.walk(true)
     }
     /** Its feet, once the core has said where they are: the round is about them (the roof may be a step off what was asked). */
@@ -368,7 +377,7 @@ export function explore(o: Needs): Explore {
         // Down: the rest of the way round, slowing to a stop behind the shoulder, and from half way the body's own eye more and more.
         const u = Math.min(1, t / ROUND.down), mine: V3 = [pose.x * M, pose.y * M, pose.z * M]
         a = downFrom.a + (downFrom.to - downFrom.a) * hermite(u, (ROUND.turn * ROUND.down) / Math.max(0.01, Math.abs(downFrom.to - downFrom.a)), 0)
-        const r = clear(a, (ROUND.far[1] + (3.4 - ROUND.far[1]) * smooth(u)) * M, (ROUND.high[1] + (2.3 - ROUND.high[1]) * smooth(u)) * M, dt), own = o.me.feet ? smooth((u - 0.45) / 0.55) : 0
+        const r = clear(a, (ROUND.far[1] * M + (Math.hypot(settles()[0] - stand.x, settles()[2] - stand.z) - ROUND.far[1] * M) * smooth(u)), (ROUND.high[1] * M + (settles()[1] - foot - ROUND.high[1] * M) * smooth(u)), dt), own = o.me.feet ? smooth((u - 0.45) / 0.55) : 0
         set(mix(r.at, mine, own), r.yaw + turnTo(r.yaw, stand.yaw) * own, r.pitch + (DOWN - r.pitch) * own)
         if (u >= 1) end()
       },
@@ -420,6 +429,7 @@ export function explore(o: Needs): Explore {
   return {
     get state() { return state },
     act() { if (state === 'idle') arm(); else if (state === 'armed' && performance.now() - times.armed >= AGAIN) void go() },
+    reframed() { if (rest) rest = { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw, pitch: pose.pitch, fov: o.fov() } },
     disarm,
     go,
     stand,

@@ -26,7 +26,7 @@
 //     and 40 degrees round them from the park's way (the signs face the park: from there each is seen at most 0.9 as
 //     wide for its height as its mark, which is said and held to); every logo in the picture;
 //   - phone (390 x 844, three pixels to a point): the first view as the page opens, at a phone's first scale (0.5) and the least,
-//     and flying free in the realm; two logos or more (the upright picture leaves Twitch out of its first view);
+//     and flying free in the realm; in the first view all three (its upright frame holds them, sf/realm.json: about 19 px tall), flying free two or more;
 //   - night (said, not held to: the X's black on the night sky is no change to read it by).
 // Pictures: each case's frame, and the three logos at the target's pixels eight times over beside the mark they are held to.
 import { mkdirSync, writeFileSync } from 'node:fs'
@@ -237,7 +237,7 @@ try {
     const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
     const page = await open(context)
     await page.waitForTimeout(2000); await settle(page)
-    for (const s of [0.5, 0.3]) { await page.evaluate((s) => { globalThis.engine.scale = s }, s); await frames(page, 6); await settle(page); judge('first view', await read(page, `phone-first-${Math.round(s * 100)}`), false, 2) }
+    for (const s of [0.5, 0.3]) { await page.evaluate((s) => { globalThis.engine.scale = s }, s); await frames(page, 6); await settle(page); judge('first view', await read(page, `phone-first-${Math.round(s * 100)}`), false, 3) }
     await page.evaluate(() => globalThis.engine.first?.engage())
     await roam(page, 70)
     await page.waitForTimeout(1500); await settle(page)

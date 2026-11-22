@@ -2,7 +2,7 @@
 // asked once, the flight and the round, the view from behind the shoulder with what the roof is for, a fall off the
 // edge and a canopy down to the street.
 //
-//   node sf/explore-shots.mjs [--no-build] [--dist dist-sf] [--out ~/.village/engine/sf/explore] [--no-clip] [--only clip|stills|phone]
+//   node sf/explore-shots.mjs [--no-build] [--dist dist-sf] [--out ~/.village/engine/sf/explore] [--no-clip] [--only clip|stills|phone] [--scale 1]
 //
 // Stills, into <out>: `first-…` at 1280 x 720 and on an upright phone (390 x 844, three pixels to one), `armed-…` at
 // both, `flight-…` through the flight and the round, `third-…` from behind the shoulder at both, `fall-…`, `canopy-…`
@@ -31,6 +31,8 @@ const open = async (options) => {
   await page.goto(`${site.url}/sf/index.html?knock=0`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.boards && globalThis.engine.far.whole && globalThis.engine.explore, null, { timeout: 300_000 })
   await page.waitForFunction(() => { const p = globalThis.engine.boards.plane, b = p.box; return p.readable && b && b.x0 > innerWidth * 0.1 && b.x1 < innerWidth * 0.92 }, null, { timeout: 60_000 }).catch(() => null)
+  // (The picture at its own full scale: on a GPU other checks share, the page steers it down to hold its frame rate, and a sign far off is read at the scale it is drawn at.)
+  await page.evaluate((s) => { globalThis.engine.scale = s }, Number(arg('scale', '1')))
   await page.waitForTimeout(2500)
   return { context, page, from }
 }
@@ -39,9 +41,13 @@ const state = (page) => page.evaluate(() => globalThis.engine.explore.state)
 const settled = (page) => page.waitForFunction(() => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 60_000 })
 /** Walks the body off the roof's edge, forward as it looks, at a run, and waits until it is 7 m down: well into the fall. */
 const off = async (page, phone) => {
+  // (Turned to the roof's north edge at the right of the picture, run to its parapet and over it with a jump: ahead of where it arrives is the sign.)
+  await page.evaluate(() => { globalThis.engine.pose.yaw = (300 * Math.PI) / 180 }); await page.waitForTimeout(300)
   if (phone) await page.evaluate(() => { globalThis.engine.input.hold('ShiftLeft', true); globalThis.engine.input.hold('KeyW', true) })
   else { await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW') }
-  await page.waitForFunction(() => globalThis.engine.me.aloft && globalThis.engine.me.feet.at[1] < globalThis.engine.explore.roof - 70, null, { timeout: 20_000 })
+  await page.waitForTimeout(2000)
+  if (phone) await page.evaluate(() => dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' }))); else await page.keyboard.press('Space')
+  await page.waitForFunction(() => globalThis.engine.me.aloft && globalThis.engine.me.feet.at[1] < globalThis.engine.explore.roof - 70, null, { timeout: 30_000 })
 }
 try {
   for (const options of [WIDE, PHONE]) {
@@ -78,10 +84,10 @@ try {
     await page.evaluate(() => { globalThis.engine.explore.roof = globalThis.engine.me.feet.at[1] })
     await off(page, phone)
     await page.screenshot({ path: join(out, `fall-${name}.png`) })
-    // (A fall of 19 m is over in two seconds: back over the roof for the canopy.)
+    // (Back over the roof for the canopy, in front of the board: a fall of 240 m is a minute under one.)
     if (phone) await page.evaluate(() => { globalThis.engine.input.hold('KeyW', false); globalThis.engine.input.hold('ShiftLeft', false) })
     else { await page.keyboard.up('KeyW'); await page.keyboard.up('ShiftLeft') }
-    await page.evaluate(() => { const e = globalThis.engine, s = e.explore.stand; e.me.walk(false); Object.assign(e.pose, { x: s.x / 10 + 4.5, y: e.explore.roof / 10 + 7, z: s.z / 10 + 2, yaw: s.yaw, pitch: -0.25 }); e.me.walk(true) })
+    await page.evaluate(() => { const e = globalThis.engine, s = e.explore.stand; e.me.walk(false); Object.assign(e.pose, { x: s.x / 10 + 4.5, y: e.explore.roof / 10 + 7, z: s.z / 10 - 1.5, yaw: s.yaw, pitch: -0.25 }); e.me.walk(true) })
     await page.waitForFunction(() => globalThis.engine.me.aloft && globalThis.engine.me.feet, null, { timeout: 10_000 })
     await page.waitForTimeout(350)
     if (phone) await page.evaluate(() => { globalThis.engine.me.canopy = true })
@@ -128,15 +134,20 @@ try {
     await page.mouse.click(x2, y2)
     await settled(page)
     await wait(4200)
-    // Off the edge at a walk; the canopy a moment into the fall; let down onto the street under the roof, turned a little along it.
+    // Off the edge at a run, under the board and on to the roof's west edge; a long fall, then the canopy, and away
+    // under it for a few seconds (a canopy from 240 m is a minute down: the clip ends on the way).
     await page.evaluate(() => { globalThis.engine.explore.roof = globalThis.engine.me.feet.at[1] })
-    await page.keyboard.down('KeyW')
-    await page.waitForFunction(() => globalThis.engine.me.aloft && globalThis.engine.me.feet.at[1] < globalThis.engine.explore.roof - 35, null, { timeout: 20_000 })
+    // (A look round to the roof's north edge at the right of the picture, the way a visitor turns, a run to its parapet and a jump over it.)
+    await page.evaluate(() => new Promise((done) => { const e = globalThis.engine, from = e.pose.yaw, to = (300 * Math.PI) / 180, t0 = performance.now(); const step = () => { const u = Math.min(1, (performance.now() - t0) / 1200); e.pose.yaw = from + (to - from) * u * u * (3 - 2 * u); if (u < 1) requestAnimationFrame(step); else done() }; step() }))
+    await page.keyboard.down('ShiftLeft'); await page.keyboard.down('KeyW')
+    await wait(2000); await page.keyboard.press('Space')
+    await page.waitForFunction(() => globalThis.engine.me.aloft && globalThis.engine.me.feet.at[1] < globalThis.engine.explore.roof - 8, null, { timeout: 25_000 })
+    await page.keyboard.up('ShiftLeft')
+    await page.waitForFunction(() => globalThis.engine.me.feet.at[1] < globalThis.engine.explore.roof - 300, null, { timeout: 10_000 }).catch(() => null)
     await page.keyboard.up('KeyW')
     await page.keyboard.press('Space')
     await wait(900)
     await page.keyboard.down('KeyD'); await wait(1300); await page.keyboard.up('KeyD')
-    await page.waitForFunction(() => !globalThis.engine.me.aloft, null, { timeout: 30_000 }).catch(() => null)
     await wait(2500)
     const ends = (Date.now() - from) / 1000
     await context.close()

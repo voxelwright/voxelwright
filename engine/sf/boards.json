@@ -43,22 +43,22 @@
     },
     "upright": {
       "around": [
-        538931,
-        677101
+        538201,
+        678354
       ],
       "radius": [
         200,
         240
       ],
       "bearing": 120,
-      "height": 470,
+      "height": 700,
       "rise": 0,
       "speed": 40,
       "size": [
-        150,
-        24.4
+        285,
+        46.4
       ],
-      "craft": 8,
+      "craft": 15,
       "start": 0.2,
       "near": {
         "around": [
@@ -174,27 +174,52 @@
       "id": "explore",
       "name": "Explore",
       "type": "lettering",
-      "building": [
-        519968,
-        666112
-      ],
-      "at": [
-        519968,
-        523,
-        666112
-      ],
-      "facing": 0,
-      "size": 3,
-      "lift": 4.2,
       "content": {
         "text": "EXPLORE"
       },
       "does": "explore",
-      "stand": [
-        519987,
-        666227,
-        115
-      ]
+      "on": "555-california",
+      "roofs": {
+        "555-california": {
+          "building": [
+            524940,
+            670800
+          ],
+          "at": [
+            524936,
+            2400,
+            670688
+          ],
+          "facing": 1,
+          "size": 11,
+          "letters": "compact",
+          "lift": 2.8,
+          "stand": [
+            525240,
+            670625,
+            228
+          ]
+        },
+        "895-pacific": {
+          "building": [
+            519968,
+            666112
+          ],
+          "at": [
+            519968,
+            523,
+            666112
+          ],
+          "facing": 0,
+          "size": 3,
+          "lift": 4.2,
+          "stand": [
+            519987,
+            666227,
+            115
+          ]
+        }
+      }
     }
   ]
 }

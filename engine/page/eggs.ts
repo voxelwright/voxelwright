@@ -4,6 +4,7 @@
 // and what the city says it says on the banner its plane tows (signs.ts, boards.ts), which comes into the picture to say it.
 //
 //   Enter or /           a line to say something to the city on; what is typed shows on the banner as it is typed
+//                        (in the first view too, where main.ts opens it: no other key is heard there)
 //   wake up, neo, red pill, follow the white rabbit       the Matrix: code rain on the windows, fog, night, green
 //   blue pill, Esc       out of the Matrix (Esc ends any egg; reset ends them all and puts the sky back)
 //   rickroll, never gonna give you up                     Rick Astley on every window, with his sound
@@ -120,7 +121,7 @@ export function eggs(page: EggsPage) {
   let brief = 0
   const briefly = (text: string, ms = 6000) => { const mine = ++brief; show(text); setTimeout(() => { if (brief === mine && !typing) show(onBanner) }, ms) }
   console.info(GREETING)
-  const say = (text: string, ms = 5000) => { page.notice(text, ms); status.textContent = text }
+  const say = (text: string, ms = 5000) => { page.notice(text, ms); if (status.parentElement !== laidOn()) laidOn().append(status); status.textContent = text }
 
   // ── What is running, and the sky as it was before the first egg ──
   let running: { egg: Egg; picture: Picture | null; started: number; media?: HTMLVideoElement; blocked?: boolean; held?: boolean } | null = null
@@ -277,6 +278,8 @@ export function eggs(page: EggsPage) {
 
   // ── The player: what a video shows on the page, with a native button for each thing it does ──
   const realm = page.ui
+  /** Where what the eggs lay over the picture goes: the realm's controls, or in the first view, where they are hidden, beside the first view's own keys. */
+  const laidOn = () => (document.documentElement.classList.contains('first') ? document.getElementById('first') ?? realm : realm)
   const player = document.createElement('div')
   player.className = 'vx-card egg-player'
   player.hidden = true
@@ -288,6 +291,7 @@ export function eggs(page: EggsPage) {
   const muteKey = player.querySelector<HTMLButtonElement>('.mute')!, stopKey = player.querySelector<HTMLButtonElement>('.stop')!
   const showPlayer = () => {
     if (!running?.media) return
+    laidOn().append(player)
     player.hidden = false
     player.querySelector('.title')!.textContent = `Now playing: ${VIDEOS[running.egg as 'rickroll' | 'apple'].title}`
     const muted = running.media.muted
@@ -433,6 +437,8 @@ export function eggs(page: EggsPage) {
   const open = () => {
     if (typing) return
     typing = page.controls.push({ name: 'saying', solid: true, text: true })
+    // (In the first view the realm's controls are hidden, and the line with them: it stands with the first view's keys then.)
+    laidOn().append(line)
     line.hidden = false
     field.value = ''
     field.focus()
@@ -538,6 +544,8 @@ export function eggs(page: EggsPage) {
     /** For the checks: what is going on. */
     get state() { return { running: running?.egg ?? null, up: march.screen.up, shield, moon, knock: knock?.stage ?? null, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
     say: heard,
+    /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
+    open,
     undo,
     /** Holds a playing video at a time, s (null: plays on), as a pause would: for the checks, which compare the windows with a known frame. */
     hold(at: number | null) {

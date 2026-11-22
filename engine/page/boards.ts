@@ -67,6 +67,8 @@ export interface Board {
   logo?: string
   /** Lettering: how tall a capital is, metres, as near as whole cells of its face allow (shape). Digital: how wide and how tall its housing is, metres. A logo: how tall its sign is, metres (how wide follows from its mark, logos.ts). */
   size: number | [number, number]
+  /** Lettering: which of the face's sets it is set in (typeface.ts), where the address does not ask: the display set on a wide screen where a capital is four of its cells or more, else the compact set. A board read from far off may ask for the compact set's stouter strokes everywhere. */
+  letters?: Size
   /** How far its foot is over the roof, metres. */
   lift?: number
   content: { text: string } | { image: string }
@@ -308,7 +310,7 @@ export interface Boards {
   box(id: string): readonly number[] | null
   /** Where a board is on the picture now, client px (its middle and its box), or null if it is behind the eye: for the checks and the host. */
   where(id: string): { x: number; y: number; wide: number; high: number; /** How tall its face is down its middle, px. */ tall: number; far: number } | null
-  marks(id: string): { x: number; y: number; lit: boolean }[]
+  marks(id: string): { x: number; y: number; lit: boolean; /** Which of its letters the square is of (spaces counted). */ letter: number }[]
   /** Whether the logos are drawn: a check reads a logo off the picture as what it changes there (test/sf-logos.mjs). */
   logos: boolean
   /** How many of a lettering board's letters still stand (most of their lamp there), and a digital board's tiles lit. */
@@ -384,8 +386,9 @@ export interface Needs {
   reach(): number
   /** How big the cells the world shows at a point are now, in its finest cells (1, 2, 4 and so on): the finest of its boxes that holds the point. */
   cell(x: number, y: number, z: number): number
-  /** A board that does something (`does`) was clicked or tapped, or its button pressed. */
-  does?(board: Board): void
+  /** A board that does something (`does`) was clicked or tapped, or its button pressed. False where there is nothing
+   * left for it to do (EXPLORE with the visitor already in): a click on it is then any click on the picture. */
+  does?(board: Board): boolean
   /** The same for what stands at a point (finest cells, x and z): nearer in the far model's wedge. Infinity where there is no far model. */
   handover(x: number, z: number): number
   edit: boolean
@@ -410,7 +413,7 @@ export async function boards(o: Needs): Promise<Boards> {
   // A face that does not come leaves the lettering boards out, and only them: the screens, logos and banner need none.
   // A board too small for the display set's cells to be four of the world's (EXPLORE, 3 m) is set in the compact set
   // too: the display set's hairlines a cell wide were finer than its face from the park holds (618 of its 748 squares).
-  const sizeOf = (b: Board): Size => lettersAsked ?? (DEVICE === 'phone' || Math.round(((b.size as number) * M) / DISPLAY_CAP) < 4 ? 'compact' : 'display')
+  const sizeOf = (b: Board): Size => lettersAsked ?? b.letters ?? (DEVICE === 'phone' || Math.round(((b.size as number) * M) / DISPLAY_CAP) < 4 ? 'compact' : 'display')
   const sizes = [...new Set(o.file.boards.filter((b) => b.type === 'lettering').map(sizeOf))]
   const [drawn, glow, faces] = await Promise.all([screensOf(o.device, o.format), letterLight(o.device, o.format, () => o.lights?.() ?? 0), Promise.all(sizes.map((z) => letteringFace(z))).then((got) => new Map(sizes.map((z, i) => [z, got[i]]))).catch((e: unknown) => { console.warn(`no lettering boards: their face did not come (${e instanceof Error ? e.message : String(e)})`); return null })])
   const faceOf = (b: Board) => faces?.get(sizeOf(b)) ?? null
@@ -838,13 +841,17 @@ export async function boards(o: Needs): Promise<Boards> {
     return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2, wide: Math.max(...xs) - Math.min(...xs), high: Math.max(...ys) - Math.min(...ys), tall, far: ps[0]!.far / M }
   }
   /** The board a point of the page is on (client px): the nearest of those whose face it is inside, a little grown. */
+  const thumb = matchMedia('(pointer: coarse)')
   const under = (x: number, y: number): Stood | null => {
     const rect = o.canvas.getBoundingClientRect(), v = o.view(), mx = ((x - rect.left) / rect.width) * 2 - 1, my = 1 - ((y - rect.top) / rect.height) * 2
     let best: Stood | null = null, nearest = Infinity
     for (const s of stood.values()) {
       if (!s.shape) continue
-      // (A little grown, and more from far off: a board a kilometre away is a few dozen pixels, and a thumb is wider than its letters.)
-      const ps = corners(s.shape, Math.max(6, 0.008 * Math.hypot(s.shape.middle[0] - v.eye[0], s.shape.middle[1] - v.eye[1], s.shape.middle[2] - v.eye[2]))).map((p) => onPicture(p, v, rect.width / rect.height))
+      // (A little grown, and more from far off: a board a kilometre away is a few dozen pixels, and a thumb is wider than its letters.
+      // Under a thumb, by 20 px of the picture all round as well: a logo 19 px tall on an upright phone is then a 59 px target,
+      // over the 44 a touch target wants, #450.)
+      const far = Math.hypot(s.shape.middle[0] - v.eye[0], s.shape.middle[1] - v.eye[1], s.shape.middle[2] - v.eye[2])
+      const ps = corners(s.shape, Math.max(6, 0.008 * far, thumb.matches ? (20 / rect.height) * 2 * v.tanHalf * far : 0)).map((p) => onPicture(p, v, rect.width / rect.height))
       if (ps.some((p) => !p)) continue
       // Inside all four edges, whichever way round they run.
       let sign = 0, inside = true
@@ -855,12 +862,12 @@ export async function boards(o: Needs): Promise<Boards> {
   }
   /** Where the middle of each square of a lettering board's letters is on the picture (client px), and whether it is lamp: for the check that reads the picture. */
   const marks = (id: string) => {
-    const s = stood.get(id), rect = o.canvas.getBoundingClientRect(), out: { x: number; y: number; lit: boolean }[] = []
+    const s = stood.get(id), rect = o.canvas.getBoundingClientRect(), out: { x: number; y: number; lit: boolean; letter: number }[] = []
     if (!s?.shape || s.b.type !== 'lettering') return out
     const sh = s.shape, v = o.view()
-    for (const letter of sh.letters ?? []) for (const { along, y, lit } of letter?.squares ?? []) {
+    for (const [i, letter] of (sh.letters ?? []).entries()) for (const { along, y, lit } of letter?.squares ?? []) {
       const p = onPicture([sh.middle[0] + sh.right[0] * along, y, sh.middle[2] + sh.right[2] * along], v, rect.width / rect.height)
-      if (p) out.push({ x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height, lit })
+      if (p) out.push({ x: rect.left + ((p.x + 1) / 2) * rect.width, y: rect.top + ((1 - p.y) / 2) * rect.height, lit, letter: i })
     }
     return out
   }
@@ -907,9 +914,9 @@ export async function boards(o: Needs): Promise<Boards> {
   addEventListener('click', (e) => {
     if (e.target !== o.canvas || o.input.locked) return
     const s = under(e.clientX, e.clientY)
-    if (!s) return
+    if (!s || (!editor && s.b.does && !o.does?.(s.b))) return
     e.stopImmediatePropagation(); e.preventDefault()
-    if (editor) editor.select(s.b.id); else if (s.b.does) o.does?.(s.b); else void visit(s.b.id)
+    if (editor) editor.select(s.b.id); else if (!s.b.does) void visit(s.b.id)
   }, true)
   // A board under the pointer is brightened, as one with the focus is (its link, below).
   addEventListener('mousemove', (e) => { if (o.input.locked) return; const s = e.target === o.canvas ? under(e.clientX, e.clientY) : null; o.canvas.style.cursor = s ? 'pointer' : ''; if (!document.activeElement?.closest?.('nav[aria-label="Billboards"]')) glow.hot = s?.b.id ?? null })

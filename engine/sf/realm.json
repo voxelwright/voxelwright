@@ -16,6 +16,11 @@
     "pitch": -0.009161
   },
   "fov": 25.0493,
+  "upright": {
+    "yaw": 2.069960,
+    "pitch": 0.104720,
+    "fov": 47
+  },
   "rules": {
     "models": false
   },

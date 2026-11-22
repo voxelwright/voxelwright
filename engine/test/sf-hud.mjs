@@ -118,6 +118,8 @@ try {
         check(m.clash.length === 0, `${name}: no control on another${m.clash.length ? `: ${m.clash.join(', ')}` : ''}`, gate)
         if (phone) check(m.unsafe.length === 0, `${name}: nothing in the safe area${m.unsafe.length ? `: ${[...new Set(m.unsafe.map((s) => s.path || s.id))].join(', ')}` : ''}`, gate)
       }
+      // (The body as it is in play: where it arrives the eye stands off from it, until it walks (explore.ts, sf-explore.mjs).)
+      await page.evaluate(() => { globalThis.engine.me.standOff = 0 })
       await page.waitForTimeout(3500)
       await look('stand', 'standing on the roof')
       // That the controls are there, where each way has them: a control missing meets nothing, and the measures above would pass.

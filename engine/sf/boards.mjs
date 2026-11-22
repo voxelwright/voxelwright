@@ -29,10 +29,35 @@ const FILE = join(root, 'sf', 'boards.json')
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
 const has = (name) => process.argv.includes(`--${name}`)
 
+/** What says where a board stands: a board with seats of its own (`roofs`) takes these from the one it is `on`. */
+const SEAT = ['building', 'at', 'facing', 'turn', 'size', 'letters', 'lift', 'stand']
+/**
+ * The file as the page has it: each board with seats of its own (`"on": "<seat>"`, `"roofs": { "<seat>": { building,
+ * at, facing, … } }`) standing on the one it is on, and nothing of the others. Moving such a board back to a roof it
+ * stood on before is one line: its `on`.
+ */
+export function seated(file) {
+  if (!Array.isArray(file?.boards)) return file
+  return { ...file, boards: file.boards.map((b) => { if (b?.on === undefined) return b; const { on, roofs, ...own } = b; return { ...own, ...(roofs?.[on] ?? {}) } }) }
+}
+/** A file the page saved (seated), put back as the file on disk has it: a board with seats keeps them, and what was changed of where it stands goes to the seat it is on. */
+export function unseated(saved, disk) {
+  return { ...saved, boards: saved.boards.map((b) => {
+    // (By its id, or where it was given a new one in the editor, by what it does: a seated board whose id is gone and
+    // that does the same. A board added where another was removed does nothing, and is not the one that was there.)
+    const was = disk?.boards?.find((d) => d.id === b.id && d.on !== undefined) ?? (disk?.boards?.some((d) => d.id === b.id) || b.does === undefined ? undefined : disk?.boards?.find((d) => d.on !== undefined && d.does === b.does && d.type === b.type && !saved.boards.some((s) => s.id === d.id)))
+    if (!was) return b
+    const own = Object.fromEntries(Object.entries(b).filter(([k]) => !SEAT.includes(k))), seat = Object.fromEntries(SEAT.filter((k) => b[k] !== undefined).map((k) => [k, b[k]]))
+    return { ...own, on: was.on, roofs: { ...was.roofs, [was.on]: seat } }
+  }) }
+}
+
 /** What is wrong with a signs file, one line each: none if it can be laid. */
-export function wrong(file) {
+export function wrong(raw) {
   const out = [], whole = (v) => Array.isArray(v) && v.every(Number.isFinite)
-  if (file?.version !== 1 || !Array.isArray(file.boards)) return ['not a signs file: { "version": 1, "boards": [] }']
+  if (raw?.version !== 1 || !Array.isArray(raw.boards)) return ['not a signs file: { "version": 1, "boards": [] }']
+  for (const [i, b] of raw.boards.entries()) if (b?.on !== undefined && !(typeof b.on === 'string' && b.roofs?.[b.on] && typeof b.roofs[b.on] === 'object' && Object.values(b.roofs).every((r) => r && typeof r === 'object' && Object.keys(r).every((k) => SEAT.includes(k))))) out.push(`board ${i} (${b?.id ?? 'no id'}): it is on one of its own roofs, which say only ${SEAT.join(', ')}`)
+  const file = seated(raw)
   const ids = new Set(['banner'])
   for (const [i, b] of file.boards.entries()) {
     const say = (what) => out.push(`board ${i} (${b?.id ?? 'no id'}): ${what}`)
@@ -57,6 +82,7 @@ export function wrong(file) {
     if (b.type === 'lettering' ? typeof b.content?.text !== 'string' : typeof b.content?.text !== 'string' && typeof b.content?.image !== 'string') say('lettering shows { text }; a digital board { text } or { image }')
     if (b.colors !== undefined && !(b.type === 'digital' && typeof b.colors?.ink === 'string' && (typeof b.colors.ground === 'string' || (Array.isArray(b.colors.ground) && b.colors.ground.length === 2)))) say('colors are a digital board\'s: { ground: a colour or two, ink: a colour }')
     if (b.to !== undefined && (typeof b.to !== 'string' || !b.to.startsWith('/'))) say('it leads to a path of the site, from /')
+    if (b.letters !== undefined && (b.type !== 'lettering' || !['display', 'compact'].includes(b.letters))) say('a lettering board\'s letters are the face\'s display or compact set')
     if (b.does !== undefined && (b.does !== 'explore' || b.type !== 'lettering' || b.to !== undefined)) say('only a lettering board that leads nowhere does something, and what it does is explore')
     if (b.stand !== undefined && !(whole(b.stand) && b.stand.length === 3 && b.does)) say('a board that does something may say where its visitor stands: [x, z] in cells and which way they look, degrees clockwise from north')
   }
@@ -117,10 +143,10 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       req.on('data', (c) => { body += c })
       req.on('end', () => {
         try {
-          const file = JSON.parse(body), said = wrong(file)
+          const file = unseated(JSON.parse(body), JSON.parse(readFileSync(FILE, 'utf8'))), said = wrong(file)
           if (said.length) { res.writeHead(422, { 'Content-Type': 'text/plain' }); return res.end(said.join('\n')) }
           writeFileSync(FILE, JSON.stringify(file, null, 2) + '\n')
-          into(dist, file)
+          into(dist, seated(file))
           console.log(`saved: ${file.boards.length} boards (${file.boards.map((b) => b.id).join(', ')})`)
           res.writeHead(204); res.end()
         } catch (e) { res.writeHead(400, { 'Content-Type': 'text/plain' }); res.end(String(e.message)) }

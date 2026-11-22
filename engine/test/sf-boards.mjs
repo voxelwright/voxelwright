@@ -50,6 +50,7 @@ import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
 import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
+import { seated } from '../sf/boards.mjs'
 import { TOWERS, framed, lit as litTower } from './sf-towers.mjs'
 
 const hud = arg('hud', ''), withHud = (path) => (hud ? `${path}${path.includes('?') ? '&' : '?'}hud=${hud}` : path)
@@ -62,7 +63,7 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 }
 mkdirSync(shots, { recursive: true })
-const file = JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8'))
+const file = seated(JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8')))
 /** The boards that are cells of the world (a logo is a face alone), and the logos. */
 const built = file.boards.filter((b) => b.type !== 'logo'), logos = file.boards.filter((b) => b.type === 'logo')
 /** Each mark's two colours as its sign shows them (page/logos.ts). */
@@ -80,10 +81,12 @@ const brandShare = (picture, w, logo, within = 90) => {
  * then asked to have about 30% smaller (Nov 21): 31 px at 1280 x 720, and the phone's to match (37 px).
  *   - A mark (X, Twitch, LinkedIn's square) is 28 px or more each way at 1280 x 720 and no more than 35: his size,
  *     a tenth either way.
- *   - On a phone 33 px or more and no more than 41. That is under the 44 px a touch target should be (Apple's
- *     guidelines; WCAG 2.5.5): a tap is taken a little round a sign (boards.ts `under`), and each is a link by name too.
+ *   - On a phone, the owner's 47 degree lens for an upright phone (Nov 22: it holds the Pyramid, the three logos,
+ *     EXPLORE, BLOG and the banner) draws them about 19 px: 17 px or more and no more than 21, a tenth either way.
+ *     sf-logos.mjs reads each mark at that size. A tap is taken 20 px round a sign under a thumb (boards.ts `under`),
+ *     over the 44 px a touch target should be (Apple's guidelines; WCAG 2.5.5), and each is a link by name too.
  */
-const READABLE = { wide: { mark: 28, most: 35 }, phone: { mark: 33, most: 41 } }
+const READABLE = { wide: { mark: 28, most: 35 }, phone: { mark: 17, most: 21 } }
 /** Whether a logo `tall` by `wide` px is as big as `bounds` asks, each way. */
 const readable = (logo, tall, wide, bounds) => Math.min(tall, wide) >= bounds.mark && Math.max(tall, wide) <= bounds.most
 /** In a page with its controls shown: each board's box against what the page lays over the picture (the hour's panel, the tools, the line of numbers, the street's name; a phone's fold, its stick where it rests, its keys to fly and to use). `logos` are the logos' boxes, `boards` every board's. */
@@ -153,11 +156,26 @@ const windowRows = (picture, box) => {
 }
 /** A lettering board as a picture has it: the mean light where its letters' lamp is and where its panel is, and how many squares of its letters are on the right side of half way between. `marks` are boards.marks (client px), `scale` the picture's pixels to one of those, `off` the picture's corner. */
 const lettersRead = (picture, marks, scale = 1, off = [0, 0]) => {
-  const light = (m) => { const i = (Math.round((m.y - off[1]) * scale) * picture.w + Math.round((m.x - off[0]) * scale)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
+  // (The pixel a point is in is its floor: rounded, half the points were read from the pixel beside theirs, and with a
+  // square 1.5 px wide that put a column of samples off a letter's stroke, #450.)
+  const light = (m) => { const i = (Math.floor((m.y - off[1]) * scale) * picture.w + Math.floor((m.x - off[0]) * scale)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
   const lit = marks.filter((m) => m.lit).map(light), dark = marks.filter((m) => !m.lit).map(light), mean = (a) => a.reduce((n, v) => n + v, 0) / Math.max(1, a.length)
-  const cut = (mean(lit) + mean(dark)) / 2
-  return { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), right: lit.filter((v) => v > cut).length + dark.filter((v) => v <= cut).length, of: marks.length }
+  const cut = (mean(lit) + mean(dark)) / 2, ok = (m) => (m.lit ? light(m) > cut : light(m) <= cut)
+  return { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), right: lit.filter((v) => v > cut).length + dark.filter((v) => v <= cut).length, of: marks.length, worst: worstLetter(marks, ok) }
 }
+/**
+ * The letter read worst, and how much of it is read right: a board read well on the whole can still lose a stroke of
+ * one letter (#450: by night from the park EXPLORE's O lost its right side and the board said EXPLCRE).
+ */
+const worstLetter = (marks, ok) => {
+  const by = new Map()
+  for (const m of marks) { const l = by.get(m.letter) ?? { right: 0, of: 0 }; l.of++; if (ok(m)) l.right++; by.set(m.letter, l) }
+  let worst = { letter: -1, share: 1 }
+  for (const [letter, l] of by) if (l.right / l.of < worst.share) worst = { letter, share: round(l.right / l.of, 2) }
+  return worst
+}
+/** How much of each letter a board's squares must read right, as its letters' whole share is asked (`asked`): a little less, as one letter's squares are few. */
+const LETTER_SHARE = 0.75
 /** In a page: where Salesforce Tower's crown is on the picture (client px), from its light's own numbers (march.beacons, heroes.rs `night`): the box of its middle three fifths, and a box of sky beside it. */
 const CROWN = () => {
   const e = globalThis.engine, rect = document.querySelector('canvas').getBoundingClientRect(), v = e.view()
@@ -210,7 +228,12 @@ try {
   await bare.evaluate(() => { globalThis.engine.resting = true })
   // Each board's foot is on its roof as this release has it: the file was made against a release, and the pin moves.
   const roofs = await bare.evaluate((boards) => boards.filter((b) => b.type !== 'logo').map((b) => ({ id: b.id, at: b.at[1], roof: globalThis.engine.feet(b.at[0], b.at[2]), ground: Math.round(globalThis.engine.ground(b.at[0] / 10, b.at[2] / 10) * 10) })), file.boards)
-  check(roofs.every((r) => Math.abs(r.roof - r.at) <= 2 && r.roof - r.ground >= 60), `every board's foot is on a roof of this release: ${roofs.map((r) => `${r.id} at ${r.at / 10} m on a roof at ${r.roof / 10} m, ${round((r.roof - r.ground) / 10)} m over the ground`).join('; ')}`)
+  // (A roof whose tiles the park does not hold, as a tower of the skyline's is not, is read from the far model's own: its roof as files.)
+  {
+    const { striker } = await import('../sf/far/strike.mjs'), pointer = JSON.parse(readFileSync(join(dist, 'sf', 'current.json'), 'utf8')), strike = striker(join(dist, 'sf', dirname(pointer.manifest)))
+    for (const r of roofs) if (r.roof - r.ground < 60) { const b = file.boards.find((b) => b.id === r.id), hit = strike([b.at[0], 60000, b.at[2]], [0, -1, 0], 60000); if (hit) Object.assign(r, { roof: Math.round(hit.at[1]), far: true }) }
+  }
+  check(roofs.every((r) => Math.abs(r.roof - r.at) <= (r.far ? 15 : 2) && r.roof - r.ground >= 60), `every board's foot is on a roof of this release: ${roofs.map((r) => `${r.id} at ${r.at / 10} m on a roof at ${r.roof / 10} m${r.far ? ' (the far model\'s, within 1.5 m)' : ''}, ${round((r.roof - r.ground) / 10)} m over the ground`).join('; ')}`)
 
   // ── The first visit, cold, in the host's frame ──
   console.log(`\nfirst visit (cold cache, ${mbit} Mbit/s, 40 ms), in a host's frame`)
@@ -360,8 +383,10 @@ try {
   // ten from 2 px; under that four in five, where the one pixel read at a square's middle has its neighbours' light in it
   // (EXPLORE's squares are 1.5 px from the park in the kit's faces of 7 and 11 rows, where the 5 rows of the bitmap
   // they were set in before #450 made them 3; read by eye it says EXPLORE, ~/.village/engine/sf/type).
-  const asked = (s) => { const px = s.where && s.letters ? (s.where.tall / s.letters.high) * s.letters.px : 0; return px >= 2 ? { px: round(px, 2), share: 0.9, says: `nine squares in ten, a square ${round(px, 2)} px` } : { px: round(px, 2), share: 0.8, says: `four squares in five, a square ${round(px, 2)} px, under 2` } }
-  const light = (x, y) => { const i = (Math.round(y) * picture.w + Math.round(x)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
+  // (The square's narrower side: a board seen from one side, as EXPLORE on its tower is from 51 degrees, has squares
+  // narrower than they are tall, by how much narrower its whole face is on the picture than it is tall for its size.)
+  const asked = (s) => { const px = s.where && s.letters ? Math.min(s.where.tall / s.letters.high, s.where.wide / s.letters.wide) * s.letters.px : 0; return px >= 2 ? { px: round(px, 2), share: 0.9, says: `nine squares in ten, a square ${round(px, 2)} px` } : { px: round(px, 2), share: 0.8, says: `four squares in five, a square ${round(px, 2)} px, under 2` } }
+  const light = (x, y) => { const i = (Math.floor(y) * picture.w + Math.floor(x)) * 4; return (picture.data[i] + picture.data[i + 1] + picture.data[i + 2]) / 3 }
   results.park = {}
   for (const s of seen) {
     const w = s.where, inside = !!w && w.x - w.wide / 2 > 0 && w.x + w.wide / 2 < 1280 && w.y - w.high / 2 > 0 && w.y + w.high / 2 < 720
@@ -379,9 +404,9 @@ try {
       const lit = s.marks.filter((m) => m.lit).map((m) => light(m.x, m.y)), dark = s.marks.filter((m) => !m.lit).map((m) => light(m.x, m.y)), mean = (a) => a.reduce((n, v) => n + v, 0) / a.length
       // Each square of each letter as the picture has it: lamp where the letter is, panel where it is not.
       const cut = (mean(lit) + mean(dark)) / 2, right = lit.filter((v) => v > cut).length + dark.filter((v) => v <= cut).length
-      const ask = asked(s)
-      r.read = { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), squaresRight: `${right}/${s.marks.length}`, squarePx: ask.px }
-      check(mean(lit) - mean(dark) > 40 && right >= s.marks.length * ask.share, `${s.id} reads in the picture at scale 0.7: lamp ${r.read.lamp} against panel ${r.read.panel} of 255, ${r.read.squaresRight} squares of its letters as they should be (${ask.says})`)
+      const ask = asked(s), worst = worstLetter(s.marks, (m) => (m.lit ? light(m.x, m.y) > cut : light(m.x, m.y) <= cut)), text = s.standing.letters
+      r.read = { lamp: Math.round(mean(lit)), panel: Math.round(mean(dark)), squaresRight: `${right}/${s.marks.length}`, squarePx: ask.px, worst }
+      check(mean(lit) - mean(dark) > 40 && right >= s.marks.length * ask.share && worst.share >= LETTER_SHARE, `${s.id} reads in the picture at scale 0.7: lamp ${r.read.lamp} against panel ${r.read.panel} of 255, ${r.read.squaresRight} squares of its letters as they should be (${ask.says}), and its worst letter, ${text[worst.letter] ?? '-'}, ${Math.round(worst.share * 100)}% (${LETTER_SHARE * 100}% or more)`)
     }
   }
   // No board over another on the picture.
@@ -443,7 +468,7 @@ try {
       const r = lettersRead(night, s.marks)
       results.night[s.id] = r
       const ask = asked(s)
-      check(r.lamp - r.panel > 40 && r.right >= r.of * ask.share, `${s.id} reads by night from the park: lamp ${r.lamp} against panel ${r.panel} of 255, ${r.right}/${r.of} squares of its letters as they should be (bounds: 40 apart, ${ask.says})`)
+      check(r.lamp - r.panel > 40 && r.right >= r.of * ask.share && r.worst.share >= LETTER_SHARE, `${s.id} reads by night from the park: lamp ${r.lamp} against panel ${r.panel} of 255, ${r.right}/${r.of} squares of its letters as they should be (bounds: 40 apart, ${ask.says}), and its worst letter, ${s.standing.letters[r.worst.letter] ?? '-'}, ${Math.round(r.worst.share * 100)}% (${LETTER_SHARE * 100}% or more)`)
     }
   }
   await realm.evaluate(() => { globalThis.engine.hour = 15; globalThis.engine.scale = 0.7 }); await page.waitForTimeout(1500)
@@ -580,12 +605,14 @@ try {
     const held = small.frames().find((f) => f.url().includes('/sf/index.html'))
     await held.waitForFunction(() => globalThis.engine.seen.whole > 0, null, { timeout: 300_000 })
     await small.waitForTimeout(4000)
+    // (The phone's own first view: an upright phone is framed as the realm says it is, sf/realm.json `upright`.)
+    const phonePark = await held.evaluate(() => ({ ...globalThis.engine.pose }))
     const firstPhone = await over(held)
     await small.screenshot({ path: join(shots, 'first-phone.png') })
     results.first.phone = firstPhone
     check(firstPhone.first && !firstPhone.hud && !firstPhone.sky && !firstPhone.tools && !firstPhone.fold && !firstPhone.thumbs && !firstPhone.where && firstPhone.wall === 0 && !firstPhone.explore && firstPhone.credits, `a phone's first view is the picture and the credits key (${firstPhone.creditsBox.join(' x ')} px): no fold, no thumbs, no tools`)
     const inView = await held.evaluate(() => { const b = globalThis.engine.boards; return b.records.map((r) => ({ id: r.id, type: r.type, to: r.to, w: b.where(r.id), standing: b.standing(r.id) })).map((r) => ({ ...r, inside: !!r.w && r.w.x - r.w.wide / 2 > 0 && r.w.x + r.w.wide / 2 < innerWidth && r.w.y - r.w.high / 2 > 0 && r.w.y + r.w.high / 2 < innerHeight })) })
-    const across = round((Math.atan(Math.tan((25.05 * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)
+    const across = round((Math.atan(Math.tan(((await held.evaluate(() => globalThis.engine.fov)) * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)
     results.phone = { inPicture: inView.filter((r) => r.inside).map((r) => r.id), of: inView.length }
     const target = inView.find((r) => r.inside && r.type === 'logo')
     check(inView.some((r) => r.inside && r.type === 'lettering') && inView.filter((r) => r.inside && r.type === 'logo').length >= 2, `in an upright phone's picture from the park (${across} degrees across): ${results.phone.inPicture.join(', ') || 'no board'}, of ${inView.length} (the lettering board and two logos are asked for; the rest are a turn of the eye away)`)
@@ -626,7 +653,7 @@ try {
       }
       Object.assign(e.pose, park)
       return out
-    }, { ids: logos.map((l) => l.id), park })
+    }, { ids: logos.map((l) => l.id), park: phonePark })
     results.phone.logos = turned
     check(turned.every((t) => readable(logos.find((l) => l.id === t.id).logo, t.markPx, t.widePx, READABLE.phone)), `on the phone, the eye turned to each logo from the park: ${turned.map((t) => `${t.id} ${t.widePx} x ${t.markPx} px`).join(', ')} (asked: a mark ${READABLE.phone.mark} to ${READABLE.phone.most} px each way)`)
     // BLOG by night on the phone, as its own pixels have it (three to a px). A phone is shown the board in cells of
@@ -634,7 +661,7 @@ try {
     // not measured square by square): the lamp's light against the panel's, as the brightest and the darkest fifths
     // of the board's face in the picture, and how much of the face is lamp (BLOG's own letters are 37% of its panels).
     {
-      const blog = await held.evaluate(async (park) => { const e = globalThis.engine; Object.assign(e.pose, park); e.hour = 21.5; await new Promise((r) => setTimeout(r, 6000)); const id = e.boards.records.find((r) => r.type === 'lettering').id; return { id, w: e.boards.where(id) } }, park)
+      const blog = await held.evaluate(async (park) => { const e = globalThis.engine; Object.assign(e.pose, park); e.hour = 21.5; await new Promise((r) => setTimeout(r, 6000)); const id = e.boards.records.find((r) => r.type === 'lettering').id; return { id, w: e.boards.where(id) } }, phonePark)
       const clip = { x: Math.round(blog.w.x - blog.w.wide * 0.42), y: Math.round(blog.w.y - blog.w.tall * 0.36), width: Math.round(blog.w.wide * 0.84), height: Math.round(blog.w.tall * 0.72) }
       await small.screenshot({ path: join(shots, 'night-phone.png') })
       results.phone.towers = await shaftLit(held, small, 3, 'on the phone')

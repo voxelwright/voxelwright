@@ -165,7 +165,9 @@ async function main() {
   // Start on land, a little above a street.
   // In the Bay (#373, `?bay=1`): in Washington Square, looking at Telegraph Hill.
   // A realm run alone (local.ts) says where one arrives: the eye there, in the world's cells, and how it faces in radians.
-  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? LOCAL.arrive : null
+  // (Framed otherwise where the picture is taller than wide, if the realm says how and the address gives no look: local.ts `upright`.)
+  const upright = innerHeight > innerWidth && !query.has('look') ? LOCAL?.upright : undefined
+  const arrive = !query.has('at') && LOCAL?.arrive?.at.length === 3 ? { ...LOCAL.arrive, ...(upright?.yaw !== undefined ? { yaw: upright.yaw } : {}), ...(upright?.pitch !== undefined ? { pitch: upright.pitch } : {}) } : null
   let startX = arrive ? arrive.at[0] : BAY_START ? BAY_START[0] : BAY_ON ? 519_500 : 700, startZ = arrive ? arrive.at[2]! : BAY_START ? BAY_START[1] : BAY_ON ? 661_150 : 4070
   // Where the Bay comes in tiles, the ones round the start and round where the page was told to stand come first.
   // Before the first picture only the finest round the start (#450): what is asked of the ground there, first on the
@@ -176,7 +178,7 @@ async function main() {
   const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
   const look = arrive && !query.has('look') ? [(arrive.yaw * 180) / Math.PI, (arrive.pitch * 180) / Math.PI] : numbers('look', BAY_ON ? [64, 4] : [20, -8])
   /** The eye's angle from top to bottom, degrees. */
-  let fov = Number(query.get('fov') ?? LOCAL?.fov ?? 70)
+  let fov = Number(query.get('fov') ?? (arrive && upright?.fov) ?? LOCAL?.fov ?? 70)
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? LOCAL?.roll ?? 0) * Math.PI) / 180
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
@@ -214,6 +216,23 @@ async function main() {
     canvas.addEventListener('click', () => first.engage())
   }
   explores = () => enter(true)
+  // A phone turned while its first view is up is framed for how it is held now (local.ts `upright`): turned upright
+  // after it opened wide, the board that leads in would be off its picture. Asked once, the ask leans from the new
+  // framing (explore.ts `reframed`); once the flight has begun the first view is over, and nothing is framed again.
+  // (The banner's round stays the one it was given as the page opened: boards.ts chooses it once.)
+  if (first && !first.engaged && arrive && LOCAL?.upright && !query.has('look') && !query.has('fov')) {
+    const own = { yaw: LOCAL.arrive!.yaw, pitch: LOCAL.arrive!.pitch, fov: LOCAL.fov ?? fov }, tall = LOCAL.upright
+    let held = !!upright
+    addEventListener('resize', () => {
+      const now = innerHeight > innerWidth
+      // (Only while the eye is where it arrived: flown to a board, it looks at that board, however the phone is held.)
+      if (now === held || first.engaged || way?.state === 'going' || way?.state === 'in' || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) > 1) return
+      held = now
+      Object.assign(pose, { yaw: (now ? tall.yaw : undefined) ?? own.yaw, pitch: (now ? tall.pitch : undefined) ?? own.pitch })
+      fov = (now ? tall.fov : undefined) ?? own.fov
+      way?.reframed()
+    })
+  }
   if (explored) enter(true)
   // A click that is to do nothing more than its press has done (explore.ts: the press that cut a flight short), stopped
   // before the boards or the picture hear it: the click of the press that was down then, however long it is held (it
@@ -1354,7 +1373,7 @@ async function main() {
     kind: (x, y, z) => core.world_kind(x, y, z), feet: (x, z) => core.feet_at(x, z), ground: (x, z) => core.ground_at(x, z), top: (x, z) => core.top_at(x, z),
     pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
     aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
-    does: (b) => { if (b.does === 'explore') enter(false) },
+    does: (b) => { if (b.does !== 'explore' || !first || first.engaged) return false; enter(false); return true },
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
   // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
@@ -1448,7 +1467,17 @@ async function main() {
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
-    let hushed: AudioContext | null = null
+    let hushed: AudioContext | null = null, said: { open(): void } | null = null
+    // The eggs' line in the first view, where no key means what it means in the realm: Enter or the slash opens it and
+    // does nothing else. Not from a key, a link or a field in focus (Enter on the board's button is the button's: it
+    // asks for the way in), nor a key held until it repeats. What is typed is the line's, and its Enter shuts it.
+    if (first && !first.engaged) addEventListener('keydown', (e) => {
+      if (first.engaged || !said || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !['Enter', 'NumpadEnter', 'Slash'].includes(e.code)) return
+      if (e.target instanceof Element && e.target.closest('button, a, input, textarea, select, [contenteditable]')) return
+      e.preventDefault()
+      way?.disarm()
+      said.open()
+    })
     const leads = signboards?.records.find((b) => b.does === 'explore')
     if (!leads) noWayIn()
     const hatch = () => {
@@ -1471,7 +1500,7 @@ async function main() {
         if (meant) void way.go()
       }).catch(noWayIn)
       void import('./eggs.ts').then(({ eggs }) => {
-        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: eggs({
+        Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
           callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },

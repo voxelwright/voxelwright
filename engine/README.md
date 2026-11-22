@@ -1624,8 +1624,9 @@ The realm opens on its picture (`page/first.ts`): a still one. Until the visitor
 
 ### The way in: the EXPLORE board (`page/explore.ts`)
 
-One lettering board of the file has `"does": "explore"` and `"stand": [x, z, degrees]`: it stands on the roof at 895 Pacific Ave (Trenton St), 407 m from the park, and takes the visitor onto that roof.
+One lettering board of the file has `"does": "explore"`: it stands on the roof of 555 California St, the dark tower right of the skyline, 1.1 km from the park, and takes the visitor onto that roof. Its capitals are 11 m in Vox Zakon's compact set on every screen (the record's `letters`: the display set's strokes were finer than a square of the picture from 1.1 km), 70 m across, and it faces north; the visitor stands on the roof in front of its east half, looking west along it, the roof's west edge 44 m ahead. A phone held upright is framed with a 47 degree lens, looked 6 degrees up so that little of the near roofs is shown (`sf/realm.json` `upright`): BLOG, the three logos, EXPLORE, the banner and the Pyramid are all in its picture, and stay in it when a tap leans the eye to the board.
 
+- **In the first view** no key means what it means in the realm, except Enter and `/`, which open the eggs' line (`page/eggs.ts`) and do nothing else. Enter on the board's own button is the button's.
 - **Asked once** (a click, a tap, or Enter on its button, which Tab reaches): its letters light, the eye leans a little towards it, a line under it says "Click again to explore · Esc to stay" ("Tap again" by touch, "Press Enter again" by keyboard), and the finest tiles round the roof start to come. Esc, a click anywhere else, the pointer taken well away, or six seconds put it back.
 - **Asked twice**: the flight. A second ask counts from 300 ms after the first, so a double click or a key held until it repeats is one ask. The host's `explore` message is meant and flies at once; it is heard from when the realm's script first runs (by the frame's `load` it has) and kept until the way in has come.
 - **The flight** is the time the roof's world has to come: 3 s from the park to the board with the lens opening from 25 to 58 degrees (80 on an upright phone), the world's boxes made round the roof from a quarter of the way; then the visitor's own body is set down beside the sign (`page/person.ts`) and the eye goes once round it and down behind its shoulder. About 8.5 s in all. If the roof's boxes are not all made the round goes on until they are (8 s at most; a roof whose tiles have not come by then gets no body, and the visitor is in as an eye). Any key or touch cuts to the end and does nothing else: a key still held from before is no new key, and the click of a press that cut does nothing however long it is held. With `prefers-reduced-motion` there is no flight, the still picture fades into the roof's view (and a click on a board in it opens nothing).
@@ -1633,10 +1634,10 @@ One lettering board of the file has `"does": "explore"` and `"stand": [x, z, deg
 
 A realm with no board that leads in (`?boards=0`, or boards that could not be made) ends its first view on a key or a click on the picture, as it used to; so does one whose `explore.js` could not be fetched, and a click on the board itself does too.
 
-`engine.explore` has `state` (`idle`, `armed`, `going`, `in`), `act()`, `go()`, `disarm()`, `stand` and `times`. To move the way in to another roof, change the board's `at` and `stand` in `sf/boards.json`; nothing else names the place.
+`engine.explore` has `state` (`idle`, `armed`, `going`, `in`), `act()`, `go()`, `disarm()`, `stand` and `times`. Where the board stands is one of its seats in `sf/boards.json`: `"on"` names the seat and `"roofs"` holds each (`building`, `at`, `facing`, `size`, `lift`, `stand`). `"on": "895-pacific"` puts it back on 895 Pacific Ave, where it first stood; a new roof is a new seat. The build and the editor's save keep the seats (`sf/boards.mjs` `seated`).
 
 ```
-node sf/explore-shots.mjs      # pictures and a clip of the whole way in, into ~/.village/engine/sf/explore
+node sf/explore-shots.mjs      # pictures and a clip of the whole way in, into ~/.village/engine/sf/explore (--out to choose)
 node test/sf-explore.mjs       # the check: nothing by chance, once, twice, the link, the fall, the canopy, the host, the keyboard, a phone
 ```
 

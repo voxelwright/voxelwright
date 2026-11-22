@@ -64,6 +64,14 @@ const HUNG: Move = { hold: true, keys: [{ t: 0.3, liftL: 2.7, liftR: 2.7, outL: 
 const FALLING: Move = { hold: true, keys: [{ t: 0.35, liftL: 1.45, liftR: 1.45, outL: 1.05, outR: 1.05, lean: 0.4 }] }
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
+/** How much further back, higher and to the right the eye behind is when it stands off (`standOff`), cells. */
+const STAND_OFF = { back: 170, over: 70, aside: 0 }
+/** Where the eye behind a body stands on level ground with all the room it wants, cells: its feet at `feet`, looking `yaw` and `pitch` (radians), stood off by `standOff` (`Me.standOff`). */
+export function behindAt(feet: readonly number[], yaw: number, pitch: number, standOff = 0): [number, number, number] {
+  const cp = Math.cos(pitch), look = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp], right = [Math.cos(yaw), 0, Math.sin(yaw)]
+  const back = 32 + STAND_OFF.back * standOff, over = 6 + STAND_OFF.over * standOff, aside = 5 + STAND_OFF.aside * standOff
+  return [feet[0] - look[0] * back + right[0] * aside, feet[1] + EYES + over - look[1] * back, feet[2] - look[2] * back + right[2] * aside]
+}
 /** How near its own head the eye behind comes before its figure is in its way and is not drawn (cells). */
 const NEAR = 9
 
@@ -102,6 +110,8 @@ export interface Me {
   readonly figure: Person
   /** How far behind the head the eye is now (cells): all the way, or as far as there is room. */
   readonly back: number
+  /** How far the eye behind stands off, 0 (its own place) to 1 (17 m further back and 7 m higher, so that the body is seen whole and what it stands beside with it),: set where it arrives (explore.ts). It comes back to 0 once the body walks. */
+  standOff: number
   /** A blow: so much speed given to the body at once (cells a second). Nothing if it is not on its feet. */
   push(speed: readonly [number, number, number]): void
   /** Puts the body on the ground for so many seconds: it does not walk meanwhile. None gets it up. */
@@ -146,7 +156,7 @@ export function person(o: {
     return true
   }
   /** How fast it is going down (cells a second, eased), and when it last left its feet or opened its canopy: for what its limbs do in the air. */
-  let sinking = 0, airborne = 0, hung = 0
+  let sinking = 0, airborne = 0, hung = 0, stoodOff = 0, standOff = 0
   // Which way is up for the body as the core last said (the turn from its own upright to the world's), and the eye's, which follows it over a fifth of a second.
   let frame: Q = [0, 0, 0, 1], tilt: Q = [0, 0, 0, 1]
   const tilted = () => Math.abs(frame[3]) < 0.9999
@@ -235,6 +245,9 @@ export function person(o: {
     set limbs(l) { limbs = l; moved() },
     get figure() { return shown },
     get back() { return backNow },
+    get standOff() { return standOff },
+    // (Set, it is there at once: it is asked for where the eye is placed, not as a move of it.)
+    set standOff(v) { standOff = stoodOff = Math.max(0, Math.min(1, v)) },
     get can() { return can },
     set can(c) { const next = { ...AS_IT_IS, ...c }; if (JSON.stringify(next) === JSON.stringify(can)) return; can = next; tellCan() },
     push(speed) { if (id) { o.send({ kick: { id, speed: [speed[0], speed[1], speed[2]] } }); o.wake(); awake = true } },
@@ -322,7 +335,10 @@ export function person(o: {
         // On a wall the eye is in the head: behind and above, it would be inside the wall or the ground as often as not (nothing keeps the eye out of what is solid).
         // Under a canopy it stands off further and higher: from close behind, the cloth was the top half of the picture.
         hung += ((canopy ? 1 : 0) - hung) * (1 - Math.exp(-dt * 3))
-        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32 + 30 * hung, over = inHead ? 0 : 6 + 12 * hung, aside = inHead ? 0 : 5
+        // (Stood off where it arrived until it walks: then in to its own place, over a second or so.)
+        if (walking > 0.5) standOff = 0
+        stoodOff += (standOff - stoodOff) * (1 - Math.exp(-dt * 2))
+        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32 + 30 * hung + STAND_OFF.back * stoodOff, over = inHead ? 0 : 6 + 12 * hung + STAND_OFF.over * stoodOff, aside = inHead ? 0 : 5 + STAND_OFF.aside * stoodOff
         const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
         // Not through a wall (`clearWay`): it comes in at once and goes out again slowly.
         // And what will be in the way where the body is going brings it in before it gets there (`roomAfter`).
