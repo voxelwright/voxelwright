@@ -39,7 +39,7 @@ const clipOf = async (page, selector, pad = 20) => {
 }
 try {
   for (const face of faces) {
-    const dir = join(out, face), q = `knock=0&face=${face}`
+    const dir = join(out, face), q = `face=${face}`
     mkdirSync(dir, { recursive: true })
     fit[face] = {}
     for (const [name, options] of [['desktop', DESKTOP], ['phone', PHONE]]) {

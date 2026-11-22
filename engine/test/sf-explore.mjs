@@ -50,7 +50,7 @@ mkdirSync(shots, { recursive: true })
 const pointer = JSON.parse(readFileSync(join(dist, 'sf/current.json'), 'utf8')), releaseAt = `/sf/${pointer.manifest.replace(/manifest\.json$/, '')}`
 // The host: a page with the realm in a frame over the whole of it, keeping what the realm tells it.
 const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
-<iframe id="realm" src="/sf/index.html?knock=0" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
+<iframe id="realm" src="/sf/index.html" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
 // A host that does not wait: it says `explore` once, when its frame has loaded, long before it is told `ready` (the
 // realm has no GPU, no core and no tile yet), and never again.
 const EARLY = HOST.replace('</script>', ';document.getElementById(\'realm\').addEventListener(\'load\',()=>ask({type:\'explore\'}))</script>')
@@ -79,7 +79,7 @@ const open = async (options, { hosted = false, slow = false, early = false, quer
   let lift = async () => {}
   if (slow) { const cdp = await context.newCDPSession(page); await cdp.send('Network.enable'); await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 }); lift = () => cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 0, downloadThroughput: -1, uploadThroughput: -1 }) }
   const from = Date.now()
-  await page.goto(hosted ? `${site.url}/${early ? 'host-early' : 'host'}.html` : `${site.url}/sf/index.html?knock=0${query}`)
+  await page.goto(hosted ? `${site.url}/${early ? 'host-early' : 'host'}.html` : `${site.url}/sf/index.html${query.replace(/^&/, '?')}`)
   const realm = hosted ? page.frames().find((f) => f.url().includes('/sf/index.html')) : page.mainFrame()
   await realm.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 240_000 })
   const shown = await realm.evaluate(() => performance.timeOrigin + globalThis.engine.seen.near)
@@ -474,7 +474,7 @@ try {
   {
     const context = await browser.newContext(WIDE), page = await context.newPage()
     page.on('pageerror', (e) => errors.push(e.message))
-    await page.goto(`${site.url}/sf/index.html?knock=0&boards=0`)
+    await page.goto(`${site.url}/sf/index.html?boards=0`)
     await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.first, null, { timeout: 300_000 })
     await page.waitForTimeout(1500)
     const before = await page.evaluate(() => globalThis.engine.first.engaged)
@@ -487,7 +487,7 @@ try {
     // The board is there and what it does could not be fetched: a click on the board itself ends the first view.
     const context = await browser.newContext(WIDE), page = await context.newPage()
     await page.route('**/page/explore.js', (route) => route.abort())
-    await page.goto(`${site.url}/sf/index.html?knock=0`)
+    await page.goto(`${site.url}/sf/index.html`)
     await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.first && globalThis.engine.boards?.where('explore') && globalThis.engine.eggs, null, { timeout: 300_000 })
     await page.waitForTimeout(1500)
     const before = await page.evaluate(() => ({ engaged: globalThis.engine.first.engaged, way: !!globalThis.engine.explore }))

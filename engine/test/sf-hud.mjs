@@ -101,7 +101,7 @@ try {
       // (One session: the override is the session's, and a second one opened after it was found to leave env() at 0.)
       const cdp = await context.newCDPSession(page)
       if (phone) await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: safe })
-      await page.goto(`${site.url}/sf/index.html?knock=0${mode === 'default' ? '' : `&hud=${mode}`}`)
+      await page.goto(`${site.url}/sf/index.html${mode === 'default' ? '' : `?hud=${mode}`}`)
       await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.explore && globalThis.engine.playHud, null, { timeout: 300_000 })
       await page.evaluate(() => { globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
       const inside = await until(page, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 90_000)

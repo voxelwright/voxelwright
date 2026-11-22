@@ -2,7 +2,7 @@
 // WebGPU. Sound is refused by a simulated browser rule (Playwright's evaluate counts as a press, so a real refusal
 // cannot be had in a check): the egg plays muted, and Unmute, a real click, brings the sound.
 //
-//   node test/sf-eggs.mjs [--no-build] [--shots ~/.village/engine/sf/eggs] [--headed]
+//   node test/sf-eggs.mjs [--no-build] [--things] [--shots ~/.village/engine/sf/eggs] [--headed]
 //
 // For each egg: its trigger as a visitor makes it (keys typed, the line, a tool used), what it does to the picture
 // (read from the canvas: the windows, the sky, the moon, against the picture before), that it is undone (Esc, a
@@ -49,7 +49,7 @@ const open = async (context) => {
   page.said = []
   page.on('pageerror', (e) => page.errors.push(e.message))
   page.on('console', (m) => { page.said.push(m.text()); if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) page.errors.push(m.text()) })
-  await page.goto(`${site.url}/sf/index.html?knock=0`)
+  await page.goto(`${site.url}/sf/index.html`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.eggs, null, { timeout: 180_000 })
   // The visitor has engaged (first.ts): the realm's controls, which the eggs' line and player join, are shown.
   await page.evaluate(() => { globalThis.engine.scale = 1; globalThis.engine.first?.engage() })
@@ -165,7 +165,121 @@ const cost = (page, name, what) => timed({
   say: (r) => `${what} costs no more than a quarter more than its sky without the screen: mean frame gap ${r.with} ms with it, ${r.without} ms without`,
 })
 
+/**
+ * Each thing that starts an egg (page/eggs-things.ts), found as a visitor finds it: the body set down on its feet a step
+ * in front of it, facing it; its cue comes (hud.ts), and a tap on it (a phone, a real touch) or a click (a desk) starts
+ * the egg. A picture of the thing as found, cue and all, and of its egg running, in `things/`. The cue is measured: a
+ * thumb's size on a phone, and over none of the body's parts (play-hud.ts `parts`).
+ */
+const THINGS = {
+  payphone: { egg: (s) => s.running === 'matrix', again: (s) => s.running === null, then: 'hangs up', shot: 'city' },
+  jukebox: { egg: (s) => s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0, again: (s) => s.running === null, then: 'stops it', shot: 'city' },
+  cart: { egg: (s) => s.running === 'apple', again: (s) => s.running === null, then: 'puts it back', shot: 'city' },
+  arcade: { egg: (s) => s.signs.banner === '+30 lives', shot: 'banner' },
+  viewer: { egg: (s) => s.hour > 23, again: (s) => s.moon === 1, then: 'brings the moon closer', shot: 'moon' },
+  plane: { egg: (s) => s.spin > 0.2, shot: 'now' },
+  shield: { egg: (s) => s.shield && s.signs.banner === 'God mode', again: (s) => !s.shield, then: 'lets go', shot: 'banner' },
+}
+const things = async (page, kind) => {
+  const dir = join(shots, 'things'), touch = kind === 'phone'
+  mkdirSync(dir, { recursive: true })
+  // The lens of play (explore.ts LENS): the realm's own is the first view's long one, which the way in opens.
+  await page.evaluate(() => { globalThis.engine.fov = innerHeight > innerWidth ? 80 : 58 })
+  const at = await page.evaluate(() => globalThis.engine.eggs.things.list)
+  check(at.length === Object.keys(THINGS).length, `${at.length} things stand in the city: ${at.map((t) => t.id).join(', ')}`)
+  // (The cue the thing offers, by its words: a car's or a ride's may be up too.) `by`: a tap or click on it, or E.
+  const tapCue = async (id, by = touch ? 'tap' : 'click') => {
+    const cue = await page.evaluate((id) => {
+      const words = globalThis.engine.eggs.things.words, el = [...document.querySelectorAll('#cues p.tap')].find((p) => !p.hidden && p.textContent === words), r = el?.getBoundingClientRect()
+      if (!r) return null
+      const x = r.left + r.width / 2, y = r.top + r.height / 2, top = document.elementFromPoint(x, y)
+      return { x, y, w: r.width, h: r.height, text: el.textContent, onTop: top === el, over: top === el ? null : `${top?.tagName}.${top?.className}`, box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom }, parts: globalThis.engine.playHud?.parts?.() ?? [], near: globalThis.engine.eggs.things.near === id }
+    }, id)
+    if (!cue) return null
+    if (by === 'tap') await page.touchscreen.tap(cue.x, cue.y)
+    else if (by === 'click') await page.mouse.click(cue.x, cue.y)
+    else await page.keyboard.press('e')
+    return cue
+  }
+  const thingState = () => page.evaluate(() => ({ ...globalThis.engine.eggs.state, spin: globalThis.engine.eggs.things.spin, hour: globalThis.engine.realmControls.sky.hour, banner: globalThis.realm.signs.list().find((x) => x.id === 'banner')?.content?.text ?? null, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.own || !s.content ? null : 'text' in s.content ? s.content.text : null])) }))
+  for (const t of at) {
+    const want = THINGS[t.id]
+    // Down on the feet a step from it, off to one side of its front (so that the body is not between the eye and it),
+    // the thing a little right of where the body looks: the eye up over the place, then the body let fall there.
+    const stand = async () => {
+      await page.evaluate((t) => {
+        const e = globalThis.engine, f = ((t.facing + (t.behind ? 180 : 0) - 55) * Math.PI) / 180, away = Math.max(t.size[0], t.size[2]) / 2 + 16
+        const x = t.at[0] + Math.sin(f) * away, z = t.at[2] - Math.cos(f) * away
+        if (e.me.on) e.me.walk(false)
+        Object.assign(e.pose, { x: x / 10, y: (t.at[1] + 40) / 10, z: z / 10, yaw: f + Math.PI - 0.3, pitch: -0.12 })
+      }, t)
+      await settle(page)
+      await page.evaluate(() => globalThis.engine.me.walk(true))
+      const near = await page.waitForFunction((id) => globalThis.engine.me.feet && globalThis.engine.eggs.things.near === id && [...document.querySelectorAll('#cues p.tap')].some((p) => !p.hidden), t.id, { timeout: 20_000 }).then(() => true, () => false)
+      // (Until the eye behind the body has come all the way out, and what an egg before said has gone.)
+      await page.waitForFunction(() => { const b = globalThis.engine.me.back, w = globalThis.backWas ?? -1; globalThis.backWas = b; return b > 0 && Math.abs(b - w) < 0.05 && ![...document.querySelectorAll('#notices > *')].some((n) => n.checkVisibility()) }, null, { timeout: 9000, polling: 400 }).catch(() => null)
+      await settle(page)
+      await page.waitForTimeout(400)
+      return near
+    }
+    const near = await stand()
+    await page.screenshot({ path: join(dir, `${kind}-${t.id}-found.png`) })
+    if (!near) { check(false, `${t.id}: found on foot, its cue comes (${JSON.stringify(await page.evaluate(() => ({ feet: globalThis.engine.me.feet?.at, near: globalThis.engine.eggs.things.near, list: globalThis.engine.eggs.things.list })))})`); continue }
+    const before = await thingState()
+    // (On a desk the arcade is played with E, the key a thing beside takes.)
+    const by = touch ? 'tap' : t.id === 'arcade' ? 'E' : 'click'
+    const cue = await tapCue(t.id, by)
+    check(cue?.near, `${t.id}: the cue is the ${t.id}'s`)
+    check(cue?.onTop, `${t.id}: its cue "${cue?.text}" is on top where it is ${touch ? 'tapped' : 'clicked'}${cue?.onTop ? '' : ` (under ${cue?.over} at ${cue && Math.round(cue.x)}, ${cue && Math.round(cue.y)})`}`)
+    const meets = (cue?.parts ?? []).filter((p) => cue.box.left < p.right && cue.box.right > p.left && cue.box.top < p.bottom && cue.box.bottom > p.top)
+    if (touch) check(cue && cue.h >= 43.5 && cue.w >= 43.5, `${t.id}: its cue is a thumb's size, ${cue && Math.round(cue.w)} x ${cue && Math.round(cue.h)} px (asked: 44 at least)`)
+    check(meets.length === 0, `${t.id}: its cue is over none of the body's ${cue?.parts.length ?? 0} parts`)
+    const started = await page.waitForFunction((code) => { const s = { ...globalThis.engine.eggs.state, spin: globalThis.engine.eggs.things.spin, hour: globalThis.engine.realmControls.sky.hour, signs: { banner: globalThis.realm.signs.list().find((x) => x.id === 'banner')?.content?.text ?? null } }; return new Function('s', `return (${code})(s)`)(s) }, want.egg.toString(), { timeout: 30_000, polling: 50 }).then(() => true, () => false)
+    const s = await thingState()
+    check(started, `${t.id}: ${by === 'E' ? 'E' : by === 'tap' ? 'a tap' : 'a click'} on "${cue?.text}" starts its egg (${JSON.stringify({ running: s.running, shield: s.shield, moon: s.moon, hour: s.hour && round(s.hour), spin: round(s.spin), banner: s.signs.banner, playing: s.playing, muted: s.muted, sound: s.sound, before: before.running })})`)
+    // The egg as it shows: on the city's windows (the eye over the thing, looking at downtown), at the moon, on the
+    // banner its plane brings, or the barrel roll itself as it turns.
+    if (want.shot === 'now') await page.waitForTimeout(150)
+    else {
+      if (want.shot !== 'banner') await still(page)
+      await page.evaluate((t) => {
+        const e = globalThis.engine, [x, y, z] = e.march.sun.s
+        e.me.walk(false)
+        Object.assign(e.pose, { x: t.at[0] / 10, y: (t.at[1] + 30) / 10, z: t.at[2] / 10 }, t.shot === 'moon' ? { yaw: Math.atan2(x, -z), pitch: Math.asin(y / Math.hypot(x, y, z)) } : { yaw: 2.1, pitch: -0.02 })
+      }, { ...t, shot: want.shot })
+      await page.waitForTimeout(800)
+      await settle(page)
+      if (want.shot === 'banner') check((await bannerSeen(page)).seen, `${t.id}: what it says comes into the picture on the banner`)
+    }
+    await page.screenshot({ path: join(dir, `${kind}-${t.id}-running.png`) })
+    if (want.shot !== 'now') await stand()
+    if (want.again) {
+      await page.waitForFunction(() => [...document.querySelectorAll('#cues p.tap')].some((p) => !p.hidden), null, { timeout: 5000 }).catch(() => null)
+      const second = await tapCue(t.id)
+      const ok = await page.waitForFunction((code) => { const s = globalThis.engine.eggs.state; return new Function('s', `return (${code})(s)`)(s) }, want.again.toString(), { timeout: 15_000, polling: 50 }).then(() => true, () => false)
+      check(ok, `${t.id}: used again ("${second?.text}") it ${want.then}${ok ? '' : ` (${JSON.stringify({ onTop: second?.onTop, over: second?.over, at: second && [Math.round(second.x), Math.round(second.y)], near: second?.near, state: await page.evaluate(() => globalThis.engine.eggs.state) })})`}`)
+    }
+    // On a desk, the shield by the aim: the eye 4 m before it looking at its middle, and the Use key (a click held by the picture).
+    if (!touch && t.id === 'shield') {
+      const on = await page.evaluate(async (t) => {
+        const e = globalThis.engine, f = (t.facing * Math.PI) / 180, x = t.at[0] + Math.sin(f) * 40, z = t.at[2] - Math.cos(f) * 40, y = t.at[1] + t.size[1] / 2
+        e.me.walk(false)
+        Object.assign(e.pose, { x: x / 10, y: y / 10, z: z / 10, yaw: f + Math.PI, pitch: 0 })
+        await new Promise((r) => setTimeout(r, 300))
+        e.input.use()
+        return e.eggs.state.shield
+      }, t)
+      check(on, 'shield: the Use key with the aim on it starts IDDQD')
+    }
+    await page.evaluate(() => globalThis.engine.eggs.undo(true))
+    await still(page)
+  }
+  if (await page.evaluate(() => globalThis.engine.me.on)) await page.evaluate(() => globalThis.engine.me.walk(false))
+}
+
 try {
+  // (`--things`: only the things in the city, on a phone and a desk.)
+  if (!has('things')) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
   const page = await open(context)
   check(page.said.some((t) => t.includes('General Kenobi') && t.includes('not hiring')), 'the console greets: Hello there, General Kenobi, the ASCII park and the resume line')
@@ -341,22 +455,17 @@ try {
   check(s.running === null && !s.playing, 'Esc ends it')
   await still(page)
 
-  // ── The knock-knock on the banner: it ends in the Rickroll, with sound ──
-  console.log('\nknock knock, and the Rickroll')
-  await page.evaluate(() => globalThis.engine.eggs.knock())
-  s = await state(page)
-  seen = await bannerSeen(page)
-  results.knock = { banner: seen }
-  check(s.signs.banner === 'Knock knock' && seen.seen, `the banner asks: "${s.signs.banner}", and its plane brings it into the picture: ${JSON.stringify(seen)}`)
-  await sayTo(page, "who's there?")
-  s = await state(page)
-  check(s.signs.banner === 'Never gonna', `"who's there?" and the banner says "${s.signs.banner}"`)
-  await sayTo(page, 'never gonna who?')
+  // ── The Rickroll, with sound, and its title on the banner ──
+  console.log('\nthe Rickroll')
+  await sayTo(page, 'never gonna give you up')
   await started(page, 'rickroll')
   await begun()
+  seen = await bannerSeen(page)
+  results.rickroll = { banner: seen }
+  check(seen.seen, `the banner's plane brings "${(await state(page)).signs.banner}" into the picture: ${JSON.stringify(seen)}`)
   await page.waitForTimeout(2500)
   s = await state(page)
-  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0, `"never gonna who?" and Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"`)
+  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0, `Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"`)
   await still(page)
   await page.evaluate(() => globalThis.engine.eggs.hold(20))
   await page.waitForTimeout(1200)
@@ -462,15 +571,30 @@ try {
 
   check(page.errors.length === 0, `no errors on the page${page.errors.length ? `: ${page.errors.slice(0, 3).join(' | ')}` : ''}`)
   await page.close()
+  }
 
-  // ── On a phone: the knock-knock's banner comes into a narrow picture too ──
+  // ── On a phone: what an egg says on the banner comes into a narrow picture too ──
   console.log('\non a phone, 390 x 844')
   const phone = await open(await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true }))
-  await phone.evaluate(() => globalThis.engine.eggs.knock())
+  if (!has('things')) {
+  await phone.evaluate(() => globalThis.engine.eggs.say('wake up'))
   const onPhone = await bannerSeen(phone, 15_000)
   results.phone = { banner: onPhone }
-  check(onPhone.seen, `the knock-knock's banner comes into the phone's picture: ${JSON.stringify(onPhone)}`)
-  if (onPhone.seen) await phone.screenshot({ path: join(shots, 'knock-phone.png') })
+  check(onPhone.seen, `the Matrix's banner comes into the phone's picture: ${JSON.stringify(onPhone)}`)
+  if (onPhone.seen) await phone.screenshot({ path: join(shots, 'banner-phone.png') })
+  await phone.evaluate(() => globalThis.engine.eggs.undo(true))
+  await still(phone)
+  }
+
+  // ── The things in the city: each found on foot, and its cue tapped (a phone) or clicked (a desk), starts its egg ──
+  console.log('\nthe things, tapped on a phone, 390 x 844')
+  await things(phone, 'phone')
+  check(phone.errors.length === 0, `no errors on the phone's page${phone.errors.length ? `: ${phone.errors.slice(0, 3).join(' | ')}` : ''}`)
+  await phone.close()
+  console.log('\nthe things, clicked on a desk, 1440 x 900')
+  const desk = await open(await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 }))
+  await things(desk, 'desk')
+  check(desk.errors.length === 0, `no errors on the desk's page${desk.errors.length ? `: ${desk.errors.slice(0, 3).join(' | ')}` : ''}`)
 } catch (e) {
   console.error(e)
   failures.push(String(e))

@@ -17,7 +17,7 @@ const back = await turn(), browser = await chromium.launch(CHROME), site = await
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log('page error:', e.message))
 try {
-  await page.goto(`${site.url}/sf/index.html?hour=${arg('hour', '12.5')}&knock=0&first=0&people=0`)
+  await page.goto(`${site.url}/sf/index.html?hour=${arg('hour', '12.5')}&first=0&people=0`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.street?.ready, null, { timeout: 300_000 })
   await page.addStyleTag({ content: '#hud, #aim, #boom, #tools, #over, #where, #realm, #first { display: none !important }' })
   const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 90_000, polling: 250 }).catch(() => null)

@@ -1506,6 +1506,7 @@ async function main() {
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)),
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {
             const voice = ears?.voice

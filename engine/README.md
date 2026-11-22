@@ -1662,6 +1662,14 @@ node test/sf-type.mjs [--no-build]        # BLOG's and EXPLORE's lamp cell for c
 node sf/type-shots.mjs [--no-build]       # the same pictures in both faces, and sheets of them side by side (~/.village/engine/sf/type)
 ```
 
+### The eggs, typed or found (`page/eggs.ts`, `page/eggs-things.ts`)
+
+Each egg starts from a phrase typed on the eggs' line (Enter or `/`), and from a thing in the city that a phone can reach without a keyboard. On 555 California's roof, where the visitor comes in: a jukebox (the Rickroll), a toy plane on a stick (a barrel roll) and a coin viewer at the east edge (night and the moon; again, and the moon grows). On the tower's plaza below: a fruit cart with one black apple (Bad Apple!!). On the BLOG board's roof: an arcade cabinet (+30 lives). In the park of the first view, out of its picture: a ringing payphone (the Matrix; hang up to leave) and a golden shield on a plinth (IDDQD). Each is a model of quarter cells drawn as a piece where it stands. Near one, the city's own cue for a usable thing says what it does (`hud.ts` `cue`, 44 px tall by touch); a tap or a click on the cue, E, or the Use key with the aim on the thing uses it. Where each stands is the `SPOTS` table in `page/eggs-things.ts`.
+
+```
+node test/sf-eggs.mjs [--no-build] [--things]   # every egg; --things: only the things, each found on foot and tapped (390 x 844) and clicked (1440 x 900), pictures in ~/.village/engine/sf/eggs/things
+```
+
 ## Checks and tools
 
 ```sh

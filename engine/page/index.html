@@ -58,6 +58,8 @@
   #card p.note { margin: -2px 0 6px; color: #9aa5b1; font-size: 12px; }
   #card kbd, #cues kbd { display: inline-block; min-width: 14px; margin-right: 8px; padding: 0 5px; border-radius: 4px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 11px/18px ui-monospace, monospace; text-align: center; }
   #cues p { position: absolute; left: 0; top: 0; margin: 0; padding: 3px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.7); width: max-content; max-width: min(320px, 70vw); will-change: transform; }
+  /* A cue that does what it says when touched is a key for a thumb: 44 px tall (Apple's least for a frequent control). */
+  @media (pointer: coarse) { #cues p.tap { padding: 13px 16px; line-height: 18px; border-radius: 12px; } }
   [data-panel="wand"] { position: absolute; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 6px; max-width: calc(100vw - 120px); pointer-events: auto; }
   body.wand [data-panel="wand"] { display: flex; }
   body.wand #tools { display: none; }

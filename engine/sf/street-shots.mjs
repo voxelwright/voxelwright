@@ -98,7 +98,7 @@ try {
     const graphs = readdirSync(join(here, 'sf/pilot-graph')).map((f) => JSON.parse(readFileSync(join(here, 'sf/pilot-graph', f), 'utf8')))
     const segments = (name) => graphs.flatMap((g) => g.roads.filter((r) => r.name === name).flatMap((r) => r.line.slice(1).map((b, i) => [r.line[i], b])))
     const site = await plain(dist, '127.0.0.1', 0, {})
-    await page.goto(`${site.url}/sf/index.html?hour=12.5&street=0&people=0&knock=0&first=0&scale=1${extra}`)
+    await page.goto(`${site.url}/sf/index.html?hour=12.5&street=0&people=0&first=0&scale=1${extra}`)
     await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 300_000 })
     const STREETS = [
       // Powell at Washington (sf-life's place), looking up the hill to the north; California by Powell, looking down to

@@ -312,7 +312,7 @@ export function hud(input: Input): Hud {
     cue(text, at, tap) {
       const e = document.createElement('p'), cue = { text, at, el: e }
       e.textContent = text
-      if (tap) { e.style.pointerEvents = 'auto'; e.addEventListener('click', tap) }
+      if (tap) { e.style.pointerEvents = 'auto'; e.classList.add('tap'); e.addEventListener('click', tap) }
       e.hidden = true
       cues.append(e)
       shown.add(cue)
@@ -327,7 +327,9 @@ export function hud(input: Input): Hud {
       for (const cue of shown) {
         const place = cue.at(), on = place && project(place)
         cue.el.hidden = !on
-        if (on) cue.el.style.transform = `translate(${on[0].toFixed(1)}px, ${on[1].toFixed(1)}px) translate(-50%, -140%)`
+        // (Kept inside the screen: a thing near its edge has its cue whole, never cut off by it.)
+        const half = on ? cue.el.offsetWidth / 2 + 8 : 0, x = on ? Math.max(half, Math.min(innerWidth - half, on[0])) : 0
+        if (on) cue.el.style.transform = `translate(${x.toFixed(1)}px, ${on[1].toFixed(1)}px) translate(-50%, -140%)`
       }
     },
   }

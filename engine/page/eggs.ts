@@ -13,7 +13,12 @@
 //   iddqd                the city cannot be broken (again: it can)
 //   moon                 night and the moon; shoot the moon (a tool used at it) and it grows, three sizes
 //   do a barrel roll     the eye turns round once
-//   knock knock          the banner answers, and a joke the banner starts ends one way only
+//
+// Each also has a thing in the city that starts it (eggs-things.ts), for whoever has no keyboard to hand: a payphone
+// that rings (the Matrix; hang up to leave), a jukebox (the Rickroll), a fruit cart's black apple (Bad Apple!!), an
+// arcade cabinet (the Konami code's lives), a viewer at a lookout (the moon; again, and it grows), a toy plane (a barrel
+// roll) and a golden shield (IDDQD). A cue says what each does once one is near; a tap or a click on it, E, or the Use
+// key with the aim on the thing, uses it.
 //
 // Nothing here is fetched until an egg starts: the pictures (eggs-pictures.ts) and the videos (sf/eggs/, put there by
 // sf/build.mjs, never in git). A video's sound plays because the visitor started it; a browser that holds the sound
@@ -23,6 +28,9 @@ import type { Marcher, View } from './march.ts'
 import type { Skies, Weather } from './weather.ts'
 import type { Signs } from './signs.ts'
 import type { Picture } from './eggs-pictures.ts'
+import type { Hud } from './hud.ts'
+import type { Pieces } from './pieces.ts'
+import { things, type ThingId } from './eggs-things.ts'
 
 export interface EggsPage {
   device: GPUDevice
@@ -58,6 +66,12 @@ export interface EggsPage {
   ui: HTMLElement
   /** Where the page's folder is: the videos are under eggs/ there. */
   base: string
+  /** What draws the things that start the eggs, and the cue beside one that is near (eggs-things.ts). */
+  pieces: Pieces
+  hud: Hud
+  /** Where the feet are (world cells), or null flying as an eye; and where feet would stand at a column. */
+  feet(): readonly number[] | null
+  ground(x: number, z: number): number
 }
 
 // Original line drawing from the park's east-southeast view (the site's, the same view).
@@ -74,7 +88,7 @@ type Egg = 'matrix' | 'rickroll' | 'apple'
 const PHRASES = new Map<string, string>([
   ['wake up', 'matrix'], ['wake up neo', 'matrix'], ['neo', 'matrix'], ['red pill', 'red'], ['follow the white rabbit', 'matrix'], ['the matrix', 'matrix'],
   ['blue pill', 'unplug'], ['rickroll', 'rickroll'], ['never gonna give you up', 'rickroll'], ['bad apple', 'apple'],
-  ['iddqd', 'god'], ['moon', 'moon'], ['shoot the moon', 'moon'], ['do a barrel roll', 'roll'], ['knock knock', 'knock'],
+  ['iddqd', 'god'], ['moon', 'moon'], ['shoot the moon', 'moon'], ['do a barrel roll', 'roll'],
   ['stop', 'stop'], ['help', 'help'], ['hint', 'help'],
 ])
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA']
@@ -148,6 +162,7 @@ export function eggs(page: EggsPage) {
   }
   const dress = (egg: Egg) => {
     keep()
+    moonlit = false
     const look = LOOKS[egg]
     glideTo(look.hour)
     page.sky.set(look.weather)
@@ -318,11 +333,14 @@ export function eggs(page: EggsPage) {
   })
 
   // ── The moon, the shield and the barrel roll ──
-  const moonUp = () => {
+  /** Whether the moon has been asked up (and not undone since): `night` once the hour has come to night for it. */
+  let moonlit: boolean | 'night' = false
+  const moonUp = (by = 'Look up at it, and shoot it.') => {
     keep()
     glideTo(23.5)
     page.sky.set('clear')
-    say('The moon is up. Look up at it, and shoot it.')
+    moonlit = true
+    say(`The moon is up. ${by}`)
   }
   /** Whether a look along `forward` meets the moon's disc, as the sky draws it (march.ts sky()). */
   const atMoon = (forward: readonly number[]) => {
@@ -340,45 +358,17 @@ export function eggs(page: EggsPage) {
   let rolling: { from: number; t: number } | null = null
   // Over every other mode a lane puts down (a tool's use goes to the top first): the moon takes a shot at it, and
   // under IDDQD no tool breaks anything.
+  // E beside a thing of the city's that starts an egg uses it (a key held down is one use, not one each repeat). Pushed
+  // once, not as one comes near: a mode put on or taken off lets go of every key held, and a walk past was a stop.
   page.controls.push({
     name: 'eggs',
+    key: (code, e) => code === 'KeyE' && !e.repeat && found.key(),
     use: () => {
       if (atMoon(page.view().forward)) { shootMoon(); return true }
+      if (found.aimed()) return true
       if (shield) { say('IDDQD: the city cannot be broken. Say iddqd again to let it.', 3000); return true }
     },
   })
-
-  // ── The knock-knock on the banner: a joke the city starts, or the visitor does, ends one way only ──
-  let knock: { stage: 'asked' | 'never' | 'who' | 'whowho'; said?: string; until: number } | null = null
-  const knocking = (start: 'city' | 'visitor') => {
-    knock = { stage: start === 'city' ? 'asked' : 'who', until: performance.now() + 60_000 }
-    banner(start === 'city' ? 'Knock knock' : "Who's there?")
-    say(start === 'city' ? 'The banner says: knock knock. Press Enter to answer.' : "The banner says: who's there?")
-  }
-  /** A line said while the joke is on: true if it was the joke's. */
-  const joke = (said: string) => {
-    if (!knock || performance.now() > knock.until) { knock = null; return false }
-    // An egg's own words are that egg, joke or no joke.
-    if (knock.stage !== 'asked' && PHRASES.has(said)) { knock = null; banner(null); return false }
-    knock.until = performance.now() + 60_000
-    if (knock.stage === 'asked') {
-      if (!/^who ?s there$|^who is there$/.test(said)) return false
-      knock.stage = 'never'
-      banner('Never gonna')
-      return true
-    }
-    if (knock.stage === 'never') {
-      if (!/who$/.test(said)) { banner('You say: never gonna who?'); return true }
-      knock = null
-      void play('rickroll')
-      return true
-    }
-    if (knock.stage === 'who') { knock = { stage: 'whowho', said, until: knock.until }; banner(`${said} who?`); return true }
-    // Whoever is at the door, it is Rick.
-    knock = null
-    void play('rickroll')
-    return true
-  }
 
   // ── What a phrase does ──
   let misses = 0
@@ -399,7 +389,6 @@ export function eggs(page: EggsPage) {
         if (matchMedia('(prefers-reduced-motion: reduce)').matches) return say('Barrel roll (with motion reduced, in spirit).')
         rolling = { from: page.pose.yaw, t: 0 }
         return say('Barrel roll.')
-      case 'knock': return knocking('visitor')
       case 'lives':
         briefly('+30 lives', 8000)
         return say('Tow banner: +30 lives')
@@ -407,15 +396,14 @@ export function eggs(page: EggsPage) {
     }
   }
   const hint = () => {
-    const text = 'Try: wake up · bad apple · iddqd · moon · knock knock'
-    briefly('Try: wake up · knock knock', 7000)
+    const text = 'Try: wake up · bad apple · iddqd · moon'
+    briefly('Try: wake up · moon', 7000)
     say(text, 7000)
   }
   /** Something said to the city on the line. */
   const heard = (text: string) => {
     const said = words(text)
     if (!said) return
-    if (joke(said)) return
     const action = PHRASES.get(said)
     if (action) { misses = 0; return act(action) }
     misses++
@@ -466,7 +454,7 @@ export function eggs(page: EggsPage) {
   addEventListener('keydown', (e) => {
     if (typing || e.repeat || (e.target instanceof HTMLElement && e.target.closest('input,textarea,select,[contenteditable]'))) return
     if (e.key === 'Escape') {
-      if (running || shield || moon || knock || saying) { e.preventDefault(); undo() }
+      if (running || shield || moon || saying) { e.preventDefault(); undo() }
       return
     }
     if (e.code === KONAMI[konami]) {
@@ -477,24 +465,52 @@ export function eggs(page: EggsPage) {
     } else konami = e.code === 'ArrowUp' ? (konami === 2 ? 2 : 1) : 0
   }, { capture: true })
 
-  /** Every egg undone: what runs stops, the shield drops, the moon is its own size, the joke is over, the sky as it was. */
+  /** Every egg undone: what runs stops, the shield drops, the moon is its own size, the sky as it was. */
   const undo = (quiet = false) => {
-    const any = running || shield || moon || knock || saying
+    const any = running || shield || moon || saying
     stop(true)
     shield = false
     moon = 0
+    moonlit = false
     march.screen.moon = 0
-    knock = null
     banner(null)
     undress()
     if (any && !quiet) say('Back in the park.')
   }
-  page.onReset(() => undo(true))
+  page.onReset(() => { undo(true); found.forget() })
+
+  // ── The things in the city that start them, and what each says it does ──
+  const touch = matchMedia('(pointer: coarse)')
+  const WORDS: Record<ThingId, () => string> = {
+    payphone: () => (running?.egg === 'matrix' ? 'Hang up the phone' : 'Answer the ringing phone'),
+    jukebox: () => (running?.egg === 'rickroll' ? 'Stop the jukebox' : 'Play the jukebox'),
+    cart: () => (running?.egg === 'apple' ? 'Put the black apple back' : 'Take the black apple'),
+    arcade: () => 'Play the arcade game',
+    viewer: () => (moonlit ? 'Look closer at the moon' : 'Look through the viewer'),
+    plane: () => 'Spin the toy plane',
+    shield: () => (shield ? 'Let go of the golden shield' : 'Touch the golden shield'),
+  }
+  const USE: Record<ThingId, () => void> = {
+    payphone: () => act(running?.egg === 'matrix' ? 'unplug' : 'matrix'),
+    jukebox: () => act('rickroll'),
+    cart: () => (running?.egg === 'apple' ? stop() : act('apple')),
+    arcade: () => act('lives'),
+    viewer: () => (moonlit ? shootMoon() : moonUp('Use the viewer again to bring it closer.')),
+    plane: () => act('roll'),
+    shield: () => act('god'),
+  }
+  const found = things({
+    pieces: page.pieces, hud: page.hud, input: page.controls, view: page.view, feet: page.feet, ground: page.ground,
+    touch: () => touch.matches, words: (id) => WORDS[id](), use: (id) => USE[id](),
+    // The payphone rings (its sign on and off) until its call is taken; the cart's black apple is gone while Bad Apple!! plays.
+    look: (id, t) => (id === 'payphone' ? (running?.egg !== 'matrix' && Math.floor(t * 2.5) % 2 ? 1 : 0) : id === 'cart' ? (running?.egg === 'apple' ? 1 : 0) : 0),
+  })
 
   // ── Every frame: the screen comes up and goes down, its picture is drawn, the light comes home, the hour is watched ──
   let flips: number[] = [], wasDark: boolean | null = null
   page.watch((gap) => {
     const dt = Math.min(gap, 100) / 1000
+    found.frame(performance.now() / 1000)
     // The banner's next line, after its plane has been in the picture for 8 s (it flies in from the edge, cloth last).
     if (nextLine && onBanner !== nextLine.after) nextLine = null
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
@@ -515,10 +531,14 @@ export function eggs(page: EggsPage) {
       rolling.t += dt / 0.85
       const s = Math.min(1, rolling.t), ease = s * s * (3 - 2 * s)
       page.pose.yaw = rolling.from + ease * Math.PI * 2
-      if (s >= 1) rolling = null
+      found.spin = ease * Math.PI * 2
+      if (s >= 1) { rolling = null; found.spin = 0 }
     }
     // Four swings of the hour across dusk in four seconds: Bad Apple!!, black and white and black and white.
     const h = page.hour(), dark = h !== null && (h < 6.5 || h >= 18.5), now = performance.now()
+    // (The moon asked up is down again once the hour, having come to night, is day again: the viewer then shows it anew.)
+    if (moonlit === 'night' && !dark) moonlit = false
+    else if (moonlit && dark) moonlit = 'night'
     if (wasDark !== null && dark !== wasDark && !running) {
       flips = [...flips.filter((t) => now - t < 4000), now]
       if (flips.length >= 4) { flips = []; void play('apple') }
@@ -532,17 +552,9 @@ export function eggs(page: EggsPage) {
   status.style.cssText = 'position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap'
   realm.append(status)
 
-  // The city starts the joke once, 45 s after the visitor first presses or taps anything, if nothing else is going on.
-  const first = () => {
-    removeEventListener('keydown', first, true); removeEventListener('pointerdown', first, true)
-    setTimeout(() => { if (!running && !knock && !typing && !saying) knocking('city') }, 45_000)
-  }
-  // (`?knock=0` leaves it to the visitor: the checks start it themselves.)
-  if (new URLSearchParams(location.search).get('knock') !== '0') { addEventListener('keydown', first, true); addEventListener('pointerdown', first, true) }
-
   return {
     /** For the checks: what is going on. */
-    get state() { return { running: running?.egg ?? null, up: march.screen.up, shield, moon, knock: knock?.stage ?? null, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    get state() { return { running: running?.egg ?? null, up: march.screen.up, shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
     say: heard,
     /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
     open,
@@ -558,7 +570,8 @@ export function eggs(page: EggsPage) {
     },
     /** For the checks: how many bytes of the video's sound were decoded (Chrome), and the picture's light where it is drawn. */
     get media() { return running?.media ?? null },
-    knock: () => knocking('city'),
+    /** The things that start the eggs: where each is, and which is offered now. */
+    things: found,
     atMoon,
   }
 }

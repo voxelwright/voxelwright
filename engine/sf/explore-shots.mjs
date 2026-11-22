@@ -28,7 +28,7 @@ const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isM
 /** A page of the realm, shown and whole, the way in fetched, the banner in sight. */
 const open = async (options) => {
   const context = await browser.newContext(options), page = await context.newPage(), from = Date.now()
-  await page.goto(`${site.url}/sf/index.html?knock=0`)
+  await page.goto(`${site.url}/sf/index.html`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.boards && globalThis.engine.far.whole && globalThis.engine.explore, null, { timeout: 300_000 })
   await page.waitForFunction(() => { const p = globalThis.engine.boards.plane, b = p.box; return p.readable && b && b.x0 > innerWidth * 0.1 && b.x1 < innerWidth * 0.92 }, null, { timeout: 60_000 }).catch(() => null)
   // (The picture at its own full scale: on a GPU other checks share, the page steers it down to hold its frame rate, and a sign far off is read at the scale it is drawn at.)

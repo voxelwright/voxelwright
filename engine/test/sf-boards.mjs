@@ -731,8 +731,8 @@ try {
   // ── The plane ──
   console.log('\nthe plane')
   await toPark()
-  // (By now the city has started its knock-knock on the banner, eggs.ts, which brings the plane in to say it: it is
-  // sent back out to its own round, which is what is measured first.)
+  // (The plane may have been called in by now (an egg, or the first view keeping it): it is sent back out to its own
+  // round, which is what is measured first.)
   await realm.evaluate(async () => { const p = globalThis.engine.boards.plane; p.call(false); p.loud = false; for (const until = performance.now() + 12000; p.come > 0 && performance.now() < until; ) await new Promise((r) => setTimeout(r, 100)) })
   const moved = await realm.evaluate(async () => { const p = globalThis.engine.boards.plane, a = [...p.at]; await new Promise((r) => setTimeout(r, 1000)); return Math.round(Math.hypot(p.at[0] - a[0], p.at[2] - a[2]) / 10) })
   await realm.evaluate(() => { globalThis.realm.signs.set('banner', { text: 'NEW POST' }); globalThis.engine.scale = 1 })

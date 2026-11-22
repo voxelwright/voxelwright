@@ -25,7 +25,7 @@ if (!has('no-build')) {
 mkdirSync(out, { recursive: true })
 const site = await plain(dist, '127.0.0.1', 0, {}), back = await turn(), browser = await chromium.launch(CHROME)
 /** A page of the realm at a size, shown and whole, its banner's cloth readable (its plane is kept in the first view). */
-const open = async (options, query = 'knock=0') => {
+const open = async (options, query = '') => {
   const context = await browser.newContext(options), page = await context.newPage(), from = Date.now()
   await page.goto(`${site.url}/sf/index.html?${query}`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.boards && globalThis.engine.far.whole, null, { timeout: 300_000 })
