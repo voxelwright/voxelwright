@@ -50,6 +50,12 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
     errors.push(...result.errors);
     rendered.set(post.slug, result);
   }
+  // Mounted, posts and the site's own folders (static/) share one folder: a post named like one would
+  // merge its files into it, or replace them.
+  if (mounted) {
+    const own = new Set(fs.readdirSync(path.join(ROOT, "static")));
+    for (const post of posts) if (own.has(post.slug)) errors.push(`${post.file}: a post cannot be called "${post.slug}"; ${sitePath(base, `/${post.slug}/`)} holds the site's own files. Rename its folder.`);
+  }
   if (errors.length) throw new ContentError(`Build failed:\n  ${errors.join("\n  ")}`);
 
   const tags = new Map();

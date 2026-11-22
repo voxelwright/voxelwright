@@ -1590,7 +1590,7 @@ The suite checks that no repainted car keeps its own paint, that the marks cover
 
 ## San Francisco on zahynailo.dev (#450)
 
-The realm is the landing at https://zahynailo.dev/ and the site is under `/blog/`. Both are one Cloudflare Worker, built and deployed by `.github/workflows/deploy.yml` on every push to main (`deploy/README.md`). When the pin in `sf/pilot/current.json` moves, run `node deploy/data.mjs pack` on the machine that has `~/.village` and commit `deploy/data.json` with the pin. To check what is live, run `node test/sf-live.mjs --url https://zahynailo.dev/`.
+The realm is the landing at https://zahynailo.dev/ and the site is under `/blog/`. Both are one Cloudflare Worker, built and deployed by `.github/workflows/deploy.yml` on every push to main (`deploy/README.md`). When the pin in `sf/pilot/current.json` moves, or the street graphs, the kept car or the eggs' videos in `~/.village` change, run `node deploy/data.mjs pack` on the machine that has `~/.village` and commit `deploy/data.json` with the pin. To check what is live, run `node test/sf-live.mjs --url https://zahynailo.dev/`.
 
 To roll back to the previous version, in one command:
 

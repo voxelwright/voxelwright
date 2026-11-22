@@ -410,6 +410,10 @@ function resolveUrl(u, env) {
   if (u.startsWith("#")) return env.absolute ? origin + basePath + u : u;
   const r = new URL(u, "https://site.invalid" + basePath);
   const p = r.pathname + r.search + r.hash;
+  // Mounted under a base, a link from "/" that is not the base's own leaves the site (only "/" itself, the realm, is meant).
+  const base = env.ctx.base;
+  if (env.errors && base && base !== "/" && r.pathname !== "/" && !r.pathname.startsWith(base) && !env.errors.some((e) => e.includes(` ${u} `)))
+    env.errors.push(`${env.ctx.file}: the link ${u} leaves the site, which is at ${base}. Write ${base}${u.replace(/^\/+/, "")} or a link relative to the post.`);
   return env.absolute ? origin + p : p;
 }
 

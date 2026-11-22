@@ -74,8 +74,10 @@ try {
   const own = ['blog/', 'blog/tags/', 'blog/voxelmorphism/', 'blog/feed.xml', 'blog/sitemap.xml', 'blog/llms.txt', 'blog/index.md', 'blog/site.css', 'robots.txt', 'CREDITS.txt'].map((p) => ({ id: p, to: new URL(p, new URL('/', url)).href }))
   for (const b of [...boards, ...own]) {
     const status = await fetch(b.to, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh) Chrome/140 Safari/537.36' } }).then((r) => r.status, (e) => `no answer (${e.message})`)
-    // LinkedIn answers 999 to every client it takes for a robot; that is not a missing page.
-    check(status !== 404 && (typeof status === 'number' && (status < 400 || status === 999 || status === 403)), `${b.id} → ${b.to}: ${status}`)
+    // LinkedIn answers 999, and others 403, to every client they take for a robot: not a missing page, but only
+    // another site's answer. This site's own pages must answer 2xx or 3xx.
+    const elsewhere = new URL(b.to).host !== new URL(url).host
+    check(typeof status === 'number' && (status < 400 || (elsewhere && (status === 999 || status === 403))), `${b.id} → ${b.to}: ${status}`)
   }
   results.boards = boards
 

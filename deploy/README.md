@@ -1,6 +1,6 @@
 # zahynailo.dev
 
-One Cloudflare Worker, `zahynailo`, on the Workers Free plan (#450). The SF realm is the landing at `/`, and the site (`site/`) is under `/blog/`. `.github/workflows/deploy.yml` builds both and deploys them on every push to main, and it can also be run by hand (Actions → deploy → Run workflow).
+One Cloudflare Worker, `zahynailo`, on the Workers Free plan (#450). The SF realm is the landing at `/`, and the site (`site/`) is under `/blog/`. `.github/workflows/deploy.yml` builds both and deploys them on every push to main, and it can also be run by hand from main (Actions → deploy → Run workflow). Only main deploys.
 
 ## What is where
 
@@ -9,9 +9,9 @@ One Cloudflare Worker, `zahynailo`, on the Workers Free plan (#450). The SF real
 - **Domains:** `zahynailo.dev` and `www.zahynailo.dev` are custom domains in `cloudflare.config.ts`. A Single Redirect rule on the zone (`www.zahynailo.dev to the apex`) sends www to the apex with a 301 and keeps the path and query. It was set once through the Rulesets API, and deploys don't touch it.
 - **The city's data in CI:** the release, the street graphs, the kept car and the eggs' videos live in `~/.village`, not in git. `node deploy/data.mjs pack` bundles them as Brotli into one GitHub Release asset (`sf-data-<digest>`, about 150 MB) and writes `deploy/data.json`. CI runs `node deploy/data.mjs fetch`, checks that the bundle is for the pin in `engine/sf/pilot/current.json` and that every file is the one packed, then builds. Cloudflare uploads only the assets whose hashes changed, so an unchanged release is never uploaded again.
 
-## When the pin moves
+## When the pin or the city's other data moves
 
-On the machine that has `~/.village`, after `engine/sf/pilot/current.json` changes:
+On the machine that has `~/.village`, after `engine/sf/pilot/current.json` changes, or after the street graphs, the kept car or the eggs' videos there change:
 
 ```sh
 node deploy/data.mjs pack     # uploads the new bundle once; writes deploy/data.json
@@ -34,7 +34,7 @@ Every deploy is a Worker version. To put the previous version back on 100% of tr
 cd deploy && CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler rollback --name zahynailo -m "why"
 ```
 
-Add a version ID after `rollback` to choose another version. `npx wrangler deployments list --name zahynailo` lists them, and each is labelled with the commit it was built from. The domains and the redirect are not part of a version and stay as they are. A failed run never needs this: a step that fails stops the run before `cf deploy`, and a failed `cf deploy` makes nothing live.
+Add a version ID after `rollback` to choose another version. `npx wrangler deployments list --name zahynailo` lists them, and each is labelled with the commit it was built from. The domains and the redirect are not part of a version and stay as they are. A failed run doesn't need it. A step that fails before `cf deploy` deploys nothing, and a failed `cf deploy` makes nothing live. When a new version fails the live check that follows (its version on all traffic, the realm's page, the blog and the release's manifest as Brotli), the workflow rolls it back to the previous version itself, and the run fails.
 
 ## Check what is live
 
@@ -48,7 +48,7 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 
 - Each request to `/releases/*` or `/bay/*` runs the Worker, and the Free plan allows 100,000 a day. A visit that only loads the landing makes about 140 of them, and exploring makes more, so the cap is roughly 700 such visits a day. Past it those requests get 429 and the city stops loading until midnight UTC. Workers Paid ($5 a month) removes the cap. That is the owner's call.
 - A static asset can be at most 25 MiB (the largest today is 10.5 MB), and a version can have at most 20,000 files on the Free plan.
-- `CLOUDFLARE_API_TOKEN` is an Account API token with the "Edit Cloudflare Workers" permission policy, scoped to this account. `CLOUDFLARE_ACCOUNT_ID` is the account. Both are repo secrets.
+- `CLOUDFLARE_API_TOKEN` is an Account API token with the "Edit Cloudflare Workers" permission policy, scoped to this account. `CLOUDFLARE_ACCOUNT_ID` is the account. Both are secrets of the repo's `production` environment, which only main may use, so a branch's workflow can't reach them.
 
 ## Later
 
