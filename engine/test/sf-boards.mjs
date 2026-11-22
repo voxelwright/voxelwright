@@ -2,7 +2,8 @@
 // plain files and held in a frame by a host page, as the site will hold it. Chrome with WebGPU; one GPU is shared, so a
 // failed run is worth one more before it is believed.
 //
-//   node test/sf-boards.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/boards/r2] [--mbit 25] [--seconds 8]
+//   node test/sf-boards.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/boards/r2] [--mbit 25] [--seconds 8] [--hud wheel|context|quiet]
+//   (`--hud`: the realm with that way of having its controls in play, play-hud.ts: its own keys are the controls measured.)
 //
 // It fails unless:
 //   - the park is shown within 8 MB over the wire on a cold cache, the boards' code among it, the editor's not;
@@ -51,6 +52,7 @@ import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 import { TOWERS, framed, lit as litTower } from './sf-towers.mjs'
 
+const hud = arg('hud', ''), withHud = (path) => (hud ? `${path}${path.includes('?') ? '&' : '?'}hud=${hud}` : path)
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'boards', 'r4')), mbit = Number(arg('mbit', '25')), seconds = Number(arg('seconds', '8'))
 const round = (n, to = 1) => Math.round(n * 10 ** to) / 10 ** to
 const failures = []
@@ -86,7 +88,7 @@ const READABLE = { wide: { mark: 28, most: 35 }, phone: { mark: 33, most: 41 } }
 const readable = (logo, tall, wide, bounds) => Math.min(tall, wide) >= bounds.mark && Math.max(tall, wide) <= bounds.most
 /** In a page with its controls shown: each board's box against what the page lays over the picture (the hour's panel, the tools, the line of numbers, the street's name; a phone's fold, its stick where it rests, its keys to fly and to use). `logos` are the logos' boxes, `boards` every board's. */
 const COVERED = () => {
-  const b = globalThis.engine.boards, laid = [...document.querySelectorAll('#realm .sky, #realm .fold, #realm .tools, #realm .stick, #realm .fly, #realm .use, #hud, #where')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => ({ name: el.className || el.id, r: el.getBoundingClientRect() })).filter((l) => l.r.width > 0 && l.r.height > 0)
+  const b = globalThis.engine.boards, laid = [...document.querySelectorAll('#realm .sky, #realm .fold, #realm .tools, #realm .stick, #realm .fly, #realm .use, #hud, #where, #realm .act :is(.up, .down, .walks, .toolkey), #realm .held, #realm .cue.on, #realm .float.on, [data-panel="wand-take"]')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => ({ name: el.className || el.id, r: el.getBoundingClientRect() })).filter((l) => l.r.width > 0 && l.r.height > 0)
   const out = []
   for (const rec of b.records) { const w = b.where(rec.id); if (!w) continue; for (const l of laid) if (w.x - w.wide / 2 < l.r.right && w.x + w.wide / 2 > l.r.left && w.y - w.high / 2 < l.r.bottom && w.y + w.high / 2 > l.r.top) out.push(`${rec.id} under ${l.name}`) }
   return { under: out, laid: laid.map((l) => `${l.name} ${Math.round(l.r.left)},${Math.round(l.r.top)} to ${Math.round(l.r.right)},${Math.round(l.r.bottom)}`), ...Object.fromEntries([['logos', (r) => r.type === 'logo'], ['boards', () => true]].map(([name, which]) => [name, b.records.filter(which).map((r) => { const w = b.where(r.id); return w && `${r.id} ${Math.round(w.x - w.wide / 2)},${Math.round(w.y - w.high / 2)} to ${Math.round(w.x + w.wide / 2)},${Math.round(w.y + w.high / 2)}` })])) }
@@ -168,7 +170,7 @@ const CROWN = () => {
 }
 // The host: a page with the realm in a frame over the whole of it, keeping what the realm tells it.
 const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;height:100%;overflow:hidden}iframe{position:fixed;inset:0;width:100%;height:100%;border:0}</style>
-<iframe id="realm" src="/sf/index.html" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
+<iframe id="realm" src="${withHud('/sf/index.html')}" allow="autoplay"></iframe><script>window.told=[];addEventListener('message',(e)=>{if(e.data&&e.data.village==='realm')told.push(e.data)});window.ask=(m)=>document.getElementById('realm').contentWindow.postMessage({village:'realm',...m},'*')</script>`
 const site = await plain(dist, '127.0.0.1', 0, { extra: (req, res) => { if (new URL(req.url, 'http://x').pathname !== '/host.html') return false; res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(HOST); return true } })
 const back = await turn()
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => { back(); process.exit(1) })
@@ -192,7 +194,7 @@ try {
   const plainContext = await browser.newContext({ viewport: { width: 1280, height: 720 } })
   const bare = await plainContext.newPage()
   const unlink = await link(plainContext, bare), bareFrom = Date.now()
-  await bare.goto(`${site.url}/sf/index.html?boards=0&debug=1`)
+  await bare.goto(`${site.url}${withHud('/sf/index.html?boards=0&debug=1')}`)
   await bare.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 300_000 })
   const without = await untilShown(bare, bareFrom)
   await unlink()
@@ -247,7 +249,7 @@ try {
     const seen = (el) => { if (!el) return false; const r = el.getBoundingClientRect(), st = getComputedStyle(el); return r.width > 0 && r.height > 0 && st.visibility !== 'hidden' && st.display !== 'none' && el.checkVisibility({ opacityProperty: true, visibilityProperty: true }) }
     const one = (q) => seen(document.querySelector(q))
     const credits = document.querySelector('#first .credits').getBoundingClientRect()
-    return { first: document.documentElement.classList.contains('first'), engaged: globalThis.engine.first.engaged, hud: one('#hud'), aim: one('#aim'), sky: one('#realm .sky'), tools: one('#realm .tools'), fold: one('#realm .fold'), thumbs: one('#realm .use'), where: one('#where'), explore: one('#first .explore'), credits: one('#first .credits'), creditsBox: [Math.round(credits.width), Math.round(credits.height)], focus: document.activeElement?.tagName ?? '', wall: [...document.querySelectorAll('body *')].filter((el) => !el.closest('#first, nav, [popover]') && seen(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 40)).length, sources: [...document.querySelectorAll('#first-credits li')].map((li) => li.textContent) }
+    return { first: document.documentElement.classList.contains('first'), engaged: globalThis.engine.first.engaged, hud: one('#hud'), aim: one('#aim'), sky: one('#realm .sky'), tools: one('#realm .tools') || one('#realm .toolkey') || one('#realm .held'), fold: one('#realm .fold'), thumbs: one('#realm .use'), where: one('#where'), explore: one('#first .explore'), credits: one('#first .credits'), creditsBox: [Math.round(credits.width), Math.round(credits.height)], focus: document.activeElement?.tagName ?? '', wall: [...document.querySelectorAll('body *')].filter((el) => !el.closest('#first, nav, [popover]') && seen(el) && [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim().length > 40)).length, sources: [...document.querySelectorAll('#first-credits li')].map((li) => li.textContent) }
   })
   const firstView = await over(realm)
   await page.screenshot({ path: join(shots, 'first-desktop.png') })

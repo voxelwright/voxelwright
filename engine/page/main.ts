@@ -49,6 +49,7 @@ import { things } from './things.ts'
 import { asker } from './ask.ts'
 import { LOCAL, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
+import { playHud } from './play-hud.ts'
 import { making } from './making.ts'
 import { kept } from './kept.ts'
 import { boards } from './boards.ts'
@@ -1442,6 +1443,9 @@ async function main() {
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
+    // The controls in play, kept off the body (#450, play-hud.ts): `?hud=wheel|context|quiet`, or the realm's own as they were.
+    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.
     let hushed: AudioContext | null = null
