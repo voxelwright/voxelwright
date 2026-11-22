@@ -1588,6 +1588,16 @@ node sf/street-shots.mjs --out ~/.village/engine/sf/street-2/new [--only city|re
 
 The suite checks that no repainted car keeps its own paint, that the marks cover the whole city with centre lines, yellow crossings and streetcar rails, and measures the shots: asphalt against pavement, road and pavement terraces on hills, paint where the graph puts it, yellow crossings, how far rails wander from straight lines, and how far-off marks alias against a render at twice the size.
 
+## San Francisco on zahynailo.dev (#450)
+
+The realm is the landing at https://zahynailo.dev/ and the site is under `/blog/`. Both are one Cloudflare Worker, built and deployed by `.github/workflows/deploy.yml` on every push to main (`deploy/README.md`). When the pin in `sf/pilot/current.json` moves, run `node deploy/data.mjs pack` on the machine that has `~/.village` and commit `deploy/data.json` with the pin. To check what is live, run `node test/sf-live.mjs --url https://zahynailo.dev/`.
+
+To roll back to the previous version, in one command:
+
+```
+cd deploy && CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> npx wrangler rollback --name zahynailo -m "why"
+```
+
 ## San Francisco signs, the banner plane and the first view (#450)
 
 The site's navigation stands in the SF realm as things of the city seen from the park: a BLOG billboard on a rooftop, the mark of each network the owner is on as a company's sign on a tower's crown, and a small plane towing a banner across the sky before the towers. Where each stands and what it is are data: `sf/boards.json` (`page/boards.ts` `SignsFile`), which `node sf/build.mjs` puts in the page's own record, so nothing more is fetched.

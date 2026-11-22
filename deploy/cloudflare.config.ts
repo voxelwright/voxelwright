@@ -9,6 +9,8 @@ export default defineConfig({
     compatibilityDate: "2026-11-13",
     observability: { enabled: true },
     workersDev: true,
+    // www answers too, and a redirect rule on the zone sends it to the apex (deploy/README.md).
+    domains: ["zahynailo.dev", "www.zahynailo.dev"],
     entrypoint: "./worker.mjs",
     env: { ASSETS: bindings.assets() },
     assets: {

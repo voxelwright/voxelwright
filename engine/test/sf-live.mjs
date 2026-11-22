@@ -71,7 +71,7 @@ try {
 
   // Every board's link, and the blog's own pages.
   const boards = await page.evaluate(() => globalThis.engine.boards.records.filter((r) => r.to).map((r) => ({ id: r.id, to: new URL(r.to, location.href).href })))
-  const own = ['blog/', 'blog/feed.xml', 'blog/sitemap.xml', 'blog/llms.txt', 'blog/index.md', 'robots.txt', 'CREDITS.txt'].map((p) => ({ id: p, to: new URL(p, new URL('/', url)).href }))
+  const own = ['blog/', 'blog/tags/', 'blog/voxelmorphism/', 'blog/feed.xml', 'blog/sitemap.xml', 'blog/llms.txt', 'blog/index.md', 'blog/site.css', 'robots.txt', 'CREDITS.txt'].map((p) => ({ id: p, to: new URL(p, new URL('/', url)).href }))
   for (const b of [...boards, ...own]) {
     const status = await fetch(b.to, { redirect: 'follow', headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh) Chrome/140 Safari/537.36' } }).then((r) => r.status, (e) => `no answer (${e.message})`)
     // LinkedIn answers 999 to every client it takes for a robot; that is not a missing page.
