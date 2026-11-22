@@ -8,6 +8,8 @@ name: deploy
 on:
   push:
     branches: [main]
+    # What the deployed folder is made from; a merge that changes none of it leaves the site as it is.
+    paths: [engine/**, site/**, deploy/**, .github/workflows/deploy.yml]
   workflow_dispatch:
 
 permissions:

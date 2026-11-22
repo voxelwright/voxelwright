@@ -40,11 +40,13 @@ if (process.argv[2] === 'pack') {
     if (!existsSync(at)) fail(`${at} is missing`)
     for (const file of statSync(at).isDirectory() ? files(at) : [at]) {
       const path = relative(VILLAGE, file).split(sep).join('/'), body = readFileSync(file)
-      // The release's own quality-11 copy where the build made one; else made here, at quality 9.
-      const brotli = path.startsWith(RELEASE) && existsSync(cached(body)) ? readFileSync(cached(body)) : brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 9, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
+      // The release's own quality-11 copy, which the build made; the rest made here, at quality 9. Without the build's
+      // copies CI would compress the whole release again at quality 11, for longer than its run may take.
+      if (path.startsWith(RELEASE) && !existsSync(cached(body))) fail(`${path} has no quality-11 copy in ${CACHE}: run node engine/sf/build.mjs first`)
+      const brotli = path.startsWith(RELEASE) ? readFileSync(cached(body)) : brotliCompressSync(body, { params: { [constants.BROTLI_PARAM_QUALITY]: 9, [constants.BROTLI_PARAM_SIZE_HINT]: body.length } })
       mkdirSync(dirname(join(work, 'files', path)), { recursive: true })
       writeFileSync(join(work, 'files', `${path}.br`), brotli)
-      index.push({ path, bytes: body.length, sha256: sha(body), q11: path.startsWith(RELEASE) && existsSync(cached(body)) })
+      index.push({ path, bytes: body.length, sha256: sha(body), q11: path.startsWith(RELEASE) })
     }
   }
   index.sort((a, b) => (a.path < b.path ? -1 : 1))
