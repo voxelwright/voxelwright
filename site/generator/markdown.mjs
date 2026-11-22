@@ -119,7 +119,11 @@ md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
 for (const kind of ["html_block", "html_inline"]) {
   const plain = md.renderer.rules[kind];
   md.renderer.rules[kind] = (tokens, idx, opts, env, self) => {
-    for (const [, u] of tokens[idx].content.matchAll(/\b(?:src|href|poster)\s*=\s*["'](\/(?!\/)[^"']*)["']/gi)) staysInSite(u, new URL(u, "https://site.invalid").pathname, env);
+    const published = tokens[idx].content.replace(/<!--[\s\S]*?(?:-->|$)/g, "");
+    for (const [, , quoted, bare] of published.matchAll(/\b(src|href|poster)\s*=\s*(?:["'](\/(?!\/)[^"']*)["']|(\/(?!\/)[^\s>"']*))/gi)) {
+      const u = quoted ?? bare;
+      staysInSite(u, new URL(u, "https://site.invalid").pathname, env);
+    }
     return plain(tokens, idx, opts, env, self);
   };
 }
@@ -421,8 +425,11 @@ const ROOT_FILES = new Set(["/", "/robots.txt"]);
 function staysInSite(u, pathname, env) {
   const base = env.ctx.base;
   if (!env.errors || !base || base === "/" || ROOT_FILES.has(pathname) || `${pathname}/`.startsWith(base)) return;
-  const said = `${env.ctx.file}: the link ${u} leaves the site`;
-  if (!env.errors.some((e) => e.startsWith(said + ","))) env.errors.push(`${said}, which is at ${base}. Link under ${base} or relative to the post.`);
+  // Once a post and address: "/blog/../x" and "/x" are one address.
+  const once = `${env.ctx.file} ${pathname}`;
+  if ((env.left ??= new Set()).has(once)) return;
+  env.left.add(once);
+  env.errors.push(`${env.ctx.file}: the link ${u} leaves the site, which is at ${base}. Link under ${base} or relative to the post.`);
 }
 
 /** Root-absolute on pages, absolute with the origin when env.absolute is set. */

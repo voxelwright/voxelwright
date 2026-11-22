@@ -27,9 +27,12 @@ test("a post named like one of the site's own folders fails the build", async ()
 test("a link from / that leaves the base fails the build; the realm, the base and relative links pass", async () => {
   const { error } = await attempt((d) => post(d, "away", "See [the desk](/voxelmorphism/)."));
   assert.match(error ?? "", /the link \/voxelmorphism\/ leaves the site/);
-  const { error: raw } = await attempt((d) => post(d, "raw", '<p><a href="/voxelmorphism/">the desk</a></p>'));
+  const { error: raw } = await attempt((d) => post(d, "raw", '<p><a href="/voxelmorphism/">the desk</a> <a href=/tags/>tags</a></p>'));
   assert.match(raw ?? "", /the link \/voxelmorphism\/ leaves the site/);
-  const { out, error: none } = await attempt((d) => post(d, "fine", 'Back to [the city](/), [tags](/blog/tags/), [the blog](/blog), [robots](/robots.txt), [up](../) and <a href="/blog/voxelmorphism/">the desk</a>.'));
+  assert.match(raw ?? "", /the link \/tags\/ leaves the site/);
+  const { error: twice } = await attempt((d) => post(d, "twice", "[a](/blog/../x/) and [b](/x/)"));
+  assert.equal((twice ?? "").match(/leaves the site/g)?.length, 1);
+  const { out, error: none } = await attempt((d) => post(d, "fine", 'Back to [the city](/), [tags](/blog/tags/), [the blog](/blog), [robots](/robots.txt), [up](../) and <a href="/blog/voxelmorphism/">the desk</a>.\n\n<!-- <a href="/old/">an old link, not published</a> -->'));
   assert.equal(none, undefined);
   assert.ok(fs.existsSync(path.join(out, "blog", "fine", "index.html")));
 });
