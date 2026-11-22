@@ -10,6 +10,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { withNotice } from './notice.mjs'
 
 const here = dirname(fileURLToPath(import.meta.url)), repo = dirname(here)
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return resolve(repo, at > 0 ? process.argv[at + 1] : fallback) }
@@ -40,7 +41,12 @@ for (const file of files(site)) {
   if (path === '_headers') { siteHeaders = readFileSync(file, 'utf8'); continue }
   place(file, path)
 }
-for (const [path, from] of placed) { mkdirSync(dirname(join(out, path)), { recursive: true }); cpSync(from, join(out, path)) }
+place(join(here, 'alpha.js'), 'alpha.js')
+for (const [path, from] of placed) {
+  mkdirSync(dirname(join(out, path)), { recursive: true })
+  if (!path.endsWith('.html')) { cpSync(from, join(out, path)); continue }
+  try { writeFileSync(join(out, path), withNotice(readFileSync(from, 'utf8'))) } catch (e) { fail(`/${path}: ${e.message}`) }
+}
 
 // One _headers for the one folder: the realm's rules, then the site's (already written for /blog/).
 writeFileSync(join(out, '_headers'), [
