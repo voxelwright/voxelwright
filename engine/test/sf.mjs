@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
+import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'runtime')), seconds = Number(arg('seconds', '10')), mbit = Number(arg('mbit', '25'))
@@ -59,10 +59,7 @@ const alone = async (name, minutes, measure) => {
   // Our own turn is kept; `quiet` takes the rest (it counts the one this process holds). Waited for three minutes at
   // most: where other lanes keep the GPU busy, it is measured beside them and said so.
   Object.assign(current, { name: `${name} (waiting for the GPU to be quiet)`, deadline: Date.now() + 5 * 60_000 })
-  const asked = quiet()
-  const rest = await Promise.race([asked, new Promise((r) => setTimeout(() => r(null), 3 * 60_000))])
-  // Had after the wait was given up: given back at once.
-  if (!rest) void asked.then((give) => give())
+  const rest = await quiet({ within: 3 * 60_000 })
   try {
     phase(name, minutes)
     const r = await measure()
@@ -94,6 +91,8 @@ const watchdog = setInterval(() => {
 const results = { url: `${site.url}/sf/index.html`, release: pointer.release, served: has('plainly') ? 'plainly' : 'brotli where taken' }
 
 const mb = (n) => round(n / 1048576, 2)
+/** Stops and starts this page's drawing (while it waits for the GPU without a turn: kit.mjs `quiet`). */
+const resting = (on) => page.evaluate((on) => { if (globalThis.engine) globalThis.engine.resting = on }, on)
 /** How many other browsers are drawing on this machine now (their GPU helpers), for a timing taken beside them. */
 const drawing = () => Number(spawnSync('sh', ['-c', 'ps -axo command | grep -c "[G]oogle Chrome Helper (.*GPU)"'], { encoding: 'utf8' }).stdout.trim()) - 1
 /** What was sent between two moments (ms since 1970): every request, and the tiles alone with their distinct files. */
@@ -129,7 +128,27 @@ try {
   console.log(JSON.stringify(results.load, null, 1))
   // The bounds are for a host that sends Brotli; a plain host sends nine times the bytes, and is checked only to work.
   const squeezed = !has('plainly')
-  check(t.near > 0 && (!squeezed || t.near < 8000), `the park shown round the eye in ${Math.round(t.near)} ms on ${mbit} Mbit/s (bound 8 s with Brotli; first frame ${Math.round(t.first)} ms, whole ${Math.round(t.whole)} ms)`)
+  const shown = (v) => `the park shown round the eye in ${Math.round(v.near)} ms on ${mbit} Mbit/s (bound 8 s with Brotli; first frame ${Math.round(v.first)} ms${v.whole ? `, whole ${Math.round(v.whole)} ms` : ''})`
+  if (!squeezed) check(t.near > 0, shown(t))
+  else {
+    // Measured again (kit.mjs `timed`): a cold visit as the first, in a browser of its own (nothing of the page's
+    // shaders kept) on a host of its own (what this one was asked stays this visit's), with this page resting.
+    const cold = async () => {
+      const other = await plain(dist, '127.0.0.1', 0, {}), fresh = await chromium.launch({ ...CHROME, headless: !has('headed') })
+      const ctx = await fresh.newContext({ viewport: { width: 1280, height: 720 } })
+      await page.evaluate(() => { globalThis.engine.resting = true })
+      try {
+        const p = await ctx.newPage(), link = await ctx.newCDPSession(p)
+        await link.send('Network.enable')
+        await link.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 })
+        await p.goto(`${other.url}/sf/index.html`)
+        await p.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 240_000 })
+        return await p.evaluate(() => ({ first: globalThis.engine.seen.first, near: globalThis.engine.seen.near }))
+      } finally { await fresh.close(); other.stop(); await page.evaluate(() => { globalThis.engine.resting = false }) }
+    }
+    const r = await timed({ check, first: t, measure: cold, passes: (v) => v.near > 0 && v.near < 8000, say: shown, again: () => phase('the first visit again, alone', 25), idle: resting })
+    if (r !== t) results.load.alone = { firstFrameMs: Math.round(r.first), placeShownMs: Math.round(r.near) }
+  }
   check(!squeezed || results.load.untilPlaceShown.all.wireMB < 8, `${results.load.untilPlaceShown.all.wireMB} MB over the wire until the park is shown (bound 8 MB)`)
   const firstTile = site.asked.find((a) => isTile(a.path) && a.status === 200)
   results.load.encoding = { accept: firstTile?.accept, sent: firstTile?.encoding }
@@ -395,17 +414,17 @@ try {
 
   // ── Every pixel drawn (scale 1): what each place costs the GPU ──
   // The bound: 60 fps with the picture at 0.7 of its size, pinned (headless Chrome is held to 60 Hz, so the gaps say
-  // only whether 60 fps holds). Then the cost of every pixel. A pass short of it on every try with other browsers
-  // drawing beside it is said, not failed: a timing beside them is not this page's.
-  results.frames70 = await alone('frames at 0.7', 4, async () => ({
-    park: await frames('park-0.7', park, 25.05, 0.7),
-    street: await frames('street-0.7', { ...street, yaw: -0.164, pitch: 0 }, 70, 0.7),
-    up150: await frames('up150-0.7', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70, 0.7),
-  }))
-  for (const [where, f] of Object.entries(results.frames70).filter(([k]) => k !== 'sharedGPU')) {
-    const ok = f.p50 <= 17.5, what = `60 fps ${where} at picture scale 0.7: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms (bound 17.5 ms)`
-    if (!ok && (f.besideOthers > 0 || results.frames70.sharedGPU > 0)) console.log(`  WARN ${what}, beside other browsers drawing on every try`)
-    else check(ok, what)
+  // only whether 60 fps holds). Then the cost of every pixel. A place short of it is measured again with every turn
+  // on the GPU held, and fails only if it is short again (kit.mjs `timed`).
+  const at70 = { park: ['park-0.7', park, 25.05], street: ['street-0.7', { ...street, yaw: -0.164, pitch: 0 }, 70], up150: ['up150-0.7', { x: park.x, y: parkGround + 150, z: park.z, yaw: park.yaw, pitch: -0.35 }, 70] }
+  results.frames70 = await alone('frames at 0.7', 4, async () => { const r = {}; for (const [where, [name, pose, fov]] of Object.entries(at70)) r[where] = await frames(name, pose, fov, 0.7); return r })
+  for (const [where, [name, pose, fov]] of Object.entries(at70)) {
+    results.frames70[where] = await timed({
+      check, first: results.frames70[where], firstAlone: !('sharedGPU' in results.frames70), idle: resting,
+      measure: () => frames(`${name}-alone`, pose, fov, 0.7), passes: (f) => f.p50 <= 17.5,
+      say: (f) => `60 fps ${where} at picture scale 0.7: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms (bound 17.5 ms)`,
+      again: () => phase(`frames at 0.7 again, alone: ${where}`, 25),
+    })
   }
   results.framesFull = await alone('frames at full size', 4, async () => ({
     park: await frames('park-full', park, 25.05, 1),

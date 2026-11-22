@@ -1,25 +1,27 @@
 // Every check with one command (#144): the core's tests, the types, and each check of the real
 // page in the installed Chrome, the phone-shaped flight among them. The page checks share one
 // server and one browser and run two at a time, so the times they print are not for quoting:
-// `node test/bench.mjs` measures.
+// `node test/bench.mjs` measures. `--changed` runs only the checks that cover what the branch changed against
+// origin/main, uncommitted files too (test/changed.mjs says which and why; `--list` only says): for iterating. Run
+// everything once on the head you report.
 //
-//   node test/all.mjs [--only falls,blast] [--jobs 2]
+//   node test/all.mjs [--only falls,blast] [--changed [--base <ref>] [--list]] [--jobs 2]
 import { spawn, spawnSync } from 'node:child_process'
 import { writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
-import { arg, CHROME, here, serve, turn } from './kit.mjs'
+import { arg, CHROME, has, hasEveryTurn, here, serve, turn } from './kit.mjs'
+import { pick } from './changed.mjs'
 
-const only = arg('only', '').split(',').filter(Boolean), jobs = Number(arg('jobs', '2'))
+const only = arg('only', '').split(',').filter(Boolean)
+// Run under a process that holds every turn on the GPU (a wrapper's `quiet`), checks that draw go one at a time: two
+// side by side would each take the GPU for its own.
+const jobs = hasEveryTurn() ? 1 : Number(arg('jobs', '2'))
+if (hasEveryTurn()) console.log('every turn on the GPU is held for this run: checks that draw go one at a time')
 const t0 = Date.now()
-const built = spawnSync('npm', ['run', '-s', 'core'], { cwd: here, encoding: 'utf8' })
-if (built.status !== 0) { console.error(built.stdout + built.stderr); console.error('FAILED: the core did not build'); process.exit(1) }
-
-const server = await serve(), browser = await chromium.launchServer(CHROME)
-const env = { ...process.env, ENGINE_KIT: JSON.stringify({ url: server.url, ws: browser.wsEndpoint() }) }
 /** [name, command, arguments, whether it draws]. */
-const checks = [
+let checks = [
   ['core', 'cargo', ['test', '--release', '--quiet'], false, `${here}core`],
   ['types', 'npx', ['tsc', '--noEmit'], false],
   ['whole', 'node', ['test/whole.mjs'], false],
@@ -106,10 +108,24 @@ const checks = [
   ['phone', 'node', ['test/flight.mjs', '--phone'], true],
   ['probe', 'node', ['test/probe.mjs', '--heat', '2'], true],
 ].filter((c) => !only.length || only.includes(c[0]))
+if (has('changed')) {
+  const { run, elsewhere } = pick(checks.map(([name, , args]) => [name, /^test\/([a-z0-9-]+)\.mjs$/.exec(args[0])?.[1] ?? name]), arg('base', 'origin/main'))
+  if (elsewhere.some((n) => /^sf(-|$)/.test(n))) console.log(`--changed: the SF realm's checks cover it too (npm run sf -- --changed)`)
+  checks = checks.filter((c) => run.includes(c[0]))
+}
+if (has('list')) { console.log(`${has('changed') ? '' : `all ${checks.length}: `}${checks.map((c) => c[0]).join(', ') || 'nothing'}`); process.exit(0) }
+if (!checks.length) { console.log('nothing to run'); process.exit(0) }
+
+const built = spawnSync('npm', ['run', '-s', 'core'], { cwd: here, encoding: 'utf8' })
+if (built.status !== 0) { console.error(built.stdout + built.stderr); console.error('FAILED: the core did not build'); process.exit(1) }
+const server = await serve(), browser = await chromium.launchServer(CHROME)
+const env = { ...process.env, ENGINE_KIT: JSON.stringify({ url: server.url, ws: browser.wsEndpoint() }) }
 
 const run = async ([name, command, args, draws, cwd = here]) => {
-  // What draws waits its turn on the GPU with every other thread's checks (kit.mjs `turn`), and is told it has one.
-  const back = draws ? await turn({ mine: false }) : () => {}
+  // What draws waits its turn on the GPU with every other thread's checks (kit.mjs `turn`), and is told it has one. A
+  // wait that gives up (it names who held the turns) fails this check, and the run goes on to close what it started.
+  let back = () => {}
+  try { if (draws) back = await turn({ mine: false }) } catch (e) { console.log(`FAILED ${name.padEnd(8)} ${e.message}`); return false }
   return new Promise((resolve) => {
   const began = Date.now(), child = spawn(command, args, { cwd, env: draws ? { ...env, ENGINE_TURN: '1' } : env, stdio: ['ignore', 'pipe', 'pipe'] })
   let out = ''

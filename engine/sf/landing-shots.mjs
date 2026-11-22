@@ -7,13 +7,14 @@
 // big tree of the left foreground by night, dusk coming at the park (`dusk-<hour>.png`, an hour at a time from 17 to
 // 21), downtown close by at night, a logo close by at night and by day. The clip (<out>/landing6.mp4, 30 s at
 // 1280 x 720): the park from the late afternoon into the night, the hour run from 16.5 to 21.5 over 24 s and the
-// night held. Filmed with every turn on the GPU held (`quiet`), so nothing else draws beside it.
+// night held. Filmed with every turn on the GPU held (`quiet`) from its page coming up, so nothing else draws beside it;
+// the stills take one turn like any check.
 import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet } from '../test/kit.mjs'
+import { arg, CHROME, has, here, quiet, turn } from '../test/kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), out = arg('out', join(homedir(), '.village', 'engine', 'sf', 'landing6')), only = arg('only', ''), tag = arg('tag', 'first')
@@ -22,7 +23,7 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 }
 mkdirSync(out, { recursive: true })
-const site = await plain(dist, '127.0.0.1', 0, {}), back = await quiet(), browser = await chromium.launch(CHROME)
+const site = await plain(dist, '127.0.0.1', 0, {}), back = await turn(), browser = await chromium.launch(CHROME)
 /** A page of the realm at a size, shown and whole, its banner's cloth readable (its plane is kept in the first view). */
 const open = async (options, query = 'knock=0') => {
   const context = await browser.newContext(options), page = await context.newPage(), from = Date.now()
@@ -88,6 +89,8 @@ try {
     // ── The clip ──
     const raw = join(out, 'raw')
     rmSync(raw, { recursive: true, force: true })
+    // Every turn, from the clip's page coming up (nothing of this process draws while `quiet` may wait).
+    const alone = await quiet()
     const { context, page, from } = await open({ viewport: { width: 1280, height: 720 }, recordVideo: { dir: raw, size: { width: 1280, height: 720 } } })
     const wait = (ms) => page.waitForTimeout(ms)
     // From where the banner comes into its near pass, in the late afternoon; then the hour run on into the night.
@@ -99,6 +102,7 @@ try {
     await wait(4500)
     const ends = (Date.now() - from) / 1000
     await context.close()
+    alone()
     const webm = readdirSync(raw).find((f) => f.endsWith('.webm'))
     renameSync(join(raw, webm), join(raw, 'landing.webm'))
     const cut = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', begins.toFixed(2), '-t', (ends - begins).toFixed(2), '-i', join(raw, 'landing.webm'), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-r', '30', join(out, 'landing6.mp4')], { encoding: 'utf8' })

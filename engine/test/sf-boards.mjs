@@ -47,7 +47,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet, turn } from './kit.mjs'
+import { arg, CHROME, has, here, quiet, timed, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 import { TOWERS, framed, lit as litTower } from './sf-towers.mjs'
 
@@ -269,19 +269,25 @@ try {
 
   // ── Frames at the park, the boards and the plane in view: taken as the bare page's were, just after the world came whole ──
   console.log('\nframes at the park')
-  const f = await framesAt(realm, (ms) => page.waitForTimeout(ms))
-  results.frames = { ...f, without: framesWithout }
   // The bound is the realm's own; where the realm without boards misses it in this same run (other lanes draw on this
-  // GPU), the boards are held to what that page did, and a margin of a tenth and a millisecond.
-  const bound = Math.max(17.5, framesWithout.p50 * 1.1 + 1)
-  check(f.p50 <= bound, `the park at picture scale 0.7 with the boards and the plane: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms; without boards in this run p50 ${framesWithout.p50} ms, march ${framesWithout.marchMs} ms (bound ${round(bound)} ms)`)
+  // GPU), the boards are held to what that page did, and a margin of a tenth and a millisecond. Missed, it is measured
+  // again with every turn on the GPU held (kit.mjs `timed`).
+  // Measured again alone, the realm's own bound holds.
+  const bound = Math.max(17.5, framesWithout.p50 * 1.1 + 1), resting = (on) => realm.evaluate((on) => { globalThis.engine.resting = on }, on)
+  const f = await timed({
+    check, first: { ...(await framesAt(realm, (ms) => page.waitForTimeout(ms))), bound }, idle: resting,
+    measure: async () => ({ ...(await framesAt(realm, (ms) => page.waitForTimeout(ms))), bound: 17.5 }), passes: (f) => f.p50 <= f.bound,
+    say: (f) => `the park at picture scale 0.7 with the boards and the plane: p50 ${f.p50} ms, p99 ${f.p99} ms, march ${f.marchMs} ms; without boards in this run p50 ${framesWithout.p50} ms, march ${framesWithout.marchMs} ms (bound ${round(f.bound)} ms)`,
+  })
+  results.frames = { ...f, without: framesWithout }
 
   // What the boards cost the GPU, which a frame gap held to 60 Hz cannot say: this page and the one without boards
   // turn about, each resting while the other is timed (the march and the far model at the canvas's full size, at
   // the GPU's own pace), and in this page the pass that draws the screens beside them. With every turn on the GPU
-  // where they can be had in three minutes.
-  {
-    const give = await Promise.race([quiet(), new Promise((r) => setTimeout(() => r(null), 180_000))])
+  // where they can be had in three minutes; where they cannot, and the bound is missed, measured again once they are
+  // (kit.mjs `timed`).
+  const boardsCost = async () => {
+    const give = await quiet({ within: 180_000 })
     const rest = (target, on) => target.evaluate((on) => { globalThis.engine.resting = on }, on)
     // The least of the turns: whatever else draws on this GPU only ever adds to a turn.
     const least = (xs) => Math.min(...xs)
@@ -297,9 +303,13 @@ try {
     } finally { await rest(realm, false); give?.() }
     const c = (results.cost = { worldWithoutMs: round(least(without), 2), worldWithMs: round(least(withBoards), 2), screensMs: round(least(screensMs.filter((v) => v > 0).concat(Math.max(...screensMs))), 2), alone: !!give, tries: { without: without.map((v) => round(v, 2)), with: withBoards.map((v) => round(v, 2)) } })
     c.addedMs = round(c.worldWithMs - c.worldWithoutMs + c.screensMs, 2)
-    const what = `the boards add ${c.addedMs} ms a frame on the GPU at the park, every pixel drawn: the world ${c.worldWithoutMs} ms without them and ${c.worldWithMs} ms with their cells, their screens and the banner ${c.screensMs} ms (bound 1.5 ms)`
-    if (c.addedMs > 1.5 && !give) console.log(`  WARN ${what}, beside other browsers drawing`); else check(c.addedMs <= 1.5, what)
+    return c
   }
+  const cost = await boardsCost()
+  results.cost = await timed({
+    check, first: cost, firstAlone: cost.alone, idle: resting, measure: boardsCost, passes: (c) => c.addedMs <= 1.5,
+    say: (c) => `the boards add ${c.addedMs} ms a frame on the GPU at the park, every pixel drawn: the world ${c.worldWithoutMs} ms without them and ${c.worldWithMs} ms with their cells, their screens and the banner ${c.screensMs} ms (bound 1.5 ms${c.alone ? '' : ', beside other checks'})`,
+  })
   await plainContext.close()
 
   // ── From the park: present, in the picture, seen, read ──

@@ -7,13 +7,13 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet } from '../test/kit.mjs'
+import { arg, CHROME, has, here, turn } from '../test/kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const out = arg('out', join(homedir(), '.village', 'engine', 'sf', 'street', 'vehicles-new')), dist = join(here, arg('dist', 'dist-sf'))
 mkdirSync(out, { recursive: true })
 if (!has('no-build')) { const b = spawnSync(process.execPath, [join(here, 'sf/build.mjs'), '--out', dist], { cwd: here, encoding: 'utf8' }); if (b.status !== 0) throw new Error(b.stdout + b.stderr) }
-const back = await quiet(), browser = await chromium.launch(CHROME), site = await plain(dist, '127.0.0.1', 0, {})
+const back = await turn(), browser = await chromium.launch(CHROME), site = await plain(dist, '127.0.0.1', 0, {})
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
 page.on('pageerror', (e) => console.log('page error:', e.message))
 try {

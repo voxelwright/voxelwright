@@ -1658,6 +1658,9 @@ In the editor, fly to a roof and press `new here`, or `propose` for the next roo
 cd engine
 npm run check                 # every check, about eight minutes: the core's tests, the types, and the real page in Chrome
 node test/all.mjs --only falls,blast
+npm run sf                    # the SF realm from static files (test/sf.mjs), then its look and controls (test/sf-look.mjs)
+npm run check -- --changed    # only the checks that cover what the branch changed against origin/main, uncommitted files too
+npm run sf -- --changed --base <sha> --list   # what changed since <sha>, which checks cover it and why, without running them
 node test/bench.mjs           # how fast the march is against test/baseline.json; says when the GPU was too busy to tell
 node test/versus.mjs --out dir --fetch   # the board: our shots beside frames of the reference films
 node test/versus.mjs --out dir --blind   # the same, and sheets for a judge with the sides unnamed (test/judge.md)
@@ -1673,7 +1676,9 @@ node test/sitting.mjs --parts street,turns,far,body,portal,ride,eye,slow,room,fi
 node test/paired.mjs --b 'bricks=1'   # what a change costs the march (#367): A and B measured turn about, seconds apart, only while the GPU is quiet; `--other dir` for A from another checkout; alone it is A against A
 ```
 
-Checks from different threads share one GPU, so whatever opens a browser takes a turn first (`test/kit.mjs` `turn`): two at a time on this machine (`ENGINE_TURNS`), the rest wait and say so. A check that is killed gives its turn back.
+Iterate with `--changed`, then run everything once on the head you report. `test/changed.mjs` keeps the map from files to checks; a file it is not sure of runs everything, and every module of the page comes in through `page/main.ts`, so a change there or in the core runs everything. Against origin/main that is most branches; after a full run on a head, `--changed --base <that head>` runs only what covers the steps since. It also names the closer checks of the realm (`test/sf-boards.mjs` and its kind) that a change concerns, which neither suite runs.
+
+Checks from different threads share one GPU, so whatever opens a browser takes a turn first (`test/kit.mjs` `turn`): two at a time on this machine (`ENGINE_TURNS`), the rest wait and say who holds them (process, command, since when). A wait fails after twenty minutes (`ENGINE_TURN_WAIT`, seconds) rather than hang. A timing takes every turn (`quiet`); what that process starts, and a `quiet` inside it, already has them (`ENGINE_QUIET`), so a wrapper that holds the GPU for a command is not waited on by its own checks. A check that is killed gives its turns back, and a turn whose holder is gone is taken again. Picture scripts hold one turn, and every turn only while a clip is filmed.
 
 `npm run check` runs `cargo test`, `tsc`, and these, each also runnable by itself:
 `test/city.mjs` (the city made, looked at from five places), `test/blast.mjs` (glass breaks

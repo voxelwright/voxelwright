@@ -8,13 +8,13 @@
 // both, `flight-…` through the flight and the round, `third-…` from behind the shoulder at both, `fall-…`, `canopy-…`
 // and `landed-…`, and `still-…` where motion is not wanted (the first view fading into the roof's).
 // The clip (<out>/explore.mp4, 1280 x 720): from the park to a canopy's landing. Filmed with every turn on the GPU
-// held (`quiet`), so nothing else draws beside it.
+// held (`quiet`) from its page coming up, so nothing else draws beside it; the stills take one turn like any check.
 import { mkdirSync, readdirSync, renameSync, rmSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet } from '../test/kit.mjs'
+import { arg, CHROME, has, here, quiet, turn } from '../test/kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), out = arg('out', join(homedir(), '.village', 'engine', 'sf', 'explore')), only = arg('only', '')
@@ -23,7 +23,7 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 }
 mkdirSync(out, { recursive: true })
-const site = await plain(dist, '127.0.0.1', 0, {}), back = await quiet(), browser = await chromium.launch(CHROME)
+const site = await plain(dist, '127.0.0.1', 0, {}), back = await turn(), browser = await chromium.launch(CHROME)
 const PHONE = { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }, WIDE = { viewport: { width: 1280, height: 720 } }
 /** A page of the realm, shown and whole, the way in fetched, the banner in sight. */
 const open = async (options) => {
@@ -111,6 +111,8 @@ try {
   if (!has('no-clip') && only !== 'stills' && only !== 'phone' && only !== 'wide') {
     const raw = join(out, 'raw')
     rmSync(raw, { recursive: true, force: true })
+    // Every turn, from the clip's page coming up (nothing of this process draws while `quiet` may wait).
+    const alone = await quiet()
     const { context, page, from } = await open({ ...WIDE, recordVideo: { dir: raw, size: { width: 1280, height: 720 } } })
     const wait = (ms) => page.waitForTimeout(ms)
     const begins = (Date.now() - from) / 1000
@@ -138,6 +140,7 @@ try {
     await wait(2500)
     const ends = (Date.now() - from) / 1000
     await context.close()
+    alone()
     const video = readdirSync(raw).find((f) => f.endsWith('.webm'))
     const made = spawnSync('ffmpeg', ['-y', '-ss', String(begins), '-to', String(ends), '-i', join(raw, video), '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '18', '-movflags', '+faststart', join(out, 'explore.mp4')], { encoding: 'utf8' })
     if (made.status !== 0) { console.error(made.stderr.slice(-800)); renameSync(join(raw, video), join(out, 'explore.webm')) }

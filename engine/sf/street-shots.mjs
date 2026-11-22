@@ -17,7 +17,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { chromium } from 'playwright'
-import { arg, CHROME, has, here, quiet } from '../test/kit.mjs'
+import { arg, CHROME, has, here, turn } from '../test/kit.mjs'
 import { plain } from '../player/serve.mjs'
 
 const out = arg('out', join(homedir(), '.village', 'engine', 'sf', 'street', 'new')), only = arg('only', ''), W = 960, H = 540
@@ -47,7 +47,8 @@ const label = (page) => page.evaluate(async ({ W, H }) => {
 const settle = (page) => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000, polling: 250 }).catch(() => console.log('  not all made in two minutes'))
 const HIDE = '#hud, #aim, #boom, #tools, #over, #where, #realm, #first { display: none !important }'
 
-const back = await quiet()
+// Pictures, with nothing timed: one turn on the GPU, like any check (test/kit.mjs).
+const back = await turn()
 const browser = await chromium.launch(CHROME)
 const context = await browser.newContext({ viewport: { width: W, height: H }, deviceScaleFactor: 1 })
 const page = await context.newPage()
