@@ -25,7 +25,9 @@ const cached = (body) => join(CACHE, `${createHash('sha256').update(body).update
 const fail = (why) => { console.error(`data: ${why}`); process.exit(1) }
 // Links are followed: a staged release shares library folders between generations by linking them (sf/release.md).
 const files = (dir) => readdirSync(dir).filter((name) => !name.startsWith('.')).flatMap((name) => (statSync(join(dir, name)).isDirectory() ? files(join(dir, name)) : [join(dir, name)]))
-const gh = (...args) => execFileSync('gh', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
+// The bundle is a release of this repository, wherever the checkout's remote points.
+const REPO = process.env.GITHUB_REPOSITORY ?? 'the private source repository'
+const gh = (command, ...args) => execFileSync('gh', ['release', command, '--repo', REPO, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 // What the build reads, under ~/.village/engine (sf/build.mjs: STAGED, GRAPHS, SHELF and the eggs' folder).
 const RELEASE = `bay/450-city-paint/sf/releases/${pin}`
@@ -49,11 +51,11 @@ if (process.argv[2] === 'pack') {
   const listing = JSON.stringify({ pin, files: index }), digest = sha(listing)
   writeFileSync(join(work, 'index.json'), listing)
   const tag = `sf-data-${digest.slice(0, 16)}`
-  const there = (() => { try { gh('release', 'view', tag, '--json', 'tagName'); return true } catch { return false } })()
+  const there = (() => { try { gh('view', tag, '--json', 'tagName'); return true } catch { return false } })()
   if (there) console.log(`${tag} is uploaded already`)
   else {
     execFileSync('tar', ['-cf', join(work, 'data.tar'), '-C', work, 'index.json', 'files'])
-    gh('release', 'create', tag, join(work, 'data.tar'), '--title', `SF realm data ${pin.slice(0, 12)}`, '--notes', `The inputs the realm's build reads from ~/.village for pin ${pin} (deploy/data.mjs). Not a release of the code.`, '--latest=false')
+    gh('create', tag, join(work, 'data.tar'), '--title', `SF realm data ${pin.slice(0, 12)}`, '--notes', `The inputs the realm's build reads from ~/.village for pin ${pin} (deploy/data.mjs). Not a release of the code.`, '--latest=false')
     console.log(`uploaded ${tag}: ${index.length} files`)
   }
   rmSync(work, { recursive: true, force: true })
@@ -63,7 +65,7 @@ if (process.argv[2] === 'pack') {
   const record = JSON.parse(readFileSync(RECORD, 'utf8'))
   if (record.pin !== pin) fail(`deploy/data.json is for pin ${record.pin.slice(0, 12)} but engine/sf/pilot/current.json pins ${pin.slice(0, 12)}: run node deploy/data.mjs pack and commit deploy/data.json`)
   const work = mkdtempSync(join(tmpdir(), 'sf-data-'))
-  gh('release', 'download', record.tag, '--pattern', 'data.tar', '--dir', work)
+  gh('download', record.tag, '--pattern', 'data.tar', '--dir', work)
   execFileSync('tar', ['-xf', join(work, 'data.tar'), '-C', work])
   const listing = readFileSync(join(work, 'index.json'), 'utf8')
   if (sha(listing) !== record.digest) fail(`${record.tag} is not the bundle deploy/data.json names`)
