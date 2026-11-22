@@ -5,7 +5,8 @@
   "description": "zahynailo.dev: the SF realm at / and the site under /blog/, one Cloudflare Worker (#450).",
   "scripts": {
     "assemble": "node assemble.mjs",
-    "deploy": "cf deploy"
+    "deploy": "cf deploy",
+    "test": "node --test"
   },
   "devDependencies": {
     "cf": "1.0.0-rc.0",

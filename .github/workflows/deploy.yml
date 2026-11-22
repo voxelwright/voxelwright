@@ -54,6 +54,8 @@ jobs:
       # One folder, one Worker.
       - run: npm ci
         working-directory: deploy
+      - run: npm test
+        working-directory: deploy
       - run: node assemble.mjs
         working-directory: deploy
       - id: deploy
@@ -79,10 +81,12 @@ jobs:
           done
           manifest="/$(node -p "require('../engine/sf/pilot/current.json').manifest")"
           code=$(get "$manifest"); echo "$manifest $code"; test "$code" = 200
+          # worker.mjs's own copy, byte for byte: the edge's Brotli of the plain file would have no length, or another.
           grep -qi '^content-encoding: br' headers.txt
+          grep -qi "^content-length: $(stat -c%s "dist$manifest.br")"$'\r'"\?$" headers.txt
 
-      - name: roll back a version that failed its live check
-        if: failure() && steps.deploy.outcome == 'success'
+      - name: roll back a version that failed or did not finish its live check
+        if: (failure() || cancelled()) && steps.deploy.outcome == 'success'
         working-directory: deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

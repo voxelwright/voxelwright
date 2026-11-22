@@ -115,6 +115,15 @@ md.renderer.rules.link_open = (tokens, idx, opts, env, self) => {
   return self.renderToken(tokens, idx, opts);
 };
 
+// Raw HTML in a post is published as written; its root-absolute addresses are checked like a link's.
+for (const kind of ["html_block", "html_inline"]) {
+  const plain = md.renderer.rules[kind];
+  md.renderer.rules[kind] = (tokens, idx, opts, env, self) => {
+    for (const [, u] of tokens[idx].content.matchAll(/\b(?:src|href|poster)\s*=\s*["'](\/(?!\/)[^"']*)["']/gi)) staysInSite(u, new URL(u, "https://site.invalid").pathname, env);
+    return plain(tokens, idx, opts, env, self);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Embed block rule
 
@@ -403,6 +412,19 @@ export function isExternal(u) {
   return /^[a-z][a-z0-9+.-]*:/i.test(u) || u.startsWith("//");
 }
 
+/** What a mounted site may link to outside its base: the realm's "/" and the files the site writes at the root. */
+const ROOT_FILES = new Set(["/", "/robots.txt"]);
+/**
+ * Mounted under a base (zahynailo.dev/blog/), a root-absolute link outside it leaves the site for the realm, where
+ * the page it meant is not: an error, once a post and link. The base without its slash is the base.
+ */
+function staysInSite(u, pathname, env) {
+  const base = env.ctx.base;
+  if (!env.errors || !base || base === "/" || ROOT_FILES.has(pathname) || `${pathname}/`.startsWith(base)) return;
+  const said = `${env.ctx.file}: the link ${u} leaves the site`;
+  if (!env.errors.some((e) => e.startsWith(said + ","))) env.errors.push(`${said}, which is at ${base}. Link under ${base} or relative to the post.`);
+}
+
 /** Root-absolute on pages, absolute with the origin when env.absolute is set. */
 function resolveUrl(u, env) {
   if (!u || isExternal(u)) return u;
@@ -410,10 +432,7 @@ function resolveUrl(u, env) {
   if (u.startsWith("#")) return env.absolute ? origin + basePath + u : u;
   const r = new URL(u, "https://site.invalid" + basePath);
   const p = r.pathname + r.search + r.hash;
-  // Mounted under a base, a link from "/" that is not the base's own leaves the site (only "/" itself, the realm, is meant).
-  const base = env.ctx.base;
-  if (env.errors && base && base !== "/" && r.pathname !== "/" && !r.pathname.startsWith(base) && !env.errors.some((e) => e.includes(` ${u} `)))
-    env.errors.push(`${env.ctx.file}: the link ${u} leaves the site, which is at ${base}. Write ${base}${u.replace(/^\/+/, "")} or a link relative to the post.`);
+  staysInSite(u, r.pathname, env);
   return env.absolute ? origin + p : p;
 }
 

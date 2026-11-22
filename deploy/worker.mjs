@@ -3,14 +3,10 @@
 // sf/build.mjs wrote beside it (`<file>.br`), byte for byte. Static assets alone cannot: an asset given
 // `Content-Encoding: br` in _headers is compressed a second time, and `.bay`, `.far` and `.bin` files are sent
 // uncompressed. `encodeBody: "manual"` sends the stored bytes as they are.
+import { takesBrotli } from './encoding.mjs'
+
 const TYPES = { '.json': 'application/json', '.bin': 'application/octet-stream', '.bay': 'application/octet-stream', '.far': 'application/octet-stream', '.txt': 'text/plain; charset=utf-8' }
 const extension = (path) => (path.includes('.') ? path.slice(path.lastIndexOf('.')) : '')
-/** Whether the client takes Brotli: `br` listed with no q or q above 0 (`br;q=0` refuses it). */
-const takesBrotli = (header) => (header ?? '').split(',').some((part) => {
-  const [name, ...params] = part.split(';').map((s) => s.trim().toLowerCase())
-  const q = params.find((p) => p.startsWith('q='))
-  return name === 'br' && (!q || Number(q.slice(2)) > 0)
-})
 
 export default {
   async fetch(request, env) {
