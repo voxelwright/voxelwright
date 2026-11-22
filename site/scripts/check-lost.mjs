@@ -46,7 +46,8 @@ try {
     assert.match(res.headers.get("content-type") ?? "", /text\/html/, `${path}: the 404 is HTML`);
     assert.match(body, /Nothing here but fog/, `${path}: the 404 body is the lost page`);
   }
-  for (const asset of ["/lost/lost.css", "/lost/lost.js", "/lost/fog.js", "/landing/ina.webp"]) {
+  // dist/ is mounted under /blog/ (site.config.mjs base); the 404 page itself sits at the root
+  for (const asset of ["/blog/lost/lost.css", "/blog/lost/lost.js", "/blog/lost/fog.js", "/blog/landing/ina.webp"]) {
     const res = await fetch(url(asset));
     assert.equal(res.status, 200, `${asset} is served`);
   }
@@ -114,8 +115,9 @@ try {
   {
     const { context, page } = await open({ colorScheme: "light" });
     const ways = await page.locator(".lost-ways a").evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href")]));
-    assert.deepEqual(ways, [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/voxelmorphism/"]]);
-    for (const [name, href] of ways) {
+    assert.deepEqual(ways, [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]]);
+    // "/" is the realm's, which dist/ does not hold; the deploy serves it
+    for (const [name, href] of ways.filter(([, href]) => href !== "/")) {
       const res = await fetch(url(href));
       assert.equal(res.status, 200, `${name} (${href}) answers 200`);
     }

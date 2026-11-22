@@ -1,12 +1,15 @@
 // /voxelmorphism/: the Signal Desk, an instrument made from Village's Voxelmorphism kit, shown on
 // the instrument's mat. The desk's hardware and its controller are the kit's showcase desk
 // (Village engine/kit/showcase); its settings are built here from the kit's own parts.
+import { sitePath } from "../lib/paths.mjs";
+
 export function voxelmorphismPage(site) {
+  const at = (p) => sitePath(site.base, p);
   const description = "Play the Signal Desk, a mechanical control surface built with Village’s Voxelmorphism kit.";
   const shell = (value, name, title, sample, checked = false) =>
     `<label class="sample" title="${title}"><input type="radio" name="shell" value="${value}"${checked ? " checked" : ""}><i style="--sample:${sample}" aria-hidden="true"></i><span>${name}</span></label>`;
   return {
-    path: "/voxelmorphism/",
+    path: at("/voxelmorphism/"),
     kind: "voxelmorphism",
     title: "Voxelmorphism",
     description,
@@ -42,7 +45,7 @@ export function voxelmorphismPage(site) {
 <p class="fittings-note">The whole site is fitted like the desk: change the enclosure and every page follows for this visit.</p>
 <div class="vx-groove" role="separator"></div>
 <fieldset class="fitting"><legend>Enclosure <output id="shell-name">Walnut</output></legend><div class="samples">
-${shell("walnut", "Walnut", "Walnut", "url(/vendor/village/kit/showcase/materials/walnut.jpg) center / cover", true)}
+${shell("walnut", "Walnut", "Walnut", `url(${at("/vendor/village/kit/showcase/materials/walnut.jpg")}) center / cover`, true)}
 ${shell("alloy", "Alloy", "Anodized aluminum", "linear-gradient(130deg,#788b91,#2b404b)")}
 ${shell("smoke", "Smoke", "Smoked acrylic", "linear-gradient(135deg,#33313e,#89838f 70%,#474552)")}
 ${shell("frost", "Frost", "Frosted acrylic", "linear-gradient(130deg,#c3cfc8,#eeeae1 65%,#afbdb7)")}
@@ -63,7 +66,7 @@ Amber, Tide, Lilac and Ember select the lamp color and a cross-section of the fi
 
 Choose a walnut, anodized alloy or acrylic enclosure, change the keycaps and switch profile, or try the case lighting. Switch sound is optional. Both the voxel and plain controls support the keyboard.
 
-[Play the Signal Desk](${site.origin}/voxelmorphism/) · [Use plain controls](${site.origin}/voxelmorphism/?view=2d)
+[Play the Signal Desk](${site.origin}${at("/voxelmorphism/")}) · [Use plain controls](${site.origin}${at("/voxelmorphism/")}?view=2d)
 `,
   };
 }

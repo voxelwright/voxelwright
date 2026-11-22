@@ -33,7 +33,9 @@ const out = path.resolve(ROOT, process.env.OUT ?? ".shots/transitions");
 fs.mkdirSync(out, { recursive: true });
 
 const site = fs.mkdtempSync(path.join(os.tmpdir(), "site-transitions-"));
-await build({ outDir: site, drafts: true, dev: false });
+// the city and its moves exist only when the site owns the whole origin, so build it that way
+const config = (await import("../site.config.mjs")).default;
+await build({ outDir: site, drafts: true, dev: false, site: { ...config, base: "/" } });
 const server = await startServer({ root: site, port: 0, host: "127.0.0.1" });
 const base = `http://127.0.0.1:${server.address().port}`;
 const POST = "/blog/kitchen-sink/";

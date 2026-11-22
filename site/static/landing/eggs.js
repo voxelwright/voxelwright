@@ -27,7 +27,7 @@ import { videoProgram } from "./video.js";
 // panes beyond the picture show (null keeps the city's own windows).
 const videos = {
   rickroll: {
-    src: "/landing/eggs/rick.mp4",
+    src: new URL("eggs/rick.mp4", import.meta.url).href,
     title: "Never Gonna Give You Up",
     palette: "rick",
     still: 20,
@@ -38,7 +38,7 @@ const videos = {
     end: "Never gonna let you down: that was the whole song.",
   },
   apple: {
-    src: "/landing/eggs/bad-apple.mp4",
+    src: new URL("eggs/bad-apple.mp4", import.meta.url).href,
     title: "Bad Apple!!",
     palette: "apple",
     still: 62,

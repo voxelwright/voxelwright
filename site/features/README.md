@@ -10,8 +10,11 @@ A feature folder may hold:
   - `head(page, site)` returns HTML added before `</head>` on every page (return `""` to skip one);
   - `bodyEnd(page, site)` returns HTML added before `</body>` on every page;
   - `pages(site, { posts })` returns extra pages, each `{ path, kind, title, description, html, markdown }`
-    like the ones in `generator/pages.mjs`. `path` ends in `/` and must not be taken already.
-- `static/`, copied into the site root when the flag is on. It cannot replace a file that is
+    like the ones in `generator/pages.mjs`. `path` ends in `/` and must not be taken already. It is
+    a path in the site's own tree, published under the site's `base` (`/hello/` → `/blog/hello/`).
+- `static/`, copied into the site (under its `base`) when the flag is on. An address written in
+  `head` or `bodyEnd` names the base itself: `sitePath(site.base, "/hello/hello.js")` from
+  `lib/paths.mjs`. It cannot replace a file that is
   already there, and nothing at its top may have a name that starts with `_` or `.`: the host
   reads `_headers`, `_redirects` and their kind as rules for the whole site.
 

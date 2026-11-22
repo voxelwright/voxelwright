@@ -8,7 +8,7 @@ import path from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { build, ContentError } from "../generator/build.mjs";
 import { loadPosts } from "../generator/posts.mjs";
-import { markdownTwin, postPath } from "../lib/paths.mjs";
+import { markdownTwin, postPath, sitePath, blogPath, isMounted, HOME } from "../lib/paths.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const failures = [];
@@ -35,7 +35,10 @@ function checkOutput(label, out, { posts, site }) {
   const rel = (f) => "/" + path.relative(out, f).split(path.sep).join("/");
   const pageFiles = files.filter((f) => f.endsWith("index.html"));
   const pageRoutes = pageFiles.map((f) => rel(f).replace(/index\.html$/, ""));
-  for (const route of ["/", "/blog/", "/voxelmorphism/"]) {
+  const mounted = isMounted(site.base);
+  // mounted below its origin, the site has no home page: "/" is the app mounted there
+  const home = mounted ? null : HOME;
+  for (const route of [home, blogPath(site.base), sitePath(site.base, "/voxelmorphism/")].filter(Boolean)) {
     if (!pageRoutes.includes(route)) fail(label, `missing destination ${route}`);
   }
   let embeds = 0;
@@ -53,6 +56,7 @@ function checkOutput(label, out, { posts, site }) {
     else if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(url)) return; // external
     else p = new URL(url, "https://site.invalid" + from).pathname;
     p = p.split("#")[0].split("?")[0];
+    if (mounted && p === HOME) return; // the app that owns "/", not part of this build
     links++;
     if (!exists(p)) fail(label, `${from}: broken internal link ${url}`);
   };
@@ -62,12 +66,12 @@ function checkOutput(label, out, { posts, site }) {
     const route = pageRoutes[i];
     const html = fs.readFileSync(file, "utf8");
     const support = [...html.matchAll(/<support-button\b([^>]*)>/g)];
-    if (route === "/") {
-      if (support.length !== 1 || !support[0][1].includes('version="instrument"') || !html.includes('src="/support/support-button.js"')) {
+    if (route === home) {
+      if (support.length !== 1 || !support[0][1].includes('version="instrument"') || !html.includes(`src="${sitePath(site.base, "/support/support-button.js")}"`)) {
         fail(label, "the landing must mount the enamel support button directly");
       }
     } else if (support.length) fail(label, `${route}: support belongs on the landing`);
-    const twin = markdownTwin(route);
+    const twin = markdownTwin(route, site.base);
     if (!exists(twin)) fail(label, `${route}: missing Markdown twin ${twin}`);
     if (!html.includes(`<link rel="alternate" type="text/markdown" href="${twin}"`)) fail(label, `${route}: missing <link rel="alternate" type="text/markdown" href="${twin}">`);
     for (const m of html.matchAll(/\s(?:href|src|poster|before|after)="([^"]*)"/g)) checkLink(route, decode(m[1]));
@@ -83,7 +87,7 @@ function checkOutput(label, out, { posts, site }) {
       embeds++;
       if (!/<figure class="ais"/.test(m[2]) || !/class="ais-ex"/.test(m[2])) fail(label, `${route}: <ai-session> rendered without its turns`);
       if (!/\ssrc="[^"]+"/.test(m[1])) fail(label, `${route}: <ai-session> without src`);
-      if (/<script(?! type="module" src="\/ai-session\.js")/.test(m[2])) fail(label, `${route}: <ai-session> contains a script`);
+      if (new RegExp(`<script(?! type="module" src="${sitePath(site.base, "/ai-session.js")}")`).test(m[2])) fail(label, `${route}: <ai-session> contains a script`);
     }
     for (const m of html.matchAll(/<model-note\b([^>]*)>([\s\S]*?)<\/model-note>/g)) {
       embeds++;
@@ -106,16 +110,16 @@ function checkOutput(label, out, { posts, site }) {
   }
 
   // llms.txt lists every post.
-  const llms = fs.readFileSync(path.join(out, "llms.txt"), "utf8");
+  const llms = fs.readFileSync(path.join(out, sitePath(site.base, "/llms.txt")), "utf8");
   if (!/^# .+\n\n> .+/.test(llms)) fail(label, "llms.txt: must start with an H1 and a blockquote summary");
   for (const p of posts) {
-    const url = site.origin + markdownTwin(postPath(p.slug));
+    const url = site.origin + markdownTwin(postPath(site.base, p.slug), site.base);
     if (!llms.includes(`](${url})`)) fail(label, `llms.txt: missing ${url}`);
   }
 
   // Feed and sitemap: well-formed XML with the required elements.
   const parser = new XMLParser({ ignoreAttributes: false, isArray: (name) => ["entry", "url", "link"].includes(name) });
-  const feedXml = fs.readFileSync(path.join(out, "feed.xml"), "utf8");
+  const feedXml = fs.readFileSync(path.join(out, sitePath(site.base, "/feed.xml")), "utf8");
   const feedValid = XMLValidator.validate(feedXml);
   if (feedValid !== true) fail(label, `feed.xml: ${JSON.stringify(feedValid.err)}`);
   else {
@@ -133,7 +137,7 @@ function checkOutput(label, out, { posts, site }) {
       }
     }
   }
-  const sitemapXml = fs.readFileSync(path.join(out, "sitemap.xml"), "utf8");
+  const sitemapXml = fs.readFileSync(path.join(out, sitePath(site.base, "/sitemap.xml")), "utf8");
   const sitemapValid = XMLValidator.validate(sitemapXml);
   if (sitemapValid !== true) fail(label, `sitemap.xml: ${JSON.stringify(sitemapValid.err)}`);
   else {
@@ -143,7 +147,7 @@ function checkOutput(label, out, { posts, site }) {
   }
 
   const robots = fs.readFileSync(path.join(out, "robots.txt"), "utf8");
-  if (!robots.includes(`Sitemap: ${site.origin}/sitemap.xml`) || /^Disallow:\s*\/\s*$/m.test(robots)) fail(label, "robots.txt: must allow crawling and name the sitemap");
+  if (!robots.includes(`Sitemap: ${site.origin}${sitePath(site.base, "/sitemap.xml")}`) || /^Disallow:\s*\/\s*$/m.test(robots)) fail(label, "robots.txt: must allow crawling and name the sitemap");
 
   return { pages: pageRoutes.length, posts: posts.length, embeds, links };
 }
@@ -180,17 +184,15 @@ export function shareProblems(route, html, site, out) {
 }
 
 /** Production builds must not mention a draft anywhere: pages, twins, llms.txt, feed, sitemap, tags, assets. */
-function checkNoDrafts(out) {
+function checkNoDrafts(out, { base }) {
   const { posts: all } = loadPosts(path.join(ROOT, "posts"), { includeDrafts: true });
   const drafts = all.filter((p) => p.draft);
-  if (fs.existsSync(path.join(out, "blog"))) {
-    for (const d of drafts) if (fs.existsSync(path.join(out, "blog", d.slug))) fail("production", `draft folder leaked: blog/${d.slug}/`);
-  }
+  for (const d of drafts) if (fs.existsSync(path.join(out, postPath(base, d.slug)))) fail("production", `draft folder leaked: ${postPath(base, d.slug)}`);
   for (const file of walk(out)) {
     if (!/\.(html|md|txt|xml)$/.test(file)) continue;
     const text = fs.readFileSync(file, "utf8");
     for (const d of drafts) {
-      if (text.includes(`/blog/${d.slug}/`) || text.includes(`/blog/${d.slug}.md`)) fail("production", `${path.relative(out, file)} mentions draft "${d.slug}"`);
+      if (text.includes(postPath(base, d.slug)) || text.includes(markdownTwin(postPath(base, d.slug), base))) fail("production", `${path.relative(out, file)} mentions draft "${d.slug}"`);
     }
     if (/class="draft"|^draft: true$/m.test(text)) fail("production", `${path.relative(out, file)} contains a draft marker`);
   }
@@ -212,7 +214,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
   try {
     const prod = await run("production", { outDir: path.join(ROOT, "dist") });
-    if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"))} draft(s) kept out`);
+    if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"), prod.site)} draft(s) kept out`);
     await run("with drafts", { outDir: draftsDir, drafts: true });
   } finally {
     fs.rmSync(draftsDir, { recursive: true, force: true });

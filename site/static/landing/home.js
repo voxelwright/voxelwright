@@ -1,5 +1,5 @@
 import { installEggs } from "./eggs.js";
-import { boot, choosePlain, isNight, setNight, soundOn, setSound } from "/site.js";
+import { boot, choosePlain, isNight, setNight, soundOn, setSound } from "../site.js";
 import { project } from "./survey.js";
 import { printCard, postcardDialog, shutter } from "./postcard.js";
 
@@ -591,7 +591,7 @@ async function start() {
   }
   root.dataset.starting = "";
   const [r, signModule, rendererModule] = await Promise.all([
-    fetch("/landing/place.json"),
+    fetch(new URL("place.json", import.meta.url)),
     import("./signs.js"),
     import("./sign-renderer.js"),
   ]);
@@ -615,7 +615,7 @@ async function start() {
   if (!navigator.gpu || stopGPU || stillPreferred()) return;
   startupTimer = setTimeout(fallback, 12000);
   const [{ renderer }, { place }] = await Promise.all([
-    import("/vendor/village/blocks/renderer.js"),
+    import("../vendor/village/blocks/renderer.js"),
     import("./place.js"),
   ]);
   if (stopGPU) return;

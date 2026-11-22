@@ -16,6 +16,7 @@ import { createRequire } from "node:module";
 import { build } from "../generator/build.mjs";
 import { shareCard, CARD } from "../generator/pages.mjs";
 import { startServer } from "./serve.mjs";
+import siteConfig from "../site.config.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const OG = path.join(ROOT, "static", "og");
@@ -399,7 +400,9 @@ async function main(args) {
   };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "site-cards-"));
   try {
-    const { pages, site } = await build({ outDir: tmp });
+    // built as the whole origin: the cards are the same wherever the site is mounted, and the
+    // home page (whose card the tags, 404 and draft pages show) exists only there
+    const { pages, site } = await build({ outDir: tmp, site: { ...siteConfig, base: "/" } });
     let jobs = cardJobs(pages, site);
     const title = option("--title");
     if (title) jobs = [{ file: option("--out") ?? "preview.png", title, plates: [site.author, new URL(site.origin).host] }];

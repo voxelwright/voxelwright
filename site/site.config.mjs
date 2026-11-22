@@ -5,6 +5,10 @@ export default {
   description: "Pavlo Zahynailo’s writing and interactive Voxelmorphism experiments.",
   language: "en",
   origin: "https://zahynailo.dev",
+  // Where the site is mounted on its origin (lib/paths.mjs). The Village realm owns "/" on
+  // zahynailo.dev, so the site lives under /blog/: the posts list is /blog/, everything else the
+  // site has is below it, and the landing ("/") is not built. "/" builds the whole origin.
+  base: "/blog/",
 
   // Answer `Accept: text/markdown` on page routes from the Worker.
   // Off by default: every page view would then invoke the Worker and count against the

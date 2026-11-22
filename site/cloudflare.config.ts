@@ -1,4 +1,5 @@
-// Cloudflare Workers with static assets, run by the `cf` CLI.
+// The site's Worker for `npm run dev` only (`cf dev`, the real Workers runtime). zahynailo.dev is one Worker for
+// the realm and the site, deployed from deploy/ in the Village repo (deploy/cloudflare.config.ts); nothing deploys this.
 // Docs: https://developers.cloudflare.com/cf/projects/cloudflare-config/index.md
 import { bindings, defineConfig } from "cf/config";
 import site from "./site.config.mjs";

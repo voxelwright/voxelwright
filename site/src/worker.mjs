@@ -1,6 +1,9 @@
 // Runs only on page routes (see PAGE_ROUTE_PATTERNS) and only when Markdown negotiation is on.
 // `Accept: text/markdown` gets the page's static .md twin; everything else gets the HTML asset.
-import { isPageRoute, markdownTwin } from "../lib/paths.mjs";
+import { isPageRoute, markdownTwin, normalizeBase } from "../lib/paths.mjs";
+import site from "../site.config.mjs";
+
+const BASE = normalizeBase(site.base);
 
 export default {
   async fetch(request, env) {
@@ -10,8 +13,9 @@ export default {
       return env.ASSETS.fetch(request);
     }
 
-    if (prefersMarkdown(request.headers.get("Accept"))) {
-      const twin = new URL(markdownTwin(url.pathname), url);
+    const twinPath = markdownTwin(url.pathname, BASE);
+    if (twinPath && prefersMarkdown(request.headers.get("Accept"))) {
+      const twin = new URL(twinPath, url);
       const res = await env.ASSETS.fetch(new Request(twin, { method, headers: request.headers }));
       if (res.ok || res.status === 304) {
         const out = new Response(res.body, res);

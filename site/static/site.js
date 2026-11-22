@@ -8,8 +8,8 @@
 //   always the full-screen city, plain only at /?view=2d (static/landing/home.js).
 // The early script in each page's head has already set data-vx-plain from the first three, and
 // data-theme from the saved night, so nothing changes under the reader.
-import { adopt, use, ready, sound } from "/vendor/village/kit/src/index.js";
-import { renderer } from "/vendor/village/blocks/renderer.js";
+import { adopt, use, ready, sound } from "./vendor/village/kit/src/index.js";
+import { renderer } from "./vendor/village/blocks/renderer.js";
 
 const root = document.documentElement;
 const dark = matchMedia("(prefers-color-scheme: dark)");

@@ -7,6 +7,7 @@ const destinations = [
   { href: "/voxelmorphism/", label: "Voxelmorphism" },
 ];
 
+// Built only when the site owns its origin (base "/"), so its addresses are the origin's own.
 export function homePage(site, posts, tagsWithPosts) {
   const latest = posts.filter((p) => !p.draft).slice(0, 3);
   const links = (local = false) => destinations
@@ -65,7 +66,7 @@ ${links(true)}
 <button type="button" class="vx-button" data-vx-material="chalk" data-postcard-share hidden>Share</button>
 <a class="vx-button" data-vx-material="chalk" data-postcard-save href="#" download>Download PNG</a></footer>
 </dialog>
-${latest.length ? `<section class="park-writing" aria-labelledby="recent-title"><h2 id="recent-title">Recent writing</h2>${postListHtml(latest)}</section>` : ""}
+${latest.length ? `<section class="park-writing" aria-labelledby="recent-title"><h2 id="recent-title">Recent writing</h2>${postListHtml(latest, site.base)}</section>` : ""}
 <section class="park-log" id="site-log" tabindex="-1" aria-labelledby="log-title" hidden>
 <h2 id="log-title">Site log</h2>
 <time datetime="2026-11-18">18 November 2026</time>
@@ -92,11 +93,11 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
       "# " + site.title,
       "Writing and experiments in voxels.",
       "Ina Coolbrith Park, San Francisco. A view over North Beach built in Village.",
-      destinations.map((l) => `- [${l.label}](${site.origin}${markdownTwin(l.href)})`).join("\n"),
+      destinations.map((l) => `- [${l.label}](${site.origin}${markdownTwin(l.href, site.base)})`).join("\n"),
       ...(latest.length
         ? [
             "## Recent writing",
-            latest.map((p) => `- [${p.title}](${site.origin}${markdownTwin(postPath(p.slug))})`).join("\n"),
+            latest.map((p) => `- [${p.title}](${site.origin}${markdownTwin(postPath(site.base, p.slug), site.base)})`).join("\n"),
           ]
         : []),
       ...(site.links?.length ? ["## Elsewhere", site.links.map((l) => `- [${l.name}](${l.url})`).join("\n")] : []),

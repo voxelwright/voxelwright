@@ -22,8 +22,10 @@ test("the 404 page is served from any depth, so every URL in it is absolute", as
     for (const [, attr, url] of html.matchAll(/\s(href|src)="([^"]*)"/g)) {
       if (url.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith("?")) continue;
       assert.ok(url.startsWith("/"), `${attr}="${url}" is relative, and breaks below the top level`);
+      // mounted under /blog/, everything but the way home ("/", the app mounted there) is the site's
+      if (url !== "/") assert.ok(url.startsWith("/blog/"), `${attr}="${url}" is outside the site's /blog/ mount`);
     }
-    for (const file of ["lost/lost.css", "lost/lost.js", "lost/fog.js", "landing/ina.webp"]) {
+    for (const file of ["blog/lost/lost.css", "blog/lost/lost.js", "blog/lost/fog.js", "blog/landing/ina.webp"]) {
       assert.ok(fs.existsSync(path.join(outDir, file)), `${file} is published`);
     }
   } finally {
@@ -39,7 +41,7 @@ test("without a script the sign still reads and its ways out are real links", ()
   const ways = [...html.matchAll(/<nav class="lost-ways"[^>]*>([\s\S]*?)<\/nav>/g)][0][1];
   assert.deepEqual(
     [...ways.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[2], m[1]]),
-    [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/voxelmorphism/"]],
+    [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]],
   );
   // the scene is decoration; the sign is the page
   assert.match(html, /<div class="lost-scene" aria-hidden="true">/);

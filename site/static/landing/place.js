@@ -54,7 +54,7 @@ const ease = (lo, hi, v) => {
 };
 
 async function readModel(index, signal) {
-  const response = await fetch("/landing/ina.faces.gz", { signal });
+  const response = await fetch(new URL("ina.faces.gz", import.meta.url), { signal });
   if (!response.ok) throw Error("City unavailable");
   const packed = await new Response(response.body.pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
   const bytes = new Uint8Array(packed),
@@ -117,7 +117,7 @@ export async function place(canvas, device, night, signal, index, signs, arrive 
       format,
       { globals: global },
       { span: 500, letter: 94, speed: 190, reach: 14000 },
-      { text: "Hello, San Francisco", font: "/vendor/village/kit/fonts/vox-text/vox-text-700-normal.woff2" },
+      { text: "Hello, San Francisco", font: new URL("../vendor/village/kit/fonts/vox-text/vox-text-700-normal.woff2", import.meta.url).href },
       false,
     ),
     glow({ device, format }),

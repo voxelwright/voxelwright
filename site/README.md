@@ -10,10 +10,11 @@ Needs Node 24 or later (developed on Node 25). Run `npm install` once.
 | Command | What it does |
 | --- | --- |
 | `npm run new "Title"` | Creates `posts/<slug>/index.md` with front matter and `draft: true`. No body. |
-| `npm run dev` | Builds with drafts into `.dev/`, watches, serves at http://localhost:4321/ with live reload. Uses `cf dev` (the Workers runtime, Markdown negotiation on); falls back to a Node server that mimics it. `npm run dev -- --node` forces the fallback. |
+| `npm run dev` | Builds with drafts into `.dev/`, watches, serves at http://localhost:4321/blog/ with live reload (`/` is the realm's and answers 404 here). Uses `cf dev` (the Workers runtime, Markdown negotiation on); falls back to a Node server that mimics it. `npm run dev -- --node` forces the fallback. |
 | `npm run build` | Production build into `dist/`. Drafts are left out. |
 | `npm run check` | Builds, checks the output (production and a drafts-included build), and runs the tests. |
-| `npm run deploy` | Runs `check`, then `cf deploy` from `dist/`. Needs `cf auth login` first. |
+
+The site is not deployed on its own. zahynailo.dev is one Worker, the SF realm at `/` and this site under `/blog/`, built and deployed together from `deploy/` in the Village repo on every push to main (`deploy/README.md`). This folder came in with `git subtree` (history kept). Splitting the realm, the site and the Voxelmorphism kit into separate repos, with a build and deploy strategy for each, waits until Village goes open source.
 
 ## Writing a post
 
@@ -73,9 +74,16 @@ and the import options are in `notes/ai-session-format.md`.
 
 ## What the build writes
 
-- `/`, `/voxelmorphism/`, `/blog/`, `/blog/<slug>/`, `/tags/`, `/tags/<tag>/`, `/404.html`
-- A Markdown twin for every page: `/index.md`, `/voxelmorphism.md`, `/blog.md`, `/blog/<slug>.md`, `/tags/<tag>.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
-- `/llms.txt` ([llmstxt.org](https://llmstxt.org)), `/feed.xml` (Atom), `/sitemap.xml`, `/robots.txt` (AI crawlers allowed)
+`site.config.mjs` mounts the site at `base: "/blog/"` on zahynailo.dev, whose `/` is the Village
+realm. `dist/` mirrors the origin, so a deploy copies it into the Worker's assets unchanged:
+
+- `/blog/` (posts list), `/blog/<slug>/`, `/blog/tags/`, `/blog/tags/<tag>/`, `/blog/voxelmorphism/`, and every static file under `/blog/`
+- A Markdown twin for every page: `/blog/index.md`, `/blog/<slug>.md`, `/blog/tags/<tag>.md`, `/blog/voxelmorphism.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
+- `/blog/llms.txt` ([llmstxt.org](https://llmstxt.org)), `/blog/feed.xml` (Atom), `/blog/sitemap.xml`
+- At the root: `/robots.txt` (AI crawlers allowed, Sitemap at `/blog/sitemap.xml`), `/404.html` (the host's not-found page), and `/_headers` (`static/_headers` with its patterns moved under `/blog/`)
+- No `/`: the landing is built only with `base: "/"`, which writes the site as the whole origin (`/`, `/blog/`, `/tags/`, `/index.md`, `/blog.md`, ...). `npm run cards` builds that way.
+
+The base path rule lives in `lib/paths.mjs`.
 
 ## Settings
 

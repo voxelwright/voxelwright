@@ -12,6 +12,8 @@ import { cardJobs, palette, remap, indexedPng, encodeCard } from "../scripts/car
 import { shareProblems } from "../scripts/check.mjs";
 
 const SITE = (await import("../site.config.mjs")).default;
+// the whole origin, with the home page: what `npm run cards` builds
+const WHOLE = { ...SITE, base: "/" };
 const ROOT = path.resolve(import.meta.dirname, "..");
 
 async function buildSite({ site = SITE, drafts = true } = {}) {
@@ -34,26 +36,43 @@ test("every page has full Open Graph and Twitter tags with absolute URLs", async
   const s = await buildSite();
   try {
     const origin = s.site.origin;
+    assert.equal(s.site.base, "/blog/");
     const post = s.meta("/blog/published/");
     assert.equal(post.get("og:type"), "article");
     assert.equal(post.get("og:title"), "A published post &amp; its card");
     assert.equal(post.get("og:url"), `${origin}/blog/published/`);
-    assert.equal(post.get("og:image"), `${origin}/og/blog/published.png`);
+    assert.equal(post.get("og:image"), `${origin}/blog/og/blog/published.png`);
     assert.equal(post.get("og:image:width"), String(CARD.width));
     assert.equal(post.get("og:image:height"), String(CARD.height));
     assert.match(post.get("og:image:alt"), /park sign/);
     assert.equal(post.get("twitter:card"), "summary_large_image");
     assert.equal(post.get("twitter:image"), post.get("og:image"));
 
+    for (const [route, card] of [["/blog/", "blog"], ["/blog/tags/", "tags"], ["/blog/voxelmorphism/", "voxelmorphism"]]) {
+      assert.equal(s.meta(route).get("og:url"), `${origin}${route}`, route);
+      assert.equal(s.meta(route).get("og:image"), `${origin}/blog/og/${card}.png`, route);
+    }
+    // the 404 page answers at every missing address, so it names none
+    assert.equal(s.meta("/404.html").has("og:url"), false);
+    // mounted below the origin, "/" is not the site's: no home page is built
+    assert.equal(fs.existsSync(path.join(s.out, "index.html")), false);
+  } finally {
+    s.done();
+  }
+});
+
+test("the whole origin has the home page and its card", async () => {
+  const s = await buildSite({ site: WHOLE });
+  try {
+    const origin = s.site.origin;
     const home = s.meta("/");
     assert.equal(home.get("og:type"), "website");
     assert.equal(home.get("og:url"), `${origin}/`);
     assert.equal(home.get("og:image"), `${origin}/og/home.png`);
+    assert.equal(s.meta("/blog/published/").get("og:image"), `${origin}/og/blog/published.png`);
     for (const [route, card] of [["/blog/", "blog"], ["/tags/", "tags"], ["/voxelmorphism/", "voxelmorphism"]]) {
       assert.equal(s.meta(route).get("og:image"), `${origin}/og/${card}.png`, route);
     }
-    // the 404 page answers at every missing address, so it names none
-    assert.equal(s.meta("/404.html").has("og:url"), false);
   } finally {
     s.done();
   }
@@ -61,16 +80,19 @@ test("every page has full Open Graph and Twitter tags with absolute URLs", async
 
 test("pages without their own card fall back to the home card; drafts never get one", async () => {
   const s = await buildSite();
+  const whole = await buildSite({ site: WHOLE });
   try {
-    const home = `${s.site.origin}/og/home.png`;
-    assert.equal(s.meta("/tags/test/").get("og:image"), home);
+    const home = `${s.site.origin}/blog/og/home.png`;
+    assert.equal(s.meta("/blog/tags/test/").get("og:image"), home);
     assert.equal(s.meta("/404.html").get("og:image"), home);
     assert.equal(s.meta("/blog/unfinished/").get("og:image"), home);
-    const files = cardJobs(s.pages, s.site).map((job) => job.file).sort();
+    // npm run cards paints from the whole origin, so the home card stays painted when mounted
+    const files = cardJobs(whole.pages, whole.site).map((job) => job.file).sort();
     assert.deepEqual(files, ["blog.png", "blog/published.png", "home.png", "tags.png", "voxelmorphism.png"]);
     assert.equal(shareCard({ kind: "feature", path: "/x/" }), null);
   } finally {
     s.done();
+    whole.done();
   }
 });
 
@@ -89,8 +111,11 @@ test("the base URL comes from the site config", async () => {
 });
 
 test("the check fails, naming npm run cards, when a page links a card that isn't there", async () => {
-  const s = await buildSite({ drafts: false });
+  const s = await buildSite({ site: WHOLE, drafts: false });
+  const mounted = await buildSite({ drafts: false });
   try {
+    assert.deepEqual(shareProblems("/blog/", mounted.html("/blog/"), mounted.site, mounted.out), []);
+    assert.deepEqual(shareProblems("/404.html", mounted.html("/404.html"), mounted.site, mounted.out), []);
     const problems = (route) => shareProblems(route, s.html(route), s.site, s.out);
     // the committed cards are copied in from static/og
     assert.deepEqual(problems("/"), []);
@@ -105,6 +130,7 @@ test("the check fails, naming npm run cards, when a page links a card that isn't
     assert.match(shareProblems("/", s.html("/").replace(`${s.site.origin}/og/home.png`, "/og/home.png"), s.site, s.out).join("\n"), /og:image must be an absolute URL/);
   } finally {
     s.done();
+    mounted.done();
   }
 });
 

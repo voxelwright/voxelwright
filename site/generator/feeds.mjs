@@ -1,21 +1,23 @@
 // llms.txt, Atom feed, sitemap and robots.txt.
 import { escapeHtml as x } from "./markdown.mjs";
-import { markdownTwin, postPath } from "../lib/paths.mjs";
+import { markdownTwin, postPath, sitePath } from "../lib/paths.mjs";
 
 /** https://llmstxt.org: H1, a blockquote summary, then H2 sections of links. */
 export function llmsTxt(site, posts, pages) {
-  const abs = (p) => site.origin + markdownTwin(p);
-  const pageLinks = pages.filter((p) => !p.path.startsWith("/blog/") || p.path === "/blog/");
+  const abs = (p) => site.origin + markdownTwin(p, site.base);
+  const at = (p) => site.origin + sitePath(site.base, p);
+  // posts have their own section
+  const pageLinks = pages.filter((p) => p.kind !== "post");
   return [
     `# ${site.title}`,
     "",
     `> ${site.description}`,
     "",
-    "Every page here has a Markdown version at the same address with `.md` instead of the trailing slash (`/` is `/index.md`). The links below point to those versions.",
+    `Every page here has a Markdown version at the same address with \`.md\` instead of the trailing slash (\`${site.base}\` is \`${markdownTwin(site.base, site.base)}\`). The links below point to those versions.`,
     "",
     "## Posts",
     "",
-    ...(posts.length ? posts.map((p) => `- [${p.title}](${abs(postPath(p.slug))}): ${p.summary || "Draft."}`) : ["No posts yet."]),
+    ...(posts.length ? posts.map((p) => `- [${p.title}](${abs(postPath(site.base, p.slug))}): ${p.summary || "Draft."}`) : ["No posts yet."]),
     "",
     "## Pages",
     "",
@@ -23,8 +25,8 @@ export function llmsTxt(site, posts, pages) {
     "",
     "## Optional",
     "",
-    `- [Atom feed](${site.origin}/feed.xml): every post with full content`,
-    `- [Sitemap](${site.origin}/sitemap.xml)`,
+    `- [Atom feed](${at("/feed.xml")}): every post with full content`,
+    `- [Sitemap](${at("/sitemap.xml")})`,
     "",
   ].join("\n");
 }
@@ -32,12 +34,12 @@ export function llmsTxt(site, posts, pages) {
 export function atomFeed(site, posts, renderedBySlug) {
   const updated = posts.length ? `${posts[0].date}T00:00:00Z` : "1970-01-01T00:00:00Z";
   const entries = posts.slice(0, 30).map((p) => {
-    const url = site.origin + postPath(p.slug);
+    const url = site.origin + postPath(site.base, p.slug);
     return `  <entry>
     <title>${x(p.title)}</title>
     <id>${x(url)}</id>
     <link rel="alternate" type="text/html" href="${x(url)}"/>
-    <link rel="alternate" type="text/markdown" href="${x(site.origin + markdownTwin(postPath(p.slug)))}"/>
+    <link rel="alternate" type="text/markdown" href="${x(site.origin + markdownTwin(postPath(site.base, p.slug), site.base))}"/>
     <published>${p.date}T00:00:00Z</published>
     <updated>${p.date}T00:00:00Z</updated>
 ${p.tags.map((t) => `    <category term="${x(t)}"/>`).join("\n")}
@@ -49,9 +51,9 @@ ${p.tags.map((t) => `    <category term="${x(t)}"/>`).join("\n")}
 <feed xmlns="http://www.w3.org/2005/Atom" xml:lang="${x(site.language)}">
   <title>${x(site.title)}</title>
   <subtitle>${x(site.description)}</subtitle>
-  <id>${x(site.origin + "/")}</id>
-  <link rel="alternate" type="text/html" href="${x(site.origin + "/")}"/>
-  <link rel="self" type="application/atom+xml" href="${x(site.origin + "/feed.xml")}"/>
+  <id>${x(site.origin + site.base)}</id>
+  <link rel="alternate" type="text/html" href="${x(site.origin + site.base)}"/>
+  <link rel="self" type="application/atom+xml" href="${x(site.origin + sitePath(site.base, "/feed.xml"))}"/>
   <updated>${updated}</updated>
   <author><name>${x(site.author)}</name></author>
 ${entries.join("\n")}
@@ -60,7 +62,7 @@ ${entries.join("\n")}
 }
 
 export function sitemap(site, pages, posts) {
-  const dates = new Map(posts.map((p) => [postPath(p.slug), p.date]));
+  const dates = new Map(posts.map((p) => [postPath(site.base, p.slug), p.date]));
   const urls = pages
     .filter((p) => p.path.endsWith("/"))
     .map((p) => `  <url><loc>${x(site.origin + p.path)}</loc>${dates.has(p.path) ? `<lastmod>${dates.get(p.path)}</lastmod>` : ""}</url>`);
@@ -94,7 +96,7 @@ const AI_CRAWLERS = [
 export function robotsTxt(site) {
   return [
     "# People, search engines and AI agents are all welcome.",
-    "# Markdown versions of every page: see /llms.txt",
+    `# Markdown versions of every page: see ${sitePath(site.base, "/llms.txt")}`,
     "",
     "User-agent: *",
     "Allow: /",
@@ -102,7 +104,7 @@ export function robotsTxt(site) {
     ...AI_CRAWLERS.map((ua) => `User-agent: ${ua}`),
     "Allow: /",
     "",
-    `Sitemap: ${site.origin}/sitemap.xml`,
+    `Sitemap: ${site.origin}${sitePath(site.base, "/sitemap.xml")}`,
     "",
   ].join("\n");
 }

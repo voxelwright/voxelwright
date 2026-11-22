@@ -3,6 +3,6 @@
 import { defineWranglerConfig } from "wrangler/experimental-config";
 
 export default defineWranglerConfig({
-  // `npm run dev` points this at .dev/ (drafts included); deploys always use dist/.
+  // `npm run dev` points this at .dev/ (drafts included). Deploys copy dist/ into deploy/dist (deploy/assemble.mjs).
   assetsDirectory: process.env.SITE_ASSETS_DIR ?? "dist",
 });

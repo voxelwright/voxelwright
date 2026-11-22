@@ -7,6 +7,7 @@ import { createHighlighter } from "shiki";
 import { validateSession } from "../lib/session/format.mjs";
 import { findLeaks } from "../lib/session/redact.mjs";
 import { sessionHtml, sessionFeedHtml, sessionMarkdown } from "../lib/session/render.mjs";
+import { sitePath } from "../lib/paths.mjs";
 
 const LANGS = ["ts", "tsx", "js", "jsx", "json", "bash", "shell", "html", "css", "md", "yaml", "toml", "rust", "python", "glsl", "wgsl", "diff", "sql"];
 // Code on a page is shown in the instrument's code window, which is dark by day and at night,
@@ -39,7 +40,7 @@ export class ContentError extends Error {}
 /**
  * Renders one post body.
  * @param {string} source  Markdown body (front matter removed).
- * @param {object} ctx     { file, lineOffset, dir, basePath, origin }
+ * @param {object} ctx     { file, lineOffset, dir, basePath, origin, base } (base: the site's mount, lib/paths.mjs)
  * @returns {{ html: string, feedHtml: string, markdown: string, errors: string[] }}
  */
 export function renderPost(source, ctx) {
@@ -341,7 +342,8 @@ function renderSessionHtml(meta, env, url) {
   const id = seen ? `${base}-${seen + 1}` : base;
   const open = !a.open ? undefined : a.open === "all" ? "all" : new Set(a.open.split(",").map((n) => Number(n.trim())));
   // The stylesheet and script come with the first session on a page, and never into the feed.
-  const assets = env.sessionAssets ? "" : `<link rel="stylesheet" href="/ai-session.css"><script type="module" src="/ai-session.js"></script>`;
+  const site = (p) => sitePath(env.ctx.base ?? "/", p);
+  const assets = env.sessionAssets ? "" : `<link rel="stylesheet" href="${site("/ai-session.css")}"><script type="module" src="${site("/ai-session.js")}"></script>`;
   env.sessionAssets = true;
   return (
     assets +

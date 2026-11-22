@@ -23,7 +23,7 @@ function fixture(files) {
 const HELLO = {
   "features/hello/feature.mjs": `export default {
     head: () => '<meta name="hello" content="1">',
-    bodyEnd: (page) => '<script src="/hello/hello.js" data-on="' + page.kind + '"></script>',
+    bodyEnd: (page, site) => '<script src="' + site.base + 'hello/hello.js" data-on="' + page.kind + '"></script>',
     pages: () => [{ path: "/hello/", title: "Hello", html: "<h1>Hello</h1>", markdown: "# Hello\\n" }],
   };`,
   "features/hello/static/hello/hello.js": "console.log('hello there');",
@@ -70,16 +70,21 @@ test("a feature whose flag is off is never even read", async () => {
 test("a feature whose flag is on adds its page, its files and its tags on every page", async () => {
   const root = fixture(HELLO);
   try {
+    // the site is mounted under /blog/, and a feature's page and files go there with it
     const out = await run(root, { hello: true });
-    assert.match(fs.readFileSync(path.join(out, "hello/index.html"), "utf8"), /<h1>Hello<\/h1>/);
-    assert.equal(fs.readFileSync(path.join(out, "hello.md"), "utf8"), "# Hello\n");
-    assert.equal(fs.readFileSync(path.join(out, "hello/hello.js"), "utf8"), "console.log('hello there');");
-    for (const file of ["index.html", "blog/index.html", "voxelmorphism/index.html", "hello/index.html", "404.html"]) {
+    assert.match(fs.readFileSync(path.join(out, "blog/hello/index.html"), "utf8"), /<h1>Hello<\/h1>/);
+    assert.equal(fs.readFileSync(path.join(out, "blog/hello.md"), "utf8"), "# Hello\n");
+    assert.equal(fs.readFileSync(path.join(out, "blog/hello/hello.js"), "utf8"), "console.log('hello there');");
+    for (const file of ["blog/index.html", "blog/voxelmorphism/index.html", "blog/hello/index.html", "404.html"]) {
       const html = fs.readFileSync(path.join(out, file), "utf8");
       assert.match(html, /<meta name="hello" content="1"><\/head>/, file);
-      assert.match(html, /<script src="\/hello\/hello\.js" data-on="[a-z-]+"><\/script><\/body>/, file);
+      assert.match(html, /<script src="\/blog\/hello\/hello\.js" data-on="[a-z-]+"><\/script><\/body>/, file);
     }
-    assert.match(fs.readFileSync(path.join(out, "sitemap.xml"), "utf8"), /\/hello\//);
+    assert.match(fs.readFileSync(path.join(out, "blog/sitemap.xml"), "utf8"), /\/blog\/hello\//);
+    // on the whole origin the same feature is at the top, and the home page carries it too
+    const whole = await run(root, { hello: true }, { site: { ...SITE, base: "/", flags: { hello: true } } });
+    assert.match(fs.readFileSync(path.join(whole, "hello/index.html"), "utf8"), /<h1>Hello<\/h1>/);
+    assert.match(fs.readFileSync(path.join(whole, "index.html"), "utf8"), /<script src="\/hello\/hello\.js" data-on="home"><\/script><\/body>/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -110,11 +115,11 @@ test("SITE_FLAGS turns a feature on in a dev build only", async () => {
 });
 
 test("a feature cannot replace a page through another spelling of its address", async () => {
-  for (const route of ["/blog//", "/nested/../blog/", "/Blog/"]) {
+  for (const route of ["/voxelmorphism//", "/nested/../voxelmorphism/", "/Voxelmorphism/"]) {
     const root = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: ${JSON.stringify(route)}, title: "Mine", html: "<h1>Mine</h1>", markdown: "# Mine\\n" }] };` });
     try {
-      // "/Blog/" only collides where the file system ignores case; elsewhere it is simply another page
-      const sensitive = route === "/Blog/" && !fs.existsSync(root.toUpperCase());
+      // "/Voxelmorphism/" only collides where the file system ignores case; elsewhere it is simply another page
+      const sensitive = route === "/Voxelmorphism/" && !fs.existsSync(root.toUpperCase());
       if (sensitive) continue;
       await assert.rejects(run(root, { grab: true }), (e) => e instanceof ContentError && /written twice|already exists/.test(e.message), route);
     } finally {
@@ -124,15 +129,19 @@ test("a feature cannot replace a page through another spelling of its address", 
 });
 
 test("a feature cannot replace a page or a file the site already has", async () => {
-  const page = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: "/blog/", title: "Mine", html: "", markdown: "" }] };` });
+  // a feature names its page in the site's own tree; mounted under /blog/, "/" there is the posts list
+  const page = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: "/", title: "Mine", html: "", markdown: "" }] };` });
+  const escape = fixture({ "features/grab/feature.mjs": `export default { pages: () => [{ path: "/../realm/", title: "Mine", html: "", markdown: "" }] };` });
   const file = fixture({ "features/grab/static/site.css": "nope" });
-  const made = fixture({ "features/grab/static/robots.txt": "nope" });
-  const twin = fixture({ "features/grab/static/blog.md": "nope" });
+  const made = fixture({ "features/grab/static/llms.txt": "nope" });
+  const twin = fixture({ "features/grab/static/tags.md": "nope" });
   try {
     await assert.rejects(run(page, { grab: true }), (e) => e instanceof ContentError && /already exists/.test(e.message));
+    await assert.rejects(run(escape, { grab: true }), (e) => e instanceof ContentError && /outside the site's \/blog\//.test(e.message));
     for (const root of [file, made, twin]) await assert.rejects(run(root, { grab: true }), (e) => e instanceof ContentError && /would replace a file/.test(e.message));
   } finally {
     fs.rmSync(made, { recursive: true, force: true });
+    fs.rmSync(escape, { recursive: true, force: true });
     fs.rmSync(twin, { recursive: true, force: true });
     fs.rmSync(page, { recursive: true, force: true });
     fs.rmSync(file, { recursive: true, force: true });

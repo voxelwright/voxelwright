@@ -15,8 +15,7 @@
     "cards": "node scripts/cards.mjs",
     "flag-proof": "node scripts/flag-proof.mjs",
     "check": "node scripts/check.mjs && node --test \"test/*.test.mjs\"",
-    "test": "node --test \"test/*.test.mjs\"",
-    "deploy": "npm run check && cf deploy"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "markdown-it": "15.0.3",

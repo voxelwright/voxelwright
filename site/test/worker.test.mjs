@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import worker, { prefersMarkdown } from "../src/worker.mjs";
-import { PAGE_ROUTE_PATTERNS, markdownTwin, matchesRunWorkerFirst } from "../lib/paths.mjs";
+import { PAGE_ROUTE_PATTERNS, markdownTwin, matchesRunWorkerFirst, normalizeBase, sitePath, blogPath, postPath, tagPath, mountHeaders } from "../lib/paths.mjs";
 import { build } from "../generator/build.mjs";
 import cloudflareConfig from "../cloudflare.config.ts";
 
@@ -27,18 +27,19 @@ function assets(files) {
   };
 }
 
+// the site as site.config.mjs mounts it, under /blog/
 const FILES = {
-  "/index.html": "<h1>Home</h1>",
-  "/index.md": "# Home",
+  "/blog/index.html": "<h1>Blog</h1>",
+  "/blog/index.md": "# Blog",
   "/blog/hello/index.html": "<h1>Hello</h1>",
   "/blog/hello.md": "# Hello",
-  "/tags/ai/index.html": "<h1>AI</h1>",
+  "/blog/tags/ai/index.html": "<h1>AI</h1>",
 };
 const get = (pathname, accept, method = "GET") =>
   new Request("https://example.com" + pathname, { method, headers: accept ? { Accept: accept } : {} });
 
 test("Accept: text/markdown gets the page's Markdown twin", async () => {
-  for (const [route, body] of [["/", "# Home"], ["/blog/hello/", "# Hello"]]) {
+  for (const [route, body] of [["/blog/", "# Blog"], ["/blog/hello/", "# Hello"]]) {
     const res = await worker.fetch(get(route, "text/markdown"), { ASSETS: assets(FILES) });
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("Content-Type"), "text/markdown; charset=utf-8");
@@ -70,28 +71,35 @@ test("a conditional request for Markdown gets a Markdown 304, not HTML", async (
     ASSETS: {
       async fetch(input) {
         const { pathname } = new URL(input.url);
-        if (pathname === "/index.md" && input.headers.get("If-None-Match") === '"md"') return new Response(null, { status: 304, headers: { ETag: '"md"' } });
-        return new Response("<h1>Home</h1>", { headers: { "Content-Type": "text/html; charset=utf-8", ETag: '"html"' } });
+        if (pathname === "/blog/index.md" && input.headers.get("If-None-Match") === '"md"') return new Response(null, { status: 304, headers: { ETag: '"md"' } });
+        return new Response("<h1>Blog</h1>", { headers: { "Content-Type": "text/html; charset=utf-8", ETag: '"html"' } });
       },
     },
   };
-  const req = new Request("https://example.com/", { headers: { Accept: "text/markdown", "If-None-Match": '"md"' } });
+  const req = new Request("https://example.com/blog/", { headers: { Accept: "text/markdown", "If-None-Match": '"md"' } });
   const res = await worker.fetch(req, env);
   assert.equal(res.status, 304);
   assert.equal(res.headers.get("Vary"), "Accept");
 });
 
 test("a page without a twin falls back to HTML", async () => {
-  const res = await worker.fetch(get("/tags/ai/", "text/markdown"), { ASSETS: assets(FILES) });
+  const res = await worker.fetch(get("/blog/tags/ai/", "text/markdown"), { ASSETS: assets(FILES) });
   assert.equal(res.headers.get("Content-Type"), "text/html; charset=utf-8");
   assert.match(res.headers.get("Vary"), /Accept/);
+});
+
+test("a page outside the base is not the site's: no twin is asked for", async () => {
+  const env = { ASSETS: assets({ "/index.html": "<h1>Realm</h1>" }) };
+  const res = await worker.fetch(get("/", "text/markdown"), env);
+  assert.equal(await res.text(), "<h1>Realm</h1>");
+  assert.deepEqual(env.ASSETS.calls, ["/"]);
 });
 
 test("non-page paths and non-GET methods pass straight to assets", async () => {
   const env = { ASSETS: assets(FILES) };
   const res = await worker.fetch(get("/blog/hello.md", "text/markdown"), env);
   assert.equal(res.headers.get("Vary"), null);
-  const post = await worker.fetch(get("/", "text/markdown", "POST"), env);
+  const post = await worker.fetch(get("/blog/", "text/markdown", "POST"), env);
   assert.equal(post.headers.get("Content-Type"), "text/html; charset=utf-8");
 });
 
@@ -102,9 +110,10 @@ test("runWorkerFirst matches every page route and no asset", async () => {
     const files = walk(out).map((f) => "/" + path.relative(out, f).split(path.sep).join("/"));
     const pages = files.filter((f) => f.endsWith("/index.html")).map((f) => f.slice(0, -"index.html".length));
     const assetsOnly = files.filter((f) => !f.endsWith("/index.html"));
-    for (const route of ["/", "/blog/", "/voxelmorphism/", "/tags/"]) {
+    assert.ok(!pages.includes("/"), "mounted under /blog/, the site builds no page at /");
+    for (const route of ["/blog/", "/blog/voxelmorphism/", "/blog/tags/", "/blog/kitchen-sink/"]) {
       assert.ok(pages.includes(route), `missing page ${route}`);
-      assert.ok(assetsOnly.includes(markdownTwin(route)), `missing Markdown twin for ${route}`);
+      assert.ok(assetsOnly.includes(markdownTwin(route, "/blog/")), `missing Markdown twin for ${route}`);
     }
     for (const p of pages) assert.ok(matchesRunWorkerFirst(p), `page ${p} must reach the Worker`);
     for (const f of assetsOnly) assert.ok(!matchesRunWorkerFirst(f), `asset ${f} must not reach the Worker`);
@@ -136,6 +145,28 @@ test("markdownTwin maps page routes only", () => {
   assert.equal(markdownTwin("/blog/"), "/blog.md");
   assert.equal(markdownTwin("/tags/ai/"), "/tags/ai.md");
   assert.equal(markdownTwin("/style.css"), null);
+  // mounted under /blog/: the base's own twin is index.md inside it; "/" is not the site's
+  assert.equal(markdownTwin("/blog/", "/blog/"), "/blog/index.md");
+  assert.equal(markdownTwin("/blog/hello/", "/blog/"), "/blog/hello.md");
+  assert.equal(markdownTwin("/blog/tags/ai/", "/blog/"), "/blog/tags/ai.md");
+  assert.equal(markdownTwin("/", "/blog/"), null);
+});
+
+test("the base path rule: the whole origin, or everything under the mount", () => {
+  for (const spelled of [undefined, "", "/", "//"]) assert.equal(normalizeBase(spelled), "/");
+  for (const spelled of ["blog", "/blog", "blog/", "/blog/"]) assert.equal(normalizeBase(spelled), "/blog/");
+  const table = {
+    "/": { site: "/site.css", tags: "/tags/", tag: "/tags/ai/", blog: "/blog/", post: "/blog/hello/" },
+    "/blog/": { site: "/blog/site.css", tags: "/blog/tags/", tag: "/blog/tags/ai/", blog: "/blog/", post: "/blog/hello/" },
+    "/notes/": { site: "/notes/site.css", tags: "/notes/tags/", tag: "/notes/tags/ai/", blog: "/notes/", post: "/notes/hello/" },
+  };
+  for (const [base, want] of Object.entries(table)) {
+    assert.deepEqual({ site: sitePath(base, "/site.css"), tags: sitePath(base, "/tags/"), tag: tagPath(base, "AI"), blog: blogPath(base), post: postPath(base, "hello") }, want, base);
+  }
+  assert.equal(
+    mountHeaders("# a comment\n/fonts/*\n  Cache-Control: max-age=1\n\n/vendor/x-*\n  ! ETag\n", "/blog/"),
+    "# a comment\n/blog/fonts/*\n  Cache-Control: max-age=1\n\n/blog/vendor/x-*\n  ! ETag\n",
+  );
 });
 
 function walk(dir) {

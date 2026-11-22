@@ -6,28 +6,30 @@
 // lists are its list groups and items, an article is its prose. static/site.css lays these out
 // and holds no colours or controls of its own; static/site.js starts the kit.
 import { escapeHtml as e } from "./markdown.mjs";
-import { markdownTwin, postPath, tagPath, slugify } from "../lib/paths.mjs";
+import { markdownTwin, postPath, tagPath, sitePath, blogPath, isMounted, HOME } from "../lib/paths.mjs";
 
+// in the site's own tree; sitePath puts it under the base
 export const KIT = "/vendor/village/kit";
 // The instrument every page is fitted as: the Signal Desk's walnut case and Ridgeline caps.
 // At night (the system's setting or the Lights key) the same case has its lights down.
 const FITTING = { shell: "walnut", caps: "field", profile: "high", rail: "steady" };
 
-const NAV = [
-  { href: "/blog/", label: "Blog" },
-  { href: "/voxelmorphism/", label: "Voxelmorphism" },
+const nav = (base) => [
+  { href: blogPath(base), label: "Blog", blog: true },
+  { href: sitePath(base, "/voxelmorphism/"), label: "Voxelmorphism" },
 ];
 
 function navbar(page, site) {
-  const links = NAV.map(({ href, label }) => {
+  const links = nav(site.base).map(({ href, label, blog }) => {
     let current;
     if (page.path === href) current = "page";
-    else if (href === "/blog/" && ["post", "tag", "tags"].includes(page.kind)) current = "true";
+    else if (blog && ["post", "tag", "tags"].includes(page.kind)) current = "true";
     return `<a href="${href}"${current ? ` aria-current="${current}"` : ""}>${label}</a>`;
   });
+  // the name goes home: the landing, or the app that owns "/" when the site is mounted below it
   return `<header class="vx-card vx-navbar-surface site-bar" data-vx-bolts="none">
 <div class="vx-navbar">
-<a class="vx-navbar-brand" href="/">${e(site.title)}</a>
+<a class="vx-navbar-brand" href="${HOME}">${e(site.title)}</a>
 <button class="vx-button vx-navbar-key" type="button" aria-expanded="false" aria-controls="site-links">Menu</button>
 <div class="vx-navbar-fold" id="site-links">
 <nav class="vx-nav" data-vx-mark="groove" aria-label="Site">${links.join("")}</nav>
@@ -40,8 +42,8 @@ function navbar(page, site) {
 function footer(page, site, twin) {
   const own = [
     twin && `<li><a href="${e(twin)}">This page as Markdown</a></li>`,
-    `<li><a href="/llms.txt">llms.txt</a></li>`,
-    `<li><a href="/feed.xml">Atom feed</a></li>`,
+    `<li><a href="${sitePath(site.base, "/llms.txt")}">llms.txt</a></li>`,
+    `<li><a href="${sitePath(site.base, "/feed.xml")}">Atom feed</a></li>`,
     `<li><a class="site-view" href="?view=2d" hidden>Plain page</a></li>`,
   ].filter(Boolean);
   const elsewhere = site.links?.length
@@ -54,7 +56,8 @@ ${elsewhere}
 }
 
 export function layout(page, site, { dev }) {
-  const twin = markdownTwin(page.path);
+  const at = (p) => sitePath(site.base, p);
+  const twin = markdownTwin(page.path, site.base);
   const canonical = site.origin + page.path;
   const home = page.kind === "home";
   const fitted = Object.entries(FITTING).map(([k, v]) => ` data-${k}="${v}"`).join("");
@@ -69,31 +72,31 @@ export function layout(page, site, { dev }) {
 ${shareMeta(page, site)}
 ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="alternate" type="text/markdown" href="${e(twin)}" title="This page as Markdown">` : ""}
-<link rel="alternate" type="application/atom+xml" href="/feed.xml" title="${e(site.title)}">
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="${KIT}/voxelmorphism.css">
-<link rel="stylesheet" href="/site.css">
-${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(href)}">`).join("\n")}
-${EARLY}${BETWEEN}${SPECULATION}</head>
+<link rel="alternate" type="application/atom+xml" href="${at("/feed.xml")}" title="${e(site.title)}">
+<link rel="icon" href="${at("/favicon.svg")}" type="image/svg+xml">
+<link rel="stylesheet" href="${at(KIT)}/voxelmorphism.css">
+<link rel="stylesheet" href="${at("/site.css")}">
+${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(at(href))}">`).join("\n")}
+${EARLY}${BETWEEN}${speculation(site.base)}</head>
 <body class="vx-page" data-page="${page.kind}"${page.script ? ' data-boot="page"' : ""}>
 ${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
 <div class="vx-page-column">
 ${navbar(page, site)}
 <main id="main" tabindex="-1">
-${home ? SUPPORT : ""}${page.html}
+${home ? support(site.base) : ""}${page.html}
 </main>
 ${footer(page, site, twin)}
 </div>
-<script type="module" src="${page.script ?? "/site.js"}"></script>
+<script type="module" src="${at(page.script ?? "/site.js")}"></script>
 ${dev ? DEV_RELOAD : ""}</body>
 </html>
 `;
 }
 
 // The support character lives on the home page, in the city and on the plain page alike.
-const SUPPORT = `<span id="support-dock" aria-hidden="true"></span>
+const support = (base) => `<span id="support-dock" aria-hidden="true"></span>
 <support-button version="instrument" dock="support-dock"></support-button>
-<script type="module" src="/support/support-button.js"></script>
+<script type="module" src="${sitePath(base, "/support/support-button.js")}"></script>
 `;
 
 // Before the first paint: the Night key's saved choice, and whether the page stays plain, so
@@ -131,17 +134,20 @@ export const CARD = { width: 1200, height: 630 };
 const HOME_CARD = "/og/home.png";
 const OWN_CARDS = { home: HOME_CARD, blog: "/og/blog.png", tags: "/og/tags.png", voxelmorphism: "/og/voxelmorphism.png" };
 
-/** The page's own card, or null when it shows the home card (tags, 404, features, draft posts). */
+/**
+ * The page's own card, or null when it shows the home card (tags, 404, features, draft posts).
+ * A path in the site's own tree (static/og/), the same wherever the site is mounted.
+ */
 export function shareCard(page) {
   // a draft's Markdown twin says so in its front matter (postPage)
-  if (page.kind === "post") return /^draft: true$/m.test(page.markdown) ? null : `/og${page.path.replace(/\/$/, "")}.png`;
+  if (page.kind === "post") return /^draft: true$/m.test(page.markdown) ? null : `/og/blog/${page.path.split("/").at(-2)}.png`;
   return OWN_CARDS[page.kind] ?? null;
 }
 
 /** Open Graph and Twitter tags, every URL absolute from site.origin. */
 export function shareMeta(page, site) {
   const own = shareCard(page);
-  const image = site.origin + (own ?? HOME_CARD);
+  const image = site.origin + sitePath(site.base, own ?? HOME_CARD);
   const title = page.kind === "home" ? site.title : page.title;
   const description = page.description || site.description;
   const alt = `A voxel model of San Francisco seen from Ina Coolbrith Park, with “${own ? title : site.title}” on the park sign`;
@@ -151,7 +157,7 @@ export function shareMeta(page, site) {
     ["og:title", title],
     ["og:description", description],
     // the 404 page answers at every missing address, so it names none
-    markdownTwin(page.path) && ["og:url", site.origin + page.path],
+    markdownTwin(page.path, site.base) && ["og:url", site.origin + page.path],
     ["og:image", image],
     ["og:image:type", "image/png"],
     ["og:image:width", CARD.width],
@@ -235,13 +241,14 @@ const BETWEEN = `<script>
 </script>
 `;
 
-// The next page, ready before the press. A page route the pointer rests on (or presses) is
-// prerendered: its kit waits for the page to be shown before it opens a GPU device (site.js).
-// The city ("/", and its plain address) is only prefetched: prerendered, it would open the GPU
-// and start its world in a background tab. Links with a query (?view=) change a saved choice when
-// pressed, so they are left to load as they are.
-const SPECULATION = `<script type="speculationrules">
-{"prerender":[{"where":{"and":[{"href_matches":"/*/"},{"not":{"selector_matches":"[href*='?'], [href^='#'], [download]"}}]},"eagerness":"moderate"}],
+// The next page, ready before the press. A page route of the site's own (under the base) the
+// pointer rests on (or presses) is prerendered: its kit waits for the page to be shown before it
+// opens a GPU device (site.js). The city ("/", and its plain address, or the app mounted there) is
+// only prefetched: prerendered, it would open the GPU and start its world in a background tab.
+// Links with a query (?view=) change a saved choice when pressed, so they are left to load as
+// they are.
+const speculation = (base) => `<script type="speculationrules">
+{"prerender":[{"where":{"and":[{"href_matches":${JSON.stringify(isMounted(base) ? [base, base + "*/"] : "/*/")}},{"not":{"selector_matches":"[href*='?'], [href^='#'], [download]"}}]},"eagerness":"moderate"}],
 "prefetch":[{"where":{"href_matches":"/"},"eagerness":"moderate"}]}
 </script>
 `;
@@ -263,6 +270,7 @@ function lettering(text, id) {
 }
 
 export function blogPage(site, posts) {
+  const at = (p) => sitePath(site.base, p);
   const markdown = `# Blog\n\n${postListMd(posts, site) || "I haven’t published a post here yet."}\n`;
   const lead = `<header class="page-head">
 ${lettering("Blog")}
@@ -270,30 +278,30 @@ ${lettering("Blog")}
 </header>`;
   if (!posts.length) {
     return {
-      path: "/blog/", kind: "blog", title: "Blog", description: `All posts on ${site.title}.`,
+      path: blogPath(site.base), kind: "blog", title: "Blog", description: `All posts on ${site.title}.`,
       html: `${lead}
 <div class="vx-empty" data-vx-align="start">
 <h2 class="vx-empty-title">Nothing published yet</h2>
 <p class="vx-empty-text">The first post is on its way. Follow the feed to hear when it lands.</p>
-<a class="vx-button" data-vx-kind="main" href="/feed.xml">Follow by Atom</a>
+<a class="vx-button" data-vx-kind="main" href="${at("/feed.xml")}">Follow by Atom</a>
 </div>`,
-      markdown: `# Blog\n\nI haven’t published a post here yet.\n\n[Follow new posts by Atom](${site.origin}/feed.xml)\n`,
+      markdown: `# Blog\n\nI haven’t published a post here yet.\n\n[Follow new posts by Atom](${site.origin}${at("/feed.xml")})\n`,
     };
   }
   const years = Map.groupBy(posts, (p) => p.date.slice(0, 4));
   const sections = [...years]
     .map(([year, list]) => `<section class="year" aria-labelledby="y${year}">
 <h2 class="year-title" id="y${year}">${year}</h2>
-${postListHtml(list)}
+${postListHtml(list, site.base)}
 </section>`)
     .join("\n");
   return {
-    path: "/blog/",
+    path: blogPath(site.base),
     kind: "blog",
     title: "Blog",
     description: `All posts on ${site.title}.`,
     html: `${lead}
-<p class="page-tools"><a href="/tags/">Browse by tag</a><a href="/feed.xml">Follow by Atom</a></p>
+<p class="page-tools"><a href="${at("/tags/")}">Browse by tag</a><a href="${at("/feed.xml")}">Follow by Atom</a></p>
 ${sections}`,
     markdown,
   };
@@ -302,7 +310,7 @@ ${sections}`,
 export function tagsPage(site, tags) {
   const list = [...tags.values()].sort((a, b) => a.name.localeCompare(b.name));
   return {
-    path: "/tags/",
+    path: sitePath(site.base, "/tags/"),
     kind: "tags",
     title: "Tags",
     description: `Topics on ${site.title}.`,
@@ -311,31 +319,31 @@ ${lettering("Tags")}
 <p class="page-lead">Every topic, with how many posts each holds.</p>
 </header>
 <ul class="vx-list-group post-list">
-${list.map((t) => `<li><a class="vx-item" href="${tagPath(t.name)}"><span class="vx-item-text"><span class="vx-item-title">${e(t.name)}</span></span><span class="vx-item-trail"><span class="vx-badge">${t.posts.length}<span class="vx-badge-aloud"> ${t.posts.length === 1 ? "post" : "posts"}</span></span></span></a></li>`).join("\n")}
+${list.map((t) => `<li><a class="vx-item" href="${tagPath(site.base, t.name)}"><span class="vx-item-text"><span class="vx-item-title">${e(t.name)}</span></span><span class="vx-item-trail"><span class="vx-badge">${t.posts.length}<span class="vx-badge-aloud"> ${t.posts.length === 1 ? "post" : "posts"}</span></span></span></a></li>`).join("\n")}
 </ul>`,
-    markdown: `# Tags\n\n${list.map((t) => `- [${t.name}](${site.origin}${markdownTwin(tagPath(t.name))}) (${t.posts.length})`).join("\n")}\n`,
+    markdown: `# Tags\n\n${list.map((t) => `- [${t.name}](${site.origin}${markdownTwin(tagPath(site.base, t.name), site.base)}) (${t.posts.length})`).join("\n")}\n`,
   };
 }
 
 export function tagPage(site, tag) {
   return {
-    path: tagPath(tag.name),
+    path: tagPath(site.base, tag.name),
     kind: "tag",
     title: `Tag: ${tag.name}`,
     description: `Posts tagged ${tag.name} on ${site.title}.`,
     html: `<header class="page-head">
-<p class="page-kicker"><a href="/tags/">Tags</a></p>
+<p class="page-kicker"><a href="${sitePath(site.base, "/tags/")}">Tags</a></p>
 ${lettering(tag.name)}
 <p class="page-lead">${tag.posts.length} ${tag.posts.length === 1 ? "post" : "posts"} tagged ${e(tag.name)}.</p>
 </header>
-${postListHtml(tag.posts)}`,
+${postListHtml(tag.posts, site.base)}`,
     markdown: `# Posts tagged ${tag.name}\n\n${postListMd(tag.posts, site)}\n`,
   };
 }
 
 export function postPage(site, post, rendered) {
   const minutes = Math.max(1, Math.round(post.body.trim().split(/\s+/).length / 220));
-  const tags = post.tags.map((t) => `<li><a href="${tagPath(t)}">${e(t)}</a></li>`).join("");
+  const tags = post.tags.map((t) => `<li><a href="${tagPath(site.base, t)}">${e(t)}</a></li>`).join("");
   const html = `<article class="post" aria-labelledby="post-title">
 <header class="post-head">
 <h1 class="post-title" id="post-title">${e(post.title)}</h1>
@@ -353,14 +361,14 @@ ${rendered.html}
     `date: ${post.date}`,
     `summary: ${JSON.stringify(post.summary)}`,
     `tags: [${post.tags.map((t) => JSON.stringify(t)).join(", ")}]`,
-    `url: ${site.origin}${postPath(post.slug)}`,
+    `url: ${site.origin}${postPath(site.base, post.slug)}`,
     `author: ${JSON.stringify(site.author)}`,
     ...(post.draft ? ["draft: true"] : []),
     "---",
   ].join("\n");
 
   return {
-    path: postPath(post.slug),
+    path: postPath(site.base, post.slug),
     kind: "post",
     title: post.title,
     description: post.summary,
@@ -374,6 +382,7 @@ ${rendered.html}
 // allowed, static/lost/fog.js drifts it on a 2D canvas and lets the pointer clear it. It is
 // served for every unknown address, at any depth, so every URL here is absolute.
 export function notFoundPage(site) {
+  const at = (p) => sitePath(site.base, p);
   return {
     path: "/404.html",
     kind: "not-found",
@@ -382,7 +391,7 @@ export function notFoundPage(site) {
     stylesheets: ["/lost/lost.css"],
     html: `<div class="lost">
 <div class="lost-scene" aria-hidden="true">
-<img class="lost-city" src="/landing/ina.webp" width="2018" height="864" alt="" fetchpriority="high">
+<img class="lost-city" src="${at("/landing/ina.webp")}" width="2018" height="864" alt="" fetchpriority="high">
 <div class="lost-banks"><i></i><i></i><i></i><i></i></div>
 <canvas class="lost-fog" hidden></canvas>
 <div class="lost-glow"></div>
@@ -392,30 +401,30 @@ export function notFoundPage(site) {
 <h1 class="lost-title" id="lost-title">Nothing here but fog</h1>
 <p class="lost-note">No page stands at <span class="lost-where">this address</span>. Either it was never built, or Karl the Fog has it.</p>
 <nav class="lost-ways" aria-label="Ways out">
-<a class="lost-home" href="/">Back to the city</a>
-<a href="/blog/">Blog</a>
-<a href="/voxelmorphism/">Voxelmorphism</a>
+<a class="lost-home" href="${HOME}">Back to the city</a>
+<a href="${blogPath(site.base)}">Blog</a>
+<a href="${at("/voxelmorphism/")}">Voxelmorphism</a>
 </nav>
 </section>
 </div>
-<script type="module" src="/lost/lost.js"></script>`,
+<script type="module" src="${at("/lost/lost.js")}"></script>`,
   };
 }
 
 // ---------------------------------------------------------------------------
 
-export function postListHtml(posts) {
+export function postListHtml(posts, base) {
   if (!posts.length) return "";
   return `<ul class="vx-list-group post-list">\n${posts
     .map(
       (p) =>
-        `<li><a class="vx-item" data-vx-size="large" href="${postPath(p.slug)}"><span class="vx-item-text"><span class="vx-item-title">${e(p.title)}</span>${p.summary ? `<span class="vx-item-line">${e(p.summary)}</span>` : ""}</span><span class="vx-item-trail">${p.draft ? `<span class="vx-badge">Draft</span>` : ""}<time datetime="${p.date}">${shortDate(p.date)}</time></span></a></li>`,
+        `<li><a class="vx-item" data-vx-size="large" href="${postPath(base, p.slug)}"><span class="vx-item-text"><span class="vx-item-title">${e(p.title)}</span>${p.summary ? `<span class="vx-item-line">${e(p.summary)}</span>` : ""}</span><span class="vx-item-trail">${p.draft ? `<span class="vx-badge">Draft</span>` : ""}<time datetime="${p.date}">${shortDate(p.date)}</time></span></a></li>`,
     )
     .join("\n")}\n</ul>`;
 }
 
 function postListMd(posts, site) {
-  return posts.map((p) => `- [${p.title}](${site.origin}${markdownTwin(postPath(p.slug))}) (${p.date})${p.summary ? `: ${p.summary}` : ""}`).join("\n");
+  return posts.map((p) => `- [${p.title}](${site.origin}${markdownTwin(postPath(site.base, p.slug), site.base)}) (${p.date})${p.summary ? `: ${p.summary}` : ""}`).join("\n");
 }
 
 export function formatDate(iso) {

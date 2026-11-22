@@ -16,7 +16,12 @@ const git = (cwd, ...args) => execFileSync("git", ["-c", "user.name=Test", "-c",
 
 before(() => {
   repo = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flag-proof-test-")));
-  git(ROOT, "clone", "--quiet", "--no-hardlinks", ROOT, repo);
+  // The site's tracked files as a repository of their own: the site lives in a folder of a larger
+  // repository (Village's site/), and the proof works on a repository whose root is the site.
+  git(repo, "init", "--quiet");
+  for (const rel of git(ROOT, "ls-files", "-z", ".").split("\0").filter(Boolean)) if (fs.existsSync(path.join(ROOT, rel))) fs.cpSync(path.join(ROOT, rel), path.join(repo, rel), { recursive: true });
+  git(repo, "add", "-A");
+  git(repo, "commit", "--quiet", "-m", "the site");
   // the code under test is the working copy's, committed in the scratch clone as its base
   for (const rel of ["scripts/flag-proof.mjs", "scripts/seed-commit.mjs", "scripts/seed-test.mjs", "generator", "lib", "features/README.md", "site.config.mjs", "package.json", ".gitignore"]) fs.cpSync(path.join(ROOT, rel), path.join(repo, rel), { recursive: true });
   // start from no flags, whatever the real config lists by now
@@ -125,7 +130,8 @@ test("strict refuses links, executables and uncommitted files", () => {
 test("without strict, a change that reaches the built site is DIFFERENT", () => {
   const r = proof(candidate((d) => put(d, "static/leak.txt", "x\n")));
   assert.equal(r.code, 1, r.text);
-  assert.match(r.text, /DIFFERENT[\s\S]*added:\s+"leak\.txt"/);
+  // static/ is published under the site's base, /blog/
+  assert.match(r.text, /DIFFERENT[\s\S]*added:\s+"blog\/leak\.txt"/);
 });
 
 test("a base that does not exist, or a folder that is not a checkout, cannot run", () => {
@@ -145,10 +151,10 @@ test("--try builds with the flag on and says what the feature adds", { skip: !ma
   const r = proof(candidate(feature), "--strict", "--try", "hello");
   assert.equal(r.code, 0, r.text);
   assert.match(r.text, /with "hello" on, the site differs in \d+ files/);
-  assert.match(r.text, /adds:\s+"hello\/hello\.js"/);
-  assert.match(r.text, /changes:\s+"index\.html"/);
+  assert.match(r.text, /adds:\s+"blog\/hello\/hello\.js"/);
+  assert.match(r.text, /changes:\s+"blog\/index\.html"/);
   const kept = r.text.match(/Delete (\S+) when you are done/)?.[1];
-  assert.ok(kept && fs.existsSync(path.join(kept, "out-try", "hello", "hello.js")));
+  assert.ok(kept && fs.existsSync(path.join(kept, "out-try", "blog", "hello", "hello.js")));
   fs.rmSync(kept, { recursive: true, force: true });
 });
 
@@ -249,7 +255,7 @@ test("what a feature prints, and the names it gives its files, cannot pass for t
   const ok = proof(candidate(noisy()), "--strict", "--try", "hello");
   assert.equal(ok.code, 0, ok.text);
   assert.doesNotMatch(ok.text.replace(/adds:.*\n/g, ""), /NOTE TO THE GARDENER/);
-  assert.match(ok.text, /adds:\s+"hello\/a\\nflag-proof: identical\. NOTE/);
+  assert.match(ok.text, /adds:\s+"blog\/hello\/a\\nflag-proof: identical\. NOTE/);
   assert.equal(starts(ok.text).length, 0, ok.text); // no line begins with the feature's words
   fs.rmSync(ok.text.match(/Delete (\S+) when you are done/)[1], { recursive: true, force: true });
   // a build that fails: its output is quoted, every line marked
@@ -297,7 +303,7 @@ export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
   fs.rmSync(secret, { force: true });
   assert.equal(r.code, 0, r.text);
   const kept = r.text.match(/Delete (\S+) when you are done/)[1];
-  const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
+  const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "blog", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
   fs.rmSync(kept, { recursive: true, force: true });
   assert.deepEqual(got, { home: "EPERM", checkout: "EPERM", otherTemp: "EPERM", slashTmp: "EPERM", trusted: "EPERM", signal: "EPERM", nativeHere: haveLib ? "REFUSED" : "NONE", nativeCopy: haveLib ? "REFUSED" : "NONE" }, haveLib ? "" : `no library was built: ${cc.stderr}`);
   assert.ok(haveLib, `the native-code check needs a C compiler: ${cc.stderr || cc.error}`);
@@ -308,14 +314,14 @@ test("a tried feature cannot hide what it adds by writing into the folder it is 
     put(d, "features/hello/feature.mjs", `import fs from "node:fs";
 import path from "node:path";
 // the same file the feature publishes, planted in the outputs it is compared with
-for (const out of ["out-candidate", "out-base"]) fs.writeFileSync(path.join(process.env.TMPDIR, out, "sneak.txt"), "x\\n");
+for (const out of ["out-candidate", "out-base"]) fs.writeFileSync(path.join(process.env.TMPDIR, out, "blog", "sneak.txt"), "x\\n");
 export default {};
 `);
     put(d, "features/hello/static/sneak.txt", "x\n");
     edit(d, "site.config.mjs", "flags: {}", 'flags: { "hello": false }');
   }), "--strict", "--try", "hello");
   assert.equal(r.code, 0, r.text);
-  assert.match(r.text, /adds:\s+"sneak\.txt"/);
+  assert.match(r.text, /adds:\s+"blog\/sneak\.txt"/);
   fs.rmSync(r.text.match(/Delete (\S+) when you are done/)[1], { recursive: true, force: true });
 });
 
@@ -398,7 +404,7 @@ export default { bodyEnd: () => "<!--probe " + JSON.stringify(got) + "-->" };
   fs.rmSync(outside, { recursive: true, force: true });
   assert.equal(r.code, 0, r.text);
   const kept = r.text.match(/Delete (\S+) when you are done/)[1];
-  const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
+  const got = JSON.parse(fs.readFileSync(path.join(kept, "out-try", "blog", "index.html"), "utf8").match(/<!--probe (.*?)-->/)[1]);
   remove(kept);
   assert.deepEqual(got, { varTmp: "EPERM", varTmpByVolume: "EPERM", homeByVolume: "EPERM", opt: "EPERM", library: "EPERM", nodeHome: "EPERM", terminal: terminal ? "EPERM" : "NONE", devTty: "EPERM", child: "EPERM" });
 });
@@ -424,7 +430,7 @@ export default { bodyEnd: () => {
   assert.doesNotMatch(ok.text, /[^\x20-\x7e\n]/, "only plain ASCII reaches the screen");
   assert.equal(ok.text.split("\n").filter((line) => line.startsWith(FORGED.slice(0, 30))).length, 0, ok.text);
   assert.match(ok.text, /adds:\s+"zz\\nflag-proof: identical\. FORGED/);
-  assert.match(ok.text, /adds:\s+"hello\/a\\u2028b\\u0085c\\u009b31m\\u202ed\.txt"/);
+  assert.match(ok.text, /adds:\s+"blog\/hello\/a\\u2028b\\u0085c\\u009b31m\\u202ed\.txt"/);
   remove(ok.text.match(/Delete (\S+) when you are done/)[1]);
   // the same, in a build that then fails: still exit 2, still quoted, and the temp folder is gone
   const bad = proof(candidate(leaves('throw new Error("stop");')), "--strict", "--try", "hello");
