@@ -19,8 +19,10 @@ export interface First {
   readonly engaged: boolean
   /** Shows the controls, as the visitor's own first move does. */
   engage(): void
-  /** Runs once when the visitor engages (at once if they have). */
-  onEngage(run: () => void): void
+  /** The first view again, from the realm, as the eye starts back to it: the controls hidden, what holds while it is up started again, the host told `back`. */
+  back(): void
+  /** What holds while the first view is up: started now (unless the visitor is in) and each time it comes back; what it returns is run as the visitor engages. */
+  during(start: () => () => void): void
   /** Whose data the place is made from, each said once: what the credits key opens. */
   credits(list: readonly string[]): void
 }
@@ -77,22 +79,33 @@ export function firstView(on: boolean): First {
   let kit: Kit | null = null
   if (new URLSearchParams(location.search).get('kit') !== 'plain') void import(kitAt).then((k: Kit) => { kit = k; k.adopt(root) }).catch(() => {})
 
-  const waiting: (() => void)[] = []
+  const starts: (() => () => void)[] = [], stops: (() => void)[] = []
   const engage = () => {
     if (engaged) return
     engaged = true
-    for (const run of waiting.splice(0)) run()
+    for (const stop of stops.splice(0)) stop()
     html.classList.remove('first')
     // The hardware builds itself as it comes (the kit's own assembling; still, where motion is not wanted).
     for (const el of document.querySelectorAll('#realm [data-vx-live]')) void kit?.live(el)?.play('assemble')
     tell('engaged')
+  }
+  const back = () => {
+    if (!engaged || !on) return
+    engaged = false
+    html.classList.add('first')
+    // (What the realm's controls put away while the picture held the pointer, play-hud.ts `away`, is not away here: in
+    // the first view nothing of theirs runs to bring it back, and the credits key would stay hidden.)
+    html.classList.remove('away')
+    for (const start of starts) stops.push(start())
+    tell('back')
   }
   // In a host's frame the keys are the host's until the frame has the focus: the realm is the page's picture, and takes it.
   if (on && embedded) window.focus()
   return {
     get engaged() { return engaged },
     engage,
-    onEngage(run) { if (engaged) run(); else waiting.push(run) },
+    back,
+    during(start) { starts.push(start); if (!engaged) stops.push(start()) },
     // (Said once each, however it was written: two releases name the same terrain with a capital and without.)
     credits(said) { list.replaceChildren(...said.filter((c, i) => said.findIndex((d) => d.toLowerCase() === c.toLowerCase()) === i).map((c) => Object.assign(document.createElement('li'), { textContent: c }))) },
   }

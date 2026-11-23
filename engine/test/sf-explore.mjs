@@ -147,6 +147,152 @@ const beside_ = async (all) => {
 const click = (page, phone, x, y) => (phone ? page.touchscreen.tap(x, y) : page.mouse.click(x, y))
 const until = (realm, what, ms = 60_000, arg = null) => realm.waitForFunction(what, arg, { timeout: ms }).then(() => true, () => false)
 
+/**
+ * There and back, then in again, then out again (page/explore.ts `back`), in the host's frame. In by the board, and back
+ * by the way back's own control (on a desk the backquote key, by touch Back to the view in the hour's panel), with a
+ * flight between: the first view is then as the page opened it (the eye, the boards a click opens, the controls hidden,
+ * the host told `back`, the banner kept in the picture, a picture like the one before). In again by the board, a cell
+ * of the roof broken, and out again by the panel's key (on a desk where motion is not wanted: no flight, the same
+ * eye): the cell is still broken. (The picture is compared on the first trip, where nothing was broken: a tile changed
+ * is drawn as its cells from then on, far.ts `edited`, and the city round 555 California is not the first picture's.)
+ */
+const thereAndBack = async (options, phone) => {
+  const size = `${options.viewport.width}x${options.viewport.height}`
+  console.log(`\nthere and back, then in again (${size})`)
+  const { context, page, realm } = await open(options, { hosted: true })
+  const told = () => page.evaluate(() => window.told.map((m) => m.type))
+  const press = (x, y) => click(page, phone, x, y)
+  /** The picture with nothing still to make, the banner held where it was in the first picture, and a screenshot of it. */
+  const settledShot = async (name, phase) => {
+    await realm.evaluate((phase) => { const e = globalThis.engine, p = e.boards.plane; e.scale = 0.75; if (p) p.hold = phase ?? p.phase }, phase)
+    await until(realm, () => { const e = globalThis.engine; return e.world.stats.wanted === 0 && e.world.stats.stale === 0 && e.far.whole }, 20_000)
+    await page.waitForTimeout(1200)
+    const png = await page.screenshot({ path: join(shots, `${name}-${size}.png`) })
+    return { png, phase: await realm.evaluate(() => globalThis.engine.boards.plane?.hold ?? null) }
+  }
+  /** What of the first view a pointer opens: over each board that leads somewhere, and EXPLORE, the picture's cursor is a hand. */
+  const clickable = async () => {
+    const out = []
+    for (const id of ['blog', 'x', 'linkedin', 'twitch', 'explore']) { const w = await realm.evaluate((id) => globalThis.engine.boards.where(id), id); if (!w) { out.push(`${id} unseen`); continue } await page.mouse.move(w.x, w.y); await page.waitForTimeout(60); if (!(await realm.evaluate(() => document.querySelector('canvas').style.cursor === 'pointer'))) out.push(id) }
+    await page.mouse.move(5, 5)
+    return out
+  }
+  /** The first view as the page has it: what is over the picture, who has the keys, and the body. */
+  const view = () => realm.evaluate(() => {
+    const e = globalThis.engine, seen = (s) => [...document.querySelectorAll(s)].some((el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+    return { first: document.documentElement.classList.contains('first'), engaged: e.first.engaged, state: e.explore.state, controls: ['#realm', '#hud', '#aim', '#where', '#over', '#realm .sky', '#realm .fold', '#realm .home'].filter(seen), credits: seen('#first .credits'), landing: e.input.live('landing'), locked: e.input.locked, on: e.me.on, called: e.boards.plane?.called ?? null, cue: e.eggs?.things?.words ?? null, cues: [...document.querySelectorAll('#cues p')].filter((p) => p.checkVisibility({ visibilityProperty: true, opacityProperty: true })).length }
+  })
+  /** Every frame from now until the first view is back: how far the eye is from where it was (m), and the way's state. */
+  const path = () => realm.evaluate(() => new Promise((done) => { const e = globalThis.engine, from = [e.pose.x, e.pose.y, e.pose.z], seen = []; const stop = e.watch(() => { seen.push([Math.hypot(e.pose.x - from[0], e.pose.y - from[1], e.pose.z - from[2]), e.explore.state]); if (e.explore.state === 'idle' && seen.length > 2) { stop(); done(seen) } }); setTimeout(() => { stop(); done(seen) }, 30_000) }))
+  /** In by the board, asked twice: whether the visitor stands on the roof. */
+  const enter = async () => {
+    let w = await at(realm)
+    await press(w.x, w.y); await page.waitForTimeout(900)
+    const armed = await realm.evaluate(() => globalThis.engine.explore.state)
+    w = await at(realm); await press(w.x, w.y)
+    const went = await until(realm, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 60_000)
+    await page.waitForTimeout(1500)
+    return armed === 'armed' && went
+  }
+  /** The panel's key, by touch or the pointer: the hour's panel opened, then Back to the view. What it says and how big it is. */
+  const panelKey = async () => {
+    const fold = await realm.evaluate(() => { const r = document.querySelector('#realm .fold').getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2] })
+    await press(...fold); await page.waitForTimeout(500)
+    const home = await realm.evaluate(() => { const b = document.querySelector('#realm .home'), r = b?.getBoundingClientRect(); return b && b.checkVisibility({ visibilityProperty: true, opacityProperty: true }) ? { at: [r.x + r.width / 2, r.y + r.height / 2], size: [Math.round(r.width), Math.round(r.height)], words: b.textContent.trim() } : null })
+    await page.screenshot({ path: join(shots, `back-panel-${size}.png`) })
+    if (home) await press(...home.at)
+    return home
+  }
+  const leave = async (how, meanwhile = null) => {
+    const watching = path(), t0 = Date.now()
+    const key = how === 'key' ? await page.keyboard.press('Backquote') : await panelKey()
+    await meanwhile?.()
+    const leaving = await realm.evaluate(() => globalThis.engine.explore.state)
+    const frames = await watching, took = (Date.now() - t0) / 1000
+    await page.waitForTimeout(1200)
+    const steps = frames.filter((f) => f[1] === 'leaving').map((f) => f[0])
+    const home = frames.at(-1)?.[0] ?? 0
+    return { key, leaving, took, between: steps.length, far: Math.max(0, ...steps), mid: frames.filter(([d]) => d > 30 && d < home - 30).length }
+  }
+  try {
+    const began = await eye(realm), first = await view(), before = await settledShot('back-before')
+    check(!first.engaged && first.state === 'idle' && first.landing, 'the first view as it opens: nobody in, the board idle, the first view\'s mode live')
+    await realm.evaluate(() => { globalThis.engine.boards.plane.hold = null })
+
+    // ── In, and back by the way back's own control ──
+    const went = await enter()
+    // (On a desk the picture is clicked first, as a visitor who looks round does: the pointer is the picture's when the key goes back.)
+    if (!phone) { await page.mouse.click(Math.round(options.viewport.width / 2), Math.round(options.viewport.height * 0.3)); await page.waitForTimeout(300) }
+    const lockedIn = !phone && (await realm.evaluate(() => globalThis.engine.input.locked))
+    const out = await leave(phone ? 'panel' : 'key')
+    if (phone) check(!!out.key && out.key.size[1] >= 44, `by touch the hour's panel has ${out.key ? `"${out.key.words}", ${out.key.size.join(' x ')} px` : 'no way back'}`)
+    check(went && out.leaving === 'leaving' && out.mid > 30 && out.far > 100 && out.took < 8, `in by the board, and ${phone ? 'Back to the view' : `the backquote key${lockedIn ? ', the pointer the picture\'s,' : ''}`} goes back: a flight, ${out.mid} of ${out.between} frames between the roof and the park, the eye up to ${Math.round(out.far)} m from the roof, ${round(out.took, 1)} s`)
+    const after = await eye(realm), back = await view(), words = await told()
+    check(same(after, began), `the eye is the first view's own: ${same(after, began) ? 'the same place, look and lens' : `at ${after.at.map((n) => round(n, 2))} looking ${round(after.yaw, 4)}, ${round(after.pitch, 4)} with ${round(after.fov, 2)} degrees, not ${began.at.map((n) => round(n, 2))} ${round(began.yaw, 4)}, ${round(began.pitch, 4)}, ${round(began.fov, 2)}`}`)
+    check(back.first && !back.engaged && back.state === 'idle' && !back.controls.length && back.credits && back.landing && !back.on && back.called && back.cue === null && !back.cues, `the first view again: the controls hidden${back.controls.length ? ` (but ${back.controls.join(', ')})` : ''}, no cue left (${back.cue ?? 'none offered'}, ${back.cues} seen), the credits key there, the first view's mode live: ${back.landing}, no body, the board idle (${back.state}), the banner kept in the picture: ${back.called}`)
+    check(words.filter((t) => t === 'engaged').length === 1 && words.filter((t) => t === 'back').length === 1 && words.lastIndexOf('back') > words.lastIndexOf('engaged'), `the host is told \`engaged\` then \`back\` (${words.join(', ')})`)
+    const shut = await clickable()
+    check(!shut.length, `the boards a pointer opens are open again: BLOG, X, LinkedIn, Twitch, EXPLORE${shut.length ? ` (not ${shut.join(', ')})` : ''}`)
+    const again1 = await settledShot('back-after', before.phase)
+    const apart = await realm.evaluate(async ([a, b]) => {
+      const load = async (s) => { const i = await createImageBitmap(await (await fetch(`data:image/png;base64,${s}`)).blob()), c = new OffscreenCanvas(i.width, i.height), g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data }
+      const p = await load(a), q = await load(b); let sum = 0, off = 0
+      for (let i = 0; i < p.length; i += 4) { const d = (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2])) / 3; sum += d; if (d > 32) off++ }
+      return { mean: Math.round((sum / (p.length / 4)) * 100) / 100, off: Math.round((10000 * off) / (p.length / 4)) / 100 }
+    }, [before.png.toString('base64'), again1.png.toString('base64')])
+    results[`back-${size}`] = { flight: { frames: out.between, seconds: round(out.took, 2), farM: Math.round(out.far) }, picture: apart }
+    check(apart.mean < 2 && apart.off < 1, `the picture is the first view's: ${apart.mean} of 255 apart on average, ${apart.off}% of its pixels more than 32 apart (people and cars walk on)`)
+    // A click on the sky is a click: no pointer is taken, nobody goes in.
+    await press(Math.round(options.viewport.width * 0.8), Math.round(options.viewport.height * 0.12)); await page.waitForTimeout(400)
+    const sky = await view()
+    check(!sky.locked && !sky.engaged && sky.state === 'idle' && (phone || lockedIn), `a ${phone ? 'tap' : 'click'} on the sky takes no pointer and brings nothing${phone ? '' : `, the pointer let go on the way back (it was ${lockedIn ? 'the picture\'s' : 'NOT the picture\'s'} when the key was pressed)`}`)
+
+    // ── In again, a cell broken, and out again by the panel's key ──
+    await realm.evaluate(() => { globalThis.engine.boards.plane.hold = null })
+    const again = await enter()
+    const inside = await realm.evaluate(() => ({ home: document.querySelectorAll('#realm .home').length, walks: document.querySelectorAll('#realm .walks').length, help: document.querySelectorAll('#realm .help').length, engaged: globalThis.engine.first.engaged, first: document.documentElement.classList.contains('first') }))
+    await page.screenshot({ path: join(shots, `back-again-${size}.png`) })
+    check(again && inside.engaged && !inside.first && (await told()).filter((t) => t === 'engaged').length === 2 && inside.home === 1 && inside.walks <= 1 && inside.help <= 1, `in again by the board: the controls back, the host told \`engaged\` again, and each of the realm's own keys once (Back to the view ${inside.home}, Fly ${inside.walks}, the card ${inside.help})`)
+    // A cell of the roof broken, two metres from the body.
+    const hole = await realm.evaluate(() => { const e = globalThis.engine, f = e.me.feet.at; for (const [dx, dz] of [[20, 0], [-20, 0], [0, 20], [0, -20]]) { const at = [Math.round(f[0] + dx), Math.round(f[1] - 1), Math.round(f[2] + dz)], was = e.kind(...at); if (was) { e.set(at, 3, 0); return { at, was } } } return null })
+    const broken = !!hole && (await until(realm, (at) => globalThis.engine.kind(...at) === 0, 5000, hole.at))
+    if (!phone) await page.emulateMedia({ reducedMotion: 'reduce' })
+    // (A phone is turned on its side on the way back: the first view it comes to is framed as a phone on its side has it, local.ts `upright`.)
+    const realmFile = JSON.parse(readFileSync(join(here, 'sf/realm.json'), 'utf8'))
+    const out2 = await leave('panel', phone ? async () => { await page.waitForTimeout(800); await page.setViewportSize({ width: options.viewport.height, height: options.viewport.width }) } : null)
+    const kept = broken && (await realm.evaluate((at) => globalThis.engine.kind(...at), hole.at)) === 0, back2 = await view(), eye2 = await eye(realm)
+    const wide = { at: began.at, yaw: realmFile.arrive.yaw, pitch: realmFile.arrive.pitch, fov: realmFile.fov }
+    check(broken && kept && back2.state === 'idle' && same(eye2, phone ? wide : began), `a cell of the roof broken (${hole ? `${hole.at.join(',')}, was ${hole.was}` : 'no solid cell beside the body'}), then out again by the panel's key${phone ? ', the phone turned on its side on the way' : ''}: the first view's eye${phone ? ` framed wide (${round(eye2.fov, 2)} degrees)` : ''}, and the cell still broken`)
+    if (phone) {
+      await page.setViewportSize(options.viewport); await page.waitForTimeout(1500)
+      const eye3 = await eye(realm)
+      check(same(eye3, began), `turned upright again in the first view, it is framed as an upright phone (${round(eye3.fov, 2)} degrees, as the page opened)`)
+    }
+    if (!phone) check(!!out2.key && out2.mid === 0 && out2.between > 0, `where motion is not wanted it goes back with no flight: the eye on the roof, then at the park (${out2.mid} of ${out2.between} frames between)`)
+    if (!phone) {
+      // A key on the way back cuts to the end as a key on the way in does: the picture fades into the first view, made.
+      await page.emulateMedia({ reducedMotion: 'no-preference' })
+      await enter()
+      await page.keyboard.press('Backquote'); await page.waitForTimeout(600)
+      // (Whether the still picture was ever laid over the page: the flight left alone would come home with none.)
+      const laid = realm.evaluate(() => new Promise((done) => { const t0 = performance.now(), look = () => { if (document.querySelector('#explore-still')) return done(true); if (performance.now() - t0 > 6000) return done(false); requestAnimationFrame(look) }; look() }))
+      await page.keyboard.press('KeyW')
+      const t0 = Date.now(), cut = (await until(realm, () => globalThis.engine.explore.state === 'idle', 12_000)) && (await laid), took = (Date.now() - t0) / 1000
+      await page.waitForTimeout(1200)
+      const made = await realm.evaluate(() => { const e = globalThis.engine; return { whole: e.world.stats.wanted === 0 && e.world.stats.stale === 0, still: !!document.querySelector('#explore-still') } })
+      check(cut && same(await eye(realm), began) && made.whole && !made.still, `a key on the way back cuts to the first view, the picture fading into it once the park is made (${cut}, ${round(took, 1)} s): the same eye, its world made (${made.whole}), the still picture gone (${!made.still})`)
+    }
+  } finally {
+    await context.close()
+  }
+}
+
+// `--only back`: that step alone, wide and on a phone.
+if (arg('only') === 'back') {
+  try { await thereAndBack(WIDE, false); await thereAndBack(PHONE, true); check(errors.length === 0, `no errors on any page${errors.length ? `: ${errors.slice(0, 3).join(' | ')}` : ''}`) } catch (e) { console.log(`  FAIL ${e.message.split('\n')[0]}`); failures.push(e.message.split('\n')[0]) } finally { await browser.close(); site.stop(); back() }
+  console.log(failures.length ? `\nsf-explore --only back: ${failures.length} failed\n${failures.map((f) => `  - ${f}`).join('\n')}` : '\nsf-explore --only back: passed')
+  process.exit(failures.length ? 1 : 0)
+}
 try {
   // ── The first view on an ordinary link, in the host's frame ──
   console.log(`\nthe first view (cold cache, ${mbit} Mbit/s, 40 ms)`)
@@ -532,6 +678,10 @@ try {
     check(!!still && still.spread > 20 && still.mean > 40, `the still picture that fades is the first view, not a blank: its light ${still?.mean} of 255, spread ${still?.spread} (20 or more)`)
     await context.close()
   }
+
+  // ── There and back, then in again: wide and on a phone ──
+  await thereAndBack(WIDE, false)
+  await thereAndBack(PHONE, true)
 
   // ── A phone opened on its side, then turned upright: framed as an upright phone is, the board in its picture ──
   console.log('\na phone turned upright')

@@ -22,6 +22,13 @@
 // this roof is for: a canopy, opened in the air, and flying. It goes when both have been done, or after a while.
 // The hour's panel, whose corner that is, is folded behind its key (realm-ui.ts).
 //
+// And back (`back`): Back to the view, a key in that panel, or the backquote key (under Esc, which the pointer's lock and
+// the eggs have). The eye leaves the body as it came to it, up and out behind its shoulder, and flies back to the first
+// view's eye, framed for how the phone is held now, its lens closing to the park's. There the body is put away and the
+// first view is as the page opens it (first.ts `back`): the controls hidden, a click on a board a click, the banner kept
+// in the picture, and the board able to take the visitor in again. The world is as they left it. Where motion is not
+// wanted there is no flight: the picture fades into the first view.
+//
 // Fetched once the park is shown (main.ts), so none of this is in the bytes before it.
 import type { Board, Boards } from './boards.ts'
 import type { First } from './first.ts'
@@ -59,19 +66,25 @@ export interface Needs {
   watch(each: (gap: number) => void): () => void
   /** The realm's controls (realm-ui.ts): their root, the kit once it has come, and the hour's panel folded behind its key. */
   ui: { root: HTMLElement; readonly kit: { adopt(root?: Element): void; refresh?(el: Element): void } | null; fold(on: boolean): void } | null
+  /** The first view's eye as the page opens it, framed for how the phone is held now: metres, radians, degrees. */
+  home(): { at: readonly number[]; yaw: number; pitch: number; fov: number }
+  /** Off whatever the visitor rides, on their feet beside it. */
+  alight(): void
 }
 
 export interface Explore {
-  /** Where it is: the first view, the board asked once, the flight, or in the realm. */
-  readonly state: 'idle' | 'armed' | 'going' | 'in'
+  /** Where it is: the first view, the board asked once, the flight, in the realm, or on the way back to the first view. */
+  readonly state: 'idle' | 'armed' | 'going' | 'in' | 'leaving'
   /** The board was asked: once arms it, again within a few seconds goes. */
   act(): void
   /** The first view was framed again (a phone turned): the eye as it is now is the one an ask leans from and goes back to. */
   reframed(): void
   /** As it was before it was asked. */
   disarm(): void
-  /** Goes, unasked: the host's word, which is meant. Resolves when the visitor stands on the roof. */
+  /** Goes, unasked: the host's word, which is meant. Resolves when the visitor stands on the roof (on the way back, once back). */
   go(): Promise<void>
+  /** Back to the first view, from the realm. Resolves when the first view is as the page opens it. */
+  back(): Promise<void>
   /** Where the visitor stands on the roof (cells) and which way they look (radians). */
   readonly stand: { x: number; z: number; yaw: number }
   /** For the checks: when it was armed, when the flight began, when what the roof needs had come and when the eye was the body's own (ms as `performance.now` has them, 0 until then), and whether the round was drawn out to wait. */
@@ -92,6 +105,8 @@ const STAND_OFF = 1
 
 /** How high the eyes are over the feet, cells (person.ts). */
 const EYES = 16.5
+/** The way back: how long the eye takes to go up and out behind the body, and the flight to the first view, s. */
+const BACK = { up: 1.1, fly: 2.6 }
 
 const STYLE = /* css */ `
 /* The line under the board: there in a sixth of a second, out of the board it hangs under (it grows a little from its top), and gone quicker than it came. Asked by a key, it is simply there. */
@@ -108,6 +123,9 @@ const STYLE = /* css */ `
 #realm .help p.done { opacity: 0.38; }
 #realm.open .help { display: none; }
 @media (pointer: coarse) { #realm .help { right: max(12px, env(safe-area-inset-right)); top: calc(max(12px, env(safe-area-inset-top)) + 56px); font-size: 13px; } }
+/* Back to the view: the first of the hour's panel's keys at its foot. Where they do not all fit across the panel the rest
+   go under it, each to the right as the foot has them (the panel is no wider for it). */
+#realm .sky .foot { flex-wrap: wrap; row-gap: calc(var(--vx) * 3); min-inline-size: 0; }
 @media (prefers-reduced-motion: reduce) { #explore-hint, #realm .help, #realm .help p { transition: none; scale: 1; translate: 0 0; } }
 `
 
@@ -149,7 +167,7 @@ export function explore(o: Needs): Explore {
     hint.style.transform = `translate(${Math.round(x - half)}px, ${Math.round(y)}px)`
   }
   const frame = (gap: number) => {
-    if (state === 'going' || state === 'in') return
+    if (state !== 'idle' && state !== 'armed') return
     const dt = Math.min(0.1, gap / 1000), on = state === 'armed' ? 1 : 0, quick = still.matches
     // The letters come up in a sixth of a second and go down in a quarter; the eye leans as a head does, and goes back slower.
     const was = lit
@@ -206,6 +224,35 @@ export function explore(o: Needs): Explore {
   }
 
   // ── Asked twice: the flight, the round, and the eye given to the body ──
+  /**
+   * Any key, any touch or click, the wheel, from a third of a second after `since`: to the end of a flight (`cut`), and
+   * that is all it does. The key is nobody else's (into the realm it would be the realm's first key: Backspace put the
+   * world back, Enter opened a line; out of it, a key of the first view), and the click that follows a press is no click
+   * on a board passed on the way. Heard from now; what it returns stops it.
+   */
+  const skipping = (since: number, cut: () => void) => {
+    const skip = (e: Event) => {
+      const key = e instanceof KeyboardEvent ? e : null
+      // (A key with Ctrl, Alt or the command key, and the keys along the top, are the browser's own: reload, the tools, full screen.)
+      if (key && (['Shift', 'Control', 'Alt', 'Meta'].includes(key.key) || key.ctrlKey || key.metaKey || key.altKey || /^F\d+$/.test(key.key))) return
+      key?.preventDefault()
+      e.stopImmediatePropagation()
+      if (e.type === 'pointerdown') o.hush()
+      // (A key still held from before, saying itself again, is no new key: the Enter that asked twice, held, cuts nothing.)
+      if (key?.repeat) return
+      if (performance.now() - since > 350) cut()
+    }
+    const types = ['keydown', 'pointerdown', 'wheel']
+    for (const type of types) addEventListener(type, skip, true)
+    return () => { for (const type of types) removeEventListener(type, skip, true) }
+  }
+  /** The picture as it stands, kept to lay over the page (`#explore-still`), not yet laid: see the flight's `fade`. */
+  const still_ = async () => {
+    const held = Object.assign(document.createElement('canvas'), { id: 'explore-still', width: o.canvas.width, height: o.canvas.height })
+    await new Promise<void>((done) => setTimeout(() => requestAnimationFrame(() => { try { held.getContext('2d')!.drawImage(o.canvas, 0, 0) } catch { /* a picture that cannot be kept: the cut is bare */ } done() }), 0))
+    return held
+  }
+  const unveil = (held: HTMLCanvasElement) => { held.style.opacity = '0'; setTimeout(() => held.remove(), 500) }
   /** The eye on the round: `a` its bearing from the body, `far` and `high` how far out and how high over the body's feet (cells), looking at the body's chest. */
   const feetAt = () => { const y = o.feet(Math.round(stand.x), Math.round(stand.z)); return Number.isFinite(y) && Math.abs(y - board.at[1]) < 400 ? y : board.at[1] }
   const round = (a: number, far: number, high: number, foot: number) => {
@@ -215,8 +262,8 @@ export function explore(o: Needs): Explore {
   /** How high whatever is under a place stands, cells: the roof or the ground there, and the sign itself, a little grown. */
   const box = boards.box(board.id)
   const under = (x: number, z: number) => Math.max(o.feet(Math.round(x), Math.round(z)), box && x > box[0] - 25 && x < box[3] + 25 && z > box[2] - 25 && z < box[5] + 25 ? box[4] : -Infinity)
-  let gone: Promise<void> | null = null
-  const go = (): Promise<void> => (gone ??= new Promise((done) => {
+  let gone: Promise<void> | null = null, leaving: Promise<void> | null = null
+  const go = (): Promise<void> => (leaving ? leaving.then(go) : (gone ??= new Promise((done) => {
     if (state === 'in') return done()
     clearTimeout(timer)
     hint.classList.remove('on')
@@ -275,7 +322,7 @@ export function explore(o: Needs): Explore {
       ended = true
       o.shot(null)
       o.focus(null)
-      for (const [type, each] of skips) removeEventListener(type, each, true)
+      skips()
       const eye = { ...pose }
       body()
       // (With no body the eye stays where the flight left it, behind where the body would stand.)
@@ -288,21 +335,7 @@ export function explore(o: Needs): Explore {
       shown()
       done()
     }
-    // Any key, any touch or click, the wheel: to the end, and that is all it does. The key is nobody else's (it would
-    // be the first key of the realm: Backspace put the world back, Enter opened a line), and the click that follows
-    // a press is no click on a board passed on the way.
-    const skip = (e: Event) => {
-      const key = e instanceof KeyboardEvent ? e : null
-      // (A key with Ctrl, Alt or the command key, and the keys along the top, are the browser's own: reload, the tools, full screen.)
-      if (key && (['Shift', 'Control', 'Alt', 'Meta'].includes(key.key) || key.ctrlKey || key.metaKey || key.altKey || /^F\d+$/.test(key.key))) return
-      key?.preventDefault()
-      e.stopImmediatePropagation()
-      if (e.type === 'pointerdown') o.hush()
-      // (A key still held from before, saying itself again, is no new key: the Enter that asked twice, held, cuts nothing.)
-      if (key?.repeat) return
-      if (performance.now() - times.went > 350) cut()
-    }
-    const skips: [string, (e: Event) => void][] = [['keydown', skip], ['pointerdown', skip], ['wheel', skip]]
+    const skips = skipping(times.went, () => cut())
     /** Cut to the end: at once if the roof is made, else the picture as it is fades into the roof when it has come. */
     const cut = () => { if (ended || fading) return; if (made()) end(); else void fade() }
     let fading = false, last = performance.now()
@@ -313,8 +346,7 @@ export function explore(o: Needs): Explore {
       // Taken in a frame, after the page has drawn it and before it is shown: once shown, the canvas holds nothing to
       // copy (a copy made from a click's own turn was blank, and the fade a bare cut). The timeout puts this frame's
       // ask after the page's own, which is made while the page draws.
-      const held = Object.assign(document.createElement('canvas'), { id: 'explore-still', width: o.canvas.width, height: o.canvas.height })
-      await new Promise<void>((done) => setTimeout(() => requestAnimationFrame(() => { try { held.getContext('2d')!.drawImage(o.canvas, 0, 0) } catch { /* a picture that cannot be kept: the cut is bare */ } done() }), 0))
+      const held = await still_()
       if (ended) return
       document.body.append(held)
       o.shot(null)
@@ -331,11 +363,9 @@ export function explore(o: Needs): Explore {
       while (!made() && performance.now() < until) await new Promise((r) => setTimeout(r, 100))
       end()
       await new Promise((r) => setTimeout(r, 250))
-      held.style.opacity = '0'
-      setTimeout(() => held.remove(), 500)
+      unveil(held)
     }
     // (Heard where there is no flight too: while the still picture waits for the roof, a click on a board in it opens nothing.)
-    for (const [type, each] of skips) addEventListener(type, each, true)
     if (still.matches) { void fade(); return }
     o.shot({
       // While the eye comes down it asks the body where its own eye would be, looking as it will look.
@@ -382,13 +412,127 @@ export function explore(o: Needs): Explore {
         if (u >= 1) end()
       },
     })
-  }))
+  })))
 
-  // ── In the realm: the card of what the roof is for, and a thumb's keys ──
+  // ── Back: from the body up and out, and home to the first view's eye ──
+  const back = (): Promise<void> => {
+    if (leaving) return leaving
+    if (state !== 'in') return Promise.resolve()
+    state = 'leaving'
+    return (leaving = new Promise<void>((done) => {
+      const home = o.home(), to: V3 = [home.at[0] * M, home.at[1] * M, home.at[2] * M]
+      const from = { at: [pose.x * M, pose.y * M, pose.z * M] as V3, yaw: pose.yaw, pitch: pose.pitch, fov: o.fov() }
+      // A line being written is put away as its Esc does (the ask bar's, the eggs'): its mode would stay over the first
+      // view's, and over the realm's keys on the next way in.
+      const line = document.activeElement
+      if (line instanceof HTMLInputElement || line instanceof HTMLTextAreaElement) { line.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true })); line.blur() }
+      // Off a ride first: its seat would have the eye and the keys under the first view's.
+      o.alight()
+      // The controls go at once, and a click is a click again (no pointer is taken): the first view's.
+      o.first.back()
+      if (document.pointerLockElement) document.exitPointerLock()
+      const set = (at: readonly number[], yaw: number, pitch: number) => Object.assign(pose, { x: at[0] / M, y: at[1] / M, z: at[2] / M, yaw, pitch })
+      // Up and out: behind the body as it faces, where the round came down from, high over it and looking at it.
+      const f = o.me.feet, foot = f ? f.at[1] : from.at[1] - EYES, body = f ? f.at : from.at
+      // (From the eye's own place behind it; in its head, or flying with no body, straight back from the look.)
+      const a = Math.hypot(from.at[0] - body[0], from.at[2] - body[2]) > 5 ? Math.atan2(from.at[0] - body[0], -(from.at[2] - body[2])) : from.yaw + Math.PI, far = ROUND.far[0] * M, high = ROUND.high[0] * M
+      const out = { at: [body[0] + Math.sin(a) * far, foot + high, body[2] - Math.cos(a) * far] as V3, yaw: a + Math.PI, pitch: Math.atan2(13 - high, far) }
+      // Then home, the forward flight's line the other way: on from where the round was, and in along the first view's look.
+      // (Over the roofs between: from the roof the park is lower, and a line straight down to it went along the tower's own wall.)
+      const long = Math.hypot(to[0] - out.at[0], to[1] - out.at[1], to[2] - out.at[2])
+      const ahead: V3 = [Math.sin(home.yaw) * Math.cos(home.pitch), Math.sin(home.pitch), -Math.cos(home.yaw) * Math.cos(home.pitch)], away: V3 = [Math.sin(a), 0, -Math.cos(a)]
+      const p1: V3 = [out.at[0] + away[0] * long * 0.12, out.at[1] + long * 0.15, out.at[2] + away[2] * long * 0.12]
+      const p2: V3 = [to[0] + ahead[0] * long * 0.3, to[1] + ahead[1] * long * 0.3 + long * 0.035, to[2] + ahead[2] * long * 0.3]
+      const bezier = (t: number): V3 => { const u = 1 - t; return [0, 1, 2].map((k) => u * u * u * out.at[k] + 3 * u * u * t * p1[k] + 3 * u * t * t * p2[k] + t * t * t * to[k]) as V3 }
+      let ended = false
+      /** Home: the first view as the page opens it. Keys and touches stay swallowed (`skips`) while a still picture is over it (`held`), until it is gone. */
+      const end = (held?: HTMLCanvasElement) => {
+        if (ended) return
+        ended = true
+        o.shot(null)
+        o.focus(null)
+        if (held) setTimeout(skips, 650); else skips()
+        // The body put away (its eye was the page's), and the eye where the first view has it.
+        if (o.me.on) o.me.walk(false)
+        o.me.standOff = 0
+        // (Framed for how the phone is held now: it may have been turned on the way.)
+        const now = o.home()
+        set(to, now.yaw, now.pitch)
+        o.setFov(now.fov)
+        lit = 0; lean = 0; rest = null
+        boards.light(board.id, 0)
+        Object.assign(times, { armed: 0, went: 0, loaded: 0, settled: 0, waited: 0 })
+        gone = null; leaving = null
+        state = 'idle'
+        done()
+      }
+      // The park's boxes are made from when the eye leaves the roof, so that the first view is whole when the eye is there
+      // (the far model draws the city passed on the way, as on the way in).
+      const focus = () => o.focus(to)
+      const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+      /** The picture as it is, laid over the page, and under it the eye home and the park made: where motion is not wanted, and for a key or a touch on the way. */
+      let fading = false
+      const fade = async () => {
+        if (fading || ended) return
+        fading = true
+        const held = await still_()
+        if (ended) return
+        document.body.append(held)
+        o.shot(null)
+        focus()
+        // (The body put away first: on its feet its eye is its own, and would be put back behind it every frame. A body
+        // just asked for, a ride left a moment ago, is let come first: one put away before it is made stays in the world.)
+        const t0 = performance.now()
+        while (o.me.on && !o.me.feet && performance.now() - t0 < 1500) await wait(100)
+        if (o.me.on) o.me.walk(false)
+        set(to, home.yaw, home.pitch)
+        o.setFov(home.fov)
+        // (As long as the way in waits for the roof's, and no longer: the boxes round the park are made again from nothing
+        // when the eye is cut home early. A click meanwhile is on the picture laid over the page, and does nothing.)
+        const until = performance.now() + ROUND.wait * 1000
+        await wait(300)
+        while (!o.whole() && performance.now() < until) await wait(100)
+        end(held)
+        await wait(150)
+        unveil(held)
+      }
+      const skips = skipping(performance.now(), () => void fade())
+      if (still.matches) { void fade(); return }
+      const since = performance.now()
+      o.shot({
+        after() {
+          const t = (performance.now() - since) / 1000
+          if (t < BACK.up) {
+            const u = smooth(t / BACK.up)
+            set(mix(from.at, out.at, u), from.yaw + turnTo(from.yaw, out.yaw) * u, from.pitch + (out.pitch - from.pitch) * u)
+            return
+          }
+          const u = Math.min(1, (t - BACK.up) / BACK.fly), s = smooth(u)
+          focus()
+          o.setFov(from.fov + (home.fov - from.fov) * smooth(u * 1.15))
+          set(bezier(s), out.yaw + turnTo(out.yaw, home.yaw) * smooth(u * 1.2), out.pitch + (home.pitch - out.pitch) * smooth(u * 1.2))
+          // (A body just asked for, a ride left as the way back began, is let come first, a second and a half at most: one put away before it is made stays in the world.)
+          if (u >= 1 && (!o.me.on || o.me.feet || t > BACK.up + BACK.fly + 1.5)) end()
+        },
+      })
+    }))
+  }
+  // The backquote key, under Esc, wherever the realm's own keys are heard (not on a line being written, nor in a vehicle or the wheel).
+  o.input.always('Backquote', (e) => { if (state !== 'in' || e.repeat || e.metaKey || e.ctrlKey || e.altKey || !o.input.live('moving')) return false; e.preventDefault(); void back(); return true })
+
+  // ── In the realm: the card of what the roof is for, a thumb's keys, and the way back ──
+  let furnished = false
   const shown = () => {
     const ui = o.ui
     if (!ui) return
     ui.fold(true)
+    // (Made once: in again, it is all where it was, and the card that said what the roof is for has said it.)
+    if (furnished) return
+    furnished = true
+    const leave = Object.assign(document.createElement('button'), { className: 'vx-button home', type: 'button', textContent: 'Back to the view', title: 'Back to the first view (`)' })
+    leave.setAttribute('aria-keyshortcuts', '`')
+    leave.addEventListener('click', () => void back())
+    ui.root.querySelector('.sky .foot')?.prepend(leave)
     const touch = matchMedia('(pointer: coarse)').matches
     const card = document.createElement('aside')
     card.className = 'vx-card help'
@@ -405,7 +549,7 @@ export function explore(o: Needs): Explore {
     up?.before(walks)
     // (On its feet that key is Space as a key pressed is, not only held: the body's own mode jumps and opens the canopy by it.)
     up?.addEventListener('pointerdown', () => { if (o.me.on) dispatchEvent(new KeyboardEvent('keydown', { code: 'Space' })) })
-    const adopt = () => { if (!ui.kit) return false; ui.kit.adopt(card); ui.kit.adopt(walks); return true }
+    const adopt = () => { if (!ui.kit) return false; ui.kit.adopt(card); ui.kit.adopt(walks); ui.kit.adopt(leave); return true }
     if (!adopt()) { const wait = setInterval(() => { if (adopt()) clearInterval(wait) }, 200) }
     requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('on')))
     const said = { up: '', walks: '' }, did = { chute: false, flies: false }
@@ -432,6 +576,7 @@ export function explore(o: Needs): Explore {
     reframed() { if (rest) rest = { at: [pose.x * M, pose.y * M, pose.z * M], yaw: pose.yaw, pitch: pose.pitch, fov: o.fov() } },
     disarm,
     go,
+    back,
     stand,
     times,
   }

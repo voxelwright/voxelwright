@@ -197,7 +197,7 @@ async function main() {
   controls.push({ name: 'moving', use: () => own.use(), key: (code) => { const act = own.keys.get(code); act?.(); return !!act }, wheel: (deltaY) => { speed = Math.max(1, Math.min(400, speed * (deltaY < 0 ? 1.25 : 0.8))); return true } })
   // A realm's first view is a still picture (first.ts): until the visitor is in the realm a mode lies over the page's
   // own that takes every key and leaves the pointer free. Nothing done by chance moves the eye.
-  if (first && !first.engaged) first.onEngage(controls.push({ name: 'landing', solid: true, still: true }))
+  first?.during(() => controls.push({ name: 'landing', solid: true, still: true }))
   // The way in (#450, explore.ts): where the world's boxes are made round in place of the eye (the roof a flight is on
   // its way to), and who places the eye after the page's own movers have.
   let ahead: readonly [number, number, number] | null = null
@@ -218,21 +218,26 @@ async function main() {
   explores = () => enter(true)
   // A phone turned while its first view is up is framed for how it is held now (local.ts `upright`): turned upright
   // after it opened wide, the board that leads in would be off its picture. Asked once, the ask leans from the new
-  // framing (explore.ts `reframed`); once the flight has begun the first view is over, and nothing is framed again.
+  // framing (explore.ts `reframed`); once the flight has begun the first view is over, and nothing is framed again
+  // until the way back comes to it (explore.ts `back`), framed for how the phone is held then.
   // (The banner's round stays the one it was given as the page opened: boards.ts chooses it once.)
-  if (first && !first.engaged && arrive && LOCAL?.upright && !query.has('look') && !query.has('fov')) {
-    const own = { yaw: LOCAL.arrive!.yaw, pitch: LOCAL.arrive!.pitch, fov: LOCAL.fov ?? fov }, tall = LOCAL.upright
-    let held = !!upright
-    addEventListener('resize', () => {
-      const now = innerHeight > innerWidth
-      // (Only while the eye is where it arrived: flown to a board, it looks at that board, however the phone is held.)
-      if (now === held || first.engaged || way?.state === 'going' || way?.state === 'in' || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) > 1) return
-      held = now
-      Object.assign(pose, { yaw: (now ? tall.yaw : undefined) ?? own.yaw, pitch: (now ? tall.pitch : undefined) ?? own.pitch })
-      fov = (now ? tall.fov : undefined) ?? own.fov
-      way?.reframed()
-    })
+  const opened = { at: [pose.x, pose.y, pose.z], yaw: pose.yaw, pitch: pose.pitch, fov }, reframes = !!(first && arrive && LOCAL?.upright && !query.has('look') && !query.has('fov'))
+  let tallNow = !!upright
+  /** The first view's eye as the page opens it, framed for how the phone is held now. */
+  const firstEye = () => {
+    if (!reframes) return opened
+    tallNow = innerHeight > innerWidth
+    const tall: { yaw?: number; pitch?: number; fov?: number } = tallNow ? LOCAL!.upright! : {}
+    return { at: opened.at, yaw: tall.yaw ?? LOCAL!.arrive!.yaw, pitch: tall.pitch ?? LOCAL!.arrive!.pitch, fov: tall.fov ?? LOCAL!.fov ?? opened.fov }
   }
+  if (reframes) addEventListener('resize', () => {
+    // (Only while the eye is where it arrived: flown to a board, it looks at that board, however the phone is held.)
+    if (innerHeight > innerWidth === tallNow || first!.engaged || (way && way.state !== 'idle' && way.state !== 'armed') || Math.hypot(pose.x * M - arrive!.at[0], pose.y * M - arrive!.at[1], pose.z * M - arrive!.at[2]!) > 1) return
+    const eye = firstEye()
+    Object.assign(pose, { yaw: eye.yaw, pitch: eye.pitch })
+    fov = eye.fov
+    way?.reframed()
+  })
   if (explored) enter(true)
   // A click that is to do nothing more than its press has done (explore.ts: the press that cut a flight short), stopped
   // before the boards or the picture hear it: the click of the press that was down then, however long it is held (it
@@ -1378,7 +1383,8 @@ async function main() {
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
   // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
   // the picture (boards.ts `call`), and after that it goes round as it will, unless an egg has something to say on it.
-  if (first && !first.engaged && signboards?.plane) { const plane = signboards.plane; plane.call(true); first.onEngage(() => plane.call(false)) }
+  const plane = signboards?.plane
+  if (first && plane) first.during(() => { plane.call(true); return () => plane.call(false) })
   // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
   if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); signboards?.plane?.begin(); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
   /**
@@ -1485,7 +1491,7 @@ async function main() {
       watchers.delete(hatch)
       if (first && leads && signboards && !first.engaged) void import('./explore.ts').then(({ explore }) => {
         way = explore({
-          board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi,
+          board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi, home: firstEye, alight: () => { if (alive.riding) alive.mount(null) },
           fov: () => fov, setFov: (v) => { fov = v },
           feet: (x, z) => core.feet_at(x, z),
           // Round the roof: this page's own core and the mover hold it, and the finest tiles the makers of sectors
