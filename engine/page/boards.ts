@@ -389,6 +389,13 @@ export interface Needs {
   /** A board that does something (`does`) was clicked or tapped, or its button pressed. False where there is nothing
    * left for it to do (EXPLORE with the visitor already in): a click on it is then any click on the picture. */
   does?(board: Board): boolean
+  /** The first view's eye as the page opens it, framed for how the phone is held now (main.ts `firstEye`): metres, radians, degrees. Where there is none, where the realm begins. */
+  home?(): { at: readonly number[]; yaw: number; pitch: number; fov: number }
+  /** The eye's angle from top to bottom, degrees, and setting it. */
+  fov?(): number
+  setFov?(degrees: number): void
+  /** The realm's own way back to the first view (explore.ts `back`), when the visitor is in it: true if it was taken. */
+  back?(): boolean
   /** The same for what stands at a point (finest cells, x and z): nearer in the far model's wedge. Infinity where there is no far model. */
   handover(x: number, z: number): number
   edit: boolean
@@ -884,9 +891,12 @@ export async function boards(o: Needs): Promise<Boards> {
     // seen from there, so that line is clear, while straight out from its face another roof may stand (one did, #450).
     const park = [o.began.x * M - sh.middle[0], o.began.y * M - sh.middle[1], o.began.z * M - sh.middle[2]], far = Math.hypot(park[0], park[1], park[2]) || 1
     const along = (park[0] * sh.normal[0] + park[2] * sh.normal[2]) / far > 0.3 ? park.map((v) => v / far) : sh.normal
-    const to = { x: (sh.middle[0] + along[0] * off) / M, y: (sh.middle[1] + along[1] * off) / M, z: (sh.middle[2] + along[2] * off) / M, yaw: Math.atan2(-along[0], along[2]), pitch: -Math.asin(along[1]) }
-    const from = { ...o.pose }, mine = ++flight, began = performance.now(), ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2200
     o.aloft()
+    return flyTo({ x: (sh.middle[0] + along[0] * off) / M, y: (sh.middle[1] + along[1] * off) / M, z: (sh.middle[2] + along[2] * off) / M, yaw: Math.atan2(-along[0], along[2]), pitch: -Math.asin(along[1]) })
+  }
+  /** Flies the eye to a pose (metres, radians), its lens going to `fov` on the way where one is given. Resolves false if another flight took over. */
+  const flyTo = (to: { x: number; y: number; z: number; yaw: number; pitch: number }, fov?: { from: number; to: number }): Promise<boolean> => {
+    const from = { ...o.pose }, mine = ++flight, began = performance.now(), ms = matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 2200
     let turn = (to.yaw - from.yaw) % (2 * Math.PI)
     if (turn > Math.PI) turn -= 2 * Math.PI
     if (turn < -Math.PI) turn += 2 * Math.PI
@@ -895,6 +905,7 @@ export async function boards(o: Needs): Promise<Boards> {
         if (mine !== flight) return done(false)
         const t = ms ? Math.min(1, (performance.now() - began) / ms) : 1, e = t * t * (3 - 2 * t)
         Object.assign(o.pose, { x: from.x + (to.x - from.x) * e, y: from.y + (to.y - from.y) * e, z: from.z + (to.z - from.z) * e, yaw: from.yaw + turn * e, pitch: from.pitch + (to.pitch - from.pitch) * e })
+        if (fov) o.setFov?.(fov.from + (fov.to - fov.from) * e)
         if (t < 1) requestAnimationFrame(step); else done(true)
       }
       step()
@@ -904,11 +915,28 @@ export async function boards(o: Needs): Promise<Boards> {
     const b = stood.get(id)?.b
     if (!b?.to) return false
     tell('navigate', { board: b.id, name: b.name, to: b.to })
-    // Run as a page of its own, the realm is the one that goes.
-    if (!embedded && !o.edit) location.assign(new URL(b.to, location.href))
+    // Run as a page of its own, the realm is the one that goes; to another site (a logo's network) it does not go at
+    // all: the visitor is asked, and that site opens in a tab of its own (`leaving`).
+    const to = new URL(b.to, location.href)
+    if (embedded || o.edit) return true
+    if (to.origin === location.origin) location.assign(to); else leaving.ask(b, to)
     return true
   }
-  const visit = async (id: string) => { if (await fly(id)) open(id) }
+  const visit = async (id: string) => { leaving.close(); if (await fly(id)) open(id) }
+
+  // ── Before another site: the card that opens it in a new tab or flies back to the view (leaving.ts, fetched when first wanted) ──
+  let card: Promise<import('./leaving.ts').Leaving> | null = null
+  const leaving = {
+    ask(b: Board, to: URL) {
+      card ??= import('./leaving.ts').then(({ leaving }) => leaving(() => {
+        if (o.back?.()) return
+        const h = o.home?.() ?? { at: [o.began.x, o.began.y, o.began.z], yaw: o.began.yaw, pitch: o.began.pitch, fov: NaN }
+        void flyTo({ x: h.at[0], y: h.at[1], z: h.at[2], yaw: h.yaw, pitch: h.pitch }, Number.isFinite(h.fov) && o.fov ? { from: o.fov(), to: h.fov } : undefined)
+      }))
+      void card.then((c) => c.ask(b.name, b.id, to))
+    },
+    close() { void card?.then((c) => c.close()) },
+  }
 
   // A click or tap on a board while the pointer is free: before the picture takes the pointer for itself (input.ts).
   addEventListener('click', (e) => {

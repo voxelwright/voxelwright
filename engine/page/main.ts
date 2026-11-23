@@ -1398,6 +1398,8 @@ async function main() {
     pose, began, view, canvas, input: controls, hud: over, day: () => march.day, dull: () => Math.max(march.rain, march.cloud, 0.2 * march.fog), faced: () => farModel.depth, pick: () => march.pick(view()),
     aloft: () => { if (me.on) me.walk(false) }, edit: query.get('boards') === 'edit',
     does: (b) => { if (b.does !== 'explore' || !first || first.engaged) return false; enter(false); return true },
+    home: firstEye, fov: () => fov, setFov: (v) => { fov = v },
+    back: () => { if (way?.state !== 'in') return false; void way.back(); return true },
   }).catch((e: unknown) => { console.warn(`no billboards: ${e instanceof Error ? e.message : String(e)}`); return null }) : null
   Object.assign((globalThis as unknown as { engine: object }).engine, { boards: signboards, first })
   // The first view is the picture with the site's name on the banner: until the visitor engages its plane is kept in
