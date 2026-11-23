@@ -1,9 +1,13 @@
-// The controls in play kept off the body (#450, page/play-hud.ts): every way of having them (`?hud=`), at 1280 x 720
-// and on an upright phone of 390 x 844 with an iPhone's safe area (59 px at the top, 34 at the bottom, set through
-// Chrome's own override so `env()` is what a phone has). Chrome with WebGPU; one GPU is shared, so it waits its turn.
+// The controls in play kept off the body (#450, page/play-hud.ts): every way of having them (`?hud=`), at 1280 x 720,
+// on an upright phone of 390 x 844 and on one on its side (844 x 390), each with an iPhone's safe area (59 px at the top
+// and 34 at the bottom upright; 59 at each side and 21 at the bottom on its side), set through Chrome's own override so
+// `env()` is what a phone has. Chrome with WebGPU; one GPU is shared, so it waits its turn.
 //
-//   node test/sf-hud.mjs [--no-build] [--dist dist-sf] [--modes default,wheel,context,quiet] [--sizes wide,phone]
-//                        [--shots ~/.village/engine/sf/hud] [--reduced]
+//   node test/sf-hud.mjs [--no-build] [--dist dist-sf] [--modes default,context,quiet,classic] [--sizes wide,phone,side]
+//                        [--shots ~/.village/engine/sf/hud-default] [--reduced]
+//
+// `default` is the page with no switch, which has the wheel; `wheel` is the same asked for by name. `classic` is the
+// realm's controls as they were before the wheel (`?hud=classic`).
 //
 // For each, it goes onto the roof (the host's `explore`) and takes a picture standing, choosing a tool, falling, under
 // the canopy and, on a phone, with a thumb down on the body and in the corner. At each it measures:
@@ -11,7 +15,10 @@
 //     over it), and every element of the page that is seen over the picture: the kit's own canvases too, which draw a
 //     key's solid past its box. None may meet the body's box.
 //   - on a phone, none may reach into the safe area.
-// The realm's own controls (`default`) are measured and said, not failed: they are what the owner asked to change.
+// By touch it also fails where a thumb's key is larger than the touch guidance asks (game-hud rule 16), where the tools
+// chosen from do not hang tidily from the tool's key (one column upright) or show the tool twice, and where the body is
+// so placed that the stick has no room where the left thumb rests.
+// The realm's old controls (`classic`) are measured and said, not failed: they are what the owner asked to change.
 // A picture with the boxes drawn on (red the body, green what is over the picture) is kept beside each, in `boxes/`.
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -21,9 +28,10 @@ import { chromium } from 'playwright'
 import { arg, CHROME, has, here, turn } from './kit.mjs'
 import { plain } from '../player/serve.mjs'
 
-const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'hud'))
-const modes = arg('modes', 'default,wheel,context,quiet').split(','), sizes = arg('sizes', 'wide,phone').split(',')
-const SAFE = { top: 59, bottom: 34, left: 0, right: 0 }
+const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'hud-default'))
+const modes = arg('modes', 'default,context,quiet,classic').split(','), sizes = arg('sizes', 'wide,phone,side').split(',')
+const SAFES = { wide: { top: 0, bottom: 0, left: 0, right: 0 }, phone: { top: 59, bottom: 34, left: 0, right: 0 }, side: { top: 0, bottom: 21, left: 59, right: 59 } }
+const NAMED = { wide: '1280x720', phone: '390x844', side: '844x390' }
 const failures = [], said = []
 const check = (ok, what, gate = true) => { console.log(`  ${ok ? 'ok  ' : gate ? 'FAIL' : 'was '} ${what}`); if (!ok && gate) failures.push(what); if (!ok && !gate) said.push(what) }
 if (!has('no-build')) {
@@ -37,7 +45,7 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => {
 const browser = await chromium.launch({ ...CHROME, headless: !has('headed') })
 // (`--reduced`: the same where less motion is wanted, and the pictures named so.)
 const reduced = has('reduced'), less = reduced ? { reducedMotion: 'reduce' } : {}
-const SIZES = { wide: { viewport: { width: 1280, height: 720 }, ...less }, phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, ...less } }
+const SIZES = { wide: { viewport: { width: 1280, height: 720 }, ...less }, phone: { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, ...less }, side: { viewport: { width: 844, height: 390 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, ...less } }
 const until = (page, what, ms = 60_000) => page.waitForFunction(what, null, { timeout: ms }).then(() => true, () => false)
 
 /** The body's box and every box over the picture that meets it or the safe area (CSS px). */
@@ -70,7 +78,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their solids: a cue on a key, a key on a key.
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, live = el.hasAttribute('data-vx-live'), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #first .credits, #realm .wheel .slot, [data-panel="wand-take"] button, #where')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #first .credits, #realm .wheel .slot, [data-panel="wand-take"] button, #where')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -92,7 +100,8 @@ const drawn = async (page, m, file) => {
 const results = {}
 try {
   for (const size of sizes) {
-    const phone = size === 'phone', safe = phone ? SAFE : { top: 0, bottom: 0, left: 0, right: 0 }
+    // (`phone`: by touch, upright or on its side.)
+    const phone = size !== 'wide', upright = size === 'phone', safe = SAFES[size], { width: vw, height: vh } = SIZES[size].viewport
     const context = await browser.newContext(SIZES[size])
     for (const mode of modes) {
       console.log(`\n${mode} at ${size}`)
@@ -102,19 +111,22 @@ try {
       const cdp = await context.newCDPSession(page)
       if (phone) await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: safe })
       await page.goto(`${site.url}/sf/index.html${mode === 'default' ? '' : `?hud=${mode}`}`)
+      // (The page with no switch has the wheel.)
+      const wheel = mode === 'default' || mode === 'wheel'
       await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.explore && globalThis.engine.playHud, null, { timeout: 300_000 })
       await page.evaluate(() => { globalThis.engine.scale = 0.75; void globalThis.engine.explore.go() })
       const inside = await until(page, () => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, 90_000)
       check(inside, 'on the roof, the eye behind the body')
-      const gate = mode !== 'default', at = {}
-      const look = async (name, what) => {
-        const file = join(shots, `${mode}${reduced ? '-less' : ''}-${name}-${size === 'wide' ? '1280x720' : '390x844'}.png`)
+      const gate = mode !== 'classic', at = {}
+      // (`menu`: the Sky panel open is a menu, which the game-hud rules leave out: what is under it is said, not failed.)
+      const look = async (name, what, menu = false) => {
+        const file = join(shots, `${mode}${reduced ? '-less' : ''}-${name}-${NAMED[size]}.png`)
         await page.screenshot({ path: file })
         const m = await measure(page, safe)
         at[name] = { body: m.body && Object.fromEntries(Object.entries(m.body).map(([k, v]) => [k, Math.round(v)])), over: m.over.map((s) => s.id), unsafe: m.unsafe.map((s) => s.id), state: m.state }
-        await drawn(page, m, join(shots, 'boxes', `${mode}${reduced ? '-less' : ''}-${name}-${size === 'wide' ? '1280x720' : '390x844'}.png`))
+        await drawn(page, m, join(shots, 'boxes', `${mode}${reduced ? '-less' : ''}-${name}-${NAMED[size]}.png`))
         check(!!m.body, `${name}: the body is seen (${what})`, gate)
-        check(m.body && m.over.length === 0, `${name}: nothing over the body${m.over.length ? `: ${[...new Set(m.over.map((s) => s.path || s.id))].join(', ')}` : ''} (${m.seen} things over the picture)`, gate)
+        check(m.body && m.over.length === 0, `${name}: nothing over the body${m.over.length ? `: ${[...new Set(m.over.map((s) => s.path || s.id))].join(', ')}` : ''} (${m.seen} things over the picture)`, gate && !menu)
         check(m.clash.length === 0, `${name}: no control on another${m.clash.length ? `: ${m.clash.join(', ')}` : ''}`, gate)
         if (phone) check(m.unsafe.length === 0, `${name}: nothing in the safe area${m.unsafe.length ? `: ${[...new Set(m.unsafe.map((s) => s.path || s.id))].join(', ')}` : ''}`, gate)
       }
@@ -124,38 +136,67 @@ try {
       await look('stand', 'standing on the roof')
       // That the controls are there, where each way has them: a control missing meets nothing, and the measures above would pass.
       const seen = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { on: el.checkVisibility({ visibilityProperty: true, opacityProperty: true }), left: r.left, right: r.right, top: r.top, bottom: r.bottom, wide: r.width, tall: r.height } }, sel)
-      if (mode !== 'default') {
+      if (mode !== 'classic') {
         const keyOf = await seen(phone ? '#realm .toolkey' : '#realm .held'), bank = await seen('#realm .tools')
-        if (phone || mode === 'wheel') check(!!keyOf?.on, `the tool's key is shown (${phone ? 'at the top' : 'in the corner'})`)
+        if (phone || wheel) check(!!keyOf?.on, `the tool's key is shown (${phone ? 'at the top' : 'in the corner'})`)
         if (!phone && mode === 'context') check(!!bank?.on && bank.tall > bank.wide && bank.right > 1280 - 40, 'the tools stand in a column at the right edge')
         // (The wheel has no bank; quiet's is put away only while the picture holds the pointer, which a check cannot take.)
-        if (!phone && mode === 'wheel') check(!bank?.on, 'the tools\' bank is put away')
-        if (phone) check(!!(await seen('#realm .act .use'))?.on && (await seen('#realm .act .use')).right > 390 - 40, 'Use is in the right corner')
+        if (!phone && wheel) check(!bank?.on, 'the tools\' bank is put away')
+        if (phone) check(!!(await seen('#realm .act .use'))?.on && (await seen('#realm .act .use')).right > vw - safe.right - 40, 'Use is in the right corner')
+        // By touch, the keys are sized by the touch guidance (game-hud rule 16): 44 px a side or more to hit, and no larger
+        // than a key needs (Use 64, the others 48 tall). Main's wheel had Use at 84 and Jump and Fly at 76 by 52.
+        if (phone) {
+          const sized = await page.evaluate(() => Object.fromEntries(Object.entries({ use: '#realm .act .use', up: '#realm .act .up', walks: '#realm .act .walks', tool: '#realm .toolkey', sky: '#realm .fold', credits: '#first .credits', wand: '[data-panel="wand-take"] button', back: '#realm .home-key' }).map(([k, sel]) => { const el = document.querySelector(sel), r = el?.getBoundingClientRect(); return [k, r && el.checkVisibility() ? [Math.round(r.width), Math.round(r.height)] : null] })))
+          const most = { use: [64, 64], up: [72, 48], walks: [72, 48], tool: [120, 48], sky: [80, 48], credits: [120, 48], wand: [120, 48], back: [120, 48] }
+          const wrong = Object.entries(sized).filter(([k, b]) => b && (b[0] < 44 || b[1] < 44 || b[0] > most[k][0] || b[1] > most[k][1])).map(([k]) => k)
+          check(wrong.length === 0 && !!sized.use && !!sized.up && !!sized.walks, `the keys are 44 px a side or more and no larger than they need${wrong.length ? `: not ${wrong.join(', ')}` : ''} (${Object.entries(sized).filter(([, b]) => b).map(([k, b]) => `${k} ${b.join('x')}`).join(', ')})`)
+        }
+        // The wand: with the wheel it is chosen among the tools and has no key of its own; else its key is a key of the kit
+        // as the others are (main's was a dark pill of its own).
+        const wandKey = await page.evaluate(() => { const el = document.querySelector('[data-panel="wand-take"] button'); return el && { kit: el.classList.contains('vx-button') && el.hasAttribute('data-vx-live'), shown: el.checkVisibility(), words: el.textContent.trim() } })
+        if (wheel) check(!!wandKey && !wandKey.shown, `with the wheel the wand has no key of its own (${JSON.stringify(wandKey)})`)
+        else check(!!wandKey?.kit, `the wand's key is a key of the kit (${JSON.stringify(wandKey)})`)
+        // The cue to fly stands beside the body, shown (it is hidden where it finds no room off the body).
+        const cueShown = await page.evaluate(() => { const c = document.querySelector('#realm .cue[data-cue="fly"]'); return !!c?.classList.contains('on') && c.checkVisibility({ visibilityProperty: true }) })
+        check(cueShown, 'the cue to fly is shown beside the body')
       }
       // Choosing a tool: E (by touch the tool's key) as a person would; the default has its bank.
-      if (mode !== 'default') {
+      if (mode !== 'classic') {
         const before = await page.evaluate(() => globalThis.engine.tool)
         if (phone) {
           const k = await page.evaluate(() => { const r = document.querySelector('#realm .toolkey')?.getBoundingClientRect(); return r && [r.left + r.width / 2, r.top + r.height / 2] })
           check(!!k, 'the tool\'s key is there to press')
           if (k) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: k[0], y: k[1] }] }); await page.waitForTimeout(350) }
           await look('choose', 'the tool\'s key down')
+          // The tools hang tidily from the tool's key: one column held upright, a grid on its side, and the held tool said once
+          // (main's showed the key over the column, and its seventh tool alone in a second column).
+          if (wheel) {
+            const hung = await page.evaluate(() => {
+              const tool = globalThis.engine.tool, seen = (el) => el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+              const slots = [...document.querySelectorAll('#realm .wheel .slot')].filter(seen).map((el) => { const r = el.getBoundingClientRect(); return { left: Math.round(r.left), top: Math.round(r.top), bottom: Math.round(r.bottom) } })
+              return { slots, twice: [...document.querySelectorAll('#realm .act .toolkey, #realm .held')].filter((el) => seen(el) && el.textContent.includes(tool)).length }
+            })
+            const lefts = new Set(hung.slots.map((b) => b.left)), tops = new Set(hung.slots.map((b) => b.top)), cells = new Set(hung.slots.map((b) => `${b.left},${b.top}`))
+            check(hung.twice === 0, `the held tool is said once while the tools are open (${hung.twice} keys besides the column say it)`)
+            if (upright) check(lefts.size === 1 && hung.slots.every((b, i) => i === 0 || b.top >= hung.slots[i - 1].bottom), `upright, the tools hang in one column (${lefts.size} left edges)`)
+            else check(cells.size === hung.slots.length && lefts.size * tops.size <= hung.slots.length + lefts.size, `on its side, the tools stand in a grid of ${tops.size} rows by ${lefts.size}`)
+          }
           if (k) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
         } else {
           await page.keyboard.down('KeyE'); await page.waitForTimeout(350)
           await look('choose', 'E held')
           // (Held on, the key repeats: a repeat is not another press, and the wheel stays open to aim.)
-          if (mode === 'wheel') { await page.keyboard.down('KeyE'); await page.waitForTimeout(100); check(await page.evaluate(() => globalThis.engine.playHud.choosing), 'E held until it repeats keeps the wheel open') }
+          if (wheel) { await page.keyboard.down('KeyE'); await page.waitForTimeout(100); check(await page.evaluate(() => globalThis.engine.playHud.choosing), 'E held until it repeats keeps the wheel open') }
         }
         // (Read while E is still held: letting it go is a choice, below.)
-        const after = await page.evaluate(() => ({ tool: globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing, slots: [...document.querySelectorAll('#realm .wheel .slot')].filter((s) => s.checkVisibility()).length }))
+        const after = await page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing, slots: [...document.querySelectorAll('#realm .wheel .slot')].filter((s) => s.checkVisibility()).length }))
         if (!phone) await page.keyboard.up('KeyE')
-        if (mode === 'wheel') check(after.choosing && after.slots === 7, `the wheel is open with its 7 tools (${after.slots} seen)`)
+        if (wheel) check(after.choosing && after.slots === 8, `the wheel is open with its 7 tools and the wand (${after.slots} seen)`)
         else check(after.tool !== before, `the next tool is taken (${before} to ${after.tool})`)
         await page.waitForTimeout(200)
         // The ways to choose on a desk, each read back: let go of E after holding it, a tap and the arrows, Tab and Enter.
-        if (mode === 'wheel' && !phone) {
-          const now = () => page.evaluate(() => ({ tool: globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
+        if (wheel && !phone) {
+          const now = () => page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
           const held = await now()
           check(!held.choosing, `holding E and letting it go closes the wheel with a choice (${held.tool})`)
           await page.keyboard.press('KeyE'); await page.waitForTimeout(150)
@@ -171,7 +212,7 @@ try {
           // Held, the mouse over a tool (the pointer free), let go: that tool, three round from the one held (the wheel opens marked at the one held).
           const heldAt = await page.evaluate(() => [...document.querySelectorAll('#realm .wheel .slot')].findIndex((el) => el.textContent.replace(/^\d+/, '').trim() === globalThis.engine.tool))
           await page.keyboard.down('KeyE'); await page.waitForTimeout(120)
-          const aimed = await slot((heldAt + 3) % 7); await page.mouse.move(aimed.x, aimed.y, { steps: 4 }); await page.waitForTimeout(250)
+          const aimed = await slot((heldAt + 3) % 8); await page.mouse.move(aimed.x, aimed.y, { steps: 4 }); await page.waitForTimeout(250)
           await page.keyboard.up('KeyE'); await page.waitForTimeout(150)
           check((await now()).tool === aimed.name && !(await now()).choosing, `holding E, pointing at ${aimed.name} and letting go picks it (${(await now()).tool})`)
           // A number; Escape leaves it as it was; a click on a tool.
@@ -188,7 +229,7 @@ try {
           await page.keyboard.press('Enter'); await page.waitForTimeout(120)
           const opened = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, on: document.activeElement?.classList.contains('slot') }))
           await page.keyboard.press('ArrowRight'); await page.keyboard.press('Enter'); await page.waitForTimeout(150)
-          const keyed = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, tool: globalThis.engine.tool, back: document.activeElement?.classList.contains('held') }))
+          const keyed = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, back: document.activeElement?.classList.contains('held') }))
           check(opened.choosing && opened.on && !keyed.choosing && keyed.tool !== first.name && keyed.back, `Enter on the held key opens the wheel with the focus on a tool, the arrow and Enter pick (${keyed.tool}), and the focus comes back to the key`)
           // Space on the focused key is still the world's: it jumps, and does not open the wheel.
           await page.evaluate(() => document.querySelector('#realm .held').focus())
@@ -213,13 +254,15 @@ try {
           await page.keyboard.press('Escape')
         }
         // By touch (wheel): a slide down the column picks where it is let go; a tap leaves it open for a tap on a tool.
-        if (mode === 'wheel' && phone) {
-          const now = () => page.evaluate(() => ({ tool: globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
+        if (wheel && phone) {
+          const now = () => page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
           const slot = (i) => page.evaluate((i) => { const el = document.querySelectorAll('#realm .wheel .slot')[i], r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2, name: el.textContent.replace(/^\d+/, '').trim() } }, i)
           await page.evaluate(() => globalThis.engine.playHud.choose(false))
           const k = await page.evaluate(() => { const r = document.querySelector('#realm .toolkey').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: k[0], y: k[1] }] }); await page.waitForTimeout(150)
-          const to = await slot(3)
+          // (Three down the column; on its side the grid may have that tool under the key itself, so the first from three on that is not.)
+          let to = await slot(3)
+          for (let i = 3; i < 7 && Math.hypot(to.x - k[0], to.y - k[1]) < 40; i++) to = await slot(i)
           for (let i = 1; i <= 8; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: k[0] + ((to.x - k[0]) * i) / 8, y: k[1] + ((to.y - k[1]) * i) / 8 }] }); await page.waitForTimeout(30) }
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await page.waitForTimeout(200)
           check(!(await now()).choosing && (await now()).tool === to.name, `a slide down to ${to.name} and let go picks it (${(await now()).tool})`)
@@ -228,10 +271,30 @@ try {
           await page.touchscreen.tap(six.x, six.y); await page.waitForTimeout(200)
           check(tapped && !(await now()).choosing && (await now()).tool === six.name, `a tap opens it and a tap on ${six.name} picks it (${(await now()).tool})`)
         }
+        // The wand is the wheel's last choice: chosen, it is in hand, the tool's key says so, and its bar is not over the
+        // body; another choice puts it away.
+        if (wheel) {
+          await page.evaluate(() => globalThis.engine.playHud.choose(false))
+          const pickAt = async (i) => {
+            if (phone) {
+              const k = await page.evaluate(() => { const r = document.querySelector('#realm .toolkey').getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] })
+              await page.touchscreen.tap(k[0], k[1]); await page.waitForTimeout(200)
+              const at = await page.evaluate((i) => { const r = document.querySelectorAll('#realm .wheel .slot')[i].getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2] }, i)
+              await page.touchscreen.tap(at[0], at[1])
+            } else { await page.keyboard.press('KeyE'); await page.keyboard.press(`Digit${i + 1}`) }
+            await page.waitForTimeout(300)
+          }
+          await pickAt(7)
+          const inHand = await page.evaluate(() => ({ held: globalThis.engine.wand.held, says: document.querySelector(matchMedia('(pointer: coarse)').matches ? '#realm .toolkey' : '#realm .held')?.textContent.trim() }))
+          await look('wand', 'the wand in hand')
+          await pickAt(0)
+          const away = await page.evaluate(() => ({ held: globalThis.engine.wand.held, tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool }))
+          check(inHand.held && /Wand/.test(inHand.says) && !away.held && away.tool === 'Hammer', `the wand is chosen from the wheel (${inHand.says}), and choosing a tool puts it away (${away.tool})`)
+        }
         await page.evaluate(() => globalThis.engine.playHud.choose(false))
       }
       // On a desk, in play: the picture holds the pointer (a click on it takes it, as sf-explore checks). What each way puts away then, and the wheel picked by the mouse's direction and by a click.
-      if (!phone && mode !== 'default') {
+      if (!phone && mode !== 'classic') {
         await page.mouse.move(640, 200); await page.mouse.click(640, 200); await page.waitForTimeout(400)
         const locked = await page.evaluate(() => globalThis.engine.input.locked)
         check(locked, 'a click on the picture takes the pointer')
@@ -239,23 +302,23 @@ try {
           await page.waitForTimeout(600)
           await look('play', 'in play, the pointer held')
           const shown = await page.evaluate(() => Object.fromEntries(Object.entries({ credits: '#first .credits', sky: '#realm .fold', held: '#realm .held', bank: '#realm .tools' }).map(([k, sel]) => [k, !!document.querySelector(sel)?.checkVisibility({ visibilityProperty: true, opacityProperty: true })])))
-          if (mode === 'wheel') check(!shown.credits && !shown.sky && shown.held, `in play the corner keys step away and the tool's key stays (${JSON.stringify(shown)})`)
+          if (wheel) check(!shown.credits && !shown.sky && shown.held, `in play the corner keys step away and the tool's key stays (${JSON.stringify(shown)})`)
           if (mode === 'quiet') check(!shown.credits && !shown.sky && !shown.bank, `in play everything is put away (${JSON.stringify(shown)})`)
           if (mode === 'context') check(shown.credits && shown.sky && shown.bank, `in play nothing hides itself (${JSON.stringify(shown)})`)
-          if (mode === 'wheel') {
+          if (wheel) {
             const tools = await page.evaluate(() => [...document.querySelectorAll('#realm .wheel .slot')].map((el) => el.textContent.replace(/^\d+/, '').trim()))
             // Held E, the mouse moved right: the tool to the right of the ring (third, Big charge, at about -13 degrees); let go, it is taken.
             await page.evaluate(() => globalThis.engine.pickTool(0)); await page.waitForTimeout(100)
             await page.keyboard.down('KeyE'); await page.waitForTimeout(120)
             await page.mouse.move(820, 200, { steps: 6 }); await page.waitForTimeout(150)
             await page.keyboard.up('KeyE'); await page.waitForTimeout(150)
-            const right = await page.evaluate(() => ({ tool: globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
+            const right = await page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
             check(!right.choosing && right.tool === tools[2], `held E and the mouse moved right picks ${tools[2]} (${right.tool})`)
             // A tap of E, the mouse moved up, a click: the top tool.
             await page.keyboard.press('KeyE'); await page.waitForTimeout(120)
             await page.mouse.move(820, 20, { steps: 6 }); await page.waitForTimeout(150)
             await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(150)
-            const up = await page.evaluate(() => ({ tool: globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
+            const up = await page.evaluate(() => ({ tool: globalThis.engine.wand?.held ? 'Wand' : globalThis.engine.tool, choosing: globalThis.engine.playHud.choosing }))
             check(!up.choosing && up.tool === tools[0], `a tap of E, the mouse moved up and a click picks ${tools[0]} (${up.tool})`)
           }
           await page.evaluate(() => document.exitPointerLock()); await page.waitForTimeout(600)
@@ -268,15 +331,18 @@ try {
         // In the corner: the lowest place in the left half where the stick's well (62 px round the thumb) is clear of the body by 40 px, as it walks and bobs.
         const clear = await page.evaluate(({ safe }) => {
           const parts = globalThis.engine.playHud.parts(), r = 62, meets = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
-          for (let y = innerHeight - safe.bottom - r; y > innerHeight / 3; y -= 8) for (let x = r + 8; x < innerWidth / 2; x += 8) { const w = { left: x - r - 40, top: y - r - 40, right: x + r + 40, bottom: y + r + 40 }; if (!parts.some((p) => meets(w, p))) return [x, y] }
+          for (let y = innerHeight - safe.bottom - r; y > innerHeight / 3; y -= 8) for (let x = safe.left + r + 8; x < innerWidth / 2; x += 8) { const w = { left: x - r - 40, top: y - r - 40, right: x + r + 40, bottom: y + r + 40 }; if (!parts.some((p) => meets(w, p))) return [x, y] }
           return null
         }, { safe })
         check(!!clear, `there is room for the stick in the left half, clear of the body${clear ? ` (at ${clear.map(Math.round).join(', ')})` : ''}`, gate)
+        // And where the left thumb rests, low in the picture: main's eye, close behind the shoulder, left room only above the body (at 70, 348 of 844).
+        check(!!clear && clear[1] >= vh * 0.6, `the body stands clear of where the left thumb rests: the stick has room in the lower part of the picture${clear ? ` (${Math.round((clear[1] / vh) * 100)}% down)` : ''}`, gate)
         // (Clear of the body first: a thumb moving walks the body, and the place found was for where it stood.)
         for (const [name, x, y] of [['move', ...(clear ?? [80, 720])], ['move-body', (b.left + b.right) / 2, (b.top + b.bottom) / 2]]) {
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
-          for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i * 2, y: y - i * 6 }] }); await page.waitForTimeout(40) }
-          await page.waitForTimeout(500)
+          // (Back, a walk: the roof's edge is a few metres ahead, and a fall is another picture.)
+          for (let i = 1; i <= 6; i++) { await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + i, y: y + i * 3 }] }); await page.waitForTimeout(40) }
+          await page.waitForTimeout(250)
           await look(name, 'a thumb down and moving')
           if (name === 'move') check(await page.evaluate(() => (() => { const f = document.querySelector('#realm .float'); return !!f && f.classList.contains('on') && Number(getComputedStyle(f).opacity) > 0.9 })()), 'the stick is drawn under a thumb clear of the body', gate)
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
@@ -297,6 +363,54 @@ try {
       const hung = await page.evaluate(() => globalThis.engine.me.canopy)
       check(hung, 'the canopy opens in the air')
       await look('canopy', 'under the canopy')
+      // The Sky panel (the page with no switch), after the fall and the canopy (what the line hears is said over the picture a while): the line to say something to the city on, opened by its Say key (a phone
+      // has no Enter or slash), and the graphics presets, kept in this browser.
+      if (mode === 'default') {
+        const press = async (sel) => { const r = await page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && b.width > 0 ? [b.left + b.width / 2, b.top + b.height / 2] : null }, sel); if (!r) return false; if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1]); await page.waitForTimeout(400); return true }
+        const opened = await press('#realm .fold')
+        await look('sky', 'the Sky panel open', true)
+        const keys = await page.evaluate(() => ({ say: !!document.querySelector('#realm .sky .say')?.checkVisibility(), graphics: [...document.querySelectorAll('#realm .sky input[name=realm-graphics]')].map((el) => el.value), chosen: document.querySelector('#realm .sky input[name=realm-graphics]:checked')?.value }))
+        check(opened && keys.say && keys.graphics.join() === 'auto,low,medium,high' && keys.chosen === 'auto', `the Sky panel has a Say key and the graphics, Auto chosen (${JSON.stringify(keys)})`)
+        // Low: the scale pinned at 0.3, no shadows or mirrors, and kept.
+        await press('#realm .sky label:has(input[value=low])')
+        const set = await page.evaluate(() => { const e = globalThis.engine; let kept = null; try { kept = localStorage.getItem('village.graphics') } catch {} return { preset: e.graphics.preset, scale: e.scale, pinned: e.graphics.pinned, flags: e.flags, kept } })
+        check(set.preset === 'low' && set.scale === 0.3 && set.pinned && (set.flags & 3) === 0 && set.kept === 'low', `Low is chosen by a press: the scale pinned at 0.3, shadows and mirrors off, written to the browser's storage (${JSON.stringify(set)})`)
+        await press('#realm .sky label:has(input[value=auto])')
+        const auto = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, pinned: globalThis.engine.graphics.pinned, flags: globalThis.engine.flags }))
+        check(auto.preset === 'auto' && !auto.pinned && (auto.flags & 3) === 3, `Auto again: shadows and mirrors back, the scale the GPU's to steer (${JSON.stringify(auto)})`)
+        // (Pinned again for the pictures that follow, as at the start.)
+        await page.evaluate(() => { globalThis.engine.scale = 0.75 })
+        // Say: the line opens with the focus in it (a phone's keyboard comes up for that), stays, and takes what is typed.
+        await press('#realm .sky .say')
+        const line = await page.evaluate(() => { const f = document.querySelector('#realm .egg-line input'); return { open: !!f?.closest('label')?.checkVisibility(), focused: document.activeElement === f, folded: !document.querySelector('#realm .sky')?.checkVisibility() } })
+        await look('say', 'the line to say something on')
+        await page.keyboard.type('iddqd'); await page.keyboard.press('Enter'); await page.waitForTimeout(400)
+        const heard = await page.evaluate(() => globalThis.engine.eggs.state)
+        check(line.open && line.focused && (!phone || line.folded) && heard.shield && !heard.typing, `the Say key opens the line with the focus in it${phone ? ' and the panel folded' : ''}, and what is typed is heard (${JSON.stringify({ ...line, shield: heard.shield })})`)
+        await page.evaluate(() => globalThis.engine.eggs.undo())
+        if (!phone) await page.evaluate(() => globalThis.engine.realmControls.fold(true))
+      }
+      // Back to the view, by touch with the wheel: a key of its own (in the Sky panel it is two taps deep). One tap goes
+      // back, and the first view has its credits key (the wheel had put it away in play, play-hud.ts `away`).
+      if (mode === 'default' && phone) {
+        const key = await page.evaluate(() => { const el = document.querySelector('#realm .home-key'), r = el?.getBoundingClientRect(); return el && r && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) ? [r.left + r.width / 2, r.top + r.height / 2] : null })
+        check(!!key, 'by touch the wheel has a key back to the view')
+        if (key) {
+          await page.touchscreen.tap(key[0], key[1])
+          const backed = await until(page, () => !globalThis.engine.first.engaged && document.documentElement.classList.contains('first') && globalThis.engine.explore.state !== 'leaving', 20_000)
+          const after = await page.evaluate(() => ({ credits: !!document.querySelector('#first .credits')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }), state: globalThis.engine.explore.state, key: !!document.querySelector('#realm .home-key')?.checkVisibility() }))
+          check(backed && after.credits && !after.key, `one tap on it goes back to the view, the credits key there and the key gone (${JSON.stringify(after)})`)
+        }
+      }
+      // A preset chosen is there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.
+      if (mode === 'default' && size === 'wide') {
+        await page.evaluate(() => { globalThis.engine.graphics.preset = 'high' })
+        await page.goto(`${site.url}/sf/index.html?shadows=0`)
+        await page.waitForFunction(() => globalThis.engine?.graphics, null, { timeout: 300_000 })
+        const again = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, scale: globalThis.engine.scale, flags: globalThis.engine.flags }))
+        check(again.preset === 'high' && again.scale === 0.8 && (again.flags & 3) === 2, `opened again, the page has High as chosen (the scale 0.8), and the address's ?shadows=0 over it (${JSON.stringify(again)})`)
+        await page.evaluate(() => { globalThis.engine.graphics.preset = 'auto'; try { localStorage.removeItem('village.graphics') } catch {} })
+      }
       check(errors.length === 0, `no errors${errors.length ? `: ${errors.slice(0, 2).join(' | ')}` : ''}`)
       results[`${mode}-${size}`] = at
       await page.close()
@@ -312,6 +426,6 @@ try {
   back()
 }
 writeFileSync(join(shots, reduced ? 'results-less.json' : 'results.json'), JSON.stringify(results, null, 1))
-if (said.length) console.log(`\nthe realm's own controls, measured (not failed):\n${said.map((f) => `  - ${f}`).join('\n')}`)
+if (said.length) console.log(`\nmeasured and said, not failed (the classic controls, and the Sky panel open, a menu):\n${said.map((f) => `  - ${f}`).join('\n')}`)
 console.log(failures.length ? `\nsf-hud: ${failures.length} failed\n${failures.map((f) => `  - ${f}`).join('\n')}` : '\nsf-hud: passed')
 process.exit(failures.length ? 1 : 0)

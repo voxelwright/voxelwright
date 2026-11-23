@@ -64,12 +64,18 @@ const HUNG: Move = { hold: true, keys: [{ t: 0.3, liftL: 2.7, liftR: 2.7, outL: 
 const FALLING: Move = { hold: true, keys: [{ t: 0.35, liftL: 1.45, liftR: 1.45, outL: 1.05, outR: 1.05, lean: 0.4 }] }
 /** How far under the body's low corner the feet are when it stands: the leg's reach less how far it is pressed in, less where the leg starts. */
 const LEG = 6 * 0.6 - 0.5
+/** Where the eye behind stands from the head, cells: back, up and to the right. By touch it stands further back and higher,
+ *  over the body's middle: from close behind the shoulder, held upright, the body was where the left thumb rests (x 64 to
+ *  171, y 450 to 748 of 390 x 844); from here it is between the thumbs and above them (test/sf-hud.mjs measures it). */
+const BEHIND = { desk: { back: 32, over: 6, aside: 5 }, touch: { back: 48, over: 10, aside: -1 } }
+/** The eye's place behind for this page's pointer (asked each time: a page can change from one to the other). */
+const behind = () => (matchMedia('(pointer: coarse)').matches ? BEHIND.touch : BEHIND.desk)
 /** How much further back, higher and to the right the eye behind is when it stands off (`standOff`), cells. */
 const STAND_OFF = { back: 170, over: 70, aside: 0 }
 /** Where the eye behind a body stands on level ground with all the room it wants, cells: its feet at `feet`, looking `yaw` and `pitch` (radians), stood off by `standOff` (`Me.standOff`). */
 export function behindAt(feet: readonly number[], yaw: number, pitch: number, standOff = 0): [number, number, number] {
-  const cp = Math.cos(pitch), look = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp], right = [Math.cos(yaw), 0, Math.sin(yaw)]
-  const back = 32 + STAND_OFF.back * standOff, over = 6 + STAND_OFF.over * standOff, aside = 5 + STAND_OFF.aside * standOff
+  const cp = Math.cos(pitch), look = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp], right = [Math.cos(yaw), 0, Math.sin(yaw)], near = behind()
+  const back = near.back + STAND_OFF.back * standOff, over = near.over + STAND_OFF.over * standOff, aside = near.aside + STAND_OFF.aside * standOff
   return [feet[0] - look[0] * back + right[0] * aside, feet[1] + EYES + over - look[1] * back, feet[2] - look[2] * back + right[2] * aside]
 }
 /** How near its own head the eye behind comes before its figure is in its way and is not drawn (cells). */
@@ -338,7 +344,7 @@ export function person(o: {
         // (Stood off where it arrived until it walks: then in to its own place, over a second or so.)
         if (walking > 0.5) standOff = 0
         stoodOff += (standOff - stoodOff) * (1 - Math.exp(-dt * 2))
-        const inHead = view === 'head' || tilted(), back = inHead ? 0 : 32 + 30 * hung + STAND_OFF.back * stoodOff, over = inHead ? 0 : 6 + 12 * hung + STAND_OFF.over * stoodOff, aside = inHead ? 0 : 5 + STAND_OFF.aside * stoodOff
+        const near = behind(), inHead = view === 'head' || tilted(), back = inHead ? 0 : near.back + 30 * hung + STAND_OFF.back * stoodOff, over = inHead ? 0 : near.over + 12 * hung + STAND_OFF.over * stoodOff, aside = inHead ? 0 : near.aside + STAND_OFF.aside * stoodOff
         const off = [up[0] * over - look[0] * back + right[0] * aside, up[1] * over - look[1] * back + right[1] * aside, up[2] * over - look[2] * back + right[2] * aside], far = Math.hypot(off[0], off[1], off[2])
         // Not through a wall (`clearWay`): it comes in at once and goes out again slowly.
         // And what will be in the way where the body is going brings it in before it gets there (`roomAfter`).

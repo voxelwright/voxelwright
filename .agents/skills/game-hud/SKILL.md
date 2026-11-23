@@ -5,9 +5,14 @@ description: Rules for the controls laid over a game's picture while someone pla
 
 # Game HUD
 
-Version 1, read 2026-11-21 for #450. Scope: the controls over a third-person realm in a browser, on a desk
-(keyboard and mouse, pointer lock) and on a phone (touch, upright). It does not cover menus, the first view or
-the kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
+Version 2, 2026-11-22 for #450 (version 1 read 2026-11-21). Scope: the controls over a third-person realm in a
+browser, on a desk (keyboard and mouse, pointer lock) and on a phone (touch, upright and on its side). It does not
+cover menus (the Sky panel open is one: what it covers is measured and said, not failed), the first view or the
+kit's own look (`engine/kit/SPEC.md`, `DESIGN.md`).
+
+**Direction (owner, November 22):** the wheel, as the lead recommended. It is what the page has with no switch;
+`?hud=classic` keeps the controls as they were, and `?hud=context` and `?hud=quiet` stay to compare. The wand is a
+tool: it is the wheel's last choice, and has no key of its own with the wheel.
 
 Each rule says where it comes from. **Fetched** means the page was opened and the fact is from its text.
 **Snippet** means it came from a search summary or a secondary outlet. **Unverified** means nobody opened a
@@ -88,8 +93,8 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
     expect movement and camera input to happen. Place secondary controls, like menus, at the top" (fetched).
 16. **Sizes.** Apple: 44 x 44 pt for frequent controls and 28 x 28 pt at the least (fetched). Android: 48 x 48 dp,
     8 dp apart ([Android accessibility](https://support.google.com/accessibility/android/answer/7101858),
-    fetched). XAG 107: 15 mm on a phone (fetched). Village's thumb keys are 52 px tall or more, and Use is
-    72 to 84.
+    fetched). XAG 107: 15 mm on a phone (fetched). Village's thumb keys are 44 px to hit (64 by 44), Use 60,
+    and `sf-hud.mjs` fails a key under 44 or larger than it needs (Use 64, the others 48 tall).
 17. **Press feedback that shows past the thumb.** Apple: "a visual press state effect, such as a glow, that they
     can see even when their finger is covering the control" (fetched). The kit's keys travel and their light
     changes on pointer down.
@@ -127,12 +132,19 @@ boxes drawn on).
 - **Measure the body in parts, turned as it faces.** A box square to the world was 1.7 times the figure standing
   and 3 times it in a fall. Under a canopy one box round the dome and the figure covers the empty space beside
   the lines, so the check uses three parts: figure, lines and dome.
-- **Upright phone, third person: the body is where the left thumb rests.** Standing, it covers about x 64 to 171
-  and y 450 to 750 of 390 x 844, and in a fall up to x 240. The only clear place for a stick in the left half is
-  above the body (y ≈ 390). The floating stick is therefore not drawn when the thumb lands on the body. Moving
-  the camera (person.ts) is the real fix and belongs to that lane.
+- **Upright phone, third person: from behind the shoulder the body was where the left thumb rests.** Standing, it
+  covered about x 64 to 171 and y 450 to 750 of 390 x 844, and the only clear place for a stick was above it
+  (y ≈ 390). By touch the eye now stands further back and higher, over the body's middle (person.ts `BEHIND`:
+  4.8 m back, 1 m up, 0.1 m left): standing, x 174 to 237 and y 478 to 680, between the thumbs, and the stick has
+  room low on the left. On its side (844 x 390) the body is in the middle, x 407 to 452.
 - **Upright phone: no ring of seven keys fits.** Above the body it runs into the top keys, and beside it there is
-  less than 200 px. The touch form of the wheel is a column dropped from the tool's key, picked by sliding down.
+  less than 200 px. The touch form of the wheel is a column that hangs from where the tool's key is (the key is not
+  shown meanwhile, so the tool is not said twice), its names' left edges in one line, picked by sliding down. The
+  thumb's keys step aside while it is open, so eight fit in one column. On its side it is a grid, two columns of four.
+- **A tap's click lands where the column has just come.** Opened by a press on the tool's key, the first tool is
+  under the finger, and the tap's click went to it and picked it. A tool is picked by a click only where it was pressed.
+- **Eight round a circle tight enough to read as one thing lay on one another.** On a desk the wheel is an ellipse
+  1.9 times as wide as it is tall (115 px up and down).
 - **The thumb's keys go in one column at the right edge.** A fall's arms-out box reaches 240 px from the left, so
   an arc round Use met it.
 - **`env()` needs one CDP session.** `Emulation.setSafeAreaInsetsOverride` set on one session was 0 on the page
@@ -153,6 +165,6 @@ Read it before quoting a game as precedent.
 
 ## Refresh when
 
-- the owner picks a direction (record which, and why);
+- the owner changes the direction (record which, and why);
 - a real iPhone run contradicts a touch rule;
 - the kit changes how keys are drawn past their box (the check's measurement depends on it).

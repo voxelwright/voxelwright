@@ -64,7 +64,9 @@ try {
     for (const [size, options] of [['1280x720', { viewport: { width: 1280, height: 720 } }], ['390x844', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }]]) {
       console.log(`\n${face.name}${face.query ? ` (?${face.query})` : ' (no ?face=)'}, ${size}`)
       const context = await browser.newContext(options), page = await context.newPage(), from = Date.now()
-      await page.goto(`${site.url}/sf/index.html${face.query ? `?${face.query}` : ''}`)
+      // (The realm's controls as a bank, `?hud=classic`, where every key is shown at once: the page with no switch has the
+      // wheel, whose keys sf-hud measures.)
+      await page.goto(`${site.url}/sf/index.html?hud=classic${face.query ? `&${face.query}` : ''}`)
       await page.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 300_000 })
       const near = await page.evaluate(() => performance.timeOrigin + globalThis.engine.seen.near)
       await page.waitForFunction(() => globalThis.engine.seen.whole > 0 && globalThis.engine.boards, null, { timeout: 300_000 })
@@ -166,7 +168,7 @@ try {
   // ── A face asked for that is none: said, and the default is used ──
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } }), page = await context.newPage(), said = []
   page.on('console', (m) => { if (m.type() === 'error') said.push(m.text()) })
-  await page.goto(`${site.url}/sf/index.html?face=comic`)
+  await page.goto(`${site.url}/sf/index.html?hud=classic&face=comic`)
   await page.waitForFunction(() => globalThis.engine?.boards, null, { timeout: 300_000 })
   const set = await page.evaluate(() => globalThis.engine.boards.letters?.('blog')?.face)
   check(set === 'Vox Zakon' && said.some((t) => t.includes('?face=comic is no face')), `?face=comic is said on the console ("${said.find((t) => t.includes('face=comic'))?.slice(0, 70)}…") and BLOG is set in ${set}`)
@@ -175,7 +177,7 @@ try {
   const failing = await plain(dist, '127.0.0.1', 0, { fail: (path) => (path === '/kit/src/core/fonts/zakon.js' ? 503 : 0) })
   const lost = await browser.newContext({ viewport: { width: 1280, height: 720 } }), torn = await lost.newPage(), warned = []
   torn.on('console', (m) => { if (m.type() === 'warning') warned.push(m.text()) })
-  await torn.goto(`${failing.url}/sf/index.html`)
+  await torn.goto(`${failing.url}/sf/index.html?hud=classic`)
   await torn.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && 'boards' in globalThis.engine, null, { timeout: 300_000 })
   const left = await torn.evaluate(() => { const b = globalThis.engine.boards; return b && { blog: b.letters('blog'), logos: b.records.filter((r) => r.type === 'logo').map((r) => !!b.where(r.id)).filter(Boolean).length, plane: !!b.plane } })
   check(!!left && left.blog === null && left.logos > 0 && left.plane && warned.some((t) => t.includes('no lettering boards')), `with its glyph set refused (503) the page says so ("${warned.find((t) => t.includes('lettering'))?.slice(0, 60)}…"), lays no BLOG, and keeps ${left?.logos} logos on the picture and the banner's plane`)

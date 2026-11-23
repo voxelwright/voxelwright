@@ -26,7 +26,13 @@ export interface RealmPage {
   reset(): Promise<unknown> | unknown
   /** Called every frame with the gap since the last, ms. */
   watch(each: (gap: number) => void): void
+  /** How the picture is drawn (main.ts `graphics`): the presets, and the one chosen. Without it the panel has no such row. */
+  graphics?: { presets: readonly string[]; get(): string; set(preset: string): void }
+  /** Opens the line to say something to the city on (eggs.ts), where the page has one: by touch there is no Enter or slash. */
+  say?(): void
 }
+
+const GRAPHICS: Record<string, string> = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High' }
 
 const NAMES: Record<Weather, string> = { clear: 'Clear', overcast: 'Overcast', fog: 'Fog', rain: 'Rain' }
 const clock = (h: number) => { const m = Math.round(h * 60) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
@@ -46,7 +52,12 @@ const STYLE = /* css */ `
    keep that far in, and Overcast (84 px in Vox Zakon Text at the key size, 78 in Vox Text) has no room for that four across. */
 #realm .sky .weather { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
 #realm .sky .vx-toggle-group > label { padding-inline: calc(var(--vx) * 2.5); white-space: nowrap; }
-#realm .sky .foot { display: flex; justify-content: flex-end; }
+/* (Its two parts, the sky's and the rest, are one column of the panel; side by side on a phone on its side.) */
+#realm .sky .part { display: contents; }
+#realm .sky .foot { display: flex; justify-content: flex-end; gap: calc(var(--vx) * 3); }
+/* The graphics, two by two as the weather (Medium is as wide as Overcast). */
+#realm .sky .graphics { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+#realm .sky .foot .say { margin-inline-end: auto; }
 /* The tools: a bank along the bottom, in the smaller size of the key font (typeface.ts), so that the bank stands clear of
    the place's name in the corner. The kit draws a key's side walls over its padding, the left one the wider: five and a
    half cells before its words and four after, so a word's first figure stands clear of the wall (3 Big charge, #450). */
@@ -63,6 +74,15 @@ const STYLE = /* css */ `
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
   /* (On a phone the panel is words a column wide: the smaller size of the key font, as the tools have, its cells still whole pixels, typeface.ts.) */
   #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); --vx-key-size: var(--vx-key-small); }
+  /* The line to say something on (eggs.ts) stands at the top by touch: the phone's keyboard comes up over the bottom. Its
+     words are 16 px, under which Safari zooms the page to the field. */
+  #realm .egg-line { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 140px) !important; z-index: 2; }
+  /* On its side the phone is low: the panel is two columns, the sky's on the left and the graphics and keys on the right. */
+  @media (orientation: landscape) {
+    #realm .sky { inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 24px), calc(var(--vx) * 150)); grid-template-columns: 1fr 1fr; column-gap: calc(var(--vx) * 6); align-items: start; }
+    #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); }
+  }
+  #realm .egg-line input { font-size: 16px !important; }
   /* Down the right edge. Held upright, standing on the thumb's key: under the skyline's signs, which are the upper third of an upright
      phone's picture (at 390 x 844 the column is from 340 px down and the skyline's lowest sign ends at 296). Set at
      the middle of the picture's height, it was over the LinkedIn sign. */
@@ -108,14 +128,22 @@ export function realmControls(page: RealmPage) {
   root.innerHTML = /* html */ `
     <button class="vx-button fold" type="button" aria-expanded="false" aria-controls="realm-sky">Sky</button>
     <section class="vx-card sky" id="realm-sky" aria-label="Sky">
+      <div class="part">
       <header><h2>Time</h2><output aria-live="off"></output></header>
       <span class="vx-slider"><input type="range" min="0" max="24" step="0.25" aria-label="Time of day"></span>
       <div class="ticks" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
       <div class="vx-toggle-group weather" role="radiogroup" aria-label="Weather">
         ${WEATHERS.map((w) => `<label><input type="radio" name="realm-weather" value="${w}">${NAMES[w]}</label>`).join('')}
       </div>
+      </div>
+      <div class="part">
+      ${page.graphics ? `<header class="g"><h2>Graphics</h2></header>
+      <div class="vx-toggle-group graphics" role="radiogroup" aria-label="Graphics">
+        ${page.graphics.presets.map((g) => `<label><input type="radio" name="realm-graphics" value="${g}">${GRAPHICS[g] ?? g}</label>`).join('')}
+      </div>` : ''}
       <div class="vx-groove" role="separator"></div>
-      <div class="foot"><button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}<button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      </div>
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
       ${page.tools.map((t, i) => `<label><input type="radio" name="realm-tool" value="${i}"><span class="n">${i + 1}</span>${t}</label>`).join('')}
@@ -138,6 +166,7 @@ export function realmControls(page: RealmPage) {
   const hourIn = $<HTMLInputElement>('.sky input[type=range]'), hourOut = $<HTMLOutputElement>('.sky output')
   const weathers = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-weather]')]
   const tools = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-tool]')]
+  const graphics = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-graphics]')]
   const panel = $<HTMLElement>('.sky'), fold = $<HTMLButtonElement>('.fold')
   const stick = $<HTMLElement>('.stick'), cap = $<HTMLElement>('.stick .cap')
   const coarse = matchMedia('(pointer: coarse)')
@@ -145,7 +174,8 @@ export function realmControls(page: RealmPage) {
   // A control used by the hand gives the keys back to the world as it is let go: a focused radio or fader would
   // take the letters (input.ts leaves keys typed into a field alone), and W would not walk. By the keyboard (Tab)
   // it keeps them, as a control should.
-  root.addEventListener('pointerup', () => setTimeout(() => { const a = document.activeElement; if (a instanceof HTMLElement && root.contains(a)) a.blur() }))
+  // (Not a line of text: a key that opens one gives the focus to it, for the keys to be typed there.)
+  root.addEventListener('pointerup', () => setTimeout(() => { const a = document.activeElement; if (a instanceof HTMLElement && root.contains(a) && !a.matches('input[type=text], textarea')) a.blur() }))
   let dragging = false
   hourIn.addEventListener('pointerdown', () => { dragging = true })
   addEventListener('pointerup', () => { dragging = false })
@@ -153,6 +183,11 @@ export function realmControls(page: RealmPage) {
   for (const w of weathers) w.addEventListener('change', () => { if (w.checked) sky.set(w.value as Weather) })
   for (const t of tools) t.addEventListener('change', () => { if (t.checked) page.pickTool(Number(t.value)) })
   $<HTMLButtonElement>('.reset').addEventListener('click', () => void page.reset())
+  for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
+  // The line opens in the same press, so that a phone brings its keyboard up (Safari does only for a focus the hand made).
+  // Where the panel is a drawer behind its key, it is folded first: the line is to be read.
+  // (The line was hidden when the kit took up the controls, and is drawn as a card of it once it is shown.)
+  root.querySelector('.say')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.say?.(); const line = root.querySelector('.egg-line:not([hidden])'); if (line && !line.hasAttribute('data-vx-live')) kit?.adopt(line) })
   // On a phone the panel folds away behind its key.
   const folded = (on: boolean) => { panel.hidden = on; fold.setAttribute('aria-expanded', String(!on)); root.classList.toggle('open', !on) }
   fold.addEventListener('click', () => folded(!panel.hidden))
@@ -173,7 +208,7 @@ export function realmControls(page: RealmPage) {
   $<HTMLButtonElement>('.use').addEventListener('click', () => page.controls.use())
 
   // Every frame: the sky goes on towards what was asked, and the controls show what the page has.
-  let shownHour = NaN, shownTool = -1, shownWeather = '', night: boolean | null = null, stickAt = ''
+  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', night: boolean | null = null, stickAt = ''
   page.watch((gap) => {
     sky.step(gap / 1000)
     const h = sky.hour ?? UNSET
@@ -184,6 +219,8 @@ export function realmControls(page: RealmPage) {
     if (sky.weather !== shownWeather) { shownWeather = sky.weather; for (const w of weathers) w.checked = w.value === sky.weather }
     const t = page.tool()
     if (t !== shownTool) { shownTool = t; tools.forEach((el, i) => { el.checked = i === t }) }
+    const g = page.graphics?.get() ?? ''
+    if (g !== shownGraphics) { shownGraphics = g; for (const el of graphics) el.checked = el.value === g }
     // The kit's day and night follow the hour (SPEC: a world with a time of day sets data-theme from its clock).
     const dark = h < 6.5 || h >= 18.5
     if (dark !== night) { night = dark; html.dataset.theme = dark ? 'dark' : 'light' }

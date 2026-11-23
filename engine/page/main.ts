@@ -421,6 +421,25 @@ async function main() {
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
+  // How the picture is drawn, as chosen in the realm's Sky panel (#450) and kept in this browser. Auto is the page as it
+  // was: the march's scale follows the GPU (`steer`), and its shadows and mirrors are what the address says. Each other
+  // preset pins the scale and chooses those two passes. What the address says is kept whatever is chosen: a scale it
+  // fixes (`?scale=`), and shadows or mirrors it turns off (`?shadows=0`, `?mirrors=0`).
+  const PRESETS = { auto: null, low: { scale: 0.3, flags: 0 }, medium: { scale: 0.5, flags: SHADOWS }, high: { scale: 0.8, flags: SHADOWS | MIRRORS } } as const
+  type Preset = keyof typeof PRESETS
+  const addressed = flags & (SHADOWS | MIRRORS)
+  let preset: Preset = 'auto'
+  const draws = (p: Preset, keep = true) => {
+    preset = p
+    const to = PRESETS[p]
+    flags = (flags & ~(SHADOWS | MIRRORS)) | ((to ? to.flags : SHADOWS | MIRRORS) & addressed)
+    if (!fixed) { if (to) { scale = to.scale; held = 1e9 } else { held = 0 } }
+    // (Storage may be refused, a private window: the choice is then this visit's.)
+    if (keep) try { localStorage.setItem('village.graphics', p) } catch { /* this visit only */ }
+  }
+  // (Taken up again only where the Sky panel is, which can change it: the realm's page, below.)
+  const keptGraphics = () => { try { const kept = localStorage.getItem('village.graphics'); if (kept && kept !== 'auto' && kept in PRESETS) draws(kept as Preset, false) } catch { /* nothing kept */ } }
+  const graphics = { presets: Object.keys(PRESETS) as Preset[], get: () => preset, set: (p: string) => { if (p in PRESETS) draws(p as Preset) } }
   own.keys.set('KeyH', () => { flags ^= HEAT })
   own.keys.set('KeyR', () => { march.rain = march.rain > 0 ? 0 : 1 })
   own.keys.set('BracketRight', () => setHour((hour ?? 14) + 0.5))
@@ -1466,10 +1485,12 @@ async function main() {
   if (LOCAL) {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each) })
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi })
-    // The controls in play, kept off the body (#450, play-hud.ts): `?hud=wheel|context|quiet`, or the realm's own as they were.
-    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true })
+    keptGraphics()
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open() })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
+    const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
+    const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, back: { go: () => void explored()?.back(), can: () => explored()?.state === 'in' } })
     Object.assign((globalThis as unknown as { engine: object }).engine, { playHud: played })
     // The landing's easter eggs (#450, eggs.ts): on the city's windows, its sky and the banner its plane tows
     // (signs.ts, boards.ts). Fetched once the park is shown, so that nothing of them is in the bytes before it.

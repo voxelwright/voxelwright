@@ -48,7 +48,8 @@ const open = async (site, context) => {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   page.on('console', (m) => { if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) errors.push(m.text()) })
-  await page.goto(`${site.url}/sf/index.html`)
+  // (The realm's controls as a bank, `?hud=classic`: the page with no switch has the wheel, whose keys sf-hud measures.)
+  await page.goto(`${site.url}/sf/index.html?hud=classic`)
   await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 })
   // The controls are these checks' business: shown as a visitor's first move shows them (page/first.ts).
   await page.evaluate(() => globalThis.engine.first?.engage())
@@ -107,17 +108,22 @@ try {
 
   // ── The look: each weather, a change of it caught halfway, night ──
   /** The picture's mean light and its contrast (the spread of light), 0 to 255, from a screenshot of the canvas alone. */
+  // (Of the picture, not of what is over it: a screenshot of the canvas has the controls too, and the Sky panel, cream
+  // and as tall as its Graphics row and Say key make it, counted as bright picture in every weather alike. The kit draws
+  // its keys on canvases of its own, so they are left out by where they are, with the room their solids and shadows take.)
   const lightOf = async (page, name) => {
     const png = await page.locator('canvas').first().screenshot({ path: join(shots, `${name}.png`) })
-    return page.evaluate(async (url) => {
+    const over = await page.evaluate(() => [...document.querySelectorAll('#realm > *, #first .credits, #where, #hud, [data-panel]')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0 && r.width * r.height < innerWidth * innerHeight * 0.4).map((r) => [r.left - 24, r.top - 24, r.right + 24, r.bottom + 24]))
+    return page.evaluate(async ([url, over]) => {
       const img = new Image(); img.src = url; await img.decode()
       const c = new OffscreenCanvas(img.width, img.height), x = c.getContext('2d'); x.drawImage(img, 0, 0)
-      const d = x.getImageData(0, 0, img.width, img.height).data
+      const d = x.getImageData(0, 0, img.width, img.height).data, k = img.width / innerWidth
+      const under = (px, py) => over.some(([l, t, r, b]) => px >= l * k && px < r * k && py >= t * k && py < b * k)
       let sum = 0, sq = 0, bright = 0, n = 0
-      for (let i = 0; i < d.length; i += 16) { const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; sum += l; sq += l * l; n++; if (l > 150) bright++ }
+      for (let i = 0; i < d.length; i += 16) { const p = i / 4; if (under(p % img.width, Math.floor(p / img.width))) continue; const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; sum += l; sq += l * l; n++; if (l > 150) bright++ }
       const mean = sum / n
       return { mean: Math.round(mean), contrast: Math.round(Math.sqrt(sq / n - mean * mean)), bright: Math.round((bright / n) * 1000) / 10 }
-    }, `data:image/png;base64,${png.toString('base64')}`)
+    }, [`data:image/png;base64,${png.toString('base64')}`, over])
   }
   const until = (page, js, ms = 30_000) => page.waitForFunction(js, null, { timeout: ms, polling: 100 }).then(() => true, () => false)
   if (only.has('look')) {
@@ -241,7 +247,7 @@ try {
     // The first page rests while the second comes (#450): drawing at a fixed scale it takes the GPU's whole frame, and
     // on a GPU that other checks share the second page's own start (its adapter) then never got a turn: 180 s, twice.
     await page.evaluate(() => { globalThis.engine.resting = true })
-    const plainPage = await (async () => { const p = await desk.newPage(); await p.goto(`${site.url}/sf/index.html?kit=plain`); await p.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 }); await p.waitForTimeout(1500); await p.evaluate(() => { globalThis.engine.first?.engage(); globalThis.engine.scale = 0.75 }); return p })()
+    const plainPage = await (async () => { const p = await desk.newPage(); await p.goto(`${site.url}/sf/index.html?kit=plain&hud=classic`); await p.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 }); await p.waitForTimeout(1500); await p.evaluate(() => { globalThis.engine.first?.engage(); globalThis.engine.scale = 0.75 }); return p })()
     await page.evaluate(() => { globalThis.engine.resting = true })
     const plainDrag = await drag(plainPage)
     await plainPage.screenshot({ path: join(shots, 'controls-plain.png') })

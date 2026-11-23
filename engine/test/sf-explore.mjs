@@ -19,7 +19,7 @@
 //   - two clicks enter: the host is told `engaged`, the eye ends behind the visitor's own body on the roof, in 6 to 10 s,
 //     seen from off the roof with the board's face read beside it (50 degrees from face-on at most, 60% of its
 //     letters in the picture) and a drop in the picture, the controls come, the hour's panel is folded
-//     and the card says the two keys;
+//     and a cue beside the body says the key to fly;
 //   - on the throttled link everything asked for after the first click has come, and every box of the world round the
 //     roof is made, when the eye settles (or the round was drawn out for it, which is said);
 //   - a step off the roof is a fall that gathers speed; Space in the air opens a canopy that sinks slowly, is steered
@@ -458,15 +458,16 @@ try {
   const inside = await realm.evaluate(() => {
     const e = globalThis.engine, f = e.me.feet, s = e.explore.stand, card = document.querySelector('#realm .help'), vis = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
     const r = card?.getBoundingClientRect(), sky = document.querySelector('#realm .sky'), fold = document.querySelector('#realm .fold')?.getBoundingClientRect()
-    return { engaged: e.first.engaged, first: document.documentElement.classList.contains('first'), on: e.me.on, view: e.me.view, back: e.me.back, off: f && Math.hypot(f.at[0] - s.x, f.at[2] - s.z), high: f && f.at[1] - e.feet(Math.round(f.at[0]), Math.round(f.at[2])), yaw: Math.abs(e.pose.yaw - s.yaw), fov: e.fov, card: vis(card), keys: [...(card?.querySelectorAll('kbd') ?? [])].map((k) => k.textContent.trim()), words: card?.textContent, right: r && innerWidth - r.right, top: r?.top, sky: vis(sky), fold: fold && [fold.right, fold.bottom], tools: vis(document.querySelector('#realm .tools')), faced: e.boards.faced('explore'), mode: e.input.top }
+    return { engaged: e.first.engaged, first: document.documentElement.classList.contains('first'), on: e.me.on, view: e.me.view, back: e.me.back, off: f && Math.hypot(f.at[0] - s.x, f.at[2] - s.z), high: f && f.at[1] - e.feet(Math.round(f.at[0]), Math.round(f.at[2])), yaw: Math.abs(e.pose.yaw - s.yaw), fov: e.fov, card: vis(card), keys: [...(card?.querySelectorAll('kbd') ?? [])].map((k) => k.textContent.trim()), words: card?.textContent, right: r && innerWidth - r.right, top: r?.top, sky: vis(sky), fold: fold && [fold.right, fold.bottom], tools: vis(document.querySelector('#realm .tools')), faced: e.boards.faced('explore'), mode: e.input.top, cue: [...document.querySelectorAll('#realm .cue.on')].filter(vis).map((c) => `${c.querySelector('kbd')?.textContent.trim()} ${c.querySelector('.words')?.textContent.trim()}`) }
   })
   await page.screenshot({ path: join(shots, 'third-1280x720.png') })
   const beside = await realm.evaluate(beside_, squares)
   check(beside.off <= 50 && beside.board >= 60 && beside.body && beside.drop, `settled, the board's face is read beside the body: seen ${beside.off} degrees off face-on (50 at most), ${beside.board}% of its letters in the picture (60 or more; ${beside.clear}% clear of the controls), the body whole and clear of them: ${beside.body}, a drop in the picture: ${beside.drop}`)
   check(inside.engaged && !inside.first && (await told()).filter((t) => t === 'engaged').length === 1, 'the visitor is in: the controls are shown, and the host is told `engaged` once')
   check(inside.on && inside.view === 'behind' && inside.back > 20 && inside.off < 15 && Math.abs(inside.high) < 4 && inside.yaw < 0.01, `the eye is behind their own body, which stands where the record says (${round(inside.off / 10, 2)} m off, the eye ${round(inside.back / 10, 1)} m back)`)
-  check(inside.card && inside.keys.join() === 'Space,B' && /in the air to deploy a parachute/.test(inside.words) && /to fly/.test(inside.words) && inside.right < 40 && inside.top < 120, `the card at the top right says the two keys: ${inside.keys.join(' and ')}`)
-  check(!inside.sky && inside.fold && inside.top >= inside.fold[1], 'the hour\'s panel is folded behind its key, and the card is under that key')
+  // (The page's controls in play are the wheel's, play-hud.ts: what the help card said comes as a cue beside the body when it is of use, B to fly while stood still, Space for the parachute in a fall; sf-hud checks where.)
+  check(!inside.card && inside.cue.join() === 'B Take to the air', `in place of the help card, a cue beside the body says the key to fly: ${inside.cue.join(', ')}`)
+  check(!inside.sky && inside.fold, 'the hour\'s panel is folded behind its key')
   check(!inside.faced, 'from the roof the board is its cells, not its face')
 
   // ── The fall, the canopy, flying ──
@@ -752,9 +753,9 @@ try {
     // (Of the phone's own squares: a phone's board is set in the compact set, and has fewer of them.)
     const besideP = await realm.evaluate(beside_, idleP.marks)
     check(besideP.off <= 50 && besideP.board >= 60 && besideP.body && besideP.drop, `on the phone too, settled: the board seen ${besideP.off} degrees off face-on, ${besideP.board}% of its letters in the picture (${besideP.clear}% clear of the controls), the body whole and clear of them: ${besideP.body}, a drop in the picture: ${besideP.drop}`)
-    const thumbs = await realm.evaluate(() => { const vis = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }), t = (s) => document.querySelector(s)?.textContent.trim(); return { walks: vis(document.querySelector('#realm .walks')) && t('#realm .walks'), up: vis(document.querySelector('#realm .act .up')) && t('#realm .act .up'), card: [...document.querySelectorAll('#realm .help kbd')].map((k) => k.textContent.trim()), fov: globalThis.engine.fov } })
+    const thumbs = await realm.evaluate(() => { const vis = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }), t = (s) => document.querySelector(s)?.textContent.trim(); return { walks: vis(document.querySelector('#realm .walks')) && t('#realm .walks'), up: vis(document.querySelector('#realm .act .up')) && t('#realm .act .up'), cue: [...document.querySelectorAll('#realm .cue.on')].filter(vis).map((c) => c.querySelector('kbd')?.textContent.trim()), fov: globalThis.engine.fov } })
     check(once.state === 'armed' && !once.engaged && /Tap again to explore/.test(once.hint) && in2, `one tap asks ("${once.hint}"), a second enters`)
-    check(thumbs.walks === 'Fly' && thumbs.up === 'Jump' && thumbs.card.join() === 'Chute,Fly', `a thumb has the keys: ${thumbs.up} (in the air: Chute), ${thumbs.walks}; the card names ${thumbs.card.join(' and ')}`)
+    check(thumbs.walks === 'Fly' && thumbs.up === 'Jump' && thumbs.cue.join() === 'Fly', `a thumb has the keys: ${thumbs.up} (in the air: Chute), ${thumbs.walks}; the cue beside the body names ${thumbs.cue.join(' and ')}`)
     // The key that rises opens the canopy in the air.
     await realm.evaluate(() => { const e = globalThis.engine; e.me.walk(false); e.pose.y += 60; e.me.walk(true) })
     await until(realm, () => globalThis.engine.me.aloft && globalThis.engine.me.feet, 10_000)
