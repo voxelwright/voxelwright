@@ -16,6 +16,7 @@
 //   - a glyph set that does not come leaves out the lettering boards alone: the logos and the banner stand;
 //   - BLOG is unlit by day, and by night its letters strike a beat apart and are all lit within four seconds.
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { arg, CHROME, has, here, turn } from './kit.mjs'
@@ -102,12 +103,15 @@ try {
         const right = [...board.chars].filter((ch, i) => read[i]?.length && same(shapeOf(read[i]), shapeOf(voxels(set.glyphs[ch], board.px, true))))
         check(board.face === set.name && panels.length === board.chars.length && right.length === board.chars.length, `BLOG is set in ${board.face} at ${board.px} cells a cell: ${panels.length} panels for "${board.chars}", ${right.length} of them lamp exactly as the kit's ${set.name} draws the letter`)
         // EXPLORE (sf/boards.json), the way in, on a far roof: its cells in the same face, which its far face is painted
-        // from (boards.ts); and at 3 m too small for the display set's cells to be four of the world's, so in the compact
-        // set wherever the picture is.
+        // from (boards.ts), in the compact set wherever the picture is (its record says so). How tall its capitals are
+        // asked is its record's, for the roof it is on; on a phone the page rounds them to eights of cells once they
+        // are tall (boards.ts), so within four cells of a capital.
+        const xRecord = JSON.parse(readFileSync(join(here, 'sf/boards.json'), 'utf8')).boards.find((b) => b.id === 'explore')
+        const xAsked = (xRecord?.roofs?.[xRecord.on]?.size ?? xRecord?.size) * 10
         const explore = await readBoard('explore'), xPanels = explore ? panelsOf(explore) : [], xSet = face.compact
         const xRead = xPanels.map(([a, b]) => { const cells = []; explore.rows.forEach((r, y) => { for (let k = a; k <= b; k++) if (r[k] === '1') cells.push([k, y]) }); return cells })
         const xRight = explore ? [...explore.chars].filter((ch, i) => xRead[i]?.length && same(shapeOf(xRead[i]), shapeOf(voxels(xSet.glyphs[ch], explore.px, true)))) : []
-        check(explore?.face === xSet.name && explore.chars === 'EXPLORE' && xRight.length === 7 && (options.hasTouch ? Math.abs(explore.px * xSet.cap - 30) <= xSet.cap / 2 : explore.px * xSet.cap >= 30), `EXPLORE is set in ${explore?.face} at ${explore?.px} cells a cell (a capital ${explore ? (explore.px * xSet.cap) / 10 : '?'} m, its record asks 3: ${options.hasTouch ? 'as near as whole cells allow' : 'at least that'}): ${xPanels.length} panels for "${explore?.chars}", ${xRight.length} of them lamp exactly as the kit's ${xSet.name} draws the letter`)
+        check(explore?.face === xSet.name && explore.chars === 'EXPLORE' && xRight.length === 7 && (options.hasTouch ? Math.abs(explore.px * xSet.cap - xAsked) <= 4 * xSet.cap : explore.px * xSet.cap >= xAsked), `EXPLORE is set in ${explore?.face} at ${explore?.px} cells a cell (a capital ${explore ? (explore.px * xSet.cap) / 10 : '?'} m, its record asks ${xAsked / 10} on ${xRecord?.on}: ${options.hasTouch ? 'as near as eights of cells allow' : 'at least that'}): ${xPanels.length} panels for "${explore?.chars}", ${xRight.length} of them lamp exactly as the kit's ${xSet.name} draws the letter`)
         // By day its letters are painted; by night they strike, not all at once, and are all lit within four seconds.
         const strike = await page.evaluate(async () => {
           const e = globalThis.engine, l = e.boards.glow, wait = (ms) => new Promise((r) => setTimeout(r, ms))

@@ -68,8 +68,10 @@ const LEG = 6 * 0.6 - 0.5
  *  over the body's middle: from close behind the shoulder, held upright, the body was where the left thumb rests (x 64 to
  *  171, y 450 to 748 of 390 x 844); from here it is between the thumbs and above them (test/sf-hud.mjs measures it). */
 const BEHIND = { desk: { back: 32, over: 6, aside: 5 }, touch: { back: 48, over: 10, aside: -1 } }
-/** The eye's place behind for this page's pointer (asked each time: a page can change from one to the other). */
-const behind = () => (matchMedia('(pointer: coarse)').matches ? BEHIND.touch : BEHIND.desk)
+/** The page's pointer, asked once; `.matches` follows it when a page changes from one to the other. */
+let coarse: MediaQueryList | undefined
+/** The eye's place behind for this page's pointer. */
+const behind = () => ((coarse ??= matchMedia('(pointer: coarse)')).matches ? BEHIND.touch : BEHIND.desk)
 /** How much further back, higher and to the right the eye behind is when it stands off (`standOff`), cells. */
 const STAND_OFF = { back: 170, over: 70, aside: 0 }
 /** Where the eye behind a body stands on level ground with all the room it wants, cells: its feet at `feet`, looking `yaw` and `pitch` (radians), stood off by `standOff` (`Me.standOff`). */
