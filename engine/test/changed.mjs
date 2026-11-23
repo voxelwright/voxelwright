@@ -11,7 +11,7 @@ import { join } from 'node:path'
 const here = new URL('..', import.meta.url).pathname
 export const EVERY = '*'
 /** The SF realm as `npm run sf` checks it, and the scripts that check one part of it more closely. */
-const REALM = ['sf', 'sf-look']
+const REALM = ['sf', 'sf-look', 'sf-loader']
 /** [what a path matches, what it is, the checks that cover it: names, EVERY, or from the match]. In order. */
 export const RULES = [
   [/(^|\/)[^/]+\.mdx?$|^docs\/|^\.agents\/|^\.claude\/|^CREDITS|^DESIGN/, 'words', []],

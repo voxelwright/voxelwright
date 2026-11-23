@@ -19,6 +19,8 @@ node deploy/data.mjs pack     # uploads the new bundle once; writes deploy/data.
 git add deploy/data.json engine/sf/pilot/current.json
 ```
 
+When the first view changes too (a new pin, the arrival, the lens, the air or the boards), take the loader's pictures again: `cd engine && node sf/loading.mjs`, then commit `engine/sf/loading.json`. The loader (`engine/page/loading.html`) shows that view under fog that burns off as the realm loads and clears onto the live picture, so a stale one shows a different city just before the real one. The build writes each picture beside the page (`loading-wide-<hash>.webp`, `loading-upright-<hash>.webp`), and a visitor fetches only the one their window needs. The build says when `loading.json` came from another release.
+
 If the pin and `deploy/data.json` disagree, CI fails before it deploys. Don't delete old `sf-data-*` releases, because rolling the code back to an older commit needs its bundle.
 
 ## Deploy by hand

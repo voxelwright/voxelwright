@@ -58,6 +58,7 @@ import { embedded, hear, tell } from './host.ts'
 import { signs } from './signs.ts'
 import { gather } from './gather.ts'
 import { cadence, describe, environment, reporter } from '../probe/tell.ts'
+import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
 
@@ -90,6 +91,7 @@ if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores()
 async function main() {
   report.env = environment()
   const gpu = await openGpu()
+  loading.step('gpu')
   const { device } = gpu
   report.env.gpu = await describe(gpu)
   report.faults = gpu.faults
@@ -142,11 +144,13 @@ async function main() {
    * eye at its middle, so the ground is out of it when the eye is 6.5 km up: from 8 km there was a blue square in haze. */
   const SPACE = 6_000
   const falling = await pieces(device, gpu.format, march)
+  loading.step('engine')
   // The far model (#450, far.ts): the city past the cells' reach as faces, where the realm has one (its record's
   // `far`, a folder beside the page) or the address names one (`?far=/path/`).
   // The far model: a realm's pinned release holds it where it has one (bay.ts `where`), else beside the page.
   const released = LOCAL?.release ? await where().catch(() => null) : null
   const farModel = await farOf(device, gpu.format, march, query.get('far') ?? (released?.far ? released.manifest : LOCAL?.far ? new URL(LOCAL.far, location.href).href : null))
+  loading.step('skyline')
   // The marine layer (#450, fog.ts): `?fog=0.8`, or `engine.fog`.
   const marine = await fog(device, gpu.format, march)
   // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
@@ -173,6 +177,7 @@ async function main() {
   // Before the first picture only the finest round the start (#450): what is asked of the ground there, first on the
   // line. The coarser ones come after; the makers of sectors ask for what they need themselves.
   if (STREAM) { const there = query.get('at')?.split(',').map(Number); await underfoot(inner, startX, startZ); void near(inner, startX, startZ); if (there?.length === 3) await near(inner, Math.round(there[0] * M), Math.round(there[2] * M)) }
+  loading.step('streets')
   while (!BAY_ON && core.ground_at(startX, startZ) < 120 && startX < 400_000) startX += 1280
   // A place given by latitude and longitude may be a roof: the eye starts over what stands there, not inside it.
   const at = arrive ? arrive.at.map((c) => c / M) : numbers('at', [startX / M, Math.max(core.ground_at(startX, startZ), BAY_START ? core.feet_at(startX, startZ) : 0) / M + 12, startZ / M])
@@ -181,6 +186,9 @@ async function main() {
   let fov = Number(query.get('fov') ?? (arrive && upright?.fov) ?? LOCAL?.fov ?? 70)
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? LOCAL?.roll ?? 0) * Math.PI) / 180
+  // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
+  const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
+  loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
   const pose: { x: number; y: number; z: number; yaw: number; pitch: number; tilt?: [number, number, number, number] } = { x: at[0], y: at[1], z: at[2], yaw: (look[0] * Math.PI) / 180, pitch: (look[1] * Math.PI) / 180 }
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
@@ -236,6 +244,7 @@ async function main() {
     const eye = firstEye()
     Object.assign(pose, { yaw: eye.yaw, pitch: eye.pitch })
     fov = eye.fov
+    loading.view(pictured ? (tallNow ? 'upright' : 'wide') : null)
     way?.reframed()
   })
   if (explored) enter(true)
@@ -595,6 +604,8 @@ async function main() {
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
     // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
     // view, so that the skyline is in the first picture; only then does the far model fetch the rest.
+    // The loader's last stage (loading.ts): how near the least whole box is to the half across its middle that `near` waits for.
+    if (!seen.near) loading.progress(Math.min(...world.levels.flatMap((l) => [0, 2].map((a) => (l.whole.high[a] - l.whole.low[a]) / (l.grid[a] / 2)))))
     if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
@@ -1407,7 +1418,7 @@ async function main() {
   const plane = signboards?.plane
   if (first && plane) first.during(() => { plane.call(true); return () => plane.call(false) })
   // The page that holds the realm in a frame is told when the place is shown (host.ts), with its boards if it has any.
-  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); signboards?.plane?.begin(); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
+  if (LOCAL) { const told = setInterval(() => { if (!seen.near) return; clearInterval(told); signboards?.plane?.begin(); loading.done(); tell('ready', { boards: signboards?.listed() ?? [], signs: signs.list().map((s) => ({ id: s.id, kind: s.kind, accepts: s.accepts })) }) }, 100) }
   /**
    * What the signs' screens cost the GPU here (#450): the march and the far model alone, and with the pass that draws
    * the screens, turn about, the middle of `rounds` each, ms a frame at the canvas's full size and the device's own pace.
@@ -1628,6 +1639,7 @@ async function main() {
 }
 
 main().catch(async (e: unknown) => {
+  loading.fail()
   const text = e instanceof Error ? `${e.message}\n${e.stack ?? ''}` : String(e)
   over.status(`This did not work here: ${text.split('\n')[0]}`)
   // A visitor to a realm run alone (#450) is told plainly, in the middle of the page, and nothing is left to press.

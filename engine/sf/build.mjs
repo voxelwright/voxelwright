@@ -158,8 +158,25 @@ writeFileSync(join(out, 'bay/marks.bin'), marks)
 // The squares they cover alone, for every core at once (page/bay.ts); the marks come after the first picture.
 writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBytes(marksMade))
 console.log(`  road marks: ${said(marks)}`)
+// The loader (page/loading.html): the realm's name and its first view under fog, there from the first byte (just after
+// the engine's canvas, which main.ts takes as the page's first). Its pictures are sf/loading.json (sf/loading.mjs),
+// each written beside the page under a name of its bytes; the loader asks for the one its window frames, and lays its
+// fog from what the page carries of them (their size, sky and skyline) before it comes. Without them its fog lies over
+// the sky's colours alone. The page's script is asked for from the head (modulepreload), so that the loader's bytes
+// before its tag do not hold its request back on a slow link.
+const loadingAt = join(root, 'sf/loading.json'), shots = existsSync(loadingAt) ? JSON.parse(readFileSync(loadingAt, 'utf8')) : null
+if (!shots) console.log('  no sf/loading.json: the loader shows no picture (node sf/loading.mjs)')
+else if (shots.release !== pointer.release) console.log(`  sf/loading.json was taken from release ${shots.release.slice(0, 12)}, not this build's ${pointer.release.slice(0, 12)}: take it again if the first view changed (node sf/loading.mjs)`)
+const escaped = realm.name.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`)
+const pictures = shots && Object.fromEntries(['wide', 'upright'].map((k) => {
+  const bytes = Buffer.from(shots[k].picture.slice(shots[k].picture.indexOf(',') + 1), 'base64'), file = `loading-${k}-${createHash('sha256').update(bytes).digest('hex').slice(0, 12)}.webp`
+  put(`sf/${file}`, bytes)
+  return [k, { file, size: shots[k].size, sky: shots[k].sky, skyline: shots[k].skyline }]
+}))
+const loader = readFileSync(join(root, 'page/loading.html'), 'utf8').replaceAll('{{name}}', () => escaped).replace('/*pictures*/null', () => JSON.stringify(pictures))
 // The engine's page with the realm's record in it (as the release made it), and its script beside it.
-put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,">`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
+if (!page.includes('<body>\n<canvas></canvas>\n')) fail('page/index.html no longer opens its body with its canvas: change where the loader goes')
+put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="../page/main.js">`).replace('<body>\n<canvas></canvas>\n', () => `<body>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
 
 // ── The eggs' videos (#450, page/eggs.ts): fetched only when an egg starts. From the site's landing, which made them
 // (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); kept on this machine, never in git. Without them the
