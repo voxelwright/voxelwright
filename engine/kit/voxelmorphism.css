@@ -254,6 +254,10 @@
 .vx-button:disabled .vx-label, .vx-button[aria-disabled="true"] .vx-label { opacity: 0.6; }
 
 .vx-button[data-vx-icon] { padding-inline-end: calc(var(--vx) * 15); }
+/* A key that is its glyph alone (its name is its aria-label): square, the glyph in its middle. Until the kit draws it,
+   a plain sign of the glyph stands in. */
+.vx-button[data-vx-icon-only] { padding: 0; min-inline-size: calc(var(--vx) * 15); min-block-size: calc(var(--vx) * 15); justify-content: center; }
+.vx-button[data-vx-icon="gear"][data-vx-icon-only]:not([data-vx-live])::after { content: "\2699\FE0E"; position: absolute; inset: 0; display: grid; place-items: center; color: var(--_on); font: 400 calc(var(--vx) * 7)/1 system-ui, sans-serif; }
 .vx-button .vx-label { display: inline-flex; align-items: center; gap: calc(var(--vx) * 2); position: relative; }
 
 .vx-button:focus-visible { outline: 2px solid var(--vx-focus); outline-offset: calc(var(--vx) * 1.5); }

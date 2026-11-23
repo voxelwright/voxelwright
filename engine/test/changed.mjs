@@ -33,7 +33,7 @@ export const RULES = [
   [/^engine\/core\//, 'the core, under everything', EVERY],
 ]
 /** The scripts that check one part of the SF realm more closely, by what the part is called. Not part of `npm run sf`. */
-const PART = { boards: ['sf-boards', 'sf-logos'], 'boards-edit': 'sf-boards', eggs: 'sf-eggs', 'eggs-pictures': 'sf-eggs', logos: ['sf-boards', 'sf-logos'], first: 'sf-explore', explore: 'sf-explore', heroes: 'sf-towers', landmark: 'sf-towers', far: 'sf-towers', street: 'sf-life', cars: 'sf-life', life: 'sf-life', 'pilot-life': 'sf-life' }
+const PART = { boards: ['sf-boards', 'sf-logos'], 'boards-edit': 'sf-boards', eggs: 'sf-eggs', 'eggs-pictures': 'sf-eggs', logos: ['sf-boards', 'sf-logos'], first: ['sf-explore', 'sf-sky'], explore: 'sf-explore', heroes: 'sf-towers', landmark: 'sf-towers', far: 'sf-towers', street: 'sf-life', cars: 'sf-life', life: 'sf-life', 'pilot-life': 'sf-life' }
 const tests = join(here, 'test'), KIT = ['all.mjs', 'changed.mjs']
 /** The scripts directly under test/ whose text names `what`, the runners and this map aside. */
 const naming = (what, but = '') => readdirSync(tests).filter((f) => f.endsWith('.mjs') && f !== but && !KIT.includes(f) && readFileSync(join(tests, f), 'utf8').includes(what))

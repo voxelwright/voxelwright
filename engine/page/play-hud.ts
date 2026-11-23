@@ -158,11 +158,11 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(72px, calc(env(safe-
   html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 200px); }
   /* On its side the picture is low, and the body's middle: the line and the bar at the top, between the top keys. */
   @media (orientation: landscape) { html[data-hud] [data-panel="wand"] { top: 72px; } html[data-hud] #realm .egg-line { top: 20px !important; } }
-  /* On its side the panel's foot has three keys and two rows, and under the Sky key it ran into the bottom's safe area:
+  /* On its side the panel's foot has three keys and two rows, and under the settings key it ran into the bottom's safe area:
      it opens to the left of that key, from the top, and no wider than leaves the credits key clear. */
   @media (orientation: landscape) { html[data-hud] #realm .sky { top: max(20px, env(safe-area-inset-top)); right: calc(env(safe-area-inset-right, 0px) + 88px); inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 24px), 480px); } }
   /* The sky's panel open is a drawer over the picture, a menu: the keys of play and what stands under it step aside
-     meanwhile (the Sky key folds it again). */
+     meanwhile (the settings key folds it again). */
   html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .home-key, #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
   html[data-hud] #where { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 136px); left: max(16px, env(safe-area-inset-left)) !important; }
 }

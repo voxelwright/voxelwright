@@ -1,6 +1,7 @@
 // The first view of a realm the page runs alone (#450): the picture, and who the place is made from behind a small
-// key. The line of numbers, the aim, the hour and weather, the tools and the street's name (and whatever else the page
-// lays over the picture) are the page's still, and hidden until the visitor engages. Nothing done by chance engages:
+// key, and the realm's settings key (a gear) in the other corner: the weather, the hour and the graphics (#506). The line of numbers,
+// the aim, the tools and the street's name (and whatever else the page lays over the picture) are the page's still,
+// and hidden until the visitor engages. Nothing done by chance engages:
 // the picture is a still one, no key moves the eye and no click takes the pointer (main.ts keeps a mode over the
 // page's own until then). The way in is the EXPLORE board, asked twice (explore.ts), or the host's `explore`; either
 // ends in `engage`. Then the controls come, once, and stay.
@@ -28,17 +29,47 @@ export interface First {
 }
 
 const STYLE = /* css */ `
-/* Until the visitor engages, nothing of the page's own is over the picture. */
-html.first :is(#hud, #aim, #realm, #where, #over) { visibility: hidden; opacity: 0; }
+/* Until the visitor engages, nothing of the page's own is over the picture but the realm's settings key and the panel it
+   opens (realm-ui.ts), with the weather, the hour and the graphics (#506): what is for playing, saying and putting the
+   world back (its foot) is the realm's. */
+html.first :is(#hud, #aim, #where, #over, #realm > :not(.fold, .sky)) { visibility: hidden; opacity: 0; }
+html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
+/* Open in the first view, the panel leaves the EXPLORE board, its tower and BLOG in sight (#506, measured by
+   test/sf-sky.mjs). On a desk it hangs in the top right corner as in the realm, right of the tower. Held upright, a
+   phone has EXPLORE and its tower down the last eighth of its picture and BLOG low in the middle: the panel hangs
+   from the top on the left, short of the tower. On its side the tower is at about three fifths across and BLOG low
+   in the middle: the panel lies beside the credits key, left of the tower, the hour across its top and the weather
+   and the graphics side by side under it, over BLOG's top (its ticks left out for the height). */
+@media (pointer: coarse) and (orientation: portrait) {
+  html.first #realm.folds .sky { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 64px), calc(var(--vx) * 76)); }
+}
+@media (pointer: coarse) and (orientation: landscape) {
+  html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 92px); right: 39vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
+  html.first #realm.folds .sky .part { display: contents; }
+  html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { grid-column: 1 / -1; }
+  html.first #realm.folds .sky .ticks { display: none; }
+  html.first #realm.folds .sky .weather { grid-column: 1; grid-row: 3 / span 2; }
+  html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
+  html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; }
+}
+/* A smaller phone on its side (under 760 px, 667 x 375): beside the credits key the weather's words did not fit. The
+   panel lies under that key instead, as wide as it may be left of the tower, with the weather and the graphics alone
+   (the hour is the realm's, once in) so that it ends over BLOG. */
+@media (pointer: coarse) and (orientation: landscape) and (max-width: 759px) {
+  html.first #realm.folds .sky { top: calc(max(20px, env(safe-area-inset-top)) + 56px); left: max(12px, env(safe-area-inset-left)); right: 36vw; }
+  html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { display: none; }
+  html.first #realm.folds .sky .weather { grid-row: 1 / span 2; }
+  html.first #realm.folds .sky header.g { grid-row: 1; }
+  html.first #realm.folds .sky .graphics { grid-row: 2; }
+}
 html.plain #hud { display: none; }
 /* A tap on the picture is a tap on a board (boards.ts), not on a link: no flash of the browser's own over the whole of it. */
 canvas { -webkit-tap-highlight-color: transparent; }
-html.first #realm .sky { translate: 0 -10px; }
 html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 /* They come as one: the picture's own marks first, the hardware a moment after, settling into place. */
 :is(#hud, #aim, #where, #over) { transition: opacity 0.5s ease-out 0.12s; }
 #realm { transition: opacity 0.36s ease-out; }
-#realm :is(.sky, .tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+#realm :is(.tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
 #first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; --vx-key-size: var(--vx-key-small); opacity: 0.86; }
@@ -86,7 +117,8 @@ export function firstView(on: boolean): First {
     for (const stop of stops.splice(0)) stop()
     html.classList.remove('first')
     // The hardware builds itself as it comes (the kit's own assembling; still, where motion is not wanted).
-    for (const el of document.querySelectorAll('#realm [data-vx-live]')) void kit?.live(el)?.play('assemble')
+    // (Not the settings key and its panel: they were there in the first view.)
+    for (const el of document.querySelectorAll('#realm [data-vx-live]')) if (!el.closest('.fold, .sky')) void kit?.live(el)?.play('assemble')
     tell('engaged')
   }
   const back = () => {

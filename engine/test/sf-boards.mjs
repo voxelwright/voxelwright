@@ -610,7 +610,7 @@ try {
     const firstPhone = await over(held)
     await small.screenshot({ path: join(shots, 'first-phone.png') })
     results.first.phone = firstPhone
-    check(firstPhone.first && !firstPhone.hud && !firstPhone.sky && !firstPhone.tools && !firstPhone.fold && !firstPhone.thumbs && !firstPhone.where && firstPhone.wall === 0 && !firstPhone.explore && firstPhone.credits, `a phone's first view is the picture and the credits key (${firstPhone.creditsBox.join(' x ')} px): no fold, no thumbs, no tools`)
+    check(firstPhone.first && !firstPhone.hud && !firstPhone.sky && !firstPhone.tools && firstPhone.fold && !firstPhone.thumbs && !firstPhone.where && firstPhone.wall === 0 && !firstPhone.explore && firstPhone.credits, `a phone's first view is the picture, the credits key (${firstPhone.creditsBox.join(' x ')} px) and the settings key (#506): no thumbs, no tools`)
     const inView = await held.evaluate(() => { const b = globalThis.engine.boards; return b.records.map((r) => ({ id: r.id, type: r.type, to: r.to, w: b.where(r.id), standing: b.standing(r.id) })).map((r) => ({ ...r, inside: !!r.w && r.w.x - r.w.wide / 2 > 0 && r.w.x + r.w.wide / 2 < innerWidth && r.w.y - r.w.high / 2 > 0 && r.w.y + r.w.high / 2 < innerHeight })) })
     const across = round((Math.atan(Math.tan(((await held.evaluate(() => globalThis.engine.fov)) * Math.PI) / 360) * (390 / 844)) * 360) / Math.PI)
     results.phone = { inPicture: inView.filter((r) => r.inside).map((r) => r.id), of: inView.length }

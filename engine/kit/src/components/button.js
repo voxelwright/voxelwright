@@ -7,13 +7,14 @@ import { cue } from '../core/sound.js';
 import { ICONS } from '../core/icons.js';
 import { watchFieldsets, listeners, wrapLabel } from './util.js';
 
-/** Draw a key's glyph in the space reserved by padding-inline-end. */
+/** Draw a key's glyph in the space reserved by padding-inline-end, or in its middle on a key that is its glyph alone (`data-vx-icon-only`). */
 export function capIcon(live, cap, z, mat) {
   const { W, H, el, look } = live;
   const glyph = (look.icons ?? ICONS)[el.dataset.vxIcon];
   if (!glyph) return;
   const x = inlineX(live);
-  const gx = W - glyph[0].length - (look.icons ? 2 : 5), gy = Math.round((H - glyph.length) / 2);
+  const alone = el.hasAttribute('data-vx-icon-only');
+  const gx = alone ? Math.floor((W - glyph[0].length) / 2) : W - glyph[0].length - (look.icons ? 2 : 5), gy = Math.round((H - glyph.length) / 2);
   for (let j = 0; j < glyph.length; j++) for (let i = 0; i < glyph[j].length; i++) {
     if (glyph[j][i] === '#') cap.plot(x(gx + i), gy + j, z, mat);
   }

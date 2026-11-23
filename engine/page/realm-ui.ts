@@ -68,6 +68,8 @@ const STYLE = /* css */ `
 #realm .thumbs { display: none; }
 #realm .fold { display: none; }
 /* Folded behind its key where something else has the corner (explore.ts: what a roof is for), as on a phone. */
+/* The settings key is its gear alone, in cells of 3 px, 44 px a side as the key it replaced was tall (kit: data-vx-icon-only). */
+#realm .fold { --vx: 3px; min-inline-size: 44px; min-block-size: 44px; }
 #realm.folds .fold { display: block; position: absolute; right: max(16px, env(safe-area-inset-right)); top: max(16px, env(safe-area-inset-top)); }
 #realm.folds .sky { top: calc(max(16px, env(safe-area-inset-top)) + 60px); }
 @media (pointer: coarse) {
@@ -126,7 +128,7 @@ export function realmControls(page: RealmPage) {
   const root = document.createElement('div')
   root.id = 'realm'
   root.innerHTML = /* html */ `
-    <button class="vx-button fold" type="button" aria-expanded="false" aria-controls="realm-sky">Sky</button>
+    <button class="vx-button fold" type="button" aria-expanded="false" aria-controls="realm-sky" aria-label="Weather, time of day and graphics" title="Weather, time of day and graphics" data-vx-icon="gear" data-vx-icon-only></button>
     <section class="vx-card sky" id="realm-sky" aria-label="Sky">
       <div class="part">
       <header><h2>Time</h2><output aria-live="off"></output></header>
@@ -175,7 +177,8 @@ export function realmControls(page: RealmPage) {
   // take the letters (input.ts leaves keys typed into a field alone), and W would not walk. By the keyboard (Tab)
   // it keeps them, as a control should.
   // (Not a line of text: a key that opens one gives the focus to it, for the keys to be typed there.)
-  root.addEventListener('pointerup', () => setTimeout(() => { const a = document.activeElement; if (a instanceof HTMLElement && root.contains(a) && !a.matches('input[type=text], textarea')) a.blur() }))
+  // (Heard on the window: the hour's fader let go over the picture is let go too, #506.)
+  addEventListener('pointerup', () => setTimeout(() => { const a = document.activeElement; if (a instanceof HTMLElement && root.contains(a) && !a.matches('input[type=text], textarea')) a.blur() }))
   let dragging = false
   hourIn.addEventListener('pointerdown', () => { dragging = true })
   addEventListener('pointerup', () => { dragging = false })
@@ -195,7 +198,7 @@ export function realmControls(page: RealmPage) {
   // The bank of tools stands down the right edge on a phone and lies along the bottom elsewhere.
   const lay = () => { $<HTMLElement>('.tools').dataset.vxWay = coarse.matches ? 'down' : ''; if (!coarse.matches) delete $<HTMLElement>('.tools').dataset.vxWay }
   lay()
-  coarse.addEventListener('change', () => { lay(); folded(coarse.matches); kit?.refresh?.($<HTMLElement>('.tools')) })
+  coarse.addEventListener('change', () => { lay(); folded(coarse.matches || root.classList.contains('folds')); kit?.refresh?.($<HTMLElement>('.tools')) })
   // Up and down are held, as Space and C are; Use does what a tap of the old round key did.
   const holding = (el: HTMLElement, code: string) => {
     const on = (e: PointerEvent) => { e.preventDefault(); el.setPointerCapture(e.pointerId); page.controls.hold(code, true) }
@@ -248,5 +251,11 @@ export function realmControls(page: RealmPage) {
     const at = new URL('../kit/src/index.js', import.meta.url).href
     void import(at).then((k) => { kit = k; k.adopt(root) }).catch(() => {})
   }
-  return { sky, root, get kit() { return kit }, /** Folds the hour's panel behind its key, on a wide page too, or opens it. */ fold(on: boolean) { root.classList.add('folds'); folded(on) } }
+  return {
+    sky, root, get kit() { return kit },
+    /** Folds the hour's panel behind its key, on a wide page too, or opens it. */
+    fold(on: boolean) { root.classList.add('folds'); folded(on) },
+    /** The panel as it is unasked: behind its key on a phone, open in its corner elsewhere (after the first view folded it, #506). */
+    rest() { root.classList.remove('folds'); folded(coarse.matches) },
+  }
 }

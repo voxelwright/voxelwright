@@ -1489,6 +1489,9 @@ async function main() {
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open() })
+    // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
+    // panel is as it is unasked (explore.ts folds it again on the roof).
+    first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
