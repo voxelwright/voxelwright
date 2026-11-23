@@ -2,7 +2,12 @@
 // WebGPU. Sound is refused by a simulated browser rule (Playwright's evaluate counts as a press, so a real refusal
 // cannot be had in a check): the egg plays muted, and Unmute, a real click, brings the sound.
 //
-//   node test/sf-eggs.mjs [--no-build] [--things] [--shots ~/.village/engine/sf/eggs] [--headed]
+//   node test/sf-eggs.mjs [--no-build] [--things | --first] [--shots ~/.village/engine/sf/eggs] [--headed]
+//
+// `--first`: only the eggs from the first view (page/eggs-first.ts), nobody gone in: the banner's lines and the
+// towers' lamps, each started and stopped by a real tap at 390 x 844 and a click at 1440 x 900, the visitor never
+// engaged, and EXPLORE still going in on its two asks after them; where each spot is at 844 x 390 too. Pictures and a
+// phone clip in `first/`.
 //
 // For each egg: its trigger as a visitor makes it (keys typed, the line, a tool used), what it does to the picture
 // (read from the canvas: the windows, the sky, the moon, against the picture before), that it is undone (Esc, a
@@ -10,7 +15,7 @@
 // screen (what the screen itself costs). A video's windows are checked against the frame held on them: the light of
 // the windows follows the picture's light and dark. Its sound: refused (simulated: it plays muted, and Unmute brings
 // it), and decoded when a typed line started it.
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -277,7 +282,318 @@ const things = async (page, kind) => {
   if (await page.evaluate(() => globalThis.engine.me.on)) await page.evaluate(() => globalThis.engine.me.walk(false))
 }
 
+
+// ── From the first view (`--first`, page/eggs-first.ts) ──
+/** A page of the realm at its first view, nobody gone in: the world round the park whole, the eggs and the way in come. */
+const openFirst = async (context) => {
+  const page = await context.newPage()
+  // Which event each play() of a video is called inside: a phone's browser gives sound only to one started in the tap's own handler.
+  await page.addInitScript(() => {
+    const play = HTMLMediaElement.prototype.play
+    globalThis.playedIn = []
+    // (And a browser that holds the sound back, simulated while `refuseSound` is set, as `open` does.)
+    HTMLMediaElement.prototype.play = function () { globalThis.playedIn.push(globalThis.event?.type ?? null); return globalThis.refuseSound && !this.muted && this.src ? Promise.reject(new DOMException('refused (simulated)', 'NotAllowedError')) : play.call(this) }
+  })
+  page.errors = []
+  page.on('pageerror', (e) => page.errors.push(e.message))
+  page.on('console', (m) => { if (m.type() === 'error' && !/404 \(Not Found\)/.test(m.text())) page.errors.push(m.text()) })
+  await page.goto(`${site.url}/sf/index.html`)
+  await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.eggs?.first && globalThis.engine.explore && globalThis.engine.boards?.where('explore'), null, { timeout: 180_000 })
+  await settle(page)
+  return page
+}
+/** What the first view is now: still the first view, the eye, the spots, the eggs. */
+const firstLook = (page) => page.evaluate(() => {
+  const e = globalThis.engine, b = globalThis.realm.signs.list().find((x) => x.id === 'banner')
+  return { engaged: e.first.engaged, html: document.documentElement.classList.contains('first'), way: e.explore.state, eye: [e.pose.x, e.pose.y, e.pose.z], yaw: e.pose.yaw, spin: e.eggs.things.spin, spots: e.eggs.first.spots, eggs: e.eggs.state, banner: b?.own ? null : b?.content?.text ?? null, called: e.boards.plane.called, loud: e.boards.plane.loud, readable: e.boards.plane.readable }
+})
+/** How far the eye turns about the vertical over some time, radians, frame by frame (a whole roll is 2π; a roll undone by another setting the eye adds nothing). */
+const watchTurn = (page) => page.evaluate(() => { const g = globalThis; g.turnTotal = 0; g.turnOn = true; let last = g.engine.pose.yaw; const step = () => { const y = g.engine.pose.yaw; g.turnTotal += y - last; last = y; if (g.turnOn) requestAnimationFrame(step) }; requestAnimationFrame(step); return last })
+/** What `watchTurn` has added up after `ms` more, and it stops. */
+const turned = async (page, ms) => { await page.waitForTimeout(ms); return page.evaluate(() => { globalThis.turnOn = false; return globalThis.turnTotal }) }
+/** The boards' targets on the page (boards.ts `under`: a face grown, by 20 px all round under a thumb). */
+const boardBoxes = (page, touch) => page.evaluate((touch) => globalThis.engine.boards.records.map((r) => { const w = globalThis.engine.boards.where(r.id), g = touch ? 20 : 6; return w && { id: r.id, x0: w.x - w.wide / 2 - g, y0: w.y - w.high / 2 - g, x1: w.x + w.wide / 2 + g, y1: w.y + w.high / 2 + g } }).filter(Boolean), touch)
+/** How far apart two boxes are, px (0 where they meet). */
+const apart = (a, b) => Math.round(Math.hypot(Math.max(0, a.x0 - b.x1, b.x0 - a.x1), Math.max(0, a.y0 - b.y1, b.y0 - a.y1)))
+const boxOf = (s) => ({ x0: s.x - s.w / 2, y0: s.y - s.h / 2, x1: s.x + s.w / 2, y1: s.y + s.h / 2 })
+const firstSizes = [['desk', { width: 1440, height: 900 }, false], ['phone', { width: 390, height: 844 }, true], ['landscape', { width: 844, height: 390 }, true]]
+
+const fromFirst = async () => {
+  const dir = join(shots, 'first')
+  mkdirSync(dir, { recursive: true })
+  results.first = {}
+  for (const [kind, viewport, touch] of firstSizes) {
+    console.log(`\nfrom the first view, ${kind} ${viewport.width} x ${viewport.height} (${touch ? 'taps' : 'clicks'})`)
+    const page = await openFirst(await browser.newContext({ viewport, deviceScaleFactor: 1, hasTouch: touch, isMobile: touch }))
+    const press = (x, y) => (touch ? page.touchscreen.tap(x, y) : page.mouse.click(x, y))
+    const r = (results.first[kind] = { spots: {}, eggs: {} })
+    /** Until the banner's cloth is whole in the picture and can be read (on a wide picture its own round crosses the left edge). */
+    const bannerIn = () => page.waitForFunction(() => { const s = globalThis.engine.eggs.first.spots.banner; return !!s && s.x - s.w / 2 >= 0 && s.x + s.w / 2 <= innerWidth && s.y - s.h / 2 >= 0 && globalThis.engine.boards.plane.readable }, null, { timeout: 40_000, polling: 100 }).catch(() => null)
+    await bannerIn()
+    const began = await firstLook(page)
+    const boards = await boardBoxes(page, touch)
+    for (const id of ['banner', 'pyramid', 'crown']) {
+      const s = began.spots[id]
+      if (!s) { check(false, `${kind}: ${id} is on the picture`); continue }
+      const nearest = boards.map((b) => ({ id: b.id, gap: apart(boxOf(s), b) })).sort((a, b) => a.gap - b.gap)[0]
+      r.spots[id] = { ...s, nearest }
+      check(s.x > 0 && s.x < viewport.width && s.y > 0 && s.y < viewport.height && (!touch || (s.w >= 44 && s.h >= 44)) && nearest.gap > 0, `${kind}: the ${id} at ${s.x}, ${s.y}, its target ${s.w} x ${s.h} px${touch ? ' (asked: 44 at least)' : ''}, ${nearest.gap} px from the nearest board's (${nearest.id})`)
+    }
+    check(began.spots.lamps && !began.engaged && began.called, `${kind}: the lamps are lit, the visitor not in, the banner's plane called`)
+    // (The picture with the lamps steady, as under reduced motion: blinking, a picture may catch them between flashes.)
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.screenshot({ path: join(dir, `${kind}-first.png`) })
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    if (kind === 'landscape') {
+      // Turned wide, a video's player stands clear of the spots and the boards too.
+      const s = began.spots.pyramid
+      await press(s.x, s.y)
+      await page.waitForFunction(() => globalThis.engine.eggs.state.playing, null, { timeout: 30_000 }).catch(() => null)
+      await page.waitForTimeout(1500)
+      const p = await page.evaluate(() => { const p = document.querySelector('.egg-player').getBoundingClientRect(), s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
+        return { box: [p.left, p.top, p.right, p.bottom].map(Math.round), under: [...['banner', 'pyramid', 'crown'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)], running: globalThis.engine.eggs.state.running } })
+      check(p.running === 'apple' && !p.under.length, `${kind}: the Pyramid's lamp tapped starts Bad Apple!!, and its player at ${p.box.join(' ')} is over ${p.under.join(', ') || 'no spot and no board'}`)
+      await page.screenshot({ path: join(dir, `${kind}-pyramid-apple.png`) })
+      const t = (await firstLook(page)).spots.pyramid
+      await press(t.x, t.y)
+      await page.waitForTimeout(500)
+      check((await firstLook(page)).eggs.running === null, `${kind}: the lamp tapped again ends it`)
+      await page.close()
+      continue
+    }
+    if (!touch) {
+      // On a desk the pointer over a spot is a hand, and a lamp under it brightens; over a board, the board's.
+      const hovered = []
+      for (const id of ['pyramid', 'crown', 'banner']) {
+        if (id === 'banner') await bannerIn()
+        const s = (await firstLook(page)).spots[id]
+        await page.mouse.move(s.x, s.y)
+        await page.waitForTimeout(100)
+        hovered.push(await page.evaluate((id) => ({ id, cursor: document.querySelector('canvas').style.cursor, hot: !!document.querySelector('#egg-lamps i.hot'), wave: globalThis.engine.boards.plane.cloth.wave }), id))
+      }
+      await page.mouse.move(viewport.width - 40, viewport.height - 40)
+      await page.waitForTimeout(100)
+      const off = await page.evaluate(() => ({ cursor: document.querySelector('canvas').style.cursor, hot: !!document.querySelector('#egg-lamps i.hot'), wave: globalThis.engine.boards.plane.cloth.wave }))
+      check(hovered.every((h) => h.cursor === 'pointer' && (h.id === 'banner' ? h.wave > 5 : h.hot)) && off.cursor !== 'pointer' && !off.hot && off.wave === 5, `${kind}: the pointer over each spot is a hand and it answers (a lamp brightens, the banner waves): ${hovered.map((h) => `${h.id} ${h.cursor} ${h.id === 'banner' ? `wave ${h.wave}` : `hot ${h.hot}`}`).join('; ')}; away, ${off.cursor || 'the default'}`)
+    }
+
+    /** A spot tapped or clicked where it is now; then what the first view is. */
+    const hit = async (id, wait = 600) => {
+      if (id === 'banner') await bannerIn()
+      const s = (await firstLook(page)).spots[id]
+      if (!s) return null
+      await press(s.x, s.y)
+      await page.waitForTimeout(wait)
+      return firstLook(page)
+    }
+    /** Still the first view: nobody in, the way in as it was, the eye where it was. */
+    const stillFirst = (l, what) => check(l && !l.engaged && l.html && (l.way === 'idle') && Math.hypot(l.eye[0] - began.eye[0], l.eye[1] - began.eye[1], l.eye[2] - began.eye[2]) < 0.01, `${kind}: ${what}, and it is still the first view (engaged ${l?.engaged}, the way in ${l?.way}, the eye where it was)`)
+    const until = (fn, arg, ms = 30_000) => page.waitForFunction(fn, arg, { timeout: ms, polling: 100 }).then(() => true, () => false)
+
+    // The site's name (no line on the banner): a barrel roll, back where it began.
+    const named = () => until(() => !globalThis.engine.eggs.first.spots.line, null, 20_000)
+    await named()
+    await bannerIn()
+    await watchTurn(page)
+    let l = await hit('banner', 0)
+    // (Half way round, the eye looks away from the park's picture: what it shows there.)
+    await page.waitForTimeout(380)
+    await page.screenshot({ path: join(dir, `${kind}-roll-mid.png`) })
+    const round1 = await turned(page, 1000)
+    check(Math.abs(round1 - 2 * Math.PI) < 0.05, `${kind}: a ${touch ? 'tap' : 'click'} on the site's name turns the eye round once (${round(round1, 3)} rad)`)
+    l = await firstLook(page)
+    stillFirst(l, `the roll ends facing as it began (${round(((l.yaw - began.yaw) % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI) % (2 * Math.PI - 1e-6), 3)} rad off)`)
+    check(Math.abs(Math.sin((l.yaw - began.yaw) / 2)) < 0.01 && l.spin === 0, `${kind}: the eye is turned round whole`)
+
+    // The crown: the Matrix, and again out of it.
+    l = await hit('crown')
+    const matrix = await until(() => globalThis.engine.eggs.state.running === 'matrix', null)
+    check(matrix, `${kind}: the Salesforce crown's lamp starts the Matrix`)
+    await still(page)
+    l = await firstLook(page)
+    stillFirst(l, `the Matrix is on (banner "${l.banner}")`)
+    await page.screenshot({ path: join(dir, `${kind}-crown-matrix.png`) })
+    l = await hit('crown')
+    check(l && l.eggs.running === null && l.called, `${kind}: the crown again ends it, and the plane is still called (${l?.called})`)
+    await still(page)
+
+    // The Pyramid: Bad Apple!!, its sound from the tap; the lamp again, the lights back.
+    await page.evaluate(() => { globalThis.playedIn = [] })
+    l = await hit('pyramid')
+    const apple = await until(() => globalThis.engine.eggs.state.running === 'apple' && globalThis.engine.eggs.state.playing, null)
+    await page.waitForTimeout(1500)
+    l = await firstLook(page)
+    const inClick = await page.evaluate(() => globalThis.playedIn)
+    check(apple && !l.eggs.muted && l.eggs.sound > 0 && inClick[0] === 'click', `${kind}: the Pyramid's lamp starts Bad Apple!! with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${inClick.join(', ')}; muted ${l.eggs.muted}, ${l.eggs.sound} bytes of sound decoded)`)
+    stillFirst(l, 'Bad Apple!! is on')
+    const lampFree = await page.evaluate(() => { const s = globalThis.engine.eggs.first.spots.pyramid, top = s && document.elementFromPoint(s.x, s.y); return top?.tagName === 'CANVAS' })
+    check(lampFree, `${kind}: nothing lies over the Pyramid's lamp while it plays (the player stands clear of it)`)
+    await still(page)
+    await page.screenshot({ path: join(dir, `${kind}-pyramid-apple.png`) })
+    l = await hit('pyramid')
+    check(l && l.eggs.running === null && l.called, `${kind}: the Pyramid's lamp again ends it, the plane still in the picture`)
+    await still(page)
+
+    // The banner's lines, each in its turn: tapped, its egg; and the banner (or the player's Stop) ends it.
+    const wants = { 'Wake up, Neo…': 'matrix', 'Never gonna…': 'rickroll', 'Barrel roll!': 'roll', 'Bad Apple!!': 'apple' }
+    for (let i = 0; i < 4; i++) {
+      const came = await until(() => { const e = globalThis.engine, s = e.eggs.first.spots, p = e.boards.plane; return !!s.line && p.readable && (!p.loud || p.come >= 1) }, null, 60_000)
+      l = await firstLook(page)
+      const line = l.spots.line, egg = wants[line]
+      check(came && egg && l.banner === line, `${kind}: the banner says "${line}" (its cloth ${l.spots.banner?.w} x ${l.spots.banner?.h} px at ${l.spots.banner?.x}, ${l.spots.banner?.y}; the plane ${l.loud ? 'called in' : 'on its own round'})`)
+      if (!came || !egg) break
+      r.eggs[egg] = { line, cloth: l.spots.banner, loud: l.loud }
+      await page.screenshot({ path: join(dir, `${kind}-line-${egg}.png`) })
+      await page.evaluate(() => { globalThis.playedIn = [] })
+      await watchTurn(page)
+      l = await hit('banner', 0)
+      if (egg === 'roll') {
+        const t = await turned(page, 1400)
+        check(Math.abs(t - 2 * Math.PI) < 0.05, `${kind}: "${line}" ${touch ? 'tapped' : 'clicked'} turns the eye round once (${round(t, 3)} rad)`)
+        continue
+      }
+      await turned(page, 0)
+      const on = await until((egg) => globalThis.engine.eggs.state.running === egg, egg)
+      check(on, `${kind}: "${line}" ${touch ? 'tapped' : 'clicked'} starts ${egg}`)
+      if (egg !== 'matrix') {
+        // The player: in the first view, on top where it is, a thumb's size by touch, and the sound playing from the tap.
+        await until(() => globalThis.engine.eggs.state.playing, null, 20_000)
+        await page.waitForTimeout(1500)
+        const player = await page.evaluate(() => {
+          const keys = [...document.querySelectorAll('.egg-player button')].map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
+          const c = document.querySelector('#first .credits').getBoundingClientRect(), p = document.querySelector('.egg-player').getBoundingClientRect()
+          // (Nor over a spot that ends it, or a board.)
+          const s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
+          const under = [...['banner', 'pyramid', 'crown'].filter((id) => s[id] && over({ x0: s[id].x - s[id].w / 2, x1: s[id].x + s[id].w / 2, y0: s[id].y - s[id].h / 2, y1: s[id].y + s[id].h / 2 })), ...b.records.filter((r) => { const w = b.where(r.id); return w && over({ x0: w.x - w.wide / 2, x1: w.x + w.wide / 2, y0: w.y - w.high / 2, y1: w.y + w.high / 2 }) }).map((r) => r.id)]
+          return { keys, under, shown: !document.querySelector('.egg-player').hidden, box: [p.left, p.top, p.right, p.bottom].map(Math.round), credits: [c.left, c.top, c.right, c.bottom].map(Math.round), meets: [c, ...[document.querySelector('#realm > .fold')].filter((g) => g?.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((g) => g.getBoundingClientRect())].some((c) => p.left < c.right && p.right > c.left && p.top < c.bottom && p.bottom > c.top), ...globalThis.engine.eggs.state }
+        })
+        r.eggs[egg].player = player
+        check(player.shown && player.keys.every((k) => k.onTop && (!touch || k.h >= 44)) && !player.meets && !player.under.length, `${kind}: its player is shown in the first view at ${player.box.join(' ')}, clear of the credits and settings keys${player.under.length ? ` but over ${player.under.join(', ')}` : ', the spots and the boards'}, its keys on top${touch ? ' and a thumb tall' : ''}: ${player.keys.map((k) => `${k.text} ${k.w} x ${k.h} at ${k.x}, ${k.y}`).join('; ')}`)
+        const played = await page.evaluate(() => globalThis.playedIn)
+        check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
+        await page.screenshot({ path: join(dir, `${kind}-${egg}.png`) })
+        if (egg === 'apple') {
+          const stop = player.keys.find((k) => k.text === 'Stop')
+          await press(stop.x, stop.y)
+          await page.waitForTimeout(500)
+          l = await firstLook(page)
+          check(l.eggs.running === null, `${kind}: Stop on the player ${touch ? 'tapped' : 'clicked'} ends ${egg}`)
+          stillFirst(l, `after ${egg}`)
+          await still(page)
+          continue
+        }
+      } else {
+        await still(page)
+        await page.screenshot({ path: join(dir, `${kind}-line-matrix-on.png`) })
+      }
+      l = await hit('banner')
+      check(l && l.eggs.running === null && l.called, `${kind}: the banner ${touch ? 'tapped' : 'clicked'} again ends ${egg}, its plane still called`)
+      stillFirst(l, `after ${egg}`)
+      await still(page)
+    }
+
+    // EXPLORE asked once, then the crown: the ask is put back and the Matrix starts; the crown again ends it.
+    const w = await page.evaluate(() => globalThis.engine.boards.where('explore'))
+    await press(w.x, w.y)
+    await page.waitForTimeout(400)
+    const asked = await page.evaluate(() => globalThis.engine.explore.state)
+    l = await hit('crown')
+    const calmed = await until(() => globalThis.engine.eggs.state.running === 'matrix', null)
+    l = await firstLook(page)
+    check(asked === 'armed' && calmed && l.way === 'idle' && !l.engaged, `${kind}: EXPLORE asked once (${asked}), then the crown: the ask is put back (${l.way}) and the Matrix starts${touch ? '' : ' (on a desk the pointer going to the crown puts it back first, explore.ts away)'}`)
+    await hit('crown')
+    await still(page)
+    // EXPLORE asked once and let go of, then the site's name while its eye leans back: the roll waits for it, and the eye comes round whole.
+    await named()
+    await bannerIn()
+    // (The eye as the ask finds it: the rolls before have each turned it a whole turn on from where it began.)
+    const asking = await page.evaluate(() => globalThis.engine.pose.yaw)
+    await press(w.x, w.y)
+    await page.waitForTimeout(400)
+    await page.evaluate(() => globalThis.engine.explore.disarm())
+    await page.waitForTimeout(250)
+    const s = (await firstLook(page)).spots.banner
+    // (Measured from the eye as the ask left it: its lean back is turned too, a little, and the roll on top of it.)
+    const from = await watchTurn(page)
+    await press(s.x, s.y)
+    const leant = await turned(page, 3500)
+    l = await firstLook(page)
+    const net = leant + from - asking
+    check(Math.abs(net - 2 * Math.PI) < 0.05 && l.way === 'idle', `${kind}: a barrel roll asked while the eye leans back from EXPLORE turns it round once all the same (${round(net, 3)} rad from where the ask found it)`)
+
+    // Sound held back by the browser: the Pyramid's lamp plays it muted, and Unmute on the player, in the first view, is the tap that brings it.
+    await page.evaluate(() => { globalThis.refuseSound = true })
+    await hit('pyramid')
+    const muted = await until(() => globalThis.engine.eggs.state.blocked && globalThis.engine.eggs.state.playing, null)
+    const unmute = await page.evaluate(() => { const b = [...document.querySelectorAll('.egg-player button')].find((k) => k.textContent === 'Unmute'), q = b?.getBoundingClientRect(); return q && { x: q.left + q.width / 2, y: q.top + q.height / 2, w: Math.round(q.width), h: Math.round(q.height), onTop: document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2) === b } })
+    await page.evaluate(() => { globalThis.refuseSound = false })
+    if (unmute) await press(unmute.x, unmute.y)
+    const sounded = await until(() => { const s = globalThis.engine.eggs.state; return !s.muted && s.playing && s.sound > 0 }, null, 10_000)
+    check(muted && unmute?.onTop && (!touch || unmute.h >= 44) && sounded, `${kind}: with the sound held back the lamp plays Bad Apple!! muted, and Unmute (${unmute ? `${unmute.w} x ${unmute.h}, on top ${unmute.onTop}` : 'not shown'}) ${touch ? 'tapped' : 'clicked'} in the first view brings the sound`)
+    await page.screenshot({ path: join(dir, `${kind}-unmuted.png`) })
+
+    // And the way in, after it all, with the video still playing: EXPLORE asked twice goes, and the player is then where the realm lays it, clear of its controls.
+    await press(w.x, w.y)
+    await page.waitForTimeout(450)
+    const armed = await page.evaluate(() => globalThis.engine.explore.state)
+    await press(w.x, w.y)
+    const went = await until(() => ['going', 'in'].includes(globalThis.engine.explore.state), null, 5000)
+    check(armed === 'armed' && went, `${kind}: after the eggs EXPLORE is asked once (${armed}) and again goes in`)
+    await page.waitForTimeout(800)
+    l = await firstLook(page)
+    check(!l.spots.lamps && !l.spots.still, `${kind}: on the way in the lamps are out and the first view's spots are off`)
+    const playerIn = () => page.evaluate(() => {
+      const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), stop = p.querySelector('.stop').getBoundingClientRect()
+      // (The thumbs' keys, the tools, the keys in the top corners (credits, settings, Back) and the street's name.)
+      const parts = [...document.querySelectorAll('#realm .thumbs, #realm .tools, #realm .toolkey, #realm .held, #realm .home-key, #realm > .fold, #first .credits, #where')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true })).map((el) => ({ name: el.className, q: el.getBoundingClientRect() }))
+      const meets = parts.filter(({ q }) => q.width && r.left < q.right - 1 && r.right > q.left + 1 && r.top < q.bottom - 1 && r.bottom > q.top + 1).map((x) => x.name)
+      return { box: [r.left, r.top, r.right, r.bottom].map(Math.round), meets, stopOnTop: !!document.elementFromPoint(stop.left + stop.width / 2, stop.top + stop.height / 2)?.closest('.stop'), running: globalThis.engine.eggs.state.running }
+    })
+    const inside = await until(() => globalThis.engine.first.engaged, null, 60_000)
+    await page.waitForTimeout(1500)
+    const inRealm = await playerIn()
+    check(inside && inRealm.running === 'apple' && inRealm.stopOnTop && !inRealm.meets.length, `${kind}: gone in with Bad Apple!! playing, its player at ${inRealm.box.join(' ')} is over ${inRealm.meets.join(', ') || "none of the realm's controls"}, Stop on top ${inRealm.stopOnTop}`)
+    await page.screenshot({ path: join(dir, `${kind}-in-with-player.png`) })
+    if (touch) {
+      // Turned wide once in, the same.
+      await page.setViewportSize({ width: 844, height: 390 })
+      await page.waitForTimeout(1500)
+      const wide = await playerIn()
+      check(wide.running === 'apple' && wide.stopOnTop && !wide.meets.length, `${kind}: turned wide in the realm, its player at ${wide.box.join(' ')} is over ${wide.meets.join(', ') || "none of the realm's controls"}, Stop on top ${wide.stopOnTop}`)
+      await page.screenshot({ path: join(dir, `${kind}-in-wide-with-player.png`) })
+    }
+    check(page.errors.length === 0, `${kind}: no errors on the page${page.errors.length ? `: ${page.errors.slice(0, 3).join(' | ')}` : ''}`)
+    await page.close()
+  }
+
+  // A short clip on a phone: the banner's first line tapped (the Matrix), the banner tapped to end it, the Pyramid's lamp (Bad Apple!!), the lamp again.
+  if (!has('no-clip')) {
+    const clips = join(dir, 'clip')
+    mkdirSync(clips, { recursive: true })
+    const opened = Date.now()
+    const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 1, hasTouch: true, isMobile: true, recordVideo: { dir: clips, size: { width: 390, height: 844 } } })
+    const page = await openFirst(context)
+    const tapAt = async (id) => { const s = await page.evaluate((id) => globalThis.engine.eggs.first.spots[id], id); if (s) await page.touchscreen.tap(s.x, s.y) }
+    await page.waitForFunction(() => { const p = globalThis.engine.boards.plane; return !!globalThis.engine.eggs.first.spots.line && p.readable && (!p.loud || p.come >= 1) }, null, { timeout: 120_000, polling: 100 }).catch(() => null)
+    // (The recording began with the page: the clip is from two seconds before the line was readable.)
+    const from = Math.max(0, (Date.now() - opened) / 1000 - 2)
+    await page.waitForTimeout(1000)
+    await tapAt('banner'); await page.waitForTimeout(6000)
+    await tapAt('banner'); await page.waitForTimeout(4000)
+    await tapAt('pyramid'); await page.waitForTimeout(7000)
+    await tapAt('pyramid'); await page.waitForTimeout(4000)
+    const video = page.video()
+    await context.close()
+    const out = join(clips, 'first-phone.mp4')
+    const raw = await video.path()
+    const made = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-ss', from.toFixed(1), '-i', raw, '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-crf', '24', out])
+    if (made.status === 0) { rmSync(raw, { force: true }); console.log(`  clip: ${out}`) } else console.log(`  clip: not cut (ffmpeg ${made.error?.message ?? made.status}); the recording is ${raw}`)
+  }
+}
+
 try {
+  if (has('first')) await fromFirst()
+  else {
   // (`--things`: only the things in the city, on a phone and a desk.)
   if (!has('things')) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
@@ -595,6 +911,7 @@ try {
   const desk = await open(await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1 }))
   await things(desk, 'desk')
   check(desk.errors.length === 0, `no errors on the desk's page${desk.errors.length ? `: ${desk.errors.slice(0, 3).join(' | ')}` : ''}`)
+  }
 } catch (e) {
   console.error(e)
   failures.push(String(e))

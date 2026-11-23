@@ -1665,12 +1665,14 @@ node test/sf-type.mjs [--no-build]        # BLOG's and EXPLORE's lamp cell for c
 node sf/type-shots.mjs [--no-build]       # the same pictures in both faces, and sheets of them side by side (~/.village/engine/sf/type)
 ```
 
-### The eggs, typed or found (`page/eggs.ts`, `page/eggs-things.ts`)
+### The eggs, typed or found (`page/eggs.ts`, `page/eggs-things.ts`, `page/eggs-first.ts`)
 
 Each egg starts from a phrase typed on the eggs' line (Enter or `/`), and from a thing in the city that a phone can reach without a keyboard. On 555 California's roof, where the visitor comes in: a jukebox (the Rickroll), a toy plane on a stick (a barrel roll) and a coin viewer at the east edge (night and the moon; again, and the moon grows). On the tower's plaza below: a fruit cart with one black apple (Bad Apple!!). On the BLOG board's roof: an arcade cabinet (+30 lives). In the park of the first view, out of its picture: a ringing payphone (the Matrix; hang up to leave) and a golden shield on a plinth (IDDQD). Each is a model of quarter cells drawn as a piece where it stands. Near one, the city's own cue for a usable thing says what it does (`hud.ts` `cue`, 44 px tall by touch); a tap or a click on the cue, E, or the Use key with the aim on the thing uses it. Where each stands is the `SPOTS` table in `page/eggs-things.ts`.
 
+The first view starts them too, before anyone goes in, with one tap or click on something in the picture (`page/eggs-first.ts`). After the site's name has been up for 14 s, the banner shows a line for an egg for about 9 s, then the name again for 10 s, in turn: "Wake up, Neo…", "Never gonna…", "Barrel roll!" and "Bad Apple!!". A line is no longer than the name, or a phone could not read it. Where the cloth is under 34 px tall on the picture, as on a desk's far round, its plane is called in while a line shows. A tap on the line starts its egg, a tap on the site's name does a barrel roll, and a tap on the banner while any egg is on ends it. Red aircraft lamps blink on the Pyramid's spire and the Salesforce Tower's crown (steady under reduced motion): the Pyramid's plays Bad Apple!! and the crown's starts the Matrix, and each ends its egg again. The moon is not one of them: it rises out of both framings of the first view. A video's player stands at the top of an upright picture and at the bottom right of a wide one, clear of the lamps. Taps are heard after the boards', so a board under the same point wins. A tap never engages, and an EXPLORE asked once is put back as it was. The lamps are laid over the picture only while the first view is up: by day the towers' own lamps are a pixel.
+
 ```
-node test/sf-eggs.mjs [--no-build] [--things]   # every egg; --things: only the things, each found on foot and tapped (390 x 844) and clicked (1440 x 900), pictures in ~/.village/engine/sf/eggs/things
+node test/sf-eggs.mjs [--no-build] [--things | --first]   # every egg; --things: only the things, each found on foot and tapped (390 x 844) and clicked (1440 x 900), pictures in ~/.village/engine/sf/eggs/things; --first: only the first view's spots, tapped and clicked, then EXPLORE's two asks, pictures and a phone clip in ~/.village/engine/sf/eggs/first
 ```
 
 ## Checks and tools

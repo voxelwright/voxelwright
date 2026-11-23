@@ -1534,10 +1534,12 @@ async function main() {
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
           device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
-          callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
+          // (In the first view its plane is kept in the picture whatever an egg says: what starts and ends them is tapped there, eggs-first.ts.)
+          callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on || !!(first && !first.engaged)); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
+          canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), still: () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1),
           pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)),
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {

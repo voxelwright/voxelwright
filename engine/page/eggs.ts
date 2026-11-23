@@ -31,6 +31,8 @@ import type { Picture } from './eggs-pictures.ts'
 import type { Hud } from './hud.ts'
 import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
+import { firstTaps, type Spot } from './eggs-first.ts'
+import type { Boards } from './boards.ts'
 
 export interface EggsPage {
   device: GPUDevice
@@ -69,6 +71,14 @@ export interface EggsPage {
   /** What draws the things that start the eggs, and the cue beside one that is near (eggs-things.ts). */
   pieces: Pieces
   hud: Hud
+  /** The picture, whose taps in the first view start the eggs (eggs-first.ts). */
+  canvas: HTMLCanvasElement
+  /** Whether the first view is up as it opened: nobody on the way in, the eye where it arrived. */
+  still(): boolean
+  /** An EXPLORE asked once is put back as it was (explore.ts `disarm`). */
+  calm(): void
+  /** The banner's plane (boards.ts), or null. */
+  plane(): Boards['plane']
   /** Where the feet are (world cells), or null flying as an eye; and where feet would stand at a column. */
   feet(): readonly number[] | null
   ground(x: number, z: number): number
@@ -300,7 +310,24 @@ export function eggs(page: EggsPage) {
   player.hidden = true
   player.setAttribute('role', 'group')
   player.setAttribute('aria-label', 'Now playing')
-  player.style.cssText = 'position:absolute;left:max(16px,env(safe-area-inset-left));top:56px;display:flex;align-items:center;gap:10px;padding:8px 10px;pointer-events:auto'
+  player.style.cssText = 'position:absolute;display:flex;align-items:center;gap:10px;padding:8px 10px;pointer-events:auto'
+  // Where it stands: under the keys in the top corners. On a desk, 56 px down. By touch, held upright: in the first view
+  // under the credits and settings keys (first.ts), in the realm under the Back key, the tool key and the street's name
+  // (play-hud.ts); held wide, gone in, between the corners' keys at the top. Never wider than the screen: the title
+  // wraps, the keys do not. (By the page's state, not by what holds it: started in the first view it stays in #first.)
+  const placed = document.createElement('style')
+  placed.textContent = /* css */ `
+    .egg-player { top: 56px; left: max(16px, env(safe-area-inset-left)); max-inline-size: calc(100vw - 2 * max(16px, env(safe-area-inset-left))); box-sizing: border-box; }
+    .egg-player .title { flex: 1 1 auto; min-inline-size: 0; }
+    .egg-player button { flex: none; }
+    @media (pointer: coarse) and (max-aspect-ratio: 1/1) {
+      html.first .egg-player { top: calc(max(20px, calc(env(safe-area-inset-top) + 8px)) + 56px); }
+      html:not(.first) .egg-player { top: calc(env(safe-area-inset-top, 0px) + 164px); }
+    }
+    @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
+      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 50%; translate: -50% 0; max-inline-size: min(420px, 100vw - 240px); }
+    }`
+  document.head.append(placed)
   player.innerHTML = '<span class="title" style="font:600 13px/1.2 var(--vx-font,system-ui)"></span><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button>'
   realm.append(player)
   const muteKey = player.querySelector<HTMLButtonElement>('.mute')!, stopKey = player.querySelector<HTMLButtonElement>('.stop')!
@@ -355,7 +382,16 @@ export function eggs(page: EggsPage) {
     march.screen.moon = MOONS[moon]
     say(`Moon size ${moon + 1} of 3.`)
   }
-  let rolling: { from: number; t: number } | null = null
+  /**
+   * A barrel roll: how far through it is (0 to 1), how far the eye has been turned by it (radians) and where it left
+   * the eye last. Turned by steps, so that whoever sets the eye meanwhile is not undone. In the first view it starts
+   * again from nothing while someone else sets the eye: an EXPLORE asked once, leaning back, sets it outright every
+   * frame, which undoes whatever of the turn was done.
+   */
+  let rolling: { t: number; turned: number; left: number } | null = null
+  /** In the first view, the roll done at once: a press or a key while it turns (an EXPLORE asked then leans from a whole eye), or the picture framed again (a key held down in the realm is not one). */
+  const rolled = (e: Event) => { if (!rolling || !page.still() || (e as KeyboardEvent).repeat) return; page.pose.yaw += Math.PI * 2 - rolling.turned; rolling = null; found.spin = 0 }
+  for (const type of ['pointerdown', 'keydown', 'resize']) addEventListener(type, rolled, { capture: true })
   // Over every other mode a lane puts down (a tool's use goes to the top first): the moon takes a shot at it, and
   // under IDDQD no tool breaks anything.
   // E beside a thing of the city's that starts an egg uses it (a key held down is one use, not one each repeat). Pushed
@@ -386,8 +422,10 @@ export function eggs(page: EggsPage) {
         return say(shield ? 'IDDQD on. The city cannot be broken.' : 'IDDQD off. The city can break again.')
       case 'moon': return moonUp()
       case 'roll':
-        if (matchMedia('(prefers-reduced-motion: reduce)').matches) return say('Barrel roll (with motion reduced, in spirit).')
-        rolling = { from: page.pose.yaw, t: 0 }
+        // (With motion reduced the eye stays, and the banner answers: in the first view it is all there is to see.)
+        if (matchMedia('(prefers-reduced-motion: reduce)').matches) { briefly('Rolled, in spirit', 4000); return say('Barrel roll (with motion reduced, in spirit).') }
+        if (rolling) page.pose.yaw += Math.PI * 2 - rolling.turned
+        rolling = { t: 0, turned: 0, left: page.pose.yaw }
         return say('Barrel roll.')
       case 'lives':
         briefly('+30 lives', 8000)
@@ -467,7 +505,7 @@ export function eggs(page: EggsPage) {
 
   /** Every egg undone: what runs stops, the shield drops, the moon is its own size, the sky as it was. */
   const undo = (quiet = false) => {
-    const any = running || shield || moon || saying
+    const any = running || shield || moon || moonlit || saying
     stop(true)
     shield = false
     moon = 0
@@ -506,11 +544,30 @@ export function eggs(page: EggsPage) {
     look: (id, t) => (id === 'payphone' ? (running?.egg !== 'matrix' && Math.floor(t * 2.5) % 2 ? 1 : 0) : id === 'cart' ? (running?.egg === 'apple' ? 1 : 0) : 0),
   })
 
+  // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines and the towers' lamps ──
+  /** Whether anything of the eggs' is on: what a tap on the banner ends. */
+  const on = () => !!(running || shield || moon || moonlit || saying)
+  const TAPS: Record<Spot, (line: string | null) => void> = {
+    // While an egg is on, the banner ends it (Unmute is the player's: a tap here stops). Its line starts its egg; the site's name, a barrel roll.
+    banner: (line) => (on() ? undo() : act(line ?? 'roll')),
+    // The Pyramid's lamp: Bad Apple!! in shadow, the lamp the one red light left; again, the lights back.
+    pyramid: () => (running?.egg === 'apple' ? stop() : act('apple')),
+    // The crown of lamps: the Matrix on the city's windows, the crown's own screen among them; again, out of it.
+    crown: () => (running?.egg === 'matrix' ? stop() : void enter()),
+  }
+  const taps = firstTaps({
+    canvas: page.canvas, view: page.view, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
+    beacons: () => march.beacons, fog: () => march.fog,
+    quiet: () => !on() && !typing,
+    tap: (spot, line) => TAPS[spot](line),
+  })
+
   // ── Every frame: the screen comes up and goes down, its picture is drawn, the light comes home, the hour is watched ──
   let flips: number[] = [], wasDark: boolean | null = null
   page.watch((gap) => {
     const dt = Math.min(gap, 100) / 1000
     found.frame(performance.now() / 1000)
+    taps.frame(dt)
     // The banner's next line, after its plane has been in the picture for 8 s (it flies in from the edge, cloth last).
     if (nextLine && onBanner !== nextLine.after) nextLine = null
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
@@ -527,10 +584,13 @@ export function eggs(page: EggsPage) {
     if (goingHome && Math.abs((page.hour() ?? OWN_HOUR) - OWN_HOUR) < 0.02) { goingHome = false; page.ownLight() }
     // (The sky keeps an hour as `h % 24`: 13.45 comes back 13.450000000000003.)
     else if (goingHome && Math.abs((page.sky.hour ?? OWN_HOUR) - OWN_HOUR) > 0.02) goingHome = false
-    if (rolling) {
+    if (rolling && page.still() && Math.abs(page.pose.yaw - rolling.left) > 1e-9) Object.assign(rolling, { t: 0, turned: 0, left: page.pose.yaw })
+    else if (rolling) {
       rolling.t += dt / 0.85
       const s = Math.min(1, rolling.t), ease = s * s * (3 - 2 * s)
-      page.pose.yaw = rolling.from + ease * Math.PI * 2
+      page.pose.yaw += ease * Math.PI * 2 - rolling.turned
+      rolling.turned = ease * Math.PI * 2
+      rolling.left = page.pose.yaw
       found.spin = ease * Math.PI * 2
       if (s >= 1) { rolling = null; found.spin = 0 }
     }
@@ -572,6 +632,8 @@ export function eggs(page: EggsPage) {
     get media() { return running?.media ?? null },
     /** The things that start the eggs: where each is, and which is offered now. */
     things: found,
+    /** What starts them from the first view (eggs-first.ts): where each spot is, and the banner's line. */
+    first: taps,
     atMoon,
   }
 }
