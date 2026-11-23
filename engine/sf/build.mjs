@@ -178,13 +178,15 @@ const loader = readFileSync(join(root, 'page/loading.html'), 'utf8').replaceAll(
 if (!page.includes('<body>\n<canvas></canvas>\n')) fail('page/index.html no longer opens its body with its canvas: change where the loader goes')
 put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="../page/main.js">`).replace('<body>\n<canvas></canvas>\n', () => `<body>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
 
-// ── The eggs' videos (#450, page/eggs.ts): fetched only when an egg starts. From the site's landing, which made them
-// (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); kept on this machine, never in git. Without them the
-// page is the same, and the two video eggs say they didn't load. ──
+// ── The eggs' videos and the Matrix's music (#450, page/eggs.ts): fetched only when an egg starts. The videos from the
+// site's landing, which made them (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); the music from
+// https://youtu.be/8mAZNNrPH0w as they were (`uvx yt-dlp -f ba`, then ffmpeg: loudnorm=I=-16:TP=-1.5:LRA=11, aac_at
+// profile 4 at 48k, +faststart, to matrix.m4a). Kept on this machine, never in git. Without them the page is the same:
+// the two video eggs say they didn't load, and the Matrix is silent. ──
 const eggsFrom = resolve(arg('eggs', join(VILLAGE, 'sf', 'eggs', 'media')))
-const EGG_VIDEOS = ['rick.mp4', 'bad-apple.mp4'].filter((f) => existsSync(join(eggsFrom, f)))
+const EGG_VIDEOS = ['rick.mp4', 'bad-apple.mp4', 'matrix.m4a'].filter((f) => existsSync(join(eggsFrom, f)))
 for (const f of EGG_VIDEOS) { mkdirSync(join(out, 'sf', 'eggs'), { recursive: true }); copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f)) }
-if (EGG_VIDEOS.length < 2) console.log(`  the eggs' videos are not all at ${eggsFrom}: the video eggs will not load (copy the site's static/landing/eggs/*.mp4 there)`)
+if (EGG_VIDEOS.length < 3) console.log(`  the eggs' media are not all at ${eggsFrom}: the video eggs will not load, or the Matrix is silent (copy the site's static/landing/eggs/*.mp4 there; matrix.m4a as said above)`)
 
 // ── Kept living things ──
 for (const k of realm.kept ?? []) {
@@ -205,7 +207,7 @@ if (realm.street && !(manifest.life && manifest.cars) && !streetManifest) {
 put('sf/CREDITS.txt', [
   ...manifest.credits,
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
-  ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos (sf/eggs/), used as parody on the owner\'s ruling, for these two eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira.'] : []),
+  ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these three eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music.'] : []),
   '',
   'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0.',
   '',
@@ -227,9 +229,10 @@ for (const file of files(out)) {
     writeFileSync(cached, squeezed)
     compressed++
   }
-  // Worth it only where it is smaller, and never for video (H.264 and AAC are squeezed already; the eggs' videos).
-  if (squeezed.length < body.length && !file.endsWith('.mp4')) writeFileSync(`${file}.br`, squeezed)
-  const sent = file.endsWith('.mp4') ? body.length : Math.min(squeezed.length, body.length)
+  // Worth it only where it is smaller, and never for video or music (H.264 and AAC are squeezed already; the eggs').
+  const media = /\.(mp4|m4a)$/.test(file)
+  if (squeezed.length < body.length && !media) writeFileSync(`${file}.br`, squeezed)
+  const sent = media ? body.length : Math.min(squeezed.length, body.length)
   raw += body.length; br += sent
   if (!relative(out, file).startsWith(join('sf', 'releases'))) { code += body.length; codeBr += sent }
 }

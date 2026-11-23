@@ -1564,8 +1564,10 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
       let up = clamp((p.y - looks.keep0.y) / max(looks.keep1.y - looks.keep0.y, 1.0), 0.0, 1.0);
       col += albedo * vec3f(1.0, 0.92, 0.78) * (1.5 + 1.5 * up) * clamp(dark * 3.0, 0.0, 1.0);
     }
-    // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow.
-    if (stuff == 15u && !sign) { col += vec3f(1.0, 0.76, 0.46) * 4.6 * dark; }
+    // A street lamp's own light is far brighter than anything it falls on: the last pass spreads it into a glow. (Not
+    // the boards' lamps on arms while their light is off, boards.ts \`dark\`: the lamps in the box they keep.)
+    let boardsOff = looks.letters[1].w < 0.0 && looks.keep1.w > 0.0 && all(p >= looks.keep0.xyz) && all(p <= looks.keep1.xyz);
+    if (stuff == 15u && !sign && !boardsOff) { col += vec3f(1.0, 0.76, 0.46) * 4.6 * dark; }
     let fine = hit.cell * i32(1u << hit.level);
     let block = inBlock(fine);
     // A window with someone home: the glass is lit from within, most of them warm, a few the blue of a screen,
@@ -1647,7 +1649,8 @@ fn lit(ro: vec3f, rd: vec3f, hit: Hit, shadows: u32) -> vec3f {
     let own = landmarkLight(p, max(hit.t, 1.0) * g.pixel * 0.1);
     if (own.r + own.g + own.b > 0.0) {
       let shown = screenOf(p);
-      col += own * clamp(dark * 3.0, 0.0, 1.0) * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.16;
+      // (Half of it, as the far model's crown takes, far.ts: the two meet where it hands over.)
+      col += own * clamp(dark * 3.0, 0.0, 1.0) * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.5;
     }
     col += landmarkLamp(p) * clamp(dark * 3.0, 0.0, 1.0);
   }

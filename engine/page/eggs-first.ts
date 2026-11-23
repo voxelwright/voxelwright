@@ -176,7 +176,7 @@ export function firstTaps(o: FirstNeeds) {
   }
   const lampsFrame = () => {
     if (holder.hidden) return
-    // (Dimmed by fog, as far as a lamp's red still comes through it: the Matrix's fog is where the crown is tapped again to leave.)
+    // (Dimmed by fog, as far as a lamp's red still comes through it.)
     const d = touch.matches ? LAMP.coarse : LAMP.fine, dim = 1 - Math.min(0.45, o.fog() * 1.4)
     for (const which of ['pyramid', 'crown'] as const) {
       const at = lampAt(which), el = lamps[which]

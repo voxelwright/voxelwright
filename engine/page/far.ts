@@ -240,8 +240,10 @@ struct Drawn { @location(0) colour: vec4f }
     let own = landmarkLight(at, wide);
     if (own.r + own.g + own.b > 0.0) {
       let shown = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
-      // (As much of it as its own windows show, measured: a sixth, where every pixel of a lit part is lamp and a wall is one part in four pane. Whole, the crown was the brightest thing in the Matrix.)
-      col += own * dark * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.16;
+      // (As much of it as its own windows show, measured: half, where every pixel of a lit part is lamp and a wall is one
+      // part in four pane. Whole, the crown was the brightest thing in the Matrix; a sixth was measured under its fog,
+      // which lay over the shaft and not the crown, and under the cloud that replaced it the crown was a dark cap, #450.)
+      col += own * dark * (1.0 - shown.a) + shown.rgb * min(own.g, 1.0) * 0.5;
     }
     col += landmarkLamp(at) * dark;
   }

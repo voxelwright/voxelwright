@@ -92,6 +92,8 @@ export interface Screen {
   /** Which tiles show (boards.ts): a bit each, across then up. */
   mask: number
   hidden: boolean
+  /** Its own light off: lit only as the day lights cloth, and no glow by night (the eggs' pictures on the windows, eggs.ts). */
+  unlit: boolean
   /** How far it waves, cells (a banner). */
   wave: number
   show(content: Content | null): void
@@ -158,7 +160,7 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
       }
       let video: HTMLVideoElement | null = null, frame = -1, asked = 0, showing = { kind: 'nothing', ready: false }
       const held: Held = {
-        at: [0, 0, 0], hu: [1, 0, 0], hv: [0, 1, 0], mask: 0xffffffff, hidden: false, wave: 0, uniforms, bind, tiles, both, leds: leds ? pixels : [0, 0], style,
+        at: [0, 0, 0], hu: [1, 0, 0], hv: [0, 1, 0], mask: 0xffffffff, hidden: false, unlit: false, wave: 0, uniforms, bind, tiles, both, leds: leds ? pixels : [0, 0], style,
         get showing() { return showing },
         show(content) {
           const mine = ++asked
@@ -196,10 +198,11 @@ export async function screens(device: GPUDevice, format: GPUTextureFormat): Prom
         s.tick()
         if (s.hidden || !s.mask) continue
         const from = [s.at[0] - view.eye[0], s.at[1] - view.eye[1], s.at[2] - view.eye[2]], far = Math.hypot(from[0], from[1], from[2])
-        f.set([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, time, ...from, s.style.glows ? 0.94 * (1 - (1 - (s.style.dim ?? 1)) * (1 - day)) : Math.max(s.style.least ?? 0, (0.2 + 0.58 * day) * (1 - 0.3 * dull)), ...s.hu, s.wave, ...s.hv, s.style.glows ? Math.max(0.6, far * 0.0015) : 0])
+        const glows = s.style.glows && !s.unlit
+        f.set([...view.right, view.tanHalf, ...view.up, to.size[0] / to.size[1], ...view.forward, time, ...from, glows ? 0.94 * (1 - (1 - (s.style.dim ?? 1)) * (1 - day)) : Math.max(s.unlit ? 0 : s.style.least ?? 0, (0.2 + 0.58 * day) * (1 - 0.3 * dull)), ...s.hu, s.wave, ...s.hv, s.style.glows ? Math.max(0.6, far * 0.0015) : 0])
         u.set([s.mask >>> 0, s.tiles[0], s.tiles[1], s.both ? 1 : 0], 24)
         // (By night a tenth of its light is over what a lit wall gives back: the last pass spreads that.)
-        f.set([s.leds[0], s.leds[1], s.style.glows ? 0.1 * (s.style.glow ?? 1) * (1 - day) : 0, 0], 28)
+        f.set([s.leds[0], s.leds[1], glows ? 0.1 * (s.style.glow ?? 1) * (1 - day) : 0, 0], 28)
         device.queue.writeBuffer(s.uniforms, 0, block.slice(0))
         pass.setBindGroup(0, s.bind(faced ?? none))
         pass.draw((SEGMENTS + 1) * 2)

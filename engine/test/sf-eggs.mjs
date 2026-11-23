@@ -67,7 +67,7 @@ const still = async (page) => {
   await settle(page)
   await page.waitForTimeout(600)
 }
-const state = (page) => page.evaluate(() => ({ ...globalThis.engine.eggs.state, status: document.querySelector('.egg-status')?.textContent, hour: globalThis.engine.hour, weather: globalThis.engine.realmControls.sky.weather, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.own || !s.content ? null : 'text' in s.content ? s.content.text : 'video' in s.content ? 'video' : 'image'])) }))
+const state = (page) => page.evaluate(() => ({ ...globalThis.engine.eggs.state, status: document.querySelector('.egg-status')?.textContent, hour: globalThis.engine.hour, weather: globalThis.engine.realmControls.sky.weather, dark: globalThis.engine.boards?.dark ?? null, signs: Object.fromEntries(globalThis.engine.signs.list().map((s) => [s.id, s.own || !s.content ? null : 'text' in s.content ? s.content.text : 'video' in s.content ? 'video' : 'image'])) }))
 /**
  * Until the banner's plane has brought what an egg says into the picture (boards.ts `plane.call`): the cloth's middle
  * and both its ends in front of the eye and inside the canvas. Resolves with how long that took, ms, and where it is.
@@ -102,6 +102,28 @@ const grid = async (page, name) => {
     for (let k = 0; k < W * H; k++) for (let c3 = 0; c3 < 3; c3++) out[k * 3 + c3] /= n[k]
     return [...out]
   }, `data:image/png;base64,${png.toString('base64')}`)
+}
+/** The boards whose own light the eggs put out (boards.ts `dark`): the two lettering boards and the three logos. */
+const LIT_BOARDS = ['blog', 'explore', 'x', 'linkedin', 'twitch']
+/** How light each board is in the picture now: the mean light (0 to 255) of the pixels in its box, those in the picture. */
+const boardLight = async (page, name) => {
+  const boxes = await page.evaluate((ids) => Object.fromEntries(ids.map((id) => [id, globalThis.engine.boards.where(id)])), LIT_BOARDS)
+  const png = await page.screenshot(name ? { path: join(shots, `${name}.png`) } : {})
+  return page.evaluate(async ({ url, boxes }) => {
+    const img = new Image(); img.src = url; await img.decode()
+    const c = new OffscreenCanvas(img.width, img.height), x = c.getContext('2d'); x.drawImage(img, 0, 0)
+    const k = img.width / innerWidth, out = {}
+    for (const [id, b] of Object.entries(boxes)) {
+      if (!b) continue
+      const x0 = Math.max(0, Math.round((b.x - b.wide / 2) * k)), y0 = Math.max(0, Math.round((b.y - b.high / 2) * k)), x1 = Math.min(img.width, Math.round((b.x + b.wide / 2) * k)), y1 = Math.min(img.height, Math.round((b.y + b.high / 2) * k))
+      if (x1 <= x0 || y1 <= y0) continue
+      const d = x.getImageData(x0, y0, x1 - x0, y1 - y0).data
+      let sum = 0
+      for (let i = 0; i < d.length; i += 4) sum += 0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]
+      out[id] = Math.round((sum / (d.length / 4)) * 10) / 10
+    }
+    return out
+  }, { url: `data:image/png;base64,${png.toString('base64')}`, boxes })
 }
 /** Cells of a grid in a box of the view (fractions: left, top, right, bottom): the city below the sky, clear of the controls. */
 const CITY = [0.03, 0.2, 0.72, 0.85], SKY = [0.03, 0.02, 0.72, 0.12]
@@ -504,6 +526,9 @@ const fromFirst = async () => {
     await hit('crown')
     await still(page)
     // EXPLORE asked once and let go of, then the site's name while its eye leans back: the roll waits for it, and the eye comes round whole.
+    // (From the end of a line, so the name is up for its whole 10 s: from wherever the turn of lines was, a line came
+    // up between the ask and the click, and the click started its egg, #450.)
+    await until(() => !!globalThis.engine.eggs.first.spots.line, null, 40_000)
     await named()
     await bannerIn()
     // (The eye as the ask finds it: the rolls before have each turned it a whole turn on from where it began.)
@@ -632,7 +657,7 @@ try {
   }
   await still(page)
 
-  // ── The Matrix, from the line: the banner shows what is typed; code rain on the windows, a green night in fog ──
+  // ── The Matrix, from the line: the banner shows what is typed; code rain on the windows, its music, a green night under cloud ──
   console.log('\nthe Matrix')
   await page.keyboard.press('Enter')
   await page.keyboard.type('wake up', { delay: 25 })
@@ -665,7 +690,26 @@ try {
   results.matrix.firstLine = await firstLine
   check(results.matrix.firstLine.came && results.matrix.firstLine.readMs >= 7500, `the banner's first line could be read for ${round(results.matrix.firstLine.readMs / 1000)} s before the second replaced it, ${round(results.matrix.firstLine.afterMs / 1000)} s after it was said (asked: 7.5 s of it readable)`)
   s = await state(page)
-  check(s.running === 'matrix' && s.up === 1 && s.weather === 'fog' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
+  check(s.running === 'matrix' && s.up === 1 && s.weather === 'overcast' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
+  const card = await page.evaluate(() => !document.querySelector('.egg-player')?.hidden)
+  check(s.playing && !s.muted && s.sound > 0 && s.time > 1 && !card, `its music plays in the background, typed, with its sound: ${s.sound} bytes decoded, ${round(s.time, 1)} s in, no player over the city (${card ? 'shown' : 'none'})`)
+  // The boards' own light is out while it has the windows: each board as the Matrix leaves it, and as it is lit again
+  // over the same picture (the letters struck and warmed up), the plane held off the boards meanwhile.
+  {
+    check(s.dark === true, `the boards' own light is off (boards.dark ${s.dark})`)
+    await page.evaluate(() => { globalThis.engine.boards.plane.hold = 0.5 })
+    await page.waitForTimeout(800)
+    const dark = await boardLight(page, 'matrix-boards-dark')
+    await page.evaluate(() => { globalThis.engine.boards.dark = false })
+    await page.waitForFunction(() => globalThis.engine.boards.glow.settled, null, { timeout: 10_000 }).catch(() => null)
+    await page.waitForTimeout(800)
+    const lit = await boardLight(page, 'matrix-boards-lit')
+    await page.evaluate(() => { globalThis.engine.boards.dark = true; globalThis.engine.boards.plane.hold = null })
+    await page.waitForTimeout(800)
+    results.matrix.boards = { dark, lit }
+    const shown = LIT_BOARDS.filter((id) => dark[id] !== undefined && lit[id] !== undefined)
+    check(shown.length >= 3 && shown.every((id) => dark[id] < lit[id] * 0.8), `each board in the picture is darker with its light off than lit: ${shown.map((id) => `${id} ${dark[id]} against ${lit[id]}`).join(', ')} (asked: under 0.8 of lit, for 3 or more in the picture)`)
+  }
   const m1 = await grid(page, 'matrix'), m2 = (await page.waitForTimeout(400), await grid(page))
   const city0 = cells(before, CITY), city1 = cells(m1, CITY), city2 = cells(m2, CITY)
   const green = (cs) => mean(cs, (c) => c[1] - (c[0] + c[2]) / 2)
@@ -718,8 +762,8 @@ try {
   }
   await cost(page, 'matrix', 'the Matrix')
   await sayTo(page, 'blue pill')
-  // On the way out too: the fog thins in the dark before the day is back, so no picture is a day washed pale under it
-  // (as light as half the day's city and with under a third of its contrast).
+  // On the way out too: no picture is a day washed pale under the night's weather (as light as half the day's city and
+  // with under a third of its contrast; under its fog, before #450's overcast, it was).
   const spread = (cs) => { const m = mean(cs, light); return Math.sqrt(mean(cs, (c) => (light(c) - m) ** 2)) }
   const out = []
   for (let i = 0; i < 28; i++) { const g = await grid(page, i % 7 === 0 ? `matrix-out-${i}` : null), city = cells(g, CITY); out.push({ light: Math.round(mean(city, light)), spread: Math.round(spread(city)) }) }
@@ -728,7 +772,7 @@ try {
   check(pale.length === 0, `as the Matrix leaves, no picture of twenty-eight is the day washed pale under its fog (the day's city: light ${Math.round(mean(dayCity, light))}, spread ${Math.round(spread(dayCity))}): light ${out.map((o) => o.light).join(' ')}; spread ${out.map((o) => o.spread).join(' ')}`)
   await page.waitForTimeout(400)
   s = await state(page)
-  check(s.running === null && s.signs.banner === null, `"blue pill" leaves it (${s.running}), the signs are their own again`)
+  check(s.running === null && s.signs.banner === null && !s.playing && s.dark === false, `"blue pill" leaves it (${s.running}), its music stops, the signs are their own again and the boards lit (dark ${s.dark})`)
   await still(page)
   await page.waitForFunction(() => globalThis.engine.hour === null, null, { timeout: 20_000 }).catch(() => null)
   s = await state(page)
@@ -742,7 +786,7 @@ try {
   await begun()
   await page.waitForTimeout(2500)
   s = await state(page)
-  check(s.running === 'apple' && s.playing && !s.muted && s.sound > 0, `typed, it plays with its sound: ${s.sound} bytes decoded`)
+  check(s.running === 'apple' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `typed, it plays with its sound: ${s.sound} bytes decoded; the boards' light off (${s.dark})`)
   await still(page)
   await cost(page, 'bad-apple', 'Bad Apple!!')
   const follows = async (at, name) => {
@@ -781,7 +825,7 @@ try {
   check(seen.seen, `the banner's plane brings "${(await state(page)).signs.banner}" into the picture: ${JSON.stringify(seen)}`)
   await page.waitForTimeout(2500)
   s = await state(page)
-  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0, `Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"`)
+  check(s.running === 'rickroll' && s.playing && !s.muted && s.sound > 0 && s.dark === true, `Rick is on every window, with his sound (${s.sound} bytes decoded); banner "${s.signs.banner}"; the boards' light off (${s.dark})`)
   await still(page)
   await page.evaluate(() => globalThis.engine.eggs.hold(20))
   await page.waitForTimeout(1200)

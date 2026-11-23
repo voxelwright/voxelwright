@@ -5,7 +5,7 @@
 //
 //   Enter or /           a line to say something to the city on; what is typed shows on the banner as it is typed
 //                        (in the first view too, where main.ts opens it: no other key is heard there)
-//   wake up, neo, red pill, follow the white rabbit       the Matrix: code rain on the windows, fog, night, green
+//   wake up, neo, red pill, follow the white rabbit       the Matrix: code rain on the windows, its music, overcast, night, green
 //   blue pill, Esc       out of the Matrix (Esc ends any egg; reset ends them all and puts the sky back)
 //   rickroll, never gonna give you up                     Rick Astley on every window, with his sound
 //   bad apple, or the hour swung across dusk four times in four seconds                        Bad Apple!! in shadow
@@ -20,9 +20,12 @@
 // roll) and a golden shield (IDDQD). A cue says what each does once one is near; a tap or a click on it, E, or the Use
 // key with the aim on the thing, uses it.
 //
-// Nothing here is fetched until an egg starts: the pictures (eggs-pictures.ts) and the videos (sf/eggs/, put there by
-// sf/build.mjs, never in git). A video's sound plays because the visitor started it; a browser that holds the sound
-// back gets the video muted and an Unmute key, which is that tap.
+// While one of the three that take the windows plays (the Matrix, the Rickroll, Bad Apple!!), the boards' own light is
+// off (boards.ts `dark`): BLOG, EXPLORE and the logos are not lit over the picture.
+//
+// Nothing here is fetched until an egg starts: the pictures (eggs-pictures.ts), the videos and the Matrix's music
+// (sf/eggs/, put there by sf/build.mjs, never in git). Their sound plays because the visitor started it; a browser that
+// holds the sound back gets it muted and an Unmute key, which is that tap. The Matrix without its music is the Matrix.
 import type { Input } from './input.ts'
 import type { Marcher, View } from './march.ts'
 import type { Skies, Weather } from './weather.ts'
@@ -77,6 +80,8 @@ export interface EggsPage {
   still(): boolean
   /** An EXPLORE asked once is put back as it was (explore.ts `disarm`). */
   calm(): void
+  /** The boards' own light off while an egg has the windows (true), and on again (false): boards.ts `dark`. */
+  darkBoards(on: boolean): void
   /** The banner's plane (boards.ts), or null. */
   plane(): Boards['plane']
   /** Where the feet are (world cells), or null flying as an eye; and where feet would stand at a column. */
@@ -109,8 +114,8 @@ const OWN_HOUR = 13.45
 
 /** How each egg dresses the sky: the hour it goes to, the weather, and the last pass's grade (colour, contrast) and tint. */
 const LOOKS: Record<Egg, { hour: number; weather: Weather; grade?: readonly [number, number]; tint: readonly [number, number, number] }> = {
-  // A green night, the marine layer in from the sea.
-  matrix: { hour: 23.25, weather: 'fog', grade: [0.75, 0.4], tint: [0.62, 1.0, 0.68] },
+  // A green night under cloud (fog lay over the windows' code, #450).
+  matrix: { hour: 23.25, weather: 'overcast', grade: [0.75, 0.4], tint: [0.62, 1.0, 0.68] },
   // A 1987 dusk: blue hour, a warm tint.
   rickroll: { hour: 20.0, weather: 'clear', tint: [1.0, 0.88, 0.97] },
   // Shadow art: an overcast night in black and white, only the windows lit.
@@ -123,6 +128,10 @@ const VIDEOS = {
   apple: { file: 'eggs/bad-apple.mp4', title: 'Bad Apple!!', outside: [0, 0, 0, 240] as const, contrast: 1.1,
     start: 'Bad Apple!! The city plays it in shadow.', end: 'Bad Apple!! is over. The lights come back on.' },
 }
+/** The Matrix's music (from the film's soundtrack, made by sf/build.mjs's note: HE-AAC, -16 LUFS as the videos), played round while it is up. */
+const MUSIC = { file: 'eggs/matrix.m4a', title: 'The Matrix' }
+/** What the player says is playing. */
+const TITLES: Record<Egg, string> = { matrix: MUSIC.title, rickroll: VIDEOS.rickroll.title, apple: VIDEOS.apple.title }
 
 /** The words of a phrase as they are compared: lower case, curly quotes straight, nothing but letters, digits, apostrophes and single spaces. */
 export const words = (text: string) => text.toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/'/g, '').replace(/\s+/g, ' ').trim()
@@ -189,17 +198,46 @@ export function eggs(page: EggsPage) {
 
   // ── The Matrix ──
   const enter = async () => {
-    if (running?.egg === 'matrix') return say('You are already in. Esc, or say “blue pill”, to leave.')
+    if (running?.egg === 'matrix') return running.blocked ? unblock(running) : say('You are already in. Esc, or say “blue pill”, to leave.')
     stop(true, false, true)
+    // Its music is started inside the gesture, as a video is (`play`), and comes round again at its end. It has no
+    // player unless its sound is held back: Esc, “blue pill” or the phone again end it, and the music with it.
+    const m = element()
+    m.muted = false
+    m.loop = true
+    void m.play().catch(() => {})
     const started = ++clock
+    const current: NonNullable<typeof running> = { egg: 'matrix', picture: null, started: performance.now(), media: m }
+    running = current
+    page.hush(true)
+    showPlayer()
+    // The rain does not wait for the music: it comes as soon as its code has, and the music when its file has.
+    const music = fetchVideo(MUSIC.file)
+    music.catch(() => {})
     const { codeRain } = await import('./eggs-pictures.ts')
-    if (started !== clock) return
-    running = { egg: 'matrix', picture: codeRain(), started: performance.now() }
+    if (running !== current || started !== clock) return
+    current.picture = codeRain()
+    current.started = performance.now()
     dress('matrix')
     // Two lines, one after the other (the banner has room for one): the second once the first has been in sight a while.
     banner('The Matrix has you')
     nextLine = { after: 'The Matrix has you', next: 'Red pill or blue pill?', seen: 0 }
     say('Wake up, Neo… The windows are code now. Esc, or say “blue pill”, to leave.')
+    try {
+      const url = await music
+      if (running !== current || started !== clock) return
+      m.src = url
+      run(current)
+    } catch (e) {
+      // No music (not built, or it did not come): the Matrix goes on in silence, and no player is offered.
+      console.warn(`${MUSIC.file} did not load:`, e)
+      if (running !== current) return
+      current.media = undefined
+      m.pause()
+      m.loop = false
+      hidePlayer()
+      page.hush(false)
+    }
   }
 
   // ── Videos on the windows ──
@@ -240,19 +278,21 @@ export function eggs(page: EggsPage) {
       say('Playing muted: Unmute on the player brings the sound.')
     })
   }
+  /** A tap again while its sound was held back: the sound, now. */
+  const unblock = (current: NonNullable<typeof running>) => {
+    current.blocked = false
+    current.media!.muted = false
+    run(current)
+    showPlayer()
+    say('Sound on.')
+  }
   const play = async (egg: 'rickroll' | 'apple') => {
     const v = VIDEOS[egg]
-    if (running?.egg === egg) {
-      if (!running.blocked) return stop()
-      running.blocked = false
-      running.media!.muted = false
-      run(running)
-      showPlayer()
-      return say('Sound on.')
-    }
+    if (running?.egg === egg) return running.blocked ? unblock(running) : stop()
     stop(true, false, true)
     const m = element()
     m.muted = false
+    m.loop = false
     // Started inside the gesture before it has a file: some browsers let an element play sound later only if it was
     // first started from a tap.
     void m.play().catch(() => {})
@@ -332,10 +372,12 @@ export function eggs(page: EggsPage) {
   realm.append(player)
   const muteKey = player.querySelector<HTMLButtonElement>('.mute')!, stopKey = player.querySelector<HTMLButtonElement>('.stop')!
   const showPlayer = () => {
+    // (The Matrix's music is in the background: no player over the city, only Unmute where the browser held its sound back.)
+    if (running?.egg === 'matrix' && !running.blocked) return hidePlayer()
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
-    player.querySelector('.title')!.textContent = `Now playing: ${VIDEOS[running.egg as 'rickroll' | 'apple'].title}`
+    player.querySelector('.title')!.textContent = `Now playing: ${TITLES[running.egg]}`
     const muted = running.media.muted
     muteKey.textContent = muted ? 'Unmute' : 'Mute'
     muteKey.setAttribute('aria-pressed', String(muted))
@@ -563,7 +605,7 @@ export function eggs(page: EggsPage) {
   })
 
   // ── Every frame: the screen comes up and goes down, its picture is drawn, the light comes home, the hour is watched ──
-  let flips: number[] = [], wasDark: boolean | null = null
+  let flips: number[] = [], wasDark: boolean | null = null, darkened = false
   page.watch((gap) => {
     const dt = Math.min(gap, 100) / 1000
     found.frame(performance.now() / 1000)
@@ -571,6 +613,8 @@ export function eggs(page: EggsPage) {
     // The banner's next line, after its plane has been in the picture for 8 s (it flies in from the edge, cloth last).
     if (nextLine && onBanner !== nextLine.after) nextLine = null
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
+    // The boards' own light is off while an egg has the windows, from its start to its end.
+    if (!!running !== darkened) { darkened = !!running; page.darkBoards(darkened) }
     const up = running?.picture ? 1 : 0
     // Up over a second, down over two thirds of one.
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)

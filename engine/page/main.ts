@@ -1550,7 +1550,7 @@ async function main() {
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
-          canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), still: () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1),
+          canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1),
           pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)),
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {

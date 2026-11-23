@@ -313,6 +313,12 @@ export interface Boards {
   marks(id: string): { x: number; y: number; lit: boolean; /** Which of its letters the square is of (spaces counted). */ letter: number }[]
   /** Whether the logos are drawn: a check reads a logo off the picture as what it changes there (test/sf-logos.mjs). */
   logos: boolean
+  /**
+   * The boards' own light off (true), as while an egg plays on the city's windows (eggs.ts): BLOG's and EXPLORE's
+   * letters out and their lamps' wash gone, the logos and the boards' far faces lit only as the day lights a wall. The
+   * banner is the eggs' own and stays lit. Off again (false), the letters strike as the lights coming on make them.
+   */
+  dark: boolean
   /** How many of a lettering board's letters still stand (most of their lamp there), and a digital board's tiles lit. */
   standing(id: string): { letters: string; whole: boolean }
   /** The lettering boards' own light (letterlight.ts): its clock can be held, and it says when it has settled and how lit each letter is. */
@@ -422,7 +428,10 @@ export async function boards(o: Needs): Promise<Boards> {
   // too: the display set's hairlines a cell wide were finer than its face from the park holds (618 of its 748 squares).
   const sizeOf = (b: Board): Size => lettersAsked ?? b.letters ?? (DEVICE === 'phone' || Math.round(((b.size as number) * M) / DISPLAY_CAP) < 4 ? 'compact' : 'display')
   const sizes = [...new Set(o.file.boards.filter((b) => b.type === 'lettering').map(sizeOf))]
-  const [drawn, glow, faces] = await Promise.all([screensOf(o.device, o.format), letterLight(o.device, o.format, () => o.lights?.() ?? 0), Promise.all(sizes.map((z) => letteringFace(z))).then((got) => new Map(sizes.map((z, i) => [z, got[i]]))).catch((e: unknown) => { console.warn(`no lettering boards: their face did not come (${e instanceof Error ? e.message : String(e)})`); return null })])
+  /** Whether the boards' own light is off (`dark`), and how far it is on now: the city's lights, or none while it is off. */
+  let dark = false
+  const lights = () => (dark ? 0 : o.lights?.() ?? 0)
+  const [drawn, glow, faces] = await Promise.all([screensOf(o.device, o.format), letterLight(o.device, o.format, lights), Promise.all(sizes.map((z) => letteringFace(z))).then((got) => new Map(sizes.map((z, i) => [z, got[i]]))).catch((e: unknown) => { console.warn(`no lettering boards: their face did not come (${e instanceof Error ? e.message : String(e)})`); return null })])
   const faceOf = (b: Board) => faces?.get(sizeOf(b)) ?? null
   o.passes.add('signs', (encoder, to, view, time) => {
     // Past where the far model's faces take over, a board's cells are not drawn: nor is its screen.
@@ -431,14 +440,20 @@ export async function boards(o: Needs): Promise<Boards> {
     for (const s of stood.values()) {
       if (!s.shape) continue
       // A lettering board: its cells, or from too far for them its face (`asCells`), painted again if the world changed under it.
-      if (s.far) { const face = !asCells(s, view.eye), dusk = (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
+      // (Each frame, as a far face is made again when its size changes and a reset lays the boards again.)
+      if (s.screen) s.screen.unlit = dark
+      if (s.far) s.far.unlit = dark
+      if (s.far) { const face = !asCells(s, view.eye), dusk = (dark ? 'dark ' : '') + (glow.power[s.b.id] ?? []).map((p) => Math.round(Math.min(1, p) * 8)).join(''); if (face !== s.faced) { s.faced = face; turned = true } s.far.hidden = !face; if (face && s.stale) paintFar(s); else if (face && dusk !== s.dusk) { s.dusk = dusk; inkFar(s) } }
       if (!s.screen) continue
       if (s.b.type === 'digital') s.screen.hidden = reach > 0 && Math.hypot(s.shape.middle[0] - view.eye[0], s.shape.middle[2] - view.eye[2]) > reach
       else if (s.b.type === 'logo') { seat(s, view.eye); sharpen(s, view, to.size) }
     }
     if (turned) keep()
     // The letters' own light: the march is told it for the next frame, and their halos are drawn over this one.
-    o.letters?.(glow.step(o.lights?.() ?? 0, seen))
+    // (Dark, the lamps on arms are said to be off too: the march washes no panel with them and lights no bulb of theirs.)
+    const told = glow.step(lights(), seen)
+    if (dark) told[7] = -1
+    o.letters?.(told)
     drawn.draw(encoder, to, view, time, o.day(), o.dull(), o.faced())
     glow.draw(encoder, to, view, o.faced())
   })
@@ -511,10 +526,10 @@ export async function boards(o: Needs): Promise<Boards> {
    * warm, as the lamps over the cells' own make them (they were a cold grey beside BLOG's).
    */
   const inkFar = (s: Stood) => {
-    const kinds = s.farKinds!, power = glow.power[s.b.id] ?? [], w = s.farLetter?.length ?? 1
-    const lamps = Array.from({ length: Math.max(1, power.length) }, (_, k) => { const lit = Math.max(s.lit ?? 0, 0.55 * Math.min(1, power[k] ?? 0)); return FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * lit) })
-    const unlit = FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * (s.lit ?? 0))
-    ;(s.far as Screen & { style: Style }).style.glow = 0.5 + (s.lit ?? 0)
+    const kinds = s.farKinds!, power = glow.power[s.b.id] ?? [], w = s.farLetter?.length ?? 1, own = dark ? 0 : s.lit ?? 0
+    const lamps = Array.from({ length: Math.max(1, power.length) }, (_, k) => { const lit = Math.max(own, 0.55 * Math.min(1, power[k] ?? 0)); return FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * lit) })
+    const unlit = FACE.lamp.map((v, c) => v + (FACE.lit[c] - v) * own)
+    ;(s.far as Screen & { style: Style }).style.glow = 0.5 + own
     s.far!.paint((pen, w, h) => {
       const picture = pen.createImageData(w, h)
       for (let i = 0; i < w * h; i++) {
@@ -1085,6 +1100,8 @@ export async function boards(o: Needs): Promise<Boards> {
     get plane() { return flown },
     get logos() { return [...stood.values()].some((s) => s.b.type === 'logo' && !s.screen?.hidden) },
     set logos(on: boolean) { for (const s of stood.values()) if (s.b.type === 'logo' && s.screen) s.screen.hidden = !on },
+    get dark() { return dark },
+    set dark(on: boolean) { dark = on },
     editor,
   }
 }
