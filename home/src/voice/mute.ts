@@ -7,12 +7,14 @@ export const ALL_MUTED = 'village.babble.muted'
 /** The music alone (Shift+M or the note beside the speaker). */
 export const MUSIC_MUTED = 'village.music.muted'
 
-export function storedFlag(key: string): boolean {
+export function storedFlag(key: string, fallback = false): boolean {
   try {
-    return localStorage.getItem(key) === '1'
+    const value = localStorage.getItem(key)
+    if (value === '1' || value === '0') return value === '1'
   } catch {
-    return false
+    // Storage may be unavailable.
   }
+  return fallback
 }
 
 export function storeFlag(key: string, on: boolean) {

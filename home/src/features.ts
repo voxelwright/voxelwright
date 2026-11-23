@@ -1,6 +1,6 @@
 /**
  * The one rule for which features a page has (#72). Talk, villagers, the dollhouse view, babble,
- * music, build mode and physics are on by default. Opt-outs: ?talk=off returns the quiet seated kitchen
+ * build mode and physics are on by default. Opt-outs: ?talk=off returns the quiet seated kitchen
  * (no villagers, music or babble, and build mode only with ?build=1), ?build=0 turns
  * build mode off, ?physics=0 turns the physics world off, ?cam=seat keeps the seated view. ?talk=npc and ?build=1 still work as before.
  * ?talk=notebook (or any other value) is the separate notebook prototype: talk is off for it.

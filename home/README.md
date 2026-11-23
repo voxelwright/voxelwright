@@ -9,7 +9,8 @@ All textures are painted in code in `src/paint.ts`.
 ```sh
 npm install
 npm run dev            # http://localhost:5181, ?q=high|medium|low overrides the measured tier
-# Talk, villagers, the iso view, babble, music, build mode and physics are on by default (#72, #74; src/features.ts).
+# Talk, villagers, the iso view, babble, build mode and physics are on by default (#72, #74; src/features.ts).
+# Background music is off by default. Use the note beside the speaker or Shift+M to turn it on.
 # Opt-outs: ?talk=off (quiet seated kitchen), ?build=0 (no build mode), ?physics=0 (no physics, no wasm), ?cam=seat (seated view).
 # ?talk=npc and ?build=1 still work. Scripts that need the old plain page add ?talk=off&build=0.
 # Physics (#74): every thing in the home is a body; the pinball table plays with Shift or arrow keys (flip) and Space or the
@@ -2087,10 +2088,10 @@ the voices have only been measured, not listened to by a person.
 
 ## Music (#42)
 
-Music: with `?talk=npc` a quiet looped bed plays under the villagers, "Groove Music" by
-benpm (CC BY 4.0, https://freesound.org/s/203099/), the only sampled sound in the home. `?music=off` turns it
-off; without `?talk=npc` the plugin adds nothing. The credit shows when you hover or Tab to the
-note beside the speaker button, and is in `CREDITS.md` and `public/audio/CREDITS.md`.
+Background music is off by default. The note beside the speaker enables "Groove Music" by
+benpm (CC BY 4.0, https://freesound.org/s/203099/) as a quiet loop under the villagers. `?music=off`
+and `?talk=off` disable the music plugin. The credit shows when you hover or Tab to the note,
+and is in `CREDITS.md` and `public/audio/CREDITS.md`.
 
 - `public/audio/groove-music.ogg` is the original re-encoded to Ogg Opus at 112 kb/s (341 KB). It
   is exactly eight bars at 90 BPM (1,024,000 samples at 48 kHz), so it loops as it is, with no trim
@@ -2109,7 +2110,7 @@ note beside the speaker button, and is in `CREDITS.md` and `public/audio/CREDITS
   survive a reload. With `?babble=off` there are no voices, so nothing ducks.
 
 ```sh
-node scripts/check-music.mjs [base-url]   # 30 headless checks, dev server on 5322 by default
+node scripts/check-music.mjs [base-url]   # headless checks, dev server on 5322 by default
 ```
 
 The first key press does not freeze the page (checked in `check-music`, in a browser of its

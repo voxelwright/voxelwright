@@ -130,6 +130,8 @@ async function record(clip) {
   await p.goto(`${base}?${clip.query ?? 'talk=npc'}`)
   await p.evaluate(() => window.village.ready(15000))
   await p.waitForFunction((talk) => window.village.sound && (!talk || window.village.talk), (clip.query ?? 'talk=npc').includes('talk=npc'), { timeout: 8000 })
+  // Preserve the sample mix in this isolated recording context.
+  await p.evaluate(() => window.village.music?.setMusicMuted(false))
   await p.mouse.click(5, 5)
   await p.waitForFunction(() => window.village.sound.audio?.state === 'running', null, { timeout: 8000 })
   await p.evaluate(async () => {
@@ -147,7 +149,8 @@ async function record(clip) {
   const reveal = await p.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => {
     const t0 = window.village.sound.audio.currentTime
     document.getElementById('lab-cover').remove()
-    resolve({ t0, music: Boolean(window.village.music?.bed?.playing) })
+    const music = window.village.music
+    resolve({ t0, music: Boolean(music?.bed?.playing && !music.muted) })
   })))
   const wall0 = Date.now()
   await p.waitForTimeout(900)

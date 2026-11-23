@@ -5,8 +5,8 @@ import { acquireAudio, type SharedAudio } from '../voice/context'
 import { busFor, mixFor, type Mix } from '../voice/buses'
 import { ALL_MUTED, MUSIC_MUTED, isMuteKey, storedFlag, storeFlag } from '../voice/mute'
 
-// #42: a quiet looped bed under the villagers' voices. On by default (?talk=off removes it); ?music=off
-// turns it off. It starts on the first touch or key press, like the voices (on the one
+// #42: a quiet looped bed under the villagers' voices, muted by default. ?talk=off or ?music=off
+// removes it. The loop starts on the first touch or key press, like the voices (on the one
 // AudioContext they share, voice/context.ts), fades in over
 // two seconds, and plays into the music bus (voice/buses.ts), which drops 6 dB while a
 // villager speaks. `M` and the felt speaker button (plugins/sound.ts) mute everything;
@@ -66,7 +66,7 @@ export default {
     let audio: AudioContext | null = null
     let bed: Bed | null = null
     let allMuted = storedFlag(ALL_MUTED)
-    let musicMuted = storedFlag(MUSIC_MUTED)
+    let musicMuted = storedFlag(MUSIC_MUTED, true)
 
     const wrap = document.createElement('div')
     wrap.className = 'music-note'

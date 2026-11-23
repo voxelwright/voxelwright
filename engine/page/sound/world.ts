@@ -50,7 +50,7 @@ const BLOW = 30
 const BLOWS = 5
 const M = 10, G = 98
 
-export function hearing(voice: Sound, scene: Scene, { music: withMusic = true } = {}) {
+export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { music: boolean }) {
   const music = withMusic ? conductor(voice) : null
   /** How much is going wrong near by, 0 to 1: blasts, things coming down, fire. It dies away over some seconds. */
   let threat = 0, snow = false, snowLooked = -9, place = ''

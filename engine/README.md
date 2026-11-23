@@ -352,7 +352,7 @@ runs on the audio thread (`page/sound/dsp.ts`) and nothing a patch says gets pas
   and far above the land there is no pulse, snow has bells and space, night a few notes on a piano, danger a driving
   figure (at once, when a charge goes off near by), making a marimba at work. It is composed as it plays: for each
   voice 3,000 random patterns are scored against named rules, each with its source, and the best is kept. No piece
-  is played twice; calm places are quiet between pieces. `?music=0` leaves it out.
+  is played twice; calm places are quiet between pieces. Background music is off by default. Use `?music=1` to hear it.
 - **Instruments** (`page/sound/instrument.ts`, `surface.ts`, `instruments.ts`): an instrument is a voice (a patch) and
   a surface to play it by, both data in a made thing's `sounds`. A part of a surface is a shape anywhere on it that
   sounds a note, is a string, sets a chord, strums, or slides between two pitches; the rest is its look. A guitar
@@ -667,7 +667,7 @@ node helper.mjs --world URL --sheets dir --facts sonnet    # keeps each sheet dr
   alarming said. A stand-in proves the joining, not what fal draws or what a real model says.
 
 Address options: `?grid=16,8,16` `?levels=9` `?pool=256` `?scale=0.5` `?at=x,y,z`
-`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?bricks=1` (with `&finesun=0`, `&walk=loop`) and `?fine=1` or `2` (#259, experiments in shape finer than a cell: the cell-engine skill says what each is, and what an edit of finer cells may be; without `bricks=1` such an edit is refused whole) `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=0` (no music) `?name=Ada` (in a shared world).
+`?look=yaw,pitch` `?shadows=0` `?mirrors=0` `?maps=0` `?flat=1` `?fire=0` `?hour=18.1` (the time of day; the `[` and `]` keys move it half an hour) `?rain=1` (rain; the R key turns it on and off) `?heat=1` `?fly=0` `?seconds=40` `?bricks=1` (with `&finesun=0`, `&walk=loop`) and `?fine=1` or `2` (#259, experiments in shape finer than a cell: the cell-engine skill says what each is, and what an edit of finer cells may be; without `bricks=1` such an edit is refused whole) `?people=0` (a town with nobody in it) `?sound=0` (silent) `?music=1` (background music on) `?music=0` (off, the default) `?name=Ada` (in a shared world).
 
 To a phone on the tailnet: `tailscale serve --bg --https=10140 http://127.0.0.1:5740`, with
 `node live.mjs` run after each merge so that the link serves main and not a working tree.
@@ -1013,8 +1013,8 @@ curl -s http://127.0.0.1:5741/world/           # the guide: everything a rule he
   how much of it is playing; both change at once in the piece that is playing. A new mood or mode comes in at the
   next bar, or the next beat with `now`. `like: null` gives the music back to the place; so does taking the rule out. A realm
   that says nothing keeps the place's own. `node test/tuned.mjs` checks it with a lighthouse whose music fills as the
-  rule's wind rises, and a dancing class that sets pace and mode by what is said; a page that joins later plays what
-  was last said, and what is heard keeps the pace asked. A model asked for a storyteller wrote one whose music
+  rule's wind rises, and a dancing class that sets pace and mode by what is said. A page that joins later with
+  `?music=1` plays the realm's last setting at the requested pace. A model asked for a storyteller wrote one whose music
   follows how far her story is (November 14).
   **A lean** (`world.music({lean, for})`): any rule pushes the music up or down for a while without having it,
   on top of the realm's rule's music or the place's own (more or less of it in, up to an eighth faster or slower),

@@ -108,6 +108,7 @@ try {
     await p.waitForFunction(() => globalThis.engine?.ears?.things, null, { timeout: 90_000 })
     await p.mouse.click(640, 200)
     await p.waitForFunction(() => globalThis.engine.ears.voice.running)
+    check(await p.evaluate(() => globalThis.engine.ears.music === null), '?music=0 keeps background music off')
     await p.waitForFunction(() => globalThis.engine.ears.things.near, null, { timeout: 30_000 }).catch(() => {})
     const near = await p.evaluate(() => ({ near: globalThis.engine.ears.things.near, offer: document.querySelector('[data-panel="play-take"] button')?.textContent }))
     check(near.near === id && /Play the piano/.test(near.offer ?? ''), `standing by it, the page offers it ("${near.offer}")`)

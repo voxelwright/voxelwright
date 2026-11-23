@@ -260,7 +260,7 @@ const SAMPLE = {
     return { state: s.audio.state, clockMoved: s.audio.currentTime - t0, atZero: s.audio.currentTime === 0, plays: s.log.length, contexts: window.audioContexts, contextMs: window.contextMs }
   })
   check('No sound before a gesture: one shared context, suspended at 0, and an event plays nothing', before.state === 'suspended' && before.atZero && before.clockMoved === 0 && before.plays === 0 && before.contexts === 1 && !requests.some((u) => u.includes('/audio/sfx/')), JSON.stringify(before))
-  await live.mouse.click(400, 300)
+  await live.click('.music-toggle')
   await live.waitForFunction(() => window.village.sound.audio.state === 'running', null, { timeout: 5000 })
   await tap(live)
 

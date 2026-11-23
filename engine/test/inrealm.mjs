@@ -31,7 +31,7 @@ try {
   browser = await chrome()
   const page = await (await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })).newPage()
   page.on('pageerror', (e) => failures.push(`page error: ${e.message}`))
-  await page.goto(`${server.url}/city?fly=0&shared=1&scale=0.4&people=0&at=70,17.8,406&look=0,0`)
+  await page.goto(`${server.url}/city?fly=0&shared=1&scale=0.4&people=0&music=1&at=70,17.8,406&look=0,0`)
   await page.waitForFunction(() => globalThis.engine?.ears, null, { timeout: 90_000 })
   await page.mouse.click(640, 300)
   await page.waitForFunction(() => globalThis.engine.ears.voice.running)

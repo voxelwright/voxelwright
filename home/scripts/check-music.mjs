@@ -157,7 +157,7 @@ const stereo = loud.samples.map(decode)
 report.lufs = +lufs(stereo).toFixed(1)
 report.peakDb = +db(Math.max(...stereo.map((x) => x.reduce((m, v) => Math.max(m, Math.abs(v)), 0)))).toFixed(1)
 report.sourceLufs = +(report.lufs - db(await page.evaluate(() => window.LEVEL))).toFixed(1)
-check('Quiet by default: -33 to -30 LUFS integrated, peaks below -12 dBFS', report.lufs >= -33 && report.lufs <= -30 && report.peakDb < -12, `${report.lufs} LUFS (the file alone is ${report.sourceLufs}), peak ${report.peakDb} dBFS`)
+check('With music enabled: -33 to -30 LUFS integrated, peaks below -12 dBFS', report.lufs >= -33 && report.lufs <= -30 && report.peakDb < -12, `${report.lufs} LUFS (the file alone is ${report.sourceLufs}), peak ${report.peakDb} dBFS`)
 
 const seam = await page.evaluate(() => window.seam())
 report.seam = {
@@ -242,6 +242,29 @@ const said = (p, n, gap = 100) =>
   }, [n, gap])
 const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttribute('aria-pressed'), sel)
 
+// Start with no saved preference, then opt in with the note for the live checks below.
+{
+  const fresh = await context.newPage()
+  fresh.on('pageerror', (e) => errors.push(String(e)))
+  await fresh.goto(URL_ALL)
+  await fresh.evaluate(() => window.village.ready(5000))
+  await fresh.mouse.click(400, 300)
+  await waitForBed(fresh)
+  await tap(fresh)
+  const from = await now(fresh)
+  await fresh.waitForFunction((t) => window.village.music.audio.currentTime >= t, from + 1)
+  const silent = await measured(fresh, from, from + 0.9)
+  const initial = await fresh.evaluate(() => ({
+    stored: localStorage.getItem('village.music.muted'),
+    note: document.querySelector('.music-toggle').getAttribute('aria-pressed'),
+    music: window.village.music.musicMuted,
+    voices: window.village.babble.muted,
+  }))
+  check('With no saved choice, Home plays no music and leaves voices enabled', initial.stored === null && initial.note === 'true' && initial.music && !initial.voices && silent.blocks > 0 && silent.peak < 1e-5, JSON.stringify({ ...initial, peak: silent.peak }))
+  await fresh.click('.music-toggle')
+  await fresh.close()
+}
+
 {
   const live = await context.newPage()
   const requests = []
@@ -280,8 +303,8 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   await live.waitForFunction(() => window.village.music.audio.state === 'running', null, { timeout: 5000 }).catch(() => {})
   await tap(live)
   const t0 = await now(live)
-  const state = await live.evaluate(() => ({ state: window.village.music.audio.state, loop: window.village.music.bed.loop, duration: window.village.music.bed.buffer.duration }))
-  check('After a gesture the loop plays: running context, a looping source over the whole buffer', state.state === 'running' && state.loop.loop && state.loop.start === 0 && Math.abs(state.loop.end - state.duration) < 1e-9, JSON.stringify(state))
+  const state = await live.evaluate(() => ({ state: window.village.music.audio.state, loop: window.village.music.bed.loop, duration: window.village.music.bed.buffer.duration, stored: localStorage.getItem('village.music.muted'), muted: window.village.music.muted }))
+  check('The note opt-in survives navigation and the loop plays after a gesture', state.stored === '0' && !state.muted && state.state === 'running' && state.loop.loop && state.loop.start === 0 && Math.abs(state.loop.end - state.duration) < 1e-9, JSON.stringify(state))
   await live.waitForTimeout(3800)
   const early = await measured(live, t0, t0 + 0.15)
   const full = await measured(live, t0 + 2.2, t0 + 3.6)
@@ -449,6 +472,7 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   const p = await (await cold.newContext()).newPage()
   p.on('pageerror', (e) => errors.push(String(e)))
   await p.addInitScript(() => {
+    localStorage.setItem('village.music.muted', '0')
     const Native = window.AudioContext
     window.audioContexts = 0
     window.AudioContext = class extends Native {
@@ -483,7 +507,7 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
     return {
       contexts: window.audioContexts,
       state: window.village.music.audio.state,
-      playing: Boolean(window.village.music.bed?.playing),
+      playing: Boolean(window.village.music.bed?.playing && !window.village.music.muted),
       longTasks: tasks.map(([start, d]) => [Math.round(start - window.keyAt), Math.round(d)]),
       maxGapMs: Math.round(Math.max(0, ...gaps)),
     }
@@ -503,7 +527,10 @@ const pressed = (p, sel) => p.evaluate((s) => document.querySelector(s)?.getAttr
   p.on('pageerror', (e) => errors.push(String(e)))
   await p.goto(`${base}?talk=npc&babble=off&plugins=music,sound`)
   await p.evaluate(() => window.village.ready(5000))
-  await p.evaluate(() => localStorage.clear())
+  await p.evaluate(() => {
+    localStorage.clear()
+    localStorage.setItem('village.music.muted', '0')
+  })
   await p.reload()
   await p.evaluate(() => window.village.ready(5000))
   await p.mouse.click(400, 300)

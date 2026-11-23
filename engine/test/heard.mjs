@@ -10,7 +10,7 @@ import * as ears from './ears.mjs'
 
 const { city, check, finish } = await start()
 try {
-  const page = await city('scale=0.5&fire=0&people=0&music=0')
+  const page = await city('scale=0.5&fire=0&people=0')
   await still(page)
   await page.waitForFunction(() => globalThis.engine.ears, null, { timeout: 20_000 })
   const state = () => page.evaluate(() => globalThis.engine.ears?.voice.context.state)
@@ -19,6 +19,7 @@ try {
   await page.mouse.click(640, 360)
   await page.waitForFunction(() => globalThis.engine.ears.voice.running, null, { timeout: 5000 })
   check(true, 'one click and sound runs')
+  check(await page.evaluate(() => globalThis.engine.ears.music === null), 'background music is off by default')
   // Tap what leaves the synthesiser.
   await page.evaluate(async () => {
     const v = globalThis.engine.ears.voice, ctx = v.context
@@ -118,7 +119,7 @@ try {
   // The music follows the place: the town's own in the street, and danger's at once when a charge goes off near by.
   const sr = fall.sr
   await page.close()
-  const tuned = await city('scale=0.5&fire=0&people=0')
+  const tuned = await city('scale=0.5&fire=0&people=0&music=1')
   await still(tuned)
   await tuned.waitForFunction(() => globalThis.engine.ears, null, { timeout: 20_000 })
   await tuned.mouse.click(640, 360)
