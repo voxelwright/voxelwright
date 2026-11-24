@@ -28,7 +28,7 @@
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
-import { AIR, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
+import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -42,6 +42,7 @@ struct V {
   wedge: vec4f, bear: vec4f,
   light: vec4f,
   keep0: vec4f, keep1: vec4f,
+  edits: array<vec4f, ${2 * EDITS}>,
 }
 // A section: where its low corner is (from the anchor) and its cell; where it is in its own frame (for windows that
 // run on from one to the next); its turn, a column at a time.
@@ -60,6 +61,7 @@ ${GLOBALS}
 ${LIGHT}
 ${AIR}
 ${HANDOVER}
+${EDITED('v.edits')}
 ${NOISE}
 ${FOG}
 ${SCREEN}
@@ -129,6 +131,8 @@ const FAR = 100000.0;
 // not agree to the metre where they meet, and a look the march hands over must find the far model's faces). Never
 // nearer than the reach against the sky: what stands near the eye is the cells' to say.
 fn ours(in: Out) -> bool {
+  // Where the world was changed, the cells hold the change, however far off.
+  if (edited(in.seen)) { return false; }
   let dist = length(in.seen);
   let reach = reachAt(in.seen, v.reach, v.wedge, v.bear, v.keep0, v.keep1);
   let z = textureLoad(marched, vec2i(in.pos.xy), 0);
@@ -318,8 +322,10 @@ export interface Far {
   /** The objects held now, by their addresses (the listing's paths from where it is): for counting what a view costs to send. */
   held(): string[]
   /**
-   * The world changed in this box (finest cells, high corner exclusive): the far tiles it reaches are no longer
-   * drawn or handed over, so that the cells there, which hold the change, are seen. `forget` (a reset) takes them back.
+   * The world changed in this box (finest cells, high corner exclusive): the far model leaves the box (a little wider)
+   * to the cells, which hold the change, however far off; the rest of its tiles it draws as before. Boxes near one
+   * another are one; past EDITS of them, the tiles a further box reaches are the cells' whole, as before #450's X tower
+   * (a cell broken on the EXPLORE roof had taken the tower beside it out of the first view). `forget` (a reset) takes them back.
    */
   edited(box: readonly [number, number, number, number, number, number]): void
   forget(): void
@@ -369,7 +375,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     depthStencil: { format: DEPTH, depthWriteEnabled: true, depthCompare: 'less' },
   })
   const mergeBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
-  const uniforms = device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const uniforms = device.createBuffer({ size: 160 + EDITS * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const windows = device.createBuffer({ size: 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   let styled = false
   let sunBaked: [number, number, number] | null = null
@@ -499,8 +505,12 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   /** Until the place is first shown only the landing's cut of the view is fetched (`ready` says when it is here); then the rest. */
   let first = true
   let ready = false
-  /** Tiles the world was changed in since the last reset: the cells' (edited). */
+  /** Boxes the world was changed in since the last reset, a little wider (low and high corners, finest cells): the cells' (edited). */
+  const edits: number[][] = []
+  /** Tiles the world was changed in past EDITS boxes: the cells' whole (edited). */
   const changed = new Set<string>()
+  /** How much wider than what changed a box is left to the cells, and how near two boxes are to be one, finest cells. */
+  const PAD = 10, JOIN = 200
   let kept: readonly number[] | null = null
 
   const self: Far = {
@@ -509,9 +519,14 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     get ready() { return ready },
     shown() { first = false },
     edited(box) {
+      const b = [box[0] - PAD, box[1] - PAD, box[2] - PAD, box[3] + PAD, box[4] + PAD, box[5] + PAD]
+      const gap = (e: readonly number[]) => Math.max(0, ...[0, 1, 2].map((a) => Math.max(e[a] - b[a + 3], b[a] - e[a + 3])))
+      const near = edits.find((e) => gap(e) <= JOIN)
+      if (near) { for (let a = 0; a < 3; a++) { near[a] = Math.min(near[a], b[a]); near[a + 3] = Math.max(near[a + 3], b[a + 3]) } return }
+      if (edits.length < EDITS) { edits.push(b); return }
       for (let x = Math.floor(box[0] / size); x <= Math.floor((box[3] - 1) / size); x++) for (let z = Math.floor(box[2] / size); z <= Math.floor((box[5] - 1) / size); z++) changed.add(`${x}_${z}`)
     },
-    forget() { changed.clear() },
+    forget() { edits.length = 0; changed.clear() },
     keep(box) { kept = box },
     handover(x, z) {
       if (!handed) return Infinity
@@ -621,8 +636,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
     if (!clear) handed = { reach, wedge }
     device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
-    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}:${kept}`
-    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
+    const boxes = new Float32Array(EDITS * 8)
+    for (const [i, e] of edits.entries()) boxes.set([e[0] - eye[0], e[1] - eye[1], e[2] - eye[2], 0, e[3] - eye[0], e[4] - eye[1], e[5] - eye[2], 1], i * 8)
+    device.queue.writeBuffer(uniforms, 160, boxes)
+    const coverKey = `${cover.join(',')}:${reach}:${wedge ? near : 0}:${map}:${kept}:${edits.join(';')}`
+    if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept, edits.map((e) => [...e])); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
     if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }] }); viewBinds.set(depth, bind) }

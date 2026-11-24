@@ -153,8 +153,8 @@ const until = (realm, what, ms = 60_000, arg = null) => realm.waitForFunction(wh
  * flight between: the first view is then as the page opened it (the eye, the boards a click opens, the controls hidden,
  * the host told `back`, the banner kept in the picture, a picture like the one before). In again by the board, a cell
  * of the roof broken, and out again by the panel's key (on a desk where motion is not wanted: no flight, the same
- * eye): the cell is still broken. (The picture is compared on the first trip, where nothing was broken: a tile changed
- * is drawn as its cells from then on, far.ts `edited`, and the city round 555 California is not the first picture's.)
+ * eye): the cell is still broken, and on a desk the picture is still the first one: only a box round the change is
+ * the cells' (far.ts `edited`), not the 500 m of city round 555 California, which had taken X's tower out of it.
  */
 const thereAndBack = async (options, phone) => {
   const size = `${options.viewport.width}x${options.viewport.height}`
@@ -170,6 +170,13 @@ const thereAndBack = async (options, phone) => {
     const png = await page.screenshot({ path: join(shots, `${name}-${size}.png`) })
     return { png, phase: await realm.evaluate(() => globalThis.engine.boards.plane?.hold ?? null) }
   }
+  /** How far apart two screenshots are: on average (0 to 255), and the share of their pixels more than 32 apart (%). */
+  const differ = (a, b) => realm.evaluate(async ([a, b]) => {
+    const load = async (s) => { const i = await createImageBitmap(await (await fetch(`data:image/png;base64,${s}`)).blob()), c = new OffscreenCanvas(i.width, i.height), g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data }
+    const p = await load(a), q = await load(b); let sum = 0, off = 0
+    for (let i = 0; i < p.length; i += 4) { const d = (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2])) / 3; sum += d; if (d > 32) off++ }
+    return { mean: Math.round((sum / (p.length / 4)) * 100) / 100, off: Math.round((10000 * off) / (p.length / 4)) / 100 }
+  }, [a.toString('base64'), b.toString('base64')])
   /** What of the first view a pointer opens: over each board that leads somewhere, and EXPLORE, the picture's cursor is a hand. */
   const clickable = async () => {
     const out = []
@@ -234,12 +241,7 @@ const thereAndBack = async (options, phone) => {
     const shut = await clickable()
     check(!shut.length, `the boards a pointer opens are open again: BLOG, X, LinkedIn, Twitch, EXPLORE${shut.length ? ` (not ${shut.join(', ')})` : ''}`)
     const again1 = await settledShot('back-after', before.phase)
-    const apart = await realm.evaluate(async ([a, b]) => {
-      const load = async (s) => { const i = await createImageBitmap(await (await fetch(`data:image/png;base64,${s}`)).blob()), c = new OffscreenCanvas(i.width, i.height), g = c.getContext('2d'); g.drawImage(i, 0, 0); return g.getImageData(0, 0, i.width, i.height).data }
-      const p = await load(a), q = await load(b); let sum = 0, off = 0
-      for (let i = 0; i < p.length; i += 4) { const d = (Math.abs(p[i] - q[i]) + Math.abs(p[i + 1] - q[i + 1]) + Math.abs(p[i + 2] - q[i + 2])) / 3; sum += d; if (d > 32) off++ }
-      return { mean: Math.round((sum / (p.length / 4)) * 100) / 100, off: Math.round((10000 * off) / (p.length / 4)) / 100 }
-    }, [before.png.toString('base64'), again1.png.toString('base64')])
+    const apart = await differ(before.png, again1.png)
     results[`back-${size}`] = { flight: { frames: out.between, seconds: round(out.took, 2), farM: Math.round(out.far) }, picture: apart }
     check(apart.mean < 2 && apart.off < 1, `the picture is the first view's: ${apart.mean} of 255 apart on average, ${apart.off}% of its pixels more than 32 apart (people and cars walk on)`)
     // A click on the sky is a click: no pointer is taken, nobody goes in.
@@ -267,6 +269,12 @@ const thereAndBack = async (options, phone) => {
       await page.setViewportSize(options.viewport); await page.waitForTimeout(1500)
       const eye3 = await eye(realm)
       check(same(eye3, began), `turned upright again in the first view, it is framed as an upright phone (${round(eye3.fov, 2)} degrees, as the page opened)`)
+    }
+    if (!phone) {
+      // (A broken cell is not to be seen from the park; what it once took with it, the 500 m tile round it, was: X's tower.)
+      const broke = await differ(before.png, (await settledShot('back-broken', before.phase)).png)
+      results[`broken-${size}`] = { picture: broke }
+      check(broke.mean < 2 && broke.off < 1, `with the cell broken the picture is still the first view's: ${broke.mean} of 255 apart on average, ${broke.off}% of its pixels more than 32 apart`)
     }
     if (!phone) check(!!out2.key && out2.mid === 0 && out2.between > 0, `where motion is not wanted it goes back with no flight: the eye on the roof, then at the park (${out2.mid} of ${out2.between} frames between)`)
     if (!phone) {

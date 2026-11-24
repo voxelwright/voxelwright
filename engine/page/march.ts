@@ -35,6 +35,8 @@ export function palette(): Float32Array<ArrayBuffer> {
 export const PANE_LIGHT = 1.25
 /** How many lettering boards' letters have a light of their own (letterlight.ts, Looks.letters). */
 export const LIT_LETTERS = 32
+/** Where `Looks.edits` begins in the looks buffer, bytes: after the palette, materials, far, cover, wedge, bear, keep and letters. */
+const EDITS_AT = 256 * 16 + 16 * 32 + 16 + 512 + 64 + (2 + 2 * LIT_LETTERS) * 16
 /**
  * The landmarks' own lights by night (#450, heroes.rs `night`): the crown of lamps on Salesforce Tower, the Pyramid's
  * lit spire and its beacon. Whatever is drawn inside a landmark's lit part, cells or the far model's faces, gives
@@ -426,6 +428,24 @@ fn reachAt(p: vec3f, reach: f32, wedge: vec4f, bear: vec4f, k0: vec4f, k1: vec4f
 }
 `
 
+/** Boxes the world was changed in that stay the cells' at any distance (far.ts `edited`): at most this many. */
+export const EDITS = 8
+/**
+ * Whether p is in a box the world was changed in (far.ts `edited`): the cells hold the change, so there they are drawn
+ * however far off, and the far model's faces are not. `boxes` is the array that holds them, two a box: its low corner,
+ * its high corner (exclusive) and 1, measured as p is; none where w is 0.
+ */
+export const EDITED = (boxes: string) => /* wgsl */ `
+fn edited(p: vec3f) -> bool {
+  for (var i = 0u; i < ${EDITS}u; i++) {
+    let lo = ${boxes}[2u * i];
+    let hi = ${boxes}[2u * i + 1u];
+    if (hi.w > 0.0 && all(p >= lo.xyz) && all(p < hi.xyz)) { return true; }
+  }
+  return false;
+}
+`
+
 /** The sky's own colour along a look, and what the air between does to a thing seen far off: the same for the world and for the far model (far.ts). Needs `g`. */
 export const AIR = /* wgsl */ `
 // The sky without sun or cloud: what the air between is the colour of.
@@ -795,11 +815,11 @@ struct SunTile { corner: vec2f, texel: f32, level: u32, origin: vec2f, pad: vec2
 struct Material { colour: vec3f, wander: f32, rough: f32, mirror: f32, glow: f32, pad: f32 }
 // far: where the far model (far.ts) takes over from the cells: the corner of its map of tiles (measured as the eye
 // is), a tile's size and the distance from the eye past which it draws, in the finest cells; cover: which of its
-// 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER).
+// 64 x 64 tiles it holds; wedge and bear: where it takes over nearer (HANDOVER); edits: where it never does (EDITED).
 // letters: the lettering boards' own light (#450, letterlight.ts): the box their light reaches (low corner and how many
 // letters; high corner and 1 where 489's lamps on arms wash the boards), then two a letter (LIT_LETTERS at most): its
 // box's low corner and how far it is lit, its high corner and which way it faces plus its hue.
-struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f, letters: array<vec4f, ${2 + 2 * LIT_LETTERS}> }
+struct Looks { palette: array<vec4f, 256>, material: array<Material, 16>, far: vec4f, cover: array<vec4u, 32>, wedge: vec4f, bear: vec4f, keep0: vec4f, keep1: vec4f, letters: array<vec4f, ${2 + 2 * LIT_LETTERS}>, edits: array<vec4f, ${2 * EDITS}> }
 
 @group(0) @binding(0) var<uniform> g: Globals;
 @group(0) @binding(1) var<storage, read> pool: array<u32>;
@@ -1113,6 +1133,7 @@ fn march(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
 }
 ${world.options.bricks ? FINER + (INLOOP ? '' : REFINE) : ''}
 ${HANDOVER}
+${EDITED('looks.edits')}
 // Whether the far model holds the tile a point is in (far.ts).
 fn farHeld(p: vec3f) -> bool {
   let t = vec2i(floor((p.xz - looks.far.xy) / looks.far.z));
@@ -1137,7 +1158,7 @@ fn trace(ro: vec3f, rd: vec3f, t0: f32, level0: u32, most: u32, wide: f32, sprea
   // what it edits nearer is in the cells.
   if (eyed && looks.far.w > 0.0 && all(ro == g.eye)) {
     let p = ro + rd * hit.t;
-    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p)) { hit.t = -1.0; hit.left = true; }
+    if (hit.t > select(reachAt(p, looks.far.w, looks.wedge, looks.bear, looks.keep0, looks.keep1), looks.far.w, (g.flags & 256u) != 0u) && farHeld(p) && !edited(p)) { hit.t = -1.0; hit.left = true; }
   }
   if (through || rd.y >= 0.0 || ro.y <= g.sea) { return hit; }
   let t = (g.sea - ro.y) / rd.y;
@@ -2029,9 +2050,10 @@ export interface Marcher {
    * the cells meet is left for it to draw. Tiles are `size` cells a side, the map's corner `corner` tiles from the
    * frame's; `held` is 64 x 64 bits, a row of tiles after another. A reach of 0 leaves every cell drawn. In `wedge`
    * (HANDOVER: its apex x and z, how far it reaches and the reach in it, cells; its bearings, radians) the reach is its own,
-   * except in `keep` (low and high corners, cells), which is the cells' out to the reach.
+   * except in `keep` (low and high corners, cells), which is the cells' out to the reach. Each box of `edits` (low and
+   * high corners, cells, EDITS at most) is the cells' however far off.
    */
-  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null, keep?: readonly number[] | null): void
+  farCover(corner: readonly [number, number], size: number, reach: number, held: Uint32Array<ArrayBuffer>, wedge?: readonly number[] | null, keep?: readonly number[] | null, edits?: readonly (readonly number[])[]): void
   /**
    * The shader made again from its text as `change` returns it, while the page draws (#264, the workshop): the new
    * pipelines are built in the background and take over between two frames. A shader that does not compile throws,
@@ -2138,7 +2160,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
   const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
-  const looks = device.createBuffer({ size: 256 * 16 + 16 * 32 + 16 + 512 + 64 + (2 + 2 * LIT_LETTERS) * 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const looks = device.createBuffer({ size: EDITS_AT + EDITS * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
   // The window screen (eggs.ts): one small picture, always bound, asked only while it is up.
@@ -2215,6 +2237,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   let farWedge: readonly number[] | null = null
   /** The box the wedge leaves to the cells (farCover's `keep`): low and high corners, cells from the frame's corner. */
   let farKeep: readonly number[] | null = null
+  /** The boxes the world was changed in (farCover's `edits`): low and high corners, finest cells. */
+  let farEdits: readonly (readonly number[])[] = []
   /** The lettering boards' own light (letters): world cells, as `Looks.letters` lays it out; null for none. */
   let lit: Float32Array | null = new Float32Array((2 + 2 * LIT_LETTERS) * 4)
   const tell = (view: View, size: readonly [number, number], flags: number, time: number, starts?: readonly [number, number, number, number]) => {
@@ -2225,6 +2249,9 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512, farWedge ? new Float32Array([farWedge[0] - anchor[0], farWedge[1] - anchor[2], farWedge[2], farWedge[3], farWedge[4], farWedge[5], 0, 0]) : new Float32Array(8))
       if (lit) { const r = lit.slice(); for (let i = 0; i < r.length; i += 4) { r[i] -= anchor[0]; r[i + 1] -= anchor[1]; r[i + 2] -= anchor[2] } device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 64, r) }
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16 + 512 + 32, farKeep ? new Float32Array([farKeep[0] - anchor[0], farKeep[1] - anchor[1], farKeep[2] - anchor[2], 0, farKeep[3] - anchor[0], farKeep[4] - anchor[1], farKeep[5] - anchor[2], 1]) : new Float32Array(8))
+      const edits = new Float32Array(EDITS * 8)
+      for (const [i, b] of farEdits.slice(0, EDITS).entries()) edits.set([b[0] - anchor[0], b[1] - anchor[1], b[2] - anchor[2], 0, b[3] - anchor[0], b[4] - anchor[1], b[5] - anchor[2], 1], i * 8)
+      device.queue.writeBuffer(looks, EDITS_AT, edits)
       f.set([view.eye[0] - anchor[0], view.eye[1] - anchor[1], view.eye[2] - anchor[2], view.tanHalf], 0)
       f.set([...view.right, size[0] / size[1]], 4)
       f.set([...view.up, time], 8)
@@ -2361,10 +2388,11 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     },
     letters(data) { lit = data ?? new Float32Array((2 + 2 * LIT_LETTERS) * 4) },
     get lights() { return lightsNow() },
-    farCover(corner, size, reach, held, wedge = null, keep = null) {
+    farCover(corner, size, reach, held, wedge = null, keep = null, edits = []) {
       farMap = [corner[0] * size, corner[1] * size, size, reach]
       farWedge = wedge
       farKeep = keep
+      farEdits = edits
       device.queue.writeBuffer(looks, 256 * 16 + 16 * 32 + 16, held.subarray(0, 128))
     },
     async reshade(change) {
