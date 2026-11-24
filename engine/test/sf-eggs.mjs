@@ -15,7 +15,7 @@
 // screen (what the screen itself costs). A video's windows are checked against the frame held on them: the light of
 // the windows follows the picture's light and dark. Its sound: refused (simulated: it plays muted, and Unmute brings
 // it), and decoded when a typed line started it.
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -206,6 +206,7 @@ const THINGS = {
   viewer: { egg: (s) => s.hour > 23, again: (s) => s.moon === 1, then: 'brings the moon closer', shot: 'moon' },
   plane: { egg: (s) => s.spin > 0.2, shot: 'now' },
   shield: { egg: (s) => s.shield && s.signs.banner === 'God mode', again: (s) => !s.shield, then: 'lets go', shot: 'banner' },
+  tv: { egg: (s) => s.memesPlayed >= 1 && s.playing, again: (s) => s.memesPlayed >= 2 && s.playing, then: 'changes the channel', shot: 'city' },
 }
 const things = async (page, kind) => {
   const dir = join(shots, 'things'), touch = kind === 'phone'
@@ -458,7 +459,9 @@ const fromFirst = async () => {
 
     // The banner's lines, each in its turn: tapped, its egg; and the banner (or the player's Stop) ends it.
     const wants = { 'Wake up, Neo…': 'matrix', 'Never gonna…': 'rickroll', 'Barrel roll!': 'roll', 'Bad Apple!!': 'apple' }
-    for (let i = 0; i < 4; i++) {
+    // (Then a meme's title, another each time round.)
+    Object.assign(wants, await page.evaluate(() => Object.fromEntries(globalThis.engine.eggs.memes.map((m) => [m.title, m.id]))))
+    for (let i = 0; i < 5; i++) {
       const came = await until(() => { const e = globalThis.engine, s = e.eggs.first.spots, p = e.boards.plane; return !!s.line && p.readable && (!p.loud || p.come >= 1) }, null, 60_000)
       l = await firstLook(page)
       const line = l.spots.line, egg = wants[line]
@@ -528,8 +531,9 @@ const fromFirst = async () => {
     // EXPLORE asked once and let go of, then the site's name while its eye leans back: the roll waits for it, and the eye comes round whole.
     // (From the end of a line, so the name is up for its whole 10 s: from wherever the turn of lines was, a line came
     // up between the ask and the click, and the click started its egg, #450.)
+    // (A line its plane has to fly in for is seen only once it is in: it can be up for more than named()'s 20 s.)
     await until(() => !!globalThis.engine.eggs.first.spots.line, null, 40_000)
-    await named()
+    await until(() => !globalThis.engine.eggs.first.spots.line, null, 60_000)
     await bannerIn()
     // (The eye as the ask finds it: the rolls before have each turned it a whole turn on from where it began.)
     const asking = await page.evaluate(() => globalThis.engine.pose.yaw)
@@ -537,14 +541,14 @@ const fromFirst = async () => {
     await page.waitForTimeout(400)
     await page.evaluate(() => globalThis.engine.explore.disarm())
     await page.waitForTimeout(250)
-    const s = (await firstLook(page)).spots.banner
+    const look = await firstLook(page), s = { ...look.spots.banner, line: look.spots.line }
     // (Measured from the eye as the ask left it: its lean back is turned too, a little, and the roll on top of it.)
     const from = await watchTurn(page)
     await press(s.x, s.y)
     const leant = await turned(page, 3500)
     l = await firstLook(page)
     const net = leant + from - asking
-    check(Math.abs(net - 2 * Math.PI) < 0.05 && l.way === 'idle', `${kind}: a barrel roll asked while the eye leans back from EXPLORE turns it round once all the same (${round(net, 3)} rad from where the ask found it)`)
+    check(Math.abs(net - 2 * Math.PI) < 0.05 && l.way === 'idle', `${kind}: a barrel roll asked while the eye leans back from EXPLORE turns it round once all the same (${round(net, 3)} rad from where the ask found it)${Math.abs(net - 2 * Math.PI) < 0.05 ? '' : `: ${JSON.stringify({ line: s.line ?? null, eggs: l.eggs, way: l.way, banner: l.banner })}`}`)
 
     // Sound held back by the browser: the Pyramid's lamp plays it muted, and Unmute on the player, in the first view, is the tap that brings it.
     await page.evaluate(() => { globalThis.refuseSound = true })
@@ -836,6 +840,83 @@ try {
   await sayTo(page, 'stop')
   await page.waitForTimeout(300)
   check((await state(page)).running === null, '"stop" ends it')
+  await still(page)
+
+  // ── The memes: each one's file built, each started by a phrase and heard; the shortest played to its end, the sky back; “meme”, any one ──
+  console.log('\nthe memes')
+  const memes = await page.evaluate(() => globalThis.engine.eggs.memes)
+  const unbuilt = memes.filter((m) => !existsSync(join(here, 'dist-sf', 'sf', m.file)))
+  check(!unbuilt.length, `every meme's clip is built (${memes.length}${unbuilt.length ? `; missing ${unbuilt.map((m) => m.file).join(', ')}` : ''})`)
+  results.memes = {}
+  for (const m of memes) {
+    await sayTo(page, m.says)
+    await started(page, m.id)
+    const heard = await page.waitForFunction(() => { const s = globalThis.engine.eggs.state; return s.playing && s.sound > 0 }, null, { timeout: 15_000, polling: 100 }).then(() => true, () => false)
+    s = await state(page)
+    results.memes[m.id] = { says: m.says, playing: s.playing, sound: s.sound, up: s.up }
+    check(s.running === m.id && heard && !s.muted, `"${m.says}" plays ${m.id} with its sound (${s.sound} bytes decoded, the screen ${round(s.up)} up)`)
+    await sayTo(page, 'stop')
+    await page.waitForFunction(() => globalThis.engine.eggs.state.running === null, null, { timeout: 5_000 }).catch(() => null)
+  }
+  // The player: a link to where it came from, Pause and Play, the fader to where in it, Next for another.
+  await sayTo(page, 'this')
+  await page.waitForFunction(() => globalThis.engine.eggs.state.time > 0.3, null, { timeout: 15_000 }).catch(() => null)
+  const shown = await page.evaluate(() => { const a = document.querySelector('.egg-player .title'); return { href: a.href, target: a.target, rel: a.rel, text: a.textContent, keys: [...document.querySelectorAll('.egg-player .keys button')].map((b) => b.textContent) } })
+  check(shown.href === 'https://www.youtube.com/watch?v=_Rz9-Vbb_fk' && shown.target === '_blank' && /noopener/.test(shown.rel), `the player links "${shown.text}" to its original in a new tab (${shown.href}); keys ${shown.keys.join(', ')}`)
+  await page.click('.egg-player .pause')
+  await page.waitForTimeout(600)
+  const t0 = (await state(page)).time
+  await page.waitForTimeout(800)
+  s = await state(page)
+  check(s.paused && s.time === t0 && (await page.locator('.egg-player .pause').textContent()) === 'Play', `Pause holds it (${round(s.time)} s, and still ${round(t0)} s after 0.8 s); the key says Play`)
+  await page.click('.egg-player .pause')
+  await page.waitForTimeout(800)
+  s = await state(page)
+  check(!s.paused && s.playing && s.time > t0, `Play plays it on (${round(s.time)} s)`)
+  const box = await page.locator('.egg-player .seek input').boundingBox()
+  await page.mouse.click(box.x + box.width * 0.75, box.y + box.height / 2)
+  await page.waitForTimeout(400)
+  const d = await page.evaluate(() => globalThis.engine.eggs.media.duration)
+  s = await state(page)
+  check(Math.abs(s.time - d * 0.75) < d * 0.1, `the fader clicked three quarters along goes there (${round(s.time)} s of ${round(d)})`)
+  await page.click('.egg-player .next')
+  await page.waitForFunction(() => { const s = globalThis.engine.eggs.state; return s.running && s.running !== 'this' }, null, { timeout: 10_000 }).catch(() => null)
+  s = await state(page)
+  check(s.running && s.running !== 'this', `Next plays another (${s.running})`)
+  await page.screenshot({ path: join(shots, 'meme-player.png') })
+  await sayTo(page, 'stop')
+  // The line's ideas: four when it opens, “Surprise me” first; letters typed narrow them; a click says one.
+  await page.keyboard.press('Enter')
+  const opened = await page.evaluate(() => [...document.querySelectorAll('.egg-ideas button')].map((b) => b.textContent))
+  await page.keyboard.type('skr', { delay: 25 })
+  const narrowed = await page.evaluate(() => [...document.querySelectorAll('.egg-ideas button')].map((b) => b.textContent))
+  await page.screenshot({ path: join(shots, 'meme-ideas.png') })
+  check(opened.length === 4 && opened[0] === 'Surprise me' && narrowed[0] === 'Angry Rapping Frog', `the line offers ${opened.join(', ')}; "skr" typed, ${narrowed.join(', ')}`)
+  await page.click('.egg-ideas button')
+  await started(page, 'frog')
+  check((await state(page)).running === 'frog', 'a click on the idea plays it')
+  await sayTo(page, 'stop')
+  await sayTo(page, 'stick bu')
+  await started(page, 'stick-bug')
+  check((await state(page)).running === 'stick-bug', 'Enter on "stick bu", no phrase of its own, says the first idea for it')
+  await sayTo(page, 'stop')
+  await still(page)
+  const hour0 = (await state(page)).hour
+  await sayTo(page, 'doom')
+  await started(page, 'doom')
+  // Waits for the screen before it plays: 4.6 s of clip from the first frame seen whole.
+  const upAt = await page.evaluate(async () => { const e = globalThis.engine; for (;;) { if (e.eggs.state.time > 0) return e.march.screen.up; await new Promise((r) => requestAnimationFrame(r)) } })
+  const doomEnded = await page.waitForFunction(() => globalThis.engine.eggs.state.running === null, null, { timeout: 20_000 }).then(() => true, () => false)
+  s = await state(page)
+  check(upAt >= 0.9 && doomEnded && /That was/.test(s.status), `the Doom clip starts once the screen is up (${round(upAt)}), plays to its end and says so ("${s.status}")`)
+  await still(page)
+  s = await state(page)
+  check(s.hour === hour0 && !s.dark, `and the sky comes back (hour ${s.hour} against ${hour0}), the boards lit again`)
+  await sayTo(page, 'meme')
+  const any = await page.waitForFunction((ids) => ids.includes(globalThis.engine.eggs.state.running), memes.map((m) => m.id), { timeout: 10_000 }).then(() => true, () => false)
+  s = await state(page)
+  check(any && s.running !== 'doom', `"meme" plays one of them, not the last (${s.running})`)
+  await page.keyboard.press('Escape')
   await still(page)
 
   // ── The moon: night, and a tool used at it makes it grow ──

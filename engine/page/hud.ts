@@ -324,12 +324,19 @@ export function hud(input: Input): Hud {
       return p
     },
     frame(project) {
+      if (!shown.size) return
+      // What the page lays over the picture and asks cues to keep clear of (`data-hud-clear`, as an egg's player): a cue
+      // that would be under one stands just below it instead, nearer its thing.
+      const clear = [...document.querySelectorAll<HTMLElement>('[data-hud-clear]')].filter((e) => !e.hidden && e.offsetParent).map((e) => e.getBoundingClientRect())
       for (const cue of shown) {
         const place = cue.at(), on = place && project(place)
         cue.el.hidden = !on
+        if (!on) continue
         // (Kept inside the screen: a thing near its edge has its cue whole, never cut off by it.)
-        const half = on ? cue.el.offsetWidth / 2 + 8 : 0, x = on ? Math.max(half, Math.min(innerWidth - half, on[0])) : 0
-        if (on) cue.el.style.transform = `translate(${x.toFixed(1)}px, ${on[1].toFixed(1)}px) translate(-50%, -140%)`
+        const w = cue.el.offsetWidth, h = cue.el.offsetHeight, half = w / 2 + 8, x = Math.max(half, Math.min(innerWidth - half, on[0]))
+        let y = on[1]
+        for (const r of clear) if (x - w / 2 < r.right && x + w / 2 > r.left && y - 1.4 * h < r.bottom && y - 0.4 * h > r.top) y = r.bottom + 8 + 1.4 * h
+        cue.el.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px) translate(-50%, -140%)`
       }
     },
   }

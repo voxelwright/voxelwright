@@ -34,6 +34,7 @@ import type { Picture } from './eggs-pictures.ts'
 import type { Hud } from './hud.ts'
 import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
+import { phrases, PHRASES, words, type Look, type Meme } from './eggs-said.ts'
 import { firstTaps, type Spot } from './eggs-first.ts'
 import type { Boards } from './boards.ts'
 
@@ -98,22 +99,21 @@ const GREETING = String.raw`Hello there.
 General Kenobi.
 If you managed to find this, you can send your resume… oh wait I'm not hiring, nvm.`
 
-type Egg = 'matrix' | 'rickroll' | 'apple'
-/** What a phrase does, by its words with nothing but letters and single spaces. */
-const PHRASES = new Map<string, string>([
-  ['wake up', 'matrix'], ['wake up neo', 'matrix'], ['neo', 'matrix'], ['red pill', 'red'], ['follow the white rabbit', 'matrix'], ['the matrix', 'matrix'],
-  ['blue pill', 'unplug'], ['rickroll', 'rickroll'], ['never gonna give you up', 'rickroll'], ['bad apple', 'apple'],
-  ['iddqd', 'god'], ['moon', 'moon'], ['shoot the moon', 'moon'], ['do a barrel roll', 'roll'],
-  ['stop', 'stop'], ['help', 'help'], ['hint', 'help'],
-])
+export { words } from './eggs-said.ts'
+
+type Pane = readonly [number, number, number, number]
+interface Video { file: string; title: string; outside: Pane; contrast: number; start: string; end: string }
+type Egg = string
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA']
 /** The moon's sizes against its own (the site's three radii, 0.017, 0.028 and 0.044 of the view). */
 const MOONS = [0, 0.65, 1.6]
 /** The hour whose sun is nearest the realm's own (main.ts, sf/realm.json `air.sun`): the light glides there and is then the realm's own again. */
 const OWN_HOUR = 13.45
 
-/** How each egg dresses the sky: the hour it goes to, the weather, and the last pass's grade (colour, contrast) and tint. */
-const LOOKS: Record<Egg, { hour: number; weather: Weather; grade?: readonly [number, number]; tint: readonly [number, number, number] }> = {
+/** A meme's evening, where it has no look of its own: after sunset, clear, the picture's own colours. */
+const EVENING: Look = { hour: 21.0, weather: 'clear', tint: [1, 0.97, 0.95] }
+/** How each egg dresses the sky (the memes' added once sf/memes.json has come). */
+const LOOKS: Record<Egg, Look> = {
   // A green night under cloud (fog lay over the windows' code, #450).
   matrix: { hour: 23.25, weather: 'overcast', grade: [0.75, 0.4], tint: [0.62, 1.0, 0.68] },
   // A 1987 dusk: blue hour, a warm tint.
@@ -121,23 +121,36 @@ const LOOKS: Record<Egg, { hour: number; weather: Weather; grade?: readonly [num
   // Shadow art: an overcast night in black and white, only the windows lit.
   apple: { hour: 23.0, weather: 'overcast', grade: [0, 0.45], tint: [0.94, 0.94, 0.94] },
 }
-/** The videos (made for the site by scripts/landing/encode-eggs.mjs: 160 x 120, -16 LUFS, HE-AAC). `outside` is what the panes beyond the picture show. */
-const VIDEOS = {
-  rickroll: { file: 'eggs/rick.mp4', title: 'Never Gonna Give You Up', outside: [14, 8, 22, 190] as const, contrast: 1.25,
+/** The videos (made for the site by scripts/landing/encode-eggs.mjs: 160 x 120, -16 LUFS, HE-AAC; the memes by sf/add-egg.mjs, added once sf/memes.json has come). `outside` is what the panes beyond the picture show. */
+const VIDEOS: Record<Egg, Video> = {
+  rickroll: { file: 'eggs/rick.mp4', title: 'Never Gonna Give You Up', outside: [14, 8, 22, 190], contrast: 1.25,
     start: 'Never gonna give you up. Rick Astley is on every window in the city.', end: 'Never gonna let you down: that was the whole song.' },
-  apple: { file: 'eggs/bad-apple.mp4', title: 'Bad Apple!!', outside: [0, 0, 0, 240] as const, contrast: 1.1,
+  apple: { file: 'eggs/bad-apple.mp4', title: 'Bad Apple!!', outside: [0, 0, 0, 240], contrast: 1.1,
     start: 'Bad Apple!! The city plays it in shadow.', end: 'Bad Apple!! is over. The lights come back on.' },
 }
+/** Where each came from, on YouTube (the player's link to it; the memes' added from sf/memes.json). */
+const SOURCES: Record<Egg, string> = { matrix: '8mAZNNrPH0w', rickroll: 'dQw4w9WgXcQ', apple: 'FtutLA63Cp8' }
 /** The Matrix's music (from the film's soundtrack, made by sf/build.mjs's note: HE-AAC, -16 LUFS as the videos), played round while it is up. */
 const MUSIC = { file: 'eggs/matrix.m4a', title: 'The Matrix' }
 /** What the player says is playing. */
-const TITLES: Record<Egg, string> = { matrix: MUSIC.title, rickroll: VIDEOS.rickroll.title, apple: VIDEOS.apple.title }
-
-/** The words of a phrase as they are compared: lower case, curly quotes straight, nothing but letters, digits, apostrophes and single spaces. */
-export const words = (text: string) => text.toLowerCase().replace(/[‘’]/g, "'").replace(/[^a-z0-9' ]+/g, ' ').replace(/'/g, '').replace(/\s+/g, ' ').trim()
+const TITLES = (egg: Egg) => (egg === 'matrix' ? MUSIC.title : VIDEOS[egg]?.title ?? egg)
 
 export function eggs(page: EggsPage) {
   const { march, device } = page
+  // ── The memes (sf/memes.json, small, fetched as the eggs start): their phrases, videos and looks joined to the eggs' own ──
+  let MEMES: readonly Meme[] = [], known: ReadonlyMap<string, string> = PHRASES
+  const memesCame = fetch(new URL('eggs/memes.json', page.base)).then((r) => { if (!r.ok) throw Error(`memes.json: ${r.status}`); return r.json() as Promise<Meme[]> }).then((list) => {
+    const { all, wrong } = phrases(list)
+    for (const w of wrong) console.warn(`eggs: ${w}`)
+    MEMES = list
+    known = all
+    for (const m of list) {
+      LOOKS[m.id] = m.look ?? EVENING
+      SOURCES[m.id] = m.youtube
+      VIDEOS[m.id] = { file: `eggs/${m.id}.mp4`, title: m.title, outside: [10, 10, 14, 200], contrast: 1.1,
+        start: `${m.title}, on every window in the city.`, end: `That was ${m.title}. Say “meme” for another.` }
+    }
+  }, (e) => console.warn('the memes did not load:', e))
   // What the eggs say on the banner, and what they said last that was not the line's echo (the line gives it back as it
   // closes). Esc gives the banner its own words back. While an egg has something on it, its plane is kept in sight.
   let onBanner: string | null = null, saying = false
@@ -157,7 +170,7 @@ export function eggs(page: EggsPage) {
   const say = (text: string, ms = 5000) => { page.notice(text, ms); if (status.parentElement !== laidOn()) laidOn().append(status); status.textContent = text }
 
   // ── What is running, and the sky as it was before the first egg ──
-  let running: { egg: Egg; picture: Picture | null; started: number; media?: HTMLVideoElement; blocked?: boolean; held?: boolean } | null = null
+  let running: { egg: Egg; picture: Picture | null; started: number; media?: HTMLVideoElement; blocked?: boolean; held?: boolean; waiting?: boolean; paused?: boolean } | null = null
   let fading: Picture | null = null
   let before: { hour: number | null; weather: Weather } | null = null
   /** Waiting for the light to come round to the realm's own hour, to give the realm its own light back. */
@@ -177,7 +190,8 @@ export function eggs(page: EggsPage) {
   const keep = () => {
     // (Another egg before the last had gone home: what was before is still what the last one kept.)
     if (leaving) { before = { hour: leaving.hour, weather: page.sky.weather }; leaving = null }
-    if (!before) before = { hour: page.hour(), weather: page.sky.weather }
+    // (On its way home to the realm's own light, that is what was before: not the hour the glide had come to.)
+    if (!before) before = { hour: goingHome ? null : page.hour(), weather: page.sky.weather }
   }
   const dress = (egg: Egg) => {
     keep()
@@ -286,8 +300,11 @@ export function eggs(page: EggsPage) {
     showPlayer()
     say('Sound on.')
   }
-  const play = async (egg: 'rickroll' | 'apple') => {
+  /** The meme played last, which “meme” does not play again straight away. */
+  let lastMeme: string | null = null, memesPlayed = 0
+  const play = async (egg: Egg) => {
     const v = VIDEOS[egg]
+    if (egg !== 'rickroll' && egg !== 'apple') { lastMeme = egg; memesPlayed++ }
     if (running?.egg === egg) return running.blocked ? unblock(running) : stop()
     stop(true, false, true)
     const m = element()
@@ -309,7 +326,11 @@ export function eggs(page: EggsPage) {
       if (running !== current || started !== clock) return
       current.picture = videoPicture(m, page.aspect, { outside: v.outside, contrast: v.contrast })
       m.src = url
-      run(current)
+      // It plays once the windows are its screen (every frame below): a 5 s clip started as the screen comes up was
+      // half over before it could be seen. Until then its first frame stands on the windows. (The play started in the
+      // gesture, with no file yet, would play it as soon as it came: held here. The gesture has let the element play.)
+      m.pause()
+      current.waiting = true
       say(`${v.start} Esc, or Stop on the player, ends it.`)
     } catch (e) {
       console.warn(`${v.file} did not load:`, e)
@@ -341,7 +362,9 @@ export function eggs(page: EggsPage) {
     }
   }
 
-  // ── The player: what a video shows on the page, with a native button for each thing it does ──
+  // ── The player: what is playing, a link to where it came from, and a control for each thing the hand does to a
+  // video (DESIGN.md): a key to pause it and to play it on, a fader for where in it the picture is (set by where it
+  // stands, as a scrubber is), a key for its sound, one for another meme, and one to stop it ──
   const realm = page.ui
   /** Where what the eggs lay over the picture goes: the realm's controls, or in the first view, where they are hidden, beside the first view's own keys. */
   const laidOn = () => (document.documentElement.classList.contains('first') ? document.getElementById('first') ?? realm : realm)
@@ -350,37 +373,75 @@ export function eggs(page: EggsPage) {
   player.hidden = true
   player.setAttribute('role', 'group')
   player.setAttribute('aria-label', 'Now playing')
-  player.style.cssText = 'position:absolute;display:flex;align-items:center;gap:10px;padding:8px 10px;pointer-events:auto'
+  // (The city's cues stand clear of it, hud.ts: on a phone it is over the middle of the picture.)
+  player.dataset.hudClear = ''
   // Where it stands: under the keys in the top corners. On a desk, 56 px down. By touch, held upright: in the first view
   // under the credits and settings keys (first.ts), in the realm under the Back key, the tool key and the street's name
   // (play-hud.ts); held wide, gone in, between the corners' keys at the top. Never wider than the screen: the title
-  // wraps, the keys do not. (By the page's state, not by what holds it: started in the first view it stays in #first.)
+  // is cut short, the keys are not. (By the page's state, not by what holds it: started in the first view it stays in #first.)
   const placed = document.createElement('style')
   placed.textContent = /* css */ `
-    .egg-player { top: 56px; left: max(16px, env(safe-area-inset-left)); max-inline-size: calc(100vw - 2 * max(16px, env(safe-area-inset-left))); box-sizing: border-box; }
-    .egg-player .title { flex: 1 1 auto; min-inline-size: 0; }
-    .egg-player button { flex: none; }
+    .egg-player { position: absolute; display: grid; gap: 6px; padding: 8px 10px 10px; pointer-events: auto; box-sizing: border-box;
+      top: 56px; left: max(16px, env(safe-area-inset-left)); inline-size: min(340px, calc(100vw - 2 * max(16px, env(safe-area-inset-left)))); font: 600 13px/1.2 var(--vx-font, system-ui); }
+    .egg-player .top { display: flex; align-items: center; gap: 6px; min-inline-size: 0; }
+    .egg-player .top .stop { flex: none; margin-inline-start: auto; }
+    .egg-player .now { flex: none; font-weight: 400; opacity: 0.72; }
+    .egg-player .title { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vx-link, inherit); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
+    .egg-player .title::after { content: " \\2197\\FE0E"; }
+    .egg-player .title:focus-visible { outline: 2px solid var(--vx-focus, currentColor); outline-offset: 2px; border-radius: 2px; }
+    .egg-player .seek { display: flex; align-items: center; gap: 8px; font: 400 12px/1 var(--vx-mono, ui-monospace, monospace); font-variant-numeric: tabular-nums; }
+    .egg-player .seek .vx-slider { flex: 1 1 auto; min-inline-size: 0; display: flex; }
+    .egg-player .seek input { inline-size: 100%; margin: 0; accent-color: var(--vx-link, auto); }
+    .egg-player .keys { display: flex; gap: 8px; }
+    .egg-player .keys button { flex: 1 1 0; min-inline-size: 0; justify-content: center; }
+    .egg-player .seek output { min-inline-size: 4ch; }
+    .egg-player .seek .of { text-align: end; }
     @media (pointer: coarse) and (max-aspect-ratio: 1/1) {
       html.first .egg-player { top: calc(max(20px, calc(env(safe-area-inset-top) + 8px)) + 56px); }
       html:not(.first) .egg-player { top: calc(env(safe-area-inset-top, 0px) + 164px); }
+      .egg-player .seek input { block-size: 44px; }
     }
     @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
-      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 50%; translate: -50% 0; max-inline-size: min(420px, 100vw - 240px); }
+      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 50%; translate: -50% 0; inline-size: min(420px, 100vw - 240px); }
     }`
   document.head.append(placed)
-  player.innerHTML = '<span class="title" style="font:600 13px/1.2 var(--vx-font,system-ui)"></span><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button>'
+  // (Stop beside the title, as a window's close is: the kit's keys are wide, and four in a row are wider than a phone.)
+  player.innerHTML = `<div class="top"><span class="now">Now playing</span><a class="title" target="_blank" rel="noopener noreferrer"></a><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button></div>
+    <div class="seek"><output class="at">0:00</output><span class="vx-slider"><input type="range" min="0" max="1" step="0.05" value="0" aria-label="Where in it"></span><output class="of">0:00</output></div>
+    <div class="keys"><button class="vx-button pause" type="button">Pause</button><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button next" type="button">Next</button></div>`
   realm.append(player)
-  const muteKey = player.querySelector<HTMLButtonElement>('.mute')!, stopKey = player.querySelector<HTMLButtonElement>('.stop')!
+  const $p = <T extends Element>(q: string) => player.querySelector<T>(q)!
+  const muteKey = $p<HTMLButtonElement>('.mute'), stopKey = $p<HTMLButtonElement>('.stop'), pauseKey = $p<HTMLButtonElement>('.pause'), nextKey = $p<HTMLButtonElement>('.next')
+  const link = $p<HTMLAnchorElement>('.title'), fader = $p<HTMLInputElement>('.seek input'), at = $p<HTMLOutputElement>('.at'), of = $p<HTMLOutputElement>('.of')
+  const mmss = (t: number) => (Number.isFinite(t) ? `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}` : '0:00')
+  /** Whether the hand is on the fader: what it says is the hand's then, not the video's. */
+  let scrubbing = false
+  /** The fader and the times as the video has them. */
+  const where = () => {
+    const m = running?.media
+    if (!m) return
+    const d = Number.isFinite(m.duration) ? m.duration : 0
+    fader.max = String(d || 1)
+    if (!scrubbing) fader.value = String(m.currentTime)
+    at.value = mmss(scrubbing ? Number(fader.value) : m.currentTime)
+    of.value = mmss(d)
+    fader.setAttribute('aria-valuetext', `${at.value} of ${of.value}`)
+  }
   const showPlayer = () => {
     // (The Matrix's music is in the background: no player over the city, only Unmute where the browser held its sound back.)
     if (running?.egg === 'matrix' && !running.blocked) return hidePlayer()
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
-    player.querySelector('.title')!.textContent = `Now playing: ${TITLES[running.egg]}`
+    const title = TITLES(running.egg), source = SOURCES[running.egg]
+    link.textContent = title
+    if (source) { link.href = `https://www.youtube.com/watch?v=${source}`; link.title = `${title}: the original on YouTube (opens a new tab)` }
+    else { link.removeAttribute('href'); link.removeAttribute('title') }
     const muted = running.media.muted
     muteKey.textContent = muted ? 'Unmute' : 'Mute'
     muteKey.setAttribute('aria-pressed', String(muted))
+    pauseKey.textContent = running.paused ? 'Play' : 'Pause'
+    where()
   }
   const hidePlayer = () => { if (player.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); player.hidden = true }
   muteKey.addEventListener('click', () => {
@@ -389,15 +450,35 @@ export function eggs(page: EggsPage) {
     m.muted = !m.muted
     running.blocked = false
     // An unmute is a fresh tap: a video that started muted gets its sound here.
-    if (!m.muted && m.paused && m.src) run(running)
+    if (!m.muted && m.paused && m.src && !running.paused && !running.waiting) run(running)
     showPlayer()
     say(m.muted ? 'Muted.' : 'Sound on.')
   })
+  pauseKey.addEventListener('click', () => {
+    const r = running
+    if (!r?.media) return
+    r.paused = !r.paused
+    if (r.paused) r.media.pause()
+    // (Played on before the screen was up: it plays once it is, as it would have.)
+    else if (!r.waiting) run(r)
+    showPlayer()
+    say(r.paused ? 'Paused.' : 'Playing.')
+  })
+  nextKey.addEventListener('click', () => act('meme'))
   stopKey.addEventListener('click', () => stop())
+  fader.addEventListener('pointerdown', () => { scrubbing = true })
+  addEventListener('pointerup', () => { if (!scrubbing) return; scrubbing = false; where() })
+  fader.addEventListener('input', () => {
+    const m = running?.media
+    if (!m || !m.src) return
+    m.currentTime = Number(fader.value)
+    where()
+  })
+  for (const type of ['timeupdate', 'durationchange', 'loadedmetadata', 'seeked']) element().addEventListener(type, () => { if (!player.hidden) where() })
   // Out of sight, the sound goes with the tab, as the city's own does.
   document.addEventListener('visibilitychange', () => {
     const m = running?.media
-    if (!m || !m.src || running!.held) return
+    if (!m || !m.src || running!.held || running!.waiting || running!.paused) return
     if (document.hidden) m.pause(); else run(running!)
   })
 
@@ -473,19 +554,31 @@ export function eggs(page: EggsPage) {
         briefly('+30 lives', 8000)
         return say('Tow banner: +30 lives')
       case 'help': return hint()
+      case 'meme': {
+        // Any clip but the one on now, or the last one played.
+        const others = MEMES.filter((m) => m.id !== running?.egg && m.id !== lastMeme)
+        // (The memes not come, or not there: the oldest meme of all.)
+        return void play(others.length ? others[Math.floor(Math.random() * others.length)].id : 'rickroll')
+      }
+      default: if (action in VIDEOS) return void play(action)
     }
   }
   const hint = () => {
-    const text = 'Try: wake up · bad apple · iddqd · moon'
+    const text = 'Try: wake up · bad apple · meme · iddqd · moon. Enter or / shows more.'
     briefly('Try: wake up · moon', 7000)
     say(text, 7000)
   }
   /** Something said to the city on the line. */
-  const heard = (text: string) => {
+  const heard = (text: string, again = false): void => {
     const said = words(text)
     if (!said) return
-    const action = PHRASES.get(said)
+    const action = known.get(said)
     if (action) { misses = 0; return act(action) }
+    // (Said before the memes had come: heard again once they have.)
+    if (!MEMES.length && !again) return void memesCame.then(() => heard(text, true))
+    // The start of a phrase, or a word of one: what the line offered first for it.
+    const guess = said.length >= 3 ? ideas(said, 1)[0] : undefined
+    if (guess) { misses = 0; return act(guess) }
     misses++
     if (misses >= 2) return hint()
     briefly(`${text.trim().slice(0, 24)}? Not here.`, 5000)
@@ -493,13 +586,70 @@ export function eggs(page: EggsPage) {
   }
 
   // ── The line: Enter or / opens it; what is typed shows on the banner as it is typed ──
-  const line = document.createElement('label')
+  // Under it, what there is to say (nobody has to know): four ideas when it opens, a different four each time, and as
+  // letters are typed, what they could be the start of, each by the name it goes by. A tap or a click says it, and
+  // Enter says the first where what was typed is no phrase of its own.
+  const line = document.createElement('div')
   line.className = 'vx-card egg-line'
   line.hidden = true
-  line.style.cssText = 'position:absolute;left:50%;bottom:calc(max(30px,env(safe-area-inset-bottom)) + 64px);transform:translateX(-50%);display:flex;gap:8px;align-items:center;padding:6px 10px;pointer-events:auto;font:600 13px/1 var(--vx-font,system-ui)'
-  line.innerHTML = '<span>Say</span><input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="60" aria-label="Say something to the city" style="font:400 15px/1.2 var(--vx-mono,ui-monospace,monospace);inline-size:24ch;background:transparent;border:0;outline:0;color:inherit">'
+  line.setAttribute('role', 'group')
+  line.setAttribute('aria-label', 'Say something to the city')
+  line.style.cssText = 'position:absolute;left:50%;bottom:calc(max(30px,env(safe-area-inset-bottom)) + 64px);transform:translateX(-50%);display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:6px 10px;pointer-events:auto;font:600 13px/1 var(--vx-font,system-ui);max-inline-size:calc(100vw - 32px);box-sizing:border-box'
+  line.innerHTML = '<span aria-hidden="true">Say</span><input type="text" autocomplete="off" autocapitalize="off" spellcheck="false" maxlength="60" aria-label="Say something to the city" aria-describedby="egg-ideas-label" style="flex:1 1 18ch;min-inline-size:0;font:400 15px/1.2 var(--vx-mono,ui-monospace,monospace);inline-size:24ch;background:transparent;border:0;outline:0;color:inherit"><div class="egg-ideas" role="group" aria-labelledby="egg-ideas-label" style="flex:1 0 100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center"><span id="egg-ideas-label" style="font-weight:400;opacity:0.72">Try</span></div>'
   realm.append(line)
-  const field = line.querySelector('input')!
+  const field = line.querySelector('input')!, ideasRow = line.querySelector<HTMLElement>('.egg-ideas')!
+  /** What each egg goes by on the line's ideas (the memes by their titles); what has no name here is not offered. */
+  const NAMES: Record<string, string> = { matrix: 'Wake up, Neo', rickroll: 'Rickroll', apple: 'Bad Apple!!', moon: 'Moon', roll: 'Barrel roll', god: 'IDDQD', meme: 'Surprise me' }
+  /** (A key on a phone holds about 18 letters: a longer title goes by the longest of its phrases that fits, “Nature documentary”.) */
+  const named = (action: string) => {
+    if (NAMES[action]) return NAMES[action]
+    const m = MEMES.find((m) => m.id === action)
+    if (!m) return null
+    if (m.title.length <= 18) return m.title
+    const fits = m.says.filter((p) => p.length <= 18).sort((a, b) => b.length - a.length)[0] ?? m.says[0]
+    return fits[0].toUpperCase() + fits.slice(1)
+  }
+  /** What to offer for what has been typed: on nothing, “Surprise me” and three at random; else what its words could start, the phrases they begin first. */
+  let offered: string[] = []
+  const ideas = (typed: string, n = 4): string[] => {
+    if (!typed) {
+      // (Short ones, two to a row on a phone.)
+      const pool = [...new Set([...known.values()])].filter((a) => a !== 'meme' && (named(a)?.length ?? 99) <= 13)
+      for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]] }
+      return ['meme', ...pool.slice(0, n - 1)]
+    }
+    const found: { action: string; rank: number }[] = []
+    for (const [phrase, action] of known) {
+      if (!named(action)) continue
+      const rank = phrase.startsWith(typed) ? 0 : phrase.includes(` ${typed}`) ? 1 : -1
+      if (rank >= 0) found.push({ action, rank: rank * 100 + phrase.length })
+    }
+    found.sort((a, b) => a.rank - b.rank)
+    return [...new Set(found.map((f) => f.action))].slice(0, n)
+  }
+  const offer = () => {
+    const typed = words(field.value)
+    // (On nothing, the same four while the line is open: they do not shuffle under the hand.)
+    if (typed || !offered.length) offered = ideas(typed)
+    ideasRow.querySelectorAll('button').forEach((b) => b.remove())
+    for (const action of offered) {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'vx-button egg-idea'
+      b.textContent = named(action)!
+      b.dataset.action = action
+      ideasRow.append(b)
+    }
+    ideasRow.hidden = !offered.length
+  }
+  ideasRow.addEventListener('pointerdown', (e) => { if ((e.target as Element).closest('button')) e.preventDefault() })
+  ideasRow.addEventListener('click', (e) => {
+    const b = (e.target as Element).closest<HTMLButtonElement>('button')
+    if (!b?.dataset.action) return
+    close()
+    misses = 0
+    act(b.dataset.action)
+  })
   let typing: (() => void) | null = null
   const echo = () => { brief++; show(`> ${field.value.slice(-24)}_`) }
   const open = () => {
@@ -509,6 +659,8 @@ export function eggs(page: EggsPage) {
     laidOn().append(line)
     line.hidden = false
     field.value = ''
+    offered = []
+    offer()
     field.focus()
     echo()
   }
@@ -519,12 +671,13 @@ export function eggs(page: EggsPage) {
     field.blur()
     show(onBanner)
   }
-  field.addEventListener('input', echo)
+  field.addEventListener('input', () => { echo(); offer() })
   field.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); const text = field.value; close(); heard(text) }
     else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close() }
   })
-  field.addEventListener('blur', () => { if (typing) close() })
+  // Gone from the line and its ideas (a tap elsewhere, Tab past them), it closes.
+  line.addEventListener('focusout', (e) => { if (typing && !line.contains(e.relatedTarget as Node | null)) close() })
   // In this realm nothing is made from words (local.ts): the ask bar's Enter is the line's.
   page.controls.always('Enter', (e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); open(); return true })
   page.controls.always('Slash', (e) => { e.preventDefault(); open(); return true })
@@ -561,6 +714,8 @@ export function eggs(page: EggsPage) {
 
   // ── The things in the city that start them, and what each says it does ──
   const touch = matchMedia('(pointer: coarse)')
+  /** Whether a meme is on the windows (the TV is on). */
+  const memeOn = () => !!running && MEMES.some((m) => m.id === running!.egg)
   const WORDS: Record<ThingId, () => string> = {
     payphone: () => (running?.egg === 'matrix' ? 'Hang up the phone' : 'Answer the ringing phone'),
     jukebox: () => (running?.egg === 'rickroll' ? 'Stop the jukebox' : 'Play the jukebox'),
@@ -569,6 +724,7 @@ export function eggs(page: EggsPage) {
     viewer: () => (moonlit ? 'Look closer at the moon' : 'Look through the viewer'),
     plane: () => 'Spin the toy plane',
     shield: () => (shield ? 'Let go of the golden shield' : 'Touch the golden shield'),
+    tv: () => (memeOn() ? 'Change the channel' : 'Turn on the TV'),
   }
   const USE: Record<ThingId, () => void> = {
     payphone: () => act(running?.egg === 'matrix' ? 'unplug' : 'matrix'),
@@ -578,17 +734,20 @@ export function eggs(page: EggsPage) {
     viewer: () => (moonlit ? shootMoon() : moonUp('Use the viewer again to bring it closer.')),
     plane: () => act('roll'),
     shield: () => act('god'),
+    tv: () => act('meme'),
   }
   const found = things({
     pieces: page.pieces, hud: page.hud, input: page.controls, view: page.view, feet: page.feet, ground: page.ground,
     touch: () => touch.matches, words: (id) => WORDS[id](), use: (id) => USE[id](),
     // The payphone rings (its sign on and off) until its call is taken; the cart's black apple is gone while Bad Apple!! plays.
-    look: (id, t) => (id === 'payphone' ? (running?.egg !== 'matrix' && Math.floor(t * 2.5) % 2 ? 1 : 0) : id === 'cart' ? (running?.egg === 'apple' ? 1 : 0) : 0),
+    look: (id, t) => (id === 'payphone' ? (running?.egg !== 'matrix' && Math.floor(t * 2.5) % 2 ? 1 : 0) : id === 'cart' ? (running?.egg === 'apple' ? 1 : 0) : id === 'tv' ? (memeOn() ? 1 : 0) : 0),
   })
 
   // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines and the towers' lamps ──
   /** Whether anything of the eggs' is on: what a tap on the banner ends. */
   const on = () => !!(running || shield || moon || moonlit || saying)
+  /** The meme the banner said last in the first view. */
+  let lastLine: string | null = null
   const TAPS: Record<Spot, (line: string | null) => void> = {
     // While an egg is on, the banner ends it (Unmute is the player's: a tap here stops). Its line starts its egg; the site's name, a barrel roll.
     banner: (line) => (on() ? undo() : act(line ?? 'roll')),
@@ -601,6 +760,14 @@ export function eggs(page: EggsPage) {
     canvas: page.canvas, view: page.view, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
     beacons: () => march.beacons, fog: () => march.fog,
     quiet: () => !on() && !typing,
+    // A meme whose title is no longer than the site's name (a line is not: first.ts), not the last one said.
+    more: () => {
+      const short = MEMES.filter((m) => m.title.length <= 13 && m.id !== lastLine)
+      const m = short[Math.floor(Math.random() * short.length)]
+      if (!m) return null
+      lastLine = m.id
+      return { text: m.title, egg: m.id }
+    },
     tap: (spot, line) => TAPS[spot](line),
   })
 
@@ -619,6 +786,7 @@ export function eggs(page: EggsPage) {
     // Up over a second, down over two thirds of one.
     if (up > march.screen.up) march.screen.up = Math.min(1, march.screen.up + dt)
     else if (up < march.screen.up) march.screen.up = Math.max(0, march.screen.up - dt * 1.5)
+    if (running?.waiting && march.screen.up >= 0.9) { running.waiting = false; if (!running.paused) run(running) }
     // A picture going down keeps its last frame.
     if (running?.picture) running.picture.draw(device, march.screen.texture, (performance.now() - running.started) / 1000)
     if (march.screen.up === 0 && fading) { fading.dispose(); fading = null }
@@ -658,11 +826,13 @@ export function eggs(page: EggsPage) {
 
   return {
     /** For the checks: what is going on. */
-    get state() { return { running: running?.egg ?? null, up: march.screen.up, shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
+    get state() { return { memesPlayed, paused: !!running?.paused, running: running?.egg ?? null, up: march.screen.up, shield, moon, typing: !!typing, muted: running?.media?.muted ?? null, blocked: running?.blocked ?? false, playing: !!running?.media && !running.media.paused, time: running?.media?.currentTime ?? 0, sound: (running?.media as { webkitAudioDecodedByteCount?: number } | undefined)?.webkitAudioDecodedByteCount ?? 0 } },
     say: heard,
     /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
     open,
     undo,
+    /** For the checks: each meme, a phrase that starts it and its file. */
+    get memes() { return MEMES.map((m) => ({ id: m.id, title: m.title, says: m.says[0], file: VIDEOS[m.id].file, youtube: m.youtube })) },
     /** Holds a playing video at a time, s (null: plays on), as a pause would: for the checks, which compare the windows with a known frame. */
     hold(at: number | null) {
       const r = running

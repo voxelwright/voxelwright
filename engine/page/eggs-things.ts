@@ -13,7 +13,7 @@ import type { Born } from './told.ts'
 import { faces } from './fine.ts'
 import { POLISHED } from './spells.ts'
 
-export type ThingId = 'payphone' | 'jukebox' | 'cart' | 'arcade' | 'viewer' | 'plane' | 'shield'
+export type ThingId = 'payphone' | 'jukebox' | 'cart' | 'arcade' | 'viewer' | 'plane' | 'shield' | 'tv'
 
 /** A model's cells in quarters of the world's (2.5 cm): its foot's middle is where it stands, its front is +z. */
 const PER = 4
@@ -244,6 +244,29 @@ function shield(): Born {
   return m.born()
 }
 
+/** An old television on a low cabinet, rabbit ears up: its screen dark (`on` false), or showing colour bars. */
+function tv(on: boolean): Born {
+  const m = new Cells(28, 66, 24)
+  const CABINET = k(WOOD, hue(1, 6)), CASE = k(STEEL, grey(12)), RIM = k(STEEL, grey(9)), KNOB = k(STEEL, grey(3)) | POLISHED, EAR = k(STEEL, grey(4)) | POLISHED
+  // The cabinet, its doors' line and two round feet each side.
+  m.box(1, 27, 2, 20, 3, 22, CABINET)
+  m.box(0, 28, 20, 22, 2, 23, CABINET)
+  m.box(13, 15, 4, 18, 22, 23, k(WOOD, hue(1, 8)))
+  for (const x of [3, 24]) for (const z of [5, 19]) m.box(x, x + 2, 0, 2, z, z + 2, k(ROOFING, grey(13)))
+  // The set: a deep case, the screen's rim, the screen, and the knobs beside it.
+  m.box(2, 26, 22, 44, 4, 21, CASE)
+  m.box(3, 20, 24, 42, 21, 22, RIM)
+  const BARS = [k(LAMP, grey(0)), k(LAMP, hue(4, 3)), k(LAMP, hue(12, 3)), k(LAMP, hue(8, 3)), k(LAMP, hue(20, 3)), k(LAMP, hue(0, 3)), k(LAMP, hue(16, 3))]
+  for (let y = 26; y < 40; y++) for (let x = 5; x < 18; x++) m.set(x, y, 22, on ? (y < 29 ? k(LAMP, grey(y === 27 ? 2 : 12)) : BARS[Math.floor(((x - 5) / 13) * BARS.length)]) : k(GLASS, grey(13)))
+  m.ball(23, 37, 21.5, 1.6, KNOB); m.ball(23, 31, 21.5, 1.6, KNOB)
+  m.box(21, 25, 25, 27, 21, 22, on ? k(LAMP, hue(0, 3)) : k(ROOFING, grey(13)))
+  // Rabbit ears from a little dome on top.
+  m.ball(14, 44, 12, 3, CASE)
+  for (let t = 0; t <= 1; t += 0.02) { m.set(Math.round(14 - 9 * t), Math.round(46 + 18 * t), 12, EAR); m.set(Math.round(14 + 8 * t), Math.round(46 + 19 * t), 12, EAR) }
+  m.ball(5, 64, 12, 1, EAR); m.ball(22, 65, 12, 1, EAR)
+  return m.born()
+}
+
 // ── Where each stands ──
 
 /**
@@ -265,6 +288,7 @@ const SPOTS: Spot[] = [
   // In the park of the first view (the realm's `arrive`: 516466, 664022), out of its picture.
   { id: 'payphone', at: [516466, 831, 663975], facing: 120 },
   { id: 'shield', at: [516430, 845, 664060], facing: 90 },
+  { id: 'tv', at: [516426, 840, 664002], facing: 110 },
 ]
 /** What the core says of the ground: where feet would stand at a column (world cells), once its tiles have come. */
 export interface ThingsPage {
@@ -303,7 +327,7 @@ export interface Things {
 }
 
 export function things(o: ThingsPage): Things {
-  const looks: Record<ThingId, Born[]> = { payphone: [payphone(false), payphone(true)], jukebox: [jukebox()], cart: [cart(false), cart(true)], arcade: [arcade()], viewer: [viewer()], plane: [planeStick()], shield: [shield()] }
+  const looks: Record<ThingId, Born[]> = { payphone: [payphone(false), payphone(true)], jukebox: [jukebox()], cart: [cart(false), cart(true)], arcade: [arcade()], viewer: [viewer()], plane: [planeStick()], shield: [shield()], tv: [tv(false), tv(true)] }
   // (The plane turns about the middle of its body.)
   const wings = { ...plane(), com: [23, 14.5, 26] as [number, number, number] }
   const placed = SPOTS.map((s) => {

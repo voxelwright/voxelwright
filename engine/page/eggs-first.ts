@@ -2,7 +2,7 @@
 // before anyone has gone in. Two kinds of thing, one way of tapping them:
 //
 //   the banner     after the site's name has been up a while its plane says something else for a while, a line for an
-//                  egg ("Wake up, Neo…", "Never gonna…", …), and the site's name again between them. A line is no longer
+//                  egg ("Wake up, Neo…", "Never gonna…", …, then a meme's title, another each time round), and the site's name again between them. A line is no longer
 //                  than the name: a longer one is set smaller on the same cloth, and could not be read on a phone. A tap
 //                  on the cloth starts what it says; on the site's name, a barrel roll; while an egg runs, it ends it.
 //   the lamps      the red aircraft warning lamps a tall tower carries, blinking on the Pyramid's spire and the
@@ -39,6 +39,8 @@ export interface FirstNeeds {
   quiet(): boolean
   /** Whether fog lies over the city now, 0 to 1. */
   fog(): number
+  /** After the lines above, one more each time round: a meme's, a different one each time (eggs.ts), or none. */
+  more?(): { text: string; egg: string } | null
   /** A tap on a spot: on the banner, the egg its line is for (null: the site's name). */
   tap(spot: Spot, line: string | null): void
 }
@@ -170,8 +172,10 @@ export function firstTaps(o: FirstNeeds) {
       if (p.readable && (!p.loud || p.come >= 1)) seen += dt
       if (seen > LINE) { quietLine(); waited = 0 }
     } else if ((waited += dt) > NAME) {
-      say(LINES[next])
-      next = (next + 1) % LINES.length
+      // (The lines, then a meme's if there is one, then the lines again.)
+      const l = next < LINES.length ? LINES[next] : o.more?.() ?? LINES[0]
+      next = next < LINES.length ? next + 1 : l === LINES[0] ? 1 : 0
+      say(l)
     }
   }
   const lampsFrame = () => {

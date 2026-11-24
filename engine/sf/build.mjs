@@ -18,6 +18,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { memes } from './add-egg.mjs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
@@ -182,11 +183,17 @@ put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${rea
 // site's landing, which made them (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); the music from
 // https://youtu.be/8mAZNNrPH0w as they were (`uvx yt-dlp -f ba`, then ffmpeg: loudnorm=I=-16:TP=-1.5:LRA=11, aac_at
 // profile 4 at 48k, +faststart, to matrix.m4a). Kept on this machine, never in git. Without them the page is the same:
-// the two video eggs say they didn't load, and the Matrix is silent. ──
+// the video eggs say they didn't load, and the Matrix is silent. ──
 const eggsFrom = resolve(arg('eggs', join(VILLAGE, 'sf', 'eggs', 'media')))
-const EGG_VIDEOS = ['rick.mp4', 'bad-apple.mp4', 'matrix.m4a'].filter((f) => existsSync(join(eggsFrom, f)))
-for (const f of EGG_VIDEOS) { mkdirSync(join(out, 'sf', 'eggs'), { recursive: true }); copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f)) }
-if (EGG_VIDEOS.length < 3) console.log(`  the eggs' media are not all at ${eggsFrom}: the video eggs will not load, or the Matrix is silent (copy the site's static/landing/eggs/*.mp4 there; matrix.m4a as said above)`)
+// The memes (sf/memes.json, beside them as eggs/memes.json for the page) are made there by sf/add-egg.mjs. Every video
+// and music file there is copied (deploy/data.mjs packs the folder whole).
+const MEMES = memes()
+const EGG_VIDEOS = existsSync(eggsFrom) ? readdirSync(eggsFrom).filter((f) => /\.(mp4|m4a)$/.test(f)) : []
+mkdirSync(join(out, 'sf', 'eggs'), { recursive: true })
+for (const f of EGG_VIDEOS) copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f))
+copyFileSync(join(root, 'sf', 'memes.json'), join(out, 'sf', 'eggs', 'memes.json'))
+const eggsMissing = ['rick.mp4', 'bad-apple.mp4', 'matrix.m4a', ...MEMES.map((m) => `${m.id}.mp4`)].filter((f) => !EGG_VIDEOS.includes(f))
+if (eggsMissing.length) console.log(`  ${eggsMissing.length} of the eggs' media are not at ${eggsFrom} (${eggsMissing.join(', ')}): those eggs will not load, or the Matrix is silent (the site's static/landing/eggs/*.mp4; matrix.m4a as said above; the memes: node sf/add-egg.mjs --encode)`)
 
 // ── Kept living things ──
 for (const k of realm.kept ?? []) {
@@ -207,7 +214,7 @@ if (realm.street && !(manifest.life && manifest.cars) && !streetManifest) {
 put('sf/CREDITS.txt', [
   ...manifest.credits,
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
-  ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these three eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music.'] : []),
+  ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music. The meme clips, each as its uploader posted it on YouTube, its rights its makers\': ' + MEMES.filter((m) => EGG_VIDEOS.includes(`${m.id}.mp4`)).map((m) => `"${m.source}" (${m.by}, youtu.be/${m.youtube})`).join('; ') + '.'] : []),
   '',
   'Ground, buildings and trees in the baked squares: public domain (DataSF: PDDL). Planet tiles: ODbL 1.0, a derived database under the same licence; terrain: https://mapterhorn.com/attribution. Street colours from Mapillary: CC BY-SA 4.0.',
   '',
