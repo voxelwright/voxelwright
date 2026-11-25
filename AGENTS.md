@@ -35,10 +35,9 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - A change lands when the lead has run the changed flow and `npm run check`
   for what it touches, and says which. A mocked provider proves orchestration
   only, never a model integration. Say which one you ran.
-- Reviews are a tool, not a gate. Run `.agents/skills/adversarial-review` or
-  the seven-lens `.agents/skills/reviewers` when you expect it to find
-  something: a change you cannot fully test, a format others will build on, or
-  anything that handles real people's data.
+- Reviews are a tool, not a gate. Run `.agents/skills/adversarial-review` when
+  you expect it to find something: a change you cannot fully test, a format
+  others will build on, or anything that handles real people's data.
 - GitHub's check workflows are off until the public cutover (#534). The run on
   the Mac is the gate: `npm run check -- --ci --webgl` on the branch merged
   with main, at the least. Put the result line in the PR.
@@ -99,8 +98,8 @@ The owner had been first to spot six visible faults in 14 days.
   ahead of the clock (for example half left on a Sunday), shift toward Astra
   and Sol. On Wednesday and Thursday, plan to use the allowance up by the
   reset. If no work remains, give Opus or Fable a deep improvement task, such
-  as finding implicit state machines, running the reviewers skill, or using
-  Taproot to find and fix deep debt. Ask the owner for the usage figure when
+  as finding implicit state machines or finding and fixing deep debt. Ask the
+  owner for the usage figure when
   pacing matters.
 - Start each unit of work in a fresh thread with a self-contained brief. Do not
   hand new work to a long, finished lane thread.
@@ -150,10 +149,3 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
   than the code: anything reachable from the public internet, changes to who
   can reach his machines or accounts, spending money, accounts on outside
   services in his name, and real family data.
-
-## Supplied reviewers
-
-The seven reviewer files came from another repository. Apply their principles
-to Village's actual stack. Their upstream/Linear paths, permissions,
-deployments and model names are not Village settings or grants. Use the host's
-managed worktree tools for isolated probes.

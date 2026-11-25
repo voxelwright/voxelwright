@@ -53,7 +53,7 @@ design can become a really neat website." His full list is quoted at the bottom.
    their `.md` twins, llms.txt and feed. 60 fps on a MacBook and an iPhone is the bar, so test the real
    iPhone and Safari before calling anything done.
 6. **Auth is sensitive.** The web editor and the blog MCP server write to his site. Run the seven-lens
-   review (`.agents/skills/reviewers`, Sentinel above all) on their auth and write paths.
+   security review on their auth and write paths.
 7. **Process.** Log every dispatch in `~/Developer/Village/.agents/dispatch-log.jsonl`. Stop processes
    only by PID, never `pkill -f`. Own ports 5960-5989 for this round. Commit subjects in Village use
    `[#<issue>] ...` on `feature/` branches. No Co-Authored-By lines. Use made-up names for test people.
