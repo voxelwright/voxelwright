@@ -35,6 +35,8 @@ export interface RealmPage {
   }
   /** Opens the line to say something to the city on (eggs.ts), where the page has one: by touch there is no Enter or slash. */
   say?(): void
+  /** Opens the panel where a visitor connects their own AI (connect.ts), where the page makes things itself (#526). */
+  ai?(): void
   /** Light, Dark or San Francisco now (#524, modes.ts), where the realm has a real sky to follow. Without it the panel has no such row. */
   modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
 }
@@ -182,7 +184,7 @@ export function realmControls(page: RealmPage) {
         ${page.graphics.presets.map((g) => `<label><input type="radio" name="realm-graphics" value="${g}">${GRAPHICS[g] ?? g}</label>`).join('')}
       </div>` : ''}
       <div class="vx-groove" role="separator"></div>
-      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}<button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
+      <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}<button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
       ${page.graphics?.resolution ? `<div class="part res">
       <header class="r"><h2>Resolution</h2><output class="res" aria-live="off"></output></header>
@@ -237,6 +239,8 @@ export function realmControls(page: RealmPage) {
   for (const m of modeKeys) m.addEventListener('change', () => { if (m.checked) mode?.choose(m.value as Mode) })
   for (const t of tools) t.addEventListener('change', () => { if (t.checked) page.pickTool(Number(t.value)) })
   $<HTMLButtonElement>('.reset').addEventListener('click', () => void page.reset())
+  // (Folded first where the panel is a drawer, as Say… does: the dialog is to be read.)
+  root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
   // The fader pins the resolution where it is let stand (Auto goes off); a rate chosen is what Auto holds, and turns it on.
   let sizing = false

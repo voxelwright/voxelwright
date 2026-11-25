@@ -39,6 +39,8 @@
   #ask.open #ask-row #ask-send { background: #14181d; color: #f6f5f0; }
   #ask:not(.open) #ask-send { display: none; }
   #choice { align-self: center; max-width: 100%; padding: 8px 10px 9px; border-radius: 14px; background: rgba(12, 16, 22, 0.78); pointer-events: auto; }
+  /* By touch the thumb's keys stand down the right edge over the bar: a question keeps left of them, its answers in reach. */
+  @media (pointer: coarse) { #choice { align-self: flex-start; max-width: calc(100% - 104px); } }
   #choice p { margin: 0 2px 7px; font-size: 14px; }
   #choice div { display: flex; flex-wrap: wrap; gap: 6px; }
   #choice button { border: 0; border-radius: 9px; padding: 7px 12px 7px 9px; background: rgba(232, 236, 241, 0.14); color: #e8ecf1; font: 600 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }

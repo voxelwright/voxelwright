@@ -138,7 +138,8 @@ export async function reply(c: Connected, q: Question, how: How = {}): Promise<R
     throw new Unanswered('line', how.signal?.aborted ? 'stopped' : `${name} could not be reached: ${e instanceof Error ? e.message : e}`)
   }
   if (!res.ok || !res.body) throw await refused(c.route, res)
-  let text = '', cut = false, declined = '', model = c.model
+  // `ended`: the provider said the answer was over. A stream that simply stops before that is cut short, not an answer.
+  let text = '', cut = false, declined = '', model = c.model, ended = false
   const tokens = { in: 0, out: 0 }
   const more = (t: unknown) => { if (typeof t === 'string' && t) { text += t; how.each?.(text) } }
   try {
@@ -146,13 +147,15 @@ export async function reply(c: Connected, q: Question, how: How = {}): Promise<R
       if (c.route === 'anthropic') {
         if (e.type === 'message_start') { model = e.message?.model ?? model; tokens.in = (e.message?.usage?.input_tokens ?? 0) + (e.message?.usage?.cache_read_input_tokens ?? 0) + (e.message?.usage?.cache_creation_input_tokens ?? 0) }
         else if (e.type === 'content_block_delta' && e.delta?.type === 'text_delta') more(e.delta.text)
-        else if (e.type === 'message_delta') { tokens.out = e.usage?.output_tokens ?? tokens.out; if (e.delta?.stop_reason === 'max_tokens') cut = true; if (e.delta?.stop_reason === 'refusal') declined = 'the model declined this one' }
+        else if (e.type === 'message_stop') ended = true
+        else if (e.type === 'message_delta') { tokens.out = e.usage?.output_tokens ?? tokens.out; if (e.delta?.stop_reason) ended = true; if (e.delta?.stop_reason === 'max_tokens') cut = true; if (e.delta?.stop_reason === 'refusal') declined = 'the model declined this one' }
         else if (e.type === 'error') throw new Unanswered(e.error?.type === 'overloaded_error' ? 'busy' : 'asked', `${name} stopped: ${String(e.error?.message ?? 'no reason given').slice(0, 200)}`)
       } else if (c.route === 'gemini') {
         if (e.promptFeedback?.blockReason) declined = 'the model declined this one'
         for (const candidate of e.candidates ?? []) {
           // A part marked as a thought is the model thinking aloud, not its answer.
           for (const part of candidate.content?.parts ?? []) if (!part.thought) more(part.text)
+          if (candidate.finishReason) ended = true
           if (candidate.finishReason === 'MAX_TOKENS') cut = true
           else if (candidate.finishReason && candidate.finishReason !== 'STOP') declined = 'the model declined this one'
         }
@@ -162,6 +165,7 @@ export async function reply(c: Connected, q: Question, how: How = {}): Promise<R
       } else {
         for (const choice of e.choices ?? []) {
           more(choice.delta?.content)
+          if (choice.finish_reason) ended = true
           if (choice.finish_reason === 'length') cut = true
           else if (choice.finish_reason === 'content_filter') declined = 'the model declined this one'
         }
@@ -176,6 +180,7 @@ export async function reply(c: Connected, q: Question, how: How = {}): Promise<R
   }
   // Whatever it wrote before it declined is not an answer.
   if (declined && !text.trim()) throw new Unanswered('declined', declined)
+  if (!ended && !declined) throw new Unanswered('line', how.signal?.aborted ? 'stopped' : `${name} stopped answering part way`)
   if (!text.trim()) throw new Unanswered('line', `${name} answered with nothing`)
   return { text, model, ms: Math.round(performance.now() - began), cut, tokens }
 }

@@ -305,7 +305,7 @@ export function pageMaker(seam: Seam): PageMaker {
       }, each)
     },
     // The last thing taken out in its turn, after whatever is being made: not while one is still settling.
-    rule: async (_wish, how, each = () => {}) => { if (how?.undo) return turn(unmake, each); const done = refused('rules need an AI connected'); each(done); return done },
+    rule: async (_wish, how, each = () => {}) => { if (how?.undo) return turn(unmake, each); const done = refused('a rule is not written here'); each(done); return done },
     realm: async (_spec, each = () => {}) => { const done = refused('a realm is not made here'); each(done); return done },
     imagine: async () => null,
     drivable: async () => false,

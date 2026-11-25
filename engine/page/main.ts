@@ -979,7 +979,7 @@ async function main() {
   // A realm the page runs alone, whose rules allow it (local.ts `making`): things are made in the page itself, by the
   // engine's own maker (page/maker.ts), fetched once the bar is first used in the realm. Elsewhere: the helper.
   const makesHere = MAKING && !far
-  /** Where another lane connects a model for it (`engine.making.model`: { system, prompt, pictures } to { text }); null: none, and the bar says so. */
+  /** The model the maker asks (`engine.making.model`: { system, prompt, pictures } to { text }): the visitor's own, through page/connect.ts, set below; null: none, and the bar says so. */
   const makingSeam: { model: ((q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>) | null } = { model: null }
   const wishes = makesHere ? later(() => import('./maker.ts').then(({ pageMaker }) => pageMaker({
       core, made, alive, eye: gaze, by: () => 'visitor', hud: over, shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z), model: () => makingSeam.model,
@@ -1002,6 +1002,12 @@ async function main() {
     return true
   })
   const wish = making(over, wishes, gaze, (id) => enterRealm(id), () => setTimeout(beginRealm, 0))
+  // The visitor's own AI (#526, page/connect.ts): asked for what nothing kept answers, fetched the first time it is needed.
+  let connected: Promise<import('./connect.ts').Connect> | null = null
+  let asking: import('./ask.ts').Ask | null = null
+  if (makesHere) wish.on((stage, ask) => { if (stage.stage === 'asking') asking = ask; else if (stage.stage === 'done' && ask === asking) asking = null })
+  const connecting = () => (connected ??= import('./connect.ts').then(({ connect }) => connect({ hud: over, input: controls, wish, asking: () => asking }), (e) => { connected = null; throw e }))
+  if (makesHere) makingSeam.model = (q) => connecting().then((c) => c.ask(q))
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
   // What is kept, shown as a ghost where it would stand while its words are typed (#220).
@@ -1666,7 +1672,7 @@ async function main() {
     keptGraphics()
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
-      modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined })
+      modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}) })
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })

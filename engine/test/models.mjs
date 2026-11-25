@@ -51,7 +51,7 @@ await step('anthropic: the request, and its stream read', async () => {
 })
 
 await step('anthropic: an older model is not told to fall back', async () => {
-  const f = stand(() => sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } }]))
+  const f = stand(() => sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } }, { type: 'message_stop' }]))
   await reply({ route: 'anthropic', key: KEY, model: 'claude-haiku-5-5' }, Q, { fetch: f })
   assert.equal(f.seen[0].headers['anthropic-beta'], undefined)
   assert.equal(f.seen[0].body.fallbacks, undefined)
@@ -85,7 +85,7 @@ await step('openai and openrouter: the chat form, and its stream read', async ()
     assert.equal(body.tools, undefined)
   }
   // With no picture the wish goes as plain words.
-  const plain = stand(() => sse([{ choices: [{ delta: { content: 'x' } }] }]))
+  const plain = stand(() => sse([{ choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }] }]))
   await reply({ route: 'openai', key: KEY, model: 'm' }, { system: 's', prompt: 'p' }, { fetch: plain })
   assert.equal(plain.seen[0].body.messages[1].content, 'p')
   await fails(() => reply({ route: 'openai', key: KEY, model: 'm' }, Q, { fetch: stand(() => sse([{ choices: [{ delta: {}, finish_reason: 'content_filter' }] }])) }), 'declined')
@@ -108,14 +108,14 @@ await step('gemini: the request, thoughts left out, and what stops it', async ()
   await fails(() => reply({ route: 'gemini', key: KEY, model: 'gemini-x' }, Q, { fetch: stand(() => sse([{ promptFeedback: { blockReason: 'SAFETY' } }])) }), 'declined')
   await fails(() => reply({ route: 'gemini', key: KEY, model: 'gemini-x' }, Q, { fetch: stand(() => sse([{ candidates: [{ finishReason: 'SAFETY' }] }])) }), 'declined')
   // A model's name cannot take the request somewhere else.
-  const odd = stand(() => sse([{ candidates: [{ content: { parts: [{ text: 'x' }] } }] }]))
+  const odd = stand(() => sse([{ candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }]))
   await reply({ route: 'gemini', key: KEY, model: '../../evil?x=' }, Q, { fetch: odd })
   assert.ok(odd.seen[0].url.startsWith('https://generativelanguage.googleapis.com/v1beta/models/..%2F..%2Fevil%3Fx%3D:'))
 })
 
 await step('a key goes only to its own provider', async () => {
   for (const route of Object.keys(AT)) {
-    const f = stand(() => sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } }, { choices: [{ delta: { content: 'x' } }] }, { candidates: [{ content: { parts: [{ text: 'x' }] } }] }]))
+    const f = stand(() => sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: 'x' } }, { type: 'message_stop' }, { choices: [{ delta: { content: 'x' }, finish_reason: 'stop' }] }, { candidates: [{ content: { parts: [{ text: 'x' }] }, finishReason: 'STOP' }] }]))
     await reply({ route, key: KEY, model: 'm' }, Q, { fetch: f })
     const l = stand(() => json({ data: [], models: [] }))
     await models(route, KEY, { fetch: l })
@@ -138,6 +138,10 @@ await step('what a provider refuses is said in plain words, without the key', as
   // A stream that breaks part way.
   const broken = () => new Response(new ReadableStream({ start(s) { s.enqueue(new TextEncoder().encode('data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"half"}}\n\n')); s.error(new Error('reset')) } }))
   await fails(() => reply(c, Q, { fetch: async () => broken() }), 'line')
+  // A stream that ends cleanly before its provider said the answer was over: cut short, not an answer, for every provider.
+  await fails(() => reply(c, Q, { fetch: stand(() => sse([{ type: 'content_block_delta', delta: { type: 'text_delta', text: '{"name": "a bo' } }])) }), 'line')
+  await fails(() => reply({ ...c, route: 'openai' }, Q, { fetch: stand(() => sse([{ choices: [{ delta: { content: '{"name": "a bo' } }] }])) }), 'line')
+  await fails(() => reply({ ...c, route: 'gemini' }, Q, { fetch: stand(() => sse([{ candidates: [{ content: { parts: [{ text: '{"name": "a bo' }] } }] }])) }), 'line')
 })
 
 await step('the models a key can use', async () => {

@@ -11,7 +11,7 @@
 //   - words for a kept thing of cells make it: its record is in `engine.things`, and its cells are in the page's own
 //     core at places sampled from that record;
 //   - `engine.unmake()` takes the last one out (record and cells), and "undo" on the bar takes out the car;
-//   - words nothing kept answers make nothing, and say so;
+//   - with no model seam, words nothing kept answers make nothing, and say so (page/connect.ts: test/sf-connect.mjs);
 //   - nothing of the maker or the shelf was asked for before the bar was used;
 //   - with a model handed in (`engine.making.model`, a stand-in that answers with a reply kept here): a wish nobody typed
 //     never reaches it; a typed one is made from its reply; a reply with a script and keys of its own makes the same
@@ -147,7 +147,8 @@ const type = async (page, words) => {
   check(undo.done.state === 'there' && undo.after === undo.before - 1, `"undo" on the bar takes out the car: ${undo.done.state}${undo.done.why ? ` (${undo.done.why})` : ''}, living ${undo.before} then ${undo.after}`)
 
   // Words nothing kept answers.
-  const none = await page.evaluate(async () => { const e = globalThis.engine, n = e.things.all.size; const done = await e.ask({ wish: 'a purple submarine', typed: true }); return { done, more: e.things.all.size - n } })
+  // (With no model seam at all: page/connect.ts, which asks the visitor to connect their own, is checked by test/sf-connect.mjs.)
+  const none = await page.evaluate(async () => { const e = globalThis.engine, n = e.things.all.size, seam = e.making.model; e.making.model = null; const done = await e.ask({ wish: 'a purple submarine', typed: true }); e.making.model = seam; return { done, more: e.things.all.size - n } })
   check(none.done.state === 'refused' && /AI/.test(none.done.why ?? '') && none.more === 0, `words nothing kept answers make nothing, and say so: ${none.done.why}`)
 
   // A model handed in (#526 step 2), stood in for by a reply kept here: the form, with a script and keys of its own.
