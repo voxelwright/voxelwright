@@ -30,13 +30,13 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
 }
 mkdirSync(shots, { recursive: true })
-const LIST = JSON.parse(readFileSync(join(here, 'sf', 'lockers.json'), 'utf8'))
+const LIST = JSON.parse(readFileSync(join(here, 'dist-sf/sf/eggs/lockers.json'), 'utf8'))
 if (LIST.length < 2) { console.error('sf/lockers.json has no lockers: node sf/lockers.mjs'); process.exit(1) }
 // Locked for the check: the third and the fourth, by the payphone and the jukebox.
-const LOCKS = { 2: 'payphone', 3: 'jukebox' }
+const LOCKS = LIST.length === 3 ? { 1: 'payphone' } : { 2: 'payphone', 3: 'jukebox' }
 const served = LIST.map((l, i) => (LOCKS[i] ? { ...l, find: LOCKS[i], hint: 'by a ringing payphone' } : l))
 // Seen before: the fifth and the sixth.
-const SEEN = [LIST[4]?.egg, LIST[5]?.egg].filter(Boolean)
+const SEEN = LIST.length === 3 ? [LIST[2].egg] : LIST.slice(4, 6).map((l) => l.egg)
 const site = await plain(join(here, 'dist-sf'), '127.0.0.1')
 const back = await turn()
 const browser = await chromium.launch(CHROME)
@@ -82,8 +82,16 @@ const drawn = async (page, name) => {
   await page.evaluate(() => globalThis.engine.eggs.lockers.force(0)); await page.waitForTimeout(400)
   const off = await around(page, points, `${name}-off`)
   await page.evaluate(() => globalThis.engine.eggs.lockers.force(null)); await page.waitForTimeout(800)
-  const on = await around(page, points, name)
-  return s.lockers.map((l, i) => ({ ...l, i, add: on[i] && off[i] ? on[i].map((v, c) => v - off[i][c]) : null }))
+  // A new window flickers. Observe its brightest change across several frames.
+  const frames = [await around(page, points, name)]
+  for (let n = 0; n < 4; n++) {
+    await page.waitForTimeout(200)
+    frames.push(await around(page, points))
+  }
+  return s.lockers.map((l, i) => {
+    const changes = frames.filter((frame) => frame[i] && off[i]).map((frame) => frame[i].map((v, c) => v - off[i][c]))
+    return { ...l, i, add: changes.sort((a, b) => moved(b) - moved(a))[0] ?? null }
+  })
 }
 /** What the far model costs the GPU a frame with the lockers shown at `shown` (main.ts farPasses: ms, the middle of five). */
 const farCost = async (page, shown) => {
@@ -99,7 +107,7 @@ console.log('a desk, 1440 x 900')
   let page = await open(context)
   let s = await lockers(page)
   check(s.lockers.length === LIST.length && s.count === `${SEEN.length}/${LIST.length}`, `${s.lockers.length} lockers of sf/lockers.json come; the key says ${s.count} (${SEEN.length} seen before)`)
-  check(s.lockers.filter((l) => l.state === 'locked').length === 2 && SEEN.every((egg) => s.lockers.find((l) => l.egg === egg)?.state === 'seen'), `states: ${['new', 'seen', 'locked'].map((k) => `${s.lockers.filter((l) => l.state === k).length} ${k}`).join(', ')}`)
+  check(s.lockers.filter((l) => l.state === 'locked').length === Object.keys(LOCKS).length && SEEN.every((egg) => s.lockers.find((l) => l.egg === egg)?.state === 'seen'), `states: ${['new', 'seen', 'locked'].map((k) => `${s.lockers.filter((l) => l.state === k).length} ${k}`).join(', ')}`)
   const inside = s.lockers.filter((l) => l.on && l.on.x > 0 && l.on.x < 1440 && l.on.y > 0 && l.on.y < 900)
   check(inside.length === s.lockers.length, `every locker's window is in the picture (${inside.length} of ${s.lockers.length})`)
   // Drawn by the far model here: each locker's window among the windows its faces draw at this size (main.ts lockerWindows).
@@ -128,7 +136,7 @@ console.log('a desk, 1440 x 900')
 
   // The pointer over a new one, and a click on it.
   s = await lockers(page)
-  const pick = s.lockers.findIndex((l) => l.state === 'new' && !['matrix', 'roll', 'lives'].includes(l.egg))
+  const pick = s.lockers.findIndex((l) => l.state === 'new' && !['roll', 'lives'].includes(l.egg))
   const it = s.lockers[pick]
   const [before] = await around(page, [it.on])
   await page.mouse.move(it.on.x, it.on.y, { steps: 4 })
@@ -139,7 +147,7 @@ console.log('a desk, 1440 x 900')
   check(s.hot === pick && s.words === '??? · What’s on in there? Click to find out.' && cursor === 'pointer', `over a new one (${it.egg}): "${s.words}", the cursor ${cursor}`)
   check(light(over) > light(before) + 20, `its window lights up under the pointer (${round(light(before))} to ${round(light(over))})`)
   await page.mouse.click(it.on.x, it.on.y)
-  const playing = await page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, it.egg, { timeout: 30_000 }).then(() => true, () => false)
+  const playing = await page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg && globalThis.engine.eggs.lockers.state.words?.includes('Found!'), it.egg, { timeout: 30_000 }).then(() => true, () => false)
   s = await lockers(page)
   const kept = await page.evaluate(() => JSON.parse(localStorage.getItem('village.sf.lockers')))
   check(playing, `a click opens it: ${it.egg} plays`)
@@ -161,6 +169,7 @@ console.log('a desk, 1440 x 900')
 
   // The key's card: every locker; a new one chosen there is lit up where it is.
   await page.mouse.move(700, 880)
+  await page.waitForFunction(() => globalThis.engine.eggs.lockers.state.lit === null)
   await page.click('.egg-count')
   await page.waitForTimeout(400)
   const card = await page.evaluate(() => ({ open: document.querySelector('#egg-windows')?.matches(':popover-open'), cells: document.querySelectorAll('#egg-windows .egg-windows button').length, told: document.querySelector('#egg-windows .told')?.textContent }))
@@ -205,9 +214,9 @@ console.log('a phone held upright, 390 x 844')
   const keys = await page.evaluate(() => { const r = (q) => document.querySelector(q)?.getBoundingClientRect(); const c = r('.egg-count'), g = r('#realm .fold'), k = r('#first .credits'); return { c: c && [c.left, c.top, c.right, c.bottom], g: g && [g.left, g.top, g.right, g.bottom], k: k && [k.left, k.top, k.right, k.bottom] } })
   const apart = (a, b) => !a || !b || a[2] <= b[0] || b[2] <= a[0] || a[3] <= b[1] || b[3] <= a[1]
   check(keys.c && apart(keys.c, keys.g) && apart(keys.c, keys.k) && Math.abs(keys.c[1] - keys.k[1]) < 12, `the key stands beside the credits key, clear of the settings key (${JSON.stringify(keys)})`)
-  const pick = s.lockers.findIndex((l) => l.state === 'new' && !['matrix', 'roll', 'lives'].includes(l.egg))
+  const pick = s.lockers.findIndex((l) => l.state === 'new' && !['roll', 'lives'].includes(l.egg))
   await page.touchscreen.tap(s.lockers[pick].on.x, s.lockers[pick].on.y)
-  const playing = await page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg, s.lockers[pick].egg, { timeout: 30_000 }).then(() => true, () => false)
+  const playing = await page.waitForFunction((egg) => globalThis.engine.eggs.state.running === egg && globalThis.engine.eggs.lockers.state.words?.includes('Found!'), s.lockers[pick].egg, { timeout: 30_000 }).then(() => true, () => false)
   s = await lockers(page)
   await page.screenshot({ path: join(shots, 'phone-found.png') })
   check(playing && s.lockers[pick].state === 'seen' && s.words?.includes('Found!'), `a tap opens one (${s.lockers[pick].egg}): "${s.words}"`)

@@ -1781,6 +1781,8 @@ The three that take the city's windows (the Matrix's code rain, the Rickroll and
 
 Each egg starts from a phrase typed on the eggs' line (Enter or `/`), and from a thing in the city that a phone can reach without a keyboard. On 555 California's roof, where the visitor comes in: a jukebox (the Rickroll), a toy plane on a stick (a barrel roll) and a coin viewer at the east edge (night and the moon; again, and the moon grows). On the tower's plaza below: a fruit cart with one black apple (Bad Apple!!). On the BLOG board's roof: an arcade cabinet (+30 lives). In the park of the first view, out of its picture: a ringing payphone (the Matrix; hang up to leave) and a golden shield on a plinth (IDDQD). Each is a model of quarter cells drawn as a piece where it stands. Near one, the city's own cue for a usable thing says what it does (`hud.ts` `cue`, 44 px tall by touch); a tap or a click on the cue, E, or the Use key with the aim on the thing uses it. Where each stands is the `SPOTS` table in `page/eggs-things.ts`.
 
+**Private overlay.** The public realm has the procedural eggs, including silent code rain. To enable the private clips and music for a build, see [the private build command](../deploy/README.md#private-egg-media).
+
 **Memes.** 25 short clips (`sf/memes.json`) play on every window with their sound, as the Rickroll does. Each has its own phrases, and "meme" or "surprise me" plays any of them. You don't have to know what to type:
 - **The line's suggestions:** when the line opens it shows four ideas, "Surprise me" first and three others at random. Typing narrows them to what the letters could start. A tap or a click says one, and Enter on something that isn't a phrase says the first suggestion.
 - **The TV:** in the first view's park, an old TV on a cabinet turns on a random meme. Using it again changes the channel.
@@ -1794,7 +1796,7 @@ Each egg starts from a phrase typed on the eggs' line (Enter or `/`), and from a
 node sf/add-egg.mjs <youtube link> --says "phrase one, phrase two" --title "Short Title" --id short-id
 ```
 It fetches the clip at 480p with yt-dlp, finds and crops black bars, and encodes the clip 120 px tall at its own shape (H.264, HE-AAC, two-pass to -16 LUFS). The encoded file goes to `~/.village/engine/sf/eggs/media`, and the command adds the meme to `sf/memes.json`. It refuses a phrase another egg already has.
-- Then run `node sf/build.mjs`, `node sf/lockers.mjs --no-build` (it gives the new meme a window in the first view), and `node ../deploy/data.mjs pack`, and commit `sf/memes.json` and `sf/lockers.json` with `deploy/data.json`.
+- Then run `node sf/build.mjs`, `node sf/lockers.mjs --no-build` (it gives the new meme a window in the first view), and commit `sf/memes.json` and `sf/lockers.json`. Set the private media directory before building.
 - `node sf/add-egg.mjs --encode [ids]` encodes the clips again from the kept sources.
 
 The page can't play a YouTube link straight onto the windows. The embed is a cross-origin frame whose pixels a page can't read. yt-dlp's stream addresses expire, are bound to the IP that asked for them, and send no CORS headers.

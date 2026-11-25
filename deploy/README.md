@@ -9,11 +9,45 @@ One Cloudflare Worker, `zahynailo`, on the Workers Free plan (#450). The SF real
 - **`worker.mjs`** runs only for `/releases/*` (the city's pinned release) and `/bay/*` (the road's marks and the landmarks). It sends the quality-11 Brotli copy that `sf/build.mjs` wrote beside each file, unchanged, so the bytes on the wire are the ones the realm's checks measure. Static assets alone can't do this. Setting `Content-Encoding: br` in `_headers` makes the edge compress the file a second time, and the edge doesn't compress `.bay`, `.far` or `.bin` files at all. The edge compresses the code itself, which comes to about 0.25 MB more than the local quality-11 copies.
 - **`/weather`** also runs `worker.mjs`. It answers San Francisco's weather now for the realm's "SF now" sky: the latest report from the National Weather Service's SFO station that saw the sky, trimmed, kept ten minutes at the edge and five in the browser. If the service fails, it answers 502 and the sky keeps its own weather. To check it after a deploy, run `curl -s https://zahynailo.dev/weather`.
 - **Domains:** `zahynailo.dev` and `www.zahynailo.dev` are custom domains in `cloudflare.config.ts`. A Single Redirect rule on the zone (`www.zahynailo.dev to the apex`) sends www to the apex with a 301 and keeps the path and query. It was set once through the Rulesets API, and deploys don't touch it.
-- **The city's data in CI:** the release, the street graphs, the kept car and the eggs' videos live in `~/.village`, not in git. `node deploy/data.mjs pack` bundles them as Brotli into one GitHub Release asset (`sf-data-<digest>`, about 150 MB) and writes `deploy/data.json`. CI runs `node deploy/data.mjs fetch`, checks that the bundle is for the pin in `engine/sf/pilot/current.json` and that every file is the one packed, then builds. Cloudflare uploads only the assets whose hashes changed, so an unchanged release is never uploaded again.
+- **The city's data in CI:** the release, the street graphs and the kept car live in `~/.village`, not in git. `node deploy/data.mjs pack` bundles them as Brotli into one GitHub Release asset (`sf-data-<digest>`, about 150 MB) and writes `deploy/data.json`. CI runs `node deploy/data.mjs fetch`, checks that the bundle is for the pin in `engine/sf/pilot/current.json` and that every file is the one packed, then builds. Cloudflare uploads only the assets whose hashes changed, so an unchanged release is never uploaded again.
+
+## Private egg media
+
+For the owner’s build, run this from the repository root with dependencies installed and the pinned realm data present:
+
+```sh
+(export VOXELWRIGHT_EGG_MEDIA="$HOME/.village/engine/sf/eggs/media" && npm --prefix engine run core && node engine/sf/build.mjs && npm --prefix site run build && node deploy/assemble.mjs)
+```
+
+The directory holds `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A standalone site at `/` uses the two landing videos. The mounted blog has no landing of its own. Builds with the variable unset ship only the procedural eggs. The public data pack excludes the private media directory.
+
+When a clip changes, rebuild the archive and upload it to the private repository:
+
+```sh
+work=$(mktemp -d)
+python3 - "$work/egg-media.tar" <<'PY'
+from pathlib import Path
+import sys
+import tarfile
+
+media = Path.home() / ".village/engine/sf/eggs/media"
+with tarfile.open(sys.argv[1], "w", format=tarfile.USTAR_FORMAT) as archive:
+    for clip in sorted([*media.glob("*.mp4"), *media.glob("*.m4a")]):
+        entry = tarfile.TarInfo(clip.name)  # fixed epoch mtime, owner/group 0 and mode 0644
+        with clip.open("rb") as source:
+            entry.size = clip.stat().st_size
+            archive.addfile(entry, source)
+PY
+digest=$(shasum -a 256 "$work/egg-media.tar")
+tag="eggs-overlay-$(printf '%.16s' "$digest")"
+gh release create "$tag" "$work/egg-media.tar" --repo the private source repository --title "Egg media overlay (private)" --notes "" --prerelease --latest=false
+```
+
+The repository variable `EGG_OVERLAY_TAG` names that release. After the upload, point it at the new tag with `gh variable set EGG_OVERLAY_TAG --body "$tag" --repo the private source repository`. Leave it unset for public builds.
 
 ## When the pin or the city's other data moves
 
-On the machine that has `~/.village`, after `engine/sf/pilot/current.json` changes, or after the street graphs, the kept car or the eggs' videos there change:
+On the machine that has `~/.village`, after `engine/sf/pilot/current.json` changes, or after the street graphs or the kept car there changes:
 
 ```sh
 node deploy/data.mjs pack     # uploads the new bundle once; writes deploy/data.json

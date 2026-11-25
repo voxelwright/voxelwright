@@ -152,7 +152,7 @@ Why one muxed MP4 per egg and not a frame pack plus `<audio>`: the media element
 
 **Fallbacks.** Reduced motion, forced colours, no WebGPU, and the plain page have no windows to play on. There the egg is sound only: the still's directory shows Mute and Stop (no Pause), Park secrets toggles it on the plain page, and Esc stops it. If the GPU is lost mid-play, the song carries on as sound only; a paused egg stops. Hiding the tab pauses the video and showing it resumes it, as with the city's sound.
 
-**Assets and credit.** Both clips come from the optional private media overlay; neither is in the repository. Only what the windows need ships: 160 × 120 H.264 frames at the source frame rate and 48 kb/s HE-AAC audio normalised to −16 LUFS (Bad Apple's master is about 8 dB hotter than Rick's, and a phone ignores a page's volume), about 3 MiB each, in `static/landing/eggs/`. Originals stay outside the repo. Rebuild with:
+**Assets and credit.** Both clips come from the optional private media overlay; neither is in the repository. Only what the windows need ships: 160 × 120 H.264 frames at the source frame rate and 48 kb/s HE-AAC audio normalised to −16 LUFS (Bad Apple's master is about 8 dB hotter than Rick's, and a phone ignores a page's volume), about 3 MiB each, in the private directory selected by `VOXELWRIGHT_EGG_MEDIA`. Both sources and encodes stay outside the repo. The standalone landing copies them only for an opted-in build. Rebuild with:
 
 ```sh
 uvx yt-dlp -f "bv*[height<=480]+ba" -o "%(id)s.%(ext)s" https://youtu.be/dQw4w9WgXcQ https://youtu.be/FtutLA63Cp8   # in a folder outside the repo

@@ -10,13 +10,15 @@
 //   apple  https://youtu.be/FtutLA63Cp8  480×360 at 30 fps
 // Fetch with `uvx yt-dlp -f "bv*[height<=480]+ba" -o "%(id)s.%(ext)s" <url>` into a
 // folder outside the repo, never into static/.
+import { eggOverlay } from "../../lib/egg-overlay.mjs";
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
 const { values } = parseArgs({ options: { rick: { type: "string" }, apple: { type: "string" } } });
-const out = resolve(import.meta.dirname, "../../static/landing/eggs");
+const out = eggOverlay;
+if (!out) throw Error("Set VOXELWRIGHT_EGG_MEDIA to the private media directory.");
 const LIMIT = 25 * 1024 * 1024; // Cloudflare static assets, per file.
 
 const eggs = {

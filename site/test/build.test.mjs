@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
+import { eggOverlay, landingVideos } from "../lib/egg-overlay.mjs";
 import { build, ContentError } from "../generator/build.mjs";
 
 const SITE = (await import("../site.config.mjs")).default;
@@ -76,4 +77,13 @@ test("a valid model note becomes an attributed blockquote in Markdown", async ()
 test("inline Markdown resolves links relative to the site root", async () => {
   const { renderInline } = await import("../generator/markdown.mjs");
   assert.equal(renderInline("See [Village](tags/village/)."), 'See <a href="/tags/village/">Village</a>.');
+});
+
+test("the standalone landing offers only the video files it ships", async (t) => {
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "landing-video-"));
+  t.after(() => fs.rmSync(outDir, { recursive: true, force: true }));
+  await build({ site: { ...SITE, base: "/" }, outDir });
+  const html = fs.readFileSync(path.join(outDir, "index.html"), "utf8");
+  for (const id of ["apple", "rickroll"]) assert.equal(html.includes(`data-egg="${id}"`), !!eggOverlay);
+  for (const file of landingVideos) assert.equal(fs.existsSync(path.join(outDir, "landing/eggs", file)), !!eggOverlay);
 });

@@ -296,6 +296,7 @@ export function installEggs(root, { world, project, schedule, broken, billboard,
   }
   function play(name) {
     const v = videos[name];
+    if (!v.button) return;
     if (egg?.kind === "video" && egg.name === name) {
       // A press after the browser held back the sound brings the sound, not a stop.
       if (!egg.blocked) return stop();

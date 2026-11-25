@@ -30,6 +30,12 @@ Licence for all fourteen: Creative Commons CC0 1.0 Universal (Public Domain Dedi
 - "BubblePopping" by Sess8it (https://freesound.org/people/Sess8it/), https://freesound.org/s/762781/ : one bubble pop, in `bubble-pops.ogg`.
 - "pop out, bubble, soft bursting" by chaferwitt (https://freesound.org/people/chaferwitt/), https://freesound.org/s/776443/ : one bubble pop, in `bubble-pops.ogg`.
 
+## Ina Coolbrith Park landing
+
+Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01445.jpg* on July 15, 2021. The landing reconstructs that view in voxels using the photograph for camera alignment, building outlines, colours and lighting. [Original photograph on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg)
+
+`site/static/landing/ina.faces.gz` contains the unpainted model’s coloured geometry. `site/static/landing/ina.webp` is a WebP capture rendered from that model. Both adaptations carry [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
 ## Weather: the National Weather Service (public domain)
 
 - Source: the latest observation at San Francisco International Airport (station KSFO), from the National Weather Service's API, https://api.weather.gov/stations/KSFO/observations/latest

@@ -1,6 +1,6 @@
 // A meme egg from a YouTube link (#450, page/eggs.ts): fetched, its black bars found, encoded for the window screen
 // and written into sf/memes.json, which the page reads. Then build (sf/build.mjs), give it a window in the first view
-// (sf/lockers.mjs), pack (deploy/data.mjs pack) and commit sf/memes.json and sf/lockers.json with deploy/data.json.
+// (sf/lockers.mjs), and commit sf/memes.json and sf/lockers.json. Media stays in the private overlay.
 //
 //   node sf/add-egg.mjs <link> [--says "i like trains, trains"] [--title "I Like Trains"] [--id trains]
 //   node sf/add-egg.mjs --encode [trains,doom]      encodes again from the kept sources (all without names)
@@ -10,6 +10,7 @@
 // (site/scripts/landing/encode-eggs.mjs): 120 px tall at the clip's own shape, H.264 Main, HE-AAC, index first, the
 // loudness two-pass to -16 LUFS (single-pass loudnorm drifts on a 5 s clip). Sources stay in
 // ~/.village/engine/sf/eggs/src/memes, the encoded clips in ~/.village/engine/sf/eggs/media, never in git.
+import { eggOverlay } from '../../site/lib/egg-overlay.mjs'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -18,7 +19,7 @@ import { parseArgs } from 'node:util'
 import { phrases, words } from '../page/eggs-said.ts'
 
 const EGGS = join(homedir(), '.village', 'engine', 'sf', 'eggs')
-const SRC = join(EGGS, 'src', 'memes'), OUT = join(EGGS, 'media')
+const SRC = join(EGGS, 'src', 'memes'), OUT = eggOverlay ?? join(EGGS, 'media')
 const LIST = join(import.meta.dirname, 'memes.json')
 const LIMIT = 25 * 1024 * 1024 // Cloudflare static assets, per file.
 const LOUD = 'I=-16:TP=-1.5:LRA=11'
@@ -104,5 +105,5 @@ if (import.meta.main) {
   if (wrong.length) { console.error(`not added:\n  ${wrong.join('\n  ')}\n(choose other phrases with --says)`); process.exit(1) }
   encode(m)
   save([...list, m])
-  console.log(`added “${title}” as ${id}: say ${says.map((s) => `“${s}”`).join(', ')}\nthen: node sf/build.mjs, and node ../deploy/data.mjs pack before it goes live`)
+  console.log(`added “${title}” as ${id}: say ${says.map((s) => `“${s}”`).join(', ')}\nthen: build with VOXELWRIGHT_EGG_MEDIA set to the encoded clips directory`)
 }

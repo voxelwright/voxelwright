@@ -8,7 +8,7 @@ const destinations = [
 ];
 
 // Built only when the site owns its origin (base "/"), so its addresses are the origin's own.
-export function homePage(site, posts, tagsWithPosts) {
+export function homePage(site, posts, eggMedia) {
   const latest = posts.filter((p) => !p.draft).slice(0, 3);
   const links = (local = false) => destinations
     .map(({ href, label }) => {
@@ -83,8 +83,8 @@ ${latest.length ? `<section class="park-writing" aria-labelledby="recent-title">
 <button class="vx-button" type="button" data-egg="roll">Do a barrel roll</button>
 <button class="vx-button" type="button" data-egg="rain" aria-pressed="false">Wake up</button>
 <button class="vx-button" type="button" data-egg="rick">Tune the tow banner</button>
-<button class="vx-button" type="button" data-egg="rickroll" aria-pressed="false">Rickroll the windows</button>
-<button class="vx-button" type="button" data-egg="apple" aria-pressed="false">Bad Apple!!</button>
+${eggMedia ? `<button class="vx-button" type="button" data-egg="rickroll" aria-pressed="false">Rickroll the windows</button>
+<button class="vx-button" type="button" data-egg="apple" aria-pressed="false">Bad Apple!!</button>` : ""}
 <button class="vx-button" type="button" data-egg="lives">Konami code</button>
 </div></details></details><p class="egg-status" role="status" aria-live="polite"></p>
 </div>`;

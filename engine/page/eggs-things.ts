@@ -292,6 +292,7 @@ const SPOTS: Spot[] = [
 ]
 /** What the core says of the ground: where feet would stand at a column (world cells), once its tiles have come. */
 export interface ThingsPage {
+  hasMedia: boolean
   pieces: Pieces
   hud: Hud
   input: Input
@@ -330,7 +331,8 @@ export function things(o: ThingsPage): Things {
   const looks: Record<ThingId, Born[]> = { payphone: [payphone(false), payphone(true)], jukebox: [jukebox()], cart: [cart(false), cart(true)], arcade: [arcade()], viewer: [viewer()], plane: [planeStick()], shield: [shield()], tv: [tv(false), tv(true)] }
   // (The plane turns about the middle of its body.)
   const wings = { ...plane(), com: [23, 14.5, 26] as [number, number, number] }
-  const placed = SPOTS.map((s) => {
+  const spots = o.hasMedia ? SPOTS : SPOTS.filter((s) => !['jukebox', 'cart', 'tv'].includes(s.id))
+  const placed = spots.map((s) => {
     const born = looks[s.id][0], a = Math.PI - (s.facing * Math.PI) / 180
     // (The plane's room is the stick's and the plane's over it: its wings reach 6.5 cells either way, its top 17 up.)
     const size = (s.id === 'plane' ? [13, 17, 13] : born.size.map((v) => v / PER)) as [number, number, number]

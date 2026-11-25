@@ -1,4 +1,6 @@
 // Smoke test the production build on loopback with WebGPU-capable Chrome.
+import { eggOverlay } from "../../lib/egg-overlay.mjs";
+import { pixels } from "./png-pixels.mjs";
 import assert from "node:assert/strict";
 import { mkdir } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -158,7 +160,8 @@ try {
     width: Math.round(view.width * 0.42),
     height: Math.round(view.height * 0.13),
   };
-  const sky = () => page.screenshot({ clip: skyClip });
+  const sky = async () => pixels(await page.screenshot({ clip: skyClip }));
+  await page.waitForTimeout(300); // Let the resized moon reach the paused canvas.
   const still = await sky();
   await page.waitForTimeout(250);
   assert.ok((await sky()).equals(still), "the paused sky holds still");
@@ -254,6 +257,12 @@ try {
   await page.locator("[data-mend]").click();
   await page.locator(".park-credit > summary").click();
   await page.locator(".park-secrets > summary").click();
+  if (!eggOverlay) {
+    assert.equal(await page.locator('[data-egg="rickroll"], [data-egg="apple"]').count(), 0);
+    await page.locator("body").click({ position: { x: 1, y: 1 } });
+    await page.keyboard.type("bad apple");
+    assert.equal(await page.locator(".egg-media").count(), 0);
+  }
   await page.locator('[data-egg="rick"]').click();
   assert.match(await status.innerText(), /Never gonna/);
   await page.locator('[data-egg="rain"]').click();

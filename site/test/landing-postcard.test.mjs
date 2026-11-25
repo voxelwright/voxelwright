@@ -48,7 +48,7 @@ test("the date is written out, and the file is named by it", () => {
 
 test("every postcard control has an HTML twin and a labelled dialog", async () => {
   const { homePage } = await import("../generator/landing.mjs");
-  const { html } = homePage({ title: "Pavlo Zahynailo", description: "", origin: "https://zahynailo.dev" }, [], []);
+  const { html } = homePage({ title: "Pavlo Zahynailo", description: "", origin: "https://zahynailo.dev" }, [], false);
   assert.match(html, /<button type="button" data-sign="postcard" aria-haspopup="dialog"[^>]*>Make a postcard<\/button>/);
   assert.match(html, /data-postcard-plain aria-haspopup="dialog" hidden>Make a postcard<\/button>/);
   assert.match(html, /<dialog class="vx-dialog postcard" aria-labelledby="postcard-title">\s*<header id="postcard-title">Your postcard<\/header>/);

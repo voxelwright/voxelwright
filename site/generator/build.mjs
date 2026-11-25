@@ -1,4 +1,5 @@
 // Builds the whole site into one directory.
+import { eggOverlay, landingVideos } from "../lib/egg-overlay.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { loadPosts } from "./posts.mjs";
@@ -69,7 +70,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
 
   const pages = [
     // mounted below its origin, the site has no home page: "/" belongs to the app mounted there
-    ...(mounted ? [] : [homePage(site, posts, new Set(tags.keys()))]),
+    ...(mounted ? [] : [homePage(site, posts, !!eggOverlay)]),
     voxelmorphismPage(site),
     blogPage(site, posts),
     tagsPage(site, tags),
@@ -95,7 +96,15 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   fs.mkdirSync(outDir, { recursive: true });
   for (const entry of fs.readdirSync(outDir)) fs.rmSync(path.join(outDir, entry), { recursive: true, force: true });
   const siteDir = path.join(outDir, base);
-  fs.cpSync(path.join(ROOT, "static"), siteDir, { recursive: true });
+  fs.cpSync(path.join(ROOT, "static"), siteDir, {
+    recursive: true,
+    filter: (src) => src !== path.join(ROOT, "static/landing/eggs"),
+  });
+  if (eggOverlay && !mounted) {
+    const dir = path.join(siteDir, "landing/eggs");
+    fs.mkdirSync(dir, { recursive: true });
+    for (const name of landingVideos) fs.copyFileSync(path.join(eggOverlay, name), path.join(dir, name));
+  }
   // the host reads _headers only at the top of its assets, so a mounted site's rules move there
   if (mounted) {
     fs.rmSync(path.join(siteDir, "_headers"));

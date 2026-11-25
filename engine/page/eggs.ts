@@ -144,9 +144,10 @@ const TITLES = (egg: Egg) => (egg === 'matrix' ? MUSIC.title : VIDEOS[egg]?.titl
 
 export function eggs(page: EggsPage) {
   const { march, device } = page
+  const hasMedia = document.body.hasAttribute('data-egg-media')
   // ── The memes (sf/memes.json, small, fetched as the eggs start): their phrases, videos and looks joined to the eggs' own ──
-  let MEMES: readonly Meme[] = [], known: ReadonlyMap<string, string> = PHRASES
-  const memesCame = fetch(new URL('eggs/memes.json', page.base)).then((r) => { if (!r.ok) throw Error(`memes.json: ${r.status}`); return r.json() as Promise<Meme[]> }).then((list) => {
+  let MEMES: readonly Meme[] = [], known: ReadonlyMap<string, string> = hasMedia ? PHRASES : new Map([...PHRASES].filter(([, action]) => !['rickroll', 'apple', 'meme'].includes(action)))
+  const memesCame = !hasMedia ? Promise.resolve() : fetch(new URL('eggs/memes.json', page.base)).then((r) => { if (!r.ok) throw Error(`memes.json: ${r.status}`); return r.json() as Promise<Meme[]> }).then((list) => {
     const { all, wrong } = phrases(list)
     for (const w of wrong) console.warn(`eggs: ${w}`)
     MEMES = list
@@ -223,18 +224,15 @@ export function eggs(page: EggsPage) {
     stop(true, false, true)
     // Its music is started inside the gesture, as a video is (`play`), and comes round again at its end. Its player is
     // the videos' own: Esc, “blue pill”, the phone again or Stop end it, and the music with it.
-    const m = element()
-    m.muted = false
-    m.loop = true
-    void m.play().catch(() => {})
+    const m = hasMedia ? element() : undefined
+    if (m) { m.muted = false; m.loop = true; void m.play().catch(() => {}) }
     const started = ++clock
     const current: NonNullable<typeof running> = { egg: 'matrix', picture: null, started: performance.now(), media: m }
     running = current
-    page.hush(true)
-    showPlayer()
+    if (m) { page.hush(true); showPlayer() }
     // The rain does not wait for the music: it comes as soon as its code has, and the music when its file has.
-    const music = fetchVideo(MUSIC.file)
-    music.catch(() => {})
+    const music = m && fetchVideo(MUSIC.file)
+    music?.catch(() => {})
     const { codeRain } = await import('./eggs-pictures.ts')
     if (running !== current || started !== clock) return
     current.picture = codeRain()
@@ -244,6 +242,7 @@ export function eggs(page: EggsPage) {
     banner('The Matrix has you')
     nextLine = { after: 'The Matrix has you', next: 'Red pill or blue pill?', seen: 0 }
     say('Wake up, Neo… The windows are code now. Esc, or say “blue pill”, to leave.')
+    if (!music || !m) return
     try {
       const url = await music
       if (running !== current || started !== clock) return
@@ -310,6 +309,7 @@ export function eggs(page: EggsPage) {
   /** The meme played last, which “meme” does not play again straight away. */
   let lastMeme: string | null = null, memesPlayed = 0
   const play = async (egg: Egg) => {
+    if (!hasMedia) return
     const v = VIDEOS[egg]
     if (egg !== 'rickroll' && egg !== 'apple') { lastMeme = egg; memesPlayed++ }
     if (running?.egg === egg) return running.blocked ? unblock(running) : stop()
@@ -596,7 +596,7 @@ export function eggs(page: EggsPage) {
     }
   }
   const hint = () => {
-    const text = 'Try: wake up · bad apple · meme · iddqd · moon. Enter or / shows more.'
+    const text = `Try: wake up · ${hasMedia ? 'bad apple · meme · ' : ''}iddqd · moon. Enter or / shows more.`
     briefly('Try: wake up · moon', 7000)
     say(text, 7000)
   }
@@ -648,7 +648,7 @@ export function eggs(page: EggsPage) {
       // (Short ones, two to a row on a phone.)
       const pool = [...new Set([...known.values()])].filter((a) => a !== 'meme' && (named(a)?.length ?? 99) <= 13)
       for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]] }
-      return ['meme', ...pool.slice(0, n - 1)]
+      return hasMedia ? ['meme', ...pool.slice(0, n - 1)] : pool.slice(0, n)
     }
     const found: { action: string; rank: number }[] = []
     for (const [phrase, action] of known) {
@@ -769,6 +769,7 @@ export function eggs(page: EggsPage) {
     tv: () => act('meme'),
   }
   const found = things({
+    hasMedia,
     pieces: page.pieces, hud: page.hud, input: page.controls, view: page.view, feet: page.feet, ground: page.ground,
     // (What a thing finds, it finds as it is used: a window in the first view that waited on it is unlocked.)
     touch: () => touch.matches, words: (id) => WORDS[id](), use: (id) => { USE[id](); if (locks?.found(id)) say('Something new is on in a window of the view. Go back to the view to watch it.', 7000) },
@@ -803,6 +804,7 @@ export function eggs(page: EggsPage) {
     crown: () => (running?.egg === 'matrix' ? stop() : void enter()),
   }
   const taps = firstTaps({
+    hasMedia,
     canvas: page.canvas, view: page.view, still: page.still, calm: page.calm, plane: page.plane, signs: page.signs,
     beacons: () => march.beacons, fog: () => march.fog,
     quiet: () => !on() && !typing,

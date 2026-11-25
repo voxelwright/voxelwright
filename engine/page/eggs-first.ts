@@ -29,6 +29,7 @@ type Plane = NonNullable<Boards['plane']>
 export type Spot = 'banner' | 'pyramid' | 'crown'
 
 export interface FirstNeeds {
+  hasMedia: boolean
   canvas: HTMLCanvasElement
   view(): View
   /** Whether the first view is up as it opened: nobody on the way in, the eye where it arrived. */
@@ -79,6 +80,7 @@ const STYLE = /* css */ `
 `
 
 export function firstTaps(o: FirstNeeds) {
+  const lines = o.hasMedia ? LINES : LINES.filter((l) => l.egg === 'matrix' || l.egg === 'roll')
   const touch = matchMedia('(pointer: coarse)')
   const style = document.createElement('style')
   style.textContent = STYLE
@@ -104,6 +106,7 @@ export function firstTaps(o: FirstNeeds) {
   const tower = (which: 'pyramid' | 'crown') => o.beacons().find((b) => (which === 'pyramid' ? b.night[9] > 0 : b.night[8] > 0)) ?? null
   /** Where a lamp is on the page, and the box a tap on it is heard in. */
   const lampAt = (which: 'pyramid' | 'crown') => {
+    if (which === 'pyramid' && !o.hasMedia) return null
     const b = tower(which)
     if (!b) return null
     const top = onPage([b.at[0], b.at[1] + b.night[1] * 10, b.at[2]])
@@ -178,8 +181,8 @@ export function firstTaps(o: FirstNeeds) {
       if (seen > LINE) { quietLine(); waited = 0 }
     } else if ((waited += dt) > NAME) {
       // (The lines, then a meme's if there is one, then the lines again.)
-      const l = next < LINES.length ? LINES[next] : o.more?.() ?? LINES[0]
-      next = next < LINES.length ? next + 1 : l === LINES[0] ? 1 : 0
+      const l = next < lines.length ? lines[next] : o.more?.() ?? lines[0]
+      next = next < lines.length ? next + 1 : l === lines[0] ? 1 : 0
       say(l)
     }
   }

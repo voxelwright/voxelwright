@@ -18,6 +18,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { homedir } from 'node:os'
+import { eggOverlay, landingVideos } from '../../site/lib/egg-overlay.mjs'
 import { memes } from './add-egg.mjs'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -181,25 +182,15 @@ const pictures = shots && Object.fromEntries(['wide', 'upright'].map((k) => {
 const loader = readFileSync(join(root, 'page/loading.html'), 'utf8').replaceAll('{{name}}', () => escaped).replace('/*pictures*/null', () => JSON.stringify(pictures))
 // The engine's page with the realm's record in it (as the release made it), and its script beside it.
 if (!page.includes('<body>\n<canvas></canvas>\n')) fail('page/index.html no longer opens its body with its canvas: change where the loader goes')
-put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="../page/main.js">`).replace('<body>\n<canvas></canvas>\n', () => `<body>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
+put('sf/index.html', page.replace('<title>Village engine</title>', `<title>${realm.name}</title><link rel="icon" href="data:,"><link rel="modulepreload" href="../page/main.js">`).replace('<body>\n<canvas></canvas>\n', () => `<body${eggOverlay ? ' data-egg-media' : ''}>\n<canvas></canvas>\n${loader}\n`).replace('<script type="module" src="/page/main.ts">', `<script type="application/json" id="realm">${JSON.stringify(realm).replace(/</g, '\\u003c')}</script>\n<script type="module" src="../page/main.js">`))
 
-// ── The eggs' videos and the Matrix's music (#450, page/eggs.ts): fetched only when an egg starts. The videos from the
-// site's landing, which made them (its scripts/landing/encode-eggs.mjs, 160 x 120, -16 LUFS); the music from
-// https://youtu.be/8mAZNNrPH0w as they were (`uvx yt-dlp -f ba`, then ffmpeg: loudnorm=I=-16:TP=-1.5:LRA=11, aac_at
-// profile 4 at 48k, +faststart, to matrix.m4a). Kept on this machine, never in git. Without them the page is the same:
-// the video eggs say they didn't load, and the Matrix is silent. ──
-const eggsFrom = resolve(arg('eggs', join(VILLAGE, 'sf', 'eggs', 'media')))
-// The memes (sf/memes.json, beside them as eggs/memes.json for the page) are made there by sf/add-egg.mjs. Every video
-// and music file there is copied (deploy/data.mjs packs the folder whole).
-const MEMES = memes()
-const EGG_VIDEOS = existsSync(eggsFrom) ? readdirSync(eggsFrom).filter((f) => /\.(mp4|m4a)$/.test(f)) : []
-mkdirSync(join(out, 'sf', 'eggs'), { recursive: true })
-for (const f of EGG_VIDEOS) copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f))
-copyFileSync(join(root, 'sf', 'memes.json'), join(out, 'sf', 'eggs', 'memes.json'))
-// The city's windows that hold the eggs (sf/lockers.json, placed by sf/lockers.mjs), beside them as eggs/lockers.json.
-if (existsSync(join(root, 'sf', 'lockers.json'))) copyFileSync(join(root, 'sf', 'lockers.json'), join(out, 'sf', 'eggs', 'lockers.json'))
-const eggsMissing = ['rick.mp4', 'bad-apple.mp4', 'matrix.m4a', ...MEMES.map((m) => `${m.id}.mp4`)].filter((f) => !EGG_VIDEOS.includes(f))
-if (eggsMissing.length) console.log(`  ${eggsMissing.length} of the eggs' media are not at ${eggsFrom} (${eggsMissing.join(', ')}): those eggs will not load, or the Matrix is silent (the site's static/landing/eggs/*.mp4; matrix.m4a as said above; the memes: node sf/add-egg.mjs --encode)`)
+// Only the private build installs media and gives its clips lockers.
+const MEMES = eggOverlay ? memes() : []
+const EGG_VIDEOS = eggOverlay ? [...landingVideos, 'matrix.m4a', ...MEMES.map((m) => `${m.id}.mp4`)] : []
+const lockers = JSON.parse(readFileSync(join(root, 'sf/lockers.json'), 'utf8'))
+put('sf/eggs/lockers.json', JSON.stringify(eggOverlay ? lockers : lockers.filter((l) => ['matrix', 'roll', 'lives'].includes(l.egg))))
+put('sf/eggs/memes.json', JSON.stringify(MEMES))
+for (const file of EGG_VIDEOS) copyFileSync(join(eggOverlay, file), join(out, 'sf/eggs', file))
 
 // ── Kept living things ──
 for (const k of realm.kept ?? []) {

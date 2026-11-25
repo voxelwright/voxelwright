@@ -1,6 +1,6 @@
 // What the realm's build reads from ~/.village and git does not hold (#450), carried to CI as one GitHub Release asset:
-// the pinned release (engine/sf/pilot/current.json), the street graphs the road's marks come from, the kept car and
-// the eggs' videos. Every file is stored as Brotli: the release's as the quality-11 copies sf/build.mjs keeps in
+// the pinned release (engine/sf/pilot/current.json), the street graphs the road's marks come from, and the kept car.
+// Every file is stored as Brotli: the release's as the quality-11 copies sf/build.mjs keeps in
 // ~/.village/engine/sf/br (so CI writes them back there and compresses nothing again), the rest at quality 9.
 //
 //   node deploy/data.mjs pack    on the machine that has ~/.village, after the pin moves: bundles, uploads the bundle
@@ -29,9 +29,9 @@ const files = (dir) => readdirSync(dir).filter((name) => !name.startsWith('.')).
 const REPO = process.env.GITHUB_REPOSITORY ?? 'the private source repository'
 const gh = (command, ...args) => execFileSync('gh', ['release', command, '--repo', REPO, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
-// What the build reads, under ~/.village/engine (sf/build.mjs: STAGED, GRAPHS, SHELF and the eggs' folder).
+// What the build reads, under ~/.village/engine (sf/build.mjs: STAGED, GRAPHS and SHELF).
 const RELEASE = `bay/450-city-paint/sf/releases/${pin}`
-const INPUTS = [RELEASE, 'bay/sf-450-city/packs/graph', 'kept-cars/shelf/1cb43f52cfc96e74e974e0a7.json', 'sf/eggs/media']
+const INPUTS = [RELEASE, 'bay/sf-450-city/packs/graph', 'kept-cars/shelf/1cb43f52cfc96e74e974e0a7.json']
 
 if (process.argv[2] === 'pack') {
   const work = mkdtempSync(join(tmpdir(), 'sf-data-')), index = []
@@ -74,6 +74,8 @@ if (process.argv[2] === 'pack') {
   const { files: index } = JSON.parse(listing)
   mkdirSync(CACHE, { recursive: true })
   for (const f of index) {
+    // Old private bundles included the overlay. Restore only the build's public inputs.
+    if (!INPUTS.some((path) => f.path === path || f.path.startsWith(path + '/'))) continue
     const brotli = readFileSync(join(work, 'files', `${f.path}.br`)), body = brotliDecompressSync(brotli)
     if (body.length !== f.bytes || sha(body) !== f.sha256) fail(`${f.path} is not the file that was packed`)
     mkdirSync(dirname(join(VILLAGE, f.path)), { recursive: true })

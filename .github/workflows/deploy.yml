@@ -35,6 +35,29 @@ jobs:
             site/package-lock.json
             deploy/package-lock.json
 
+      # The private repo opts in before either build. The release tag pins the bytes we unpack.
+      - name: fetch private egg media
+        if: vars.EGG_OVERLAY_TAG != ''
+        shell: bash
+        env:
+          EGG_OVERLAY_TAG: ${{ vars.EGG_OVERLAY_TAG }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [[ ! "$EGG_OVERLAY_TAG" =~ ^eggs-overlay-[0-9a-f]{16}$ ]]; then
+            echo "EGG_OVERLAY_TAG must name an eggs-overlay release with a 16-digit SHA-256 prefix" >&2
+            exit 1
+          fi
+          overlay=$(mktemp -d "$RUNNER_TEMP/egg-overlay.XXXXXX")
+          gh release download "$EGG_OVERLAY_TAG" --repo "$GITHUB_REPOSITORY" --pattern egg-media.tar --dir "$overlay"
+          digest=$(sha256sum "$overlay/egg-media.tar")
+          if [[ "${digest:0:16}" != "${EGG_OVERLAY_TAG#eggs-overlay-}" ]]; then
+            echo "Egg media overlay SHA-256 mismatch" >&2
+            exit 1
+          fi
+          mkdir "$overlay/media"
+          tar -xf "$overlay/egg-media.tar" -C "$overlay/media"
+          printf 'VOXELWRIGHT_EGG_MEDIA=%s\n' "$overlay/media" >> "$GITHUB_ENV"
+
       # The site, under /blog/.
       - run: npm ci
         working-directory: site

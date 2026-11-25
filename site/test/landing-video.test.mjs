@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { statSync } from "node:fs";
+import { join } from "node:path";
+import { eggOverlay, landingVideos } from "../lib/egg-overlay.mjs";
 import { moody, MOOD, PALETTES, reads, lampsUnder, fogUnder } from "../static/landing/mood.js";
 import { fitVideo, videoProgram } from "../static/landing/video.js";
 import { pictureSize } from "../static/landing/screen.js";
@@ -62,9 +64,9 @@ test("a video program repaints only on a new frame, and holds its last as it fad
   assert.equal(program.key(), 1.5, "a stopped video holds its last picture");
 });
 
-test("the egg files ship small and lazily", () => {
-  for (const file of ["rick.mp4", "bad-apple.mp4"]) {
-    const size = statSync(new URL(`../static/landing/eggs/${file}`, import.meta.url)).size;
-    assert.ok(size < 4 * 1024 * 1024, `${file} is ${size} bytes, under 4 MiB (Cloudflare's limit is 25 MiB)`);
+test("private window videos fit the landing budget", { skip: !eggOverlay && "private egg overlay is absent" }, () => {
+  for (const file of landingVideos) {
+    const size = statSync(join(eggOverlay, file)).size;
+    assert.ok(size > 0 && size < 4 * 1024 * 1024, `${file} is ${size} bytes`);
   }
 });

@@ -15,7 +15,7 @@
 // screen (what the screen itself costs). A video's windows are checked against the frame held on them: the light of
 // the windows follows the picture's light and dark. Its sound: refused (simulated: it plays muted, and Unmute brings
 // it), and decoded when a typed line started it.
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -34,6 +34,7 @@ if (!has('no-build')) {
   if (built.status !== 0) { console.error(built.stdout + built.stderr); process.exit(1) }
   console.log(built.stdout.trim())
 }
+const hasMedia = readFileSync(join(here, 'dist-sf/sf/index.html'), 'utf8').includes('<body data-egg-media>')
 mkdirSync(shots, { recursive: true })
 const site = await plain(join(here, 'dist-sf'), '127.0.0.1')
 const back = await turn()
@@ -214,7 +215,8 @@ const things = async (page, kind) => {
   // The lens of play (explore.ts LENS): the realm's own is the first view's long one, which the way in opens.
   await page.evaluate(() => { globalThis.engine.fov = innerHeight > innerWidth ? 80 : 58 })
   const at = await page.evaluate(() => globalThis.engine.eggs.things.list)
-  check(at.length === Object.keys(THINGS).length, `${at.length} things stand in the city: ${at.map((t) => t.id).join(', ')}`)
+  const expected = hasMedia ? Object.keys(THINGS) : ['payphone', 'arcade', 'viewer', 'plane', 'shield']
+  check(at.length === expected.length && expected.every((id) => at.some((t) => t.id === id)), `${at.length} things stand in the city: ${at.map((t) => t.id).join(', ')}`)
   // (The cue the thing offers, by its words: a car's or a ride's may be up too.) `by`: a tap or click on it, or E.
   const tapCue = async (id, by = touch ? 'tap' : 'click') => {
     const cue = await page.evaluate((id) => {
@@ -618,10 +620,24 @@ const fromFirst = async () => {
 }
 
 try {
-  if (has('first')) await fromFirst()
+  if (!hasMedia) {
+    const page = await open(await browser.newContext())
+    const requests = []
+    page.on('request', (r) => { if (/\.(mp4|m4a|mp3|webm)$/.test(r.url())) requests.push(r.url()) })
+    for (const phrase of ['bad apple', 'rickroll', 'meme']) await sayTo(page, phrase)
+    check(!(await state(page)).running, 'private phrases start no player')
+    await sayTo(page, 'wake up')
+    await started(page, 'matrix')
+    const s = await state(page)
+    check(s.running === 'matrix' && !s.playing, 'the procedural Matrix runs silently')
+    check(!requests.length && !page.errors.length, 'no media requests or page errors')
+    await page.close()
+    console.log('SKIP private playback and its first-view triggers: built without the private egg overlay')
+  }
+  if (has('first') && hasMedia) await fromFirst()
   else {
   // (`--things`: only the things in the city, on a phone and a desk.)
-  if (!has('things')) {
+  if (hasMedia && !has('things')) {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 })
   const page = await open(context)
   check(page.said.some((t) => t.includes('General Kenobi') && t.includes('not hiring')), 'the console greets: Hello there, General Kenobi, the ASCII park and the resume line')
