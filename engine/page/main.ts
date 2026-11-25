@@ -516,8 +516,20 @@ async function main() {
   const REST_MS = 1000 / 30
   let rests = query.get('rest') !== '0', stirred = 0, resting = false
   for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart']) addEventListener(type, () => { stirred = performance.now() }, { capture: true, passive: true })
+  /** Whether the eye is where the first view arrives. */
+  const atArrival = () => !arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1
   /** Whether the first view is up and still: as is the eggs' `still` below, and its picture is in. */
-  const firstStill = () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1)
+  const firstStill = () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && atArrival()
+  // The first view as it was left needs only its own picture (#523): the far model keeps to the landing's cut of the
+  // view, which from that eye draws the skyline every band does (a hundredth of the faces), and street life sleeps,
+  // none of it in sight from there. Both wake at the first ask of EXPLORE or anything else that leaves the first view, for good.
+  let landing = true
+  const leaveLanding = () => {
+    if (!landing || !seen.near || (first && !first.engaged && (!way || way.state === 'idle') && !!arrive && atArrival())) return
+    landing = false
+    farModel.left()
+    if (streetLife) streetLife.enabled = true
+  }
   // An eye that turned, or a window screen that is up (an egg playing, eggs.ts), stirs it as a hand does.
   let looked = ''
   const restful = (now: number) => {
@@ -668,10 +680,11 @@ async function main() {
     if (!seen.first) seen.first = performance.now()
     // The picture with the place in it (as player/stage.ts counts it): every box whole across its middle half.
     // And the far model's share of it (far.ts `ready`): at the landing, the faces seen from there of every far tile in the
-    // view, so that the skyline is in the first picture; only then does the far model fetch the rest.
+    // view, so that the skyline is in the first picture; then what the view needs past the cut, and once the visitor leaves the first view the rest (leaveLanding).
     // The loader's last stage (loading.ts): how near the least whole box is to the half across its middle that `near` waits for.
     if (!seen.near) loading.progress(Math.min(...world.levels.flatMap((l) => [0, 2].map((a) => (l.whole.high[a] - l.whole.low[a]) / (l.grid[a] / 2)))))
     if (!seen.near && world.stats.stale === 0 && world.stats.made > 0 && (farModel.ready || pose.y > SPACE) && world.levels.every((l) => l.whole.high.every((h, a) => h - l.whole.low[a] >= l.grid[a] / 2))) { seen.near = performance.now(); farModel.shown() }
+    leaveLanding()
     if (!seen.whole && world.stats.wanted === 0 && world.stats.stale === 0 && world.stats.made > 0) seen.whole = performance.now()
     cpuMs += (performance.now() - began - cpuMs) * 0.05
     requestAnimationFrame(frame)
@@ -1491,6 +1504,7 @@ async function main() {
   if (LOCAL?.street && lively && !far) {
     const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
     streetLife = life
+    if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
   }
   // The realm's billboards and the banner its plane tows (#450, boards.ts): where each stands is the realm's record

@@ -11,9 +11,10 @@
 //
 // A listing may also have the landing's own cut (`landing`, sf/far/landing.mjs): of every band, only the faces seen
 // from the landing's eye, one object a tile, about a hundredth of them. From that eye they draw the same skyline as
-// every band together. While the eye is there and until the place is first shown, only they are fetched for the
-// tiles in the view, the biggest on the screen first; a tile draws them until every band it needs is here, and then
-// lets them go. Away from that eye they are not used.
+// every band together. While the eye is there and until `shown` (the page says it once the visitor leaves the first
+// view: main.ts, #523), only they are fetched for the tiles in the view, the biggest on the screen first, and a tile
+// they cover is whole; a tile draws them until every band it needs is here, and then lets them go. Away from that eye
+// they are not used.
 //
 // In #423's wedge (`wedge`, sf/far/pack.mjs) the faces are a quarter of a metre (half a metre past 700 m from its apex)
 // and laid out with the streets, finer than the cells of 40 cm and more past 100 m: there they begin at `farnear`
@@ -27,6 +28,7 @@
 //   ?farlight=3.44,1.23  the faces' light, fill and gain (the listing's `light`: #423's, which their colours were fitted under)
 //   ?fardetail=0.75      how many pixels across a face must be to be drawn
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
+//   ?farcutfit=1.6       how many times taller than the cut's tallest picture it is still trusted as the whole of the landing's
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
 import { LOCKERS, SLOTS } from './lockers.ts'
@@ -333,7 +335,7 @@ export interface Listing {
   light?: { fill: number; gain: number }
 }
 type Rec = { path: string; bytes: number; sha256: string }
-interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number }
+interface Landing { eye: [number, number, number]; tiles: Record<string, Rec>; reach?: number; fov?: number; size?: [number, number]; yaw?: number; pitch?: number; heights?: number[] }
 interface Section { layer: string; pos: [number, number, number]; cell: number; c0: number[]; c2: number[]; uw: [number, number]; start: number; count: number; runs: { way: number; start: number; count: number; lods: number[] }[]; lo: number[]; hi: number[] }
 interface Head { sections: Section[]; styles: { storey: number; bay: number; wide: number; tall: number; glass: number[] }[]; sun: { vector: [number, number, number] } | null; grouped: boolean }
 
@@ -361,8 +363,10 @@ export interface Far {
   readonly whole: boolean
   /** Whether the first picture's share is here: at the landing, its cut of every tile in the view (each held, or asked and failed). */
   readonly ready: boolean
-  /** The place was shown: from now the rest is fetched (finer bands, the tiles out of the view). */
+  /** The place was shown: from now each tile in the view has every band it needs where the landing's cut is not its whole picture. */
   shown(): void
+  /** The first view was left (main.ts, #523): from now the rest is fetched (finer bands, the tiles out of the view). */
+  left(): void
   /** The objects held now, by their addresses (the listing's paths from where it is): for counting what a view costs to send. */
   held(): string[]
   /**
@@ -387,7 +391,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, left() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -487,6 +491,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       })
       t.held[band] = { band, buffer, bytes: faces.byteLength, sections, used: frame }
       stats.fetched++
+      t.fails[band] = 0
       stats.fetchedBytes += bytes.length
     } catch (e) {
       // A listed object that does not come is a load error (release.md): said, left out, and tried again later.
@@ -546,12 +551,18 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const light = lit?.length === 2 && lit.every(Number.isFinite) ? { fill: lit[0], gain: lit[1] } : listing.light ?? { fill: 1, gain: 1 }
   /** How near the landing's eye the eye must be for its cut to be used, cells. */
   const LANDED = 200
+  /** How wide the view the landing's cut was made for is, up and across (the tangents of their halves, a hair over): any view if it does not say. */
+  const cutTan = landing?.fov && landing.size ? { y: Math.tan((landing.fov * Math.PI) / 360) * 1.001, x: Math.tan((landing.fov * Math.PI) / 360) * (landing.size[0] / landing.size[1]) * 1.001 } : { y: Infinity, x: Infinity }
+  /** Which way the eye the cut was made for looks, if it says. */
+  const cutLook = landing?.yaw !== undefined && landing.pitch !== undefined ? [Math.sin(landing.yaw) * Math.cos(landing.pitch), Math.sin(landing.pitch), -Math.cos(landing.yaw) * Math.cos(landing.pitch)] : null
+  /** The tallest picture the cut is trusted for, pixels: its own tallest (sf/far/landing.mjs `--heights`) and some, `?farcutfit` times (a 1350 px picture of the cut was the bands' but for slivers at the edges, #523); a taller one draws finer faces than it kept. */
+  const cutTall = landing?.heights?.length ? Math.max(...landing.heights) * Number(query.get('farcutfit') ?? 1.6) : 0
   /** How far past the reach a tile is still drawn, metres. */
   const FURTHEST = Number(query.get('farthest') ?? 16_000)
   let frame = 0
   let whole = true
-  /** Until the place is first shown only the landing's cut of the view is fetched (`ready` says when it is here); then the rest. */
-  let first = true
+  /** Until `shown` only the landing's cut of the view is fetched (`ready` says when it is here); then what the view needs; after `left`, the rest. */
+  let first = true, landed = true
   let ready = false
   /** Boxes the world was changed in since the last reset, a little wider (low and high corners, finest cells): the cells' (edited). */
   const edits: number[][] = []
@@ -566,6 +577,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     get whole() { return whole },
     get ready() { return ready },
     shown() { first = false },
+    left() { first = false; landed = false },
     edited(box) {
       const b = [box[0] - PAD, box[1] - PAD, box[2] - PAD, box[3] + PAD, box[4] + PAD, box[5] + PAD]
       const gap = (e: readonly number[]) => Math.max(0, ...[0, 1, 2].map((a) => Math.max(e[a] - b[a + 3], b[a] - e[a + 3])))
@@ -623,6 +635,11 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     // away from it or where the listing has none, the first band of the view): on an ordinary link the finer bands
     // near the eye had taken the wire for seconds while the skyline was still the cells' boxes.
     const there = !!landing && Math.hypot(eye[0] - landing.eye[0], eye[1] - landing.eye[1], eye[2] - landing.eye[2]) < LANDED
+    // The very view the cut was made for (its eye, its look, its lens or a narrower one, a picture no taller): there it
+    // is the whole picture (#523), and a tile draws it whatever bands it holds, a twentieth of their faces; a tile it has
+    // nothing of shows nothing, and is neither fetched nor left to the cells. Any other view (a wider screen sees past
+    // the faces it kept, a turned eye others, a taller picture finer ones) has every band it needs fetched as well.
+    const exact = there && !!cutLook && sz[1] <= cutTall && view.tanHalf <= cutTan.y && view.tanHalf * aspect <= cutTan.x && Math.hypot(eye[0] - landing!.eye[0], eye[1] - landing!.eye[1], eye[2] - landing!.eye[2]) < 10 && view.forward[0] * cutLook[0] + view.forward[1] * cutLook[1] + view.forward[2] * cutLook[2] > 0.99999
     const want: { t: Tile; band: number; d: number; seen: number }[] = []
     cover.fill(0)
     whole = true
@@ -643,25 +660,30 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
         if (h && h !== 'coming') { held += h.bytes / 20; heldBytes += h.bytes; if (need[k]) h.used = frame }
       }
       t.full = all
-      // The landing's cut is let go once every band the tile needs is here, or the eye has left the landing.
+      // The landing's cut is let go once every band the tile needs is here and the view is not the cut's own, or the eye has left the landing.
       const cut = t.held[C]
-      if ((all || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
-      const cutHeld = !all && there && !!cut && cut !== 'coming'
+      if (((all && !exact) || !there) && cut && cut !== 'coming') { cut.buffer.destroy(); t.held[C] = null }
+      const cutHeld = (!all || exact) && there && !!cut && cut !== 'coming'
       if (cutHeld) { held += (cut as Held).bytes / 20; heldBytes += (cut as Held).bytes; onCut = true }
       const cutting = there && t.listed[C]
-      // What it is fetched for now: before the first show, the cut if the tile is in the view (or else its first
-      // band); after, the cut while the tile is in the view and not whole, and every band it needs.
-      const fetch = [...(first ? bands.map((_, k) => k === 0 && !!seen && !cutting) : need), !all && !!seen && cutting]
+      // What it is fetched for now: until `shown`, the cut if the tile is in the view, or else its first band (none of
+      // a tile the cut has nothing of, through its own view); until `left`, every band a tile in the view needs where
+      // the cut is not its whole picture (any view but the cut's own, or a cut that did not come); after, every band it
+      // needs. And the cut while the tile is in the view and not whole.
+      const enough = exact && !t.fails[C]
+      const fetch = [...(first ? bands.map((_, k) => k === 0 && !!seen && !cutting && !exact) : landed ? need.map((n) => n && !!seen && (cutting ? !enough : !exact)) : need), !all && !!seen && cutting]
       for (const [k, h] of t.held.entries()) {
         if (!fetch[k] || !t.listed[k] || (h !== null && h !== 'coming')) continue
         if (h === null && performance.now() >= t.retry[k]) want.push({ t, band: k === C ? -1 : k, d, seen })
         // What the first picture waits on: the cut of the view, each held or asked once and failed.
         if (k === C && first && (h === 'coming' || !t.fails[k])) short = true
       }
-      if (!all && seen) whole = false
-      // The march hands a tile over once what it needs is here, or the landing's cut of it while the eye is there:
-      // until then its cells stand in. Nor one the world was changed in.
-      if ((all || cutHeld) && d < FURTHEST * 10 && !changed.has(t.key)) {
+      // (Through the cut's own view, the cut is a tile's whole, and a tile it has nothing of shows nothing.)
+      const hidden = exact && !t.listed[C]
+      if (!all && !(exact && cutHeld) && !hidden && seen) whole = false
+      // The march hands a tile over once what it needs is here, or the landing's cut of it while the eye is there (or,
+      // through the cut's own view, a tile it has nothing of): until then its cells stand in. Nor one the world was changed in.
+      if ((all || cutHeld || hidden) && d < FURTHEST * 10 && !changed.has(t.key)) {
         const bx = t.x - map[0], bz = t.z - map[1]
         if (bx >= 0 && bx < 64 && bz >= 0 && bz < 64) { const bit = bz * 64 + bx; cover[bit >> 5] |= 1 << (bit & 31) }
       }
@@ -683,7 +705,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     // The wedge (HANDOVER): for the march from the frame's corner, here from the eye (where a face is measured from).
     // While a tile draws the landing's cut, no nearer than the reach the cut was made for: nearer it has no faces.
     const w = listing.wedge && view.tanHalf < NARROW ? listing.wedge : null
-    const near = Math.min(reach, 10 * Math.max(self.near, onCut ? landing?.reach ?? self.reach : 0))
+    const near = Math.min(reach, 10 * Math.max(self.near, onCut || exact ? landing?.reach ?? self.reach : 0))
     const wedge = w ? [w.at[0], w.at[1], w.far * 10, near, (w.from * Math.PI) / 180, (w.to * Math.PI) / 180] : null
     if (!clear) handed = { reach, wedge }
     device.queue.writeBuffer(uniforms, 0, new Float32Array([eye[0] - anchor[0], eye[1] - anchor[1], eye[2] - anchor[2], view.tanHalf, ...view.right, aspect, ...view.up, reach, ...view.forward, shaded ? 1 : 0, ...march.sun.s, (2 * view.tanHalf) / sz[1], ...(wedge ? [wedge[0] - eye[0], wedge[1] - eye[2], wedge[2], wedge[3], wedge[4], wedge[5], 0, 0] : [0, 0, 0, 0, 0, 0, 0, 0]), 1 + (light.fill - 1) * fair, 1 + (light.gain - 1) * fair, 0, 0, ...(kept && wedge ? [kept[0] - eye[0], kept[1] - eye[1], kept[2] - eye[2], 0, kept[3] - eye[0], kept[4] - eye[1], kept[5] - eye[2], 1] : [0, 0, 0, 0, 0, 0, 0, 0])]))
@@ -710,10 +732,12 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       // A tile wholly within the reach (the wedge's, where there is one) is the cells'.
       const furthest = Math.hypot(...[0, 1, 2].map((a) => Math.max(Math.abs(t.lo[a] - eye[a]), Math.abs(t.hi[a] - eye[a]))))
       if (furthest < (wedge ? near : reach)) continue
-      drawn++
-      // A tile not yet whole draws the landing's cut where it has it, else what bands it has.
+      // A tile not yet whole, or seen through the cut's own view, draws the landing's cut where it has it, else what
+      // bands it has; seen through the cut's own view, a tile the cut has nothing of draws nothing.
       const cut = t.held[C]
-      for (const h of !t.full && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
+      if (exact && !t.listed[C]) continue
+      drawn++
+      for (const h of (!t.full || exact) && cut && cut !== 'coming' ? [cut] : t.held.slice(0, C)) {
         if (!h || h === 'coming') continue
         out.setVertexBuffer(0, h.buffer)
         for (const { s, bind: b } of h.sections) {

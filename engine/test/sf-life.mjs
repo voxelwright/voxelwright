@@ -76,7 +76,10 @@ page.on('console', (m) => { if (m.type() === 'error' && !/404 \(Not Found\)/.tes
 
 try {
   await page.goto(`${site.url}/sf/index.html?hour=${hour}`)
-  await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0 && globalThis.engine.street?.ready, null, { timeout: 180_000 })
+  await page.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 })
+  // (Street life sleeps in the first view as it was left, none of it in sight there (#523): it wakes when the eye leaves.)
+  await page.evaluate(([x, z]) => { const e = globalThis.engine; Object.assign(e.pose, { x: x / 10, z: z / 10, y: e.ground(x / 10, z / 10) + 1.7 }) }, SPOTS[0].at)
+  await page.waitForFunction(() => globalThis.engine.street?.ready, null, { timeout: 180_000 })
   const settle = () => page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 90_000, polling: 250 }).catch(() => null)
   const look = (pose, fov = 70) => page.evaluate(({ pose, fov }) => { const e = globalThis.engine; Object.assign(e.pose, { ...pose, y: e.ground(pose.x, pose.z) + pose.h }); e.fov = fov }, { pose, fov })
   // The picture's size pinned for every take, so that on and off draw the same pixels: the page otherwise steers it
