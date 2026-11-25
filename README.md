@@ -76,8 +76,8 @@ check and starts one dev server for the page checks, so it does not touch ports 
 can run beside a play server. A full run takes under 20 minutes on the dev Mac (serial: about 31). `--only` also runs a check the manifest skips, such as `host-regressions`. The runner and
 `scripts/checks.mjs` (the manifest: which checks may run together, which are local-only, which are
 skipped and why) are the one place to look. Perf gates (`npm run perf-gate` in `home/`) stay by hand.
-Checks rewrite some tracked screenshots under `home/screenshots/`; `git checkout home/screenshots`
-before you commit.
+Checks write pictures and clips under `home/screenshots/`, which git ignores; only the notes there
+(`*.md`) are tracked.
 
 GitHub Actions (`.github/workflows/check.yml`) runs `npm run check -- --ci --webgl` on pull
 requests to `main` and pushes to `main`, on `ubuntu-latest`: both typechecks, the home build, the host's
