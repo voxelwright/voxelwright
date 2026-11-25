@@ -1,6 +1,6 @@
 ---
 name: game-sound
-description: How Village's engine makes sound (#247), all of it synthesised in an AudioWorklet from patches that are strict data (engine/page/sound/). What makes game sound good, physically informed synthesis (modes, strings, noise beds), the patch form a model writes, the loudness ceiling, how it is checked without ears, AudioWorklet on iOS Safari, and what is not verified. Load before changing engine/page/sound/, adding a sound to the engine, or asking a model for a patch. The old home's sound (samples, babble) is `web-audio-voice`.
+description: How Voxelwright's engine makes sound (#247), all of it synthesised in an AudioWorklet from patches that are strict data (engine/page/sound/). What makes game sound good, physically informed synthesis (modes, strings, noise beds), the patch form a model writes, the loudness ceiling, how it is checked without ears, AudioWorklet on iOS Safari, and what is not verified. Load before changing engine/page/sound/, adding a sound to the engine, or asking a model for a patch. The old home's sound (samples, babble) is `web-audio-voice`.
 ---
 
 # Sound in the engine

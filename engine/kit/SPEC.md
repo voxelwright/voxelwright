@@ -317,11 +317,11 @@ Decide by how often it happens (from the site-craft rules):
 
 - Each part has its own small canvas, which sits behind the part's content. So parts layer
   correctly inside dialogs and popovers and scroll with the page for free.
-- **The Village engine's renderer draws them** (WebGPU, `src/engine.js`), straight into each
+- **The Voxelwright engine's renderer draws them** (WebGPU, `src/engine.js`), straight into each
   part's canvas. It is the default: a page calls `adopt()` and nothing else. A WebGPU device
   takes a moment to arrive, so every page starts plain and becomes voxels when it does, and
   nothing moves when that happens. `src/engine.js` re-exports the renderer from
-  `../blocks/renderer.ts` in the same Village checkout.
+  `../blocks/renderer.ts` in the same Voxelwright checkout.
 - **Where there is no WebGPU** the kit's own WebGL2 renderer (`src/core/gl.js`) still stands in,
   drawing into one hidden canvas and copying. It draws the same picture. It goes when the plain
   version looks right; a browser without WebGPU then gets the plain page. A real iPhone drew the

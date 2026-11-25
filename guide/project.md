@@ -14,13 +14,22 @@ flowchart LR
 
 | Part | Where to start |
 | --- | --- |
-| [Home](../home/README.md) | Walk the house or work on the scene, interactions and physics. |
-| [Host](../host/README.md) | Start the live home. Follow a request from the Elder to a candidate change. |
+| [Home](../home/README.md) | Walk Village's house or work on the scene, interactions and physics. |
+| [Host](../host/README.md) | Start Village's live home. Follow a request from the Elder to a candidate change. |
 | [Street](../street/README.md) | Run the shared block and join it from two pages. |
 | [Engine](../engine/README.md) | Build the Rust core as WebAssembly and draw the city with WebGPU. Page plugins can [draw into a frame](render-passes.md). |
 | [Kit](../engine/kit/README.md) | Run the showcase to work on a voxel control in isolation. |
 | [Site](../site/README.md) and [deploy](../deploy/README.md) | Build the blog as HTML and Markdown. The deploy assembly combines its output with the SF realm. |
 | [Master](../master/README.md) | Find a player-hosted lobby and pass the WebRTC offer and answer. Game traffic goes between peers. |
+
+## Names
+
+- **Voxelwright** is the project, the repository and the whole stack: the engine, the kit, the fonts, the sound engine, the site generator, the servers, the docs, and how agents build it.
+- **Voxelmorphism** is the design language and its UI kit (`engine/kit`, the npm package `voxelmorphism`). The owner coined the word.
+- **Village** is one product built on the stack: the private family home with its villagers, the Elder and reminders (`home/`, `host/`). The name comes from "it takes a village". It is not the name of the project.
+- San Francisco, the street and the site are other things built on the stack. Call each what it is.
+
+The project began as Village, so older issues, branches, paths and identifiers still carry that word (`~/.village`, `VILLAGE_*`, the `village` scripts in `host/`). Quote them exactly; renaming them is separate work.
 
 ## How the parts work
 

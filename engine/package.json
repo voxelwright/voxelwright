@@ -4,7 +4,7 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "description": "Issue #140: Village's own engine. A world of cells drawn with raw WebGPU. Synthetic data. Its servers listen on this machine; strangers reach a world only through a dedicated server's door (#526).",
+  "description": "Issue #140: Voxelwright's own engine. A world of cells drawn with raw WebGPU. Synthetic data. Its servers listen on this machine; strangers reach a world only through a dedicated server's door (#526).",
   "scripts": {
     "core": "node core/build.mjs",
     "serve": "node serve.mjs",

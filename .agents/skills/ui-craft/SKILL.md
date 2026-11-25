@@ -1,6 +1,6 @@
 ---
 name: ui-craft
-description: Use for any Village UI, 3D scene or skeuomorphic surface work (three.js/WebGPU home, panels, textures, lighting, post effects). Drives a screenshot, score, fix, re-score loop so the result looks designed rather than merely working.
+description: Use for any Voxelwright UI, 3D scene or skeuomorphic surface work (three.js/WebGPU home, panels, textures, lighting, post effects). Drives a screenshot, score, fix, re-score loop so the result looks designed rather than merely working.
 ---
 
 # UI craft
@@ -239,7 +239,7 @@ Details and scores are in `home/notes/build/look-log.md`.
 - Do not add a pile of design skills expecting taste (1:23). The loop did it.
 - Do not accept the first 9 from a reviewer that saw one screenshot or angle.
 - Do not run unbounded. Set a round cap and a spend note (a regroup restarts the cap for the new strategy); his full effort was
-  about 17.6 agent-hours and roughly $250 to $400 (21:14-22:00). Village
+  about 17.6 agent-hours and roughly $250 to $400 (21:14-22:00). Voxelwright
   slices should stop at 3 to 5 rounds unless the owner asks for more.
 - Do not treat a reviewer that hallucinates (invents line numbers, files) as
   signal; discard its score (9:50-10:59, his Gemini "jester").

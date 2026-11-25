@@ -1,6 +1,6 @@
 ---
 name: adversarial-review
-description: Village's default review for every change. A reviewer examines a frozen commit, and a critic checks the review itself, either agreeing, disagreeing with code evidence, or raising a concern the reviewer must settle with code. Use before a change lands on the integration branch. For privacy, auth, data-model, network, device, firmware or factory-permission changes, use the seven-lens `reviewers` skill instead.
+description: Voxelwright's default review for every change. A reviewer examines a frozen commit, and a critic checks the review itself, either agreeing, disagreeing with code evidence, or raising a concern the reviewer must settle with code. Use before a change lands on the integration branch. For privacy, auth, data-model, network, device, firmware or factory-permission changes, use the seven-lens `reviewers` skill instead.
 ---
 
 # Adversarial review
@@ -8,7 +8,7 @@ description: Village's default review for every change. A reviewer examines a fr
 This skill follows Qiu and Gill, "Adversarial Review: Structured Disagreement
 for Grounded Agentic Code Review" (arXiv 2608.18167, ICML 2026 DL4C workshop).
 The paper has not published its prompts, so this is our reading of its protocol.
-Additions of our own are marked *Village*.
+Additions of our own are marked *Voxelwright*.
 
 The failure it targets is **false consensus**: agents agree without evidence.
 The paper shows two forms. A reviewer hedges and a critic confirms a made-up
@@ -56,7 +56,7 @@ meta-reviewer). On SWE-bench Verified it scored 75.2% against 72.6%, at about
    Otherwise the builder fixes the kept flags in a new commit, and the loop
    restarts at step 1 with fresh reviewer and critic agents.
 
-## Practicalities (Village)
+## Practicalities (Voxelwright)
 
 - Give the reviewer and the critic different models where possible, for
   example Opus and GPT-6.1 Sol, or two different Sonnet tiers for small
@@ -67,7 +67,7 @@ meta-reviewer). On SWE-bench Verified it scored 75.2% against 72.6%, at about
 - Record the result in the PR description in about five lines: the SHA, the
   number of rounds, the kept flags and how each was fixed, the dropped flags
   with a reason, and any lead decision.
-- Note in the record any unconfirmed result of this protocol on Village
+- Note in the record any unconfirmed result of this protocol on Voxelwright
   changes, until we have compared it with the seven-lens review on real
   changes.
 

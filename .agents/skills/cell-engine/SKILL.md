@@ -1,9 +1,9 @@
 ---
 name: cell-engine
-description: How Village's own engine (#140) holds, makes, draws and breaks a world of 10 cm cells, with measured costs, the lessons paid for, and what is not built. Load before changing engine/core's tree, city or blast, engine/page's world boxes, marcher or flight, or before claiming a frame rate.
+description: How Voxelwright's own engine (#140) holds, makes, draws and breaks a world of 10 cm cells, with measured costs, the lessons paid for, and what is not built. Load before changing engine/core's tree, city or blast, engine/page's world boxes, marcher or flight, or before claiming a frame rate.
 ---
 
-# Village's engine of cells
+# Voxelwright's engine of cells
 
 Begun November 11, 2026 (#140) on the owner's direction: an engine of our own, no loyalty to
 three.js or Jolt, 60 fps on an iPhone and the M1 Pro at the scale of a city. It lives in

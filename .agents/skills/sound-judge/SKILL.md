@@ -1,6 +1,6 @@
 ---
 name: sound-judge
-description: How Village judges and improves the engine's sound with nobody listening (#410). The benchmark clips, the measures and which were kept or dropped and why, the proof (damage, references, human ratings), the check that fails when sound gets worse, the climb loop, the Python tools it stands on, and what the field says about good game sound and music. Load before changing engine/page/sound/, engine/ears/ or the sound checks, or before claiming anything about how the engine sounds.
+description: How Voxelwright judges and improves the engine's sound with nobody listening (#410). The benchmark clips, the measures and which were kept or dropped and why, the proof (damage, references, human ratings), the check that fails when sound gets worse, the climb loop, the Python tools it stands on, and what the field says about good game sound and music. Load before changing engine/page/sound/, engine/ears/ or the sound checks, or before claiming anything about how the engine sounds.
 ---
 
 # Judging sound without ears

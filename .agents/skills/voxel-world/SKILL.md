@@ -1,12 +1,12 @@
 ---
 name: voxel-world
-description: Measured facts, recipes and limits for Village's world of cells (voxels) in the engine and the street (#138). Load before changing home/src/engine/voxels.ts, cells.ts or the cells parts of world.ts, the street's --cells path, the page's cells renderer, or anything that edits, splits, packs or replicates cells.
+description: Measured facts, recipes and limits for Voxelwright's world of cells (voxels) in the engine and the street (#138). Load before changing home/src/engine/voxels.ts, cells.ts or the cells parts of world.ts, the street's --cells path, the page's cells renderer, or anything that edits, splits, packs or replicates cells.
 ---
 
 # A world of cells
 
 Adopted November 11, 2026 (#138), on the owner's direction that the world be a voxel engine. Nothing
-was added as a dependency: the cells are Village's own code over the existing solver (`jolt-physics`
+was added as a dependency: the cells are Voxelwright's own code over the existing solver (`jolt-physics`
 1.1.1, see the `jolt-physics` skill) and renderer (three r187 WebGPU, see `tsl-stylised-post`).
 Verified in Node 25.1 and headless Chrome on an M1 Pro. Every number below was measured on that
 Mac while it was busy (load 6 to 16), so a quiet machine does better.

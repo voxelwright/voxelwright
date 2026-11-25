@@ -1,6 +1,6 @@
 ---
 name: raw-webgpu
-description: Verified facts, recipes and traps for raw WebGPU and WGSL in Village's engine pages (#140), with no scene library: opening a device, timing honestly on a busy or frame-capped device, WGSL and layout traps, serving TypeScript with Node's type stripper, driving Chrome and Safari. Load before changing engine/probe, engine/page or engine/blocks shaders or pipelines, or any timing claim.
+description: Verified facts, recipes and traps for raw WebGPU and WGSL in Voxelwright's engine pages (#140), with no scene library: opening a device, timing honestly on a busy or frame-capped device, WGSL and layout traps, serving TypeScript with Node's type stripper, driving Chrome and Safari. Load before changing engine/probe, engine/page or engine/blocks shaders or pipelines, or any timing claim.
 ---
 
 # Raw WebGPU in the engine's pages

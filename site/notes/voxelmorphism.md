@@ -23,8 +23,8 @@ before site startup and scopes the showcase's stylesheet to the desk.
 
 ## Asset provenance
 
-IBM Plex Sans and Mono retain their upstream OFL files beside their WOFF2s. Vox Text is Village's original Sentence glyph set rendered as two WOFF2s. Its source is `engine/kit/src/core/fonts/sentence.js` and its build instructions are in `engine/kit/fonts/vox-text/README.md`. The OFL notice accompanies each family.
+IBM Plex Sans and Mono retain their upstream OFL files beside their WOFF2s. Vox Text is Voxelwright's original Sentence glyph set rendered as two WOFF2s. Its source is `engine/kit/src/core/fonts/sentence.js` and its build instructions are in `engine/kit/fonts/vox-text/README.md`. The OFL notice accompanies each family.
 
-The press and release WAVs are byte-for-byte from `engine/kit/src/core/audio/`. Village cut them from the Mechvibes Cherry MX Brown PBT KeyJ recording, with separate downstroke and upstroke samples. The included MIT license accompanies the recordings. [Original sound pack](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt)
+The press and release WAVs are byte-for-byte from `engine/kit/src/core/audio/`. Voxelwright cut them from the Mechvibes Cherry MX Brown PBT KeyJ recording, with separate downstroke and upstroke samples. The included MIT license accompanies the recordings. [Original sound pack](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt)
 
-This distribution contains compiled Village engine code and unpublished kit assets. Public distribution requires the owner's release decision.
+This distribution contains compiled Voxelwright engine code and unpublished kit assets. Public distribution requires the owner's release decision.

@@ -1,11 +1,11 @@
 ---
 name: lead-orchestration
-description: How Village's lead (orchestrator) agent runs many builder agents at once - taking stock, splitting work, writing briefs, landing, looking at output, and keeping the machine healthy. Use when you coordinate other agents, sweep finished threads, land lane work, or plan parallel work.
+description: How Voxelwright's lead (orchestrator) agent runs many builder agents at once - taking stock, splitting work, writing briefs, landing, looking at output, and keeping the machine healthy. Use when you coordinate other agents, sweep finished threads, land lane work, or plan parallel work.
 ---
 
 # Lead orchestration
 
-This skill holds what the leads have learned from running Village's factory
+This skill holds what the leads have learned from running Voxelwright's factory
 since November 2026. AGENTS.md has the rules. This skill explains how to follow
 them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
 -speed.md, -parts-and-kits.md, 2026-11-21/report.md) and in issue #465.

@@ -1,6 +1,6 @@
 # Credits
 
-Village's own pictures, and most of its sounds, are made in code. Third-party material used in the project:
+Voxelwright's own pictures, and most of its sounds, are made in code. Third-party material used in the project:
 
 ## Music: "Groove Music" by benpm
 
@@ -129,7 +129,7 @@ The drawer used Google Nano Banana 2 via `fal-ai/nano-banana-2`. The model page 
 
 ## Personal post attachments
 
-The owner reserves rights in his personal posts. Both examples entered Village in the site import. The draft posts describe their origins. Publication of these attachments is the owner's decision.
+The owner reserves rights in his personal posts. Both examples entered this repository in the site import. The draft posts describe their origins. Publication of these attachments is the owner's decision.
 
 | Post | Attachment | Origin evidenced in the post or file |
 | --- | --- | --- |

@@ -1,4 +1,4 @@
-# Designing Village controls
+# Designing Voxelwright controls
 
 ## Interaction
 

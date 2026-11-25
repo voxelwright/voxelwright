@@ -1,10 +1,10 @@
 # Ina Coolbrith Park
 
-The ordinary site build copies the files in `static/landing/`. The live view imports the Village device owner at `/vendor/village/blocks/renderer.js`, from the installed Voxelmorphism kit. The tow banner uses the kit’s Vox Text lettering. The marquee is built from solid letters and the park signs use the site’s faces: IBM Plex Sans from the kit and Source Serif 4.
+The ordinary site build copies the files in `static/landing/`. The live view imports the Voxelwright device owner at `/vendor/village/blocks/renderer.js`, from the installed Voxelmorphism kit. The tow banner uses the kit’s Vox Text lettering. The marquee is built from solid letters and the park signs use the site’s faces: IBM Plex Sans from the kit and Source Serif 4.
 
 ## Source
 
-| Asset | Village source |
+| Asset | Voxelwright source |
 | --- | --- |
 | City, landmarks and camera | `24b416e0742d4cf834ee59393bb1783adf0f0066` on `feature/423-ina`, particularly `engine/landing/ina/README.md`, `camera.json`, `matte.py`, `heroes.mjs` and `cull.mjs`. The cached `place/ina` output has 707,795 actual faces. |
 | Skyline poster | The unpainted model’s own `shots/r12-full.png`, made with `cd engine && node landing/ina/shoot.mjs --place ina --name r12` from that engine checkout and its cache. The camera is at 86.98 m elevation, bearing 120.205°, with a vertical field of view of 25.049°. |
@@ -17,7 +17,7 @@ The city uses USGS 3DEP lidar, DataSF buildings, Mapterhorn terrain, OpenStreetM
 
 ## Refresh
 
-Run from the site checkout with its locked dependencies installed. The prep also uses Git and `cwebp` (libwebp). Supply a Village clone with both pinned commit objects, plus the private Ina build cache described in Village’s Ina README.
+Run from the site checkout with its locked dependencies installed. The prep also uses Git and `cwebp` (libwebp). Supply a Voxelwright clone with both pinned commit objects, plus the private Ina build cache described in Voxelwright’s Ina README.
 
 ```sh
 node scripts/landing/prepare.mjs "$VILLAGE_REPO" "$INA_CACHE"
@@ -28,9 +28,9 @@ The cache must contain `home/.village/engine/place/ina/index.json`, its named bi
 
 ## Park secrets (#426)
 
-The short tap and held press follow the interaction in Village `feature/421-landing` at `ef68e752dc98135994e8f6ffaaaa9fc987a4e481`. On this directory, hold the B for at least 540 ms and release, or focus Blog and press Space. LOG opens a fragment on the same home page. Mend restores the Blog link. IDDQD mends the sign and protects it until the code is entered again. The log describes site commits `311b936`, `9606bb8` and `cf84767`.
+The short tap and held press follow the interaction in Voxelwright `feature/421-landing` at `ef68e752dc98135994e8f6ffaaaa9fc987a4e481`. On this directory, hold the B for at least 540 ms and release, or focus Blog and press Space. LOG opens a fragment on the same home page. Mend restores the Blog link. IDDQD mends the sign and protects it until the code is entered again. The log describes site commits `311b936`, `9606bb8` and `cf84767`.
 
-The moon uses the sky pass and cycles through three disc radii on a night tap. The banner hit test projects the tow cloth endpoints from the Village plane. Tapping the cloth changes its message and a dancer appears on the directory. The Konami sequence changes that same cloth to +30 lives. Type “do a barrel roll” for a plane and compass roll, or “neo” / “wake up” to enter the Matrix (see below; the still and the plain page keep a brief fall of window glyphs). Going offline uncovers the cable car on the View sign, on the still directory, or in the plain-page caption.
+The moon uses the sky pass and cycles through three disc radii on a night tap. The banner hit test projects the tow cloth endpoints from the Voxelwright plane. Tapping the cloth changes its message and a dancer appears on the directory. The Konami sequence changes that same cloth to +30 lives. Type “do a barrel roll” for a plane and compass roll, or “neo” / “wake up” to enter the Matrix (see below; the still and the plain page keep a brief fall of window glyphs). Going offline uncovers the cable car on the View sign, on the still directory, or in the plain-page caption.
 
 About this view → Park secrets carries native button equivalents, including a moon-size sample and banner text on the plain page. The B bitmap, cable car, dancer, glyph arrangement, console skyline and procedural lunar marks are original to this adapter. The roll is a small addition to the pinned plane shader in the refresh script. There are no downloaded sprites, audio, or new runtime dependencies.
 
@@ -45,7 +45,7 @@ If Playwright already resolves from the site checkout, omit `PLAYWRIGHT`. The te
 
 ## Full-screen city and signs
 
-The home view keeps the exported Ina geometry in the Village Bay frame. New fixtures in `static/landing/signs.js` take an easting and northing in NAD83 / UTM zone 10N (EPSG:26910) and an elevation in NAVD88 metres. `surveyPoint` maps these to the pack's decimetres, with X east of 500,000 m, Z south of 4,250,000 m, and Y above the 1 m datum. A 1 m move along any axis spans ten engine units. The display crop changes the lens framing while preserving the world scale.
+The home view keeps the exported Ina geometry in the Voxelwright Bay frame. New fixtures in `static/landing/signs.js` take an easting and northing in NAD83 / UTM zone 10N (EPSG:26910) and an elevation in NAVD88 metres. `surveyPoint` maps these to the pack's decimetres, with X east of 500,000 m, Z south of 4,250,000 m, and Y above the 1 m datum. A 1 m move along any axis spans ten engine units. The display crop changes the lens framing while preserving the world scale.
 
 The BLOG marquee stands on building 3174 and the Voxelmorphism lightbox on building 1374. Their supports were placed against the Ina lidar surface. The park directory and folding graphics panel stand on the slope in front of the survey camera. Letters, cabinets, posts and lamps share the buildings' depth buffer. Browser links and form controls follow the projected faces for keyboard, touch and modified clicks. Narrow views repeat the destinations on the directory.
 

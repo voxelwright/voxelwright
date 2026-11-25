@@ -1,6 +1,6 @@
 ---
 name: jolt-physics
-description: Versions, verified recipes and limits for Jolt Physics in JavaScript (jolt-physics npm, wasm), Village's candidate core physics engine (#74). Load before writing or changing a Jolt adapter, contact listener, heightfield edit or anything that allocates Jolt objects.
+description: Versions, verified recipes and limits for Jolt Physics in JavaScript (jolt-physics npm, wasm), Voxelwright's candidate core physics engine (#74). Load before writing or changing a Jolt adapter, contact listener, heightfield edit or anything that allocates Jolt objects.
 ---
 
 # Jolt Physics (JS/wasm)

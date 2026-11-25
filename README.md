@@ -1,6 +1,18 @@
-# Village
+# Voxelwright
 
-Walk San Francisco in a WebGPU browser. Install Node.js 25 or newer and stable Rust, then add the target once with `rustup target add wasm32-unknown-unknown`. From the repository root on macOS or Linux:
+Voxelwright is a stack for worlds that people make by talking. It has its own engine (a world of 10 cm cells drawn with raw WebGPU, its core in Rust), sound engine, fonts, UI kit (Voxelmorphism), site generator and servers for playing together. Pavlo Zahynailo builds it with AI agents.
+
+![San Francisco in voxels, seen from Ina Coolbrith Park](site/static/landing/ina.webp)
+
+*The landing view: San Francisco in voxels from Ina Coolbrith Park, rebuilt from Frank Schulenburg's photograph ([CC BY-SA 4.0](CREDITS.md#ina-coolbrith-park-landing)).*
+
+What you can do with it today:
+
+- Walk San Francisco in a WebGPU browser.
+- Make new things in the city with your own AI provider key.
+- Run Village, a private home for a family with villagers, reminders and the Elder. See [Run Village, the private home](#run-village-the-private-home).
+
+To walk the city, install Node.js 25 or newer and stable Rust, then add the target once with `rustup target add wasm32-unknown-unknown`. From the repository root on macOS or Linux:
 
 ```sh
 ./world
@@ -8,21 +20,28 @@ Walk San Francisco in a WebGPU browser. Install Node.js 25 or newer and stable R
 
 Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The pinned city includes street lamps and trolley wires mapped by San Francisco Public Works. See the [sources and licence records](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers the release mirror needed before public cutover and running in a Dev Container.
 
+Where to go next:
+
+- The [project map](guide/project.md): the parts, how they fit and what each name means.
+- The [quickstart](guide/quickstart.md): the city, its data and a Dev Container.
+- [How the project is built](guide/building.md): agents, skills, the gate and the documentation check.
+- [Contributing](CONTRIBUTING.md) and the [licences](#licences).
+
 ## Layout
 
 Start with the [project map](guide/project.md) and [how to keep documentation current](guide/documentation.md).
 
-- `home/`: the 3D home (three.js, Cordis plugins). See `home/README.md`.
-- `host/`: the villager and the Elder, plus the live home. See `host/README.md`.
+- `home/`: Village's 3D home (three.js, Cordis plugins). See `home/README.md`.
+- `host/`: Village's villager and the Elder, plus the live home. See `host/README.md`.
 - `street/`: the shared street's world process and page. See `street/README.md`.
-- `engine/`: Village's own engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`.
+- `engine/`: the engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`. Its UI kit, Voxelmorphism, is in `engine/kit/`.
 - `site/`: the personal site and blog, served under zahynailo.dev/blog/. It was brought in with `git subtree`, history kept. See `site/README.md`.
-- `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`. Splitting the realm, the site and the kit into separate repos waits until Village goes open source.
+- `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`. Splitting the realm, the site and the kit into separate repos waits until Voxelwright goes open source.
 - `master/`: the master server (Rust), which lists player-hosted lobbies and passes one WebRTC offer and one answer per join (#526). See `master/README.md`.
 - `guide/`: the quickstart, project map and contributor documentation.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
-## Run the private home
+## Run Village, the private home
 
 You need a recent Node (measured on 25.1), Google Chrome and a signed-in
 Claude Code.

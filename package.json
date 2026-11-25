@@ -1,5 +1,6 @@
 {
-  "name": "village",
+  "name": "voxelwright",
+  "description": "A stack for worlds that people make by talking, and the things built on it.",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",

@@ -1,6 +1,6 @@
 ---
 name: claude-code-headless
-description: How Village runs the official Claude Code binary once, without tools, for a single reply that is treated as data (engine/make/model.mjs, #220). Flags, what the binary adds to the context by itself, the result's form, measured times and costs, and limits. Load before changing how the maker runs a model, or before running `claude -p` from any other Village code.
+description: How Voxelwright runs the official Claude Code binary once, without tools, for a single reply that is treated as data (engine/make/model.mjs, #220). Flags, what the binary adds to the context by itself, the result's form, measured times and costs, and limits. Load before changing how the maker runs a model, or before running `claude -p` from any other Voxelwright code.
 ---
 
 # Claude Code, headless, for one reply
@@ -87,7 +87,7 @@ goes to the provider. Run from a fresh folder in the system's temp folder, the p
 or `/var/folders/.../T/thing-XXXX` and names nobody. **The account's email cannot be turned off by any
 documented flag** (searched the help and the two pages; `--exclude-dynamic-system-prompt-sections` applies only
 to the default prompt). It is the address of the subscription the request is billed to, sent to that
-subscription's own provider by its own official binary, and it is not something Village's code puts there. The
+subscription's own provider by its own official binary, and it is not something Voxelwright's code puts there. The
 owner should know it is there.
 
 Without `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` a second, small Haiku call appears in `modelUsage`

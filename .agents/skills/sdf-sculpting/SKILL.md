@@ -1,12 +1,12 @@
 ---
 name: sdf-sculpting
-description: What Media Molecule's Dreams teaches about SDF sculpting (edit lists, hierarchical evaluation, storage) and creation tools for non-experts, with sources and gaps. Load before building Village terrain, craters, sculpted shapes, soft-body source shapes, or gadget and wire UX (#74).
+description: What Media Molecule's Dreams teaches about SDF sculpting (edit lists, hierarchical evaluation, storage) and creation tools for non-experts, with sources and gaps. Load before building Voxelwright terrain, craters, sculpted shapes, soft-body source shapes, or gadget and wire UX (#74).
 ---
 
 # SDF sculpting and creation tools (lessons from Dreams)
 
 Gathered November 8, 2026 (#74) from public sources only. Nothing here is verified in
-Village yet. Each fact names its source. Lines marked *inference* are ours.
+Voxelwright yet. Each fact names its source. Lines marked *inference* are ours.
 
 ## Sources
 
@@ -51,7 +51,7 @@ Village yet. Each fact names its source. Lines marked *inference* are ours.
   - Community reports (unverified) describe collision as "close to the shape" but
     approximate.
 
-## What Village takes from it
+## What Voxelwright takes from it
 
 These are all *inference*. Check each with a short experiment before relying on it.
 
@@ -72,17 +72,17 @@ These are all *inference*. Check each with a short experiment before relying on 
 5. **Cap edits per region and cap gadgets and wires per scene, and show visibly when a
    cap is reached.**
    - This builds on LittleBigPlanet's "cull jammed objects visibly".
-   - Village already cuts wire loops.
+   - Voxelwright already cuts wire loops.
 
 ## Creation tools for non-experts
 
 - **One core idea, reused.** Painting reuses the sculpt primitives, so people learn one
   set of moves (toolset article).
 - **Gestures over settings.** "Endless menus, and endless sliders, and endless
-  settings" shrink the audience (toolset article). In Village, talk and direct
+  settings" shrink the audience (toolset article). In Voxelwright, talk and direct
   manipulation come first. Numbers belong in the Workshop.
 - **"Stealth create."** People start by arranging existing things, then alter a prefab,
-  then build their own (toolset article). Village's path is furnishing, then tuning a
+  then build their own (toolset article). Voxelwright's path is furnishing, then tuning a
   part, then composing parts, then inventing a part.
 - **Playful defaults beat precision tools.**
   - Clone-repeat makes "a perfect staircase every time".
@@ -102,6 +102,6 @@ These are all *inference*. Check each with a short experiment before relying on 
 
 - Someone reads slides 101–145 or the speaker notes.
 - Someone watches the GDC 2020 architecture talk.
-- Village builds its first SDF terrain experiment.
+- Voxelwright builds its first SDF terrain experiment.
 
 <!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/src/engine/world.ts":"d4f158d7927f632492b1477d53e036f0"} -->

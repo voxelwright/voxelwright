@@ -1,6 +1,6 @@
 ---
 name: game-hud
-description: Rules for the controls laid over a game's picture while someone plays (tool and weapon choice, prompts, auto-hiding, touch sticks and thumb keys, keeping the character clear), drawn from shipped games and platform guidelines, with the source for each. Use when placing, hiding or changing anything over Village's realm picture (engine/page/realm-ui.ts, play-hud.ts, explore.ts, input.ts) on a desk or a phone.
+description: Rules for the controls laid over a game's picture while someone plays (tool and weapon choice, prompts, auto-hiding, touch sticks and thumb keys, keeping the character clear), drawn from shipped games and platform guidelines, with the source for each. Use when placing, hiding or changing anything over Voxelwright's realm picture (engine/page/realm-ui.ts, play-hud.ts, explore.ts, input.ts) on a desk or a phone.
 ---
 
 # Game HUD
@@ -49,24 +49,24 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 5. **A wheel needs a route without aiming.** XAG 107 asks for any directional input to be available "through
    other means… (such as from a menu)" (fetched,
    [XAG 107](https://learn.microsoft.com/en-us/gaming/accessibility/xbox-accessibility-guidelines/107)). In
-   Village: the numbers, the arrows and Enter, a click or a tap on a slot, and Escape to leave unchanged.
+   Voxelwright: the numbers, the arrows and Enter, a click or a tap on a slot, and Escape to leave unchanged.
 6. **Hold to open, and offer a tap that latches.** Holding and releasing is how console wheels work (RDR2:
    hold to open, snippet). GAG asks to "avoid / provide alternatives to requiring buttons to be held down"
-   (fetched, [GAG full list](https://gameaccessibilityguidelines.com/full-list/)). In Village a tap of E or of
+   (fetched, [GAG full list](https://gameaccessibilityguidelines.com/full-list/)). In Voxelwright a tap of E or of
    the tool key leaves the wheel open, and a hold of over 280 ms picks on release.
 7. **Time slowing while a wheel is open is reported, not confirmed.** For GTA V the evidence is a mod page that
    removes the slowdown. Ratchet & Clank comes from snippets, and Tears of the Kingdom is unverified (see
-   [sources.md](sources.md)). Village stops the body (a solid input mode) but not the world.
+   [sources.md](sources.md)). Voxelwright stops the body (a solid input mode) but not the world.
 
 ### Prompts and auto-hiding
 
 8. **Show a control only while it can do something.** Apple: "hide controls when an action isn't available or
-   relevant" (fetched). In Village the parachute cue shows while falling, the fly cue while standing and never
+   relevant" (fetched). In Voxelwright the parachute cue shows while falling, the fly cue while standing and never
    flown, and the walk cue just after taking off. A cue goes once it has been used a few times.
 9. **A cue stands beside the thing it is about.** XAG 101 shows Fenyx's "Y Collect" over the character, outlined
    (fetched,
    [XAG 101](https://learn.microsoft.com/en-us/gaming/accessibility/xbox-accessibility-guidelines/101)). No
-   source compares this with a fixed corner. Village puts cues beside the body's box, on the side with more
+   source compares this with a fixed corner. Voxelwright puts cues beside the body's box, on the side with more
    room.
 10. **Fold variants of one action into one key.** Apple: "Combine functionality into a single control… walking
     or sprinting… a single control" (fetched). The thumb's rising key is Jump on the ground, Chute in the air
@@ -78,7 +78,7 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 12. **A minimal mode is a setting, not a loss.** Breath of the Wild and Tears of the Kingdom ship a Pro HUD that
     can be switched any time (snippet, Kotaku). RDR2 lets each HUD piece be switched (snippet). GAG: "Provide an
     option to turn off / hide all non interactive elements" (fetched).
-13. **No source gives fade timings.** Village's quiet mode hides while the picture holds the pointer and three
+13. **No source gives fade timings.** Voxelwright's quiet mode hides while the picture holds the pointer and three
     seconds after the last touch. These are numbers to tune by playing, not rules.
 
 ### Touch
@@ -86,14 +86,14 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 14. **The stick is not drawn until a thumb is down, and comes where the thumb lands.** Apple: "consider hiding
     movement controls until a player touches the screen" and "show a virtual thumbstick wherever the player
     lands their thumb… use direct touch to pan the camera" (fetched). Call of Duty Mobile floats its stick by
-    default, and locking it in place is a setting (confirmed, Activision blog). In Village the well is not drawn
+    default, and locking it in place is a setting (confirmed, Activision blog). In Voxelwright the well is not drawn
     while it meets the body. A thumb on the body steers unseen: the thumb is the mark, and the body stays in view.
 15. **Frequent keys near the right thumb, outside the move and look circles. Secondary keys at the top.**
     Apple: "Place frequently used buttons near a player's thumb, avoiding the circular regions where players
     expect movement and camera input to happen. Place secondary controls, like menus, at the top" (fetched).
 16. **Sizes.** Apple: 44 x 44 pt for frequent controls and 28 x 28 pt at the least (fetched). Android: 48 x 48 dp,
     8 dp apart ([Android accessibility](https://support.google.com/accessibility/android/answer/7101858),
-    fetched). XAG 107: 15 mm on a phone (fetched). Village's thumb keys are 44 px to hit (64 by 44), Use 60,
+    fetched). XAG 107: 15 mm on a phone (fetched). Voxelwright's thumb keys are 44 px to hit (64 by 44), Use 60,
     and `sf-hud.mjs` fails a key under 44 or larger than it needs (Use 64, the others 48 tall).
 17. **Press feedback that shows past the thumb.** Apple: "a visual press state effect, such as a glow, that they
     can see even when their finger is covering the control" (fetched). The kit's keys travel and their light
@@ -104,9 +104,9 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 19. **Let players move the keys, later.** COD Mobile's Custom Layout is "a mock HUD where you can drag, drop, and
     change the size and opacity of everything on-screen" ([Activision blog,
     2019](https://blog.activision.com/call-of-duty/2019-10/Getting-a-Grip-on-the-Call-of-Duty-Mobile-Controls),
-    fetched). Fortnite's HUD Layout Tool is snippet. Not built in Village yet.
+    fetched). Fortnite's HUD Layout Tool is snippet. Not built in Voxelwright yet.
 20. **Floating or fixed stick is contested.** Fireproof says "no floating d-pads". Others point to the lack of
-    feel on any screen stick (snippet, pocketgamer.biz). Apple recommends floating. Village floats, so try it on
+    feel on any screen stick (snippet, pocketgamer.biz). Apple recommends floating. Voxelwright floats, so try it on
     a real phone.
 21. **Most phones are held in one hand.** Hoober observed 780 people: 49% one-handed, 36% cradled, 15% two-handed
     ([UXmatters 2013](https://www.uxmatters.com/mt/archives/2013/02/how-do-users-really-hold-mobile-devices.php),
@@ -117,11 +117,11 @@ source for it. Don't treat an unverified claim as a rule. Measure it in the real
 22. **Everything by keyboard alone, and remappable.** XAG 107 and GAG (fetched). The wheel takes focus order,
     `aria-keyshortcuts` and an `aria-label` on its dialog.
 23. **Less motion: the controls still come and go, without travel.** Apple: replace movement with fades under
-    Reduce Motion (fetched). Village honours `prefers-reduced-motion` by dropping translations.
+    Reduce Motion (fetched). Voxelwright honours `prefers-reduced-motion` by dropping translations.
 24. **Text over the picture.** XAG 101: at least 18 px at 1080p on PC (fetched). XAG 102: 4.5:1 contrast for
     standard text (fetched). Cues sit on a kit card, not on the bare picture.
 
-## Found in Village (measured, November 21)
+## Found in Voxelwright (measured, November 21)
 
 These come from `engine/test/sf-hud.mjs` and its pictures in `~/.village/engine/sf/hud` (the `boxes/` copies have the
 boxes drawn on).

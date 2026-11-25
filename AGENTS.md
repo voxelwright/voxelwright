@@ -1,11 +1,16 @@
-# Working on Village
+# Working on Voxelwright
 
-Village is a game: one systemic, multiplayer world that people make by talking,
-where their own agents live as characters. Its first places are a private home
-and a shared street (`street/`). The bar is PlayStation's Dreams and Spawn
-(spawn.co), done better: take every good idea, wherever it is from, and build
-original work with it. It is the owner's hobby project. There are no customers
-and no production, so iterate hard and be bold.
+Voxelwright is the project, this repository and the whole stack: the engine,
+the kit, the fonts, the sound engine, the site generator, the servers, the
+docs, and how agents build it. What it builds is a game: one systemic,
+multiplayer world that people make by talking, where their own agents live as
+characters. Its places so far are San Francisco, a shared street (`street/`)
+and Village, a private home for a family (`home/`, `host/`). The project began
+as Village; the [names](guide/project.md#names) note says what each name means
+now. The bar is PlayStation's Dreams and Spawn (spawn.co), done better: take
+every good idea, wherever it is from, and build original work with it. It is
+the owner's hobby project. There are no customers and no production, so
+iterate hard and be bold.
 
 On November 10, 2026 the owner handed the codebase to its lead agent: what it
 is for and how it is built are the lead's call. That direction supersedes
@@ -15,7 +20,7 @@ The [project map](guide/project.md) describes the game and its components.
 
 ## Pace
 
-Get Village to daily use quickly, then iterate hard, while keeping quality,
+Get Voxelwright to daily use quickly, then iterate hard, while keeping quality,
 performance and taste high. Keep process in proportion to risk. The November
 4–6 sessions produced about ten lines of evidence for every line of code and
 sixteen unmerged PRs, and the home itself was never started. Avoid repeating that.

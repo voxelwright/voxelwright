@@ -1,6 +1,6 @@
 ---
 name: fal-model-api
-description: How Village calls fal.ai's hosted image models (the engine's drawer of five-view sheets, engine/make/drawn.mjs, #245). The sync and queue APIs, fal-ai/nano-banana-2's input and output, price, limits, what fal keeps of a request and how to ask it to keep less, where the key lives, and what was measured. Load before changing how the engine draws, adding another fal endpoint, or sending anything new to fal.
+description: How Voxelwright calls fal.ai's hosted image models (the engine's drawer of five-view sheets, engine/make/drawn.mjs, #245). The sync and queue APIs, fal-ai/nano-banana-2's input and output, price, limits, what fal keeps of a request and how to ask it to keep less, where the key lives, and what was measured. Load before changing how the engine draws, adding another fal endpoint, or sending anything new to fal.
 ---
 
 # fal.ai Model APIs, for one drawn sheet
@@ -9,7 +9,7 @@ Read November 16, 2026 from fal's own docs (the pages below, as served then). No
 engine: it is one HTTPS request from node's own `fetch`. The bench (`~/.village/engine/fast-voxels/src/fal5.py`)
 uses the Python `fal_client` and its queue-backed `subscribe`; the engine does not.
 
-## What Village sends, and never sends
+## What Voxelwright sends, and never sends
 
 - **Typed words only.** The drawer's prompt is the sheet layout (below) and the asker's words. Never a picture, a
   photograph, a link's contents or anything of the owner's: the owner has not made that call.
@@ -30,7 +30,7 @@ X-Fal-Store-IO: 0
 
 | Choice | Why | Source |
 | --- | --- | --- |
-| `fal.run` (sync), not `queue.fal.run` | one blocking request, no polling; the queue's worth (retries, webhooks, many at once) is not needed for one sheet. fal does not retry a sync request: a temporary failure answers with `X-Fal-Needs-Retry: 1`. Village does not retry: the wish goes the way it went before | sync API reference (`/api-reference/inference-api/sync/run.md`); `/documentation/model-apis/inference/synchronous.md` |
+| `fal.run` (sync), not `queue.fal.run` | one blocking request, no polling; the queue's worth (retries, webhooks, many at once) is not needed for one sheet. fal does not retry a sync request: a temporary failure answers with `X-Fal-Needs-Retry: 1`. Voxelwright does not retry: the wish goes the way it went before | sync API reference (`/api-reference/inference-api/sync/run.md`); `/documentation/model-apis/inference/synchronous.md` |
 | `Authorization: Key …` | the only scheme | sync API reference, `securitySchemes` |
 | `X-Fal-Store-IO: 0` | fal does not keep the request and response payloads in the dashboard's history | sync reference `StoreIO`; `/documentation/model-apis/media-expiration.md` |
 | `sync_mode: true` | the picture comes back as a `data:` URI in the answer and "won't be available in the request history"; nothing is fetched from fal's CDN | nano-banana-2 schema (`fal.ai/models/fal-ai/nano-banana-2/llms.txt`) |

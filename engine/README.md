@@ -1,6 +1,6 @@
 # The engine (#140)
 
-Village's own engine: a world of 10 cm cells, drawn with raw WebGPU by marching rays, with
+Voxelwright's own engine: a world of 10 cm cells, drawn with raw WebGPU by marching rays, with
 its core in Rust built as wasm. Synthetic data, this machine or the tailnet only. What it is,
 what it costs and what is not built: `.agents/skills/cell-engine/SKILL.md`.
 

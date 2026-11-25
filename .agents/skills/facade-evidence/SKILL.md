@@ -1,6 +1,6 @@
 ---
 name: facade-evidence
-description: How Village reads Mapillary panoramas as evidence for each San Francisco building's facade parameters (wall colour, material, window share, storefront, awning) with local models (PyTorch, Hugging Face transformers, UperNet ConvNeXt ADE20K, SigLIP), and how those records reach the bake (engine/bay/facade_evidence.py, evidence_tile.py, #450). Versions, licences, the venv, measured speeds, what the models can and cannot see, and the trust test. Load before changing the segmentation or classifier, measuring more buildings, or reading the records from a new rule.
+description: How Voxelwright reads Mapillary panoramas as evidence for each San Francisco building's facade parameters (wall colour, material, window share, storefront, awning) with local models (PyTorch, Hugging Face transformers, UperNet ConvNeXt ADE20K, SigLIP), and how those records reach the bake (engine/bay/facade_evidence.py, evidence_tile.py, #450). Versions, licences, the venv, measured speeds, what the models can and cannot see, and the trust test. Load before changing the segmentation or classifier, measuring more buildings, or reading the records from a new rule.
 ---
 
 # Facade evidence: models that read the photographs

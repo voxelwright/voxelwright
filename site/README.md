@@ -14,7 +14,7 @@ Needs Node 24 or later (developed on Node 25). Run `npm install` once.
 | `npm run build` | Production build into `dist/`. Drafts are left out. |
 | `npm run check` | Builds, checks the output (production and a drafts-included build), and runs the tests. |
 
-The site is not deployed on its own. zahynailo.dev is one Worker, the SF realm at `/` and this site under `/blog/`, built and deployed together from `deploy/` in the Village repo on every push to main (`deploy/README.md`). This folder came in with `git subtree` (history kept). Splitting the realm, the site and the Voxelmorphism kit into separate repos, with a build and deploy strategy for each, waits until Village goes open source.
+The site is not deployed on its own. zahynailo.dev is one Worker, the SF realm at `/` and this site under `/blog/`, built and deployed together from `deploy/` in the Voxelwright repository on every push to main (`deploy/README.md`). This folder came in with `git subtree` (history kept). Splitting the realm, the site and the Voxelmorphism kit into separate repos, with a build and deploy strategy for each, waits until Voxelwright goes open source.
 
 ## Writing a post
 
@@ -74,7 +74,7 @@ and the import options are in `notes/ai-session-format.md`.
 
 ## What the build writes
 
-`site.config.mjs` mounts the site at `base: "/blog/"` on zahynailo.dev, whose `/` is the Village
+`site.config.mjs` mounts the site at `base: "/blog/"` on zahynailo.dev, whose `/` is the SF
 realm. `dist/` mirrors the origin, so a deploy copies it into the Worker's assets unchanged:
 
 - `/blog/` (posts list), `/blog/<slug>/`, `/blog/tags/`, `/blog/tags/<tag>/`, `/blog/voxelmorphism/`, and every static file under `/blog/`
@@ -92,7 +92,7 @@ social links, and `negotiateMarkdown`.
 
 ### Voxelmorphism
 
-Every page is built from Voxelmorphism, Village's UI kit, installed from `../engine/kit` by npm
+Every page is built from Voxelmorphism, Voxelwright's UI kit, installed from `../engine/kit` by npm
 (see `notes/voxelmorphism.md`). The page stands on the kit's ground and is fitted as the Signal
 Desk's instrument (walnut case, Ridgeline caps; at night the same case with its lights down). The
 bar is the kit's navbar, post lists are its list groups, an article is its prose, code sits in its
@@ -102,7 +102,7 @@ plain version. `?view=2d`, the footer's "Plain page" link, reduced motion, or no
 plain; the Night key in the bar switches the time of day. Choosing a finish on the Signal Desk
 refits every page for the rest of the visit.
 
-A part the site needs and the kit lacks goes into the kit (Village `engine/kit`), not into
+A part the site needs and the kit lacks goes into the kit (Voxelwright `engine/kit`), not into
 `site.css`; `notes/voxelmorphism-dogfood.md` lists what building the site found. The rules the
 site is designed against are in `.claude/skills/site-craft/SKILL.md`.
 

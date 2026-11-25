@@ -94,7 +94,7 @@ existing requirements for independent verification, review, and release.
 
 Confirmed handoff lesson: deterministic routing and typed outputs do not prove
 semantic correctness or authorization. Keep independent canonical checks and
-held review when reusing deterministic behaviors. Village's observed
+held review when reusing deterministic behaviors. Voxelwright's observed
 early-termination and custom-equality proof-oracle failures illustrate the gap;
 their corrected controls and incomplete audit are recorded in the handoff
 candidate's handoff record
@@ -102,7 +102,7 @@ and linked structured receipts. Swamp's
 [behavior account](https://swamp-club.com/behavior),
 [definition reference](https://swamp-club.com/manual/reference/behavior-definitions)
 and [idempotency guide](https://swamp-club.com/manual/how-to/make-workflows-idempotent)
-are corroborating design sources, read November 5, not a Village integration or
+are corroborating design sources, read November 5, not a Voxelwright integration or
 comparable performance experiment. No Swamp dependency or platform guarantee is
 adopted. State existence alone cannot reconcile an uncertain external effect.
 

@@ -1,6 +1,6 @@
 # village-master
 
-Village's master server. A player runs a dedicated server on their own machine; other
+Voxelwright's master server. A player runs a dedicated server on their own machine; other
 players' pages find it here and reach it straight over WebRTC data channels. The master
 lists lobbies and passes one whole offer and one whole answer for each join. It never
 carries game traffic, never sees a password or a key, and keeps nothing on disk: when

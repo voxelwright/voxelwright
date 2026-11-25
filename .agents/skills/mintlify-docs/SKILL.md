@@ -9,4 +9,4 @@ The site root is `guide/`. Keep the page paths in `guide/docs.json` relative to 
 
 Check the configuration and navigation locally before requesting a deployment. Public deployment requires owner approval.
 
-<!-- docs-verified 3e4407c8ce8053805cf32fd47fab75b930e62bf6 {"guide/docs.json":"35ac300e1990d40bab0b5cdee8af78aa"} -->
+<!-- docs-verified ac7693d9844e8b432441efc853bb878b22987dd3 {"guide/docs.json":"4e30eb4c175b2a41dffc38c4019eb11c"} -->

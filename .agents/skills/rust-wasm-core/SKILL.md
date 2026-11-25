@@ -1,6 +1,6 @@
 ---
 name: rust-wasm-core
-description: Verified facts and recipes for building Village's engine core in Rust as wasm (#140): the toolchain, how the page and Node load it with no generated glue, memory views, one instance a worker, what keeps answers the same on every machine. Load before changing engine/core, its build, or how a page or worker calls it.
+description: Verified facts and recipes for building Voxelwright's engine core in Rust as wasm (#140): the toolchain, how the page and Node load it with no generated glue, memory views, one instance a worker, what keeps answers the same on every machine. Load before changing engine/core, its build, or how a page or worker calls it.
 ---
 
 # The engine's core: Rust built as wasm
