@@ -6,6 +6,7 @@
 //                   --most 8 [--private] [--password-file f] [--admin-password-file f] [--port 5747] [--ice-ports a-b]
 //                   [--asks 30] [--up-mb 24] [--columns 65536] [--backlog-mb 32]
 //                   [--things-minute 6] [--changes-minute 30] [--things 40] [--cells 4000000] [--reach 1200]
+//                   [--waiting-per-address 2]
 //                   [--release-cache dir] [--arrive=x,y,z,yaw] [--reports file] [--tiles-most 16] [--ground-wait 3000]
 //
 // --release is a built static realm (node sf/build.mjs) or the address of its current.json: pages join only a
@@ -23,12 +24,13 @@ const { values: a } = parseArgs({ options: {
   world: string, port: { type: 'string', default: '5747' }, release: string, 'release-cache': string, arrive: string, reports: string,
   master: string, name: string, about: string, most: string, private: { type: 'boolean' }, 'password-file': string, 'admin-password-file': string,
   'ice-ports': string, asks: string, 'up-mb': string, columns: string, 'backlog-mb': string, 'tiles-most': string, 'ground-wait': string,
-  'things-minute': string, 'changes-minute': string, things: string, cells: string, reach: string,
+  'things-minute': string, 'changes-minute': string, things: string, cells: string, reach: string, 'waiting-per-address': string,
 } })
 if (!a.world) { console.error('a server keeps a world: --world <file>'); process.exit(1) }
 const secret = (name) => { const f = a[name]; if (!f) return null; const v = readFileSync(f, 'utf8').replace(/\r?\n$/, ''); if (!v) { console.error(`--${name} names an empty file`); process.exit(1) } return v }
 const password = secret('password-file'), admin = secret('admin-password-file')
 const ports = a['ice-ports']?.split('-').map(Number)
+if (a['waiting-per-address'] !== undefined && !(Number.isInteger(Number(a['waiting-per-address'])) && Number(a['waiting-per-address']) >= 1)) { console.error('--waiting-per-address is a whole number, 1 or more'); process.exit(1) }
 
 // The world's server, in this process: what it reads from the command line is set here, so one process is all
 // there is to stop.
@@ -55,7 +57,7 @@ try {
     ...(a['up-mb'] ? { upMinute: Number(a['up-mb']) << 20 } : {}),
     ...(a.columns ? { columns: Number(a.columns) } : {}),
     ...(a['backlog-mb'] ? { backlog: Number(a['backlog-mb']) << 20 } : {}),
-    ...Object.fromEntries([['things-minute', 'thingsMinute'], ['changes-minute', 'changesMinute'], ['things', 'things'], ['cells', 'cells'], ['reach', 'reach']].filter(([flag]) => a[flag] !== undefined).map(([flag, key]) => [key, Number(a[flag])])),
+    ...Object.fromEntries([['things-minute', 'thingsMinute'], ['changes-minute', 'changesMinute'], ['things', 'things'], ['cells', 'cells'], ['reach', 'reach'], ['waiting-per-address', 'waitingPerAddress']].filter(([flag]) => a[flag] !== undefined).map(([flag, key]) => [key, Number(a[flag])])),
   },
   })
 } catch (e) { console.error(e.message); process.exit(1) }

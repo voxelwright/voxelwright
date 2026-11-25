@@ -77,7 +77,7 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
 
 - `server.mjs` runs the world's server (`serve.mjs`, bound to 127.0.0.1, `--port`, 5747 unless said) and the door
   (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
-  machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
+  machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one until it is closed, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
   `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
 - A visitor finds servers in the realm's settings, **Servers…** (`page/lobbies.ts`, fetched when first pressed), where
   the realm's rule allows lobbies (`lobbies` is `"preview"` in `sf/realm.json`: only with `?lobbies=1&master=<address>`;
@@ -97,6 +97,21 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
   20 `ctl` messages, 2 opens of the stream in 10 s and 4 look parts a minute (`LIMITS` and `pools` in `door.mjs`). A
   page behind on the stream is waited for (where things are is skipped for it, as the world's server does for its own
   readers); one that takes nothing for 15 s is dropped.
+- Joins that have not said hello (`answer` in `door.mjs`). Each holds a place, and a port, for 8 s from the moment
+  it is given one (an offer may wait 3 s for that), however it stalls: channels never opened, opened and silent, one of three; a hello being checked is left the moment that takes. At most 8
+  wait at once (the master lets 8 wait on one host), and with `--ice-ports` no more than the ports the players leave.
+  An offer with no place free takes the place of one waiting whose answer has left (its channels open half a second with no hello, or, with none open, 2 s
+  after its answer left: before that a page would hold an answer for a connection already closed, and blame its network): one
+  refused already, then one not connected 3 s after its answer, then one from the address with the most waiting, then the one silent longest. A page says hello as its
+  channels open, so one silent longest is the least likely to be one. Each address (its connection's, never what its
+  offer says) holds `--waiting-per-address 2` at most; past that its silent-longest goes, once it has had the same chance. (It is counted as that address's joins connect and open their channels: ones that connect and never open a channel may stand over it until the next comes, and are the first let go when a place is wanted.) libdatachannel frees a closed
+  connection's port on a thread of its own, 0.6 to 2.7 ms after `close()` (measured here), so a join that takes another's
+  place makes its connection again until the port binds, for 3 s at most, and is refused as busy when no place came in those 3 s
+  (every port a player's, or every join waiting still being answered, answered under 2 s ago, or saying hello); a port that still will not bind by then is refused as "could not answer". Before November 25 it was made once, and about one
+  such join in two was refused ("the server could not answer that offer"), and a join let go while it was being
+  answered was never answered (the master gave up after 10 s). What the door sends the master is paced to 40 messages
+  a second: the master closes a host that sends over 50, and 60 offers refused at once had it drop the lobby, which came
+  back under a new id and code. `node test/door-silent.mjs` checks all of it.
 - What the door keeps beside the world's file (`<world>.door.json`, mode 600): the key that ids and banned addresses
   are made with, bans, the password's hash and the settings an admin changed. A flag given at start wins over what is
   kept. A file that is there and cannot be read stops the server, rather than be written again without its bans.
@@ -171,10 +186,13 @@ The wire (what goes over `ctl`, `up` and `down`) is in the header of `door.mjs`.
 Check: `node test/door.mjs`. It runs the real master, `server.mjs`, and two pages from a plain host that join as
 strangers. They stand on one ground, see each other's blast and brick, and talk; a page cannot write another's
 `by`. It also covers a full server, admin passwords (one at a time, even sent together), a kick and a ban, hellos of
-another protocol or release, unsigned or with another's key, look-alike names, joins that say nothing, a peer that
+another protocol or release, unsigned or with another's key, look-alike names, a peer that
 takes tiny messages, building for admins only, a stranger's rule refused and an admin's taken, rules' sources kept
 off a stranger's stream, a flood held to one connection, no plugin loaded, a password, a ban by address, and the
-host killed.
+host killed. `node test/door-silent.mjs [--ports 6070]` needs no page: with the door's ports pinned tight, nine silent
+joins and then one that says hello, three times; a 30 s trickle of joins that stall every way, with a player arriving
+every 1.2 s through it; eight offers at once; sixty refused at once; and twelve silent joins from one address beside one from another. Every player is let in within
+4 s (a place within 3 s, then its answer and channels; here 34 ms to 2.4 s, median 0.1 to 0.2 s).
 
 What a join sends: `node test/door-join.mjs` (November 25, one machine, a Node client). A freshly released world
 sends 0.3 KB before the page is "now" in it. With 100 made things and 500 edits it sends 1.0 MB: 0.65 MB of log

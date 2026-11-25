@@ -88,7 +88,7 @@ const worldSolid = async (x, z, y) => (await json(`/world/tops?x0=${x}&z0=${z}&x
 // ── A client on the wire (node-datachannel): the same protocol a page speaks, for steps that need no picture ──
 const { RTCPeerConnection } = await import('node-datachannel/polyfill')
 /** Joins a lobby as a page does. Answers {you, name, fetch, ctl, close, gone} once welcomed, or {why}. `hello` overrides fields of the hello. */
-async function wire(name, { lobby = server.id, keys = generateKeyPairSync('ec', { namedCurve: 'P-256' }), password, hello = {}, munge = (sdp) => sdp, silent = false } = {}) {
+async function wire(name, { lobby = server.id, keys = generateKeyPairSync('ec', { namedCurve: 'P-256' }), password, hello = {}, munge = (sdp) => sdp } = {}) {
   const pc = new RTCPeerConnection({ iceServers: [] })
   const ch = { ctl: pc.createDataChannel('ctl'), down: pc.createDataChannel('down'), up: pc.createDataChannel('up') }
   await pc.setLocalDescription(await pc.createOffer())
@@ -99,8 +99,6 @@ async function wire(name, { lobby = server.id, keys = generateKeyPairSync('ec', 
   await pc.setRemoteDescription({ type: 'answer', sdp: v.sdp })
   const opened = await Promise.race([Promise.all(Object.values(ch).map((c) => (c.readyState === 'open' ? null : new Promise((done) => c.addEventListener('open', done, { once: true }))))).then(() => true), wait(10_000).then(() => false)])
   if (!opened) { pc.close(); return { why: 'no channel opened' } }
-  // Joined and saying nothing: holding a place at the door.
-  if (silent) { stops.push(() => pc.close()); return { pc } }
   const said = []
   const { promise: gone, resolve: went } = Promise.withResolvers()
   ch.ctl.addEventListener('message', (e) => { const m = JSON.parse(e.data); said.push(m); if (m.gone) went(m.gone.why) })
@@ -319,11 +317,7 @@ try {
   check(alike.name === 'Ada (2)', `a name that only looks like Ada's is told apart (${JSON.stringify(alike.name)})`)
   alike.close?.()
   await wait(1500)
-  // Joins that open their channels and say nothing cannot keep the door shut.
-  for (let i = 0; i < 9; i++) await wire('Quiet', { silent: true })
-  const fern = await wire('Fern')
-  check(!!fern.you, `after nine joins that say nothing, someone who says hello is let in (${fern.you ?? fern.why})`)
-  fern.close?.()
+  // Joins that say nothing, and the ports they hold: test/door-silent.mjs (no page needed).
   // A page that says it takes four-byte messages is let go, and the server goes on.
   const tiny = await wire('Gil', { munge: (sdp) => `${sdp.replace(/a=max-message-size:\d+\r\n/, '')}a=max-message-size:4\r\n` })
   const t0 = Date.now(), still_ = await ada.page.evaluate(async () => (await globalThis.engine.lobby.fetch('/world/ground')).status)

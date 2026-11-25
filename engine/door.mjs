@@ -32,7 +32,27 @@ import { BEHIND, BODIES, ECHO, SKIPPED } from './page/frames.ts'
 const scrypt = promisify(scryptCb)
 /** A down channel's bytes in flight before the door waits for it to drain, and where it starts sending again. */
 const HIGH = 1 << 20, LOW = 256 << 10
-const HELLO_WAIT = 10_000, OPEN_WAIT = 20_000, SILENT = 15_000, PENDING_MOST = 8
+/**
+ * A join that has not said hello (its channels not open yet, open and silent, or its hello still being checked) holds a
+ * place at the door for JOIN_WAIT from its offer at most. PENDING_MOST of them wait at once, as many as the master lets
+ * wait on one host. An offer waits PLACE_WAIT at most for a place before it is refused as busy: well under the 10 s the
+ * master waits for an answer, with gathering's 0.6 to 3 s after it.
+ */
+const JOIN_WAIT = 8_000, PLACE_WAIT = 3_000, SILENT = 15_000, PENDING_MOST = 8
+/**
+ * A join's answer is on its way for FRESH after it leaves for the master: the join is not let go before then unless its
+ * channels are open, or the page would have an answer for a connection already closed (and say its network is at fault,
+ * not that the server was busy). A page's connects in under a second (the lobby-transport skill: 0.4 to 0.6 s across
+ * a NAT); on a loaded host, one took over a second here. One not connected CONNECT_GRACE after its answer left is likely never to be: it is let go first.
+ */
+const FRESH = 2_000, CONNECT_GRACE = 3_000
+/** How long a join whose channels are open has for its hello before it may be let go (a page sends it at once). */
+const HELLO_GRACE = 500
+/**
+ * Messages to the master in any second, at most: it closes a host that sends over 50 (`host_messages_per_second`), and
+ * a burst of offers refused at once would otherwise be a burst of replies.
+ */
+const MASTER_RATE = 40
 /** The most a request's body may be: 8 MB, and 16 MB for a look's cells (POST /world/fine). */
 const BODY_MOST = 8 << 20, FINE_MOST = 16 << 20
 const CTL_MOST = 4096, INFLIGHT_MOST = 8, STREAMS_MOST = 1
@@ -85,7 +105,10 @@ const LIMITS = { asks: 30, upMinute: 24 << 20, columns: 65536, backlog: 32 << 20
   // What one person who is not an admin may make (#526), kept by who they are, not by their connection: things made a
   // minute, changes to things' records a minute (each is kept for good), things standing and their cells all told
   // (the world's server counts those: serve.mjs `stranger`), and how far from where their page says they are (cells).
-  thingsMinute: 6, changesMinute: 30, things: 40, cells: 4_000_000, reach: 1200 }
+  thingsMinute: 6, changesMinute: 30, things: 40, cells: 4_000_000, reach: 1200,
+  // Joins that have not said hello from one address at once (known once their connection is: the offer's own
+  // addresses are whatever its sender wrote). Past it, that address's oldest is let go.
+  waitingPerAddress: 2 }
 
 /** A pool that fills again over `per` ms: `take(n)` is false when it would go under. */
 const pool = (most, per = 1000) => { let left = most, since = Date.now(); const fill = () => { const now = Date.now(); left = Math.min(most, left + ((now - since) / per) * most); since = now }; return { take(n = 1) { fill(); if (left < n) return false; left -= n; return true }, give(n = 1) { fill(); left = Math.min(most, left + n) }, left() { fill(); return left } } }
@@ -173,31 +196,93 @@ export function door(o) {
   /** Every connection, welcomed or not; a welcomed one has `you`. */
   const conns = new Set()
   const welcomed = () => [...conns].filter((c) => c.you)
-  /** Joins answered and not yet let in or closed: each holds a peer connection and its ports. */
+  /** Joins answered and not yet let in or closed. */
   const pending = () => [...conns].filter((c) => !c.you)
+  /**
+   * Peer connections not yet closed, and offers that have a place and are making theirs. Each holds a UDP port: with
+   * --ice-ports that is what the range must hold. A connection closed late (its last word going out) is counted until
+   * it is closed, though it is no longer in `conns`.
+   */
+  let held = 0, placing = 0
+  const ports = o.ports ? o.ports[1] - o.ports[0] + 1 : Infinity
+  /**
+   * Whether a join has had its chance: its channels have been open HELLO_GRACE; or, with none open, its answer left
+   * FRESH ago. Before then a page could not have said hello, and one let go would hold an answer for a connection
+   * already closed. (Channels that open late still get their HELLO_GRACE: the hello is a round trip behind them.)
+   */
+  const settled = (c, at) => !!c.sent && (c.ready ? at - c.ready > HELLO_GRACE : at - c.sent > FRESH)
+  /** Joins waiting from an address, whether or not they have had their chance. */
+  const waitingFrom = (address) => pending().filter((d) => d.address === address && !d.greeting).length
+  /**
+   * The join to let go when an offer needs its place: one already refused, then one still not connected well after its
+   * offer, then one from the address with the most joins waiting, then the one silent longest (since it connected, or
+   * since its offer). A page says hello the moment its channels open, so the one silent longest is the least likely
+   * to be one. One whose hello is being checked is not let go: that takes a moment.
+   */
+  function evictable() {
+    const at = Date.now(), silent = pending().filter((c) => settled(c, at) && (!c.greeting || c.refused))
+    const rank = (c) => [c.refused ? 1 : 0, !c.connected && at - c.sent > CONNECT_GRACE ? 1 : 0, c.address ? waitingFrom(c.address) : 1, -(c.connected ?? c.sent)]
+    const before = (a, b) => { const x = rank(a), y = rank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0 }
+    return silent.sort(before)[0]
+  }
+  /** Once a join's address is known (its connection's, never its offer's): past the most for one address, the one of that address silent longest goes. */
+  function counted(c) {
+    if (c.closed) return
+    c.connected ??= Date.now()
+    if (!c.address) try { c.address = c.pc.selectedCandidatePair()?.remote?.address ?? null } catch { /* not known */ }
+    if (!c.address) return
+    // Asked again as each join of the address connects and as its channels open. The join that has just come is kept,
+    // and so is one that has not had its chance yet (`settled`): a join over the most goes once it has.
+    const at = Date.now(), same = pending().filter((d) => d.address === c.address && !d.greeting)
+    let over = same.length - limits.waitingPerAddress
+    for (const d of same.filter((d) => d !== c && settled(d, at)).sort((a, b) => a.connected - b.connected)) if (over-- > 0) close(d)
+  }
 
   // ── The master ──
   let master = null, stopped = false
   const { promise: lobby, resolve: tellLobby } = Promise.withResolvers()
   let iceServers = []
   const hello = () => ({ proto: PROTO, name: kept.name || 'A Village server', about: kept.about, pin: o.pin, most: kept.most, locked: !!kept.password, listed: o.listed !== false })
-  const now = (more = {}) => { if (master?.readyState === 1) master.send(JSON.stringify({ now: { players: welcomed().length, ...more } })) }
+  /**
+   * What goes to the master, paced to MASTER_RATE in any second; dropped with the socket it was for. An answer that
+   * is never sent takes its join with it (`join`): nobody will ever connect to it, and it would hold a place that
+   * no offer could take (it is not `settled` until its answer has left).
+   */
+  let outbox = [], sent = []
+  function toMaster(m, then, join) {
+    if (master?.readyState !== 1) { if (join) close(join); return }
+    outbox.push({ text: JSON.stringify(m), then, join })
+    if (outbox.length === 1) drain()
+  }
+  const unsent = () => { const left = outbox; outbox = []; for (const { join } of left) if (join) close(join) }
+  function drain() {
+    while (outbox.length && master?.readyState === 1) {
+      const at = Date.now()
+      sent = sent.filter((t) => at - t < 1000)
+      if (sent.length >= MASTER_RATE) return void setTimeout(drain, 1000 - (at - sent[0]) + 5).unref()
+      sent.push(at)
+      const { text, then } = outbox.shift()
+      master.send(text)
+      then?.()
+    }
+  }
+  const now = (more = {}) => toMaster({ now: { players: welcomed().length, ...more } })
   async function hold(wait = 1000) {
     if (stopped || !o.master) return
     try { iceServers = await literal((await (await fetch(`${o.master}/ice`, { signal: AbortSignal.timeout(10_000) })).json()).iceServers) } catch { iceServers = [] }
     const ws = new WebSocket(`${o.master.replace(/^http/, 'ws')}/host`)
     master = ws
     let beat = null
-    ws.onopen = async () => { await ready; ws.send(JSON.stringify({ hello: hello() })); beat = setInterval(() => now(), 15_000) }
+    ws.onopen = async () => { await ready; if (master !== ws) return; unsent(); toMaster({ hello: hello() }); beat = setInterval(() => now(), 15_000) }
     ws.onmessage = (e) => {
       let m
       try { m = JSON.parse(String(e.data)) } catch { return }
       if (m.welcome && typeof m.welcome.id === 'string') { wait = 1000; tellLobby({ id: m.welcome.id, code: m.welcome.code }); log(`listed with the master as lobby ${m.welcome.id}${o.listed === false ? ' (not listed: joined by its code only)' : ''}; its private code is ${m.welcome.code}`) }
-      else if (m.offer && Number.isInteger(m.offer.n)) void answer(m.offer.n, m.offer.sdp).then((r) => { if (ws.readyState === 1) ws.send(JSON.stringify(r)) })
+      else if (m.offer && Number.isInteger(m.offer.n)) void answer(m.offer.n, m.offer.sdp).then(([r, c]) => { if (master === ws) toMaster(r, c && (() => { c.sent = Date.now() }), c); else if (c) close(c) })
     }
     ws.onclose = (e) => {
       clearInterval(beat)
-      if (master === ws) master = null
+      if (master === ws) { master = null; unsent() }
       if (stopped) return
       if (e.code === 4403) return log(`the master took this lobby off or refused it (${String(e.reason).slice(0, 120)}): nobody can find it now`)
       log(`the master's socket closed (${e.code}${e.reason ? `: ${String(e.reason).slice(0, 120)}` : ''}): trying again in ${Math.round(wait / 1000)} s`)
@@ -207,28 +292,47 @@ export function door(o) {
   void hold()
 
   // ── A join ──
+  /** Answers [what the master is told, the join when it has one]. */
   async function answer(n, sdp) {
-    if (typeof sdp !== 'string' || sdp.length > 16384) return { refuse: { n, why: 'that is not an offer' } }
+    if (typeof sdp !== 'string' || sdp.length > 16384) return [{ refuse: { n, why: 'that is not an offer' } }]
     // Full is said at the hello, once it is known who is asking: the same person from another page is let in there.
-    if (addressesIn(sdp).some((a) => kept.bans.some((b) => b.place && b.place === placeOf(a)))) return { refuse: { n, why: 'you are banned from this server' } }
-    // Each peer connection holds a UDP port while it lives: with the ports pinned (--ice-ports), the joins waiting are
-    // held to what those ports leave over the players already in.
-    const room = o.ports ? Math.max(1, Math.min(PENDING_MOST, o.ports[1] - o.ports[0] + 1 - welcomed().length)) : PENDING_MOST
-    if (pending().length >= room) {
-      // The oldest join that has not said hello makes room: peers that never open their channels, or open them and
-      // say nothing, cannot keep the door shut.
-      const oldest = pending().find((p) => !p.greeting)
-      if (!oldest) return { refuse: { n, why: 'the server is busy: try again in a moment' } }
-      close(oldest)
+    if (addressesIn(sdp).some((a) => kept.bans.some((b) => b.place && b.place === placeOf(a)))) return [{ refuse: { n, why: 'you are banned from this server' } }]
+    // A place: a port (with --ice-ports) and fewer than PENDING_MOST joins waiting. Without one, a join that has not
+    // said hello gives its up: joins that say nothing cannot keep the door shut. With none to let go (every port a
+    // player's, or hellos being checked), the offer waits for one, a while.
+    const until = Date.now() + PLACE_WAIT
+    while (held >= ports || pending().length + placing >= PENDING_MOST) {
+      const oldest = evictable()
+      if (oldest) { close(oldest); continue }
+      if (Date.now() >= until) return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }]
+      await new Promise((r) => setTimeout(r, 25))
     }
-    let pc, c
+    held++; placing++
+    let pc, c, placed = true
+    const unplace = () => { if (placed) { placed = false; placing-- } }
     try {
-      pc = new RTCPeerConnection({ iceServers, ...(o.ports ? { portRangeBegin: o.ports[0], portRangeEnd: o.ports[1] } : {}) })
+      // libdatachannel frees a closed connection's port on a thread of its own, a millisecond or three after close()
+      // (measured: 0.6 to 2.7 ms), and a peer connection made before then finds no port in the range: it is made again.
+      for (;;) {
+        pc = new RTCPeerConnection({ iceServers, ...(o.ports ? { portRangeBegin: o.ports[0], portRangeEnd: o.ports[1] } : {}) })
+        try { await pc.setRemoteDescription({ type: 'offer', sdp }); break } catch (e) {
+          try { pc.close() } catch { /* already */ }
+          pc = null
+          if (!/gather/i.test(String(e?.message)) || Date.now() >= until || stopped) throw e
+          await new Promise((r) => setTimeout(r, 10))
+        }
+      }
       c = { pc, ch: {}, n, chunk: CHUNK_LEAST, you: null, name: '', admin: false, address: null, since: Date.now(), last: Date.now(), streams: new Map(), parts: null, inflight: 0, riding: new Set(), seat: null, closed: false, aborts: new Set(), queued: 0, queue: [], drained: null,
         pools: { ctl: pool(20), fine: pool(4, 60_000), stream: pool(2, 10_000), asks: pool(limits.asks), up: pool(limits.upMinute, 60_000), columns: pool(limits.columns), ask: pool(limits.ask), say: pool(limits.say), here: pool(limits.here), act: pool(limits.act), drive: pool(limits.drive), look: pool(limits.look) } }
-      conns.add(c)
-      const opened = setTimeout(() => { if (!c.you) close(c) }, OPEN_WAIT)
-      pc.addEventListener('connectionstatechange', () => { if (['failed', 'closed'].includes(pc.connectionState)) close(c) })
+      // The place is the join's now: its port is given back when it closes. A peer connection closed while it is being
+      // answered never settles what it was doing (libdatachannel), so each step is raced against its closing.
+      c.gone = Promise.withResolvers()
+      const unless = (step) => Promise.race([step, c.gone.promise])
+      conns.add(c); unplace()
+      // However it stalls (channels never open, open and silent, a hello never finished), it is gone by then.
+      // (One whose hello is being checked is left to that: it is welcomed or refused in a moment, with the true reason.)
+      c.joinBy = setTimeout(() => { if (c.you || (c.greeting && !c.refused)) return; if (c.ready && !c.refused) refuse(c, 'no hello came'); else close(c) }, JOIN_WAIT)
+      pc.addEventListener('connectionstatechange', () => { if (pc.connectionState === 'connected') counted(c); if (['failed', 'closed'].includes(pc.connectionState)) close(c) })
       pc.addEventListener('datachannel', ({ channel }) => {
         if (!['ctl', 'down', 'up'].includes(channel.label) || c.ch[channel.label]) return channel.close()
         c.ch[channel.label] = channel
@@ -240,43 +344,46 @@ export function door(o) {
         if (channel.label === 'down') channel.addEventListener('bufferedamountlow', () => flush(c))
         channel.addEventListener('open', () => {
           if (c.ready || !['ctl', 'down', 'up'].every((k) => c.ch[k]?.readyState === 'open')) return
-          c.ready = true
-          clearTimeout(opened)
+          c.ready = Date.now()
           const most = pc.sctp.maxMessageSize
           // A peer that says it takes tiny messages would have every frame sent a byte at a time, or never.
           if (!(most >= CHUNK_LEAST)) return close(c)
           c.chunk = Math.min(CHUNK, most)
-          try { c.address = pc.selectedCandidatePair()?.remote?.address ?? null } catch { /* not known */ }
+          counted(c)
+          // Asked again once its own hello's time is up, for the joins of its address that were not yet over it.
+          setTimeout(() => counted(c), HELLO_GRACE + 10).unref()
           c.ch.down.bufferedAmountLowThreshold = LOW
-          c.helloBy = setTimeout(() => { if (!c.you) refuse(c, 'no hello came') }, HELLO_WAIT)
         })
       })
-      await pc.setRemoteDescription({ type: 'offer', sdp })
-      await pc.setLocalDescription(await pc.createAnswer())
-      await gathered(pc, iceServers.length > 0)
+      await unless(pc.createAnswer().then((a) => pc.setLocalDescription(a)))
+      await unless(gathered(pc, iceServers.length > 0))
+      if (c.closed) return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }]
       c.fingerprint = fingerprintOf(pc.localDescription.sdp)
-      return { answer: { n, sdp: pc.localDescription.sdp } }
+      return [{ answer: { n, sdp: pc.localDescription.sdp } }, c]
     } catch {
       if (c) close(c)
-      try { pc?.close() } catch { /* already */ }
-      return { refuse: { n, why: 'the server could not answer that offer' } }
+      else { unplace(); held-- }
+      return [{ refuse: { n, why: 'the server could not answer that offer' } }]
     }
   }
 
   const tell = (c, m) => { try { if (c.ch.ctl?.readyState === 'open') c.ch.ctl.send(JSON.stringify(m)) } catch { /* closing */ } }
-  const refuse = (c, why) => { tell(c, { refuse: { why } }); setTimeout(() => close(c), 200) }
+  const refuse = (c, why) => { c.refused = true; tell(c, { refuse: { why } }); setTimeout(() => close(c), 200) }
   function close(c, why) {
     if (c.closed) return
     if (why && c.you) tell(c, { gone: { why } })
     c.closed = true
+    c.gone?.resolve()
     conns.delete(c)
-    clearTimeout(c.helloBy)
+    clearTimeout(c.joinBy)
     for (const a of c.aborts) a.abort()
     c.queue = []; c.queued = 0
     c.drained?.(false)
-    // Let the last word go out before the line is cut; with nothing to say, it is cut now, and its port is free for the next join.
-    if (why) setTimeout(() => { try { c.pc.close() } catch { /* already */ } }, 300)
-    else try { c.pc.close() } catch { /* already */ }
+    // Let a player's last word go out before the line is cut; anyone else's is cut now. Its port is counted as held
+    // until then, and is free a moment after (`answer`).
+    const cut = () => { try { c.pc.close() } catch { /* already */ } held-- }
+    if (why && c.you) setTimeout(cut, 300)
+    else cut()
     if (c.you) { log(`${c.name} (${c.you}) left${why ? `: ${why}` : ''}`); now() }
   }
   // A page says something at least every few seconds (its pings): one silent for long is gone, and its place is free.
@@ -321,7 +428,7 @@ export function door(o) {
       if (!(await same(h.password, kept.password))) return refuse(c, 'wrong password')
       failing.passed(keys)
     }
-    if (c.closed) return
+    if (c.closed || c.refused) return
     // Asked again with nothing awaited from here to `c.you = you`: two hellos at once cannot both pass.
     if (banned()) return refuse(c, 'you are banned from this server')
     const again = welcomed().find((w) => w.you === you)
@@ -334,7 +441,7 @@ export function door(o) {
     let name = wanted
     for (let i = 2; welcomed().some((w) => w !== c && w.name.toLowerCase() === name.toLowerCase()); i++) name = `${wanted.slice(0, 20)} (${i})`
     c.name = name
-    clearTimeout(c.helloBy)
+    clearTimeout(c.joinBy)
     tell(c, { welcome: { you, name, server: { name: kept.name, about: kept.about, most: kept.most, build: kept.build, admins: !!adminSealed } } })
     log(`${name} (${you}) joined`)
     now()
