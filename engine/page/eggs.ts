@@ -20,6 +20,10 @@
 // roll) and a golden shield (IDDQD). A cue says what each does once one is near; a tap or a click on it, E, or the Use
 // key with the aim on the thing, uses it.
 //
+// In the first view some of the city's windows hold an egg each, as lockers (eggs-lockers.ts): a flicker where something
+// new is, a green lamp where it was seen, a red light where it is locked until found in the city. The pointer over one
+// says what is in it, and a click opens it. A key by the credits counts them and shows them all.
+//
 // While one of the three that take the windows plays (the Matrix, the Rickroll, Bad Apple!!), the boards' own light is
 // off (boards.ts `dark`): BLOG, EXPLORE and the logos are not lit over the picture.
 //
@@ -36,7 +40,9 @@ import type { Pieces } from './pieces.ts'
 import { things, type ThingId } from './eggs-things.ts'
 import { phrases, PHRASES, words, type Look, type Meme } from './eggs-said.ts'
 import { firstTaps, type Spot } from './eggs-first.ts'
+import { lockers } from './eggs-lockers.ts'
 import type { Boards } from './boards.ts'
+import type { Far } from './far.ts'
 
 export interface EggsPage {
   device: GPUDevice
@@ -88,6 +94,8 @@ export interface EggsPage {
   /** Where the feet are (world cells), or null flying as an eye; and where feet would stand at a column. */
   feet(): readonly number[] | null
   ground(x: number, z: number): number
+  /** The far model, which lights the windows that hold an egg (far.ts `lockers`). */
+  far: Pick<Far, 'lockers' | 'lockerHeader' | 'listing'>
 }
 
 // Original line drawing from the park's east-southeast view (the site's, the same view).
@@ -763,10 +771,24 @@ export function eggs(page: EggsPage) {
   }
   const found = things({
     pieces: page.pieces, hud: page.hud, input: page.controls, view: page.view, feet: page.feet, ground: page.ground,
-    touch: () => touch.matches, words: (id) => WORDS[id](), use: (id) => USE[id](),
+    // (What a thing finds, it finds as it is used: a window in the first view that waited on it is unlocked.)
+    touch: () => touch.matches, words: (id) => WORDS[id](), use: (id) => { USE[id](); if (locks?.found(id)) say('Something new is on in a window of the view. Go back to the view to watch it.', 7000) },
     // The payphone rings (its sign on and off) until its call is taken; the cart's black apple is gone while Bad Apple!! plays.
     look: (id, t) => (id === 'payphone' ? (running?.egg !== 'matrix' && Math.floor(t * 2.5) % 2 ? 1 : 0) : id === 'cart' ? (running?.egg === 'apple' ? 1 : 0) : id === 'tv' ? (memeOn() ? 1 : 0) : 0),
   })
+
+  // ── The city's windows that hold an egg (eggs-lockers.ts), in the first view ──
+  /** What a locker's egg is called once it has been seen (a meme by its title). */
+  const LOCKER_TITLES: Record<string, string> = { matrix: 'The Matrix', rickroll: 'Never Gonna Give You Up', apple: 'Bad Apple!!', roll: 'Do a barrel roll', lives: '+30 lives' }
+  // (Not without a far model, `?farreach=0`: nothing would light their windows, and the words would be over dark glass.)
+  const firstLayer = document.getElementById('first')
+  const locks = firstLayer && page.far.listing ? lockers({
+    canvas: page.canvas, view: page.view, still: page.still, far: page.far, layer: firstLayer, corner: firstLayer.querySelector('.corner'), base: page.base,
+    title: (egg) => LOCKER_TITLES[egg] ?? MEMES.find((m) => m.id === egg)?.title ?? 'Something',
+    // (A meme is known once sf/memes.json has come: one opened before it had plays when it comes.)
+    open: (egg) => (LOCKER_TITLES[egg] || egg in VIDEOS ? act(egg) : void memesCame.then(() => act(egg))),
+  }) : null
+  void memesCame.then(() => locks?.relabel())
 
   // ── What starts them from the first view, before anyone has gone in (eggs-first.ts): the banner's lines and the towers' lamps ──
   /** Whether anything of the eggs' is on: what a tap on the banner ends. */
@@ -794,6 +816,7 @@ export function eggs(page: EggsPage) {
       return { text: m.title, egg: m.id }
     },
     tap: (spot, line) => TAPS[spot](line),
+    lockers: locks ?? undefined,
   })
 
   // ── Every frame: the screen comes up and goes down, its picture is drawn, the light comes home, the hour is watched ──
@@ -802,6 +825,7 @@ export function eggs(page: EggsPage) {
     const dt = Math.min(gap, 100) / 1000
     found.frame(performance.now() / 1000)
     taps.frame(dt)
+    locks?.frame(dt)
     // The banner's next line, after its plane has been in the picture for 8 s (it flies in from the edge, cloth last).
     if (nextLine && onBanner !== nextLine.after) nextLine = null
     else if (nextLine && !typing && page.planeSeen() && (nextLine.seen += dt) > 8) { const next = nextLine.next; nextLine = null; banner(next) }
@@ -873,6 +897,8 @@ export function eggs(page: EggsPage) {
     things: found,
     /** What starts them from the first view (eggs-first.ts): where each spot is, and the banner's line. */
     first: taps,
+    /** The windows that hold an egg (eggs-lockers.ts). */
+    lockers: locks,
     atMoon,
   }
 }

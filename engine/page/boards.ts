@@ -773,7 +773,7 @@ export async function boards(o: Needs): Promise<Boards> {
     const overlays = () => {
       if (performance.now() - laidAt < 250) return laid
       laidAt = performance.now()
-      laid = [...document.querySelectorAll<HTMLElement>('#realm .sky, #realm .fold, #realm .tools, #hud, #notices p, #first > button')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
+      laid = [...document.querySelectorAll<HTMLElement>('#realm .sky, #realm .fold, #realm .tools, #hud, #notices p, #first .corner > button')].filter((el) => el.checkVisibility?.({ visibilityProperty: true, opacityProperty: true }) ?? true).map((el) => el.getBoundingClientRect()).filter((r) => r.width > 0 && r.height > 0)
       return laid
     }
     read = (phase: number) => {

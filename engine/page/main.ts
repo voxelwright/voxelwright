@@ -1329,6 +1329,41 @@ async function main() {
     return out
   }
   /**
+   * The windows of the far model the eye sees now, as the eggs' lockers know them (#450, lockers.ts `Key`): for each,
+   * its key and style, how many pixels of a picture `size` big its bay covers and how many of them are its glass, the
+   * box they lie in (pixels from the top left), and where its glass is (cells: the middle of the points of it). Only
+   * walls with windows, and only windows with at least `least` pixels of glass. For sf/lockers.mjs, which places them.
+   */
+  const lockerWindows = async (size: [number, number], least = 4) => {
+    const v = view(), to = offscreen(gpu, size), row = Math.ceil((size[0] * 16) / 256) * 256
+    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC
+    const keys = device.createTexture({ size, format: 'rgba32uint', usage }), at = device.createTexture({ size, format: 'rgba32float', usage })
+    const read = [0, 1].map(() => device.createBuffer({ size: row * size[1], usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }))
+    paused = true
+    const encoder = device.createCommandEncoder()
+    march.draw(encoder, to, v, PICK, 0)
+    await farModel.drawKeys(encoder, keys.createView(), at.createView(), to.depth, size, v)
+    encoder.copyTextureToBuffer({ texture: keys }, { buffer: read[0], bytesPerRow: row }, size)
+    encoder.copyTextureToBuffer({ texture: at }, { buffer: read[1], bytesPerRow: row }, size)
+    device.queue.submit([encoder.finish()])
+    await Promise.all(read.map((r) => r.mapAsync(GPUMapMode.READ)))
+    const k = new Uint32Array(read[0].getMappedRange()), p = new Float32Array(read[1].getMappedRange())
+    const seen = new Map<string, { key: [number, number, number, number]; style: number; bay: number; glass: number; sum: [number, number, number]; box: [number, number, number, number] }>()
+    for (let y = 0; y < size[1]; y++) for (let x = 0; x < size[0]; x++) {
+      const i = (y * row) / 4 + x * 4, w = k[i], flags = w >>> 28
+      if (!(flags & 1)) continue
+      const key: [number, number, number, number] = [w & 0xffffff, (w >>> 24) & 7, k[i + 1] | 0, k[i + 2] | 0], name = key.join()
+      let f = seen.get(name)
+      if (!f) seen.set(name, (f = { key, style: k[i + 3], bay: 0, glass: 0, sum: [0, 0, 0], box: [x, y, x, y] }))
+      f.bay++
+      f.box = [Math.min(f.box[0], x), Math.min(f.box[1], y), Math.max(f.box[2], x), Math.max(f.box[3], y)]
+      if (flags & 2) { f.glass++; f.sum[0] += p[i]; f.sum[1] += p[i + 1]; f.sum[2] += p[i + 2] }
+    }
+    read.forEach((r) => { r.unmap(); r.destroy() }); keys.destroy(); at.destroy(); to.destroy()
+    paused = false
+    return [...seen.values()].filter((f) => f.glass >= least).map(({ key, style, bay, glass, sum, box }) => ({ key, style, bay, glass, box, at: sum.map((s, a) => Math.round((v.eye[a] + s / glass) * 10) / 10) }))
+  }
+  /**
    * What the far model costs the GPU here, at the canvas's full size and the device's own pace: the march alone and
    * the march with the far model, turn about, the middle of `rounds` each, ms a frame (a pass's own clock says the
    * march's time on this GPU, not the pass's: #423).
@@ -1347,7 +1382,7 @@ async function main() {
     const middle = (xs: number[]) => [...xs].sort((x, y) => x - y)[xs.length >> 1]
     return { march: middle(alone), withFar: middle(both), withFog: fogged.length ? middle(fogged) : null, size: [canvas.width, canvas.height], ...farModel.stats }
   }
-  Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, far: farModel, farIds, farPasses, pause: (on: boolean) => { paused = on } })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { fine, fineEdit, fineRest, falling, passes, far: farModel, farIds, lockerWindows, farPasses, pause: (on: boolean) => { paused = on } })
   // How thick the marine layer is, 0 to 1 (fog.ts): a property, as the hour and the rain are.
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'fog', { get: () => marine.strength, set: (v: number) => { marine.strength = Math.max(0, Math.min(1, v)) } })
 
@@ -1585,7 +1620,7 @@ async function main() {
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
           canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: firstStill,
-          pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)),
+          pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)), far: farModel,
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {
             const voice = ears?.voice

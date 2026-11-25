@@ -192,6 +192,8 @@ const EGG_VIDEOS = existsSync(eggsFrom) ? readdirSync(eggsFrom).filter((f) => /\
 mkdirSync(join(out, 'sf', 'eggs'), { recursive: true })
 for (const f of EGG_VIDEOS) copyFileSync(join(eggsFrom, f), join(out, 'sf', 'eggs', f))
 copyFileSync(join(root, 'sf', 'memes.json'), join(out, 'sf', 'eggs', 'memes.json'))
+// The city's windows that hold the eggs (sf/lockers.json, placed by sf/lockers.mjs), beside them as eggs/lockers.json.
+if (existsSync(join(root, 'sf', 'lockers.json'))) copyFileSync(join(root, 'sf', 'lockers.json'), join(out, 'sf', 'eggs', 'lockers.json'))
 const eggsMissing = ['rick.mp4', 'bad-apple.mp4', 'matrix.m4a', ...MEMES.map((m) => `${m.id}.mp4`)].filter((f) => !EGG_VIDEOS.includes(f))
 if (eggsMissing.length) console.log(`  ${eggsMissing.length} of the eggs' media are not at ${eggsFrom} (${eggsMissing.join(', ')}): those eggs will not load, or the Matrix is silent (the site's static/landing/eggs/*.mp4; matrix.m4a as said above; the memes: node sf/add-egg.mjs --encode)`)
 

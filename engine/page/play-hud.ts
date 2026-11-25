@@ -148,7 +148,8 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(72px, calc(env(safe-
      what was in the bottom left corner, where the left thumb steers, under the credits key: the wand's key and the place's name. */
   html[data-hud] #realm .fold { top: calc(env(safe-area-inset-top, 0px) + 20px); right: max(14px, calc(env(safe-area-inset-right) + 8px)); --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 64px; min-block-size: 44px; padding: 0; }
   html[data-hud] #realm .sky { top: calc(env(safe-area-inset-top, 0px) + 92px); }
-  html[data-hud] #first .credits { top: calc(env(safe-area-inset-top, 0px) + 20px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); min-block-size: 44px; }
+  html[data-hud] #first .corner { top: calc(env(safe-area-inset-top, 0px) + 20px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); }
+  html[data-hud] #first .credits { min-block-size: 44px; }
   html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 76px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); }
   html[data-hud] [data-panel="wand-take"] button.vx-button { min-block-size: 44px; }
   /* Back to the view, with the wheel by touch: where the wand's key was, under the credits key (in the Sky panel it is

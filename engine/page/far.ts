@@ -29,6 +29,7 @@
 //   ?farlanding=<url>    a landing cut's landing.json (sf/far/landing.mjs), for a release that does not list one
 import { DEPTH, FAR, NEAR, shader, type Target } from '../probe/gpu.ts'
 import { AIR, EDITED, EDITS, FOG, GLOBALS, HANDOVER, LANDMARK_LIGHT, LEAF_NIGHT, LIGHT, NIGHT_WALL, NOISE, PANE_LIGHT, SCREEN, type Marcher, type View } from './march.ts'
+import { LOCKERS, SLOTS } from './lockers.ts'
 
 const query = new URLSearchParams(globalThis.location?.search ?? '')
 
@@ -57,6 +58,8 @@ ${GLOBALS}
 @group(0) @binding(2) var<uniform> styles: Styles;
 @group(0) @binding(3) var marched: texture_depth_2d;
 @group(0) @binding(4) var screen: texture_2d<f32>;
+// The eggs' lockers (lockers.ts): which windows hold an egg, as a table looked up by the window.
+@group(0) @binding(5) var<storage, read> lockers: array<vec4u>;
 @group(1) @binding(0) var<uniform> b: B;
 ${LIGHT}
 ${AIR}
@@ -66,6 +69,7 @@ ${NOISE}
 ${FOG}
 ${SCREEN}
 ${NIGHT_WALL}
+${LOCKERS}
 ${LANDMARK_LIGHT}
 ${LEAF_NIGHT}
 struct Out {
@@ -161,6 +165,8 @@ struct Drawn { @location(0) colour: vec4f }
   let high1 = fwidth(in.high * 0.1);
   var pane = within(fract(fx), 0.5 - st.size.z * 0.5, 0.5 + st.size.z * 0.5, ax) * within(fract(fy), 0.26, 0.26 + st.size.w, ay);
   let blur = smoothstep(0.3, 0.8, max(ax, ay));
+  // (Its glass as drawn sharp: a locker's light fills it, lockers.ts.)
+  let sharp = pane;
   pane = mix(pane, st.size.z * st.size.w, blur) * f32(in.style != 0u && in.style < 14u);
   let dist = max(length(in.seen), 1.0);
   let rd = in.seen / dist;
@@ -185,6 +191,23 @@ struct Drawn { @location(0) colour: vec4f }
     // A landmark's glass shows what is across from it, which from far is the sky a little darker.
     let facing = 1.0 - max(dot(-rd, in.n), 0.0);
     col = mix(col, skyBase(reflect(rd, in.n)) * 0.8, clamp(0.25 + 0.75 * (0.04 + 0.96 * pow(facing, 5.0)), 0.0, 1.0));
+  }
+  // A window that is one of the eggs' lockers (lockers.ts, eggs-lockers.ts) has its own light in its pane, by day as by
+  // night, in place of its room's and of its glass; while the window screen is up it is one of the screen's panes.
+  // Where its pane is under two pixels across, the pixel its bay falls in is lit whole: a point of light, not a smear.
+  var locker = 0.0;
+  let lockersShown = bitcast<f32>(lockers[0].z);
+  if (lockersShown > 0.0 && in.style != 0u && in.style < 14u && abs(in.n.y) < 0.5) {
+    let found = lockerAt(in.id & 0xffffffu, in.way, i32(floor(fx)), i32(floor(fy)));
+    if (found.x > 0u) {
+      let glass = mix(sharp, 1.0, blur);
+      let hot = select(0.0, 1.0, lockers[0].y == found.y + 1u);
+      // (Its pane is its light, lockers.ts; under the pointer the light spills onto the wall round the pane, an eighth as
+      // bright. It stays lit while the window screen is up only under the pointer: the rest are the screen's then.)
+      let light = lockerLight(found, g.time, clamp(g.weather.z * 3.0, 0.0, 1.0));
+      locker = glass * lockersShown * (1.0 - g.air.z * (1.0 - hot));
+      col = mix(col, light, locker) + light * (1.0 - glass) * 0.12 * hot * lockersShown;
+    }
   }
   if (g.weather.z > 0.0) {
     let dark = clamp(g.weather.z * 3.0, 0.0, 1.0);
@@ -235,7 +258,7 @@ struct Drawn { @location(0) colour: vec4f }
       let pic = screenAt(in.pos.xy / vec2f(textureDimensions(marched)));
       // (A pane some pixels across is a lit room and no lamp, march.ts PANE_LIGHT: from a pixel and a half wide to four.)
       let near = smoothstep(1.5, 4.0, pw / bx);
-      col += wall.rgb * wall.a * dark * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, smoothstep(0.3, 0.8, bx)) * (1.0 - pic.a) + pic.rgb * panes * shows * 2.4;
+      col += wall.rgb * wall.a * dark * mix(mix(2.4, ${PANE_LIGHT}, near), 1.5, smoothstep(0.3, 0.8, bx)) * (1.0 - pic.a) * (1.0 - locker) + pic.rgb * panes * shows * 2.4;
     }
     // A tree's crown in a city at night is not black (march.ts LEAF_NIGHT).
     if (b.whole == 2u) { col += leafNight(in.rgb, in.n, at) * dark; }
@@ -256,6 +279,21 @@ struct Drawn { @location(0) colour: vec4f }
   if (g.fog.x > 0.0) { col = inFog(col, rd, dist); }
   // Beside the colour, how far brighter than any lit surface the pixel is, as the march writes it (glow.ts reads it).
   return Drawn(vec4f(tone(col), 1.0 - clamp((max(col.r, max(col.g, col.b)) - 1.2) / 3.0, 0.0, 1.0)));
+}
+// Each pixel's window as the lockers know it (lockers.ts, Key): its building's number, its way, whether it is a
+// wall with windows (flag 1) and in a pane's glass (flag 2); its bay; its storey; its style. Beside it, where the
+// point is from the eye (cells). For placing the lockers where the landing's eye sees them (main.ts lockerWindows).
+struct Keys { @location(0) key: vec4u, @location(1) at: vec4f }
+@fragment fn fsKeys(in: Out) -> Keys {
+  if (!ours(in)) { discard; }
+  let st = styles.s[min(in.style, 15u)];
+  let fx = in.along / max(st.size.y, 0.01);
+  let fy = in.high * 0.1 / max(st.size.x, 0.01);
+  let ax = max(fwidth(fx), 0.0001);
+  let ay = max(fwidth(fy), 0.0001);
+  let pane = within(fract(fx), 0.5 - st.size.z * 0.5, 0.5 + st.size.z * 0.5, ax) * within(fract(fy), 0.26, 0.26 + st.size.w, ay);
+  let flags = select(0u, 1u, in.style != 0u && in.style < 14u && abs(in.n.y) < 0.5) | select(0u, 2u, pane > 0.5);
+  return Keys(vec4u((in.id & 0xffffffu) | (in.way << 24u) | (flags << 28u), bitcast<u32>(i32(floor(fx))), bitcast<u32>(i32(floor(fy))), in.style), vec4f(in.seen, 1.0));
 }
 // Each pixel's building, and which way its face looks (1 up, 2 to 5 the walls): for measuring.
 @fragment fn fsIds(in: Out) -> @location(0) vec4f {
@@ -305,6 +343,12 @@ export interface Far {
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Each pixel's building number and way as the far model draws it over `to`'s depth, into `ids` (cleared): for measuring. */
   drawIds(encoder: GPUCommandEncoder, ids: GPUTextureView, depth: GPUTextureView, size: readonly [number, number], view: View): void
+  /** Each pixel's window (fsKeys) into `keys` (rgba32uint) and where it is from the eye into `at` (rgba32float), both cleared: for placing the eggs' lockers. Resolves once it is in `encoder`. */
+  drawKeys(encoder: GPUCommandEncoder, keys: GPUTextureView, at: GPUTextureView, depth: GPUTextureView, size: readonly [number, number], view: View): Promise<void>
+  /** The eggs' lockers (lockers.ts `table`): every window that holds one, laid in the table the faces look windows up in. */
+  lockers(words: Uint32Array<ArrayBuffer>): void
+  /** The lockers' header after its mask (lockers.ts `header`): the one under the pointer, how far they are shown, the flash. */
+  lockerHeader(words: Uint32Array<ArrayBuffer>): void
   /** Metres from the eye where faces begin. */
   reach: number
   /** Metres from the eye where faces begin in the listing's wedge. */
@@ -343,7 +387,7 @@ export interface Far {
 /** The far model whose listing is at `base`far.json (a folder beside the page) or in the release manifest `base` names, or one that draws nothing. */
 export async function far(device: GPUDevice, format: GPUTextureFormat, march: Marcher, base: string | null): Promise<Far> {
   const stats = { faces: 0, sections: 0, tiles: 0, held: 0, heldBytes: 0, fetched: 0, fetchedBytes: 0, coming: 0, covered: 0, failed: 0, error: '' }
-  const none: Far = { listing: null, draw() {}, drawIds() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
+  const none: Far = { listing: null, draw() {}, drawIds() {}, drawKeys: async () => {}, lockers() {}, lockerHeader() {}, reach: 0, near: 0, detail: 1, stats, whole: true, ready: true, shown() {}, depth: null, held: () => [], edited() {}, forget() {}, keep() {}, handover: () => Infinity }
   const reachAsked = Number(query.get('farreach') ?? 500)
   if (!base || reachAsked <= 0) return none
   // A folder with far.json in it, or a release's manifest (engine/sf/release.md), whose `far` is the same listing.
@@ -360,15 +404,17 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const module = await shader(device, 'far', CODE)
   const vertex: GPUVertexState = { module, entryPoint: 'vs', buffers: [{ arrayStride: 20, stepMode: 'instance', attributes: [0, 1, 2, 3, 4].map((n) => ({ shaderLocation: n, offset: n * 4, format: 'uint32' as const })) }] }
   const F = GPUShaderStage.FRAGMENT, VF = GPUShaderStage.VERTEX | F
-  const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }, { binding: 4, visibility: F, texture: {} }] })
+  const viewLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }, { binding: 1, visibility: VF, buffer: {} }, { binding: 2, visibility: F, buffer: {} }, { binding: 3, visibility: F, texture: { sampleType: 'depth' } }, { binding: 4, visibility: F, texture: {} }, { binding: 5, visibility: F, buffer: { type: 'read-only-storage' } }] })
   const blockLayout = device.createBindGroupLayout({ entries: [{ binding: 0, visibility: VF, buffer: {} }] })
   const layout = device.createPipelineLayout({ bindGroupLayouts: [viewLayout, blockLayout] })
-  const pipelineFor = (entry: string, target: GPUTextureFormat) => device.createRenderPipelineAsync({
-    label: `far ${entry}`, layout, vertex, fragment: { module, entryPoint: entry, targets: [{ format: target }] },
+  const pipelineFor = (entry: string, ...targets: GPUTextureFormat[]) => device.createRenderPipelineAsync({
+    label: `far ${entry}`, layout, vertex, fragment: { module, entryPoint: entry, targets: targets.map((format) => ({ format })) },
     primitive: { topology: 'triangle-strip', cullMode: 'none' },
     depthStencil: { format: 'depth32float', depthWriteEnabled: true, depthCompare: 'greater' },
   })
   const [picture, numbers] = await Promise.all([pipelineFor('fs', format), pipelineFor('fsIds', format)])
+  // (The windows' keys are for placing the eggs' lockers, by the tools: made the first time they are asked for.)
+  let keyed: Promise<GPURenderPipeline> | null = null
   const mergeModule = await shader(device, 'far depth', MERGE)
   const merging = await device.createRenderPipelineAsync({
     label: 'far depth', layout: 'auto', vertex: { module: mergeModule, entryPoint: 'vs' }, fragment: { module: mergeModule, entryPoint: 'fs', targets: [] },
@@ -377,6 +423,8 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
   const mergeBinds = new WeakMap<GPUTextureView, GPUBindGroup>()
   const uniforms = device.createBuffer({ size: 160 + EDITS * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const windows = device.createBuffer({ size: 16 * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  // The lockers' table (lockers.ts): empty (mask 0) until the eggs lay theirs in it.
+  const lockerTable = device.createBuffer({ label: 'lockers', size: (SLOTS + 1) * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST })
   let styled = false
   let sunBaked: [number, number, number] | null = null
 
@@ -536,7 +584,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     held: () => tiles.flatMap((t) => t.held.flatMap((h, k) => (h && h !== 'coming' ? [t.recs[k]!.path] : []))),
     get depth() { return own?.view ?? null },
     draw(encoder, to, view) {
-      pass(encoder, to.color, to.depth, to.size, view, picture, false)
+      pass(encoder, [to.color], to.depth, to.size, view, picture, false)
       if (!stats.faces || !own) return
       let bind = mergeBinds.get(own.view)
       if (!bind) { bind = device.createBindGroup({ layout: merging.getBindGroupLayout(0), entries: [{ binding: 0, resource: own.view }] }); mergeBinds.set(own.view, bind) }
@@ -546,7 +594,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
       merge.draw(3)
       merge.end()
     },
-    drawIds(encoder, ids, depth, size, view) { pass(encoder, ids, depth, size, view, numbers, true) },
+    drawIds(encoder, ids, depth, size, view) { pass(encoder, [ids], depth, size, view, numbers, true) },
+    async drawKeys(encoder, keys, at, depth, size, view) { pass(encoder, [keys, at], depth, size, view, await (keyed ??= pipelineFor('fsKeys', 'rgba32uint', 'rgba32float')), true) },
+    lockers(words) { device.queue.writeBuffer(lockerTable, 0, words) },
+    lockerHeader(words) { device.queue.writeBuffer(lockerTable, 4, words) },
   }
   /** The reach and the wedge of the last draw (pass): what `handover` answers from. */
   let handed: { reach: number; wedge: number[] | null } | null = null
@@ -560,7 +611,7 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     return own.view
   }
 
-  const pass = (encoder: GPUCommandEncoder, colour: GPUTextureView, depth: GPUTextureView, sz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
+  const pass = (encoder: GPUCommandEncoder, colours: GPUTextureView[], depth: GPUTextureView, sz: readonly [number, number], view: View, pipeline: GPURenderPipeline, clear: boolean) => {
     frame++
     const reach = self.reach * 10, aspect = sz[0] / sz[1], focal = sz[1] / (2 * view.tanHalf), eye = view.eye
     // The march's map of held tiles is 64 a side round the eye's tile (the city is wider than that: 32 km).
@@ -643,10 +694,10 @@ export async function far(device: GPUDevice, format: GPUTextureFormat, march: Ma
     if (coverKey !== covered) { covered = coverKey; march.farCover(map, size, reach, cover, wedge, kept, edits.map((e) => [...e])); stats.covered = cover.reduce((n, w) => { let c = 0; for (let v = w; v; v &= v - 1) c++; return n + c }, 0) }
 
     let bind = viewBinds.get(depth)
-    if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }] }); viewBinds.set(depth, bind) }
+    if (!bind) { bind = device.createBindGroup({ layout: viewLayout, entries: [{ binding: 0, resource: { buffer: uniforms } }, { binding: 1, resource: { buffer: march.globals } }, { binding: 2, resource: { buffer: windows } }, { binding: 3, resource: depth }, { binding: 4, resource: march.screen.view }, { binding: 5, resource: { buffer: lockerTable } }] }); viewBinds.set(depth, bind) }
     const out = encoder.beginRenderPass({
       label: 'far',
-      colorAttachments: [{ view: colour, loadOp: clear ? 'clear' : 'load', storeOp: 'store', clearValue: [0, 0, 0, 0] }],
+      colorAttachments: colours.map((view) => ({ view, loadOp: clear ? 'clear' as const : 'load' as const, storeOp: 'store' as const, clearValue: [0, 0, 0, 0] })),
       depthStencilAttachment: { view: ownDepth(sz), depthClearValue: 0, depthLoadOp: 'clear', depthStoreOp: 'store' },
     })
     out.setPipeline(pipeline)

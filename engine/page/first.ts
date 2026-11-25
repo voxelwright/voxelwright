@@ -38,13 +38,14 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
    test/sf-sky.mjs). On a desk it hangs in the top right corner as in the realm, right of the tower. Held upright, a
    phone has EXPLORE and its tower down the last eighth of its picture and BLOG low in the middle: the panel hangs
    from the top on the left, short of the tower. On its side the tower is at about three fifths across and BLOG low
-   in the middle: the panel lies beside the credits key, left of the tower, the hour across its top and the weather
+   in the middle: the panel lies beside the corner's keys (the credits key, the lockers' count under it: where they
+   end is --first-corner-right, measured), left of the tower, the hour across its top and the weather
    and the graphics side by side under it, over BLOG's top (its ticks left out for the height). */
 @media (pointer: coarse) and (orientation: portrait) {
   html.first #realm.folds .sky { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 64px), calc(var(--vx) * 76)); }
 }
 @media (pointer: coarse) and (orientation: landscape) {
-  html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 92px); right: 39vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
+  html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(var(--first-corner-right, calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 78px)) + 14px); right: 39vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
   html.first #realm.folds .sky .part { display: contents; }
   html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { grid-column: 1 / -1; }
   html.first #realm.folds .sky .ticks { display: none; }
@@ -53,10 +54,10 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
   html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; }
 }
 /* A smaller phone on its side (under 760 px, 667 x 375): beside the credits key the weather's words did not fit. The
-   panel lies under that key instead, as wide as it may be left of the tower, with the weather and the graphics alone
-   (the hour is the realm's, once in) so that it ends over BLOG. */
+   panel lies under the corner's keys instead (--first-corner-bottom), as wide as it may be left of the tower, with the
+   weather and the graphics alone (the hour is the realm's, once in) so that it ends over BLOG. */
 @media (pointer: coarse) and (orientation: landscape) and (max-width: 759px) {
-  html.first #realm.folds .sky { top: calc(max(20px, env(safe-area-inset-top)) + 56px); left: max(12px, env(safe-area-inset-left)); right: 36vw; }
+  html.first #realm.folds .sky { top: calc(var(--first-corner-bottom, calc(max(20px, env(safe-area-inset-top)) + 44px)) + 12px); left: max(12px, env(safe-area-inset-left)); right: 36vw; }
   html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { display: none; }
   html.first #realm.folds .sky .weather { grid-row: 1 / span 2; }
   html.first #realm.folds .sky header.g { grid-row: 1; }
@@ -72,11 +73,17 @@ html.first #realm .tools, html.first #realm .thumbs { translate: 0 10px; }
 #realm :is(.tools, .thumbs) { transition: translate 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
 #first { position: fixed; inset: 0; z-index: 6; pointer-events: none; font: 400 14px/1.4 var(--vx-font, system-ui, sans-serif); }
 #first > * { pointer-events: auto; }
-#first .credits { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); --vx: 3px; --vx-key-size: var(--vx-key-small); opacity: 0.86; }
+/* The corner the credits key stands in, and beside it the count of the windows opened (eggs-lockers.ts). */
+#first .corner { position: absolute; left: max(12px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); display: flex; align-items: center; gap: 12px; pointer-events: none; }
+#first .corner > * { pointer-events: auto; }
+#first .credits { --vx: 3px; --vx-key-size: var(--vx-key-small); opacity: 0.86; }
 #first .credits:is(:hover, :focus-visible, [aria-expanded="true"]) { opacity: 1; }
 /* By touch the bottom corners are the thumbs': the credits key is at the top, where a phone shows no line of numbers. */
 /* (Its voxel body stands out past its box to the left and up: further in from the corner than 12 px, or the screen's edge cuts it.) */
-@media (pointer: coarse) { #first .credits { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } }
+@media (pointer: coarse) { #first .corner { bottom: auto; left: max(22px, calc(env(safe-area-inset-left) + 10px)); top: max(20px, calc(env(safe-area-inset-top) + 8px)); } }
+/* On its side (760 px wide and more) a phone's settings panel lies beside the credits key: what else is in the corner
+   stands under it. (On a smaller one the panel lies under the corner, which stays a row.) */
+@media (pointer: coarse) and (orientation: landscape) and (min-width: 760px) { #first .corner { flex-direction: column; align-items: flex-start; gap: 10px; } }
 #first-credits { max-block-size: min(60vh, 420px); overflow: auto; }
 #first-credits ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(var(--vx) * 2); font-size: 0.8125rem; line-height: 1.4; color: var(--vx-ink-quiet); }
 /* The street's name stands over the credits key. */
@@ -92,7 +99,7 @@ export function firstView(on: boolean): First {
   const root = document.createElement('div')
   root.id = 'first'
   root.innerHTML = /* html */ `
-    <button class="vx-button credits" type="button" popovertarget="first-credits" aria-label="Credits: whose data this place is made from">Credits</button>
+    <div class="corner"><button class="vx-button credits" type="button" popovertarget="first-credits" aria-label="Credits: whose data this place is made from">Credits</button></div>
     <div class="vx-popover" id="first-credits" popover aria-label="Credits"><h3>This place is made from</h3><ul></ul></div>`
   const list = root.querySelector<HTMLUListElement>('ul')!
   if (on) html.classList.add('first')
@@ -132,6 +139,11 @@ export function firstView(on: boolean): First {
     tell('back')
   }
   // In a host's frame the keys are the host's until the frame has the focus: the realm is the page's picture, and takes it.
+  // Where the corner's keys end (px from the left and the top), for the settings panel to lie clear of them on a phone on its side.
+  const corner = root.querySelector<HTMLElement>('.corner')!
+  const cornered = () => { const r = corner.getBoundingClientRect(); html.style.setProperty('--first-corner-right', `${Math.round(r.right)}px`); html.style.setProperty('--first-corner-bottom', `${Math.round(r.bottom)}px`) }
+  new ResizeObserver(cornered).observe(corner)
+  addEventListener('resize', cornered)
   if (on && embedded) window.focus()
   return {
     get engaged() { return engaged },

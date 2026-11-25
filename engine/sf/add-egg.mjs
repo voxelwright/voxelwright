@@ -1,6 +1,6 @@
 // A meme egg from a YouTube link (#450, page/eggs.ts): fetched, its black bars found, encoded for the window screen
-// and written into sf/memes.json, which the page reads. Then build (sf/build.mjs), pack (deploy/data.mjs pack) and commit
-// sf/memes.json with deploy/data.json.
+// and written into sf/memes.json, which the page reads. Then build (sf/build.mjs), give it a window in the first view
+// (sf/lockers.mjs), pack (deploy/data.mjs pack) and commit sf/memes.json and sf/lockers.json with deploy/data.json.
 //
 //   node sf/add-egg.mjs <link> [--says "i like trains, trains"] [--title "I Like Trains"] [--id trains]
 //   node sf/add-egg.mjs --encode [trains,doom]      encodes again from the kept sources (all without names)

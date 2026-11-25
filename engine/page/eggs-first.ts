@@ -8,6 +8,9 @@
 //   the lamps      the red aircraft warning lamps a tall tower carries, blinking on the Pyramid's spire and the
 //                  Salesforce Tower's crown (steady where motion is not wanted). Each starts its egg, and ends it again.
 //
+// Under those, the city's windows that hold an egg (eggs-lockers.ts): the pointer over one lights it up and says what
+// it holds, and a tap or a click on one opens it; a board, the banner or a lamp under the same point has it first.
+//
 // (Not the moon: it stands where the night's light comes from, high in the north-east, out of both framings of the
 // first view, so nothing here asks it up.)
 //
@@ -43,6 +46,8 @@ export interface FirstNeeds {
   more?(): { text: string; egg: string } | null
   /** A tap on a spot: on the banner, the egg its line is for (null: the site's name). */
   tap(spot: Spot, line: string | null): void
+  /** The windows that hold an egg (eggs-lockers.ts): which is under a point of the page, the one the pointer is over, one opened. */
+  lockers?: { at(x: number, y: number): number | null; hover(i: number | null): void; open(i: number): void }
 }
 
 /** The banner's lines, one an egg, and what each starts (eggs.ts `act`). */
@@ -196,21 +201,31 @@ export function firstTaps(o: FirstNeeds) {
   addEventListener('click', (e) => {
     if (e.target !== o.canvas) return
     const spot = spotAt(e.clientX, e.clientY)
-    if (!spot) return
+    const locker = spot ? null : o.lockers?.at(e.clientX, e.clientY) ?? null
+    if (!spot && locker === null) return
     e.stopImmediatePropagation(); e.preventDefault()
     o.calm()
+    if (!spot) return o.lockers!.open(locker!)
     const said = spot === 'banner' ? line?.egg ?? null : null
     // A line tapped has been heard: the name is put back, and what it started says what it says over it.
     if (said) { quietLine(); waited = 0 }
     o.tap(spot, said)
   }, true)
-  let hot: Spot | null = null
+  let hot: Spot | null = null, hotLocker: number | null = null
+  // (Only a mouse is over a window: the mousemove a browser sends after a tap (or a pen's, which may not hover) is not,
+  // and the words it left up stayed for good, the window lit over a playing video. A tap opens one all the same.)
+  let mouse = !touch.matches
+  for (const type of ['pointerdown', 'pointermove']) addEventListener(type, (e) => { mouse = (e as PointerEvent).pointerType === 'mouse' }, true)
   addEventListener('mousemove', (e) => {
     // (The boards' own listener ran first and set the cursor for this move: a board under the pointer has it. Where
     // there are no boards, the cursor is this listener's alone, and put back here.)
-    const boards = !!o.plane(), spot = e.target === o.canvas && !(boards && o.canvas.style.cursor === 'pointer') ? spotAt(e.clientX, e.clientY) : null
-    if (spot) o.canvas.style.cursor = 'pointer'
-    else if (hot && !boards) o.canvas.style.cursor = ''
+    const boards = !!o.plane(), free = e.target === o.canvas && !(boards && o.canvas.style.cursor === 'pointer')
+    const spot = free ? spotAt(e.clientX, e.clientY) : null
+    // (A window under it only where nothing else is.)
+    const locker = free && !spot && mouse ? o.lockers?.at(e.clientX, e.clientY) ?? null : null
+    if (spot || locker !== null) o.canvas.style.cursor = 'pointer'
+    else if ((hot || hotLocker !== null) && !boards) o.canvas.style.cursor = ''
+    if (locker !== hotLocker) { hotLocker = locker; o.lockers?.hover(locker) }
     if (spot === hot) return
     hot = spot
     lamps.pyramid.classList.toggle('hot', spot === 'pyramid')
@@ -218,6 +233,14 @@ export function firstTaps(o: FirstNeeds) {
     // The banner under the pointer waves harder, as a cloth caught by a gust.
     const p = o.plane()
     if (p) p.cloth.wave = spot === 'banner' ? 11 : 5
+  })
+
+  o.canvas.addEventListener('pointerleave', () => {
+    if (hotLocker === null) return
+    hotLocker = null
+    o.lockers?.hover(null)
+    // (Where there are no boards the cursor is this file's to put back: the next move over the picture would not.)
+    if (!o.plane() && !hot) o.canvas.style.cursor = ''
   })
 
   return {
