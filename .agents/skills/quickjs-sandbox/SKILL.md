@@ -115,3 +115,5 @@ world's process (`rules/run.mjs`), with no frame. Node 25.1, M1 Pro:
 The package version changes, the frame's policy changes, a browser other than Chrome is
 targeted, or generated code is to get a capability that needs a host function bound into the
 interpreter (each bound function is attack surface: prefer more data in the view).
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"home/package.json":"a38f2ea9a4ee4fd4e6f3af8aff8b754c","home/src/invent/limits.ts":"14438986d95d6fd469a6f1693eeeddfc"} -->

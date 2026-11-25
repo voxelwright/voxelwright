@@ -132,3 +132,5 @@ test/                   Worker and build-failure tests
 cloudflare.config.ts    Worker config for the cf CLI
 wrangler.config.ts      assets directory (cf builds static sites through Wrangler)
 ```
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"site/package.json":"08074e98dac22a6bc119019f646526b0"} -->

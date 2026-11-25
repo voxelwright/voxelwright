@@ -69,3 +69,5 @@ WebAssembly JS API, and the probes below.
 
 Refresh this when the Rust toolchain or edition changes, when a dependency is added, or when
 the core starts to use threads.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/core/Cargo.toml":"db826952f1bc68e63fecdbd3990fd738","engine/core/build.mjs":"3da36bcee495e94eaa59a898cbe3f42c"} -->

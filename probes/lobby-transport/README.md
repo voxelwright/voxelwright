@@ -66,3 +66,5 @@ Ports: 5980 (page, TCP), 5981 (WebTransport, UDP), 5982 (helper, TCP), 5983-5987
 The SDP in the mailbox carries the Mac's public address. Nothing here prints it:
 results, logs and the runner's log carry candidate types only. The comments are
 deleted when a run is done.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"probes/lobby-transport/server.mjs":"a7016a73ad3a812dc388142ae3358756","probes/lobby-transport/helper.mjs":"6606a23ce2536c2076057694d3410390","probes/lobby-transport/host.mjs":"9dc6fdc9a407627fcf39666c87fd096b"} -->

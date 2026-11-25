@@ -76,3 +76,5 @@ Address switches: `?farreach=500` sets the metres from the eye where faces begin
 `?farnear=100` where they begin in the wedge, and `?farlight=fill,gain` the faces' light.
 `?fardetail=0.75` sets how many pixels across a face must be to be drawn. `?farfaces=12000000` caps the faces held.
 `?fog=0.8` turns on the marine layer (`page/fog.ts`); `engine.fog` changes it while the page runs.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/sf/far/check.mjs":"e5f6ba8143a2bb591ebeb08e4a005373"} -->

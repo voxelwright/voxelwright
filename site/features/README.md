@@ -111,3 +111,5 @@ What the proof does not cover:
   one that cannot write outside its worktree, with these scripts run for it, not by it.
 
 Turning a flag on is the owner's step, in `site.config.mjs`.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"site/package.json":"9104488275f142f7fae3a6a9a3629dff","site/generator/features.mjs":"857db8201922ea8a72a8021003b2cf35","site/lib/flags.mjs":"c59d537e94991f3650793f0691219172"} -->

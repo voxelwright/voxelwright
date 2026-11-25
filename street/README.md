@@ -328,3 +328,5 @@ so made things have no score cards or lamps. A made thing can land on someone. A
 the world owner's Claude usage and there is no sign-in: tailnet only. The agents' door listens
 on this machine only, so an agent must run on the same machine as the world. Fire's GPU field and
 invented mechanics' page sandbox have not been tried off the page.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"street/package.json":"388727e958869bc75da8bc69afc52635","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f"} -->

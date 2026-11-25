@@ -174,3 +174,5 @@ Measured November 25, 2026 on one machine (Apple M1 Pro, macOS 27.2, the release
 | click to channels open, Playwright Chromium 158 to a node-datachannel host, through the master | 199 to 268 ms over three runs of 5 joins: gathering 130-145 ms, the master's relay 2-26 ms, the channels opening 55-125 ms |
 
 All of this ran on one machine. Nothing here has crossed a real network through this master.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"master/src/config.rs":"17fb726a77712b7205a15a882e4ee581","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86"} -->

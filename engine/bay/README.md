@@ -123,3 +123,5 @@ $venv engine/bay/evidence_proof.py spot           # 20 written sample buildings,
 The panel render of November 21 (sheets in `~/.village/engine/bay/450-city-paint/quality/evidence/`) showed the hue and material are evidence worth reading (brick in Dogpatch and SoMa, yellow boards on Nob Hill, a blue Victorian in the Mission), but the wall's lightness is not: walls read at a median sRGB of about 93, so sunlit cream and white fronts drew charcoal. The glass share drew narrow windows and is not written. Leave `VILLAGE_FACADE_EVIDENCE` unset for releases until the colour's lightness has its own reference.
 
 A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` set (`tiles.py`) carries the records in its building rows (`evidence_tile.py` lists which rule reads which field). The far bake reads the same folder (`landing/ina/looks.py` `walls`). Without the variable both are byte for byte as before.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/bay/run-city.sh":"3ef99e171f119d3ac6919f9ac99ba986","engine/bay/full_run.py":"6de4a3125d1b30515e7323aa10ffa54b"} -->

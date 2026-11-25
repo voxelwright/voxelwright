@@ -57,3 +57,5 @@ laspy with lazrs, tifffile with imagecodecs, shapely): `PY=~/.village/engine/lan
 - `sun.py`: the sun for the photograph's minute (bearing 251.85, height 55.37).
 
 The engine's notes are in `.agents/skills/cell-engine` ("A place built to lie on a photograph").
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/landing/ina/shoot.mjs":"0c71c975f37afb4f5ca4165efd7079b7","engine/landing/ina/camera.json":"22cd857691c9e400ae79af895b3e94b1"} -->

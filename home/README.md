@@ -3508,3 +3508,5 @@ host `check-villager` 225/225. Earlier in the climb `check-talk-notebook` failed
 8 distinct pages and `check-entries` once on the doorway glide, both under load and both
 passing alone. Changed for the new behaviour: `check-talk-npc` expects the page before kept
 and not shown; `check-talk-notebook` and `check-prop-sandbox` take `--dev`/`--host`.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"home/package.json":"0529fac582aef2ff995aae35c3a07d5b","home/src/features.ts":"3dadf647ede33aaff523b63a0dd3209d"} -->

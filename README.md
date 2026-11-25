@@ -12,6 +12,8 @@ people only, and it is not safe for real family data yet.
 
 ## Layout
 
+Start with the [project map](guide/project.md) and [how to keep documentation current](guide/documentation.md).
+
 - `home/`: the 3D home (three.js, Cordis plugins). See `home/README.md`.
 - `host/`: the villager and the Elder, plus the live home. See `host/README.md`.
 - `street/`: the shared street's world process and page. See `street/README.md`.
@@ -121,3 +123,5 @@ restart cleanup, including older evidence and skills, is kept at the tag
 Copyright 2026 Pavlo Zahynailo. Project code carries the [Apache License 2.0](LICENSE). Project documentation and prose carry [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), except for the owner's personal writing in [site/posts](site/posts/NOTICE) and [site/writing](site/writing/NOTICE), which is all rights reserved. The project's Vox fonts carry the SIL Open Font License 1.1 with reserved names. Third-party works and baked data retain their source terms. See [credits](CREDITS.md), [data licences](DATA-LICENSES.md) and [NOTICE](NOTICE).
 
 Voxelwright and Voxelmorphism are names belonging to Pavlo Zahynailo. Please choose another name for your fork.
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","package.json":"8ce1e779c247a7ea73bf057505a56f3a","street/package.json":"631a60c23ff10de35394f84373fe599a","host/src/live.ts":"45499f1073f06a5c713a90a389267a56"} -->

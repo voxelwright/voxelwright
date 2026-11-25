@@ -1,0 +1,196 @@
+{
+  ".agents/skills/jolt-physics/SKILL.md": {
+    "home/package.json": [
+      "dependencies.jolt-physics"
+    ],
+    "home/src/engine/jolt.ts": "lines:^import .*jolt-physics"
+  },
+  ".agents/skills/quickjs-sandbox/SKILL.md": {
+    "home/package.json": [
+      "dependencies.@jitl/quickjs-wasmfile-release-sync",
+      "dependencies.quickjs-emscripten-core"
+    ],
+    "home/src/invent/limits.ts": "lines:^\\w+:"
+  },
+  ".agents/skills/rust-wasm-core/SKILL.md": {
+    "engine/core/.cargo/config.toml": "file",
+    "engine/core/Cargo.toml": "lines:^edition|^crate-type|^opt-level|^lto|^codegen-units|^panic|^\\[.*dependencies",
+    "engine/core/build.mjs": "lines:execFileSync\\('cargo'|^const built =|out = join"
+  },
+  "README.md": {
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ],
+    "deploy/assemble.mjs": "lines:^const realm =",
+    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
+    "master/src/lib.rs": "lines:^\\.route\\(",
+    "host/package.json": [
+      "scripts.village"
+    ],
+    "engine/package.json": [
+      "scripts.core"
+    ],
+    "home/package.json": [
+      "dependencies.three",
+      "dependencies.cordis"
+    ],
+    "package.json": [
+      "scripts.check"
+    ],
+    "street/package.json": [
+      "scripts.world",
+      "scripts.page"
+    ],
+    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join"
+  },
+  "deploy/README.md": {
+    "deploy/package.json": [
+      "scripts"
+    ],
+    "deploy/assemble.mjs": "lines:^const realm =",
+    "deploy/worker.mjs": "lines:pathname\\."
+  },
+  "engine/README.md": {
+    "engine/package.json": [
+      "scripts",
+      "dependencies"
+    ]
+  },
+  "engine/bay/README.md": {
+    "engine/bay/run-city.sh": "lines:^(case |start\\)|status\\)|\\*\\) echo \"usage:)",
+    "engine/bay/full_run.py": "lines:add_argument"
+  },
+  "engine/kit/README.md": {
+    "engine/kit/package.json": [
+      "exports"
+    ],
+    "engine/kit/src/index.js": "lines:^export ",
+    "engine/kit/tools/serve.mjs": "lines:^const port ="
+  },
+  "engine/kit/fonts/vox-block/README.md": {
+    "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+  },
+  "engine/kit/fonts/vox-sign/README.md": {
+    "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+  },
+  "engine/kit/fonts/vox-text/README.md": {
+    "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+  },
+  "engine/kit/fonts/vox-zakon/README.md": {
+    "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+  },
+  "engine/kit/src/core/audio/README.md": {
+    "engine/kit/src/core/sound.js": "lines:^export function (sound|cue)\\(",
+    "engine/kit/src/core/audio/press.wav": "file",
+    "engine/kit/src/core/audio/release.wav": "file"
+  },
+  "engine/landing/ina/README.md": {
+    "engine/landing/ina/shoot.mjs": "lines:arg\\('(place|out|cells|server|fine)'",
+    "engine/landing/ina/camera.json": [
+      "camera"
+    ]
+  },
+  "engine/sf/far/README.md": {
+    "engine/sf/far/check.mjs": "lines:arg\\('only'"
+  },
+  "guide/checks.md": {
+    "scripts/checks.mjs": "checks"
+  },
+  "guide/documentation.md": {
+    "scripts/docs.mjs": "lines:^const usage =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith"
+  },
+  "guide/plugin-types.md": {
+    "engine/page/plugins.ts": "types"
+  },
+  "guide/project.md": {
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ],
+    "deploy/assemble.mjs": "lines:^const realm =",
+    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
+    "master/src/lib.rs": "lines:^\\.route\\(",
+    "host/package.json": [
+      "scripts.village"
+    ],
+    "engine/package.json": [
+      "scripts.core"
+    ],
+    "home/package.json": [
+      "dependencies.three",
+      "dependencies.cordis"
+    ],
+    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join"
+  },
+  "guide/render-passes.md": {
+    "engine/page/plugins.ts": "types:Pass,Passes",
+    "engine/plugins/paint/page.ts": "lines:engine.draws.(add|remove)\\("
+  },
+  "home/README.md": {
+    "home/package.json": [
+      "scripts",
+      "dependencies.three",
+      "dependencies.cordis"
+    ],
+    "home/src/features.ts": "lines:^export const"
+  },
+  "home/bench/physics/README.md": {
+    "home/bench/physics/package.json": [
+      "scripts",
+      "dependencies"
+    ],
+    "home/bench/physics/core.ts": "types"
+  },
+  "host/README.md": {
+    "host/package.json": [
+      "scripts",
+      "dependencies.@anthropic-ai/claude-agent-sdk"
+    ]
+  },
+  "master/README.md": {
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
+    "master/src/lib.rs": "lines:^\\.route\\("
+  },
+  "probes/lobby-transport/README.md": {
+    "probes/lobby-transport/server.mjs": "lines:^const PORT",
+    "probes/lobby-transport/helper.mjs": "lines:^const PORT",
+    "probes/lobby-transport/host.mjs": "lines:process.argv|portRangeBegin|new Http3Server"
+  },
+  "scripts/public-history/README.md": {
+    "scripts/public-history/run": "lines:parser.add_argument|--report-path|--gitleaks-ignore-path"
+  },
+  "site/README.md": {
+    "site/package.json": [
+      "scripts",
+      "engines",
+      "dependencies.voxelmorphism"
+    ]
+  },
+  "site/designs/support-button/README.md": {
+    "site/static/support/support-button.js": "lines:getAttribute\\(|observedAttributes|^const VERSIONS|customElements.define"
+  },
+  "site/features/README.md": {
+    "site/package.json": [
+      "scripts.flag-proof"
+    ],
+    "site/generator/features.mjs": "lines:includes\\(key\\)|\\.hooks\\.",
+    "site/lib/flags.mjs": "file"
+  },
+  "site/scripts/landing/README.md": {
+    "site/scripts/landing/prepare.mjs": "lines:^const (ina|sky|capture|cachePath) =|Expected the unpainted|Usage:",
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ],
+    "site/lib/egg-overlay.mjs": "lines:^export const",
+    "site/scripts/landing/encode-eggs.mjs": "lines:^const out =|parseArgs\\(\\{|^(rick|apple):"
+  },
+  "street/README.md": {
+    "street/package.json": [
+      "scripts"
+    ],
+    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'"
+  }
+}

@@ -13,3 +13,5 @@ Build from `engine/kit` (needs fonttools and brotli), each set exported with
     python tools/vox-text-build.py glyphs.json fonts/vox-zakon "Vox Zakon" vox-zakon                       # zakon
     python tools/vox-text-build.py glyphs.json fonts/vox-zakon "Vox Zakon Text" vox-zakon-text             # zakontext
     python tools/vox-text-build.py glyphs.json fonts/vox-zakon "Vox Zakon Text" vox-zakon-text --as-bold   # zakontextbold
+
+<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/kit/tools/vox-text-build.py":"dce000ec93cee49b923176de30374c60","engine/kit/tools/vox-text-export.mjs":"56314cc0af7738c133733391e64d26ff"} -->
