@@ -8,7 +8,7 @@
 //         `village-door-1 <this connection's DTLS fingerprint>` (page/wire.ts `signed`). The door answers
 //         {welcome: {you, name, server}} or {refuse: {why}} and closes. Then {ping} and {pong}, {unstream: n} (the
 //         page stops reading a stream), an admin's password and the lobby's ops ({n, admin}, {n, lobby: {op}}
-//         answered {n, ok} or {n, why}), {told: {text}} (the server says something), {end: {n, why}} (a stream ended)
+//         answered {n, ok} or {n, why}), who is here for anyone let in ({n, people: true}: {n, ok, people: [{name, me?}]}), {told: {text}} (the server says something), {end: {n, why}} (a stream ended)
 //         and {gone: {why}} (the door closes this connection).
 //   up    a request: a JSON head {n, m (method), p (path and query), k (parts)}, then k binary parts that are its
 //         body. Its reply: {n, s (status), t (type), k}, then k binary parts; or {n, s: 200, stream: true} for a stream.
@@ -300,6 +300,8 @@ export function door(o) {
     if (!Number.isInteger(m.n)) return
     if (m.admin !== undefined) return tell(c, { n: m.n, ...(await becomeAdmin(c, m.admin)) })
     if (m.may === 'make') { const why = mayMake(c); return tell(c, { n: m.n, ...(why ? { why } : { ok: true }) }) }
+    // Who is here, for anyone let in: names as the server made them, and which is the asker. No ids, no addresses (an admin's `who` has the ids).
+    if (m.people === true) return tell(c, { n: m.n, ok: true, people: welcomed().map((w) => ({ name: w.name, ...(w === c ? { me: true } : {}) })) })
     if (m.lobby && typeof m.lobby === 'object') return tell(c, { n: m.n, ...(await op(c, m.lobby)) })
   }
   async function greet(c, h) {

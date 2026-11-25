@@ -248,6 +248,9 @@ try {
   check(!!cleo.you, `then a third joins (${cleo.you ?? cleo.why})`)
   const people = await lobbyOf(ada, () => globalThis.engine.lobby.who())
   check(people.people?.map((p) => p.name).sort().join(',') === 'Ada,Bram,Cleo', `an admin lists who is there (${people.people?.map((p) => `${p.name}${p.admin ? ' (admin)' : ''}`).join(', ')})`)
+  // Anyone let in may ask who is here (the server list's panel, page/lobbies.ts): names and which is the asker, no ids or addresses.
+  const here_ = await cleo.ctl({ people: true })
+  check(here_.ok === true && here_.people.map((p) => p.name).sort().join(',') === 'Ada,Bram,Cleo' && here_.people.filter((p) => p.me).map((p) => p.name).join() === 'Cleo' && here_.people.every((p) => Object.keys(p).every((k) => k === 'name' || k === 'me')), `a stranger asks who is here and is told names alone, itself marked (${JSON.stringify(here_.people)})`)
 
   // ── What is off the list ────────────────────────────────────────────────────
   const off = {}

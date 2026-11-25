@@ -79,9 +79,17 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
   (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
   machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
   `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
-- A page joins with `?lobbies=1&master=<address>&lobby=<id or code>&name=<a name>` on the static realm (its rule `lobbies` is `"preview"`: without `?lobbies=1` the address takes nobody into a lobby; a realm whose rule names a master joins through that one only) (`sf/index.html`; no
-  page lists lobbies yet). It joins only a world on its own release, and draws its own tiles. A server with a password
-  asks for it in the browser's prompt.
+- A visitor finds servers in the realm's settings, **Servers…** (`page/lobbies.ts`, fetched when first pressed), where
+  the realm's rule allows lobbies (`lobbies` is `"preview"` in `sf/realm.json`: only with `?lobbies=1&master=<address>`;
+  a realm whose rule names a master uses that one only). The list holds every listed lobby on the page's release,
+  sorted by its heads, refreshed by hand and every 30 s while open; a row is joined with Join, a double click or Enter,
+  a private server with its code. A join loads the page again: the lobby goes in a ticket this tab keeps
+  (sessionStorage `village.join`, taken and forgotten as the page starts, honoured for a minute), never the address,
+  and a password is asked in the panel once the page is up again, never kept. In a lobby a tag in the top left says
+  whose server it is and opens its panel: who is here, what the server says, Leave, and an admin's controls once the
+  admin password is given. `node test/sf-lobbies.mjs` checks all of it. In a realm's preview an address may still
+  join (`&lobby=<id or code>&name=<a name>`), for the checks and the console, where a password is asked in the
+  browser's prompt. A page joins only a world on its own release, and draws its own tiles.
 - Limits for each connection (flags): `--asks 30` requests a second, `--up-mb 24` megabytes sent a minute,
   `--columns 65536` columns of `/world/tops` a second, and `--backlog-mb 32` megabytes of replies a page asked for and
   has not read before the door drops it. Each route also has a limit for each connection, under the pool the world's
@@ -135,8 +143,11 @@ cells of theirs standing. The door counts `--things-minute 6` things made and `-
 minute for each person (by who they are, so joining again starts nothing afresh). Breaking a thing with a blast or a
 hammer is the world's physics and stays every builder's. "Undo" takes out the asker's own last thing.
 
-**Admins.** With `--admin-password-file`, a connection that gives that password (`engine.lobby.admin('…')` in the
-page's console) is an admin until it closes. `engine.lobby`: `who()`, `kick(you)`, `ban(you, {address})`,
+**Admins.** With `--admin-password-file`, a connection that gives that password (the server's panel, **I am an
+admin…**, or `engine.lobby.admin('…')` in the page's console) is an admin until it closes. The panel's controls are
+these same ops: the players with Kick and Ban, the banned with Lift, the password set or cleared, the most players,
+who may build, say as the server, rename; it builds them only once the server has said yes. Anyone let in may ask who
+is here (`{n, people: true}` on `ctl`): the names the server gave, the asker marked, no ids. `engine.lobby`: `who()`, `kick(you)`, `ban(you, {address})`,
 `unban(you)`, `bans()`, `lock(password | null)`, `most(n)`, `build('everyone' | 'admins')`, `say(text)`,
 `rename(name, about)`. Each try at a password (the admin's or the server's) is counted before it is checked, for that
 connection and that address: the next waits two seconds, twice as long after each, to half a minute, and a wrong

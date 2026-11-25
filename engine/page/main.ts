@@ -92,8 +92,12 @@ if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores()
 async function main() {
   report.env = environment()
   // A lobby (#526): a world on someone else's machine, joined through its door (door.ts) before anything is made; a join that fails says why and the page goes on alone.
-  // Only where the realm's rule allows (local.ts `MASTER`): a link alone takes nobody into a stranger's server.
-  const joined = query.has('lobby') && MASTER ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
+  // Only where the realm's rule allows (local.ts `MASTER`): a link alone takes nobody into a stranger's server. The way
+  // in is the server list (lobbies.ts), which loads the page again with the lobby chosen in this tab's ticket, taken and
+  // forgotten here; an address names one only in a realm's preview (`?lobby=`, for the checks and the console).
+  const ticket = (() => { try { const t = sessionStorage.getItem('village.join'); sessionStorage.removeItem('village.join'); const v = t ? JSON.parse(t) : null; return MASTER && v && v.master === MASTER && typeof v.lobby === 'string' && Math.abs(Date.now() - v.at) < 60_000 ? { lobby: String(v.lobby), name: typeof v.name === 'string' ? v.name : null, label: String(v.label ?? '') } : null } catch { return null } })()
+  const joined = ticket ? await import('./lobbies.ts').then((l) => l.arrive({ master: MASTER!, ...ticket, hud: over, input: controls }))
+    : query.has('lobby') && MASTER && RULES.lobbies === 'preview' ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
   loading.step('gpu')
   const { device } = gpu
@@ -1299,6 +1303,8 @@ async function main() {
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby })
+  // In a lobby: whose server this is in the corner, who is here, what it says, the way out (lobbies.ts).
+  if (joined) void import('./lobbies.ts').then((l) => l.inside({ master: MASTER!, hud: over, input: controls, door: joined }))
   Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
   // The last thing made in this page, taken out again (page/maker.ts; "undo" on the bar does the same).
   if (makesHere) Object.assign((globalThis as unknown as { engine: object }).engine, { unmake: () => wishes.rule('', { undo: true }), making: makingSeam })
@@ -1674,7 +1680,9 @@ async function main() {
     keptGraphics()
     const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
-      modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}) })
+      modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}),
+      // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
+      ...(MASTER && !joined ? { servers: () => void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } : {}) })
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })

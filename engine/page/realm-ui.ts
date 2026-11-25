@@ -37,6 +37,8 @@ export interface RealmPage {
   say?(): void
   /** Opens the panel where a visitor connects their own AI (connect.ts), where the page makes things itself (#526). */
   ai?(): void
+  /** Opens the servers (lobbies.ts, #526): other players' servers to join, or how to host one. Where lobbies may be joined and this page is in none (in one, its tag stands where this key does). */
+  servers?(): void
   /** Light, Dark or San Francisco now (#524, modes.ts), where the realm has a real sky to follow. Without it the panel has no such row. */
   modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
 }
@@ -91,6 +93,12 @@ const STYLE = /* css */ `
 #realm .tools { position: absolute; left: 50%; bottom: max(30px, env(safe-area-inset-bottom)); transform: translateX(-50%); --vx-key-size: var(--vx-key-small); }
 #realm .tools > label { padding-inline: calc(var(--vx) * 5.5) calc(var(--vx) * 4); white-space: nowrap; }
 #realm .tools .n { margin-inline-end: 6px; color: var(--vx-ink-quiet); }
+/* The servers (#526, lobbies.ts): a key of its own in the top left corner, where nothing else is on a desk, the size of
+   the settings key across from it; while the picture holds the pointer it steps away as the other corner keys do
+   (play-hud.ts), and in the first view it is not there. In a lobby the lobby's tag stands here instead. */
+#realm .lobbies { position: absolute; left: max(24px, env(safe-area-inset-left)); top: max(24px, env(safe-area-inset-top)); min-block-size: 44px; }
+html.first #realm .lobbies { display: none; }
+html:is([data-hud="quiet"], [data-hud="wheel"]).away #realm .lobbies { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease-out; }
 /* What a thumb has: only where the pointer is coarse. */
 #realm .thumbs { display: none; }
 #realm .fold { display: none; }
@@ -100,6 +108,9 @@ const STYLE = /* css */ `
 #realm.folds .fold { display: block; position: absolute; right: max(16px, env(safe-area-inset-right)); top: max(16px, env(safe-area-inset-top)); }
 #realm.folds .sky { top: calc(max(16px, env(safe-area-inset-top)) + 60px); }
 @media (pointer: coarse) {
+  /* By touch the credits key has the top left corner (first.ts): the servers key stands beside it, at its height. */
+  #realm .lobbies { top: calc(env(safe-area-inset-top, 0px) + 20px); left: calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 98px); --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 64px; }
+  html[data-hud="wheel"].away #realm .lobbies { opacity: 1 !important; pointer-events: auto !important; }
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
   /* (On a phone the panel is words a column wide: the smaller size of the key font, as the tools have, its cells still whole pixels, typeface.ts.) */
   #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); --vx-key-size: var(--vx-key-small); }
@@ -165,6 +176,7 @@ export function realmControls(page: RealmPage) {
   const root = document.createElement('div')
   root.id = 'realm'
   root.innerHTML = /* html */ `
+    ${page.servers ? '<button class="vx-button lobbies" type="button" aria-haspopup="dialog" title="Other players’ servers: join one, or host your own">Servers</button>' : ''}
     <button class="vx-button fold" type="button" aria-expanded="false" aria-controls="realm-sky" aria-label="Weather, time of day and graphics" title="Weather, time of day and graphics" data-vx-icon="gear" data-vx-icon-only></button>
     <section class="vx-card sky" id="realm-sky" aria-label="Sky">
       <div class="part">
@@ -240,6 +252,7 @@ export function realmControls(page: RealmPage) {
   for (const t of tools) t.addEventListener('change', () => { if (t.checked) page.pickTool(Number(t.value)) })
   $<HTMLButtonElement>('.reset').addEventListener('click', () => void page.reset())
   // (Folded first where the panel is a drawer, as Say… does: the dialog is to be read.)
+  root.querySelector('button.lobbies')?.addEventListener('click', () => { if (coarse.matches) folded(true); page.servers?.() })
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
   // The fader pins the resolution where it is let stand (Auto goes off); a rate chosen is what Auto holds, and turns it on.
