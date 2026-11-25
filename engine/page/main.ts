@@ -303,9 +303,17 @@ async function main() {
   const clocked = gpu.canTime && navigator.maxTouchPoints === 0
   // How many frames came well late just now.
   let lateRun = 0
-  const steer = (budget: number, gap: number) => {
+  const steer = (budget: number, gap: number, calm = false) => {
     // Pinned by whoever measures (`engine.scale`): not even a late frame moves it.
     if (fixed || held > 1e6) return
+    // At rest (`restful`) frames come late on purpose: only the GPU's clock steers, to the march it would have at the
+    // screen's rate, so the picture left alone is as sharp as it was drawn every frame.
+    if (calm) {
+      if (!clocked || gpuMs <= 0 || --held > 0) return
+      const next = Math.round(Math.max(0.3, Math.min(1, scale * Math.sqrt((0.6 * budget) / gpuMs))) * 20) / 20
+      if (next !== scale) { scale = next; held = 20 }
+      return
+    }
     // A look turned from a cheap view to a dear one (#367): the march is suddenly several frames long, and coming down
     // 15% every 45 frames the picture took three seconds to fit again (60 frames dropped in one turn of the head, with
     // the march at 50 ms). Two late frames close together with the GPU's clock saying why bring it down at once to what fits.
@@ -470,6 +478,23 @@ async function main() {
   // The screen's own rate: the shortest gap between frames seen lately.
   let screenMs = 16.7, shortest = Infinity
 
+  // The first view left alone (nobody has pressed, moved the pointer or a key for two seconds, the eye where it arrived,
+  // the fog gone) is drawn 30 times a second, not at the screen's rate: steered to six tenths of every frame, the
+  // landing kept the GPU two thirds busy (9.8 ms a frame at 69 fps) for a picture that only drifts. `?rest=0` keeps the
+  // screen's rate, for checks that time frames there.
+  const REST_MS = 1000 / 30
+  let rests = query.get('rest') !== '0', stirred = 0, resting = false
+  for (const type of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart']) addEventListener(type, () => { stirred = performance.now() }, { capture: true, passive: true })
+  /** Whether the first view is up and still: as is the eggs' `still` below, and its picture is in. */
+  const firstStill = () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1)
+  // An eye that turned, or a window screen that is up (an egg playing, eggs.ts), stirs it as a hand does.
+  let looked = ''
+  const restful = (now: number) => {
+    const look = `${pose.yaw} ${pose.pitch} ${fov}`
+    if (look !== looked || march.screen.up > 0) { looked = look; stirred = now }
+    return rests && seen.near > 0 && now - seen.near > 4000 && now - stirred > 2000 && firstStill()
+  }
+
   const watchers = new Set<(gap: number) => void>()
   let paused = false, saying = ''
   /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
@@ -515,20 +540,29 @@ async function main() {
     return roomed
   }
   const frame = (now: number) => {
+    // At rest, a screen frame that comes too soon after the last one drawn is let go by, unseen by the watchers too: what
+    // they are handed is the time since the last frame drawn. (Two milliseconds short still counts, so 60 Hz gives 30.)
+    const wasResting = resting
+    resting = restful(now)
+    if (resting && now - last < REST_MS - 2) { requestAnimationFrame(frame); return }
     const began = mark = performance.now()
     const dt = Math.min(0.1, (now - last) / 1000)
     const gap = now - last
     for (const each of watchers) each(gap)
     if (paused) { last = now; requestAnimationFrame(frame); return }
-    frameMs += ((now - last) - frameMs) * 0.05
-    shortest = Math.min(shortest, now - last)
-    if (frames % 120 === 119) { screenMs = Math.max(4, shortest); shortest = Infinity }
+    // Rest is not lateness: the screen's rate, and how long a frame takes, are counted only from frames at that rate.
+    if (wasResting && !resting) frameMs = screenMs
+    if (!resting) {
+      frameMs += ((now - last) - frameMs) * 0.05
+      shortest = Math.min(shortest, now - last)
+      if (frames % 120 === 119) { screenMs = Math.max(4, shortest); shortest = Infinity }
+    }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
     shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     shot?.after(dt)
-    steer(Math.max(1000 / 60, screenMs), gap)
+    steer(Math.max(1000 / 60, screenMs), gap, resting)
     const v = view(), to = fit()
     march.roofed = roomedBy(dt)
     staff.frame(v)
@@ -575,7 +609,7 @@ async function main() {
       pluginDraws.draw(encoder, to, v, (now - started) / 1000)
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
-    easeMood(Math.min(frameMs, 100) / 1000, grade)
+    easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
     blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
@@ -1550,7 +1584,7 @@ async function main() {
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },
           notice: (text, ms) => over.notice(text, ms), aspect: () => canvas.clientWidth / Math.max(1, canvas.clientHeight),
           watch: (each) => void watchers.add(each), onReset: (each) => void resetting.add(each), base: location.href,
-          canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: () => !!first && !first.engaged && (!way || way.state === 'idle' || way.state === 'armed') && (!arrive || Math.hypot(pose.x * M - arrive.at[0], pose.y * M - arrive.at[1], pose.z * M - arrive.at[2]!) <= 1),
+          canvas, plane: () => signboards?.plane ?? null, calm: () => way?.disarm(), darkBoards: (on) => { if (signboards) signboards.dark = on }, still: firstStill,
           pieces: falling, hud: over, feet: () => me.feet?.at ?? null, ground: (x, z) => core.feet_at(Math.round(x), Math.round(z)),
           // The city's sound steps aside for an egg's: taken off the speakers, and put back.
           hush: (on) => {
@@ -1564,7 +1598,7 @@ async function main() {
     }
     watchers.add(hatch)
   }
-  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
+  Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.

@@ -94,6 +94,7 @@ try {
   const take = () => page.evaluate(async ({ ms, scale }) => {
     const e = globalThis.engine, gaps = [], street = []
     e.scale = scale
+    e.rests = false
     await new Promise((r) => setTimeout(r, 1000))
     const stop = e.watch((g) => { gaps.push(g); street.push(e.street.ms) })
     // Once a second: who is on a crossing at red (none should be), who waits at a kerb, what each car waits for.

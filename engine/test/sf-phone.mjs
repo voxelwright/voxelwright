@@ -53,7 +53,7 @@ onerror = (m) => say({ error: String(m) })
     const park = { ...e.pose }, ground = e.ground(park.x, park.z), street = { x: 51590, z: 66300, yaw: -0.164, pitch: 0 }
     street.y = e.ground(street.x, street.z) + 1.7
     const frames = async (pose, fov) => {
-      Object.assign(e.pose, pose); e.fov = fov
+      Object.assign(e.pose, pose); e.fov = fov; e.rests = false
       await new Promise((r) => setTimeout(r, 1500)); await wait(() => e.world.stats.wanted === 0 && e.world.stats.stale === 0, 60000).catch(() => {}); await new Promise((r) => setTimeout(r, 2000))
       const gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ${seconds * 1000})); stop()
       const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => Math.round(g[Math.min(g.length - 1, Math.floor(g.length * p))] * 10) / 10

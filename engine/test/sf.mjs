@@ -114,7 +114,7 @@ try {
   const cdp = await context.newCDPSession(page)
   await cdp.send('Network.enable')
   await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 })
-  await page.goto(`${site.url}/sf/index.html#helper=${encodeURIComponent(HELPER)}&secret=offered`)
+  await page.goto(`${site.url}/sf/index.html?rest=0#helper=${encodeURIComponent(HELPER)}&secret=offered`)
   await page.waitForFunction(() => globalThis.engine?.seen?.first > 0, null, { timeout: 180_000 })
   await page.waitForFunction(() => globalThis.engine.seen.near > 0, null, { timeout: 240_000 })
   await page.waitForFunction(() => globalThis.engine.seen.whole > 0, null, { timeout: 300_000 })
@@ -141,7 +141,7 @@ try {
         const p = await ctx.newPage(), link = await ctx.newCDPSession(p)
         await link.send('Network.enable')
         await link.send('Network.emulateNetworkConditions', { offline: false, latency: 40, downloadThroughput: (mbit * 1e6) / 8, uploadThroughput: (5 * 1e6) / 8 })
-        await p.goto(`${other.url}/sf/index.html`)
+        await p.goto(`${other.url}/sf/index.html?rest=0`)
         await p.waitForFunction(() => globalThis.engine?.seen?.near > 0, null, { timeout: 240_000 })
         return await p.evaluate(() => ({ first: globalThis.engine.seen.first, near: globalThis.engine.seen.near }))
       } finally { await fresh.close(); other.stop(); await page.evaluate(() => { globalThis.engine.resting = false }) }
@@ -439,7 +439,7 @@ try {
   const handheld = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true })
   const small = await handheld.newPage()
   small.on('pageerror', (e) => errors.push(`phone: ${e.message}`))
-  await small.goto(`${site.url}/sf/index.html`)
+  await small.goto(`${site.url}/sf/index.html?rest=0`)
   await small.waitForFunction(() => globalThis.engine?.seen?.whole > 0, null, { timeout: 180_000 })
   await small.waitForTimeout(3000)
   results.phone = await small.evaluate(async (ms) => {

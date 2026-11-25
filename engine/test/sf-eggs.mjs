@@ -159,7 +159,7 @@ const greens = async (page, towers) => {
 
 /** Frame gaps for a few seconds: p50 and p99, ms, with the march's own GPU time. */
 const frames = async (page, seconds = 4) => {
-  const w = await page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, gpuMs: e.gpuMs } }, seconds * 1000)
+  const w = await page.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; e.rests = false; await new Promise((r) => setTimeout(r, 200)); const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); return { gaps, gpuMs: e.gpuMs } }, seconds * 1000)
   const g = w.gaps.filter((x) => x >= 2).sort((a, b) => a - b), q = (p) => round(g[Math.min(g.length - 1, Math.floor(g.length * p))], 1)
   return { frames: g.length, p50: q(0.5), p99: q(0.99), marchMs: round(w.gpuMs, 1) }
 }

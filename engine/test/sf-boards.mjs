@@ -204,7 +204,7 @@ try {
   /** Frame gaps at the park with the picture at 0.7 of its size, the best of up to three tries short of 60 fps (other lanes draw on this GPU). */
   const framesAt = async (target, wait) => {
     await target.evaluate(() => { globalThis.engine.scale = 0.7 }); await wait(4000)
-    const take = () => target.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b); return { frames: g.length, p50: g[Math.floor(g.length * 0.5)], p99: g[Math.min(g.length - 1, Math.floor(g.length * 0.99))], marchMs: e.gpuMs, cpuMs: e.cpuMs } }, seconds * 1000)
+    const take = () => target.evaluate(async (ms) => { const e = globalThis.engine, gaps = []; e.rests = false; await new Promise((r) => setTimeout(r, 200)); const stop = e.watch((g) => gaps.push(g)); await new Promise((r) => setTimeout(r, ms)); stop(); const g = gaps.filter((x) => x >= 2).sort((a, b) => a - b); return { frames: g.length, p50: g[Math.floor(g.length * 0.5)], p99: g[Math.min(g.length - 1, Math.floor(g.length * 0.99))], marchMs: e.gpuMs, cpuMs: e.cpuMs } }, seconds * 1000)
     let f = await take()
     for (let again = 0; again < 2 && f.p50 > 17.5; again++) { await wait(8000); const next = await take(); if (next.p50 < f.p50) f = next }
     return { p50: round(f.p50), p99: round(f.p99), marchMs: round(f.marchMs), cpuMs: round(f.cpuMs) }
