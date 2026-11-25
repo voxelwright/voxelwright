@@ -37,9 +37,9 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
   - Sonnet or Sol: clearly specified, mechanical work.
   - Astra, high: when Claude usage runs ahead of the reset. Give it a tighter
     brief.
-  - Gemini 4 Neon, high: trial only, on long implementation, debugging and
-    review units, never 3D or look work, and only through a route Google's
-    terms allow (AGENTS.md). Log the trial and its outcome.
+  - Gemini 4 Neon: on trial across every kind of work, look work included,
+    at varied effort (start at high), and only through a route Google's
+    terms allow (AGENTS.md). Log the kind, effort, time and outcome.
 - Start each unit in a fresh thread (`delegate_task`). Do not send new orders
   into a long, finished lane thread: a 1,900-item thread carries stale context,
   and the owner stopped one. A completed delegate wakes the lead, so don't poll

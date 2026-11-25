@@ -96,15 +96,18 @@ The owner had been first to spot six visible faults in 14 days.
   - For well-defined work that smaller models do well, the lead may choose
     Sonnet, Haiku or GPT-6.2 Sol.
   - Google's Gemini 4 Neon (November 2026) is on trial, not a default. Once
-    the owner has chosen a route (next rule), try it at high on long,
-    well-specified implementation, debugging and review work, beside the
-    model the lead would otherwise pick. Keep it off 3D,
-    rendering and UI look work, where the first hands-on reports put it well
-    behind Opus. Log each trial run in the dispatch log with `"trial": true`,
-    and record whether it finished in its time box, passed its checks at
-    hand-back, followed the brief, and what review found. After about ten
-    runs, keep it for the kinds of work where it matched the usual model,
-    and drop it elsewhere.
+    the owner has chosen a route (next rule), try it on every kind of work,
+    3D, rendering and UI look work included, beside the model the lead would
+    otherwise pick: a trial that skips a kind of work tells us nothing about
+    it. The first hands-on reports put it behind Opus on look work, so
+    expect that and measure it. Vary the effort too. High is the starting
+    point, lower for routine units, and the highest setting only where
+    thoroughness is worth its long wait. Log each trial run in the dispatch
+    log with `"trial": true`, the kind of work, the effort and the time
+    taken, and record whether it finished in its time box, passed its checks
+    at hand-back, followed the brief, and what review found. After about ten
+    runs of a kind, keep it for that kind if it matched the usual model, and
+    drop it there if not.
 - Reach a model only by a route its vendor's terms allow. Google's
   Antigravity terms forbid using third-party software to access the
   service, and its FAQ says wrapping `agy` in other coding agents or apps is
