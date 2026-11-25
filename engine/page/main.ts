@@ -445,18 +445,48 @@ async function main() {
   const PRESETS = { auto: null, low: { scale: 0.3, flags: 0 }, medium: { scale: 0.5, flags: SHADOWS }, high: { scale: 0.8, flags: SHADOWS | MIRRORS } } as const
   type Preset = keyof typeof PRESETS
   const addressed = flags & (SHADOWS | MIRRORS)
-  let preset: Preset = 'auto'
+  let preset: Preset = 'auto', custom = false
+  // The resolution, as the Sky panel's fader and its Auto switch have it: pinned at a scale by hand, or the GPU's to
+  // steer (`steer`) for a frame rate, 30 or 60 a second or the screen's own (0). A preset is the same thing chosen
+  // with its passes: Auto steers, the others pin. What is chosen is kept in this browser beside the preset.
+  let rate = 60
+  const RATES = [30, 60, 0] as const
+  const steered = () => !fixed && held < 1e6
+  const keepResolution = () => { try { localStorage.setItem('village.resolution', JSON.stringify({ auto: steered(), scale, target: rate })) } catch { /* this visit only */ } }
   const draws = (p: Preset, keep = true) => {
-    preset = p
+    preset = p; custom = false
     const to = PRESETS[p]
     flags = (flags & ~(SHADOWS | MIRRORS)) | ((to ? to.flags : SHADOWS | MIRRORS) & addressed)
     if (!fixed) { if (to) { scale = to.scale; held = 1e9 } else { held = 0 } }
     // (Storage may be refused, a private window: the choice is then this visit's.)
-    if (keep) try { localStorage.setItem('village.graphics', p) } catch { /* this visit only */ }
+    if (keep) { try { localStorage.setItem('village.graphics', p) } catch { /* this visit only */ } keepResolution() }
+  }
+  /** The resolution by hand: a scale pins it (on steer's grid of 0.05, 0.3 to 1), `auto` gives it back to the GPU, `target` is the frame rate steered for. An address's `?scale=` is kept over it. */
+  const resolve = (to: { scale?: number; auto?: boolean; target?: number }, keep = true) => {
+    if (fixed) return
+    if (to.target !== undefined && (RATES as readonly number[]).includes(to.target)) rate = to.target
+    if (to.auto === true) held = 0
+    else if (to.auto === false || to.scale !== undefined) { scale = Math.round(Math.max(0.3, Math.min(1, to.scale ?? scale)) * 20) / 20; held = 1e9 }
+    // Moved off what the preset draws, the preset is no longer what the page has.
+    const of = PRESETS[preset]
+    if (to.auto !== undefined || to.scale !== undefined) custom = of ? steered() || scale !== of.scale : !steered()
+    if (keep) keepResolution()
   }
   // (Taken up again only where the Sky panel is, which can change it: the realm's page, below.)
-  const keptGraphics = () => { try { const kept = localStorage.getItem('village.graphics'); if (kept && kept !== 'auto' && kept in PRESETS) draws(kept as Preset, false) } catch { /* nothing kept */ } }
-  const graphics = { presets: Object.keys(PRESETS) as Preset[], get: () => preset, set: (p: string) => { if (p in PRESETS) draws(p as Preset) } }
+  const keptGraphics = () => {
+    try {
+      const kept = localStorage.getItem('village.graphics')
+      if (kept && kept !== 'auto' && kept in PRESETS) draws(kept as Preset, false)
+      const res = JSON.parse(localStorage.getItem('village.resolution') ?? 'null') as { auto?: unknown; scale?: unknown; target?: unknown } | null
+      if (res && typeof res === 'object') resolve({ ...(typeof res.target === 'number' ? { target: res.target } : {}), ...(res.auto === true ? { auto: true } : typeof res.scale === 'number' ? { scale: res.scale } : {}) }, false)
+    } catch { /* nothing kept */ }
+  }
+  /** The preset chosen, or 'custom' once the fader or the switch has moved the resolution off it. */
+  const shownPreset = () => custom ? 'custom' : preset
+  const graphics = {
+    presets: Object.keys(PRESETS) as Preset[], get: shownPreset, set: (p: string) => { if (p in PRESETS) draws(p as Preset) },
+    resolution: { rates: RATES, get: () => ({ scale, auto: steered(), target: rate, fixed }), set: resolve },
+  }
   own.keys.set('KeyH', () => { flags ^= HEAT })
   own.keys.set('KeyR', () => { march.rain = march.rain > 0 ? 0 : 1 })
   own.keys.set('BracketRight', () => setHour((hour ?? 14) + 0.5))
@@ -475,8 +505,9 @@ async function main() {
     busy: false,
   } : null
   let gpuMs = 0, marchMs = 0, windowMs = 0, frameMs = 16.7, last = performance.now(), frames = 0, started = last
-  // The screen's own rate: the shortest gap between frames seen lately.
-  let screenMs = 16.7, shortest = Infinity
+  // The screen's own rate: the shortest gap between frames seen lately; and the shortest it has been seen to keep up,
+  // two counts running agreeing (a lone short gap is not a screen), which a frame rate of 'the screen's own' aims at.
+  let screenMs = 16.7, shortest = Infinity, fastestMs = 16.7
 
   // The first view left alone (nobody has pressed, moved the pointer or a key for two seconds, the eye where it arrived,
   // the fog gone) is drawn 30 times a second, not at the screen's rate: steered to six tenths of every frame, the
@@ -555,14 +586,14 @@ async function main() {
     if (!resting) {
       frameMs += ((now - last) - frameMs) * 0.05
       shortest = Math.min(shortest, now - last)
-      if (frames % 120 === 119) { screenMs = Math.max(4, shortest); shortest = Infinity }
+      if (frames % 120 === 119) { const was = screenMs; screenMs = Math.max(4, shortest); shortest = Infinity; if (Math.abs(screenMs - was) < 1) fastestMs = Math.min(fastestMs, screenMs) }
     }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
     shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     shot?.after(dt)
-    steer(Math.max(1000 / 60, screenMs), gap, resting)
+    steer(rate ? Math.max(1000 / rate, screenMs) : fastestMs, gap, resting)
     const v = view(), to = fit()
     march.roofed = roomedBy(dt)
     staff.frame(v)
@@ -1572,7 +1603,7 @@ async function main() {
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return shownPreset() }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, back: { go: () => void explored()?.back(), can: () => explored()?.state === 'in' } })

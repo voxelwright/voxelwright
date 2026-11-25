@@ -27,7 +27,11 @@ export interface RealmPage {
   /** Called every frame with the gap since the last, ms. */
   watch(each: (gap: number) => void): void
   /** How the picture is drawn (main.ts `graphics`): the presets, and the one chosen. Without it the panel has no such row. */
-  graphics?: { presets: readonly string[]; get(): string; set(preset: string): void }
+  graphics?: {
+    presets: readonly string[]; get(): string; set(preset: string): void
+    /** The resolution (main.ts `resolve`): a scale of the screen's pixels, pinned or steered for a frame rate (0: the screen's own). */
+    resolution?: { rates: readonly number[]; get(): { scale: number; auto: boolean; target: number; fixed: boolean }; set(to: { scale?: number; auto?: boolean; target?: number }): void }
+  }
   /** Opens the line to say something to the city on (eggs.ts), where the page has one: by touch there is no Enter or slash. */
   say?(): void
 }
@@ -58,6 +62,13 @@ const STYLE = /* css */ `
 /* The graphics, two by two as the weather (Medium is as wide as Overcast). */
 #realm .sky .graphics { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
 #realm .sky .foot .say { margin-inline-end: auto; }
+/* The resolution: a fader (a picture's size is set by where it stands and moved finely), its Auto switch, and the frame rates Auto holds, three across. */
+#realm .sky .rates { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+/* (By touch the keys are the smaller size: four across fit, and the panel stays short enough to leave the boards clear.) */
+@media (pointer: coarse) { #realm .sky .rates { grid-template-columns: repeat(4, 1fr); } }
+/* (The resolution is a part of its own, a third column on a phone on its side; in one column it comes before the keys at the foot.) */
+#realm .sky .part.res > * { order: 1; }
+#realm .sky .vx-groove, #realm .sky .foot { order: 2; }
 /* The tools: a bank along the bottom, in the smaller size of the key font (typeface.ts), so that the bank stands clear of
    the place's name in the corner. The kit draws a key's side walls over its padding, the left one the wider: five and a
    half cells before its words and four after, so a word's first figure stands clear of the wall (3 Big charge, #450). */
@@ -82,6 +93,8 @@ const STYLE = /* css */ `
   /* On its side the phone is low: the panel is two columns, the sky's on the left and the graphics and keys on the right. */
   @media (orientation: landscape) {
     #realm .sky { inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 24px), calc(var(--vx) * 150)); grid-template-columns: 1fr 1fr; column-gap: calc(var(--vx) * 6); align-items: start; }
+    /* (With the resolution a third column: the panel as wide as the phone allows.) */
+    #realm .sky:has(.part.res) { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)) - 68px), calc(var(--vx) * 228)); grid-template-columns: 1fr 1fr 1fr; }
     #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); }
   }
   #realm .egg-line input { font-size: 16px !important; }
@@ -146,6 +159,14 @@ export function realmControls(page: RealmPage) {
       <div class="vx-groove" role="separator"></div>
       <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}<button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
+      ${page.graphics?.resolution ? `<div class="part res">
+      <header class="r"><h2>Resolution</h2><output class="res" aria-live="off"></output></header>
+      <span class="vx-slider"><input class="res" type="range" min="30" max="100" step="5" aria-label="Resolution, percent of the screen's pixels"></span>
+      <div class="vx-toggle-group rates" role="radiogroup" aria-label="Auto resolution: off, or the frames a second it holds">
+        <label title="Off: the resolution stays where the fader is"><input type="radio" name="realm-rate" value="off">Off</label>
+        ${page.graphics.resolution.rates.map((r) => `<label title="Auto: the resolution follows the GPU to hold ${r ? `${r} frames a second` : 'the screen’s own rate'}"><input type="radio" name="realm-rate" value="${r}">${r || 'Max'}</label>`).join('')}
+      </div>
+      </div>` : ''}
     </section>
     <div class="vx-toggle-group tools" role="radiogroup" aria-label="Tool">
       ${page.tools.map((t, i) => `<label><input type="radio" name="realm-tool" value="${i}"><span class="n">${i + 1}</span>${t}</label>`).join('')}
@@ -169,6 +190,8 @@ export function realmControls(page: RealmPage) {
   const weathers = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-weather]')]
   const tools = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-tool]')]
   const graphics = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-graphics]')]
+  const res = page.graphics?.resolution, resIn = root.querySelector<HTMLInputElement>('input.res'), resOut = root.querySelector<HTMLOutputElement>('output.res')
+  const rates = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-rate]')]
   const panel = $<HTMLElement>('.sky'), fold = $<HTMLButtonElement>('.fold')
   const stick = $<HTMLElement>('.stick'), cap = $<HTMLElement>('.stick .cap')
   const coarse = matchMedia('(pointer: coarse)')
@@ -187,6 +210,12 @@ export function realmControls(page: RealmPage) {
   for (const t of tools) t.addEventListener('change', () => { if (t.checked) page.pickTool(Number(t.value)) })
   $<HTMLButtonElement>('.reset').addEventListener('click', () => void page.reset())
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
+  // The fader pins the resolution where it is let stand (Auto goes off); a rate chosen is what Auto holds, and turns it on.
+  let sizing = false
+  resIn?.addEventListener('pointerdown', () => { sizing = true })
+  addEventListener('pointerup', () => { sizing = false })
+  resIn?.addEventListener('input', () => res?.set({ scale: Number(resIn.value) / 100 }))
+  for (const r of rates) r.addEventListener('change', () => { if (r.checked) res?.set(r.value === 'off' ? { auto: false } : { target: Number(r.value), auto: true }) })
   // The line opens in the same press, so that a phone brings its keyboard up (Safari does only for a focus the hand made).
   // Where the panel is a drawer behind its key, it is folded first: the line is to be read.
   // (The line was hidden when the kit took up the controls, and is drawn as a card of it once it is shown.)
@@ -211,7 +240,7 @@ export function realmControls(page: RealmPage) {
   $<HTMLButtonElement>('.use').addEventListener('click', () => page.controls.use())
 
   // Every frame: the sky goes on towards what was asked, and the controls show what the page has.
-  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', night: boolean | null = null, stickAt = ''
+  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', shownRes = '', night: boolean | null = null, stickAt = ''
   page.watch((gap) => {
     sky.step(gap / 1000)
     const h = sky.hour ?? UNSET
@@ -224,6 +253,17 @@ export function realmControls(page: RealmPage) {
     if (t !== shownTool) { shownTool = t; tools.forEach((el, i) => { el.checked = i === t }) }
     const g = page.graphics?.get() ?? ''
     if (g !== shownGraphics) { shownGraphics = g; for (const el of graphics) el.checked = el.value === g }
+    // The resolution as the page has it: under Auto the fader goes where the GPU steers it.
+    if (res && resIn && resOut) {
+      const r = res.get(), at = String(Math.round(r.scale * 100)), key = `${at},${r.auto},${r.target},${r.fixed}`
+      if (key !== shownRes) {
+        shownRes = key
+        if (!sizing) resIn.value = at
+        resOut.value = r.auto ? `Auto ${at}%` : `${at}%`
+        for (const el of rates) el.checked = r.auto ? el.value === String(r.target) : el.value === 'off'
+        for (const el of [resIn, ...rates]) el.disabled = r.fixed
+      }
+    }
     // The kit's day and night follow the hour (SPEC: a world with a time of day sets data-theme from its clock).
     const dark = h < 6.5 || h >= 18.5
     if (dark !== night) { night = dark; html.dataset.theme = dark ? 'dark' : 'light' }

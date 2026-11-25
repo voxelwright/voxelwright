@@ -52,6 +52,8 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
   html.first #realm.folds .sky .weather { grid-column: 1; grid-row: 3 / span 2; }
   html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
   html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; }
+  /* (The resolution's rows would take the panel down over BLOG: in the first view they wait for the realm's own panel.) */
+  html.first #realm.folds .sky .part.res > * { display: none; }
 }
 /* A smaller phone on its side (under 760 px, 667 x 375): beside the credits key the weather's words did not fit. The
    panel lies under the corner's keys instead (--first-corner-bottom), as wide as it may be left of the tower, with the
