@@ -42,13 +42,22 @@ try {
   check('an agent is told who wants what and where', look.wanted?.length === 3 && look.wanted.some((w: { who: string; wants: string }) => w.who === 'Mabel' && /walk across/.test(w.wants)), look.wanted)
 
   // To the middle of the road and down to a couple of metres above the trench.
-  await s(`s.hold('KeyD', true)`)
-  await until(at, (p) => p[0] < 0.3, 6000)
-  await s(`s.hold('KeyD', false)`)
-  await s(`s.hold('KeyW', true)`)
+  // Release on the exact animation frame the target is crossed, so IPC latency does not overshoot the bridge's landing window or clearOf().
+  const walkUntil = (code: string, axis: 0 | 2, cmp: '<' | '>', goal: number, ms: number) =>
+    page.evaluate(([c, i, op, g, lim]) => new Promise<number[]>((resolve) => {
+      const st = (window as unknown as { __street: { hold(k: string, d: boolean): void; shownOf(id: number): number[]; you: number } }).__street
+      const t0 = performance.now()
+      st.hold(c, true)
+      const step = () => {
+        const p = st.shownOf(st.you)
+        if ((op === '<' ? p[i] < g : p[i] > g) || performance.now() - t0 > lim) { st.hold(c, false); resolve(p); return }
+        requestAnimationFrame(step)
+      }
+      requestAnimationFrame(step)
+    }), [code, axis, cmp, goal, ms] as const)
+  await walkUntil('KeyD', 0, '<', 0.3, 6000)
   // A long walk on a page that has just built a street: with the machine busy it has taken over twelve seconds.
-  await until(at, (p) => p[2] > (TRENCH.from - 1.6) / LEN, 30_000)
-  await s(`s.hold('KeyW', false)`)
+  await walkUntil('KeyW', 2, '>', (TRENCH.from - 1.6) / LEN, 30_000)
   await sleep(500)
 
   // Told to try with nothing to walk on, she does, falls in, and is back at her place.

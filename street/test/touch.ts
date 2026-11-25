@@ -25,27 +25,31 @@ try {
   const s = <T>(body: string) => page.evaluate(`(async () => { const s = window.__street; return ${body} })()`) as Promise<T>
   const until = async <T>(read: () => Promise<T>, good: (v: T) => boolean, ms: number) => { for (const t0 = Date.now(); ;) { const v = await read(); if (good(v) || Date.now() - t0 > ms) return v; await sleep(80) } }
   const at = () => s<number[]>('s.shownOf(s.you)')
-  /** A thumb down on the left of the picture and dragged: right and up are 1. Lifted with `lift`. */
-  const finger = (kind: string, x: number, y: number) => page.evaluate(([k, px, py]) => {
-    const target = k === 'pointerdown' ? document.querySelector('canvas')! : window
-    target.dispatchEvent(new PointerEvent(k as string, { pointerId: 7, pointerType: 'touch', clientX: px as number, clientY: py as number, bubbles: true, isPrimary: true }))
-  }, [kind, x, y] as const)
-  const stick = async (right: number, up: number) => { await finger('pointerdown', 90, 620); await finger('pointermove', 90 + right * 50, 620 - up * 50) }
-  const lift = () => finger('pointerup', 90, 620)
+  /** A thumb down on the left of the picture and dragged: right and up are 1. Lifted on the exact animation frame `axis` crosses `goal`, so IPC latency does not overshoot Otis's frame or the trench's bridge window. */
+  const walkUntil = (right: number, up: number, axis: 0 | 2, cmp: '<' | '>', goal: number, ms: number) =>
+    page.evaluate(([r, u, i, op, g, lim]) => new Promise<number[]>((resolve) => {
+      const send = (k: string, px: number, py: number) => (k === 'pointerdown' ? document.querySelector('canvas')! : window).dispatchEvent(new PointerEvent(k, { pointerId: 7, pointerType: 'touch', clientX: px, clientY: py, bubbles: true, isPrimary: true }))
+      const st = (window as unknown as { __street: { shownOf(id: number): number[]; you: number } }).__street
+      const t0 = performance.now()
+      send('pointerdown', 90, 620)
+      send('pointermove', 90 + r * 50, 620 - u * 50)
+      const step = () => {
+        const p = st.shownOf(st.you)
+        if ((op === '<' ? p[i] < g : p[i] > g) || performance.now() - t0 > lim) { send('pointerup', 90, 620); resolve(p); return }
+        requestAnimationFrame(step)
+      }
+      requestAnimationFrame(step)
+    }), [right, up, axis, cmp, goal, ms] as const)
 
   await page.goto(`http://localhost:${PAGE}/?name=Phone`)
   await page.waitForFunction('window.__street?.ready', undefined, { timeout: 40_000 })
   await sleep(1000)
   const start = await at()
   // The stick: to the right is the road's middle from here, up is down the hill.
-  await stick(1, 0)
-  await until(at, (p) => p[0] < 0.3, 6000)
-  await lift()
+  await walkUntil(1, 0, 0, '<', 0.3, 6000)
   const side = await at()
   check('the stick to the right walks you to the right', side[0] < 0.4 && Math.abs(side[2] - start[2]) < 1, { start, side })
-  await stick(0, 1)
-  await until(at, (p) => p[2] > -19.5, 8000)
-  await lift()
+  await walkUntil(0, 1, 2, '>', -19.5, 8000)
   await sleep(700)
   // What someone wants, over their head, stays on a narrow screen.
   const heads = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('.head')].filter((h) => h.style.display !== 'none' && !h.querySelector<HTMLElement>('.wants')!.hidden).map((h) => { const r = h.getBoundingClientRect(); return { text: h.querySelector('.wants')!.textContent!.slice(0, 24), left: Math.round(r.left), right: Math.round(r.right) } }))
@@ -57,9 +61,7 @@ try {
   const top = await until(at, (p) => p[1] > ground + 0.4, 1500)
   check('a tap jumps', top[1] > ground + 0.4, { ground, top: top[1] })
   await sleep(900)
-  await stick(0, 1)
-  await until(at, (p) => p[2] > (TRENCH.from - 1.6) / LEN, 12_000)
-  await lift()
+  await walkUntil(0, 1, 2, '>', (TRENCH.from - 1.6) / LEN, 12_000)
   await sleep(500)
 
   // The sentence, by tapping it and typing: a bridge, and Mabel crosses.

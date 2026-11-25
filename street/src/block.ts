@@ -35,8 +35,10 @@ export interface MadeThing { toy: ToySpec; text: string; by: string; at: string 
 const MOST = { made: 80, moving: 700, bits: 140 }
 /** A number on the wire is not given to a new thing until this many ticks after the old one went: a pose still on its way must not move the new thing. */
 const ID_REST = 180
+/** Ticks a seat's last input is repeated when no fresh datagram arrives (100 ms): bridges UDP jitter without runaway walking when a browser stalls. */
+const MAX_HOLD = 6
 
-interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; ack: number; driven?: { x: number; z: number; jump: boolean }; /** Walked by the world itself (problems.ts): not someone who came. */ cast?: boolean }
+interface Seat { toy: string; body: string; legs: string; name: string; plush: number; queue: Input[]; newest: number; last: Input; missed: number; ack: number; driven?: { x: number; z: number; jump: boolean }; /** Walked by the world itself (problems.ts): not someone who came. */ cast?: boolean }
 
 /** What is on the street, as a resident who cannot see a picture is told it. */
 export interface Seen {
@@ -272,7 +274,7 @@ export class Block {
     spec.label = name || `Resident ${n + 1}`
     this.build(spec)
     const id = this.ids.get(`${toy}/body`)!
-    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, name: spec.label, plush: n, queue: [], newest: 0, last: STILL, ack: 0 })
+    this.seats.set(id, { toy, body: `${toy}/body`, legs: `${toy}/legs`, name: spec.label, plush: n, queue: [], newest: 0, last: STILL, missed: 0, ack: 0 })
     return id
   }
   /** A seat's name, as others read it over its head. */
@@ -348,9 +350,10 @@ export class Block {
       // A seat that fell behind catches up at once rather than staying late for good.
       while (seat.queue.length > 4) seat.queue.shift()
       const next = seat.queue.shift()
+      if (next) { seat.last = next; seat.ack = next.seq; seat.missed = 0 }
+      else if (++seat.missed > MAX_HOLD) seat.last = STILL
       const input = seat.driven ? { seq: 0, ...seat.driven } : next ?? { ...seat.last, jump: false }
       if (seat.driven) seat.driven.jump = false
-      if (next) { seat.last = next; seat.ack = next.seq }
       this.world.setKnob(seat.legs, 'x', input.x)
       this.world.setKnob(seat.legs, 'z', input.z)
       this.world.setKnob(seat.legs, 'jump', input.jump ? 1 : 0)

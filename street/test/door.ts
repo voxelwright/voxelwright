@@ -67,7 +67,7 @@ try {
   // A home opened with a street on another machine's name shows no way out: the address is not believed.
   const other = await chrome.newPage()
   await other.goto(`http://localhost:${HOME}/?talk=off&street=${encodeURIComponent('https://elsewhere.example/')}`)
-  await other.waitForFunction('document.querySelector("canvas")', undefined, { timeout: 30_000 })
+  await other.waitForSelector('canvas', { timeout: 30_000 })
   await sleep(2500)
   check('a street on another machine\'s name is not believed', (await other.locator('.street-door').count()) === 0)
 } finally {
