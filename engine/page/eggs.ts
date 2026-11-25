@@ -384,7 +384,7 @@ export function eggs(page: EggsPage) {
     .egg-player { position: absolute; display: grid; gap: 6px; padding: 8px 10px 10px; pointer-events: auto; box-sizing: border-box;
       top: 56px; left: max(16px, env(safe-area-inset-left)); inline-size: min(340px, calc(100vw - 2 * max(16px, env(safe-area-inset-left)))); font: 600 13px/1.2 var(--vx-font, system-ui); }
     .egg-player .top { display: flex; align-items: center; gap: 6px; min-inline-size: 0; }
-    .egg-player .top .stop { flex: none; margin-inline-start: auto; }
+    .egg-player .top .stop { flex: none; }
     .egg-player .now { flex: none; font-weight: 400; opacity: 0.72; }
     .egg-player .title { flex: 0 1 auto; min-inline-size: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vx-link, inherit); text-decoration: underline; text-underline-offset: 2px; text-decoration-thickness: 1px; }
     .egg-player .title::after { content: " \\2197\\FE0E"; }
@@ -402,13 +402,21 @@ export function eggs(page: EggsPage) {
       .egg-player .seek input { block-size: 44px; }
     }
     @media (pointer: coarse) and (min-aspect-ratio: 1/1) {
-      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 50%; translate: -50% 0; inline-size: min(420px, 100vw - 240px); }
-    }`
+      html:not(.first) .egg-player { top: max(12px, env(safe-area-inset-top)); left: 0; right: 0; margin-inline: auto; inline-size: min(420px, 100vw - 240px); }
+    }
+    .egg-player { transition: transform 320ms cubic-bezier(0.32, 0.72, 0, 1); }
+    .egg-player.tucked { transform: translateX(calc(env(safe-area-inset-left, 0px) - var(--tuck, 100vw))); }
+    .egg-player .tuck { flex: none; margin-inline-start: auto; padding-inline: 12px; font-size: 20px; }
+    .egg-player .tab { position: absolute; left: calc(100% + 16px); font-size: 22px; top: 50%; translate: 0 -50%; min-inline-size: 36px; min-block-size: 56px; padding: 0;
+      opacity: 0; visibility: hidden; transition: opacity 160ms ease-out, visibility 0s 160ms; }
+    .egg-player.tucked .tab { opacity: 1; visibility: visible; transition: opacity 160ms ease-out 120ms; }
+    @media (prefers-reduced-motion: reduce) { .egg-player, .egg-player .tab { transition: none; } }`
   document.head.append(placed)
   // (Stop beside the title, as a window's close is: the kit's keys are wide, and four in a row are wider than a phone.)
-  player.innerHTML = `<div class="top"><span class="now">Now playing</span><a class="title" target="_blank" rel="noopener noreferrer"></a><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button></div>
+  player.innerHTML = `<div class="top"><span class="now">Now playing</span><a class="title" target="_blank" rel="noopener noreferrer"></a><button class="vx-button tuck" type="button" aria-label="Tuck the player away" title="Tuck the player away">‹</button><button class="vx-button stop" type="button" data-vx-kind="danger">Stop</button></div>
     <div class="seek"><output class="at">0:00</output><span class="vx-slider"><input type="range" min="0" max="1" step="0.05" value="0" aria-label="Where in it"></span><output class="of">0:00</output></div>
-    <div class="keys"><button class="vx-button pause" type="button">Pause</button><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button next" type="button">Next</button></div>`
+    <div class="keys"><button class="vx-button pause" type="button">Pause</button><button class="vx-button mute" type="button" aria-pressed="false">Mute</button><button class="vx-button next" type="button">Next</button></div>
+    <button class="vx-button tab" type="button" aria-label="Bring the player back" title="Bring the player back" inert>›</button>`
   realm.append(player)
   const $p = <T extends Element>(q: string) => player.querySelector<T>(q)!
   const muteKey = $p<HTMLButtonElement>('.mute'), stopKey = $p<HTMLButtonElement>('.stop'), pauseKey = $p<HTMLButtonElement>('.pause'), nextKey = $p<HTMLButtonElement>('.next')
@@ -433,6 +441,7 @@ export function eggs(page: EggsPage) {
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
+    if (tucked) measure()
     const title = TITLES(running.egg), source = SOURCES[running.egg]
     link.textContent = title
     if (source) { link.href = `https://www.youtube.com/watch?v=${source}`; link.title = `${title}: the original on YouTube (opens a new tab)` }
@@ -464,6 +473,24 @@ export function eggs(page: EggsPage) {
     showPlayer()
     say(r.paused ? 'Paused.' : 'Playing.')
   })
+  // Tucked: slid off the left edge to watch with nothing over the picture, a tab left at the edge to bring it back. It
+  // stays tucked for the next egg too, until the tab is tapped. Out of sight, its keys are out of reach (inert).
+  const tuckKey = $p<HTMLButtonElement>('.tuck'), tab = $p<HTMLButtonElement>('.tab'), parts = [...player.children].filter((e) => e !== tab) as HTMLElement[]
+  let tucked = false
+  /** How far it slides: its right edge 16 px past the screen's left, its block's side and shadow too, the tab 16 px out to meet the edge (by layout, so the slide itself does not count). */
+  const measure = () => { const left = (player.offsetParent as HTMLElement | null)?.getBoundingClientRect().left ?? 0; player.style.setProperty('--tuck', `${left + player.offsetLeft + player.offsetWidth + 16}px`) }
+  const tuck = (on: boolean) => {
+    const focused = player.contains(document.activeElement)
+    tucked = on
+    if (on) measure()
+    player.classList.toggle('tucked', on)
+    for (const e of parts) e.inert = on
+    tab.inert = !on
+    if (focused) (on ? tab : tuckKey).focus({ preventScroll: true })
+  }
+  tuckKey.addEventListener('click', () => tuck(true))
+  tab.addEventListener('click', () => tuck(false))
+  addEventListener('resize', () => { if (tucked) measure() })
   nextKey.addEventListener('click', () => act('meme'))
   stopKey.addEventListener('click', () => stop())
   fader.addEventListener('pointerdown', () => { scrubbing = true })

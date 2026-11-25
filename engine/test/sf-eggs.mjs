@@ -485,7 +485,7 @@ const fromFirst = async () => {
         await until(() => globalThis.engine.eggs.state.playing, null, 20_000)
         await page.waitForTimeout(1500)
         const player = await page.evaluate(() => {
-          const keys = [...document.querySelectorAll('.egg-player button')].map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
+          const keys = [...document.querySelectorAll('.egg-player button')].filter((b) => b.checkVisibility({ visibilityProperty: true })).map((b) => { const q = b.getBoundingClientRect(), top = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { text: b.textContent, x: Math.round(q.left + q.width / 2), y: Math.round(q.top + q.height / 2), w: Math.round(q.width), h: Math.round(q.height), onTop: top === b } })
           const c = document.querySelector('#first .credits').getBoundingClientRect(), p = document.querySelector('.egg-player').getBoundingClientRect()
           // (Nor over a spot that ends it, or a board.)
           const s = globalThis.engine.eggs.first.spots, b = globalThis.engine.boards, over = (q) => q && p.left < q.x1 && p.right > q.x0 && p.top < q.y1 && p.bottom > q.y0
@@ -879,6 +879,18 @@ try {
   const d = await page.evaluate(() => globalThis.engine.eggs.media.duration)
   s = await state(page)
   check(Math.abs(s.time - d * 0.75) < d * 0.1, `the fader clicked three quarters along goes there (${round(s.time)} s of ${round(d)})`)
+  // Tucked away: slid off the left edge, the video playing on, only the tab at the edge; the tab brings it back.
+  const tuckedBox = () => page.evaluate(() => { const p = document.querySelector('.egg-player'), r = p.getBoundingClientRect(), t = p.querySelector('.tab').getBoundingClientRect(); return { right: Math.round(r.right), tab: [t.left, t.right].map(Math.round), tabOnTop: document.elementFromPoint(t.left + t.width / 2, t.top + t.height / 2) === p.querySelector('.tab'), keysInert: !!p.querySelector('.stop').closest('[inert]') } })
+  await page.click('.egg-player .tuck')
+  await page.waitForTimeout(700)
+  const away = await tuckedBox(), t1 = (await state(page)).time
+  await page.waitForTimeout(500)
+  s = await state(page)
+  check(away.right <= 0 && away.tab[0] >= 0 && away.tab[0] <= 2 && away.tabOnTop && away.keysInert && s.playing && s.time > t1, `the player tucks away (its right edge at ${away.right} px, the tab at ${away.tab.join('-')} px and on top, its keys out of reach ${away.keysInert}), the video playing on (${round(s.time)} s)`)
+  await page.click('.egg-player .tab')
+  await page.waitForTimeout(700)
+  const backBox = await page.locator('.egg-player .next').boundingBox()
+  check(backBox && backBox.x > 0, `the tab brings it back (Next at ${round(backBox?.x ?? -1)} px)`)
   await page.click('.egg-player .next')
   await page.waitForFunction(() => { const s = globalThis.engine.eggs.state; return s.running && s.running !== 'this' }, null, { timeout: 10_000 }).catch(() => null)
   s = await state(page)
