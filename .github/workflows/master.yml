@@ -1,6 +1,9 @@
-# The master server (master/): test it, then build release binaries for five
-# platforms and keep them as workflow artifacts. Nothing is released, tagged or
-# pushed to a registry.
+# The master server (master/): test it on every push that touches it. The release
+# binaries for five platforms and the Docker image are built only when the workflow
+# is run by hand (Actions, master, Run workflow) and kept as workflow artifacts:
+# a macOS minute is billed as ten and a Windows one as two, and six pushes of the
+# first branch built all five each time. Nothing is released, tagged or pushed to a
+# registry.
 name: master
 
 on:
@@ -32,6 +35,7 @@ jobs:
 
   build:
     needs: test
+    if: github.event_name == 'workflow_dispatch'
     strategy:
       fail-fast: false
       matrix:
@@ -67,6 +71,7 @@ jobs:
 
   docker:
     needs: test
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
