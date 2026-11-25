@@ -5,11 +5,14 @@
 //   node server.mjs --world file --release <folder or address> --master <address> --name "..." --about "..."
 //                   --most 8 [--private] [--password-file f] [--admin-password-file f] [--port 5747] [--ice-ports a-b]
 //                   [--asks 30] [--up-mb 24] [--columns 65536] [--backlog-mb 32]
+//                   [--things-minute 6] [--changes-minute 30] [--things 40] [--cells 4000000] [--reach 1200]
 //                   [--release-cache dir] [--arrive=x,y,z,yaw] [--reports file]
 //
 // --release is a built static realm (node sf/build.mjs) or the address of its current.json: pages join only a
 // world on their own release. Without it the world is the generated town (pin "town"). --private keeps the lobby off
-// the master's list: it is joined by its code. Passwords are read from their files, never from the command line. The
+// the master's list: it is joined by its code. What one person who is not an admin may make: things a minute, changes
+// to things a minute, things standing and their cells all told, and how far from where their page says they are (cells
+// of 10 cm); admins are held to none of it. Passwords are read from their files, never from the command line. The
 // last three go to serve.mjs as they are (a value that starts with "-" is given with "=").
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
@@ -20,6 +23,7 @@ const { values: a } = parseArgs({ options: {
   world: string, port: { type: 'string', default: '5747' }, release: string, 'release-cache': string, arrive: string, reports: string,
   master: string, name: string, about: string, most: string, private: { type: 'boolean' }, 'password-file': string, 'admin-password-file': string,
   'ice-ports': string, asks: string, 'up-mb': string, columns: string, 'backlog-mb': string,
+  'things-minute': string, 'changes-minute': string, things: string, cells: string, reach: string,
 } })
 if (!a.world) { console.error('a server keeps a world: --world <file>'); process.exit(1) }
 const secret = (name) => { const f = a[name]; if (!f) return null; const v = readFileSync(f, 'utf8').replace(/\r?\n$/, ''); if (!v) { console.error(`--${name} names an empty file`); process.exit(1) } return v }
@@ -50,6 +54,7 @@ try {
     ...(a['up-mb'] ? { upMinute: Number(a['up-mb']) << 20 } : {}),
     ...(a.columns ? { columns: Number(a.columns) } : {}),
     ...(a['backlog-mb'] ? { backlog: Number(a['backlog-mb']) << 20 } : {}),
+    ...Object.fromEntries([['things-minute', 'thingsMinute'], ['changes-minute', 'changesMinute'], ['things', 'things'], ['cells', 'cells'], ['reach', 'reach']].filter(([flag]) => a[flag] !== undefined).map(([flag, key]) => [key, Number(a[flag])])),
   },
   })
 } catch (e) { console.error(e.message); process.exit(1) }

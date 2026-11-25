@@ -2,10 +2,10 @@
 // real master server (master/, built here if it is not); pages served by a plain host of files on another port (the
 // static realm, `node sf/build.mjs`) join it through the master and data channels, as strangers to the world's server.
 //
-//   node test/door.mjs [--release dist-sf]
+//   node test/door.mjs [--release dist-sf] [--ports 6000]
 //
-// Ports (this lane's): 6001 the master, 6002 the world's server (this machine only), 6003 the pages' host, UDP 6004
-// to 6009 the door's ICE. (6000 is a port browsers and Node's fetch refuse: X11.)
+// Ports (this lane's, from --ports, 6000 unless said): +1 the master, +2 the world's server (this machine only), +3 the
+// pages' host, UDP +4 to +9 the door's ICE. (6000 itself is a port browsers and Node's fetch refuse: X11.)
 import { spawn, spawnSync } from 'node:child_process'
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,21 +22,22 @@ const folder = resolve(here, arg('release', 'dist-sf'))
 const scratch = mkdtempSync(join(tmpdir(), 'engine-door-'))
 const file = join(scratch, 'world.log'), adminFile = join(scratch, 'admin'), ADMIN = 'amber-lantern-42'
 writeFileSync(adminFile, `${ADMIN}\n`, { mode: 0o600 })
-const MASTER = 'http://127.0.0.1:6001', WORLD = 'http://127.0.0.1:6002'
+const PORTS = Number(arg('ports', '6000')), port = (n) => PORTS + n
+const MASTER = `http://127.0.0.1:${port(1)}`, WORLD = `http://127.0.0.1:${port(2)}`
 const stops = []
 const finish = (code) => { for (const s of stops.reverse()) { try { s() } catch { /* gone */ } } rmSync(scratch, { recursive: true, force: true }); process.exit(code) }
 
 // ── The master (master/README.md): limits for one address raised, since every page here is this machine ──
 const masterDir = resolve(here, '..', 'master'), binary = join(masterDir, 'target', 'release', 'village-master')
 if (!existsSync(binary) && spawnSync('cargo', ['build', '--release', '--quiet'], { cwd: masterDir, stdio: 'inherit' }).status !== 0) { console.error('the master did not build'); process.exit(1) }
-const master = spawn(binary, ['--listen', '127.0.0.1:6001', '--registrations-per-minute', '100', '--joins-per-minute', '1000', '--lookups-per-minute', '5000', '--max-lobbies-per-addr', '16'], { stdio: ['ignore', 'ignore', 'pipe'] })
+const master = spawn(binary, ['--listen', `127.0.0.1:${port(1)}`, '--registrations-per-minute', '100', '--joins-per-minute', '1000', '--lookups-per-minute', '5000', '--max-lobbies-per-addr', '16'], { stdio: ['ignore', 'ignore', 'pipe'] })
 stops.push(() => master.kill('SIGINT'))
 for (let i = 0; ; i++) { try { await fetch(MASTER); break } catch { if (i > 100) { console.error('the master did not start'); finish(1) } await wait(100) } }
 
 // ── The dedicated server ──
 /** Starts server.mjs and answers its lobby's id and code once the master has listed it, with how to stop it. */
 async function dedicated(more = []) {
-  const p = spawn('node', ['server.mjs', '--world', file, '--release', folder, '--port', '6002', '--master', MASTER, '--name', 'Fern Hollow', '--about', 'a check', '--most', '2', '--admin-password-file', adminFile, '--ice-ports', '6004-6009', ...more], { cwd: here, stdio: ['ignore', 'pipe', 'pipe'] })
+  const p = spawn('node', ['server.mjs', '--world', file, '--release', folder, '--port', String(port(2)), '--master', MASTER, '--name', 'Fern Hollow', '--about', 'a check', '--most', '2', '--admin-password-file', adminFile, '--ice-ports', `${port(4)}-${port(9)}`, ...more], { cwd: here, stdio: ['ignore', 'pipe', 'pipe'] })
   const said = []
   p.stderr.on('data', (d) => { const t = String(d); if (!/ExperimentalWarning|trace-warnings/.test(t)) process.stderr.write(`  server: ${t}`) })
   const lobby = await new Promise((done, no) => {
@@ -47,7 +48,7 @@ async function dedicated(more = []) {
 }
 let server = await dedicated()
 stops.push(() => server.process.kill('SIGKILL'))
-const site = await plain(folder, '127.0.0.1', 6003)
+const site = await plain(folder, '127.0.0.1', port(3))
 stops.push(() => site.stop())
 check(!!server.id && !!server.code, `server.mjs keeps the world and is listed with the master as lobby ${server.id}`)
 const json = async (path) => { const r = await fetch(`${WORLD}${path}`); if (!r.ok) throw new Error(`${path}: ${r.status} ${await r.text()}`); return r.json() }
@@ -250,7 +251,7 @@ try {
 
   // ── What is off the list ────────────────────────────────────────────────────
   const off = {}
-  for (const [m, p] of [['GET', '/world/minds'], ['POST', '/world/mind'], ['POST', '/world/join'], ['GET', `/world/me?by=${adaYou}`], ['GET', `/world/around?by=${adaYou}`], ['GET', '/release/current.json'], ['GET', '/page/main.ts'], ['GET', '/plugins/make/page.ts'], ['GET', '/'], ['POST', '/report'], ['GET', '/realm/home/world/ground'], ['GET', '/world/../release/current.json'], ['GET', '//127.0.0.1:6002/world/ground'], ['GET', 'http://127.0.0.1:6002/world/ground'], ['GET', '/world/ground/'], ['GET', '/WORLD/ground'], ['PUT', '/world/ask']]) { off[`${m} ${p}`] = (await cleo.fetch(p, { method: m, body: m === 'GET' ? undefined : {} })).status; await wait(80) }
+  for (const [m, p] of [['GET', '/world/minds'], ['POST', '/world/mind'], ['POST', '/world/join'], ['GET', `/world/me?by=${adaYou}`], ['GET', `/world/around?by=${adaYou}`], ['GET', '/release/current.json'], ['GET', '/page/main.ts'], ['GET', '/plugins/make/page.ts'], ['GET', '/'], ['POST', '/report'], ['GET', '/realm/home/world/ground'], ['GET', '/world/../release/current.json'], ['GET', `//127.0.0.1:${port(2)}/world/ground`], ['GET', `http://127.0.0.1:${port(2)}/world/ground`], ['GET', '/world/ground/'], ['GET', '/WORLD/ground'], ['PUT', '/world/ask']]) { off[`${m} ${p}`] = (await cleo.fetch(p, { method: m, body: m === 'GET' ? undefined : {} })).status; await wait(80) }
   check(Object.values(off).every((s) => s === 404), `routes off the list are not passed: ${Object.entries(off).map(([k, s]) => `${k} ${s}`).join('; ')}`)
   const admin = {}
   for (const [m, p, b] of [['POST', '/world/ask', { rule: { id: 'cleo-rule', source: 'on("tick", () => {})' } }], ['POST', '/world/ask', { unrule: 'talk' }], ['POST', '/world/ask', { realm: { name: 'Cleo\'s now' } }], ['POST', '/world/ask', { realm: { director: true } }], ['GET', '/world/rules?id=talk'], ['POST', '/realms', { name: 'elsewhere' }], ['GET', '/gaps'], ['POST', '/world/gap', { cannot: ['x'] }], ['POST', '/plugins/look'], ['POST', '/core/look']]) { admin[`${m} ${p}${b ? ` ${Object.keys(b)[0]}` : ''}`] = (await cleo.fetch(p, { method: m, body: b ?? {} })).status; await wait(80) }

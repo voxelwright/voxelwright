@@ -878,7 +878,8 @@ async function main() {
       fell.tried = answer.tried
     }
   }
-  mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`) }
+  // A world that refuses this page's ask says why (a thing of someone else's in a lobby, #526): said, as text.
+  mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.
   const streaks = shots(smoke, debris)
@@ -978,11 +979,12 @@ async function main() {
   const gaze = (): { eye: [number, number, number]; toward: [number, number, number] } => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }
   // A realm the page runs alone, whose rules allow it (local.ts `making`): things are made in the page itself, by the
   // engine's own maker (page/maker.ts), fetched once the bar is first used in the realm. Elsewhere: the helper.
-  const makesHere = MAKING && !far
+  // In a lobby joined through a door (#526) the same: the maker asks the world on the host's machine, as this page's person.
+  const makesHere = MAKING && (!far || !!joined)
   /** The model the maker asks (`engine.making.model`: { system, prompt, pictures } to { text }): the visitor's own, through page/connect.ts, set below; null: none, and the bar says so. */
   const makingSeam: { model: ((q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>) | null } = { model: null }
   const wishes = makesHere ? later(() => import('./maker.ts').then(({ pageMaker }) => pageMaker({
-      core, made, alive, eye: gaze, by: () => 'visitor', hud: over, shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z), model: () => makingSeam.model,
+      core, made, alive, eye: gaze, by: () => joined?.you ?? 'visitor', hud: over, ...(joined ? { lobby: { fetch: joined.fetch, may: () => joined.may() } } : {}), shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z), model: () => makingSeam.model,
       // As the page lays its own: finer cells only where every box of the world they reach takes them (`taken`).
       lay: (edit, at) => { if (edit.words[0] < 3) { make(edit, at); return true } put(); if (!taken(edit)) return false; waiting++; mover.postMessage({ edit: edit.words, after: heard, release: at } satisfies Ask); return true },
     }))) : asker(gaze, () => others?.name ?? 'someone')
@@ -1719,7 +1721,7 @@ async function main() {
       }).catch(noWayIn)
       void import('./eggs.ts').then(({ eggs }) => {
         Object.assign((globalThis as unknown as { engine: object }).engine, { signs, eggs: said = eggs({
-          device, march, controls, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
+          device, march, controls, makes: makesHere, sky: realmUi.sky, ui: realmUi.root, hour: () => hour, setHour, ownLight, view, pose, signs,
           // (In the first view its plane is kept in the picture whatever an egg says: what starts and ends them is tapped there, eggs-first.ts.)
           callPlane: (on) => { const plane = signboards?.plane; if (plane) { plane.call(on || !!(first && !first.engaged)); plane.loud = on } }, planeSeen: () => { const plane = signboards?.plane; return plane ? plane.readable && (!plane.loud || plane.come >= 1) : true },
           mood: (m) => { if (m) mood.of = { grade: m.grade ? [m.grade[0], m.grade[1]] : null, tint: m.tint ? [m.tint[0], m.tint[1], m.tint[2]] : [1, 1, 1] }; mood.on = !!m },

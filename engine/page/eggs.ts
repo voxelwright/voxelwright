@@ -49,6 +49,8 @@ export interface EggsPage {
   device: GPUDevice
   march: Marcher
   controls: Input
+  /** The page makes things from words (#526, local.ts `MAKING`): Enter is the ask bar's there, and the line to the city opens with / alone. */
+  makes?: boolean
   /** The realm's sky (realm-ui.ts): the weather and the hour, changed smoothly, read back by its controls. */
   sky: Skies
   /** The hour the page is lit for, or null for the realm's own light. */
@@ -596,7 +598,7 @@ export function eggs(page: EggsPage) {
     }
   }
   const hint = () => {
-    const text = `Try: wake up · ${hasMedia ? 'bad apple · meme · ' : ''}iddqd · moon. Enter or / shows more.`
+    const text = `Try: wake up · ${hasMedia ? 'bad apple · meme · ' : ''}iddqd · moon. ${page.makes ? '/' : 'Enter or /'} shows more.`
     briefly('Try: wake up · moon', 7000)
     say(text, 7000)
   }
@@ -710,8 +712,9 @@ export function eggs(page: EggsPage) {
   })
   // Gone from the line and its ideas (a tap elsewhere, Tab past them), it closes.
   line.addEventListener('focusout', (e) => { if (typing && !line.contains(e.relatedTarget as Node | null)) close() })
-  // In this realm nothing is made from words (local.ts): the ask bar's Enter is the line's.
-  page.controls.always('Enter', (e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); open(); return true })
+  // Where nothing is made from words (local.ts) the ask bar's Enter is the line's. Where things are (`makes`), Enter is
+  // the ask bar's still: whoever registers a key last has it (input.ts `always`), and this comes after the bar.
+  if (!page.makes) page.controls.always('Enter', (e) => { if (e.metaKey || e.ctrlKey) return; e.preventDefault(); open(); return true })
   page.controls.always('Slash', (e) => { e.preventDefault(); open(); return true })
 
   // ── Keys that are not on the line: Esc ends the eggs, and the Konami code (its B and A are not the world's) ──

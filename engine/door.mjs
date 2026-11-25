@@ -81,10 +81,14 @@ const ROUTES = [
   { m: 'POST', p: '/core/look', who: 'admin', rate: 'ask', why: 'the core read again from the host\'s disk' },
 ]
 /** A connection's own limits, a second unless said (flags of server.mjs). `backlog` is bytes of replies a page has asked for and not read. */
-const LIMITS = { asks: 30, upMinute: 24 << 20, columns: 65536, backlog: 32 << 20, ask: 15, say: 3, here: 15, act: 10, drive: 12, look: 20 }
+const LIMITS = { asks: 30, upMinute: 24 << 20, columns: 65536, backlog: 32 << 20, ask: 15, say: 3, here: 15, act: 10, drive: 12, look: 20,
+  // What one person who is not an admin may make (#526), kept by who they are, not by their connection: things made a
+  // minute, changes to things' records a minute (each is kept for good), things standing and their cells all told
+  // (the world's server counts those: serve.mjs `stranger`), and how far from where their page says they are (cells).
+  thingsMinute: 6, changesMinute: 30, things: 40, cells: 4_000_000, reach: 1200 }
 
 /** A pool that fills again over `per` ms: `take(n)` is false when it would go under. */
-const pool = (most, per = 1000) => { let left = most, since = Date.now(); return { take(n = 1) { const now = Date.now(); left = Math.min(most, left + ((now - since) / per) * most); since = now; if (left < n) return false; left -= n; return true } } }
+const pool = (most, per = 1000) => { let left = most, since = Date.now(); const fill = () => { const now = Date.now(); left = Math.min(most, left + ((now - since) / per) * most); since = now }; return { take(n = 1) { fill(); if (left < n) return false; left -= n; return true }, give(n = 1) { fill(); left = Math.min(most, left + n) }, left() { fill(); return left } } }
 
 /** A password as it is kept: a slow hash and its salt. */
 const sealed = async (password, salt) => (await scrypt(String(password).normalize('NFC'), Buffer.from(salt, 'hex'), 32, { N: 1 << 14 })).toString('hex')
@@ -159,6 +163,13 @@ export function door(o) {
   const failing = tries()
   setInterval(() => failing.sweep(), 60_000).unref()
 
+  /** What each person has made lately, by who they are: a page that joins again is the same person, with the same pools. */
+  const makers = new Map()
+  // Forgotten once their pools are full again: nothing is lost by that, and a stream of new keys leaves nothing behind.
+  setInterval(() => { for (const [you, m] of makers) if (m.made.left() >= limits.thingsMinute && m.changed.left() >= limits.changesMinute) makers.delete(you) }, 60_000).unref()
+  const makerOf = (c) => { if (!makers.has(c.you)) makers.set(c.you, { made: pool(limits.thingsMinute, 60_000), changed: pool(limits.changesMinute, 60_000) }); return makers.get(c.you) }
+  /** Whether someone may make a thing now, and why not: asked by their page before any model is (page/door.ts `may`), and again by the ask itself. */
+  const mayMake = (c) => (c.admin ? null : kept.build === 'admins' ? 'on this server only admins build' : makerOf(c).made.left() < 1 ? `you have made ${limits.thingsMinute} things this minute: wait a little` : null)
   /** Every connection, welcomed or not; a welcomed one has `you`. */
   const conns = new Set()
   const welcomed = () => [...conns].filter((c) => c.you)
@@ -288,6 +299,7 @@ export function door(o) {
     if (m.unstream !== undefined) return void c.streams.get(m.unstream)?.abort()
     if (!Number.isInteger(m.n)) return
     if (m.admin !== undefined) return tell(c, { n: m.n, ...(await becomeAdmin(c, m.admin)) })
+    if (m.may === 'make') { const why = mayMake(c); return tell(c, { n: m.n, ...(why ? { why } : { ok: true }) }) }
     if (m.lobby && typeof m.lobby === 'object') return tell(c, { n: m.n, ...(await op(c, m.lobby)) })
   }
   async function greet(c, h) {
@@ -439,6 +451,7 @@ export function door(o) {
     for (const name of route.q ?? []) { const v = url.searchParams.get(name); if (v !== null && /^[a-z0-9.-]{1,64}$/i.test(v)) q.set(name, v) }
     if (route.columns) { const n = Math.max(0, (Number(q.get('x1')) - Number(q.get('x0'))) * (Number(q.get('z1')) - Number(q.get('z0')))) || 0; if (n > limits.columns || !c.pools.columns.take(n)) return reply(c, h.n, 429, 'too many columns asked after: wait a second') }
     // Who asked is this connection, whatever the page wrote.
+    let untaken = null
     if (json) {
       if (route.by) json.by = c.you
       if (route.by === 'here') json.name = c.name
@@ -446,6 +459,19 @@ export function door(o) {
         if (typeof json.id !== 'string' || !ID.test(json.id)) return reply(c, h.n, 400, 'what a thing is told is {id, go, turn, rise}')
         if (typeof json.on === 'boolean') { if (json.on) c.riding.add(json.id); else c.riding.delete(json.id) }
         else if (!c.riding.has(json.id) && c.seat !== json.id) return reply(c, h.n, 409, 'you are not on that')
+      }
+      // Where this page's person is, as it last said: a thing it makes is made near there (serve.mjs `stranger`).
+      if (route.by === 'here' && Array.isArray(json.at) && json.at.length === 3 && json.at.every(Number.isFinite)) c.at = json.at.slice()
+      // A thing made or changed by someone who is not an admin: counted against what they may (`makers`), and said to be
+      // a stranger's to the world's server, which holds it to its own (`as`). Whatever the page wrote there is not read.
+      if (route.ask) {
+        delete json.as
+        if (!c.admin) {
+          // (Given back if the world does not take it: only what was made or changed counts.)
+          if (json.edit !== undefined && json.thing !== undefined) { const why = mayMake(c); if (why || !makerOf(c).made.take()) return reply(c, h.n, 429, why ?? `you have made ${limits.thingsMinute} things this minute: wait a little`); untaken = () => makerOf(c).made.give() }
+          else if (json.thing !== undefined) { if (!makerOf(c).changed.take()) return reply(c, h.n, 429, `you have changed things ${limits.changesMinute} times this minute: wait a little`); untaken = () => makerOf(c).changed.give() }
+          json.as = { things: limits.things, cells: limits.cells, at: c.at ?? null, reach: limits.reach }
+        }
       }
       if (route.rules && json.rule !== undefined && !(json.rule && typeof json.rule.id === 'string' && RULE_ID.test(json.rule.id))) return reply(c, h.n, 400, 'a rule has an id')
     }
@@ -458,6 +484,7 @@ export function door(o) {
     try {
       const r = await fetch(`${o.world}${path}`, { method: h.m, signal: AbortSignal.any([abort.signal, AbortSignal.timeout(30_000)]), ...(h.m === 'POST' ? { body: json ? JSON.stringify(json) : raw } : {}) })
       const bytes = Buffer.from(await r.arrayBuffer())
+      if (r.status !== 202) untaken?.()
       reply(c, h.n, r.status, bytes, r.headers.get('content-type') ?? 'application/octet-stream')
     } catch { reply(c, h.n, 502, 'the world did not answer') }
     finally { c.aborts.delete(abort); c.inflight-- }

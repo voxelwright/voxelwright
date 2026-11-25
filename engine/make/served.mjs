@@ -1,27 +1,30 @@
 // A world's server, by its address (#220): how the maker (make/maker.mjs) asks it what is where (`/world/at`,
 // `/world/look`, `/world/tops`), what is made in it (`/world/things`), has it keep a living thing's look
 // (`/world/fine`), and sends it a thing as one edit (`POST /world/ask`), which the world takes whole or refuses whole.
-// The one place where a world is an address: make.mjs, helper.mjs and the checks hand the maker `served(address)`.
-// Nothing here is on the server.
-import { createHash } from 'node:crypto'
+// The one place where a world is an address: make.mjs, helper.mjs, the checks and a page in a lobby (page/maker.ts,
+// over the door's `fetch`) hand the maker `served(address)`. Nothing here is on the server, and nothing here is Node's.
 import { beside, edit, samples } from './place.mjs'
 
 const no = (why) => { throw new Error(why) }
 const json = async (res) => { if (!res.ok) throw new Error(`the world said ${res.status}: ${(await res.text()).slice(0, 120)}`); return res.json() }
-export const at = (world, [x, y, z]) => fetch(`${world}/world/at?x=${x}&y=${y}&z=${z}`).then(json)
-/** The first thing down every column of a rectangle, looked for from height `y`: { high, material }, a row of x for each z. */
-export async function tops(world, [x0, z0, x1, z1], y) {
-  // The world gives so many columns a second to everyone together: told to wait, this waits and asks again.
+/**
+ * A question of the world, asked again while it says to wait (429): a world, or a door in front of it (door.mjs),
+ * gives each asker so many a second. A question that is refused is never taken for an answer.
+ */
+async function asked(url, f = fetch) {
   for (let tries = 0; ; tries++) {
-    const res = await fetch(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`)
+    const res = await f(url)
     if (res.status !== 429 || tries === 40) return json(res)
     await new Promise((r) => setTimeout(r, 300))
   }
 }
-export const look = (world, [x, y, z], [dx, dy, dz]) => fetch(`${world}/world/look?x=${x}&y=${y}&z=${z}&dx=${dx}&dy=${dy}&dz=${dz}`).then(json)
+export const at = (world, [x, y, z], f = fetch) => asked(`${world}/world/at?x=${x}&y=${y}&z=${z}`, f)
+/** The first thing down every column of a rectangle, looked for from height `y`: { high, material }, a row of x for each z. */
+export const tops = (world, [x0, z0, x1, z1], y, f = fetch) => asked(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`, f)
+export const look = (world, [x, y, z], [dx, dy, dz], f = fetch) => asked(`${world}/world/look?x=${x}&y=${y}&z=${z}&dx=${dx}&dy=${dy}&dz=${dz}`, f)
 
-/** Many questions, a few at a time. */
-async function all(items, ask, together = 24) {
+/** Many questions, a few at a time (fewer than a door lets one asker have under way: door.mjs `INFLIGHT_MOST`). */
+async function all(items, ask, together = 6) {
   const out = new Array(items.length)
   let next = 0
   await Promise.all(Array.from({ length: together }, async () => { while (next < items.length) { const i = next++; out[i] = await ask(items[i]) } }))
@@ -29,8 +32,8 @@ async function all(items, ask, together = 24) {
 }
 
 /** How many of the sampled cells are what they should be. */
-export async function counted(world, cells, kind) {
-  const found = await all(cells, (c) => at(world, c))
+export async function counted(world, cells, kind, f = fetch) {
+  const found = await all(cells, (c) => at(world, c, f))
   // A cell asked after as -1 is one that only has to hold something (a cell of finer cells has no one kind).
   return found.filter((f, i) => { const want = kind ?? cells[i][3]; return want === -1 ? f.material !== 0 : f.kind === want }).length
 }
@@ -40,9 +43,11 @@ export async function counted(world, cells, kind) {
  * if they were and then were not, 'not there' if they never were, and 'unknown' if the world could not be asked.
  * `gone`: the id of a made thing to take out, cells and record on one ask: the world empties the cells it keeps for it (`made` only says where to ask after them).
  * `replaces`: the id of a made thing this one is sent in place of: it is taken out on the same ask, which the world does whole or refuses whole.
+ * `post` sends it and `get` asks after it (both `fetch` unless said: a page in a lobby gives the door's).
  * It never sends twice: after a send whose answer was lost it asks the world what is there, and says.
  */
-export async function send(world, made, by, { kind, thing, gone, replaces, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
+export async function send(world, made, by, { kind, thing, gone, replaces, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch, get = fetch } = {}) {
+  const ask = (cells) => counted(world, cells, kind, get)
   // A thing of finer cells (`fine`: { grain, rows }) is sent as those rows; `made` is then its stand-in in the
   // world's cells, which says where to ask after it: a cell of the world that holds any of it is no longer air.
   const cells = samples(made).map((c) => (fine ? [c[0], c[1], c[2], kind === 0 ? 0 : -1] : c))
@@ -65,19 +70,19 @@ export async function send(world, made, by, { kind, thing, gone, replaces, fine,
     // Laid, and nothing came loose: it stands as it was put, and one look at its cells says the world took all of it
     // (a sector that holds too many finer cells takes none of them). Nothing is waited for.
     if (laid?.loose === 0) {
-      const seen = await counted(world, cells, kind)
+      const seen = await ask(cells)
       if (seen === cells.length) return { state: 'there' }
     }
     let seen = 0
     for (const began = Date.now(); Date.now() - began < wait;) {
-      seen = await counted(world, cells, kind)
+      seen = await ask(cells)
       if (seen === cells.length) break
       await pause(250)
     }
     if (seen < cells.length) return { state: 'not there', why: sent === 'lost' ? 'the world could not be reached when it was sent, and it is not there' : `only ${seen} of ${cells.length} cells asked after are there` }
     // Whatever was going to come loose has by now.
     await pause(settle)
-    const stayed = await counted(world, cells, kind)
+    const stayed = await ask(cells)
     return stayed === cells.length ? { state: 'there' } : { state: 'fell', why: `${cells.length - stayed} of ${cells.length} cells asked after came loose` }
   } catch (e) {
     return { state: 'unknown', why: `the world stopped answering after it was sent (${e.message}): look before making it again` }
@@ -116,7 +121,8 @@ export const gaze = (who) => ({ from: [Math.round(who.at[0]), Math.round(who.at[
 
 /** A look's cells as the world names them: the sha256 of their bytes. Worked out once for each part. */
 const shas = new WeakMap()
-const shaOf = (kinds) => { if (!shas.has(kinds)) shas.set(kinds, createHash('sha256').update(Buffer.from(kinds.buffer, kinds.byteOffset, kinds.byteLength)).digest('hex')); return shas.get(kinds) }
+const bytesOf = (kinds) => new Uint8Array(kinds.buffer, kinds.byteOffset, kinds.byteLength)
+const shaOf = (kinds) => { if (!shas.has(kinds)) shas.set(kinds, crypto.subtle.digest('SHA-256', bytesOf(kinds)).then((d) => [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, '0')).join(''))); return shas.get(kinds) }
 
 /** What a world is known to keep already, by `world sha`: asked once each, so a second car of a kind sends nothing. */
 /** What each world is known to keep, or is being sent now: a look is asked after and sent once, however many ask at once (a ghost asks at every key). */
@@ -128,12 +134,12 @@ const known = new Map()
  */
 export async function keepLook(world, look, { post = fetch } = {}) {
   return Promise.all(look.map(async (part) => {
-    const p = { ...part, sha: shaOf(part.kinds) }, key = `${world} ${p.sha}`
+    const p = { ...part, sha: await shaOf(part.kinds) }, key = `${world} ${p.sha}`
     if (!known.has(key)) {
       const sent = (async () => {
         const there = await post(`${world}/world/fine/${p.sha}`, { method: 'HEAD' }).then((r) => r.ok, () => false)
         if (there) return
-        const r = await post(`${world}/world/fine`, { method: 'POST', body: Buffer.from(p.kinds.buffer, p.kinds.byteOffset, p.kinds.byteLength) }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }))
+        const r = await post(`${world}/world/fine`, { method: 'POST', body: bytesOf(p.kinds) }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }))
         if (!r.ok) no(`the world would not keep its look (${r.status}): ${(await r.text()).slice(0, 120)}`)
         const said = await r.json()
         if (said.kept !== p.sha) no('the world kept its look under another name')
@@ -149,19 +155,20 @@ export async function keepLook(world, look, { post = fetch } = {}) {
 
 /**
  * The world at `address` as the maker takes a world (make/maker.mjs `World`): every question is asked of its server.
- * `address` names it in the journal, so `undo` finds what was made there.
+ * `address` names it in the journal, so `undo` finds what was made there. `f` is how it is asked: a page in a lobby
+ * gives the door's `fetch` (page/door.ts), and `address` is then '' (the door takes paths) and `name` what the journal calls it.
  */
-export function served(address) {
+export function served(address, f = fetch, name = null) {
   const world = String(address).replace(/\/$/, '')
   return {
-    address: world,
-    at: (c) => at(world, c),
-    tops: (rect, y) => tops(world, rect, y),
-    look: (from, toward) => look(world, from, toward),
-    things: () => fetch(`${world}/world/things`).then(json),
-    async thing(id) { const r = await fetch(`${world}/world/things?id=${encodeURIComponent(id)}`); return r.ok ? r.json() : null },
-    send: (made, by, how) => send(world, made, by, how),
-    keepLook: (parts) => keepLook(world, parts),
-    async empty(rows, by) { for (const part of rows) await fetch(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(part), release: beside(part) }) }) },
+    address: name ?? world,
+    at: (c) => at(world, c, f),
+    tops: (rect, y) => tops(world, rect, y, f),
+    look: (from, toward) => look(world, from, toward, f),
+    things: () => asked(`${world}/world/things`, f),
+    async thing(id) { const r = await f(`${world}/world/things?id=${encodeURIComponent(id)}`); return r.ok ? r.json() : null },
+    send: (made, by, how) => send(world, made, by, { post: f, get: f, ...how }),
+    keepLook: (parts) => keepLook(world, parts, { post: f }),
+    async empty(rows, by) { for (const part of rows) await f(`${world}/world/ask`, { method: 'POST', body: JSON.stringify({ by, edit: edit(part), release: beside(part) }) }) },
   }
 }

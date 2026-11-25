@@ -32,6 +32,7 @@ import * as words from '../make/meant.mjs'
 import * as seen from '../make/shown.mjs'
 import * as cores from '../make/core.mjs'
 import * as places from '../make/place.mjs'
+import * as servedWorld from '../make/served.mjs'
 
 type V3 = [number, number, number]
 type Row = [number, number, number, number, number]
@@ -42,6 +43,7 @@ const make = maker.make as unknown as (o: object) => Promise<Made>, putHeld = ma
 const placing = maker.placing as unknown as (o: object) => Promise<{ origin?: V3; facing?: string; why?: string }>, keptThing = maker.kept as unknown as (entry: unknown) => Promise<unknown>
 const meant = words.meant as unknown as (text: string, shelf: Entry[]) => { entry: Entry; sure: number } | null, recalled = words.recalled as unknown as (entry: unknown) => object
 const shown = seen.shown as unknown as (thing: unknown, facing: string) => Looks, compiled = cores.compiled as unknown as (core: string) => Promise<WebAssembly.Module>
+const served = servedWorld.served as unknown as (address: string, f: (path: string, init?: RequestInit) => Promise<Response>, name: string) => object
 const beside = places.beside as unknown as (rows: Row[]) => V3, bounds = places.bounds as unknown as (rows: Row[]) => [V3, V3], editOf = places.edit as unknown as (rows: Row[], kind?: number, grain?: number) => number[], samples = places.samples as unknown as (rows: Row[]) => number[][]
 /** What the page lends the maker (main.ts, in the bar's wiring). */
 export interface Seam {
@@ -62,6 +64,12 @@ export interface Seam {
   hold(x: number, z: number): Promise<unknown>
   /** The model another lane connects (`engine.making.model`), or null: nothing connected. Asked only for a wish the visitor typed. */
   model(): Model | null
+  /**
+   * A world on someone else's machine, joined through its door (#526): the maker asks it, and sends to it, in place of
+   * this page's own (make/served.mjs `served` over the door's `fetch`). What is made there is told back by the world's
+   * stream, as anyone's is. `may` asks the server, before anything is made, whether this page may make now: why not, or null.
+   */
+  lobby?: { fetch(path: string, init?: RequestInit): Promise<Response>; may(): Promise<string | null> }
 }
 /** A model as another lane hands it in: the brief, the wish and any picture, to its reply as text. */
 export type Model = (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>
@@ -116,7 +124,7 @@ export function pageMaker(seam: Seam): PageMaker {
     return true
   }
   const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
-  const world = {
+  const own = {
     address: 'this page',
     async at([x, y, z]: V3) { const k = kind(x, y, z); return { kind: k, material: k & 15, ground: core.ground_at(x, z) } },
     /** The first cell along a line that is not air, within 800 cells (as a world's process looks: world.mjs `look`). */
@@ -181,6 +189,7 @@ export function pageMaker(seam: Seam): PageMaker {
       return stayed === cells.length ? { state: 'there' } : { state: 'fell', why: `${cells.length - stayed} of ${cells.length} cells asked after came loose` }
     },
   }
+  const world = seam.lobby ? served('', seam.lobby.fetch, 'lobby') : own
 
   // ── Would it stand: a fresh core with the city's tiles round it, and nobody's edits ──
   const fresh = async (rows: Row[]) => {
@@ -271,6 +280,10 @@ export function pageMaker(seam: Seam): PageMaker {
       return turn(async () => {
         if (ask.wish && UNDO.test(ask.wish)) return unmake()
         if (ask.link) return refused('a link is not read here')
+        // In a lobby the server says first whether this page may make now (only admins build there, or too many made
+        // this minute): if not, nothing is made and no model is asked.
+        const not = await seam.lobby?.may()
+        if (not) return refused(not)
         const shelf = (await index()).filter((e) => e.apart === (ask.hand ? 'hand' : ''))
         const entry = ask.wish && !ask.picture && !ask.fresh ? meant(ask.wish, shelf)?.entry : undefined
         const how = { wish: ask.wish ?? '', world, where: where(target, from), by: seam.by(), journal, core: fresh, say: said(each) }
@@ -285,7 +298,9 @@ export function pageMaker(seam: Seam): PageMaker {
           if (!ask.typed) return refused('only what a visitor types is made new here')
           if (!model) return refused('nothing kept is called that, and making new things needs an AI connected')
           await seam.hold(from.eye[0], from.eye[2])
-          r = await make({ ...how, picture: ask.picture, model: asking(model) })
+          // In a lobby the model is asked once for a wish: whether it is asked again would turn on what the host's
+          // world answers (where it stands, what falls), and a host never spends a visitor's model.
+          r = await make({ ...how, picture: ask.picture, model: asking(model), ...(seam.lobby ? { tries: 1 } : {}) })
         }
         const done = ended(r)
         if (done.state === 'held') asked.set(done, from)
@@ -298,6 +313,8 @@ export function pageMaker(seam: Seam): PageMaker {
         const hold = held.held ? holds.get(held.held) : undefined
         if (!hold) return refused('that is not held any more: ask for it again')
         holds.delete(held.held!)
+        const not = await seam.lobby?.may()
+        if (not) return refused(not)
         await seam.hold(from.eye[0], from.eye[2])
         const done = ended(await putHeld({ hold, world, where: where(target, from), clear: how.clear, by: seam.by(), journal, core: fresh, say: said(each) }))
         if (done.state === 'held') asked.set(done, from)

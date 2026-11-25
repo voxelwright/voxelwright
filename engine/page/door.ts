@@ -22,6 +22,8 @@ export interface Door {
   readonly server: { name: string; about: string; most: number; build: string; admins: boolean }
   /** A request to the world, as `fetch` makes one, through the door. A stream is a Response whose body comes as the world says it. */
   fetch(path: string, init?: RequestInit): Promise<Response>
+  /** Whether this page may make a thing now, as the server says (only admins build there, or too many made this minute): why not, or null. Asked before any model is. */
+  may(): Promise<string | null>
   /** The stream to the world broke and will not mend: the door is closed, and `ongone` told why. */
   lost(why: string): void
   /** The lobby from the console (`engine.lobby`): an admin's password, then what an admin may do. */
@@ -210,7 +212,9 @@ function admitted(pc: RTCPeerConnection, ch: { ctl: RTCDataChannel; down: RTCDat
     try { pc.close() } catch { /* already */ }
     self.ongone?.(why)
   }
-  const self: Door = { you, name, pin, server, fetch, lobby, ongone: null, ontold: null, lost: (why) => end(`The world's stream broke: ${why}`) }
+  // Not known is not allowed: a page that cannot ask makes nothing.
+  const may = async () => { const a = await ask({ may: 'make' }); return a.ok === true ? null : String(a.why ?? 'the server did not say').slice(0, 200) }
+  const self: Door = { you, name, pin, server, fetch, may, lobby, ongone: null, ontold: null, lost: (why) => end(`The world's stream broke: ${why}`) }
   // A ping every two seconds; nothing back for eight and the server is taken for gone (a killed host says nothing).
   const beat = setInterval(() => { if (Date.now() - heard > SILENT) return end('The server is gone: nothing has been heard from it for a while.'); send(ch.ctl, { ping: Date.now() }) }, 2000)
   ch.ctl.addEventListener('message', (e) => {

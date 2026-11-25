@@ -4,6 +4,7 @@
 //   node test/sf-make.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/make/check] [--headed]
 //
 // It fails unless:
+//   - in the realm Enter, pressed as a person presses it, opens the bar to make on, and the slash the line to the city;
 //   - without `?making=1` (the realm's rule is "preview") there is no bar, nothing of the maker or its shelf is asked
 //     for, by the bar or by anything said on it, and words sent to be made make nothing;
 //   - with it, in the realm: the bar is there; typing the words for a kept car shows its ghost, Enter makes it, and
@@ -97,6 +98,13 @@ const type = async (page, words) => {
   check(before === 0, `with ?making=1, nothing of the maker asked for before the park is shown and the visitor is in (${before})`)
   const bar = await page.evaluate(() => getComputedStyle(document.querySelector('#ask')).display)
   check(bar !== 'none' && makerAsked(from).length === 0, `in the realm the bar is there (${bar}), and nothing of the maker is asked for until it is used`)
+  // As a person does it, on the keys: Enter opens the bar to make on, not the line to the city (eggs.ts), which keeps
+  // the slash. (Found on the live site on November 25: the eggs had Enter, so a wish typed after it made nothing, and
+  // every step below opened the bar by `engine.hud.line.show()` and did not see it.)
+  await page.waitForFunction(() => !!globalThis.engine.eggs, null, { timeout: 60_000 }).catch(() => {})
+  const keyed = async (key) => { await page.keyboard.press(key); await page.waitForTimeout(500); const at = await page.evaluate(() => ({ bar: document.activeElement?.id === 'line', city: !!document.activeElement?.closest('.egg-line') })); await page.keyboard.press('Escape'); await page.waitForTimeout(300); return at }
+  const onEnter = await keyed('Enter'), onSlash = await keyed('/')
+  check(onEnter.bar && !onEnter.city && onSlash.city, `Enter opens the bar to make on (${onEnter.bar}, the city's line ${onEnter.city}); the slash opens the city's line (${onSlash.city})`)
 
   // A kept car: its ghost as it is typed, then Enter.
   const alive0 = await page.evaluate(() => globalThis.engine.alive.things.length)

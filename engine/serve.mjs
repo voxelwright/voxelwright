@@ -37,6 +37,7 @@ import { foreign, named } from './guard.mjs'
 import { RULES_MOST, SOURCE_MOST } from './rules/run.mjs'
 import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
+import { controlsOf } from './page/living.ts'
 import { arrival, ground as groundOf } from './ground.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
@@ -541,6 +542,75 @@ function allowed(body) {
   if (body.realm !== undefined) { const realm = recorded(body.realm); return typeof realm === 'string' ? realm : { by, realm } }
   return 'an ask is a blast, a fire, a ball, an edit, a change to a made thing, a rule, or what the realm is called'
 }
+// ── A stranger's ask (#526) ──────────────────────────────────────────────
+// A page in a lobby is a stranger's code as far as this server knows: what its maker checked does not count. The door
+// (door.mjs) puts `as` on every ask of someone who is not an admin, and takes it off every other (an ask without it,
+// from this machine or an admin, is held to `allowed` alone): {own: true, things, cells (the most one person may have
+// standing, all told), at (where their page last said they are, or null), reach (how far from there, in cells)}.
+/** What the core takes of a motor (core/src/bodies/living.rs `Motor::from`): a stranger's number outside these is refused, not clamped. */
+const MOTOR = { front: [0, 3], grip: [0, 4], power: [0, 2000], top: [0, 1500], steer: [0, 1.2], hover: [0, 200], lift: [0, 600], upright: [0, 60], turns: [0, 12], jump: [0, 300], tough: [10, 2000] }
+/** The most a stranger's thing may be along a side (a program's grid, make/program.mjs), and a living one (make/alive.mjs `BODY_MOST`); how far a foot, a seat or a look may lie outside a body (`OUT_MOST`). */
+const SIDE_MOST = 256, BODY_SIDE_MOST = 96, OUT = 8
+/** The most a stranger's whole record may be, bytes of JSON: the fields the maker sends, each well under `FIELD_MOST`. */
+const STRANGER_RECORD_MOST = 24576
+/** What of a living thing's controls a stranger may say (the world's process writes `rest` and `driven`). */
+const CONTROL_KEYS = ['scheme', 'motor', 'seats', 'size', 'eye', 'fine']
+const within = (v, [lo, hi]) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi
+const near3 = (p, size, out) => Array.isArray(p) && p.length === 3 && p.every((v, a) => within(v, [-out, size[a] + out]))
+/** Why a living thing's controls, as a stranger sent them, are not taken; or null. `body` is its size as its record says it: before it was turned to face, so its feet and seats are held to its footprint either way. */
+function strangerControls(c, body) {
+  const wide = Math.max(body[0], body[2]), size = [wide, body[1], wide]
+  if (!c || typeof c !== 'object' || Array.isArray(c) || !controlsOf(c)) return 'a living thing has a scheme (drive, fly, hover or ride) and a motor'
+  const extra = Object.keys(c).find((k) => !CONTROL_KEYS.includes(k))
+  if (extra) return `"${extra.slice(0, 20)}" is not something a living thing is sent with`
+  for (const [k, range] of Object.entries(MOTOR)) if (!within(c.motor[k], range)) return `a motor's ${k} is ${range[0]} to ${range[1]}`
+  if (!Number.isInteger(c.motor.front)) return 'a motor\'s front is 0, 1, 2 or 3'
+  if (!c.motor.feet.every((f) => near3(f.at, size, OUT) && within(f.reach, [0, 32]))) return `a foot is at most ${OUT} cells outside the body and reaches 0 to 32 cells`
+  if (c.seats !== undefined && !(Array.isArray(c.seats) && c.seats.length <= 8 && c.seats.every((p) => near3(p, size, OUT)))) return 'a living thing has at most 8 seats, on its body'
+  if (c.eye !== undefined && !near3(c.eye, size, OUT + 12)) return 'a driver\'s eye is on the body'
+  if (c.fine !== undefined && !(Array.isArray(c.fine) && controlsOf(c).fine?.length === c.fine.length)) return 'a living thing\'s look is at most 8 parts of kept cells'
+  if (c.size !== undefined && !(Array.isArray(c.size) && c.size.length === 3 && c.size.every((v) => within(v, [1, BODY_SIDE_MOST])))) return `a living thing's size is at most ${BODY_SIDE_MOST} cells a side`
+  return null
+}
+/**
+ * Why a stranger's ask about a made thing is not taken (`as`, above), or null. A thing they make is no bigger than a
+ * maker makes one, its cells lie in its own box, it stands near where they are, and what it is sent with is what a
+ * maker sends; a change to one is held to the same. (Whose it is, and how many they have, are asked in `ask`.)
+ */
+function stranger(ask, as, was) {
+  // Put down where they say: within reach, as a thing they make is.
+  if (ask.put !== undefined && ask.at && !(Array.isArray(as.at) && as.at.length === 3 && as.at.every(Number.isFinite) && Math.hypot(ask.at[0] - as.at[0], ask.at[2] - as.at[2]) <= as.reach && Math.abs(ask.at[1] - as.at[1]) <= as.reach)) return `a thing is put down within ${Math.round(as.reach / 10)} m of where you are`
+  // A thing taken out goes with its cells: its record alone would leave them standing, counted against nobody.
+  if (ask.gone !== undefined && !ask.edit && !ask.release) return 'a thing is taken out with its cells: say where to ask what that leaves unheld (release)'
+  const t = ask.thing
+  if (!t) return null
+  const living = t.controls !== undefined
+  if (ask.edit) {
+    const most = living ? BODY_SIDE_MOST : SIDE_MOST
+    if (!t.size.every((v) => v <= most)) return `a ${living ? 'living ' : ''}thing is at most ${most} cells along a side`
+    if (JSON.stringify(t).length > STRANGER_RECORD_MOST) return `a thing's record is at most ${STRANGER_RECORD_MOST} bytes`
+    // Its box, in the world's cells (`allowed` worked it out from the rows): within its footprint either way it faces, and its feet carried down.
+    const half = Math.ceil(Math.max(t.size[0], t.size[2]) / 2) + 2, b = ask.box
+    if (b[0] < t.at[0] - half || b[3] > t.at[0] + half + 1 || b[2] < t.at[2] - half || b[5] > t.at[2] + half + 1 || b[1] < t.at[1] - 64 || b[4] > t.at[1] + t.size[1] + 2) return 'the cells of a thing lie in its own box'
+  } else {
+    const change = JSON.stringify(t).length
+    if (change > STRANGER_RECORD_MOST) return `a change to a thing is at most ${STRANGER_RECORD_MOST} bytes`
+  }
+  if (t.at) {
+    if (!Array.isArray(as.at) || as.at.length !== 3 || !as.at.every(Number.isFinite)) return 'say where you are first: a thing is made near whoever makes it'
+    if (Math.hypot(t.at[0] - as.at[0], t.at[2] - as.at[2]) > as.reach || Math.abs(t.at[1] - as.at[1]) > as.reach) return `a thing is made within ${Math.round(as.reach / 10)} m of where you are`
+  }
+  if (living) {
+    // Brought to life later (a change): its body is held to the same side as one made alive.
+    const body = ask.edit ? t.size : was?.size ?? [0, 0, 0]
+    if (!ask.edit && !body.every((v) => v <= BODY_SIDE_MOST)) return `a living thing is at most ${BODY_SIDE_MOST} cells along a side`
+    return strangerControls(t.controls, body)
+  }
+  return null
+}
+/** How many cells rows of an edit fill (`[kind, n, rows...]`). */
+const cellsIn = (edit) => { let n = 0; for (let k = 2; k + 4 < edit.length; k += 5) n += edit[k + 1] - edit[k]; return n }
+
 /** Starts a realm's world from its file (`of` is the realm: {id, file, record}), and answers for it until it is closed. */
 function open(of) {
   const worldFile = of.file
@@ -559,8 +629,10 @@ function open(of) {
   const things = new Map()
   /** Living things a rider has told something since this process started (#245): until the world's process writes `controls.driven` into the record, which is what lasts (make.mjs `asPut`). */
   const ridden = new Set()
-  /** Ids taken by asks the world has not yet done: two asks may not make the same thing. */
-  const coming = new Set()
+  /** Ids taken by asks the world has not yet done: two asks may not make the same thing. Each with who asked and how many cells it is, counted against what they may have (`as`). */
+  const coming = new Map()
+  /** How many cells a made thing's rows fill: worked out once. */
+  const cellsOf = (t) => (t.cells ??= cellsIn([0, 0, ...rowsOf(t)]))
   /** Ids of things an ask not yet done is taking out, taking up or making again in their place: a second such ask may not take the same thing (#245: two asks at once to make a thing in place of one were both taken, and two things stood where one had; a thing being picked up could be made again under the hand). Held from when an ask is taken to when the world's process says it is done, or refuses it. */
   const going = new Set()
   /** The rules, by id, as last put; and what the realm is called. */
@@ -874,6 +946,9 @@ function open(of) {
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
       const ask = allowed(body)
       if (typeof ask === 'string') return send(res, 400, ask)
+      // A stranger's, said so by the door (`stranger`, above): never kept or told.
+      const as = body.as && typeof body.as === 'object' ? { own: true, things: Number(body.as.things) || 0, cells: Number(body.as.cells) || 0, at: body.as.at ?? null, reach: Number(body.as.reach) || 0 } : null
+
       // A thing made in place of another (`gone` with its cells): checked whole here, before anything is done, and then
       // the other is taken out and this one laid, one after the other with nothing between: both, or neither (#245).
       let replaced = null
@@ -888,7 +963,20 @@ function open(of) {
         delete ask.gone
       }
       // A thing is made once: an id the world has is refused, so a send that is tried again cannot make two.
-      if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.add(ask.thing.id); if (replaced) going.add(replaced.gone) }
+      // A stranger's (`as`): a thing of someone else's is theirs and an admin's to change, replace, take out or pick up; and one person has so many things, of so many cells, at most.
+      if (as?.own) {
+        const of = replaced?.gone ?? ask.gone ?? ask.hold ?? (ask.thing && !ask.edit ? ask.thing.id : undefined), t = of !== undefined && things.get(of)
+        if (t && t.record.by !== ask.by) return send(res, 403, `that ${t.record.name || 'thing'} is someone else's: only whoever made it, or an admin, may ${ask.hold !== undefined ? 'pick it up' : replaced ? 'make it again' : ask.gone ? 'take it out' : ask.thing.controls !== undefined ? 'bring it to life' : 'change it'}`)
+      }
+      if (as) { const why = stranger(ask, as, ask.thing && !ask.edit ? things.get(ask.thing.id)?.record : null); if (why) return send(res, 403, why) }
+      if (as && ask.thing && ask.edit) {
+        let n = 1, cells = cellsIn(ask.edit)
+        for (const t of things.values()) if (t.record.by === ask.by && t.record.id !== replaced?.gone) { n++; cells += cellsOf(t) }
+        for (const c of coming.values()) if (c.by === ask.by) { n++; cells += c.cells }
+        if (n > as.things) return send(res, 403, `you have ${n - 1} things standing here, the most one person may: take one out first`)
+        if (cells > as.cells) return send(res, 403, `that would be ${cells} cells of yours standing here, and the most one person may have is ${as.cells}: take something out first`)
+      }
+      if (ask.thing && ask.edit) { if (things.has(ask.thing.id) || coming.has(ask.thing.id)) return send(res, 409, 'a thing of that id is already in the world'); coming.set(ask.thing.id, { by: ask.by, cells: cellsIn(ask.edit) }); if (replaced) going.add(replaced.gone) }
       else if ((ask.thing && !things.has(ask.thing.id)) || (ask.gone && !things.has(ask.gone))) return send(res, 409, 'no thing of that id is in the world')
       // (Said apart from a thing that is not there: whoever takes a thing out by its id falls back to its cells alone when it has no record, and must not while another ask has it.)
       else if (ask.gone && going.has(ask.gone)) return send(res, 409, 'that thing is on its way out already: ask again in a moment')

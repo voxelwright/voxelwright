@@ -112,6 +112,21 @@ host's machine), tiles (`/release/`, `/bay/`: a page draws its own), the pages, 
 `/report`, and other realms (a page through a door can only be in the home realm). Each address upstream is built
 from the route's table entry (`ROUTES` in `door.mjs`); a page's path or query is never passed as it came.
 
+**Making, and what is whose.** A realm whose rule allows making (`making`; `"preview"` with `?making=1`) has the ask
+bar in a lobby too: the page's own maker (`page/maker.ts`) asks the world through the door (`make/served.mjs` over its
+`fetch`) and sends a thing as one ask, which the world takes whole or refuses whole. A kept thing comes from the
+page's shelf; a new wish goes to the model the visitor connected, once, and only for words they typed: nothing the
+host sends reaches it. Before anything is made the page asks the door whether it may (`{n, may: 'make'}` on `ctl`:
+only admins build, or too many made this minute), and says why not. A made thing's record says who made it (`by`,
+from the connection). For everyone who is not an admin the door puts `as` on each ask (the world never keeps or tells
+it) and the world's server (`serve.mjs` `stranger`) holds it to: another's thing is not theirs to take out, change,
+make again, bring to life or pick up (403, with why); a thing at most 256 cells a side (a living one 96), its cells in
+its own box, made within `--reach 1200` cells of where their page last said they are (`here`), a record of at most
+24 KB, and a living thing's motor within what the core takes; at most `--things 40` things and `--cells 4000000`
+cells of theirs standing. The door counts `--things-minute 6` things made and `--changes-minute 30` records changed a
+minute for each person (by who they are, so joining again starts nothing afresh). Breaking a thing with a blast or a
+hammer is the world's physics and stays every builder's. "Undo" takes out the asker's own last thing.
+
 **Admins.** With `--admin-password-file`, a connection that gives that password (`engine.lobby.admin('…')` in the
 page's console) is an admin until it closes. `engine.lobby`: `who()`, `kick(you)`, `ban(you, {address})`,
 `unban(you)`, `bans()`, `lock(password | null)`, `most(n)`, `build('everyone' | 'admins')`, `say(text)`,
