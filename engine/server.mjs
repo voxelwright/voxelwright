@@ -6,14 +6,14 @@
 //                   --most 8 [--private] [--password-file f] [--admin-password-file f] [--port 5747] [--ice-ports a-b]
 //                   [--asks 30] [--up-mb 24] [--columns 65536] [--backlog-mb 32]
 //                   [--things-minute 6] [--changes-minute 30] [--things 40] [--cells 4000000] [--reach 1200]
-//                   [--release-cache dir] [--arrive=x,y,z,yaw] [--reports file]
+//                   [--release-cache dir] [--arrive=x,y,z,yaw] [--reports file] [--tiles-most 16] [--ground-wait 3000]
 //
 // --release is a built static realm (node sf/build.mjs) or the address of its current.json: pages join only a
 // world on their own release. Without it the world is the generated town (pin "town"). --private keeps the lobby off
 // the master's list: it is joined by its code. What one person who is not an admin may make: things a minute, changes
 // to things a minute, things standing and their cells all told, and how far from where their page says they are (cells
-// of 10 cm); admins are held to none of it. Passwords are read from their files, never from the command line. The
-// last three go to serve.mjs as they are (a value that starts with "-" is given with "=").
+// of 10 cm); admins are held to none of it. Passwords are read from their files, never from the command line.
+// --most, and the last five, go to serve.mjs as they are (a value that starts with "-" is given with "=").
 import { readFileSync } from 'node:fs'
 import { parseArgs } from 'node:util'
 import { door } from './door.mjs'
@@ -22,7 +22,7 @@ const string = { type: 'string' }
 const { values: a } = parseArgs({ options: {
   world: string, port: { type: 'string', default: '5747' }, release: string, 'release-cache': string, arrive: string, reports: string,
   master: string, name: string, about: string, most: string, private: { type: 'boolean' }, 'password-file': string, 'admin-password-file': string,
-  'ice-ports': string, asks: string, 'up-mb': string, columns: string, 'backlog-mb': string,
+  'ice-ports': string, asks: string, 'up-mb': string, columns: string, 'backlog-mb': string, 'tiles-most': string, 'ground-wait': string,
   'things-minute': string, 'changes-minute': string, things: string, cells: string, reach: string,
 } })
 if (!a.world) { console.error('a server keeps a world: --world <file>'); process.exit(1) }
@@ -33,7 +33,8 @@ const ports = a['ice-ports']?.split('-').map(Number)
 // The world's server, in this process: what it reads from the command line is set here, so one process is all
 // there is to stop.
 process.argv = [process.argv[0], new URL('./serve.mjs', import.meta.url).pathname, '--world', a.world, '--port', a.port,
-  ...['release', 'release-cache', 'arrive', 'reports'].flatMap((name) => (a[name] ? [`--${name}`, a[name]] : []))]
+  // The most players is the door's and the world's alike: the world holds the ground of that many (world.mjs `owners`).
+  ...['release', 'release-cache', 'arrive', 'reports', 'most', 'tiles-most', 'ground-wait'].flatMap((name) => (a[name] ? [`--${name}`, a[name]] : []))]
 await import('./serve.mjs')
 const at = `http://127.0.0.1:${a.port}`
 let ground = null

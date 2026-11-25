@@ -33,7 +33,7 @@ import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
 import { reading } from './ground.mjs'
-import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, prepare, underfoot } from './page/bay.ts'
+import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, owned, owning, prepare, shares, unpin } from './page/bay.ts'
 
 // ── The ground (#526) ──────────────────────────────────────────────────────
 // A world is the generated town, or San Francisco from the release the server was started with (ground.mjs): then
@@ -135,26 +135,38 @@ function grid(rows, there) {
 function live(id, value, rows, fresh, name = '') {
   const controls = controlsOf(value)
   if (!controls) return
-  const motor = numbers(controls.motor), known = alive.get(id)
-  const set = (body) => { const room = core.edits_room(motor.length); new Float32Array(core.memory.buffer, room, motor.length).set(motor); return core.living_motor(body, motor.length) }
-  if (known) { known.controls = controls; if (name) known.name = name; set(known.body); return }
+  const known = alive.get(id)
+  if (known) { known.controls = controls; if (name) known.name = name; if (known.body) motorOf(known.body, numbers(controls.motor)); return }
   const g = rows && grid(rows, fresh)
   if (!g) return
+  // `born`: where it is until the core says it has moved (its middle where it was made, or where it last slept), for
+  // `livesNow` only. It is not its pose: a pose is written into its record as where it sleeps.
+  const born = !fresh && controls.rest ? { at: controls.rest.at, rot: controls.rest.rot } : { at: g.low.map((v, a) => v + g.size[a] / 2), rot: [0, 0, 0, 1] }
+  // `rows`: its cells as it was made, to stand it up again after it has slept (#526). `body` 0: asleep, no body in the core.
+  const a = { body: 0, controls, name, pose: null, born, size: g.size, awake: true, rows }
+  alive.set(id, a)
+  // In a released world a thing stood up again where nobody's ground is held sleeps until someone comes near (`sleeper`).
+  if (GROUND && !fresh && !nearSomeone(born.at)) return
+  if (!rise(id, a, fresh, g)) alive.delete(id)
+}
+/** Gives a body its motor. False where the core will not take it (a number past what it reads). */
+const motorOf = (body, motor) => { const room = core.edits_room(motor.length); new Float32Array(core.memory.buffer, room, motor.length).set(motor); return core.living_motor(body, motor.length) }
+/** Has the core make a living thing's body, from its cells (`g`, or its rows as it was made), where it last slept. False where it could not. */
+function rise(id, a, fresh, g = grid(a.rows, false)) {
+  if (!g) return false
   // The room first, then the memory: making room may grow it.
   const room = core.edits_room(g.cells.length)
   new Int32Array(core.memory.buffer, room, g.cells.length).set(g.cells)
   const n = core.living_spawn(g.size[0], g.size[1], g.size[2], g.low[0], g.low[1], g.low[2], fresh ? 1 : 0), body = core.living_last()
-  if (!body) return
+  if (!body) return false
   // A motor the core will not take (a number past what it reads) is no living thing: the body is taken out again, and nothing is said to be alive with a motor it does not have.
-  if (!set(body)) { told(n, false); told(core.living_vanish(body), false); return }
-  // `born`: where it is until the core says it has moved (its middle where it was made, or where it last slept), for
-  // `livesNow` only. It is not its pose: a pose is written into its record as where it sleeps.
-  const born = !fresh && controls.rest ? { at: controls.rest.at, rot: controls.rest.rot } : { at: g.low.map((v, a) => v + g.size[a] / 2), rot: [0, 0, 0, 1] }
-  alive.set(id, { body, controls, name, pose: null, born, size: g.size, awake: true })
-  if (!fresh && controls.rest) core.living_place(body, ...controls.rest.at, ...controls.rest.rot)
+  if (!motorOf(body, numbers(a.controls.motor))) { told(n, false); told(core.living_vanish(body), false); return false }
+  a.body = body; a.awake = true
+  if (!fresh && a.controls.rest) core.living_place(body, ...a.controls.rest.at, ...a.controls.rest.rot)
   told(n, false)
   parentPort.postMessage({ living: { thing: id, body } })
   nudged = true
+  return true
 }
 /**
  * Writes where a sleeper sleeps into its record, if it has moved since that was last written and it is twenty seconds
@@ -492,6 +504,8 @@ setInterval(() => {
       continue
     }
     if (!p.seat) continue
+    // A rule's actor where nobody's own ground is (a released world) sleeps where it stands until someone comes near.
+    if (p.asleep) continue
     if (p.back && goingBack(p, now)) continue
     // A tenth of a second of its going: straight, or round what is in its way, or after whoever it follows (about.mjs).
     const aimed = turned(p, now)
@@ -836,7 +850,7 @@ function handle(said) {
     // what it had logged is on its way to the server ahead of the answer to this, and is in what the server sends back.
     swapping = { held: [], began, fire: fireSeen }
     alive.clear()
-    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(async ({ instance }) => { const next = instance.exports; next.fine_cells(1); if (GROUND) { await prepare(next); await Promise.all([...folk.values()].map((p) => underfoot(next, Math.round(p.at[0]), Math.round(p.at[2])))); dropped(core) } core = next; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(async ({ instance }) => { const next = instance.exports; next.fine_cells(1); if (GROUND) { await prepare(next); await Promise.all(owners(Date.now(), next).map((b) => groundOf(next, b[0], b[1], b[2], b[3], 1))); dropped(core) } core = next; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
     return
   }
   // While the swap is under way: the world's own history is taken as it comes (the server sends it once the new
@@ -886,6 +900,8 @@ function handle(said) {
     if (driven.seatOf(here.by)) Object.assign(p, { name: here.name, last: Date.now() })
     else Object.assign(p, { name: here.name, at: [here.at[0], here.at[1] - EYES - 0.5, here.at[2]], yaw: here.yaw, frame: here.frame, last: Date.now() })
     folk.set(here.by, p)
+    // Someone new: their ground is their own from now, if there is a place for them among the players.
+    if (GROUND && !old) owners()
     return tell(p)
   }
   if (line) return parentPort.postMessage({ id, ...look(line.from, line.to) })
@@ -899,6 +915,9 @@ function handle(said) {
   if (ask.throw !== undefined) { blow.toss(ask.by, ask.to); return }
   if (ask.hold !== undefined && grasp.of(ask.by)) lay({ by: ask.by, put: true })
   if (ask.hold !== undefined || ask.put !== undefined) { const why = ask.hold !== undefined ? grasp.hold(ask, rows) : grasp.put(ask); if (why) return parentPort.postMessage({ refused: { by: ask.by, why, ...(ask.hold !== undefined ? { hold: ask.hold } : {}) } }) }
+  // A living thing taken out, awake or asleep: its body goes, wherever it has gone, and nothing of where it was made is
+  // emptied (its cells left the world when it first lived).
+  if (ask.gone && !ask.thing && alive.has(ask.gone)) unplace(ask)
   parentPort.postMessage({ echo: ask })
   // A thing taken out that lives: its body goes, wherever it has gone, as a rule's thing taken away does. (Its record goes with the echo.)
   if (ask.gone && !ask.edit) {
@@ -936,58 +955,92 @@ function handle(said) {
 
 // ── What is said, and the ground it waits for (#526) ─────────────────────────
 // In the town everything said is done at once, in the order it came, as it always was. In a released world:
-//   - a question (what is at a cell, a look, the tops of a box, a seat that joins, walks or looks round) waits for its
-//     own ground and for nothing else, and is answered as soon as it is held, out of turn;
-//   - what changes the world (an ask, an edit kept from before, a thing stood up again, a rule, a swap of the core) is
-//     done in the order it came, each once its own ground is held;
+//   - people come first. The ground round where one arrives is always held, and so is the ground round each of up to
+//     PLAYERS people here (pages, and seats that have spoken lately), first come: their own ground (bay.ts `owning`),
+//     which nothing else can take. Everything else that wants ground (a question about a place nobody is at, a blast in
+//     the sky, a seat parked for a while) takes it from a small spare share (serve.mjs --tiles-most), is the first let
+//     go, and is refused when the spare is used up. A living thing or a rule's actor where nobody's own ground is held
+//     sleeps and holds nothing: it wakes when someone comes near.
+//   - a question (what is at a cell, a look, the tops of a box, what a seat sees round it) waits for its own ground and
+//     for nothing else, and is answered as soon as it is held, out of turn;
+//   - what changes the world (an ask, a seat that joins or walks, an edit kept from before, a rule, a swap of the core)
+//     waits for its own ground and for every change before it whose place meets its own: if one of those was not
+//     done, neither is it. Changes elsewhere go on. What has no place (a rule, a thing's record) waits for nothing;
+//     the world's own history and a swap of its core wait for everything before them, and everything after waits for them;
 //   - the rest (where a page's eye is, what is said, a rider's hands, a rule's act) waits for no ground at all.
-// Each asks for its tiles as it arrives, not when its turn comes, and waits at most GROUND_WAIT for them: then a
-// question is answered why not (503), an ask is refused (and an ask that waits for its answer is told why), and
-// nothing is answered as water. What is answered is answered from tiles held at that moment (bay.ts `holds`).
-/** Places lately asked about that things may still move at (a blast's pieces, a thrown ball): [x, z, when]. */
-const lately = []
-/** How far round a place an ask holds the ground (cells): its pieces fly there. How far round a body: what it walks and sees. */
-const ASK_REACH = 600, BODY_REACH = 2000
-/** The boxes of the ground, [x0, z0, x1, z1] in cells, that what is said needs held. */
+// Each asks for its tiles as it arrives and waits at most GROUND_WAIT for them: then a question is answered why not
+// (503), a change is refused and its asker told why (a page through its ask's own answer), and nothing is answered
+// as water. What it waited for is held for it (`pins`) until it is done, so it is done on that ground.
+/** How far round a place an ask holds the ground (cells): its pieces fly there. How far round a body: what it walks and sees. How far round a living thing or an actor: what it stands on. */
+const ASK_REACH = 600, BODY_REACH = 2000, THING_REACH = 300
+/** The most people whose own ground the world holds (serve.mjs --most). */
+const PLAYERS = GROUND?.players ?? 8
+/** Seconds after its last word that a seat still has its own ground: after that it is parked, and holds none of its own. */
+const PARKED_AFTER = 30
+/** Who has one of the PLAYERS places now, by name: kept while they are here, given to whoever comes next once free. */
+const players = new Set()
+/** Joins and walks not yet done: {by, box}. Their ground is the seat's own (if it has a place) from when they are asked. */
+const arriving = new Set()
+/** The box of cells round a place, [x0, z0, x1, z1]. */
+const around = (x, z, r) => [Math.round(x) - r, Math.round(z) - r, Math.round(x) + r + 1, Math.round(z) + r + 1]
+/** Whether someone is here as a person now: a page that has said where it is, a seat that has spoken lately, walks or rides. */
+const present = (p, now) => !p.rule && (!p.seat || now - p.last < PARKED_AFTER * 1000 || !!p.goal || !!driven.seatOf(p.by))
+/** The boxes of everyone's own ground: where one arrives, and round each who has a place. Places are given and taken here. */
+function owners(now = Date.now(), c = core) {
+  const waiting = new Set([...arriving].map((j) => j.by))
+  for (const by of players) { const p = folk.get(by); if (!waiting.has(by) && !(p && present(p, now))) players.delete(by) }
+  for (const p of folk.values()) if (players.size < PLAYERS && present(p, now)) players.add(p.by)
+  for (const j of arriving) if (players.size < PLAYERS) players.add(j.by)
+  const a = arrival(), boxes = a ? [around(a[0], a[a.length - 1], BODY_REACH + 64)] : []
+  for (const by of players) { const p = folk.get(by); if (p) boxes.push(around(p.at[0], p.at[2], BODY_REACH)) }
+  for (const j of arriving) if (players.has(j.by)) boxes.push(j.box)
+  owning(c, boxes)
+  return boxes
+}
+/** Whether the ground round a place is someone's own and is held now: a living thing or an actor there is awake. */
+const nearSomeone = (at) => { const b = around(at[0], at[2], THING_REACH); return owned(core, ...b) && holds(core, ...b, 1) }
+/** The boxes of the ground, [x0, z0, x1, z1] in cells, that what is said needs held, which are where it acts. */
 function boxesOf(said) {
-  const out = [], round = (v, r, k = 2) => { if (Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[k])) out.push([Math.round(v[0]) - r, Math.round(v[k]) - r, Math.round(v[0]) + r + 1, Math.round(v[k]) + r + 1]) }
-  const { ask, at, look: line, tops: area, seat: asks, revive, settle, rows } = said
+  const out = [], round = (v, r, k = 2) => { if (Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[k])) out.push(around(v[0], v[k], r)) }
+  const { ask, at, look: line, tops: area, seat: asks, rows } = said
   round(at, 0)
   if (line) { const long = Math.hypot(...line.to) || 1, end = line.from.map((v, a) => v + (line.to[a] / long) * LOOK); out.push([Math.floor(Math.min(line.from[0], end[0])), Math.floor(Math.min(line.from[2], end[2])), Math.ceil(Math.max(line.from[0], end[0])) + 1, Math.ceil(Math.max(line.from[2], end[2])) + 1]) }
   if (area) out.push(area.box)
-  if (asks) { if (asks.op === 'join') round(joinAt(asks), BODY_REACH, 1); else { round(folk.get(asks.by)?.at, BODY_REACH); round(asks.to, BODY_REACH, 1) } }
-  if (revive) { if (revive.controls?.rest?.at) round(revive.controls.rest.at, ASK_REACH); else if (revive.rows) round([revive.rows[0], 0, revive.rows[3]], ASK_REACH) }
-  round(settle?.at, ASK_REACH)
+  if (asks) { if (asks.op === 'join') round(joinAt(asks), BODY_REACH, 1); else round(folk.get(asks.by)?.at, BODY_REACH) }
   if (ask) {
     for (const v of [ask.blast, ask.ignite, ask.ball?.from, ask.release, ask.at, ask.thing?.at]) round(v, ASK_REACH)
     if (ask.box) out.push([ask.box[0] - 96, ask.box[2] - 96, ask.box[3] + 96, ask.box[5] + 96])
-    if (ask.by) round(folk.get(ask.by)?.at, ASK_REACH)
     if (rows) round([rows[0], 0, rows[3]], ASK_REACH)
+    // What is put down or thrown from a hand has no place but its holder's.
+    if (!out.length && (ask.put !== undefined || ask.throw !== undefined || ask.hold !== undefined)) round(folk.get(ask.by)?.at, ASK_REACH)
   }
   return out
 }
 /** Whether what is said is a question, answered out of turn on its own ground. */
-const questionOf = (said) => !!(said.at || said.look || said.tops || (said.seat && ['join', 'walk', 'around'].includes(said.seat.op)))
+const questionOf = (said) => !!(said.at || said.look || said.tops || said.seat?.op === 'around')
 /** Whether what is said changes the world, and so is done in turn. */
-const orderedOf = (said) => !!(said.ask || said.replay !== undefined || said.revive || said.settle || said.rule || said.swap || said.swapped)
-/** Has the ground round what is said held within GROUND_WAIT, from when it was said: null, or why not. */
-async function groundFor(said) {
-  const boxes = boxesOf(said), now = Date.now()
-  if (said.ask) for (const b of boxes) lately.push([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2, now])
-  const whys = await Promise.all(boxes.map((b) => groundOf(core, b[0], b[1], b[2], b[3], 1, GROUND_WAIT)))
+const orderedOf = (said) => !!(said.ask || said.replay !== undefined || said.revive || said.settle || said.rule || said.swap || said.swapped || ['join', 'walk'].includes(said.seat?.op))
+/** What waits for everything before it, and everything after for it: the world's own history, and a swap of its core. */
+const wholeOf = (said) => !!(said.replay !== undefined || said.swap || said.swapped)
+/** What is still done while the core is swapped: the history sent back, things stood up again, and the end of it. */
+const swappedOf = (said) => !!(said.replay !== undefined || said.revive || said.swapped)
+/** Has the ground round what is said held within GROUND_WAIT, from when it was said: null, or why not. What it waited for stays held for it (`pins`). */
+async function groundFor(said, pins) {
+  const whys = await Promise.all(boxesOf(said).map((b) => groundOf(core, b[0], b[1], b[2], b[3], 1, GROUND_WAIT, pins)))
   fresh()
   return whys.find((w) => w) ?? null
 }
-/** Whether every tile what is said needs is held this moment. */
-const heldNow = (said) => boxesOf(said).every((b) => holds(core, b[0], b[1], b[2], b[3], 1))
+/** What could not be done because a change before it at the same place was not. */
+const BEFORE = 'something asked before this at the same place was not done, so neither is this: '
 /** Tells whoever asked that it was not done, and why. */
 function refuse(said, why) {
-  const words = why === 'full' ? FULL : UNHELD
+  const words = why === 'full' ? FULL : why.startsWith?.(BEFORE) ? why : UNHELD
   if (said.ask) { console.error(`an ask was not done: ${words}`); parentPort.postMessage({ refused: { by: said.ask.by, why: words, ...(said.ask.hold !== undefined ? { hold: said.ask.hold } : {}), ...(said.ask.thing?.id ? { thing: said.ask.thing.id } : {}), ...(said.ask.gone ? { gone: said.ask.gone } : {}) } }) }
   if (said.id !== undefined) parentPort.postMessage({ id: said.id, error: words })
-  else if (said.revive) console.error(`the living thing ${said.revive.id} was not stood up: ${words}. It gets up when the world starts again.`)
-  else if (said.settle) console.error(`the thing ${said.settle.id} was not put down: ${words}. It is put down when the world starts again.`)
+  return words
 }
+/** An ask that takes out a living thing, without the cells of where it was made. */
+const unplace = (ask) => { delete ask.edit; delete ask.box; delete ask.release }
 /** Set once something could not be done: nothing more is, and the world stops. */
 let stopped = false
 const fail = (e) => { stopped = true; setImmediate(() => { throw e }) }
@@ -1000,72 +1053,119 @@ function hear(said) {
     for (const p of then ? [one, then] : [said]) { const more = handle(p); if (Array.isArray(more)) for (const m of more) hear(m) }
     return
   }
-  if (orderedOf(said)) return inTurn([said])
-  if (!questionOf(said)) { const more = handle(said); if (Array.isArray(more)) inTurn(more, true); return }
+  // A living thing taken out needs no ground (`handle`): it goes wherever it is, even asleep where nobody is.
+  if (said.ask?.gone && !said.ask.thing && alive.has(said.ask.gone)) unplace(said.ask)
+  if (orderedOf(said)) return void changes([said])
+  if (!questionOf(said)) { const more = handle(said); if (Array.isArray(more)) changes(more); return }
   // While the core is swapped a question waits with everything else (`handle` keeps it), and asks its ground after.
   if (swapping) return void handle(said)
-  void groundFor(said).then((why) => {
-    if (stopped) return
-    if (!why && !heldNow(said)) why = 'slow'
-    if (why) return refuse(said, why)
-    handle(said)
+  const pins = []
+  void groundFor(said, pins).then((why) => {
+    try { if (stopped) return; if (why) return void refuse(said, why); handle(said) } finally { unpin(pins) }
   }).catch(fail)
 }
-/** What changes the world, in the order it came, each with its ground asked for as it came. */
-const turns = []
-let turning = false
-function inTurn(said, first = false) {
-  const items = said.map((m) => ({ said: m, ground: null }))
-  for (const item of items) {
+/** What changes the world and is not yet done, in the order it came: {said, parts, at (where it acts), whole, pins, why (undefined until its ground is had or not)}. */
+const pending = []
+/** Whether two boxes of cells meet. */
+const meet = (a, b) => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+/** Whether a change must wait for one before it: either waits for everything, or their places meet. */
+const clash = (before, item) => before.whole || item.whole || before.at.some((a) => item.at.some((b) => meet(a, b)))
+/** Changes, in the order they came, put in line (at `at`, else last), each asking for its ground as it comes. */
+function changes(said, at = pending.length) {
+  const items = said.filter((m) => !stopped).map((m) => {
     // Two asks that are one (a thing made in place of another, serve.mjs): both stand on their ground, or neither is done.
-    const { then, ...one } = item.said, parts = then ? [one, then] : [item.said]
-    // Not while the core is swapped (it is asked for once the new core is in), and not for what keeps no place.
-    item.parts = parts
-    if (!swapping) item.ground = Promise.all(parts.map(groundFor)).then((w) => w.find((x) => x) ?? null)
-  }
-  if (first) turns.unshift(...items); else turns.push(...items)
-  if (!turning) void next().catch(fail)
+    const { then, ...one } = m, parts = then ? [one, then] : [m]
+    const item = { said: m, parts, at: parts.flatMap(boxesOf), whole: wholeOf(m), pins: [], why: undefined }
+    // A seat that joins or walks: its ground is its own from now, if it has a place among the players (`owners`).
+    item.seat = m.seat ? { by: m.seat.by, box: item.at[0] } : null
+    if (item.seat?.box) { arriving.add(item.seat); owners() }
+    // Not while the core is swapped (what is held then asks for its ground once the new core is in).
+    if (!item.at.length || (swapping && !swappedOf(m))) item.why = null
+    // (Done with before its ground came, refused for one before it: what it waited for is let go as it comes.)
+    else void Promise.all(parts.map((p) => groundFor(p, item.pins))).then((w) => { if (item.over) return void unpin(item.pins.splice(0)); item.why = w.find((x) => x) ?? null; pump() }).catch(fail)
+    return item
+  })
+  pending.splice(at, 0, ...items)
+  pump()
 }
-async function next() {
-  turning = true
+let pumping = false, again = false
+/** Does every change that may be done now: its ground is had (or not) and nothing before it at its place is waiting. */
+function pump() {
+  if (pumping) { again = true; return }
+  pumping = true
   try {
-    while (turns.length && !stopped) {
-      const item = turns.shift(), { said, parts } = item
-      // During a swap it is kept as it came, a pair as one (`handle` keeps what is said meanwhile).
-      if (swapping && !said.swapped && !said.replay && !said.revive) { swapping.held.push(said); continue }
-      // While the core is swapped the history kept goes back into it as it was (edits keep no ground); a thing stood up
-      // again stands on the new core's ground, which is asked for now.
-      const skip = swapping && !said.revive
-      let why = skip ? null : await (item.ground ?? Promise.all(parts.map(groundFor)).then((w) => w.find((x) => x) ?? null))
-      // What it stands on may have been let go of while it waited its turn: asked for again, within the same bound.
-      if (!why && !skip && !parts.every(heldNow)) why = (await Promise.all(parts.map(groundFor))).find((x) => x) ?? (parts.every(heldNow) ? null : 'slow')
-      if (why) {
-        for (const p of parts) refuse(p, why)
-        // Nothing else is done where the ground is not: what moves there is held still by the clock until it comes.
-        if (parts.some((p) => p.id !== undefined || p.ask || p.revive || p.settle)) continue
+    do {
+      again = false
+      for (let i = 0; i < pending.length && !stopped; i++) {
+        const item = pending[i]
+        if (pending.slice(0, i).some((before) => clash(before, item))) continue
+        // While the core is swapped, kept as it came, to be done once the new one is whole (`handle` gives it back).
+        if (swapping && !swappedOf(item.said)) { pending.splice(i, 1); done(item); swapping.held.push(item.said); again = true; break }
+        if (item.why === undefined) continue
+        pending.splice(i, 1)
+        if (item.why) {
+          // Not done, and nor is anything after it whose place meets its own, however that came out.
+          const words = item.parts.map((p) => refuse(p, item.why))[0], gone = [item]
+          for (let k = i; k < pending.length;) {
+            const later = pending[k]
+            if (gone.some((g) => clash(g, later)) && !later.whole) { pending.splice(k, 1); gone.push(later); for (const p of later.parts) refuse(p, words.startsWith(BEFORE) ? words : BEFORE + words); done(later) } else k++
+          }
+          done(item)
+        } else {
+          for (const p of item.parts) {
+            const more = handle(p)
+            // Asked to say when it is done (serve.mjs, a page's ask in a released world): it is.
+            if (p.ask && p.id !== undefined) parentPort.postMessage({ id: p.id, done: true })
+            // What a swap held, before anything said since.
+            if (Array.isArray(more)) { const ordered = more.filter(orderedOf); changes(ordered, i); for (const m of more) if (!orderedOf(m)) hear(m) }
+          }
+          done(item)
+        }
+        again = true
+        break
       }
-      for (const p of parts) {
-        const more = handle(p)
-        // What a swap held, before anything said since.
-        if (Array.isArray(more)) { const ordered = more.filter(orderedOf), rest = more.filter((m) => !orderedOf(m)); inTurn(ordered, true); for (const m of rest) hear(m) }
-      }
-    }
-  } finally { turning = false }
+    } while (again && !stopped)
+  } finally { pumping = false }
 }
-// Round everyone, every living thing and everywhere lately asked about, once a second, and let go of what nobody has
-// been near for a while: tiles are held for what is here now, never by how many.
+/** A change is done with, whichever way: what it waited on may be let go, and its seat's ground is its own only if it is here. */
+function done(item) { item.over = true; unpin(item.pins.splice(0)); if (item.seat) { arriving.delete(item.seat); owners() } }
+// Everyone's own ground once a second, and the living things and actors there woken, or put to sleep where none is;
+// then what nobody has been near for a while is let go.
 let forgotten = Date.now()
+/** Seconds a living thing is out of everyone's ground before it sleeps. */
+const SLEEP_AFTER = 5
 if (GROUND) setInterval(() => {
-  if (swapping) return
+  if (swapping || stopped) return
   const now = Date.now()
-  while (lately.length && now - lately[0][2] > 15_000) lately.shift()
-  const places = [...[...folk.values()].map((p) => p.at), ...[...alive.values()].map((a) => (a.pose ?? a.born)?.at).filter(Boolean)].map((at) => [at[0], at[2]])
-  if (fireSeen?.length >= 3) places.push([fireSeen[0], fireSeen[2]])
-  void Promise.all([...places, ...lately].map(([x, z]) => underfoot(core, Math.round(x), Math.round(z)))).then(fresh)
+  void Promise.all(owners(now).map((b) => groundOf(core, b[0], b[1], b[2], b[3], 1))).then(fresh)
+  for (const [id, a] of alive) {
+    const at = (a.pose ?? a.born)?.at
+    if (!at) continue
+    const near = nearSomeone(at)
+    if (a.body) { if (near) a.out = undefined; else if ((a.out ??= now) <= now - SLEEP_AFTER * 1000) sleep(id, a) }
+    // One the core will not stand up (cells it cannot make a body of, a motor it does not read) lives no more, as it never did on main.
+    // Its record goes with it: its cells left the world when it first lived, and nothing is to empty where it was made.
+    else if (near && !rise(id, a, false)) { alive.delete(id); parentPort.postMessage({ echo: { by: 'the world', gone: id } }); console.error(`the living thing ${id} could not be stood up: it is not alive, and its record is taken out`) }
+  }
+  for (const p of folk.values()) if (p.rule) p.asleep = !nearSomeone(p.at)
   if (now - forgotten > UNHELD_EVERY) { forgotten = now; forget(core, UNHELD_AFTER) }
 }, 1000)
-/** What this process holds of the ground now (serve.mjs `/world/ground`): tiles by level. */
-const groundHeld = () => (GROUND ? { tiles: tilesHeld(core) } : null)
+/** A living thing nobody is near sleeps (#526): where it is is written into its record, and its body leaves the core until someone comes near (`rise`). */
+function sleep(id, a) {
+  const pose = a.pose ?? a.born, at = pose.at.map((v) => Math.round(v * 100) / 100), rot = pose.rot.map((v) => Math.round(v * 10000) / 10000), was = a.controls.rest
+  if (!was || Math.hypot(at[0] - was.at[0], at[1] - was.at[1], at[2] - was.at[2]) >= 0.05 || Math.abs(rot[0] * was.rot[0] + rot[1] * was.rot[1] + rot[2] * was.rot[2] + rot[3] * was.rot[3]) <= 0.9999) {
+    a.controls = { ...a.controls, rest: { at, rot } }
+    parentPort.postMessage({ echo: { by: 'the world', thing: { id, controls: a.controls } } })
+  }
+  // Out of `alive`'s bodies first: the core says the body is gone, and that is not its breaking (`heed`).
+  const body = a.body
+  a.body = 0; a.out = undefined; a.pose = { at, rot }; a.born = { at, rot }; a.rested = false
+  told(core.living_vanish(body), false)
+  parentPort.postMessage({ living: { thing: id, body: 0 } })
+  nudged = true
+}
+/** What this process holds of the ground now (serve.mjs `/world/ground`): tiles by level, how many finest are people's own and how many more, who has a place, and how many living things sleep. */
+const groundHeld = () => (GROUND ? { tiles: tilesHeld(core), ...shares(core), players: players.size, asleep: [...alive.values()].filter((a) => !a.body).length } : null)
 
 // Its own clock: sixty times a second while anything moves, burns or flows.
 let last = performance.now()

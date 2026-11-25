@@ -69,8 +69,24 @@ const resting = new Map<string, number>()
 /** How long each tile that did not come rests next time: doubled each time it fails again, up to a minute. */
 const restFor = new Map<string, number>()
 let rest = 0
-/** The most tiles a core may hold at once (the world's process, `hold`): past it the least lately wanted that nothing waits on is let go, or what is asked is refused. */
+/**
+ * The most tiles a core may hold beyond its own ground (`owning`; the world's process, `hold`): past it the least
+ * lately wanted that nothing waits on and that is nobody's own is let go, or what is asked is refused.
+ */
 let most = Infinity
+/** The finest tiles each core holds as someone's own ground (the world's process: where people are, and the arrival): never counted against `most`, never let go. */
+const own = new WeakMap<object, Set<string>>()
+/** Says which finest tiles are a core's own ground from now on: the tiles boxes of cells ([x0, z0, x1, z1]) need. */
+export function owning(core: object, boxes: number[][]): void {
+  const size = (toldLevels[0] ?? LEVELS[0]).size, keys = new Set<string>()
+  for (const b of boxes) for (const { key } of keysOf(b[0], b[1], b[2], b[3], 0, size)) keys.add(key)
+  own.set(core, keys)
+}
+/** Whether every finest tile a box needs is a core's own ground. */
+export function owned(core: object, x0: number, z0: number, x1: number, z1: number): boolean {
+  const keys = own.get(core), size = (toldLevels[0] ?? LEVELS[0]).size
+  return !!keys && keysOf(x0, z0, x1, z1, 0, size).every(({ key }) => keys.has(key))
+}
 /** Why the ground was not had: on its way too long, resting after it failed, failed now, or more than a core may hold. */
 export type Unheld = 'slow' | 'resting' | 'failed' | 'full'
 /**
@@ -452,9 +468,11 @@ const keysOf = (x0: number, z0: number, x1: number, z1: number, level: number, s
 }
 /**
  * `need`, saying why not (`Unheld`) or null where the ground is had. `within` (ms) is the longest it waits: past it,
- * what is still on its way is given up on for now (it rests until it comes or fails), and it says `slow`.
+ * what is still on its way is given up on for now (it rests until it comes or fails), and it says `slow`. With `pins`,
+ * every tile it waited on stays waited on (never let go) after it resolves, until `unpin`: what was asked is done on
+ * the ground it waited for, however long it then waits its turn.
  */
-export async function ground(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number): Promise<Unheld | null> {
+export async function ground(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number, pins?: object[]): Promise<Unheld | null> {
   if (!STREAM) return null
   const levels = owns ? (await where()).levels : toldLevels, keep = owns ? HOLD.keep : toldKeep
   const level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, { size, gstep } = levels[level]
@@ -468,8 +486,9 @@ export async function ground(core: object, x0: number, z0: number, x1: number, z
     if (!t && rest && (resting.get(key) ?? 0) > Date.now()) { why ??= 'resting'; continue }
     // One given up on while still on its way: nobody waits on it again until it has come.
     if (t && !t.ready && resting.get(key) === Infinity) { why ??= 'slow'; continue }
-    // No more than a core may hold: the least lately wanted that nothing waits on makes room, or nothing is asked for.
-    if (!t && mine.size >= most && !roomIn(core, mine, stamp)) { why ??= 'full'; continue }
+    // No more than a core may hold beyond its own ground: the least lately wanted that nothing waits on and that is
+    // nobody's own makes room, or nothing is asked for.
+    if (!t && !own.get(core)?.has(key) && spare(core, mine) >= most && !roomIn(core, mine, stamp)) { why ??= 'full'; continue }
     if (!t) {
       const body = owns ? tile(level, `${tx}_${tz}`) : fromPage(level, `${tx}_${tz}`)
       const entry: Held = { level, x0: tx * size, z0: tz * size, used: stamp, seen: 0, came: Promise.resolve(false), waiters: 0 }
@@ -496,7 +515,7 @@ export async function ground(core: object, x0: number, z0: number, x1: number, z
   try {
     if (within === undefined) await Promise.all(coming)
     else await Promise.race([Promise.all(coming), new Promise((r) => setTimeout(() => { late = true; r(null) }, within))])
-  } finally { for (const t of wanted) t.waiters = (t.waiters ?? 1) - 1 }
+  } finally { if (pins) pins.push(...wanted); else unpin(wanted) }
   if (late) for (const { key } of keysOf(x0, z0, x1, z1, level, size)) { const t = mine.get(key); if (t && !t.ready && rest) resting.set(key, Infinity) }
   why ??= wanted.some((t) => t.failed) ? 'failed' : late && wanted.some((t) => !t.ready) ? 'slow' : null
   // Let go of the longest unwanted of this level, never one wanted since this ask began.
@@ -508,15 +527,25 @@ export async function ground(core: object, x0: number, z0: number, x1: number, z
   }
   return why
 }
-/** Makes room for one more tile in a core that holds `most`: lets go of the least lately wanted that has come, nothing waits on, and nobody wanted in the last two seconds. */
+/** Tiles `ground` was given `pins` for are waited on no longer. */
+export const unpin = (pins: object[]) => { for (const t of pins as Held[]) t.waiters = (t.waiters ?? 1) - 1 }
+/** How many tiles a core holds (or is waiting for) that are not its own ground. */
+const spare = (core: object, mine: Map<string, Held>) => { const keys = own.get(core); let n = 0; for (const key of mine.keys()) if (!keys?.has(key)) n++; return n }
+/**
+ * Whether a tile may be let go: nothing waits on it and it is nobody's own ground. One still on its way that nothing
+ * waits on was given up on (`within`), so it rests (`resting`, Infinity) and is not asked for again until it has come:
+ * let go, it is dropped from the core as it comes, and no newer ask of the same tile can have taken it meanwhile.
+ */
+const free = (core: object, key: string, t: Held) => !t.waiters && !own.get(core)?.has(key)
+/** Lets go of a tile: from the core once it has come. */
+const letGo = (core: object, mine: Map<string, Held>, key: string, t: Held) => { mine.delete(key); void t.came.then((took) => took && (core as Core).bay_drop(t.x0, t.z0, (toldLevels[t.level] ?? LEVELS[t.level]).gstep)) }
+/** Makes room for one more tile in a core that holds `most` beyond its own: lets go of the least lately wanted that has come, may be let go, and nobody wanted in the last two seconds. */
 function roomIn(core: object, mine: Map<string, Held>, stamp: number): boolean {
   const now = Date.now()
   let oldest: [string, Held] | null = null
-  for (const e of mine) if (e[1].ready && !e[1].waiters && e[1].used < stamp && now - e[1].seen > 2000 && (!oldest || e[1].seen < oldest[1].seen)) oldest = e
+  for (const e of mine) if (free(core, e[0], e[1]) && e[1].used < stamp && now - e[1].seen > 2000 && (!oldest || e[1].seen < oldest[1].seen)) oldest = e
   if (!oldest) return false
-  const [key, t] = oldest
-  mine.delete(key)
-  void t.came.then((took) => took && (core as Core).bay_drop(t.x0, t.z0, (toldLevels[t.level] ?? LEVELS[t.level]).gstep))
+  letGo(core, mine, ...oldest)
   return true
 }
 /** Whether a core holds, now, every tile a box needs (has come, as a pack or as water): what is answered there is the place's. Counts as wanting them. */
@@ -547,14 +576,11 @@ export const underfoot = (core: object, x: number, z: number): Promise<boolean> 
 export function forget(core: object, ms: number): number {
   const mine = held.get(core), before = Date.now() - ms
   let n = 0
-  if (mine) for (const [key, t] of [...mine]) {
-    // Never one that is on its way or that something waits on.
-    if (t.seen >= before || !t.ready || t.waiters) continue
-    mine.delete(key); n++
-    void t.came.then((taken) => taken && (core as Core).bay_drop(t.x0, t.z0, (toldLevels[t.level] ?? LEVELS[t.level]).gstep))
-  }
+  if (mine) for (const [key, t] of [...mine]) if (t.seen < before && free(core, key, t)) { letGo(core, mine, key, t); n++ }
   return n
 }
+/** How many finest tiles are a core's own ground (`owning`), and how many it holds beyond them. */
+export const shares = (core: object): { own: number; spare: number } => ({ own: own.get(core)?.size ?? 0, spare: spare(core, held.get(core) ?? new Map()) })
 /** How many tiles a core holds (or is waiting for) at each level. */
 export const holding = (core: object): number[] => { const n = [0, 0, 0]; for (const t of held.get(core)?.values() ?? []) n[t.level]++; return n }
 /** A core that is no more (one swapped for another build): what it held is not counted again. */

@@ -166,7 +166,8 @@ try {
   const second = await hold([start[0] + 20_000, start[1] + 600, start[2]], 40)
   const mb = (r) => `${Math.round(r.rss / 2 ** 20)} MB`
   console.log(`  standing still: ${still0.held.tiles} tiles held, ${mb(still0)}; a km on: ${first.held.tiles}, ${mb(first)}; another km on: ${second.held.tiles}, ${mb(second)}`)
-  check(first.held.tiles[0] <= 12 && second.held.tiles[0] <= 12 && second.rss < Math.max(still0.rss, first.rss) * 1.25, `the world lets go of tiles nobody is near (${still0.held.tiles[0]}, ${first.held.tiles[0]}, ${second.held.tiles[0]} of the finest held) and its memory levels off (${mb(still0)}, ${mb(first)}, ${mb(second)})`)
+  // What is held is the arrival's own ground (always) and the flier's own (#526): nothing of where the flier was is kept.
+  check(first.held.spare === 0 && second.held.spare === 0 && first.held.tiles[0] <= first.held.own && second.held.tiles[0] <= 24 && second.rss < Math.max(still0.rss, first.rss) * 1.25, `the world lets go of tiles nobody is near (${still0.held.tiles[0]}, ${first.held.tiles[0]}, ${second.held.tiles[0]} of the finest held, the arrival's and the flier's own; ${second.held.spare} beyond) and its memory levels off (${mb(still0)}, ${mb(first)}, ${mb(second)})`)
 } catch (e) {
   failures.push(String(e?.stack ?? e))
 }

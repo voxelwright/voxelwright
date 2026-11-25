@@ -47,8 +47,16 @@ marks as a page's cores do, round everyone and everything asked about, and lets 
 20 s. `/city?shared=1` draws the Bay from the same release, served at `/release/`; the page is told the release in
 itself and again first in the stream, and a page pinned to another (`&release=<digest>`) does not join and says why.
 One arrives where `--arrive x,y,z,yaw` says, else where `sf/realm.json` does. A released world has no residents yet.
-`GET /world/ground` says what a world stands on and what its process holds. Check: `node test/shared-sf.mjs`
-(`--address` serves the folder as a host and gives the server its address).
+People come first: the ground round the arrival is always held, and so is the ground round each of up to `--most`
+people (8; pages, and seats that spoke in the last 30 s), first come. Anything else (a question about a place nobody
+is at, a blast far off, a parked seat) takes from a spare share of `--tiles-most` tiles (16), the least lately asked
+let go first, and is refused once that is used up. A living thing or a rule's actor where nobody's ground is held
+sleeps and holds nothing until someone comes near. Changes are done in order where their places meet: one asked
+after a refused one at the same place is refused too; elsewhere nothing waits. Waits end at `--ground-wait` (3000
+ms). In a released world a page's ask is answered once it is done, or 503 with why it was not.
+`GET /world/ground` says what a world stands on and what its process holds. Checks: `node test/shared-sf.mjs`
+(`--address` serves the folder as a host and gives the server its address) and `node test/shared-sf-slow.mjs` (no
+browser: a slow host, the spare, order, sleep, start-up reads).
 
 ## A server of your own (#526)
 

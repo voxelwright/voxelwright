@@ -136,12 +136,25 @@ try {
   const d = await open()
   const back = await looks(d)
   check(same(back, kept) >= 19, `and after the server is started again on the same file (${same(back, kept)} of twenty looks agree)`)
-  // The world that came back is a working one: it is asked to break something more, and does.
-  const again = await ask({ by: 'node', blast: at, radius: 16, spark: false })
+  // The world that came back is a working one: it is asked to break something more, and does. Somewhere whole, four
+  // metres along the fronts: the place broken before is rubble already, and a second blast there changed 0 to 6 of
+  // the looks from one run to the next. So the world itself is asked what the cells there are, before and after.
+  // The most solid of a few places a few metres along and across from the one broken before, as the world says.
+  const cellAt = async ([x, y, z]) => (await (await fetch(`${server.url}/world/at?x=${x}&y=${y}&z=${z}`)).json()).kind
+  const roundOf = (c) => { const out = []; for (let dx = -6; dx <= 6; dx += 3) for (let dy = -6; dy <= 6; dy += 3) for (let dz = -6; dz <= 6; dz += 3) out.push([c[0] + dx, c[1] + dy, c[2] + dz]); return out }
+  let fresh = null, solid = []
+  for (const dx of [40, 60, 80, -40, -60, -80]) for (const dz of [0, -20, 20, -40]) for (const dy of [0, -10]) {
+    const c = [at[0] + dx, at[1] + dy, at[2] + dz], found = []
+    for (const k of roundOf(c)) if (((await cellAt(k)) & 15) !== 0 && ((await cellAt(k)) & 16) === 0) found.push(k)
+    if (found.length > solid.length) { fresh = c; solid = found }
+  }
+  const again = await ask({ by: 'node', blast: fresh, radius: 16, spark: false })
   await d.waitForTimeout(1500)
   await still(d, { limit: 90_000 })
+  const gone = []
+  for (const c of solid) if (((await cellAt(c)) & 15) === 0) gone.push(c)
   const more = await looks(d)
-  check(again.status === 202 && same(more, back) < 20, `the world that came back does what it is asked (${again.status}; ${20 - same(more, back)} looks changed)`)
+  check(again.status === 202 && solid.length >= 20 && gone.length >= solid.length * 0.8, `the world that came back does what it is asked: of ${solid.length} solid cells round a whole place, ${gone.length} are gone after a blast there (${again.status}; ${20 - same(more, back)} of the page's looks changed)`)
   await d.context().close()
 } catch (e) {
   failures.push(String(e))

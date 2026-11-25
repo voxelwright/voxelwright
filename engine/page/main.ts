@@ -878,7 +878,7 @@ async function main() {
       fell.tried = answer.tried
     }
   }
-  // A world that refuses this page's ask says why (a thing of someone else's in a lobby, #526): said, as text.
+  // A world that refuses this page's ask says why, as text: a thing of someone else's in a lobby, or ground that has not come (#526).
   mover.onerror = (e) => { waiting = 0; ticking = false; report.notes.push(`mover: ${e.message}`); if (joined && e.message.startsWith('the world refused: ')) over.notice(`Not done: ${e.message.slice(19, 219)}`, 6000) }
   // Things that live (#245): bodies that are kept, and driven by whoever rides them. In a shared world the world's
   // own process moves them, and this page says only what a rider asks.

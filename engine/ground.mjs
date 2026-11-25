@@ -63,8 +63,12 @@ export async function ground(where, { cache = CACHE, arrive = null } = {}) {
   }
   // The landmarks and the squares the marks cover are what every core holds before it makes anything (bay.ts `prepare`).
   // A staged release has none beside it: the engine's own landmarks then, and marks the server makes from the city's graphs.
-  const heroes = (await beside('heroes.json')) ?? readFileSync(join(here, 'sf', 'heroes.json'))
-  const squares = await beside('marks-squares.bin'), marks = await beside('marks.bin')
+  // The manifest too, from an address: a host that does not give it fails the start here, plainly and in bounded time,
+  // not a world's process later. It is then on its way to that process already (`once` holds it a minute).
+  const manifest = remote ? new URL(said.manifest ?? '', pointer).href : null
+  const [heroesKept, squares, marks, listed] = await Promise.all([beside('heroes.json'), beside('marks-squares.bin'), beside('marks.bin'), manifest && (existsSync(keptAt(cache, manifest) ?? '') ? { status: 200 } : fetchOnce(manifest))])
+  if (listed && listed.status !== 200) throw new Error(`no release at ${pointer}: its manifest did not come (${listed.status === 503 ? `nothing came in ${FETCH_MOST / 1000} s, or the host could not be reached` : listed.status})`)
+  const heroes = heroesKept ?? readFileSync(join(here, 'sf', 'heroes.json'))
   const realm = JSON.parse(readFileSync(join(here, 'sf', 'realm.json'), 'utf8'))
   return {
     release, pointer, bytes, read, passed, heroes, squares, marks, remote, cache, fetchOnce,

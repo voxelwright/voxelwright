@@ -125,8 +125,8 @@ if (ground?.remote) {
   ground.listed = bay.listed
 }
 if (ground) console.log(`the ground is San Francisco, release ${ground.release.slice(0, 12)} (${ground.pointer}${ground.remote ? `, objects kept in ${ground.cache} once checked` : ''})`)
-/** How long a question or an ask waits for its ground before it is refused, ms; and the most tiles a world's process holds (#526). */
-const GROUND_WAIT = Number(arg('ground-wait', '3000')), TILES_MOST = Number(arg('tiles-most', '64'))
+/** How long a question or an ask waits for its ground before it is refused, ms; the most tiles a world's process holds beyond its people's own ground; the most people whose ground it holds (#526). */
+const GROUND_WAIT = Number(arg('ground-wait', '3000')), TILES_MOST = Number(arg('tiles-most', '16')), MOST = Number(arg('most', '8'))
 /** What a world says of its ground: to a page before it makes anything (in the page itself, and first in the stream) and to anyone at `/world/ground`. */
 const groundWord = () => ({ release: ground?.release ?? null, pointer: ground ? '/release/current.json' : null, arrive: ground ? { at: ground.arrive.at, yaw: ground.arrive.yaw, pitch: ground.arrive.pitch ?? 0 } : null })
 /** The page, with its ground said in it (bay.ts `WORLD`), where this server keeps a world. */
@@ -286,7 +286,7 @@ function grounded(words) {
   return words.split('\n').map((line) => {
     if (line.startsWith('The town starts near')) return `This world is San Francisco at true size, from open data: release ${ground.release} (GET /world/ground). One arrives near x ${x}, y ${y}, z ${z}. Streets, buildings and hills are where they are in the city; ask what is where (at, look, tops) rather than guessing.`
     if (line.startsWith('Cars are parked along both kerbs')) return null
-    if (line.startsWith('Residents of the town walk')) return `Nobody lives on its streets yet: there are no residents, only whoever is here (world.residents is empty).\nThe world holds the city's ground round whoever is here and whatever is asked about, up to ${TILES_MOST} tiles of 250 m. Where the ground has not come within ${GROUND_WAIT / 1000} s, or holding it would pass that, a question is answered 503 with why, and an ask is not done: an ask sent with "wait": true is answered 503 with why; any other is answered 202 and is simply not done.`
+    if (line.startsWith('Residents of the town walk')) return `Nobody lives on its streets yet: there are no residents, only whoever is here (world.residents is empty).\nThe world holds the city's ground round where one arrives and round each of up to ${MOST} people here (a seat that has said nothing for 30 s is parked and holds none), and up to ${TILES_MOST} tiles of 250 m more for everything else (a question about a place nobody is at, a blast far off), the least lately asked let go first. Where the ground has not come within ${GROUND_WAIT / 1000} s, or the spare is used up, a question is answered 503 with why, and an ask is not done: an ask sent with "wait": true is answered 503 with why; any other is answered 202 and is simply not done. A change at a place where something asked before it was not done is not done either. Living things and actors where nobody is sleep until someone comes near.`
     return line.replace('get a body on the north pavement near the start', 'get a body near where one arrives')
   }).filter((line) => line !== null).join('\n')
 }
@@ -621,7 +621,7 @@ function open(of) {
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
   let questions = 0
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST } } })
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST, players: MOST } } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []
@@ -946,6 +946,8 @@ function open(of) {
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
       const ask = allowed(body)
       if (typeof ask === 'string') return send(res, 400, ask)
+      // In a released world an ask is answered once it is done, or 503 with why it was not (#526: its ground); in the town at once.
+      const tell = (m) => { if (!ground) return thread.postMessage(m), send(res, 202, '{"asked":true}', TYPES['.json']); const id = questions++, timer = setTimeout(() => { waiting.delete(id); send(res, 202, '{"asked":true}', TYPES['.json']) }, WAIT_MOST); waiting.set(id, (a) => { clearTimeout(timer); if (a.error) send(res, 503, a.error); else send(res, 202, '{"asked":true}', TYPES['.json']) }); (m.then ?? m).id = id; thread.postMessage(m) }
       // A stranger's, said so by the door (`stranger`, above): never kept or told.
       const as = body.as && typeof body.as === 'object' ? { own: true, things: Number(body.as.things) || 0, cells: Number(body.as.cells) || 0, at: body.as.at ?? null, reach: Number(body.as.reach) || 0 } : null
 
@@ -987,8 +989,9 @@ function open(of) {
         // A living thing's cells are a body now, wherever it has gone: the world's process takes the body out, and nothing of where it was made is emptied.
         if (living.has(ask.gone)) delete ask.release
         // A thing with a motor that the world's process has not yet said is alive (the world has only just woken): its
-        // cells are a body in a moment, and emptying where it was made would leave the body alive with no record.
-        else if (t.record.controls?.motor) return send(res, 409, 'that thing is waking: ask again in a moment')
+        // cells are a body in a moment, and emptying where it was made would leave the body alive with no record. In a
+        // released world it may sleep instead (#526): the world's process takes its record out and empties nothing (world.mjs `unplace`).
+        else if (t.record.controls?.motor && !ground) return send(res, 409, 'that thing is waking: ask again in a moment')
       }
       if (ask.gone && ask.release) Object.assign(ask, emptying(things.get(ask.gone)))
       if (ask.unrule && !rules.has(ask.unrule) && !(ask.unrule === TALK.id && talks)) return send(res, 409, 'no rule of that id is in the world')
@@ -1001,8 +1004,7 @@ function open(of) {
         if (t.record.held) return send(res, 409, 'someone holds that already')
         if (t.record.controls?.motor) return send(res, 409, 'that thing is alive: it is not picked up')
         going.add(ask.hold)
-        thread.postMessage({ ask: { ...ask, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) })
-        return send(res, 202, '{"asked":true}', TYPES['.json'])
+        return tell({ ask: { ...ask, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) })
       }
       // Controls given to a thing that is there may bring it to life: the world's process is sent its cells with the ask.
       if (ask.thing && !ask.edit && ask.thing.controls !== undefined && things.get(ask.thing.id).record.grain) return send(res, 409, 'a thing of finer cells cannot be given controls yet')
@@ -1021,9 +1023,8 @@ function open(of) {
         // The two as one message: the world's process does both on their ground, or neither (world.mjs `step`).
         return thread.postMessage(replaced ? { ask: replaced, then: { ask, id } } : { ask, id })
       }
-      if (replaced) return thread.postMessage({ ask: replaced, then: { ask } }), send(res, 202, '{"asked":true}', TYPES['.json'])
-      thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
-      send(res, 202, '{"asked":true}', TYPES['.json'])
+      if (replaced) return tell({ ask: replaced, then: { ask } })
+      tell(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
     },
     /** What a living thing's rider asks of it (#245): held by the core for a second, never kept. */
     async drive(req, res) {
