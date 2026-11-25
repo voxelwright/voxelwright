@@ -244,8 +244,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
   }
   const thing = make
   const asked = async (ask: Ask): Promise<Done> => {
-    // A picture or a link is of a thing. Words alone say what they are.
-    if (ask.picture || ask.link || !ask.wish) return thing(ask)
+    // A picture or a link is of a thing. Words alone say what they are. (Given on the bar: the asker's own, as typed words are.)
+    if (ask.picture || ask.link || !ask.wish) return thing({ ...ask, typed: true })
     const what = await meaning(ask.wish), words = ask.wish.replace(/^(thing|rule|play|say|said):\s*/i, '')
     // Said, with nobody's line to say it on (a world that is not shared): there is nothing to hear it, so it is a thing after all.
     if (what === 'said') { if (hud.line.onsubmit) { hud.line.onsubmit(words); return { stage: 'done', state: 'refused', why: 'said' } } return thing({ ...ask, wish: words, typed: true }) }

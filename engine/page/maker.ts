@@ -15,7 +15,12 @@
 //                    own solver (living.ts `spawn`), its cells never laid.
 //   things           this page's own records (things.ts), told as a world's echo would tell them
 //
-// Only what is kept is made in this step; a model is another lane's to connect.
+// Words nothing kept answers are made by the model another lane connects (`engine.making.model`), through the same
+// pipeline as make.mjs `make`: the brief, the reply read leniently as data (make/form.mjs: nothing in it is run, and
+// what is not the form's is left out), cells, what would fall taken off, placed, laid, a car brought to life. Only a
+// wish the visitor typed (`Ask.typed`) reaches it, with a picture they gave. Not here: a reply that is a program
+// (make/program.mjs runs in Node's box only), a link read for the model, drawing (make/drawn.mjs), a better one made
+// behind (make/best.mjs), keeping what was made on a shelf, and bringing a made thing to life where it stands.
 import type { Ask, Asker, Done, Guess, Stage, Target } from './ask.ts'
 import type { Edit } from './edits.ts'
 import type { Hud } from './hud.ts'
@@ -55,7 +60,13 @@ export interface Seam {
   core_url: string
   /** Has the page's core hold the finest tiles round a place (bay.ts `underfoot`): what is asked of it there is the city, not water. */
   hold(x: number, z: number): Promise<unknown>
+  /** The model another lane connects (`engine.making.model`), or null: nothing connected. Asked only for a wish the visitor typed. */
+  model(): Model | null
 }
+/** A model as another lane hands it in: the brief, the wish and any picture, to its reply as text. */
+export type Model = (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>
+/** The most a reply may be, in characters: more than any form reply the maker reads (form.mjs, cells.mjs `RUNS_MOST`). */
+const REPLY_MOST = 8 << 20
 /** What the shelf's index says of each kept thing: what the word rule reads (make/meant.mjs `meant`). */
 interface Entry { id: string; wish: string; words: string[]; name: string; apart: string; fields: string[] }
 /** Words that take the last made thing out again. */
@@ -215,6 +226,12 @@ export function pageMaker(seam: Seam): PageMaker {
     each(done)
     return done
   }
+  /** The connected model as the maker asks one: its reply is text, and only text, timed here. */
+  const asking = (model: Model) => async (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => {
+    const began = performance.now(), got = await model({ system: q.system, prompt: q.prompt, pictures: q.pictures })
+    if (typeof got?.text !== 'string') throw new Error('the model gave no text')
+    return { text: got.text.slice(0, REPLY_MOST), model: 'the connected model', ms: Math.round(performance.now() - began), cost: 0 }
+  }
   const said = (each: (stage: Stage) => void) => (_words: string, stage?: Stage) => { if (stage) each(stage) }
   const places = new Map<string, Promise<{ origin?: V3; facing?: string; why?: string }>>()
   const facesOf = new Map<string, Promise<Looks>>()
@@ -247,19 +264,29 @@ export function pageMaker(seam: Seam): PageMaker {
     async faces(id, facing) { try { return (await look(id, facing)).faces } catch { return null } },
     ask(ask: Ask, each = () => {}) {
       // Where the eye is and what is aimed at are as they were when it was asked, not when its turn comes.
-      const from = seam.eye(), target = ask.target ?? self.aim?.(), chose = ask.kept ?? (ask.wish && !ask.picture && !ask.link && !ask.fresh && !ask.hand ? self.kept?.(ask.wish) : undefined)
+      const from = seam.eye(), target = ask.target ?? self.aim?.()
+      // The ghost the bar showed is told its words were sent (page/kept.ts keeps it until the thing stands): what is made
+      // is what the words as they were sent mean, the one rule (make/meant.mjs), whether a ghost had shown or not.
+      if (ask.wish && !ask.picture && !ask.link && !ask.fresh && !ask.hand) self.kept?.(ask.wish)
       return turn(async () => {
         if (ask.wish && UNDO.test(ask.wish)) return unmake()
-        if (ask.picture || ask.link || !ask.wish) return refused('a picture or a link needs an AI connected to make it')
+        if (ask.link) return refused('a link is not read here')
         const shelf = (await index()).filter((e) => e.apart === (ask.hand ? 'hand' : ''))
-        // The ghost's thing, if the words as they were sent still mean it; else what they mean now.
-        // (The ghost's own thing is what the words as they were sent still mean, or the words are made as they say: one rule.)
-        void chose
-        const entry = meant(ask.wish, shelf)?.entry
-        if (!entry) return refused('nothing kept is called that, and making new things needs an AI connected')
-        each({ stage: 'known', name: entry.name })
-        const [kept] = await Promise.all([record(entry.id), seam.hold(from.eye[0], from.eye[2])])
-        const r = await make({ wish: ask.wish, world, where: where(target, from), by: seam.by(), journal, core: fresh, ...recalled(kept), say: said(each) })
+        const entry = ask.wish && !ask.picture && !ask.fresh ? meant(ask.wish, shelf)?.entry : undefined
+        const how = { wish: ask.wish ?? '', world, where: where(target, from), by: seam.by(), journal, core: fresh, say: said(each) }
+        let r
+        if (entry) {
+          each({ stage: 'known', name: entry.name })
+          const [kept] = await Promise.all([record(entry.id), seam.hold(from.eye[0], from.eye[2])])
+          r = await make({ ...how, ...recalled(kept) })
+        } else {
+          // Nothing kept answers: the connected model, for what the visitor typed or gave themselves, and nothing else.
+          const model = seam.model()
+          if (!ask.typed) return refused('only what a visitor types is made new here')
+          if (!model) return refused('nothing kept is called that, and making new things needs an AI connected')
+          await seam.hold(from.eye[0], from.eye[2])
+          r = await make({ ...how, picture: ask.picture, model: asking(model) })
+        }
         const done = ended(r)
         if (done.state === 'held') asked.set(done, from)
         return done

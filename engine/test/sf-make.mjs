@@ -12,8 +12,11 @@
 //     core at places sampled from that record;
 //   - `engine.unmake()` takes the last one out (record and cells), and "undo" on the bar takes out the car;
 //   - words nothing kept answers make nothing, and say so;
-//   - nothing of the maker or the shelf was asked for before the bar was used.
-// No model is run.
+//   - nothing of the maker or the shelf was asked for before the bar was used;
+//   - with a model handed in (`engine.making.model`, a stand-in that answers with a reply kept here): a wish nobody typed
+//     never reaches it; a typed one is made from its reply; a reply with a script and keys of its own makes the same
+//     cells and the same record as the plain one (nothing in it runs); a picture given goes to it as a picture.
+// No model is run: the stand-in proves the pipeline only.
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -146,6 +149,39 @@ const type = async (page, words) => {
   // Words nothing kept answers.
   const none = await page.evaluate(async () => { const e = globalThis.engine, n = e.things.all.size; const done = await e.ask({ wish: 'a purple submarine', typed: true }); return { done, more: e.things.all.size - n } })
   check(none.done.state === 'refused' && /AI/.test(none.done.why ?? '') && none.more === 0, `words nothing kept answers make nothing, and say so: ${none.done.why}`)
+
+  // A model handed in (#526 step 2), stood in for by a reply kept here: the form, with a script and keys of its own.
+  const STALL = { name: 'fruit stall', size: [34, 25, 18], parts: [
+    ['box', 'wood', '2:6', 2, 0, 2, 4, 24, 4], ['box', 'wood', '2:6', 30, 0, 2, 32, 24, 4], ['box', 'wood', '2:6', 2, 0, 14, 4, 24, 16], ['box', 'wood', '2:6', 30, 0, 14, 32, 24, 16],
+    ['box', 'wood', 'own', 2, 8, 2, 32, 9, 16], ['box', 'wood', '2:5', 4, 0, 3, 30, 8, 4],
+    ['stripes', 'plaster', '0:4', 0, 24, 0, 34, 25, 18, 'x', 4, 'white'],
+    ['box', 'leaves', '2:4', 6, 9, 5, 9, 11, 8], ['box', 'leaves', '0:4', 11, 9, 5, 14, 11, 8], ['ball', 'leaves', '8:4', 16, 9, 5, 19, 12, 8],
+    ['cyl', 'wood', 'own', 22, 9, 5, 26, 13, 9, 'y'], ['text', 'lamp', '3:1', 3, 1, 2, 'FRUIT'],
+  ] }
+  const plainReply = JSON.stringify(STALL)
+  const wildReply = JSON.stringify({ ...STALL, script: 'globalThis.__ran = 1', onload: 'globalThis.__ran = 2', controls: { scheme: 'drive' }, parts: [...STALL.parts, ['script', 'wood', 'own', 0, 0, 0, 2, 2, 2, 'globalThis.__ran = 3']] })
+  const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+  const modelled = await page.evaluate(async ({ plainReply, wildReply, PNG }) => {
+    const e = globalThis.engine, asked = [], cellsOf = (t) => { const g = t.grain ?? 1, out = []; for (let i = 0; i + 4 < t.cells.length; i += 5) for (let x = t.cells[i]; x < t.cells[i + 1]; x++) out.push(`${x},${t.cells[i + 2]},${t.cells[i + 3]},${t.cells[i + 4]}`); return out.sort().join(' ') }
+    e.making.model = async (q) => { asked.push({ system: q.system.length, prompt: q.prompt, pictures: q.pictures.length }); return { text: asked.length === 1 ? plainReply : wildReply } }
+    // Not typed by a visitor (a rule's world.make): nothing reaches the model.
+    const untyped = await e.ask({ wish: 'a fruit stall' })
+    const plain = await e.ask({ wish: 'a fruit stall', typed: true })
+    const one = plain.id && e.things.all.get(plain.id), plainCells = one && cellsOf(one), plainKeys = one && Object.keys(one).sort().join()
+    await e.unmake()
+    const wild = await e.ask({ wish: 'a fruit stall', typed: true })
+    const two = wild.id && e.things.all.get(wild.id), wildCells = two && cellsOf(two), wildKeys = two && Object.keys(two).sort().join()
+    await e.unmake()
+    const pictured = await e.ask({ wish: 'a fruit stall', typed: true, picture: { type: 'image/png', data: PNG } })
+    if (pictured.id) await e.unmake()
+    e.making.model = null
+    return { untyped, plain, wild, pictured, asked, ran: globalThis.__ran ?? null, keys: [plainKeys, wildKeys], same: !!plainCells && plainCells.length > 0, cells: [plainCells?.length ?? 0, wildCells?.length ?? 0], alive: e.alive.things.length }
+  }, { plainReply, wildReply, PNG })
+  check(modelled.untyped.state === 'refused' && modelled.asked.length === 3, `a wish nobody typed reaches no model (${modelled.untyped.why}); the model was asked ${modelled.asked.length} times for 3 typed wishes`)
+  check(modelled.plain.state === 'there' && modelled.asked[0]?.prompt === 'a fruit stall' && modelled.asked[0]?.system > 1000 && modelled.asked[0]?.pictures === 0, `with a stand-in model a new wish is made: ${modelled.plain.state}${modelled.plain.why ? ` (${modelled.plain.why})` : ''}, ${modelled.plain.name}; the model got the brief and the wish`)
+  check(modelled.wild.state === 'there' && modelled.ran === null && modelled.keys[0] === modelled.keys[1] && !/script|onload/.test(modelled.keys[1] ?? ''), `a reply with a script and keys of its own: ${modelled.wild.state}, nothing of it ran (${modelled.ran}), the record's keys are the plain one's (${modelled.keys[1]})`)
+  check(modelled.cells[0] > 0 && modelled.cells[0] === modelled.cells[1], `and only its cells could differ: the same ${modelled.cells[0]} cells as the plain reply's, its own part left out`)
+  check(modelled.pictured.state === 'there' && modelled.asked[2]?.pictures === 1, `a picture given goes to the model as a picture (${modelled.asked[2]?.pictures ?? 0}): ${modelled.pictured.state}`)
   await context.close()
 }
 

@@ -944,8 +944,10 @@ async function main() {
   // A realm the page runs alone, whose rules allow it (local.ts `making`): things are made in the page itself, by the
   // engine's own maker (page/maker.ts), fetched once the bar is first used in the realm. Elsewhere: the helper.
   const makesHere = MAKING && !far
+  /** Where another lane connects a model for it (`engine.making.model`: { system, prompt, pictures } to { text }); null: none, and the bar says so. */
+  const makingSeam: { model: ((q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>) | null } = { model: null }
   const wishes = makesHere ? later(() => import('./maker.ts').then(({ pageMaker }) => pageMaker({
-      core, made, alive, eye: gaze, by: () => 'visitor', hud: over, shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z),
+      core, made, alive, eye: gaze, by: () => 'visitor', hud: over, shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z), model: () => makingSeam.model,
       // As the page lays its own: finer cells only where every box of the world they reach takes them (`taken`).
       lay: (edit, at) => { if (edit.words[0] < 3) { make(edit, at); return true } put(); if (!taken(edit)) return false; waiting++; mover.postMessage({ edit: edit.words, after: heard, release: at } satisfies Ask); return true },
     }))) : asker(gaze, () => others?.name ?? 'someone')
@@ -1255,7 +1257,7 @@ async function main() {
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
   // The last thing made in this page, taken out again (page/maker.ts; "undo" on the bar does the same).
-  if (makesHere) Object.assign((globalThis as unknown as { engine: object }).engine, { unmake: () => wishes.rule('', { undo: true }) })
+  if (makesHere) Object.assign((globalThis as unknown as { engine: object }).engine, { unmake: () => wishes.rule('', { undo: true }), making: makingSeam })
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
   // The core built again and taken while the page runs (#264): this thread's own, then the workers', and every
