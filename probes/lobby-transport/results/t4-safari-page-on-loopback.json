@@ -1,0 +1,36 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+ "origin": "http://127.0.0.1:5980",
+ "secureContext": true,
+ "webTransport": true,
+ "rtc": true,
+ "permissionsBefore": {
+  "local-network-access": "query failed: TypeError",
+  "local-network": "query failed: TypeError",
+  "loopback-network": "query failed: TypeError"
+ },
+ "helper": {
+  "127.0.0.1": {
+   "ok": true,
+   "status": 200,
+   "body": "{\"helper\":\"ok\",\"via\":\"127.0.0.1:5982\"}",
+   "ms": 20
+  },
+  "localhost": {
+   "ok": true,
+   "status": 200,
+   "body": "{\"helper\":\"ok\",\"via\":\"localhost:5982\"}",
+   "ms": 14
+  },
+  "[::1]": {
+   "ok": true,
+   "status": 200,
+   "body": "{\"helper\":\"ok\",\"via\":\"[::1]:5982\"}",
+   "ms": 6
+  }
+ },
+ "permissionsAfter": {
+  "local-network-access": "query failed: TypeError",
+  "loopback-network": "query failed: TypeError"
+ }
+}

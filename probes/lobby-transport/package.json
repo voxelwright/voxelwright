@@ -1,0 +1,13 @@
+{
+  "name": "village-lobby-transport-probe",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Issue #526: time-boxed probe of how a browser on an https page reaches a player-hosted server. Not product code.",
+  "dependencies": {
+    "@fails-components/webtransport": "1.6.11",
+    "@fails-components/webtransport-transport-http3-quiche": "1.6.11",
+    "node-datachannel": "0.33.6",
+    "playwright": "1.65.0"
+  }
+}

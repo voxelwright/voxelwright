@@ -1,0 +1,81 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>lobby transport probe</title>
+<pre id="out">running…</pre>
+<script type="module">
+// ?t=rtc|wt|local  &lobby=<name> (through the stand-in master) or &relay=<run>&sid=<sid> (through the issue mailbox)
+// &name=<result file> &up=<seconds> &helper=<port>
+import { clientOffer, clientConnect, clientRun, candidateTypes } from '/lib/rtc-load.mjs';
+import { wtConnect, wtRun } from '/wt-load.mjs';
+
+const q = new URLSearchParams(location.search);
+const name = q.get('name') ?? 'page';
+const up = Number(q.get('up') ?? 60);
+const post = (path, v) => fetch(path, { method: 'POST', body: JSON.stringify(v) });
+const log = (k, ...v) => { document.getElementById('out').textContent += `\n${k} ${JSON.stringify(v)}`; post(`/log/${name}`, { k, v }).catch(() => {}); };
+const now = () => performance.now();
+const out = { ua: navigator.userAgent, origin: location.origin, secureContext: isSecureContext, webTransport: typeof WebTransport === 'function', rtc: typeof RTCPeerConnection === 'function' };
+
+async function permission(n) { try { return (await navigator.permissions.query({ name: n })).state; } catch (e) { return `query failed: ${e.name}`; } }
+
+try {
+  const t = q.get('t');
+  if (t === 'rtc') {
+    const t0 = now();
+    const c = await clientOffer(RTCPeerConnection);
+    log('offer', { gatherMs: c.gatherMs, complete: c.gatherComplete, candidates: c.offerCandidates });
+    const relay = q.get('relay');
+    const r = await (relay
+      ? post('/relay/offer', { run: relay, sid: q.get('sid'), offer: c.offer })
+      : post(`/master/join/${q.get('lobby')}`, { offer: c.offer })).then((x) => x.json());
+    if (!r.answer) throw new Error(`no answer: ${JSON.stringify(r)}`);
+    const conn = await clientConnect(c, r.answer);
+    out.webrtc = { clickToOpenMs: Math.round(now() - t0), gatherMs: c.gatherMs, gatherComplete: c.gatherComplete, offerCandidates: c.offerCandidates, signalMs: r.masterMs ?? r.mailboxMs, via: relay ? 'issue mailbox' : 'stand-in master', ...conn };
+    log('connect', out.webrtc);
+    if (conn.open) out.webrtc.load = await clientRun(c, { upSeconds: up, log });
+  }
+  if (t === 'wt') {
+    const t0 = now();
+    const listing = await fetch(`/master/lobby/${q.get('lobby')}`).then((x) => x.json());
+    const { wt, connectMs } = await wtConnect(listing.wt.url, listing.wt.hash);
+    out.webtransport = { clickToReadyMs: Math.round(now() - t0), connectMs };
+    log('ready', out.webtransport);
+    out.webtransport.load = await wtRun(wt, { upSeconds: up, log });
+    wt.close();
+  }
+  if (t === 'local') {
+    const port = q.get('helper') ?? '5982';
+    out.permissionsBefore = { 'local-network-access': await permission('local-network-access'), 'local-network': await permission('local-network'), 'loopback-network': await permission('loopback-network') };
+    out.helper = {};
+    for (const host of ['127.0.0.1', 'localhost', '[::1]']) {
+      const t0 = now();
+      try {
+        const res = await fetch(`http://${host}:${port}/ping`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{"hello":1}' });
+        out.helper[host] = { ok: res.ok, status: res.status, body: await res.text(), ms: Math.round(now() - t0) };
+      } catch (e) { out.helper[host] = { error: `${e.name}: ${e.message}`, ms: Math.round(now() - t0) }; }
+      log('helper', host, out.helper[host]);
+    }
+    const wth = new URLSearchParams(location.hash.slice(1)).get('helperwt');
+    if (wth) {
+      const t0 = now();
+      try {
+        const hash = wth.match(/../g).map((h) => parseInt(h, 16));
+        const { wt } = await wtConnect('https://127.0.0.1:5988/helper', hash);
+        const s = await wt.createBidirectionalStream();
+        const w = s.writable.getWriter(); await w.write(new TextEncoder().encode('{"hello":1}')); await w.close();
+        let txt = ''; const r = s.readable.getReader(); for (;;) { const x = await r.read(); if (x.done) break; txt += new TextDecoder().decode(x.value); }
+        out.helper.webtransport = { ok: true, body: txt, ms: Math.round(now() - t0) };
+        wt.close();
+      } catch (e) { out.helper.webtransport = { error: `${e.name}: ${e.message}`, ms: Math.round(now() - t0) }; }
+      log('helper', 'webtransport', out.helper.webtransport);
+    }
+    out.permissionsAfter = { 'local-network-access': await permission('local-network-access'), 'loopback-network': await permission('loopback-network') };
+  }
+} catch (e) {
+  out.error = `${e.name}: ${e.message}`;
+  log('error', out.error);
+}
+await post(`/result/${name}`, out);
+document.title = 'done';
+log('done');
+</script>

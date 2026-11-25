@@ -1,0 +1,60 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+ "origin": "https://<tailnet-host>:<port>",
+ "secureContext": true,
+ "webTransport": true,
+ "rtc": true,
+ "webtransport": {
+  "clickToReadyMs": 58,
+  "connectMs": 51,
+  "load": {
+   "request": {
+    "n": 10,
+    "p50": 2,
+    "p95": 9,
+    "p99": 9,
+    "max": 9
+   },
+   "stream": {
+    "bytes": 20971520,
+    "ms": 504,
+    "mbps": 332.9,
+    "hostSendMs": 500,
+    "hostMaxWriteWaitMs": 6,
+    "slowBytesPerSec": 0
+   },
+   "slowStream": {
+    "bytes": 20971520,
+    "ms": 9997,
+    "mbps": 16.8,
+    "hostSendMs": 556,
+    "hostMaxWriteWaitMs": 8,
+    "slowBytesPerSec": 2097152
+   },
+   "upDatagram": {
+    "sent": 1200,
+    "echoed": 1200,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 1200,
+     "p50": 2,
+     "p95": 36,
+     "p99": 80,
+     "max": 171
+    }
+   },
+   "upStream": {
+    "sent": 1200,
+    "echoed": 1200,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 1200,
+     "p50": 2,
+     "p95": 37,
+     "p99": 80,
+     "max": 172
+    }
+   }
+  }
+ }
+}

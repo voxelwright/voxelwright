@@ -1,0 +1,35 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+ "origin": "https://<tailnet-host>:<port>",
+ "secureContext": true,
+ "webTransport": true,
+ "rtc": true,
+ "permissionsBefore": {
+  "local-network-access": "query failed: TypeError",
+  "local-network": "query failed: TypeError",
+  "loopback-network": "query failed: TypeError"
+ },
+ "helper": {
+  "127.0.0.1": {
+   "error": "TypeError: Load failed",
+   "ms": 4
+  },
+  "localhost": {
+   "error": "TypeError: Load failed",
+   "ms": 0
+  },
+  "[::1]": {
+   "error": "TypeError: Load failed",
+   "ms": 0
+  },
+  "webtransport": {
+   "ok": true,
+   "body": "{\"helper\":\"ok\",\"via\":\"webtransport\",\"got\":\"{\\\"hello\\\":1}\"}",
+   "ms": 13
+  }
+ },
+ "permissionsAfter": {
+  "local-network-access": "query failed: TypeError",
+  "loopback-network": "query failed: TypeError"
+ }
+}

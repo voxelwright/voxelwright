@@ -1,0 +1,86 @@
+{
+ "role": "mac",
+ "run": "r2",
+ "node": "v25.1.0",
+ "B_node": {
+  "gatherMs": 60,
+  "offerCandidates": {
+   "host": 3,
+   "srflx": 1,
+   "prflx": 0,
+   "relay": 0,
+   "udp": 4,
+   "tcp": 0,
+   "ipv6": 1,
+   "mdns": 0
+  },
+  "mailboxMs": 16210,
+  "open": true,
+  "openMs": 427,
+  "state": "connected",
+  "answerCandidates": {
+   "host": 1,
+   "srflx": 1,
+   "prflx": 0,
+   "relay": 0,
+   "udp": 2,
+   "tcp": 0,
+   "ipv6": 0,
+   "mdns": 0
+  },
+  "pair": {
+   "local": "srflx",
+   "remote": "srflx"
+  },
+  "load": {
+   "request": {
+    "n": 10,
+    "p50": 49.3,
+    "p95": 52.3,
+    "p99": 52.3,
+    "max": 52.3
+   },
+   "stream": {
+    "bytes": 20971520,
+    "ms": 1858,
+    "mbps": 90.3,
+    "hostSendMs": 1541,
+    "hostPeakBuffered": 1114112,
+    "slowBytesPerSec": 0
+   },
+   "slowStream": {
+    "bytes": 20971520,
+    "ms": 10001,
+    "mbps": 16.8,
+    "hostSendMs": 1156,
+    "hostPeakBuffered": 1114112,
+    "readerPeakQueued": 17170432,
+    "slowBytesPerSec": 2097152
+   },
+   "up": {
+    "sent": 400,
+    "echoed": 400,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 400,
+     "p50": 49.7,
+     "p95": 54.3,
+     "p99": 61.2,
+     "max": 89.1
+    }
+   },
+   "upUnreliable": {
+    "sent": 400,
+    "echoed": 400,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 400,
+     "p50": 49.8,
+     "p95": 54.1,
+     "p99": 60.9,
+     "max": 88.9
+    }
+   }
+  }
+ }
+}

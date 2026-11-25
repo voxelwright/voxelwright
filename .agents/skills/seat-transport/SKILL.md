@@ -49,7 +49,8 @@ Primary sources: each package's README and shipped `dist/` types;
 - Playwright 1.65 wants its own browser builds (`npx playwright install chromium webkit`);
   older cached builds are ignored.
 - Playwright WebKit closed the page during `RTCPeerConnection` setup, so WebRTC
-  was not measured in WebKit. Real Safari support is a docs claim only.
+  was not measured in WebKit here. The real Safari 27.2 runs both WebRTC data channels and
+  WebTransport by certificate hash (#526, `.agents/skills/lobby-transport`).
 - Claude Code 2.1.319 prints "OAuth fallback is disabled when headers.Authorization
   is set" on a 401. The gateway serves no OAuth metadata, so the probe did not
   test the older bug (headers ignored when OAuth is advertised). Keep serving none.
@@ -75,7 +76,7 @@ Primary sources: each package's README and shipped `dist/` types;
 ## Not verified
 
 Real iPhone Safari, LAN or Wi-Fi loss and jitter (all numbers are loopback),
-NAT traversal, more than one seat, browser-side MCP, and the @fails-components
+more than one seat (NAT traversal: see `lobby-transport`), browser-side MCP, and the @fails-components
 library under sustained load. Its author calls the HTTP/3 binding a
 "duct tape-style solution until ... native support" in Node.
 

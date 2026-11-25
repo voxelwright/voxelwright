@@ -1,0 +1,92 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15",
+ "origin": "https://<tailnet-host>:<port>",
+ "secureContext": true,
+ "webTransport": true,
+ "rtc": true,
+ "webrtc": {
+  "clickToOpenMs": 3677,
+  "gatherMs": 374,
+  "gatherComplete": "srflx+quiet",
+  "offerCandidates": {
+   "host": 1,
+   "srflx": 1,
+   "prflx": 0,
+   "relay": 0,
+   "udp": 2,
+   "tcp": 0,
+   "ipv6": 0,
+   "mdns": 1
+  },
+  "signalMs": 2457,
+  "via": "issue mailbox",
+  "open": true,
+  "openMs": 438,
+  "state": "connected",
+  "answerCandidates": {
+   "host": 1,
+   "srflx": 1,
+   "prflx": 0,
+   "relay": 0,
+   "udp": 2,
+   "tcp": 0,
+   "ipv6": 0,
+   "mdns": 0
+  },
+  "pair": {
+   "local": "srflx",
+   "remote": "srflx",
+   "protocol": "udp"
+  },
+  "load": {
+   "request": {
+    "n": 10,
+    "p50": 58,
+    "p95": 68,
+    "p99": 68,
+    "max": 68
+   },
+   "stream": {
+    "bytes": 20971520,
+    "ms": 12569,
+    "mbps": 13.3,
+    "hostSendMs": 12179,
+    "hostPeakBuffered": 1114112,
+    "slowBytesPerSec": 0
+   },
+   "slowStream": {
+    "bytes": 20971520,
+    "ms": 11010,
+    "mbps": 15.2,
+    "hostSendMs": 10611,
+    "hostPeakBuffered": 1114112,
+    "readerPeakQueued": 65536,
+    "slowBytesPerSec": 2097152
+   },
+   "up": {
+    "sent": 1200,
+    "echoed": 1200,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 1200,
+     "p50": 57,
+     "p95": 126,
+     "p99": 314,
+     "max": 326
+    }
+   },
+   "upUnreliable": {
+    "sent": 1200,
+    "echoed": 1200,
+    "lossPct": 0,
+    "rttMs": {
+     "n": 1200,
+     "p50": 57,
+     "p95": 102,
+     "p99": 134,
+     "max": 888
+    }
+   }
+  }
+ }
+}

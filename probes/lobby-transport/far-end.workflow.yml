@@ -1,0 +1,50 @@
+# Issue #526: the far end of the NAT probe. To run it, copy this file to
+# .github/workflows/ on a branch (push over SSH) and push run.txt. It lived on
+# feature/526-transport-probe for runs r1 and r2; never put it on main.
+name: lobby-transport-probe
+on:
+  workflow_dispatch:
+    inputs:
+      run: { description: run id, required: true }
+  push:
+    branches: [feature/526-transport-probe]
+    paths: [probes/lobby-transport/run.txt]
+permissions:
+  contents: read
+  issues: write
+jobs:
+  far-end:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults: { run: { working-directory: probes/lobby-transport } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci --no-audit --no-fund
+      - run: |
+          # run.txt: line 1 run id, line 2 PHASES (empty = all), line 3 SCTP_BUF (empty = default)
+          RUN="${{ inputs.run }}"; [ -z "$RUN" ] && RUN=$(sed -n 1p run.txt)
+          export PHASES=$(sed -n 2p run.txt) SCTP_BUF=$(sed -n 3p run.txt)
+          node nat-peer.mjs runner "$RUN"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MAILBOX_ISSUE: '527'
+          HOST_MINUTES: '15'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: nat-runner, path: probes/lobby-transport/results/nat-runner.json, if-no-files-found: ignore }
+  loads:
+    # Does node-datachannel's prebuilt addon load and gather on other platforms?
+    strategy:
+      fail-fast: false
+      matrix: { os: [windows-latest, ubuntu-24.04-arm] }
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    defaults: { run: { working-directory: probes/lobby-transport } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 24 }
+      - run: npm ci --no-audit --no-fund
+      - run: node loads.mjs

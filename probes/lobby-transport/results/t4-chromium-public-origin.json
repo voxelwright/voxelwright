@@ -1,0 +1,34 @@
+{
+ "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/158.0.8127.18 Safari/537.36",
+ "origin": "https://<tailnet-host>:<port>",
+ "secureContext": true,
+ "webTransport": true,
+ "rtc": true,
+ "permissionsBefore": {
+  "local-network-access": "prompt",
+  "local-network": "prompt",
+  "loopback-network": "prompt"
+ },
+ "helper": {
+  "127.0.0.1": {
+   "error": "TypeError: Failed to fetch",
+   "ms": 3
+  },
+  "localhost": {
+   "error": "TypeError: Failed to fetch",
+   "ms": 1
+  },
+  "[::1]": {
+   "error": "TypeError: Failed to fetch",
+   "ms": 8
+  },
+  "webtransport": {
+   "error": "WebTransportError: Opening handshake failed.",
+   "ms": 1
+  }
+ },
+ "permissionsAfter": {
+  "local-network-access": "prompt",
+  "loopback-network": "prompt"
+ }
+}
