@@ -164,6 +164,8 @@ export interface Source {
   far: boolean
   /** Whether the manifest's hash was checked (crypto.subtle is only in secure contexts: https and localhost). */
   checked: boolean
+  /** Whether the release lists a tile (its level, `tx_tz`): land it holds, not sea and not past its edge. Under the page server, never. */
+  lists(level: number, key: string): boolean
   /** An object the release lists anywhere in its manifest (a tile, names, the far model's, street life's), by its path there: where it is and what it must be. Null for anything it does not list. */
   record(path: string): { url: string; bytes: number; sha256: string; listed: true } | null
 }
@@ -188,6 +190,7 @@ async function released(pointer: URL): Promise<Source> {
   return {
     levels: levels.map(({ size, gstep }) => ({ size, gstep })),
     // Water, in the sea list or past what the release holds: nothing is asked.
+    lists: (level, key) => !!levels[level]?.tiles[key],
     find: (level, key) => { const r = levels[level]?.tiles[key]; if (r) return { url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256, listed: true }; if (sea[level]?.has(key)) seaKeys++; else unlisted++; return null },
     names: Object.values(manifest.names).map((r) => ({ url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256 })),
     credits: releaseCredits(at.release, manifest.credits),
@@ -214,6 +217,7 @@ async function served(): Promise<Source> {
   const has = i.tiles.map((l) => new Set(BAKED ? l.map(([x, z]) => `${x}_${z}`) : []))
   return {
     levels: i.levels,
+    lists: () => false,
     find: (level, key) => ({ url: has[level].has(key) ? `${BASE}tiles/${level}/${key}.bay` : `${BASE}earth/${FRAME}/${level}/${key}.bay`, listed: false }),
     names: (BAKED ? i.squares : []).map((name) => ({ url: `${BASE}${name}.json` })),
     credits: null,
@@ -606,6 +610,12 @@ export async function hold(o: { pointer: string; read: typeof get; passed?: (url
   const s = await source
   toldLevels = s.levels
   return s
+}
+
+/** Whether the release lists the finest tile at a column (cells), for a place a stranger names (#526, arrival.ts): read once the release is. */
+export async function lists(): Promise<(x: number, z: number) => boolean> {
+  const s = await where(), size = s.levels[0].size
+  return (x, z) => s.lists(0, `${Math.floor(x / size)}_${Math.floor(z / size)}`)
 }
 
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */

@@ -79,13 +79,29 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
   (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
   machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one until it is closed, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
   `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
+- Where a visitor who joins stands (`page/arrival.ts`): on their feet, on the ground or a roof, round the column
+  `--arrive` names, facing its yaw. Its height is never taken: a page stands them on whatever is highest at that
+  column. The page checks the place first, as a stranger's data: finite numbers, a tile its own release lists,
+  something there to stand on (not water, level under the body, 2 m of air over it, nothing made standing in it). A
+  place that fails, or no `--arrive` (the server then says the realm's own arrival, the landing's eye, which is no
+  place to stand), is the realm's meeting place instead (`meet` in `sf/realm.json`: a level crossing on Russian Hill
+  south-west of the landing, looking north down the hill to the Bay, where a car fits). Round that place each person
+  has their own: places 3 m apart, the middle first, then behind and to a side (whoever comes later has those already
+  there in sight), dealt by the number the door gives each connection (the lowest nobody here holds, `spot` in the
+  welcome), so that people let in in the same second never meet; anyone already standing is gone round by 2.5 m. They
+  face where the place says, or turn an eighth at a time until 20 m ahead is clear, and look down at the ground 16 m
+  ahead, so that a wish there is made there. The tiles round the place come first; until then the keys move nothing.
+  `engine.arrival` says how it went: `standing`, `eye` (nowhere would do: left an eye), or `moved` (the eye was put
+  somewhere else first). The body's own core holds the ground round it in any shared world on a release.
 - A visitor finds servers in the realm's settings, **Servers…** (`page/lobbies.ts`, fetched when first pressed), where
   the realm's rule allows lobbies (`lobbies` is `"preview"` in `sf/realm.json`: only with `?lobbies=1&master=<address>`;
   a realm whose rule names a master uses that one only). The list holds every listed lobby on the page's release,
   sorted by its heads, refreshed by hand and every 30 s while open; a row is joined with Join, a double click or Enter,
   a private server with its code. A join loads the page again: the lobby goes in a ticket this tab keeps
   (sessionStorage `village.join`, taken and forgotten as the page starts, honoured for a minute), never the address,
-  and a password is asked in the panel once the page is up again, never kept. In a lobby a tag in the top left says
+  and a password is asked in the panel once the page is up again, never kept. A join the visitor chose (the ticket, or
+  the question before a link's join answered yes) skips the still first view, and the realm's settings stay folded
+  behind their key; an address alone never skips it, and a join that fails leaves the first view as it was. In a lobby a tag in the top left says
   whose server it is and opens its panel: who is here, what the server says, Leave, and an admin's controls once the
   admin password is given. `node test/sf-lobbies.mjs` checks all of it. In a realm's preview an address may still
   join (`&lobby=<id or code>&name=<a name>`), for the checks and the console, where a password is asked in the

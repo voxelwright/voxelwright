@@ -36,6 +36,8 @@ export function realms(o: {
   came(): void
   /** Puts the eye somewhere. */
   place(at: Pose, body?: Pose): void
+  /** Called in place of `place` for where the page arrives as it is loaded straight into a realm, with what the realm says (a stranger's data in a lobby, #526): the page sets its person down itself. */
+  land?(arrive: unknown): void
   /** Where a realm's arrival is, as a pose: its feet on the ground there, its eyes over them. */
   arrival(arrive: NonNullable<Realm['arrive']>): Pose
   /** Where this page began. */
@@ -53,7 +55,7 @@ export function realms(o: {
   // straight into a realm arrives where the realm says, unless its address said where.
   o.far.onrealm = (realm) => {
     o.look(realm.look)
-    if (!arrived && realm.arrive && !new URLSearchParams(location.search).has('at')) o.place(o.arrival(realm.arrive))
+    if (!arrived && !new URLSearchParams(location.search).has('at')) { if (o.land) o.land(realm.arrive); else if (realm.arrive) o.place(o.arrival(realm.arrive)) }
     arrived = true
   }
   const frame = () => new Promise<void>((done) => requestAnimationFrame(() => done()))

@@ -78,7 +78,8 @@ const notice = (p) => p.page.evaluate(() => document.getElementById('door-notice
 const noticed = (p, re, ms = 30_000) => p.page.waitForFunction((src) => new RegExp(src).test(document.getElementById('door-notice')?.textContent ?? ''), re.source, { timeout: ms }).then(() => true, () => false)
 /** The eye over a place, with the world round it made. */
 const over = async (page, { x, z }) => {
-  await page.evaluate(([x, z]) => { const e = globalThis.engine; Object.assign(e.pose, { x: x / 10, y: e.ground(x / 10, z / 10) + 3, z: z / 10, yaw: 0, pitch: -0.3 }) }, [x, z])
+  // (Taken up first: a page let in is set down on its feet, page/arrival.ts, and on foot the eye is the body's.)
+  await page.evaluate(([x, z]) => { const e = globalThis.engine; e.me.walk(false); Object.assign(e.pose, { x: x / 10, y: e.ground(x / 10, z / 10) + 3, z: z / 10, yaw: 0, pitch: -0.3 }) }, [x, z])
   await page.waitForTimeout(1200)
   await still(page, { limit: 120_000 })
 }

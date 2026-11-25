@@ -72,6 +72,7 @@ let checks = [
   ['course', 'node', ['test/course.mjs'], false],
   ['rules', 'node', ['test/rules.mjs'], true],
   ['realms', 'node', ['test/realms.mjs'], false],
+  ['arrival', 'node', ['test/arrival.mjs'], false],
   ['plugged', 'node', ['test/plugged.mjs'], false],
   ['plugins', 'node', ['test/plugins.mjs'], true],
   ['swap', 'node', ['test/swap.mjs'], true],

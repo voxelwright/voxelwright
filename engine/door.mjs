@@ -6,7 +6,7 @@
 //   ctl   JSON. The page's hello first: {hello: {proto, pin, name, key, sig, password?}}, where key is the page's
 //         public key (SPKI, base64) and sig its signature (ECDSA P-256, SHA-256, IEEE P1363, base64) over
 //         `village-door-1 <this connection's DTLS fingerprint>` (page/wire.ts `signed`). The door answers
-//         {welcome: {you, name, server}} or {refuse: {why}} and closes. Then {ping} and {pong}, {unstream: n} (the
+//         {welcome: {you, name, spot, server}} (spot: the lowest place number nobody else here holds) or {refuse: {why}} and closes. Then {ping} and {pong}, {unstream: n} (the
 //         page stops reading a stream), an admin's password and the lobby's ops ({n, admin}, {n, lobby: {op}}
 //         answered {n, ok} or {n, why}), who is here for anyone let in ({n, people: true}: {n, ok, people: [{name, me?}]}), {told: {text}} (the server says something), {end: {n, why}} (a stream ended)
 //         and {gone: {why}} (the door closes this connection).
@@ -441,8 +441,11 @@ export function door(o) {
     let name = wanted
     for (let i = 2; welcomed().some((w) => w !== c && w.name.toLowerCase() === name.toLowerCase()); i++) name = `${wanted.slice(0, 20)} (${i})`
     c.name = name
+    // Its place among those here (page/arrival.ts): the lowest number nobody else here holds, so that pages let in
+    // together stand apart. Only the door sees every join.
+    for (c.spot = 0; welcomed().some((w) => w !== c && w !== again && w.spot === c.spot); c.spot++);
     clearTimeout(c.joinBy)
-    tell(c, { welcome: { you, name, server: { name: kept.name, about: kept.about, most: kept.most, build: kept.build, admins: !!adminSealed } } })
+    tell(c, { welcome: { you, name, spot: c.spot, server: { name: kept.name, about: kept.about, most: kept.most, build: kept.build, admins: !!adminSealed } } })
     log(`${name} (${you}) joined`)
     now()
   }

@@ -34,6 +34,7 @@ import type { Board, Boards } from './boards.ts'
 import type { First } from './first.ts'
 import type { Input } from './input.ts'
 import type { View } from './march.ts'
+import { LENS } from './arrival.ts'
 import { behindAt, type Me } from './person.ts'
 
 export interface Needs {
@@ -96,8 +97,8 @@ const M = 10, DEG = Math.PI / 180
 const STANDS = 6000, LEAN = 0.08, PUSH = 0.965
 /** How soon after the first ask a second counts, ms: a double click, or a key held until it repeats, is one ask, and the line that says how to go on has been there to read. */
 const AGAIN = 300
-/** The lens in the realm, degrees (wider where the picture is taller than wide, which sees a third as much across); how long the flight is, s; the round: how far out and how high over the body's feet it begins and comes to, m, its turn in radians a second, the least of it before it comes down, how long the coming down is and how long the roof is waited for, s, and how far over whatever is under it the eye keeps, m. */
-const LENS = { wide: 58, upright: 80 }, FLY = 3, ROUND = { far: [26, 18], high: [24, 12], turn: 1.35, least: 1.5, down: 2.2, wait: 8, clear: 2.5 }
+/** How long the flight is, s (the lens it opens to is the realm's, arrival.ts `LENS`); the round: how far out and how high over the body's feet it begins and comes to, m, its turn in radians a second, the least of it before it comes down, how long the coming down is and how long the roof is waited for, s, and how far over whatever is under it the eye keeps, m. */
+const FLY = 3, ROUND = { far: [26, 18], high: [24, 12], turn: 1.35, least: 1.5, down: 2.2, wait: 8, clear: 2.5 }
 /** How the body looks from behind its shoulder as the eye becomes its own, radians down. */
 const DOWN = -0.1
 /** How far the body's eye stands off where it arrives (person.ts `standOff`): out from the roof, so that the body is seen whole beside the sign and the sign's face is read. */

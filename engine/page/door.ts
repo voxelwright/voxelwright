@@ -18,6 +18,8 @@ export interface Door {
   readonly name: string
   /** The release this page draws (the world must stand on it), or null for the generated town. */
   readonly pin: string | null
+  /** Its place among those here, as the door numbers them (door.mjs `spot`): where it stands is dealt by it (arrival.ts). 0 where the server said none. */
+  readonly spot: number
   /** What the server said of itself as it let this page in. Text someone typed: to be shown as text. */
   readonly server: { name: string; about: string; most: number; build: string; admins: boolean }
   /** A request to the world, as `fetch` makes one, through the door. A stream is a Response whose body comes as the world says it. */
@@ -219,7 +221,7 @@ async function knock(o: { base: string; id: string; iceServers: RTCIceServer[]; 
 function admitted(pc: RTCPeerConnection, ch: { ctl: RTCDataChannel; down: RTCDataChannel; up: RTCDataChannel }, w: Record<string, unknown>, pin: string | null): Door {
   const s = (w.server ?? {}) as Record<string, unknown>
   const server = { name: String(s.name ?? '').slice(0, 48), about: String(s.about ?? '').slice(0, 200), most: Number(s.most) || 0, build: s.build === 'admins' ? 'admins' : 'everyone', admins: s.admins === true }
-  const you = w.you as string, name = String(w.name ?? '').slice(0, 30)
+  const you = w.you as string, name = String(w.name ?? '').slice(0, 30), spot = Number.isInteger(w.spot) && (w.spot as number) >= 0 && (w.spot as number) < 4096 ? w.spot as number : 0
   const chunk = Math.min(CHUNK, pc.sctp?.maxMessageSize ?? CHUNK)
   let n = 0, gone = false, heard = Date.now()
   /** Replies awaited, by request: their head once it comes and the parts so far. */
@@ -270,7 +272,7 @@ function admitted(pc: RTCPeerConnection, ch: { ctl: RTCDataChannel; down: RTCDat
   // Not known is not allowed: a page that cannot ask makes nothing.
   const may = async () => { const a = await ask({ may: 'make' }); return a.ok === true ? null : String(a.why ?? 'the server did not say').slice(0, 200) }
   const people = async () => { const a = await ask({ people: true }); return Array.isArray(a.people) ? (a.people as unknown[]).slice(0, 256).map((p) => ({ name: String((p as { name?: unknown })?.name ?? '').slice(0, 30), me: (p as { me?: unknown })?.me === true })) : [] }
-  const self: Door = { you, name, pin, server, fetch, may, people, lobby, ongone: null, ontold: null, lost: (why) => end(`The world's stream broke: ${why}`) }
+  const self: Door = { you, name, pin, spot, server, fetch, may, people, lobby, ongone: null, ontold: null, lost: (why) => end(`The world's stream broke: ${why}`) }
   // A ping every two seconds; nothing back for eight and the server is taken for gone (a killed host says nothing).
   const beat = setInterval(() => { if (Date.now() - heard > SILENT) return end('The server is gone: nothing has been heard from it for a while.'); send(ch.ctl, { ping: Date.now() }) }, 2000)
   ch.ctl.addEventListener('message', (e) => {

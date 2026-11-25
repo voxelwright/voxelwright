@@ -36,6 +36,8 @@ export interface Local extends Realm {
   /** Which world it is: `bay` as `?bay=` says it (bay.ts). */
   world?: { bay?: string }
   rules: Rules
+  /** Where people who join a server stand when its host names no place (#526, arrival.ts): a column (cells) and a facing (radians). */
+  meet?: { at: [number, number]; yaw: number }
   /** Living things from a kept library, set down where the realm begins: each an address beside the page (sf/kept.mjs writes them). */
   kept?: { file: string; at: [number, number, number]; yaw?: number; /** Set down at the kerb of a street near `at`, not at it (main.ts `kerbside`). */ kerb?: boolean }[]
   /** Where the world's tiles come from: a release pointer beside the page (sf/release.md), read once a page load. */

@@ -3,16 +3,22 @@
 // host of files, joining through the master and data channels. Every step is a key or a click a person makes; the
 // page's state is only read (`engine.*`, the DOM), never driven.
 //
-//   node test/sf-lobbies.mjs [--release dist-sf] [--ports 6060] [--phone] [--shots <dir>] [--headed]
+//   node test/sf-lobbies.mjs [--release dist-sf] [--ports 6060] [--phone] [--shots <dir>] [--headed] [--arriving]
 //
-// Ports (this lane's, 6060 unless said): +0 the master, +1 the pages' host, +2 to +5 the four worlds' servers (this
-// machine only); UDP +0 to +8 the doors' ICE, three for the open server and two for each other. The master lists two
+// `--arriving` stops after the arrival's steps (below), for a quick run of them alone.
+//
+// Ports (this lane's, 6060 unless said): +0 the master, +1 the pages' host, +2 to +6 the five worlds' servers (this
+// machine only); UDP +0 to +11 the doors' ICE, three for the open server and the arrival's, two for each other. The master lists two
 // lobbies a page (`--page-size 2`), so the list is read over several pages.
 //
 // Servers: Fern Hollow (listed, open, with an admin), Quiet Harbor (listed, a password, one player at most), Back Room
 // (not listed: its code), Elsewhere (listed, the generated town: another release), and a host that is only a socket to
 // the master, whose name and about are markup. It fails unless:
 //   - without ?lobbies=1 there is no way in, lobbies.js is never fetched, and a link with ?master=&lobby= joins nothing;
+//   - two visitors who come as people do (no `first=0`: the landing, the way in, the Servers key, a row, Join, both in
+//     the same second) have no still picture after the page loads again; each is on foot on the ground, the tiles there
+//     come, not inside anything, more than 2 m from the other, looking at something (20 m clear ahead), with the
+//     settings folded; Enter, "a car", Enter makes the kept car with no "something is in the way", and the other has it;
 //     with it, nothing of the list is fetched until the Servers key is pressed;
 //   - the list says when it is empty; shows the listed servers on this release, every page of them, and neither the
 //     private one nor the other release's; sorts by its heads; is refreshed by hand; a server that stops leaves it;
@@ -242,6 +248,91 @@ async function blast(p) {
   check(asked.length === 1 && asked[0].includes('names a server list at lists.example.invalid:8443.') && !/safe/.test(asked[0]) && went === 0 && !open, `a master with no scheme: asked once, by its host alone (${asked.length} asked: ${JSON.stringify((asked[0] ?? '').slice(5, 90))}); told no, no list opens (${open}) and nothing is sent there (${went})`)
   await sly.context.close()
 }
+
+// ── Arriving (#526): two visitors as people come, with none of the checks' flags (no first=0): the landing, the way
+// in, the Servers key, the row, Join, both in the same second. (Found rehearsing on the tailnet: after Join the still
+// picture again with nothing that said how to go in; then everyone in the air at the landing's eye, inside each other;
+// the settings open over the picture; a car wished there "in the way".) ──
+step('arriving')
+{
+  const corner = await dedicated('Corner Shop', 6, [9, 11], ['--release', folder, '--about', 'Meet at the corner', '--most', '8'])
+  // What the list leaves in the address, with making (the realm's rule is "preview") and the page kept quiet and small.
+  const as = `lobbies=1&master=${encodeURIComponent(MASTER)}&making=1&sound=0&scale=0.5`
+  const pair = [await stranger('Wren', as), await stranger('Odile', as)]
+  await Promise.all(pair.map((p) => up(p)))
+  const tap = (p, x, y) => (PHONE ? p.page.touchscreen.tap(x, y) : p.page.mouse.click(x, y))
+  for (const p of pair) {
+    // The way in a visitor takes: the EXPLORE board, asked twice (explore.ts), to the roof.
+    const landing = await p.page.evaluate(() => document.documentElement.classList.contains('first'))
+    await p.page.waitForFunction(() => globalThis.engine.explore && globalThis.engine.boards?.where('explore'), null, { timeout: 120_000 })
+    for (let i = 0; i < 2; i++) { const w = await p.page.evaluate(() => globalThis.engine.boards.where('explore')); await tap(p, w.x, w.y); await p.page.waitForTimeout(900) }
+    const roof = await p.page.waitForFunction(() => globalThis.engine.explore.state === 'in' && globalThis.engine.me.feet, null, { timeout: 90_000 }).then(() => true, () => false)
+    check(landing && roof, `${p.name} opens on the landing (${landing}) and goes in by the EXPLORE board, asked twice, to the roof (${roof})`)
+    await p.page.waitForTimeout(1500)
+    // The Servers key, the row, the name.
+    await servers(p)
+    await p.page.waitForSelector(row('Corner Shop'), { timeout: 30_000 })
+    await p.page.fill('#lobbies-name', p.name)
+    await p.page.click(row('Corner Shop'))
+  }
+  // Join, both in the same second.
+  await Promise.all(pair.map((p) => reloads(p, () => p.page.click('#lobbies .k-join'))))
+  const inside = await Promise.all(pair.map((p) => inLobby(p)))
+  check(inside.every(Boolean), `both press Join in the same second and are in Corner Shop once their pages have loaded again (${inside.join(', ')})`)
+  const after = await Promise.all(pair.map((p) => p.page.evaluate(() => ({ href: location.href, first: document.documentElement.classList.contains('first') }))))
+  check(after.every((a) => !a.first && !/first=|lobby=|[?&]at=/.test(a.href)), `no still picture stands between them and the world, and the address holds no flag of the checks' (${after.map((a) => `${a.first ? 'the landing' : 'in'}: ${a.href.replace(site.url, '')}`).join('; ')})`)
+  // Where the still picture is up anyway (as it was before #526's fix), a person clicks it to go in (main.ts `noWayIn`).
+  for (const [i, p] of pair.entries()) if (after[i].first) {
+    const b = await p.page.locator('canvas').first().boundingBox(); await tap(p, b.x + b.width / 2, b.y + b.height / 2); await p.page.waitForTimeout(1200)
+    if (await p.page.evaluate(() => !globalThis.engine.first?.engaged)) { await p.page.keyboard.press('KeyW'); await p.page.waitForTimeout(1200) }
+  }
+  // Set down: where each stands once the page has done arriving (a minute at most), with the tiles there made.
+  await Promise.all(pair.map((p) => p.page.waitForFunction(() => globalThis.engine?.seen?.near > 0 && globalThis.engine.arrival?.state !== 'waiting' && (globalThis.engine.arrival || null), null, { timeout: 120_000, polling: 250 }).catch(() => {})))
+  for (const p of pair) await p.page.waitForFunction(() => { const s = globalThis.engine.world.stats; return s.wanted === 0 && s.stale === 0 }, null, { timeout: 120_000 }).catch(() => {})
+  await wait(2000)
+  const stood = await Promise.all(pair.map((p) => p.page.evaluate(() => {
+    const e = globalThis.engine, f = e.me.feet, at = f?.at.map(Math.round) ?? null
+    // In nothing: the cells of the body's height over its feet are air (from a step over them), and under them is something.
+    let inside = 0, under = 0
+    if (at) { for (let y = at[1] + 3; y < at[1] + 18; y++) if (e.kind(at[0], y, at[2])) inside++; under = e.kind(at[0], at[1] - 1, at[2]) || e.kind(at[0], at[1] - 2, at[2]) }
+    return { on: e.me.on, at, arrival: e.arrival ?? null, inside, under, engaged: e.first?.engaged ?? null, panel: document.querySelector('#realm .sky')?.checkVisibility() ?? null, pills: [...document.querySelectorAll('button')].filter((b) => /^(Portal|Realms)$/.test(b.textContent.trim()) && b.checkVisibility()).length, ground: at ? e.ground(at[0] / 10, at[2] / 10) * 10 : null }
+  })))
+  for (const [i, p] of pair.entries()) {
+    const s = stood[i]
+    check(s.on && !!s.at && s.arrival?.state === 'standing' && s.inside === 0 && s.under !== 0, `${p.name} is on foot on something solid (${JSON.stringify({ on: s.on, feet: s.at, arrival: s.arrival?.state, round: s.arrival?.round, ground: s.ground, over: s.at && s.ground !== null ? s.at[1] - s.ground : null })}), not in anything (${s.inside} cells of the body's height filled)`)
+    check(s.engaged !== false && s.panel === false, `${p.name} is in the world (${s.engaged}) with the settings folded behind their key (${s.panel ? 'open' : 'folded'})`)
+    // (Realms and portals are an admin's at a door, by their keys: a visitor is shown no key for what they would be refused, and on a phone those two lay over Charge.)
+    check(s.pills === 0, `${p.name} is shown no Portal or Realms key in someone else's server (${s.pills})`)
+  }
+  const apart = stood[0].at && stood[1].at ? Math.hypot(stood[0].at[0] - stood[1].at[0], stood[0].at[2] - stood[1].at[2]) / 10 : 0
+  check(apart > 2, `joined in the same second they stand ${apart.toFixed(2)} m apart (more than 2)`)
+  // Whoever was set down behind has the other in their picture: ahead of the eye, inside the lens across.
+  const inSight = await Promise.all(pair.map((p, i) => p.page.evaluate((other) => {
+    if (!other) return false
+    const e = globalThis.engine, v = e.view(), d = [other[0] - v.eye[0], other[2] - v.eye[2]], h = Math.hypot(v.forward[0], v.forward[2]), fx = v.forward[0] / h, fz = v.forward[2] / h
+    const along = d[0] * fx + d[1] * fz, across = Math.abs(d[0] * -fz + d[1] * fx), half = Math.atan((Math.tan((e.fov * Math.PI) / 360) * innerWidth) / innerHeight)
+    return along > 0 && Math.atan2(across, along) < half * 0.9
+  }, stood[1 - i].at)))
+  check(inSight.some(Boolean), `whoever stands behind has the other in their picture (${pair.map((p, i) => `${p.name} sees ${pair[1 - i].name}: ${inSight[i]}`).join(', ')})`)
+  // Ahead of each, along where the eye looks: the first solid at its height, level.
+  const facing = await Promise.all(pair.map((p) => p.page.evaluate(() => { const e = globalThis.engine, v = e.view(), out = []; for (let d = 6; d <= 200; d += 4) out.push(e.kind(Math.round(v.eye[0] + v.forward[0] / Math.hypot(v.forward[0], v.forward[2]) * d), Math.round(v.eye[1]), Math.round(v.eye[2] + v.forward[2] / Math.hypot(v.forward[0], v.forward[2]) * d))); const near = out.findIndex(Boolean); return near < 0 ? null : 6 + near * 4 })))
+  check(facing.every((d) => d === null || d > 100), `each looks at something, not at a wall: the first solid straight ahead at eye height is ${facing.map((d) => (d === null ? 'past 20 m' : `${(d / 10).toFixed(1)} m`)).join(' and ')} off`)
+  for (const p of pair) await shot(p, `arrived-${p.name.toLowerCase()}`)
+  // A wish there, by the keys (a thumb on the bar on a phone): Enter, "a car", Enter makes the kept car, no model.
+  const [w, o] = pair
+  if (PHONE) await w.page.tap('#line'); else await w.page.keyboard.press('Enter')
+  await w.page.waitForTimeout(600)
+  await w.page.keyboard.type('a car', { delay: 40 }); await w.page.waitForTimeout(1500)
+  await w.page.keyboard.press('Enter')
+  const wished = await w.page.waitForFunction(() => { const t = [...globalThis.engine.things.all.values()]; if (t.length) return { name: t[0].name, at: t[0].at }; return /something is in the way/.test(document.body.innerText) ? { held: true } : null }, null, { timeout: 60_000, polling: 200 }).then((h) => h.jsonValue(), () => null)
+  const seenBy = await o.page.waitForFunction(() => globalThis.engine.things.all.size > 0, null, { timeout: 30_000 }).then(() => true, () => false)
+  check(!!wished?.name && !wished.held && seenBy, `Wren's Enter, "a car", Enter there makes ${wished?.name ?? (wished?.held ? 'nothing: "something is in the way"' : 'nothing')}${wished?.at ? ` ${(Math.hypot(wished.at[0] - stood[0].at[0], wished.at[2] - stood[0].at[2]) / 10).toFixed(0)} m from her` : ''}, and Odile's page has it (${seenBy})`)
+  await wait(1500)
+  for (const p of pair) await shot(p, `wished-${p.name.toLowerCase()}`)
+  for (const p of pair) await p.context.close()
+  await corner.stop()
+}
+if (has('arriving')) { console.log(`  pictures in ${shots}`); console.log(failures.length ? `\n${failures.length} failed` : '\nall passed'); finish(failures.length ? 1 : 0) }
 
 // ── Two strangers, with ?lobbies=1: nothing of the list before the Servers key ──
 const ada = await stranger('Ada'), bram = await stranger('Bram')

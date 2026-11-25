@@ -42,7 +42,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -106,6 +106,8 @@ async function main() {
    * master, before anything is sent to it. One this site's realm names, one on this site, or the engine's own page,
    * needs no asking.
    */
+  /** Whether the visitor answered the question yes in this load: a join they chose, as the list's own is (`ticket`). */
+  let askedYes = false
   const agreed = (what: 'join' | 'list'): boolean => {
     if (!MASTER_NAMED || !masterAt || masterAt.origin === location.origin) return true
     const masterHost = masterAt.host
@@ -117,6 +119,7 @@ async function main() {
       ? `This link wants to take you into a server found through ${masterHost}.\n\nThat is not this site. Servers run on players' own machines: the host will see your address and what you do there.\n\nJoin it?`
       : `The link you followed names a server list at ${masterHost}.\n\nThat is not this site: it, and any server you join from it, will see your address.\n\nShow it?`)
     if (!yes) return false
+    askedYes = true
     try { sessionStorage.setItem(kept, MASTER!) } catch { /* asked again next time */ }
     return true
   }
@@ -232,7 +235,10 @@ async function main() {
   const street = { x: startX / M, y: core.ground_at(startX, startZ) / M, z: startZ / M }
   let speed = 12
   // A realm the page runs alone opens on its picture (#450, first.ts): its controls come when the visitor engages.
-  const first = LOCAL ? firstView(query.get('first') !== '0' && query.get('boards') !== 'edit') : null
+  // Not after a join the visitor chose (#526: the list's ticket, or the question answered yes in this load): they asked
+  // to be in that world, and are. An address alone never skips it, nor does a join that failed.
+  const chosen = !!joined && (!!ticket || askedYes)
+  const first = LOCAL ? firstView(!chosen && query.get('first') !== '0' && query.get('boards') !== 'edit') : null
   // The line of numbers is for whoever measures: a realm the page runs alone shows it only when asked (`?debug=1`; first.ts hides it).
   if (LOCAL && query.get('debug') !== '1') document.documentElement.classList.add('plain')
   if (BAY_ON) void whereabouts(() => [Math.round(pose.x * M), Math.round(pose.z * M)], farModel.listing?.credit ? [farModel.listing.credit] : [], first ? (credits) => first.credits(credits) : undefined)
@@ -991,6 +997,59 @@ async function main() {
   const waysFull: (readonly [number, number, number])[] = []
   inTheWay = () => { waysFull.length = 0; const f = me.feet; if (f) waysFull.push(f.at); if (others) for (const at of others.standing()) waysFull.push(at); return waysFull }
   if (shadow) shadow.onmessage = (e: MessageEvent<Answer>) => { if (!e.data.failed) me.heard(e.data, read(e.data.words)) }
+  // In the Bay in tiles the body's own core holds the ground round the eye too, asked again as it moves: without it a
+  // person who got down in a shared world fell through a world their core did not have (#526).
+  if (STREAM && shadow) { const tell = () => shadow.postMessage({ bay: [Math.round(pose.x * M), Math.round(pose.z * M)] } as never); tell(); setInterval(tell, 500) }
+  // In a lobby (#526, arrival.ts): whoever joins is set down on their feet in a place of their own, round where the
+  // host's world says one arrives if this page finds something to stand on there, else round the realm's meeting place
+  // (local.ts `meet`), once the tiles there have come and the visitor is past the first view, if it is up (an address's
+  // join): nothing moves under the still picture. Until then the keys move nothing; if the eye is moved from where the
+  // page opened it anyway (the console, a check), it is left where it was put. `engine.arrival` says how it went.
+  const arrival: { state: 'waiting' | 'standing' | 'eye' | 'moved'; round?: 'host' | 'own'; at?: number[]; yaw?: number } = { state: 'waiting' }
+  // (An address that says where the eye is, `?at=`, is kept as realms.ts keeps it: nothing is set down.)
+  let arriving = joined && !query.has('at') ? controls.push({ name: 'arriving', solid: true }) : null
+  const arrived = (state: typeof arrival.state) => { if (arrival.state === 'waiting') arrival.state = state; arriving?.(); arriving = null }
+  // (A world that never says where one arrives, in a minute: the keys are given back, and the eye stays.)
+  let settling = false
+  if (joined) setTimeout(() => { if (!settling) arrived('eye') }, query.has('at') ? 0 : 60_000)
+  // (Any move counts: nothing of the page's own moves the eye while the keys are held still, and a check may put it a metre off.)
+  const openedAt = [pose.x, pose.y, pose.z], moved = () => Math.hypot(pose.x - openedAt[0], pose.y - openedAt[1], pose.z - openedAt[2]) > 0.05
+  const settle = async (told: unknown) => {
+    settling = true
+    const [{ LENS, said, stand }, within] = await Promise.all([import('./arrival.ts'), lists()])
+    const host = said(told), own = said(LOCAL?.meet ?? LOCAL?.arrive)
+    if (!own) return arrived('eye')
+    // A host that names no place sends the realm's own arrival (serve.mjs `groundWord`): the first view's eye, no place to stand.
+    const landing = LOCAL?.arrive ? said(LOCAL.arrive) : null
+    const named = host && within(host.x, host.z) && !(landing && Math.hypot(host.x - landing.x, host.z - landing.z) < 1) ? host : null
+    const middles = named ? [named, own] : [own]
+    for (const m of middles) { mover.postMessage({ bay: [m.x, m.z] } as never); shadow?.postMessage({ bay: [m.x, m.z] } as never) }
+    await Promise.race([Promise.all(middles.map((m) => near(inner, m.x, m.z))), new Promise((r) => setTimeout(r, 20_000))])
+    // A moment for where everyone already here stands to be heard; and the first view, if it is up, left.
+    await new Promise((r) => setTimeout(r, 800))
+    while (first && !first.engaged && arrival.state === 'waiting') await new Promise((r) => setTimeout(r, 200))
+    if (arrival.state !== 'waiting') return
+    if (moved()) return arrived('moved')
+    const found = stand({ host: named, own, spot: joined!.spot, others: others?.standing() ?? [], ground: { within, feet: (x, z) => core.feet_at(Math.round(x), Math.round(z)), kind: (x, y, z) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)) } })
+    if (!found) return arrived('eye')
+    const [x, f, z] = found.at
+    shadow?.postMessage({ bay: [x, z] } as never)
+    Object.assign(pose, { x: x / M, y: (f + 18.5) / M, z: z / M, yaw: found.yaw, pitch: found.pitch })
+    // The realm's own lens, not the first view's long one: whoever stands beside is in the picture.
+    fov = canvas.clientHeight > canvas.clientWidth ? LENS.upright : LENS.wide
+    me.view = 'behind'
+    me.walk(true)
+    // Its feet, once its core has said: where it was set down, or it is taken up and left an eye over that place.
+    const stood = () => !!me.feet && Math.abs(me.feet.at[1] - f) <= 10 && Math.hypot(me.feet.at[0] - x, me.feet.at[2] - z) <= 10
+    for (const until = performance.now() + 8000; performance.now() < until && !stood();) await new Promise((r) => setTimeout(r, 100))
+    if (!stood()) { me.walk(false); Object.assign(pose, { x: x / M, y: (f + 16.5) / M, z: z / M }); return arrived('eye') }
+    // The look from the eye as it now rides (behind and over the body; higher and further back on a phone held upright):
+    // at the ground 10 m ahead of the feet, so that a wish made at once is made there and not down the hill beyond.
+    const ax = x + Math.sin(found.yaw) * 100, az = z - Math.cos(found.yaw) * 100, ay = core.feet_at(Math.round(ax), Math.round(az))
+    if (Number.isFinite(ay)) pose.pitch = Math.max(-0.6, Math.min(0.05, Math.atan2(ay - pose.y * M, Math.hypot(ax - pose.x * M, az - pose.z * M))))
+    Object.assign(arrival, { round: found.round, at: found.at, yaw: found.yaw })
+    arrived('standing')
+  }
   // Whoever rides from this page is seen in their seat (#367): from behind, the kart went up the street with nobody in it.
   // The page places its own rider each frame where the thing is, so they are not the tenth of a second behind that others see them.
   const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
@@ -1073,7 +1132,7 @@ async function main() {
   const began: Pose = { ...pose }
   let afoot = false, heldKeys: string[] = []
   const realm = far ? realms({
-    far, began,
+    far, began, ...(joined ? { land: (a: unknown) => void settle(a) } : {}),
     leave: (trade) => {
       // On foot, the body is taken up first: its own core is about to forget the world it stands on, and it is set down again on arriving.
       afoot = me.on
@@ -1334,7 +1393,7 @@ async function main() {
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
-  if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby })
+  if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby, arrival })
   // In a lobby: whose server this is in the corner, who is here, what it says, the way out (lobbies.ts).
   if (joined) void import('./lobbies.ts').then((l) => l.inside({ master: MASTER!, hud: over, input: controls, door: joined }))
   Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
@@ -1717,7 +1776,9 @@ async function main() {
       ...(MASTER && !joined ? { servers: () => { if (agreed('list')) void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } } : {}) })
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
-    first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })
+    // In a lobby it stays folded, as it is on the roof alone (#526).
+    first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
+    if (joined) realmUi.fold(true)
     Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return shownPreset() }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
@@ -1824,8 +1885,10 @@ async function main() {
     const realmsButton = button.cloneNode() as HTMLButtonElement
     realmsButton.textContent = 'Realms'; realmsButton.title = 'Pick or make a realm (Tab)'
     realmsButton.onclick = () => void ring.toggle()
-    // Shown on a desktop too, small in the corner: they say that there are keys for these.
-    buttons.append(button, realmsButton)
+    // Shown on a desktop too, small in the corner: they say that there are keys for these. Not in a lobby (#526): a
+    // door keeps realms for its admins (door.mjs `ROUTES`), who have the keys, and a visitor is shown nothing they
+    // would only be refused; on a phone the two lay over the Charge key there.
+    if (!joined) buttons.append(button, realmsButton)
     Object.assign((globalThis as unknown as { engine: object }).engine, { wheel: ring, enterRealm: (id: string) => enterRealm(id) })
   }
   portalDraw = gate ? (encoder, to, v, time, timing) => { gate.walk(); return gate.draw(encoder, to, v, flags, time, timing) } : null
