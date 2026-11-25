@@ -169,9 +169,14 @@ if (!canSandbox && opts.try) stop(2, "flag-proof: --try runs the feature's own c
 if (opts.try && builtinModules.includes("ffi")) stop(2, "flag-proof: this node has a foreign-function module, which the sandbox for --try was not written for. Not run.");
 const LIMIT = Number(process.env.FLAG_PROOF_LIMIT_MS) || 120_000; // how long one build may take
 const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "flag-proof-")));
+// esbuild starts a native process. Prepare the installed kit with trusted code before
+// sandboxing either build, and give both builds read-only access to those assets.
+const kitAssets = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "site-proof-kit-")));
 let keep = false;
 let code = 2;
 try {
+  const { buildKit } = await import("../generator/kit.mjs");
+  await buildKit(kitAssets);
   const exportTree = (commit, name) => {
     const dir = path.join(tmp, name);
     fs.mkdirSync(dir);
@@ -180,7 +185,7 @@ try {
     return dir;
   };
   // A candidate with loose edits is built where it stands, so the sandbox must let that folder be read.
-  const sandbox = canSandbox ? sandboxFor(tmp, dirty ? [fs.realpathSync(cand)] : []) : null;
+  const sandbox = canSandbox ? sandboxFor(tmp, dirty ? [kitAssets, fs.realpathSync(cand)] : [kitAssets]) : null;
   const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", HOME: tmp, TMPDIR: tmp, LANG: process.env.LANG ?? "C" };
   // Runs a script with node, shut in. Nothing it prints is passed through: on a failure its
   // last lines are quoted in the error, marked as data.
@@ -196,10 +201,16 @@ try {
     return r.stdout;
   };
   const run = (cwd, outDir, on = null) => {
-    node(cwd, `import { build } from "./generator/build.mjs";
+    node(cwd, `import fs from "node:fs";
+import { createHash } from "node:crypto";
+const file = "./generator/kit.mjs";
+if (fs.existsSync(file) && createHash("sha256").update(fs.readFileSync(file)).digest("hex") === process.argv[3]) {
+  process.env.FLAG_PROOF_KIT = process.argv[2];
+}
+const { build } = await import("./generator/build.mjs");
 const site = (await import("./site.config.mjs")).default;
-const on = process.argv[2];
-await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.flags ?? {}), [on]: true } } : site });`, outDir, ...(on ? [on] : []));
+const on = process.argv[4];
+await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.flags ?? {}), [on]: true } } : site });`, outDir, kitAssets, hash(path.join(ROOT, "generator/kit.mjs")), ...(on ? [on] : []));
   };
 
   const baseDir = exportTree(base, "base");
@@ -263,6 +274,7 @@ await build({ outDir: process.argv[1], site: on ? { ...site, flags: { ...(site.f
   if (e instanceof Refused) { console.error(e.message); code = e.code; }
   else { console.error(`flag-proof: could not run: ${quote(e.message)}`); code = 2; } // the message may carry a path a build made
 } finally {
+  fs.rmSync(kitAssets, { recursive: true, force: true });
   if (!keep) {
     // a build may have left folders nobody can open; open them, so the whole folder can go
     try { unlock(tmp); fs.rmSync(tmp, { recursive: true, force: true }); } catch { console.error(`flag-proof: could not remove ${tmp}. Delete it by hand.`); }

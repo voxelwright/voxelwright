@@ -2,6 +2,7 @@
 import { eggOverlay, landingVideos } from "../lib/egg-overlay.mjs";
 import fs from "node:fs";
 import path from "node:path";
+import { buildKit } from "./kit.mjs";
 import { loadPosts } from "./posts.mjs";
 import { renderPost, ContentError } from "./markdown.mjs";
 import { homePage } from "./landing.mjs";
@@ -55,6 +56,7 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
   // merge its files into it, or replace them.
   if (mounted) {
     const own = new Set(fs.readdirSync(path.join(ROOT, "static")));
+    own.add("vendor");
     for (const post of posts) if (own.has(post.slug)) errors.push(`${post.file}: a post cannot be called "${post.slug}"; ${sitePath(base, `/${post.slug}/`)} holds the site's own files. Rename its folder.`);
   }
   if (errors.length) throw new ContentError(`Build failed:\n  ${errors.join("\n  ")}`);
@@ -100,6 +102,8 @@ export async function build({ outDir, drafts = false, dev = false, postsDir = pa
     recursive: true,
     filter: (src) => src !== path.join(ROOT, "static/landing/eggs"),
   });
+  const vendor = path.join(siteDir, "vendor/village");
+  await buildKit(vendor);
   if (eggOverlay && !mounted) {
     const dir = path.join(siteDir, "landing/eggs");
     fs.mkdirSync(dir, { recursive: true });

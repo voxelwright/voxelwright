@@ -1,7 +1,7 @@
 // Every page as a pair: HTML for people and Markdown for agents.
 // Each function returns { path, kind, title, description, html, markdown }.
 //
-// The HTML is built from Voxelmorphism, the Village kit vendored in static/vendor/village/kit
+// The HTML is built from Voxelmorphism, the Village kit installed as an npm dependency
 // (see notes/voxelmorphism.md): the page stands on the kit's ground, the bar is the kit's navbar,
 // lists are its list groups and items, an article is its prose. static/site.css lays these out
 // and holds no colours or controls of its own; static/site.js starts the kit.

@@ -43,7 +43,7 @@ test("only files named by their content are kept for good; pages, twins, feeds a
 test("every chunk the kit imports exists, so a kept chunk is never asked for by a name the kit dropped", () => {
   const kit = path.join(out, "blog/vendor/village/kit");
   let imports = 0;
-  for (const entry of ["src/index.js", "showcase/desk.js"]) {
+  for (const entry of ["src/index.js", "showcase/desk-controls.js"]) {
     for (const [, name] of fs.readFileSync(path.join(kit, entry), "utf8").matchAll(/["'](\.\.\/shared\/chunk-[A-Z0-9]+\.js)["']/g)) {
       imports++;
       assert.ok(fs.existsSync(path.join(kit, path.dirname(entry), name)), `${entry} imports ${name}`);

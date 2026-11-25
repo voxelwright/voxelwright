@@ -32,7 +32,19 @@ before(() => {
   git(repo, "add", "-A");
   git(repo, "commit", "--quiet", "--allow-empty", "-m", "base");
   git(repo, "branch", "-f", "base");
-  fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(repo, "node_modules"));
+  // This fixture is a standalone site. Its installed dependencies must live inside
+  // node_modules, including the kit that npm links to a sibling in the monorepo.
+  const installed = path.join(ROOT, "node_modules"), deps = path.join(repo, "node_modules");
+  const kit = path.join(installed, "voxelmorphism");
+  fs.cpSync(installed, deps, { recursive: true, verbatimSymlinks: true, filter: (file) => file !== kit });
+  const [packed] = JSON.parse(execFileSync("npm", ["pack", "--json", "--pack-destination", repo], {
+    cwd: fs.realpathSync(kit), encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+  }));
+  const target = path.join(deps, "voxelmorphism");
+  fs.mkdirSync(target);
+  const tarball = path.join(repo, packed.filename);
+  execFileSync("tar", ["-xzf", tarball, "--strip-components=1", "-C", target]);
+  fs.unlinkSync(tarball);
 });
 after(() => fs.rmSync(repo, { recursive: true, force: true }));
 

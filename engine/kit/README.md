@@ -34,6 +34,11 @@ A page in the engine root can use the kit directly.
 The stylesheet alone is the plain version. Calling `adopt()` adds the voxels. Give the page `overflow-x: clip` (see Bleed in the spec).
 
 The kit's `src/engine.js` imports the Village WebGPU renderer from `../../blocks/renderer.ts`. The engine servers strip TypeScript types for the browser.
+Run `npm pack` in this directory to package the same renderer as plain JavaScript.
+Static generators can import `copyModules` from `voxelmorphism/browser` to write the kit,
+renderer and desk modules into one public directory. Copy the exported stylesheet and its
+adjacent fonts and notices into that directory’s `kit/` folder.
+
 Its device takes a moment to arrive, so a page is plain first and `ready()` says when it is live:
 
 ```js

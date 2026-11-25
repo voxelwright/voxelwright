@@ -1,15 +1,10 @@
-// The site is built from the vendored Voxelmorphism kit and nothing else: every vx- class a page
-// uses must be one the vendored stylesheet knows, and the vendored copy must come from a pinned
-// Village commit (scripts/refresh-voxelmorphism.mjs), never from a working checkout.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { test } from "node:test";
 import { build } from "../generator/build.mjs";
-
-const ROOT = path.resolve(import.meta.dirname, "..");
-const KIT = path.join(ROOT, "static/vendor/village/kit");
 
 function* files(dir) {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -19,12 +14,12 @@ function* files(dir) {
   }
 }
 
-test("every vx- class on a page is in the vendored kit", async () => {
+test("every vx- class on a page is in the installed kit", async () => {
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "site-kit-"));
   try {
     await build({ outDir: out, drafts: true });
     // the kit's sheet, and the showcase desk's (the Signal Desk's own hardware)
-    const css = ["voxelmorphism.css", "showcase/desk.css"].map((f) => fs.readFileSync(path.join(KIT, f), "utf8")).join("\n");
+    const css = ["voxelmorphism.css", "showcase/desk.css"].map((f) => fs.readFileSync(path.join(out, "blog/vendor/village/kit", f), "utf8")).join("\n");
     const missing = new Map();
     for (const file of files(out)) {
       if (file.includes(`${path.sep}vendor${path.sep}`)) continue;
@@ -36,27 +31,44 @@ test("every vx- class on a page is in the vendored kit", async () => {
         }
       }
     }
-    assert.deepEqual([...missing], [], "classes the vendored kit does not style (add the part to PARTS in scripts/refresh-voxelmorphism.mjs)");
+    assert.deepEqual([...missing], [], "classes the site kit does not style (add the part to PARTS in generator/kit.mjs)");
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
   }
 });
 
-test("the vendored kit comes from a pinned Village commit", async () => {
-  const revision = fs.readFileSync(path.join(KIT, "REVISION"), "utf8").trim();
-  const { PIN } = await import("../scripts/refresh-voxelmorphism.mjs");
-  assert.match(revision, /^[0-9a-f]{40}$/, "vendored from working files: run the refresh script with a revision before committing");
-  assert.equal(revision, PIN, "REVISION and the script's PIN disagree");
+test("the built kit loads with its renderer and local assets", async () => {
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "site-kit-"));
+  try {
+    await build({ outDir: out });
+    const kit = path.join(out, "blog/vendor/village/kit");
+    const { adopt } = await import(pathToFileURL(path.join(kit, "src/index.js")));
+    assert.equal(typeof adopt, "function");
+    const { renderer } = await import(pathToFileURL(path.join(kit, "../blocks/renderer.js")));
+    assert.equal(typeof renderer, "function");
+    for (const file of ["voxelmorphism.css", "showcase/desk.css"]) {
+      const sheet = fs.readFileSync(path.join(kit, file), "utf8");
+      for (const [, asset] of sheet.matchAll(/url\(["']?((?:fonts|materials)\/[^)"']+)/g)) {
+        assert.ok(fs.existsSync(path.resolve(kit, path.dirname(file), asset)), asset);
+      }
+    }
+    for (const file of ["LICENSE", "NOTICE", "shared/audio/LICENSE", "fonts/vox-text/OFL.txt"]) {
+      assert.ok(fs.statSync(path.join(kit, file)).size > 0, file);
+    }
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });
 
-test("every vendored part is used by the site", async () => {
-  const { PARTS } = await import("../scripts/refresh-voxelmorphism.mjs");
+test("every selected part is used by the site", async () => {
+  const { PARTS } = await import("../generator/kit.mjs");
   function* walk(dir) {
-    for (const e of fs.readdirSync(path.join(ROOT, dir), { withFileTypes: true })) {
+    for (const e of fs.readdirSync(path.join(import.meta.dirname, "..", dir), { withFileTypes: true })) {
       const rel = path.join(dir, e.name);
+      if (rel === "generator/kit.mjs") continue;
       if (rel.startsWith(path.join("static", "vendor"))) continue;
       if (e.isDirectory()) yield* walk(rel);
-      else if (/\.(mjs|js|css)$/.test(e.name)) yield fs.readFileSync(path.join(ROOT, rel), "utf8");
+      else if (/\.(mjs|js|css)$/.test(e.name)) yield fs.readFileSync(path.join(import.meta.dirname, "..", rel), "utf8");
     }
   }
   const sources = ["generator", "lib", "static"].flatMap((dir) => [...walk(dir)]).join("\n");

@@ -14,3 +14,4 @@ node_modules/
 /src/engine/
 /tools/sync-engine.mjs
 /showcase/garden.*
+/browser/

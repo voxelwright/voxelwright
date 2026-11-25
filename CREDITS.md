@@ -61,14 +61,14 @@ Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01
 | `engine/kit/fonts/departure-mono` | departure-mono | [Copyright 2022–2024 Helena Zhang](https://helenazhang.com) | OFL-1.1 | Yes |
 | `site/static/fonts/fraunces`<br>`site/static/support/fonts` | fraunces | [Copyright 2020 The Fraunces Project Authors](https://github.com/undercasetype/Fraunces) | OFL-1.1 | Yes (family-specific notices in support/fonts) |
 | `engine/kit/fonts/geist-pixel` | geist-pixel | [Copyright 2026 The Geist Project Authors](https://github.com/vercel/geist-font) | OFL-1.1 | Yes |
-| `engine/kit/fonts/ibm-plex-mono`<br>`site/static/vendor/village/kit/fonts/ibm-plex-mono` | ibm-plex-mono | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
-| `engine/kit/fonts/ibm-plex-sans`<br>`site/static/vendor/village/kit/fonts/ibm-plex-sans` | ibm-plex-sans | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
+| `engine/kit/fonts/ibm-plex-mono` | ibm-plex-mono | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
+| `engine/kit/fonts/ibm-plex-sans` | ibm-plex-sans | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
 | `engine/landing/site/fonts/literata` | literata | [Copyright 2017 The Literata Project Authors](https://github.com/googlefonts/literata) | OFL-1.1 | Yes |
 | `engine/kit/fonts/overpass`<br>`engine/landing/site/fonts/overpass`<br>`site/static/fonts/overpass` | overpass | [Copyright 2021 The Overpass Project Authors](https://github.com/RedHatOfficial/Overpass) | OFL-1.1 | Yes |
 | `engine/kit/fonts/overpass-mono`<br>`site/static/fonts/overpass-mono`<br>`site/static/support/fonts` | overpass-mono | [Copyright 2021 The Overpass Project Authors](https://github.com/RedHatOfficial/Overpass) | OFL-1.1 | Yes (family-specific notices in support/fonts) |
 | `site/static/fonts/source-serif-4` | source-serif-4 | [Copyright 2014 The Source Serif 4 Project Authors](https://github.com/adobe-fonts/source-serif) | OFL-1.1 | Yes |
-| `engine/kit/fonts/vox-*`, `engine/kit/src/core/fonts`, vendored kit fonts and CSS | Vox typefaces and embedded Block and Sign | Pavlo Zahynailo | OFL-1.1 with reserved names | Yes, also distributed with embedded fonts |
-| `engine/kit/src/core/audio`, `site/static/vendor/village/kit/shared/audio` | Press and release excerpts | [Mechvibes, Hải Nguyễn](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt) | MIT | Yes, LICENSE in both |
+| `engine/kit/fonts/vox-*`, `engine/kit/src/core/fonts`, packaged kit fonts and CSS | Vox typefaces and embedded Block and Sign | Pavlo Zahynailo | OFL-1.1 with reserved names | Yes, also distributed with embedded fonts |
+| `engine/kit/src/core/audio` | Press and release excerpts | [Mechvibes, Hải Nguyễn](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt) | MIT | Yes, adjacent LICENSE |
 | `home/public/audio/groove-music.ogg` | Groove Music | [benpm, Freesound](https://freesound.org/s/203099/) | CC BY 4.0 | Adjacent credit and licence link |
 | `home/public/audio/sfx/*.ogg` | 14 recordings in 11 sprites | Freesound, individual credits and links above | CC0 1.0 | Adjacent credits and licence link |
 | `site/static/landing/ina.webp`, `ina.faces.gz` | Landing render and geometry | Frank Schulenburg, Wikimedia Commons (above) | CC BY-SA 4.0 | Link in root credits |

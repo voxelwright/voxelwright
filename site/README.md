@@ -92,7 +92,7 @@ social links, and `negotiateMarkdown`.
 
 ### Voxelmorphism
 
-Every page is built from Voxelmorphism, Village's UI kit, vendored in `static/vendor/village/kit/`
+Every page is built from Voxelmorphism, Village's UI kit, installed from `../engine/kit` by npm
 (see `notes/voxelmorphism.md`). The page stands on the kit's ground and is fitted as the Signal
 Desk's instrument (walnut case, Ridgeline caps; at night the same case with its lights down). The
 bar is the kit's navbar, post lists are its list groups, an article is its prose, code sits in its
@@ -126,7 +126,6 @@ generator/              build: posts, Markdown and embeds, pages, feeds
 lib/paths.mjs           URL rules shared by build, Worker, checks and dev server
 src/worker.mjs          Markdown negotiation Worker
 static/site.css         layout of the kit's parts; static/site.js starts the kit
-static/vendor/village/  the Voxelmorphism kit and renderer (scripts/refresh-voxelmorphism.mjs)
 static/fonts/           self-hosted fonts and their licences
 scripts/                new, build, dev, check, Node dev server
 test/                   Worker and build-failure tests

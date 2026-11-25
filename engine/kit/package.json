@@ -4,12 +4,14 @@
   "description": "A design language where every control is a small solid built from voxels.",
   "license": "Apache-2.0",
   "type": "module",
-  "main": "src/index.js",
+  "scripts": { "prepare": "node browser.mjs" },
+  "main": "browser/kit/src/index.js",
   "exports": {
-    ".": "./src/index.js",
+    ".": "./browser/kit/src/index.js",
+    "./browser": "./browser.mjs",
     "./voxelmorphism.css": "./voxelmorphism.css",
     "./fonts/*": "./fonts/*"
   },
-  "files": ["src", "fonts", "voxelmorphism.css", "SPEC.md", "README.md", "NOTICE"],
+  "files": ["browser", "browser.mjs", "css", "fonts", "voxelmorphism.css", "SPEC.md", "README.md", "NOTICE"],
   "sideEffects": false
 }

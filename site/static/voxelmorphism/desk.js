@@ -9,7 +9,7 @@ await boot({
   before: async () => {
     // the desk keeps its consent for the tab; hand it the site's choice first
     try { sessionStorage.setItem("vx-showcase-switch-sound", soundOn() ? "on" : "off"); } catch {}
-    await import("../vendor/village/kit/showcase/desk.js");
+    await import("../vendor/village/kit/showcase/desk-controls.js");
     document.querySelector("#sound").addEventListener("change", (e) => setSound(e.target.checked));
     for (const part of bench.querySelectorAll("[inert]")) part.inert = false;
     document.querySelector("#desk-fallback").hidden = true;

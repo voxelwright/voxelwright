@@ -19,8 +19,10 @@
     "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
+    "esbuild": "0.28.2",
     "markdown-it": "15.0.3",
     "shiki": "4.6.0",
+    "voxelmorphism": "file:../engine/kit",
     "yaml": "2.9.1"
   },
   "devDependencies": {

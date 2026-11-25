@@ -1,29 +1,10 @@
 # Voxelmorphism on the site
 
-Every page is built from the kit. The vendored copy in `static/vendor/village/` comes from one
-Village commit, pinned as `PIN` in `scripts/refresh-voxelmorphism.mjs` and written to
-`kit/REVISION`. `test/kit.test.mjs` fails when the copy names no commit (a working-files refresh)
-or when a page uses a `vx-` class the copy does not style.
-
-## Refresh
-
-With Node 24+ and Git, from the site checkout, with a Village clone that has the commit:
-
-```sh
-npm ci
-node scripts/refresh-voxelmorphism.mjs ../Village            # the pinned commit
-node scripts/refresh-voxelmorphism.mjs ../Village <commit>   # another commit; then update PIN
-git diff --exit-code -- static/vendor/village
-```
-
-To change the kit and the site together, refresh from a Village checkout's working files with
-`--worktree`, build, look, and repeat. Commit the kit change in Village first, then refresh from
-that commit; the test refuses a working-files copy.
-
-The script takes only the parts in `PARTS` (the kit's registry is cut to them, so esbuild drops the
-rest) and their stylesheets, put together in the kit's own order (`tools/css.mjs`). A new part on
-a page means a line in `PARTS`. It also bundles the Signal Desk's controller from the kit's
-showcase, without the showcase's boot, and scopes the desk's stylesheet to `.signal-desk`.
+From `site/`, run `npm ci` and `npm run build`. npm links the adjacent
+`engine/kit` package. Each build reads its current modules, stylesheet, fonts and
+notices into the site's public `vendor/village/` directory. The renderer there
+is the one included with Voxelmorphism. The Signal Desk imports its controls
+before site startup and scopes the showcase's stylesheet to the desk.
 
 ## Runtime contract
 
@@ -42,7 +23,7 @@ showcase, without the showcase's boot, and scopes the desk's stylesheet to `.sig
 
 ## Asset provenance
 
-IBM Plex Sans and Mono retain their upstream OFL files beside their WOFF2s. Vox Text is Village's original Sentence glyph set rendered as two WOFF2s. Its source is `engine/kit/src/core/fonts/sentence.js` and its build instructions are in `engine/kit/fonts/vox-text/README.md`. Village has not selected a public license for it.
+IBM Plex Sans and Mono retain their upstream OFL files beside their WOFF2s. Vox Text is Village's original Sentence glyph set rendered as two WOFF2s. Its source is `engine/kit/src/core/fonts/sentence.js` and its build instructions are in `engine/kit/fonts/vox-text/README.md`. The OFL notice accompanies each family.
 
 The press and release WAVs are byte-for-byte from `engine/kit/src/core/audio/`. Village cut them from the Mechvibes Cherry MX Brown PBT KeyJ recording, with separate downstroke and upstroke samples. The included MIT license accompanies the recordings. [Original sound pack](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt)
 
