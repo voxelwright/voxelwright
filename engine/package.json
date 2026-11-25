@@ -12,7 +12,8 @@
     "landing": "npm run -s player && node player/serve.mjs --port 5950",
     "check": "node test/all.mjs",
     "typecheck": "tsc --noEmit",
-    "sf": "node test/sf-suite.mjs"
+    "sf": "node test/sf-suite.mjs",
+    "lobby": "node test/lobby-suite.mjs"
   },
   "devDependencies": {
     "@types/node": "25.0.3",

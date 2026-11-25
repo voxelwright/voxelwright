@@ -199,6 +199,11 @@ reply or a stream frame over 64 MB closes the door, and the page says so.
 
 The wire (what goes over `ctl`, `up` and `down`) is in the header of `door.mjs`.
 
+Every check of playing in someone else's server, in one run: `npm run lobby` (`test/lobby-suite.mjs`: `arrival`,
+`door-silent`, `door`, `door-make`, and `sf-lobbies` on a desktop's and a phone's page; it builds the realm once into
+`dist-sf-lobby`, takes `--ports 6500` and the 50 after, and `--only` names some of them). Run it before a change to the
+door, the list or a join lands.
+
 Check: `node test/door.mjs`. It runs the real master, `server.mjs`, and two pages from a plain host that join as
 strangers. They stand on one ground, see each other's blast and brick, and talk; a page cannot write another's
 `by`. It also covers a full server, admin passwords (one at a time, even sent together), a kick and a ban, hellos of
@@ -2122,4 +2127,4 @@ Not tested: an iPhone; a tab really hidden and come back to; Firefox.
 
 Facts paid for are in `.agents/skills/raw-webgpu` ("Many small transparent pictures").
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/package.json":"0676cc8f867a8b46cb449edf4c663a6e"} -->
+<!-- docs-verified ce4d9e7e518e41e40612cda85199e5ee8dc19000 {"engine/package.json":"8559b0f8264142bdc2e799f3b61c8d9a"} -->
