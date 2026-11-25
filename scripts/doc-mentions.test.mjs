@@ -28,29 +28,29 @@ test('look up scripts, paths, and flags in the documented package', () => {
     '`npm --prefix home run missing-script`',
     '```sh', 'cd home', 'node missing-entry', '```',
     '[missing link](guide/missing-page.md)',
-    '`python scripts/public-history/run --not-an-option`',
+    '`python engine/sf/street_sheet.py --not-an-option`',
     '`./target/release/village-master --not-an-option`',
   ].join('\n')
   assert.deepEqual(mentions('README.md', content), [
     'README.md:1: missing npm script missing-script in home/package.json',
     'README.md:4: missing command file missing-entry',
     'README.md:6: missing link guide/missing-page.md',
-    'README.md:7: unknown --not-an-option in scripts/public-history/run',
+    'README.md:7: unknown --not-an-option in engine/sf/street_sheet.py',
     'README.md:8: unknown --not-an-option in master/src/config.rs',
   ])
 })
 
 test('read parser declarations despite stale comments', () => {
   const snippets = {
-    'scripts/public-history/run': '#!/usr/bin/env python3\n# parser.add_argument("--gone")\nparser.add_argument("--kept")',
+    'engine/sf/street_sheet.py': '#!/usr/bin/env python3\n# parser.add_argument("--gone")\nparser.add_argument("--kept")',
     'master/src/config.rs': '// #[arg(long = "gone")] pub gone: bool,\n#[arg(long)] pub kept: bool,',
   }
   const fs = {...workingTree, read: path => snippets[path] ?? workingTree.read(path)}
   assert.deepEqual(mentions('README.md', [
-    '`scripts/public-history/run --gone --kept`',
+    '`engine/sf/street_sheet.py --gone --kept`',
     '`./target/release/village-master --gone --kept`',
   ].join('\n'), fs), [
-    'README.md:1: unknown --gone in scripts/public-history/run',
+    'README.md:1: unknown --gone in engine/sf/street_sheet.py',
     'README.md:2: unknown --gone in master/src/config.rs',
   ])
 })

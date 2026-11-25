@@ -64,18 +64,24 @@ try {
   const took = Date.now()
   await withFileLock(file, async () => {}, { staleMs: 1_000 })
   check("a lock older than the stale limit (a crashed owner's) is taken over", Date.now() - took < 1_000 && !existsSync(`${file}.lock`))
-  // Six waiters meeting a stale lock, 50 times: never two inside at once.
+  // Backdate only the abandoned lock. Live holders keep a lease longer than the test
+  // so a scheduler pause cannot turn this concurrency check into an expiry check.
+  const abandoned = new Date(0)
+  const liveLease = { staleMs: 3_600_000 }
   let overlaps = 0
   for (let round = 0; round < 50; round++) {
     await writeFile(`${file}.lock`, 'crashed')
-    await utimes(`${file}.lock`, old, old)
+    await utimes(`${file}.lock`, abandoned, abandoned)
     await Promise.all(Array.from({ length: 6 }, () => withFileLock(file, async () => {
-      const inside = await open(`${file}.inside`, 'wx').catch(() => null)
+      const inside = await open(`${file}.inside`, 'wx').catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'EEXIST') return null
+        throw error
+      })
       if (!inside) return void overlaps++
       await new Promise((r) => setTimeout(r, 2))
       await inside.close()
       await rm(`${file}.inside`)
-    }, { staleMs: 1_000 })))
+    }, liveLease)))
   }
   check('six waiters on a stale lock, 50 rounds: never two holding it at once', overlaps === 0, { overlaps })
   // While we hold the lock, someone replaces it (a takeover after we stalled): we leave theirs alone.

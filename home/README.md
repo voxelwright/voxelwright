@@ -1181,7 +1181,7 @@ shell, and the sheep carer's stocking cap against its wool.
 ### Look regroup and round 5 (November 7, 2026): the role mark is the owner's colour
 
 Round 4's scarf tail read as a tongue on all 8 reference villagers, and marks got lost on busy
-bodies. The regroup (`screenshots/villager-gen/LEARNING-look.md`) tried three ways to show the owner:
+bodies. The regroup (`notes/villager-gen/LEARNING-look.md`) tried three ways to show the owner:
 a tidy band (A), a chest badge (B), and the role mark dyed in the owner's colour (C). Opus and GPT-6.1
 Sol both picked C in a blind test. C is now the only look. The A and B code is gone and stays in Git
 at c1a54c6.
@@ -1211,7 +1211,7 @@ at c1a54c6.
   moved felt, and a blind colour sheet in its own shuffle with `readability-colour-key.md`.
 
 The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
-`screenshots/villager-gen/round5/` (`repairs.md`, `personas-readability.md`).
+`screenshots/villager-gen/round5/`. See [repairs](notes/villager-gen/round5/repairs.md) and [persona readability](notes/villager-gen/round5/personas-readability.md).
 
 | Measure | Round 4 (scarf) | Regroup C (8) | Round 5 (20) |
 | --- | --- | --- | --- |
@@ -1266,7 +1266,7 @@ its arm). Both round-5 plumes already sat 1.1 and 1.5 head widths out, so the co
 toque's round puff, not from the duster's place.
 
 The 20 were made by real Sonnet calls through `claude -p`, code arm, concurrency 3, in
-`screenshots/villager-gen/round6/` (`repairs.md`, the colour sheet with its own key, the silhouette sheet with its key).
+`screenshots/villager-gen/round6/` ([repairs](notes/villager-gen/round6/repairs.md), the colour sheet with its own key, the silhouette sheet with its key).
 
 | Measure | Round 5 | Round 6 |
 | --- | --- | --- |
@@ -1311,7 +1311,7 @@ did not show at dollhouse size. Round 7 resizes the marks and adds a short appea
   (1.47) and both one-ball plumes. The hippo's hat also cleared the eyes only 15 degrees steeper.
   `scripts/villagers/measure-marks.mjs <prefix>` prints these measures for a saved round.
 
-Real Sonnet through `claude -p`, code arm, concurrency 3, in `screenshots/villager-gen/round7/` (`repairs.md`, the
+Real Sonnet through `claude -p`, code arm, concurrency 3, in `screenshots/villager-gen/round7/` ([repairs](notes/villager-gen/round7/repairs.md), the
 colour sheet with its key, a fresh silhouette sheet with its key, seed 51, and closes of both tutors, a gardener,
 both tidiers and a cook).
 
@@ -1596,7 +1596,7 @@ in the glass; while the pattern is made the cutting happens on the stool's top. 
 `gen/setup-controls.ts`. `--strategy=1` runs the default through the whole flow at each size with the
 layout gate, a face-spill check, a 14 px floor and the keyboard order; the other checks below drive the
 bench and prove the shared core. Captures and the learning log: `screenshots/villager-gen/setup/`
-(`d-round-2/` is the latest) and `LEARNING.md`.
+(`d-round-2/` is the latest) and [the learning log](notes/villager-gen/setup/LEARNING.md).
 
 `check-setup.mjs` starts its own dev server (5334) and a host in-process with a stub
 maker, then proves headless: the workshop, the stitch order and pace, focus on the first
@@ -1611,7 +1611,7 @@ reload cycles back to baseline. At every captured moment (`1-empty`, `1b-picked`
 every visible label is on screen and overlaps no other or the villager's projected
 bounds, and that no tool on the table lies under the slip; run it at `--viewport=390x844`
 and `1024x768` as well as the default. Captures: `screenshots/villager-gen/setup/round-N/`,
-scores and changes per round in its `NOTES.md`.
+scores and changes per round in the [setup notes](notes/villager-gen/setup/NOTES.md).
 
 ## Measured, kitchen scene (November 6, 2026)
 
@@ -3214,7 +3214,7 @@ Sonnet put one end of 3 windows 0.2 to 1.0 m off; Opus missed none. Untested:
 real scans, photos of paper, plans without dimensions. The two models ran
 concurrently, so latencies compare with each other but are not absolute.
 
-Per-plan tables are in `scripts/plan-import/out/results.md`. The
+Run `scripts/plan-import/score.mjs` on the saved runs to generate per-plan tables. The
 experiment's output is not `plan.ts`'s `Plan`: openings sit in one list with a
 `wall` field, walls carry no height and openings no sill or head. Nothing
 converts it yet.

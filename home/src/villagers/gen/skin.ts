@@ -1,4 +1,4 @@
-// #47 look regroup 3: sewn skin (screenshots/villager-gen/LEARNING-look.md). The model builds a body from separate
+// #47 look regroup 3: sewn skin (notes/villager-gen/LEARNING-look.md). The model builds a body from separate
 // primitives that overlap (a trunk of three capsules, ears pushed into a sphere); trusted code here fuses the felt
 // parts of one rig slot (the body, the head, a foot) into one continuous soft surface, as a plush is sewn from panels.
 //

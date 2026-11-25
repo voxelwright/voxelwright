@@ -1,4 +1,4 @@
-// #47 the trusted felt kit (screenshots/villager-gen/LEARNING-look.md), the default since the kit council. The model
+// #47 the trusted felt kit (notes/villager-gen/LEARNING-look.md), the default since the kit council. The model
 // builds the species body and says where things go: its eye discs (eye-left, eye-right) give the eye line, and the one
 // small anchor it passes to villager.mark() gives the side and the holder (the crown, above an ear, the back, or the
 // duster handle's top knot). Village's own code then makes the parts that carry the character and the craft: button

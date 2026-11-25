@@ -4,7 +4,9 @@ node_modules/
 *.sqlite*
 *.sock
 .village/
-host/proof/*.json
+/host/proof/
+/home/scripts/plan-import/out/
+/.agents/dispatch-log.jsonl
 .check/
 __pycache__/
 /.voxelwright/

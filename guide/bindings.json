@@ -18,7 +18,7 @@
     "engine/make/model.mjs": "lines:^const args =|^if .*args.push"
   },
   ".agents/skills/documentation-maintenance/SKILL.md": {
-    "AGENTS.md": "lines:^- Keep README commands|^Mintlify is pre-authorized"
+    "AGENTS.md": "lines:^- Change docs|^- Keep README commands"
   },
   ".agents/skills/facade-evidence/SKILL.md": {
     "engine/bay/facade_evidence.py": "lines:^(SEGMENTER|CLASSIFIER) =|^cli.add_argument"
@@ -51,7 +51,7 @@
     "master/Cargo.toml": "lines:^(edition|axum|tokio|hyper|hyper-util|tower|tower-http|http-body-util|serde|serde_json|clap) ="
   },
   ".agents/skills/mintlify-docs/SKILL.md": {
-    "docs/docs.json": [
+    "guide/docs.json": [
       "name",
       "navigation.groups"
     ]
@@ -218,9 +218,6 @@
   "guide/documentation.md": {
     "scripts/docs.mjs": "lines:^const usage =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith|^const schema = "
   },
-  "guide/history-cli.md": {
-    "scripts/public-history/run": "options"
-  },
   "guide/plugin-types.md": {
     "engine/page/plugins.ts": "types"
   },
@@ -276,9 +273,6 @@
     "probes/lobby-transport/server.mjs": "lines:^const PORT",
     "probes/lobby-transport/helper.mjs": "lines:^const PORT",
     "probes/lobby-transport/host.mjs": "lines:process.argv|portRangeBegin|new Http3Server"
-  },
-  "scripts/public-history/README.md": {
-    "scripts/public-history/run": "lines:parser.add_argument|--report-path|--gitleaks-ignore-path"
   },
   "site/README.md": {
     "site/package.json": [

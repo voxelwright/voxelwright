@@ -214,7 +214,7 @@ Details and scores are in `home/README.md`, "Paper climb".
 
 ## Lessons from the build-mode regroups (#48, November 7, 2026)
 
-Details and scores are in `home/screenshots/build/look-log.md`.
+Details and scores are in `home/notes/build/look-log.md`.
 
 - **When a complaint repeats, look for the missing system.** Three rounds of
   restyling a room sketch moved the score less than 0.3; the complaint was that

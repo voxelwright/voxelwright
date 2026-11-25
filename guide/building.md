@@ -8,7 +8,7 @@ AI agents write most of this repository. One lead agent decides what to build, s
 - **Builder.** An agent given one unit of work, in its own git worktree and its own feature branch, with a stop condition and a time box.
 - **Brief.** The builder's only context: repository, branch, current state with numbers, numbered tasks, the commands that prove the work, files that are off limits and a reply format.
 - **Skill.** A versioned `SKILL.md` under `.agents/skills/<name>/` that holds what was learned about one technology or practice, from primary sources and short experiments. A new dependency needs one (`.agents/skills/technology-grounding`). An agent loads the skill for the area it changes before changing it.
-- **Dispatch log.** `.agents/dispatch-log.jsonl`, one JSON line per agent started, with its role, issue, task, provider and model. `.claude/hooks/dispatch-log.mjs` appends a row for each T3 delegation. It is the first dataset for routing work to models.
+- **Dispatch log.** The local file `.agents/dispatch-log.jsonl`, one JSON line per agent started, with its role, issue, task, provider and model. `.claude/hooks/dispatch-log.mjs` appends a row for each T3 delegation. It is the first dataset for routing work to models.
 - **Gate.** What must pass before a change lands: the changed flow run by hand, its own tests, and `npm run check -- --ci --webgl` on the branch merged with main.
 
 ## A change, from issue to main
@@ -63,4 +63,4 @@ node scripts/docs.mjs mentions              # paths, links and commands only
 npm run check -- --list                     # every check and whether CI runs it
 ```
 
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"AGENTS.md":"10566cbd5f062caa13532abb033b7c43","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->
+<!-- docs-verified 3e4407c8ce8053805cf32fd47fab75b930e62bf6 {"AGENTS.md":"d47241c0c37fd5a829fa6e94aae4bdd6","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->

@@ -25,7 +25,6 @@ function cli(title, command, fields, row) {
 const generators = {
   'guide/check-cli.md': cli('Check runner', 'npm run check --', ['Type', 'Default', 'Purpose'],
     (purpose, type, value) => [type, `\`${value}\``, purpose]),
-  'guide/history-cli.md': cli('Public history candidate', 'scripts/public-history/run', ['Purpose'], purpose => [purpose]),
   'guide/checks.md': rows => [
     '# Repository checks', '',
     'Use a name with `npm run check -- --only NAME`. The default CI run excludes local and skipped checks. A file prerequisite must exist even for a named run.', '',

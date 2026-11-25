@@ -17,7 +17,7 @@ import { sewSkin, type surfaceStats } from './skin'
 import { ENUMS, type VillagerSpec } from './spec'
 
 /**
- * Owner colour (#47 look regroup, screenshots/villager-gen/LEARNING-look.md, strategy C): shape says the role,
+ * Owner colour (#47 look regroup, notes/villager-gen/LEARNING-look.md, strategy C): shape says the role,
  * colour says whose villager it is. Trusted code dyes every villager.mark() part in the owner's felt, and pulls
  * any other felt that competes with an owner's hue towards oatmeal (./checks.ts OWNER_CLASH), so the mark wins.
  * The model never wears the accent itself.

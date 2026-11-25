@@ -74,7 +74,8 @@
     "three/addons/tsl/display/BloomNode.js": "Installed Three.js addon."
   },
   "README.md": {
-    ".check/": "Generated directory under the build, evidence or installation root described on this page."
+    ".check/": "Generated directory under the build, evidence or installation root described on this page.",
+    ".agents/dispatch-log.jsonl": "Local output written when an agent is dispatched."
   },
   "deploy/README.md": {
     "404.html": "Generated site response.",
@@ -145,13 +146,6 @@
     "../": "Deliberately invalid path in the notes containment test.",
     "a/../../": "Deliberately invalid path in the notes containment test."
   },
-  "scripts/public-history/README.md": {
-    "gitleaks.json": "Report generated in the private evidence directory.",
-    "remaining-media.html": "Report generated in the private evidence directory.",
-    "summary.json": "Report generated in the private evidence directory.",
-    "tip-diff.json": "Report generated in the private evidence directory.",
-    "filter-repo/analysis/path-all-sizes.txt": "Git-filter-repo analysis output."
-  },
   "site/README.md": {
     "photo.jpg": "Example attachment relative to a post.",
     ".dev/": "Generated directory under the build, evidence or installation root described on this page."
@@ -192,5 +186,11 @@
     "./browser": "Package export subpath in engine/kit/package.json.",
     "./voxelmorphism.css": "Package export subpath in engine/kit/package.json.",
     "vendor/village/": "Site build output under the site's output folder."
+  },
+  ".agents/skills/adversarial-review/SKILL.md": {
+    ".agents/dispatch-log.jsonl": "Local output written when an agent is dispatched."
+  },
+  "guide/building.md": {
+    ".agents/dispatch-log.jsonl": "Local output written when an agent is dispatched."
   }
 }

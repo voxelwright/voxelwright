@@ -11,7 +11,7 @@ On November 10, 2026 the owner handed the codebase to its lead agent: what it
 is for and how it is built are the lead's call. That direction supersedes
 earlier ones, including the November 4 and 6 home-hub framing; the home's
 helpers (reminders, the Elder, villagers) stay and serve the game.
-`docs/index.mdx` describes the vision.
+The [project map](guide/project.md) describes the game and its components.
 
 ## Pace
 
@@ -47,9 +47,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 - Tilt is optional. Use the shortest repeatable local proof.
 - Keep evidence short: the command, the result and the measurements that matter.
   Routine changes need no receipt archives.
-- Keep README commands current. Update the private handbook (`docs/`) at
-  milestones, not for every change. Publishing the private handbook to
-  Mintlify is pre-authorized (November 5, 2026).
+- Keep README commands current. Maintain the public guide in `guide/` alongside its source.
 - Bring the owner results and things to try, not permission questions. Ask
   only when something below is his to decide, with a recommendation.
 
@@ -133,9 +131,7 @@ The owner had been first to spot six visible faults in 14 days.
   UI Craft screenshot and review loop with its cross-model target of 9/10 or better.
 - Keep subagents short-lived. Give each one unit of work, end it when the work
   is done, and never leave one idle.
-- Record every dispatch in `.agents/dispatch-log.jsonl` on `feature/village`
-  and commit it with each integration. It is the first dataset for Village's
-  own model routing.
+- Record every dispatch in the local `.agents/dispatch-log.jsonl` for model routing.
 - When work enters a new technology or unfamiliar area, build the expertise
   into a versioned skill with `.agents/skills/technology-grounding`. Draw on
   primary sources, official skills, community knowledge and short experiments.
@@ -169,7 +165,7 @@ Before building or changing UI, read [DESIGN.md](DESIGN.md).
   controller or its permission policy.
 - Granted (November 10, 2026): merging to main, creating repositories,
   pushing branches, pull requests, the Ally for isolated Linux proofs,
-  tailnet-only serving from the owner's Mac, publishing the private handbook.
+  tailnet-only serving from the owner's Mac.
 - Still the owner's to decide, because they protect him and his family rather
   than the code: anything reachable from the public internet, changes to who
   can reach his machines or accounts, spending money, accounts on outside

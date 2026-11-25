@@ -288,7 +288,7 @@ const demo = await page.evaluate(async () => {
 // ── the live plugin ─────────────────────────────────────────────────────────
 // A worklet on the mix's limiter (voice/buses.ts) reports each 128-sample block's peak with its audio time.
 async function tap(p) {
-  return p.evaluate(async () => {
+  await p.evaluate(async () => {
     const audio = window.village.babble.audio
     // The page's CSP takes worklets from its own origin only (#40); the dev server serves this file.
     await audio.audioWorklet.addModule('/scripts/babble-tap.js')
@@ -297,8 +297,8 @@ async function tap(p) {
     window.village.sound.mix.output.connect(node).connect(sink).connect(audio.destination)
     window.blocks = []
     node.port.onmessage = (m) => window.blocks.push(m.data)
-    await new Promise((r) => setTimeout(r, 100))
   })
+  await p.waitForFunction(() => window.blocks.length > 0, null, { timeout: 5000 })
 }
 const say = (p, villager, word, index = 0, last = true) =>
   p.evaluate(([villager, word, index, last]) => {
@@ -351,7 +351,8 @@ const blocksAfter = (p, t) => p.evaluate((t) => window.blocks.filter(([bt]) => b
   const latencies = []
   for (const [v, w] of [['Dumpling', 'Hello'], ['Tuft', 'socks!'], ['Moss', 'basil.'], ['Dumpling', 'soup?'], ['Tuft', 'Hi']]) {
     const t = await say(live, v, w)
-    await live.waitForTimeout(450)
+    // Wait for the measurement window on the audio clock, including delivery from the worklet.
+    await live.waitForFunction((end) => window.blocks.at(-1)?.[0] >= end, t + 0.45, { timeout: 5000 })
     const first = (await blocksAfter(live, t - 0.01)).find(([, p]) => p > 1e-4)
     latencies.push(first ? (first[0] - t) * 1000 : Infinity)
   }

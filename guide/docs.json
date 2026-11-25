@@ -1,0 +1,43 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Village",
+  "colors": {
+    "primary": "#52745C"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Start here",
+        "pages": [
+          "quickstart",
+          "project",
+          "building"
+        ]
+      },
+      {
+        "group": "World and engine",
+        "pages": [
+          "cells",
+          "city-pipeline",
+          "engine",
+          "engine-core",
+          "engine-page",
+          "engine-plugins",
+          "render-passes",
+          "plugin-types",
+          "making",
+          "kit"
+        ]
+      },
+      {
+        "group": "Contributing",
+        "pages": [
+          "documentation",
+          "checks",
+          "check-cli"
+        ]
+      }
+    ]
+  }
+}

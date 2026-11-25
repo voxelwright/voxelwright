@@ -19,7 +19,7 @@ Start with the [project map](guide/project.md) and [how to keep documentation cu
 - `site/`: the personal site and blog, served under zahynailo.dev/blog/. It was brought in with `git subtree`, history kept. See `site/README.md`.
 - `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`. Splitting the realm, the site and the kit into separate repos waits until Village goes open source.
 - `master/`: the master server (Rust), which lists player-hosted lobbies and passes one WebRTC offer and one answer per join (#526). See `master/README.md`.
-- `docs/`: the handbook, published privately with Mintlify.
+- `guide/`: the quickstart, project map and contributor documentation.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
 ## Run the private home
@@ -91,7 +91,7 @@ every `delegate_task` and `t3_thread_launch` call made from a Claude Code sessio
 
 ## Handbook
 
-`docs/` has the quickstart, current status, decisions and change log.
+The [project map](guide/project.md) links to each component and its guide.
 
 ## History
 

@@ -17,7 +17,7 @@ sounds is a measurement or a principle, and is marked as such.
 
 ## Sources, and how far each was read
 
-Four Sonnet reads on November 13 (logged in `.agents/dispatch-log.jsonl`). Much of the standard literature would
+Four Sonnet reads on November 13. Much of the standard literature would
 not fetch; what is from memory is said to be.
 
 | Fetched and read | What it gave |

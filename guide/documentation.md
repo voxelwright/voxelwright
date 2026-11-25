@@ -1,6 +1,6 @@
 # Keeping a page current
 
-Read the documentation in your checkout. Change the page in the same pull request as its source. The hosted handbook follows its own publication process for main.
+Read the documentation in your checkout. Change the page in the same pull request as its source.
 
 Run `npm ci --prefix home` once for the repository's TypeScript parser. From the root, run `node scripts/docs.mjs`. The same check runs in `npm run check -- --ci`.
 
@@ -13,7 +13,7 @@ Add a page to [bindings.json](bindings.json). Each key below the page names a so
 | An array of dotted paths | Those fields of a JSON document. For example, `["scripts.dev"]` tracks the command a contributor runs. |
 | `lines:<pattern>` | All trimmed source lines matching a regular expression. Anchor it on the declaration or option that owns the rule. A selector with no matches fails. |
 | `types` | Exported TypeScript interfaces and type aliases declared in the file, printed without comments. Use `types:Pass,Passes` to select only named declarations. |
-| `options` | CLI options from parser declarations. The [check runner](check-cli.md) and [public history tool](history-cli.md) use this selector. |
+| `options` | CLI options from parser declarations. The [check runner](check-cli.md) uses this selector. |
 | `checks` | Names, default CI eligibility and required files from the check manifest. |
 | `file` | The complete contents. Reserve this for a small contract, fixture or other source where every edit merits review. |
 

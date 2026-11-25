@@ -218,8 +218,7 @@ red; noise 0.003%) 854 ms later, with no page load. Rollback took 0.8 s and
 the box was gone 328 ms later, with no file left, as recorded. Earlier run on
 the same code: 739 + 262 ms and 550 + 271 ms. Each refusal (no `--approve`,
 missing, failed, edited after the check, uncommitted live changes, rollback
-over a hand edit) exited 1 and wrote its entry. Proof:
-`proof/20261106T234036-promote.json`. `npm run regressions`: 24 of 24.
+over a hand edit) exited 1 and wrote its entry. `npm run regressions`: 24 of 24.
 
 Regressions in the same run (November 7, 2026): the live server sends the
 home's Content Security Policy; two promotions at once give one promotion and

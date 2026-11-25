@@ -5,7 +5,5 @@ perf-gate.json
 .sound-lab/
 public/sound-lab/
 
-# Pictures and clips the checks write stay out of git (#534). The notes beside them (*.md) are kept.
-screenshots/**
-!screenshots/**/
-!screenshots/**/*.md
+# Captures produced by the checks. Tracked observations live in notes/.
+screenshots/
