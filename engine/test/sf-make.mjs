@@ -4,6 +4,8 @@
 //   node test/sf-make.mjs [--no-build] [--dist dist-sf] [--shots ~/.village/engine/sf/make/check] [--headed]
 //
 // It fails unless:
+//   - on the roof where the way in leaves a visitor, on foot, a kept thing asked for by the keys alone is made there,
+//     on what they stand on;
 //   - in the realm Enter, pressed as a person presses it, opens the bar to make on, and the slash the line to the city;
 //   - without `?making=1` (the realm's rule is "preview") there is no bar, nothing of the maker or its shelf is asked
 //     for, by the bar or by anything said on it, and words sent to be made make nothing;
@@ -44,7 +46,7 @@ const MAKER = /^\/(page\/maker\.js|make\/|text\.js|sf\/shelf\/)/
 const makerAsked = (from = 0) => site.asked.filter((a) => a.at >= from && MAKER.test(a.path)).map((a) => a.path)
 
 /** A page of the realm, in once the park is whole: by the host's way in (explore.ts `go`), then stood on the street at the kept car's kerb, looking along it. */
-const open = async (query) => {
+const open = async (query, { roof = false } = {}) => {
   const context = await browser.newContext({ viewport: { width: 1280, height: 720 } }), page = await context.newPage()
   page.on('pageerror', (e) => errors.push(e.message))
   const from = Date.now()
@@ -53,6 +55,8 @@ const open = async (query) => {
   const before = makerAsked(from).length
   await page.evaluate(() => globalThis.engine.explore.go())
   await page.waitForFunction(() => globalThis.engine.first.engaged && globalThis.engine.explore.state === 'in', null, { timeout: 60_000 })
+  // (`roof`: left where the flight leaves a visitor, on the roof by the sign, on foot.)
+  if (roof) { await page.waitForTimeout(5000); return { context, page, from, before } }
   // Off the roof the flight leaves the visitor on, to the street the realm parks its car in (sf/realm.json `kept`),
   // looking west along it; once the page holds the tiles there, the eye 1.7 m over the street's top.
   const stand = () => page.evaluate(() => {
@@ -75,6 +79,26 @@ const type = async (page, words) => {
   await page.evaluate(() => globalThis.engine.hud.line.show())
   await page.fill('#line', '')
   await page.type('#line', words, { delay: 40 })
+}
+
+// ── On the roof, where the way in leaves a visitor, by the keys alone ──
+// (Found on the live site on November 25: every step below first stands the eye in a street. On the roof a wish was
+// refused, "there is no ground near there to stand it on": only the land's own height counted as a place, and the
+// visitor's first wish is made from a roof, looking at a sign and the sky.)
+{
+  const { context, page } = await open('?making=1', { roof: true })
+  const stood = await page.evaluate(() => { const e = globalThis.engine, f = e.me.feet?.at; return f ? { feet: f.map(Math.round), on: e.me.on } : null })
+  await page.keyboard.press('Enter'); await page.waitForTimeout(600)
+  await page.keyboard.type('a car', { delay: 40 }); await page.waitForTimeout(2500)
+  await page.keyboard.press('Enter')
+  const made = await page.waitForFunction(() => globalThis.engine.things.all.size > 0, null, { timeout: 60_000 }).then(() => true, () => false)
+  await page.waitForTimeout(1500)
+  const thing = await page.evaluate(() => { const t = [...globalThis.engine.things.all.values()][0]; return t ? { name: t.name, at: t.at } : null })
+  const said = await page.evaluate(() => [...document.querySelectorAll('body *')].filter((n) => n.children.length === 0 && /Not made|no ground/.test(n.textContent ?? '') && n.getClientRects().length).map((n) => n.textContent.trim()).join(' | '))
+  await page.screenshot({ path: join(shots, 'roof.png') })
+  const level = thing && stood ? Math.abs(thing.at[1] - stood.feet[1]) : null
+  check(!!stood && stood.on && made && thing !== null && level !== null && level <= 20, `on the roof where a visitor arrives (${stood ? `their feet ${(stood.feet[1] / 10).toFixed(0)} m up, on foot ${stood.on}` : 'no body'}), Enter, "a car", Enter makes it on the roof: ${thing ? `${thing.name}, ${level} cells from the height of their feet` : `nothing${said ? ` ("${said}")` : ''}`}`)
+  await context.close()
 }
 
 // ── Without ?making=1 ──

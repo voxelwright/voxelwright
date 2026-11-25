@@ -976,7 +976,7 @@ async function main() {
   if (far) worldHour = () => far.realm.look?.hour ?? 11
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
   /** Where this page's eye is and looks, in whole cells: what an ask is asked from. */
-  const gaze = (): { eye: [number, number, number]; toward: [number, number, number] } => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }
+  const gaze = (): { eye: [number, number, number]; toward: [number, number, number]; feet?: [number, number, number] } => { const v = view(), f = me.on ? me.feet : null; return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]], ...(f ? { feet: [Math.round(f.at[0]), Math.round(f.at[1]), Math.round(f.at[2])] as [number, number, number] } : {}) } }
   // A realm the page runs alone, whose rules allow it (local.ts `making`): things are made in the page itself, by the
   // engine's own maker (page/maker.ts), fetched once the bar is first used in the realm. Elsewhere: the helper.
   // In a lobby joined through a door (#526) the same: the maker asks the world on the host's machine, as this page's person.

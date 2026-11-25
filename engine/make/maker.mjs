@@ -59,12 +59,17 @@ const REACH = 64
 /**
  * Where a thing asked for at `where` goes: the ground there, or the nearest ground to it. A wish is not turned down
  * for where it was aimed: on a roof, at the sky, at a car, it is taken to mean the ground nearest that.
+ * `where.feet` (#526): where whoever asked stands, if they are on foot. What they stand on is a place too, as high as
+ * it is: a visitor on a roof of the city has the roof to make on, as the street is for one in the street.
  * Resolves to { spot, eye, wall } or { why } when there is no ground within reach (the open sea).
  */
 export async function ground(world, where) {
+  const feet = Array.isArray(where.feet) && where.feet.length === 3 && where.feet.every(Number.isFinite) ? where.feet.map(Math.round) : null
   // Ground is a top: near the land's own height, with air over it. The foot of a wall is near it too, with wall over it.
-  const land = async (c) => c && c[1] <= (await world.at(c)).ground + ON_GROUND && (await world.at([c[0], c[1] + 1, c[2]])).material === 0 && (await world.at(c)).material !== 5
-  const down = async (x, z) => (await world.look([x, (await world.at([x, 0, z])).ground + 60, z], [0, -1, 0])).at
+  // So is a top at the height the asker's own feet are on, wherever that is.
+  const land = async (c) => c && (c[1] <= (await world.at(c)).ground + ON_GROUND || (feet !== null && Math.abs(c[1] - feet[1]) <= ON_GROUND)) && (await world.at([c[0], c[1] + 1, c[2]])).material === 0 && (await world.at(c)).material !== 5
+  // The first thing down a column, looked for from over the land there, or from over the asker's head where they stand higher.
+  const down = async (x, z) => (await world.look([x, Math.max((await world.at([x, 0, z])).ground, feet ? feet[1] : -Infinity) + 60, z], [0, -1, 0])).at
   let spot, eye = null, wall = false, aim
   // A box to fill: its middle, on what its floor lies on.
   if (where.box) { const b = where.box; aim = [Math.round((b[0] + b[3]) / 2), Math.round((b[2] + b[5]) / 2)]; spot = [aim[0], b[1] - 1, aim[1]]; if (await land(spot)) return { spot, eye: where.from ?? null, wall: false, centred: true }; spot = await down(...aim); if (spot && (await land(spot))) return { spot, eye: where.from ?? null, wall: false, centred: true } }
@@ -89,6 +94,16 @@ export async function ground(world, where) {
     const turn = (k * Math.PI) / 4 + (eye ? Math.atan2(eye[2] - aim[1], eye[0] - aim[0]) : 0)
     const c = await down(Math.round(aim[0] + Math.cos(turn) * r), Math.round(aim[1] + Math.sin(turn) * r))
     if (c && (await land(c))) return { spot: c, eye, wall: false }
+  }
+  // Nothing where it was aimed (off the edge of a roof, at a sign in the sky): in front of the asker's own feet, on
+  // what they stand on, nearer first.
+  if (feet) {
+    const toward = where.toward ?? [0, 0, 1], flat = Math.hypot(toward[0], toward[2]) || 1
+    for (const far of [30, 20, 45, 12, 60]) for (const turn of [0, 0.6, -0.6, 1.4, -1.4, Math.PI]) {
+      const dx = (toward[0] / flat) * Math.cos(turn) - (toward[2] / flat) * Math.sin(turn), dz = (toward[0] / flat) * Math.sin(turn) + (toward[2] / flat) * Math.cos(turn)
+      const c = await down(Math.round(feet[0] + dx * far), Math.round(feet[2] + dz * far))
+      if (c && (await land(c))) return { spot: c, eye: eye ?? feet, wall: false }
+    }
   }
   return { why: 'there is no ground near there to stand it on' }
 }

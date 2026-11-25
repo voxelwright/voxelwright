@@ -53,7 +53,8 @@ export interface Seam {
   lay(edit: Edit, release: V3): boolean
   made: Things
   alive: Living
-  eye(): { eye: V3; toward: V3 }
+  /** Where the eye is and looks; and, on foot, where the visitor's own feet are: what they stand on is a place to make on (make/maker.mjs `ground`). */
+  eye(): { eye: V3; toward: V3; feet?: V3 }
   by(): string
   hud: Hud
   /** The shelf's folder beside the page (sf/build.mjs writes it). */
@@ -208,10 +209,10 @@ export function pageMaker(seam: Seam): PageMaker {
   const journal = { note: async (line: Record<string, unknown>) => { lines.push({ at: new Date().toISOString(), ...line }) }, lines: async () => lines }
 
   /** Where an ask goes: what it aims at, from where the eye was when it was asked. */
-  const where = (target: Target | undefined, from: { eye: V3; toward: V3 }) => {
+  const where = (target: Target | undefined, from: { eye: V3; toward: V3; feet?: V3 }) => {
     const point = target && 'point' in target ? target.point : target && 'box' in target ? [(target.box[0] + target.box[3]) / 2, target.box[1], (target.box[2] + target.box[5]) / 2] : null
     const toward = point ? point.map((v, a) => v - from.eye[a]) as V3 : from.toward
-    return { from: from.eye, toward: Math.hypot(...toward) > 0 ? toward : from.toward }
+    return { from: from.eye, toward: Math.hypot(...toward) > 0 ? toward : from.toward, ...(from.feet ? { feet: from.feet } : {}) }
   }
   /** Things made that no place would take, kept a while for the asker to say where. */
   const holds = new Map<string, unknown>(), asked = new WeakMap<Done, { eye: V3; toward: V3 }>()
