@@ -65,7 +65,7 @@ async function open(name, { lobby = server.id, query = '' } = {}) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   page.on('console', (m) => { if (m.type() === 'error') console.log(`  ${name}'s page: ${m.text().slice(0, 300)}`) })
-  await page.goto(`${site.url}/sf/index.html?master=${encodeURIComponent(MASTER)}&lobby=${lobby}&name=${name}&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0${query}`)
+  await page.goto(`${site.url}/sf/index.html?lobbies=1&master=${encodeURIComponent(MASTER)}&lobby=${lobby}&name=${name}&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0${query}`)
   const p = { name, page, errors, context }
   pages.push(p)
   return p
@@ -343,6 +343,21 @@ try {
   check(/banned/.test(fresh.why ?? ''), `someone new from that address is refused: "${fresh.why}"`)
   const kept = JSON.parse(readFileSync(`${file}.door.json`, 'utf8'))
   check(kept.bans.length === 2 && !!seenAs && !JSON.stringify(kept).includes(seenAs), `bans are kept beside the world's file (${kept.bans.length}), with no address in it plainly`)
+
+  // ── A link alone takes nobody into a lobby (local.ts `MASTER`): the realm's rule is a preview, and without ?lobbies=1
+  // the address is not read for a master ──
+  {
+    const context = await browser.newContext({ viewport: { width: 640, height: 360 }, deviceScaleFactor: 1 }), page = await context.newPage()
+    const toMaster = [], from = Date.now()
+    page.on('request', (r) => { if (r.url().startsWith(MASTER)) toMaster.push(r.url()) })
+    await page.goto(`${site.url}/sf/index.html?master=${encodeURIComponent(MASTER)}&lobby=${server.id}&name=Cleo&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0`)
+    await page.waitForFunction(() => globalThis.engine?.seen?.near, null, { timeout: 120_000 }).catch(() => {})
+    await page.waitForTimeout(3000)
+    const lobby = await page.evaluate(() => typeof globalThis.engine?.lobby)
+    const door = site.asked.filter((q) => q.at >= from && /\/page\/(door|wire)\.js/.test(q.path)).length
+    check(lobby === 'undefined' && toMaster.length === 0 && door === 0, `without ?lobbies=1 a link with a master and a lobby joins nothing: no lobby (${lobby}), ${toMaster.length} requests to the master, the door's code not fetched (${door})`)
+    await context.close()
+  }
 
   // ── The host's process is killed ────────────────────────────────────────────
   server.process.kill('SIGKILL')

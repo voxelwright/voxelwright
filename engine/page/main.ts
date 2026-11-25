@@ -48,7 +48,7 @@ import { input } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker, later } from './ask.ts'
-import { LOCAL, MAKING, RULES } from './local.ts'
+import { LOCAL, MAKING, MASTER, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { playHud } from './play-hud.ts'
 import { making } from './making.ts'
@@ -92,7 +92,8 @@ if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores()
 async function main() {
   report.env = environment()
   // A lobby (#526): a world on someone else's machine, joined through its door (door.ts) before anything is made; a join that fails says why and the page goes on alone.
-  const joined = query.has('lobby') && query.has('master') ? await import('./door.ts').then((d) => d.enter({ master: query.get('master')!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
+  // Only where the realm's rule allows (local.ts `MASTER`): a link alone takes nobody into a stranger's server.
+  const joined = query.has('lobby') && MASTER ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
   loading.step('gpu')
   const { device } = gpu

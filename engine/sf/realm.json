@@ -23,7 +23,8 @@
   },
   "rules": {
     "models": false,
-    "making": "preview"
+    "making": "preview",
+    "lobbies": "preview"
   },
   "kept": [
     {

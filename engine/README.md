@@ -64,14 +64,14 @@ cd engine && npm ci && npm run core && node sf/build.mjs          # the world's 
 node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
   --master https://<a master> --name "Fern Hollow" --about "bricks and talk" --most 8 \
   --admin-password-file ~/.village/admin.txt [--password-file f] [--private]
-# it prints: lobby <id>, code <code>: a page joins with ?master=<master>&lobby=<id> (a --private lobby: its code)
+# it prints: lobby <id>, code <code>: a page joins with ?lobbies=1&master=<master>&lobby=<id> (a --private lobby: its code)
 ```
 
 - `server.mjs` runs the world's server (`serve.mjs`, bound to 127.0.0.1, `--port`, 5747 unless said) and the door
   (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
   machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
   `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
-- A page joins with `?master=<address>&lobby=<id or code>&name=<a name>` on the static realm (`sf/index.html`; no
+- A page joins with `?lobbies=1&master=<address>&lobby=<id or code>&name=<a name>` on the static realm (its rule `lobbies` is `"preview"`: without `?lobbies=1` the address takes nobody into a lobby; a realm whose rule names a master joins through that one only) (`sf/index.html`; no
   page lists lobbies yet). It joins only a world on its own release, and draws its own tiles. A server with a password
   asks for it in the browser's prompt.
 - Limits for each connection (flags): `--asks 30` requests a second, `--up-mb 24` megabytes sent a minute,

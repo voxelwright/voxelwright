@@ -21,6 +21,14 @@ export interface Rules {
    * or false: off. `"preview"`: on only where the address has `?making=1`. True: on. It says nothing of `models`.
    */
   making?: boolean | 'preview'
+  /**
+   * Whether a visitor here may join a world on someone else's machine (#526, door.ts), and through which master
+   * server it is found. A host learns the address of whoever joins it, and what it sends is drawn on this page, so a
+   * link alone must never take a visitor into one. Absent or false: off, whatever the address says. `"preview"`: only
+   * where the address has `?lobbies=1`, and then the master is the one the address names (`?master=`). `{ master }`:
+   * on, through that master and no other.
+   */
+  lobbies?: false | 'preview' | { master: string }
 }
 
 export interface Local extends Realm {
@@ -56,7 +64,8 @@ export interface Local extends Realm {
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */
-const OPEN: Rules = { models: true, making: false }
+// The engine's own page is whoever runs it: a lobby is joined through the master its address names.
+const OPEN: Rules = { models: true, making: false, lobbies: 'preview' }
 
 function read(): Local | null {
   // A worker has no page: it is told what it needs in its own address (bay.ts `BAY`).
@@ -64,7 +73,7 @@ function read(): Local | null {
   if (!tag?.textContent) return null
   const realm = JSON.parse(tag.textContent) as Local
   // Rules left unsaid are off: a realm turns on what it allows.
-  realm.rules = { models: realm.rules?.models === true, making: realm.rules?.making === true ? true : realm.rules?.making === 'preview' ? 'preview' : false }
+  realm.rules = { models: realm.rules?.models === true, making: realm.rules?.making === true ? true : realm.rules?.making === 'preview' ? 'preview' : false, lobbies: realm.rules?.lobbies === 'preview' ? 'preview' : typeof realm.rules?.lobbies === 'object' && realm.rules.lobbies && typeof realm.rules.lobbies.master === 'string' ? { master: realm.rules.lobbies.master } : false }
   return realm
 }
 
@@ -74,3 +83,15 @@ export const LOCAL: Local | null = read()
 export const RULES: Rules = LOCAL?.rules ?? OPEN
 /** Whether this page makes things itself (`Rules.making`): the one place the address is read for it, and only for a preview. */
 export const MAKING = RULES.making === true || (RULES.making === 'preview' && typeof location !== 'undefined' && new URLSearchParams(location.search).get('making') === '1')
+/**
+ * The master server a lobby is found through from this page (`Rules.lobbies`), or null where none may be joined. The
+ * one place the address is read for it: in a realm's preview only with `?lobbies=1`; on the engine's own page always.
+ */
+export const MASTER: string | null = (() => {
+  const l = RULES.lobbies
+  if (!l) return null
+  if (l !== 'preview') return l.master
+  if (typeof location === 'undefined') return null
+  const q = new URLSearchParams(location.search)
+  return LOCAL && q.get('lobbies') !== '1' ? null : q.get('master')
+})()
