@@ -63,8 +63,8 @@ const asked = state.asked
 /** Every request the page made, with all its headers and its body. */
 const requests = []
 /** A context whose every request is kept, the providers answered here, and every console line kept. */
-const context = async (viewport = { width: 1280, height: 720 }) => {
-  const c = await browser.newContext({ viewport })
+const context = async (opts = { viewport: { width: 1280, height: 720 } }) => {
+  const c = await browser.newContext(opts)
   await c.route(PROVIDERS, answer)
   c.on('request', async (r) => { const entry = { url: r.url(), method: r.method(), headers: {}, body: r.postData() ?? '' }; requests.push(entry); try { entry.headers = await r.allHeaders() } catch { /* gone */ } })
   return c
@@ -108,6 +108,124 @@ const until = async (frame, from) => {
   check(off.making === 'undefined' && !off.panel && !off.key && !off.line, `without ?making=1: no seam (${off.making}), no panel, no key in the settings, no line`)
   check(ours(from).length === 0, `without ?making=1: connect.js and models.js are never asked for (${ours(from).join(', ') || 'none'})`)
   await c.close()
+}
+
+// ── On the roof, desktop (1280x720) and phone (390x844, touch): the offer to connect is clear of every other control,
+//    the hint card comes back once the offer is gone, and no "Making…" cue is shown while asking to connect ──
+const OFFER_CHECK = ({ safe }) => {
+  const choice = document.querySelector('#choice')
+  if (!choice || choice.hidden || !choice.checkVisibility({ visibilityProperty: true, opacityProperty: true })) return { shown: false, hits: [], unsafe: [], cues: [], aiLine: '' }
+  const vw = innerWidth, vh = innerHeight
+  const solid = (el) => {
+    const b = el.getBoundingClientRect(), cs = getComputedStyle(el), live = el.hasAttribute('data-vx-live')
+    const vx = parseFloat(cs.getPropertyValue('--vx')) || 4
+    const lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0
+    const bleed = live ? vx : 0
+    return { left: b.left - lift - bleed, top: b.top - lift - bleed, right: b.right + bleed, bottom: b.bottom + bleed, width: b.width, height: b.height }
+  }
+  const meets = (a, b) => a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5
+  const mine = solid(choice)
+  const canvas = document.querySelector('body > canvas, canvas#view') ?? [...document.querySelectorAll('canvas')].sort((a, b) => b.width * b.height - a.width * a.height)[0]
+  const hits = []
+  for (const el of document.body.querySelectorAll('*')) {
+    if (el === choice || choice.contains(el) || el.contains(choice)) continue
+    if (el === canvas || el.classList.contains('vx-canvas') || el.closest('[hidden]') || ['STYLE', 'SCRIPT', 'LINK', 'TEMPLATE'].includes(el.tagName)) continue
+    if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue
+    const r = solid(el)
+    if (r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue
+    if (r.width * r.height > vw * vh * 0.4) continue
+    const cs = getComputedStyle(el)
+    const own = el.hasAttribute('data-vx-live') || el.tagName === 'CANVAS' || el.tagName === 'IMG' || el.tagName === 'svg' || [...el.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()) || cs.backgroundColor !== 'rgba(0, 0, 0, 0)' || cs.backgroundImage !== 'none' || parseFloat(cs.borderTopWidth) > 0 || cs.boxShadow !== 'none'
+    if (!own) continue
+    if (meets(mine, r)) {
+      const id = el.id ? `#${el.id}` : `${el.tagName.toLowerCase()}${el.classList.length ? `.${[...el.classList].join('.')}` : ''}`
+      const text = el.textContent?.replace(/\s+/g, ' ').trim().slice(0, 40)
+      hits.push(`${id}${text ? ` (${text})` : ''} [${[r.left, r.top, r.right, r.bottom].map(Math.round).join(',')}]`)
+    }
+  }
+  const unsafe = []
+  if (mine.left < safe.left - 0.5) unsafe.push(`left ${Math.round(mine.left)} < ${safe.left}`)
+  if (mine.top < safe.top - 0.5) unsafe.push(`top ${Math.round(mine.top)} < ${safe.top}`)
+  if (mine.right > vw - safe.right + 0.5) unsafe.push(`right ${Math.round(mine.right)} > ${vw - safe.right}`)
+  if (mine.bottom > vh - safe.bottom + 0.5) unsafe.push(`bottom ${Math.round(mine.bottom)} > ${vh - safe.bottom}`)
+  const cues = [...document.querySelectorAll('#cues p')].filter((p) => !p.hidden && p.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((p) => p.textContent.trim())
+  const ai = document.querySelector('#ai-line')
+  const aiLine = ai && !ai.hidden && ai.checkVisibility({ visibilityProperty: true, opacityProperty: true }) ? ai.textContent.trim() : ''
+  return { shown: true, box: [mine.left, mine.top, mine.right, mine.bottom].map(Math.round), hits, unsafe, cues, aiLine }
+}
+const MAKING_CUE = /\b(making|drawing|carving|building)\b/i
+const cuesShown = (p) => p.evaluate(() => [...document.querySelectorAll('#cues p')].filter((el) => !el.hidden && el.checkVisibility({ visibilityProperty: true, opacityProperty: true })).map((el) => el.textContent.trim()))
+const flyCueShown = (p) => p.evaluate(() => { const el = document.querySelector('#realm .cue[data-cue="fly"]'); return !!el && el.classList.contains('on') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) })
+
+for (const [label, opts, safe] of [
+  ['desk', { viewport: { width: 1280, height: 720 } }, { top: 0, bottom: 0, left: 0, right: 0 }],
+  ['phone', { viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true }, { top: 59, bottom: 34, left: 0, right: 0 }],
+]) {
+  const rc = await context(opts), rp = await rc.newPage()
+  watch(rp)
+  const phone = label === 'phone'
+  if (phone) { const cdp = await rc.newCDPSession(rp); await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: safe }) }
+  await rp.goto(`${site.url}/sf/index.html?making=1`)
+  await rp.waitForFunction(() => globalThis.engine?.explore && globalThis.engine.seen?.whole > 0, null, { timeout: 300_000 })
+  await rp.evaluate(() => globalThis.engine.explore.go())
+  await rp.waitForFunction(() => globalThis.engine.first.engaged && globalThis.engine.explore.state === 'in', null, { timeout: 60_000 })
+  await rp.waitForFunction(() => { const el = document.querySelector('#realm .cue[data-cue="fly"]'); return !!el && el.classList.contains('on') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) }, null, { timeout: 15_000 }).catch(() => {})
+  await rp.waitForTimeout(1000)
+  check(await flyCueShown(rp), `roof (${label}): "Take to the air" hint card is shown on arrival`)
+  await rp.screenshot({ path: join(shots, `roof-before-${label}.png`) })
+
+  // Ask for a new wish the way a person does: Enter (or tap the bar on a phone), the words, Enter.
+  const askByKeys = async (words) => {
+    await rp.evaluate(() => { globalThis.__done = new Promise((done) => { const off = globalThis.engine.wish.on((s) => { if (s.stage === 'done') { off(); done(s) } }) }) })
+    if (phone) {
+      const bar = await rp.evaluate(() => { const r = document.querySelector('#line')?.getBoundingClientRect(); return r && [r.left + Math.min(80, r.width / 2), r.top + r.height / 2] })
+      if (bar) await rp.touchscreen.tap(bar[0], bar[1])
+      else await rp.keyboard.press('Enter')
+    } else await rp.keyboard.press('Enter')
+    await rp.waitForFunction(() => document.activeElement?.id === 'line', null, { timeout: 5000 }).catch(() => {})
+    await rp.keyboard.type(words, { delay: 30 })
+    await rp.keyboard.press('Enter')
+    return rp.waitForFunction(() => { const c = document.querySelector('#choice'); return c && !c.hidden && /Connect your AI/.test(c.textContent) }, null, { timeout: 60_000 }).then(() => true, () => false)
+  }
+
+  // 1) Offer shown -> open panel -> decline/close panel -> hint card returns, no cue left behind.
+  const gotOffer = await askByKeys('a fruit stall')
+  await rp.waitForTimeout(400)
+  await rp.screenshot({ path: join(shots, `roof-offered-${label}.png`) })
+  const m = await rp.evaluate(OFFER_CHECK, { safe })
+  check(gotOffer && m.shown && m.hits.length === 0 && m.unsafe.length === 0, `roof (${label}): nothing overlaps the offer to connect (box [${m.box?.join(',')}]; hits: ${m.hits.join(' | ') || 'none'}; unsafe: ${m.unsafe.join(' | ') || 'none'})`)
+  check(!m.cues.some((t) => MAKING_CUE.test(t)) && !MAKING_CUE.test(m.aiLine), `roof (${label}): no "Making…" cue while offering to connect (cues: ${m.cues.join(' | ') || 'none'}${m.aiLine ? `; line: ${m.aiLine}` : ''})`)
+
+  // Open the Connect panel: still no "Making…" cue while the visitor has not connected.
+  if (phone) await rp.tap('#choice button >> nth=0'); else await rp.keyboard.press('Digit1')
+  const panelOpen = await rp.waitForFunction(() => document.querySelector('#connect')?.open, null, { timeout: 15_000 }).then(() => true, () => false)
+  await rp.waitForTimeout(500)
+  await rp.screenshot({ path: join(shots, `roof-panel-${label}.png`) })
+  const panelCues = await cuesShown(rp)
+  check(panelOpen && !panelCues.some((t) => MAKING_CUE.test(t)), `roof (${label}): no "Making…" cue while the connect panel is open (open ${panelOpen}; cues: ${panelCues.join(' | ') || 'none'})`)
+
+  // Close/decline the panel: leaves no cue behind, and the "Take to the air" card comes back.
+  if (phone) await rp.tap('#connect .later'); else await rp.keyboard.press('Escape')
+  const closedDone = await rp.evaluate(() => globalThis.__done)
+  await rp.waitForTimeout(500)
+  await rp.screenshot({ path: join(shots, `roof-declined-panel-${label}.png`) })
+  const afterPanelCues = await cuesShown(rp)
+  const afterPanelLine = await rp.evaluate(() => { const l = document.querySelector('#ai-line'); return l && !l.hidden ? l.textContent.trim() : '' })
+  check(closedDone?.why === 'let go' && afterPanelCues.length === 0 && !afterPanelLine, `roof (${label}): closing the connect panel leaves no cue behind (why: ${closedDone?.why}; cues: ${afterPanelCues.join(' | ') || 'none'}; line: ${afterPanelLine || 'none'})`)
+  check(await flyCueShown(rp), `roof (${label}): "Take to the air" hint card comes back after closing the panel`)
+
+  // 2) Offer shown -> decline directly ("Not now" / Escape) -> leaves no cue behind and hint card comes back.
+  const gotOffer2 = await askByKeys('a brass lantern')
+  await rp.waitForTimeout(400)
+  if (phone) await rp.tap('#choice button >> nth=1'); else await rp.keyboard.press('Digit2')
+  const declinedDone = await rp.evaluate(() => globalThis.__done)
+  await rp.waitForTimeout(500)
+  await rp.screenshot({ path: join(shots, `roof-declined-offer-${label}.png`) })
+  const afterOfferCues = await cuesShown(rp)
+  const afterOfferLine = await rp.evaluate(() => { const l = document.querySelector('#ai-line'); return l && !l.hidden ? l.textContent.trim() : '' })
+  check(gotOffer2 && declinedDone?.why === 'let go' && afterOfferCues.length === 0 && !afterOfferLine, `roof (${label}): declining the offer ("Not now") leaves no cue behind (why: ${declinedDone?.why}; cues: ${afterOfferCues.join(' | ') || 'none'}; line: ${afterOfferLine || 'none'})`)
+  check(await flyCueShown(rp), `roof (${label}): "Take to the air" hint card comes back after declining the offer`)
+  await rc.close()
 }
 
 // ── With ?making=1, in a host's frame ──
@@ -220,6 +338,8 @@ for (const route of ROUTES) {
     await wishFor('a stone birdbath')
     await realm.waitForFunction(() => /Stop/.test(document.querySelector('#ai-line button')?.textContent ?? '') && !document.querySelector('#ai-line').hidden, null, { timeout: 30_000 })
     await realm.waitForTimeout(400)
+    const makingCues = await cuesShown(realm)
+    check(makingCues.some((t) => MAKING_CUE.test(t)), `while a model is really being asked, the "Making…" cue is shown (${makingCues.join(' | ') || 'none'})`)
     await shot('making')
     const tStop = Date.now()
     await realm.click('#ai-line button')
@@ -234,11 +354,14 @@ for (const route of ROUTES) {
     state.mode = 'refuse'
     await wishFor('a stone birdbath')
     const back = await panel(), reason = await realm.evaluate(() => document.querySelector('#connect .said')?.textContent)
+    const refusedCues = await cuesShown(realm)
     check(back && /did not take/.test(reason ?? ''), `a key the provider refuses leads back to the panel, with the reason (${reason})`)
+    check(!refusedCues.some((t) => MAKING_CUE.test(t)), `when a refused key re-opens the panel, no "Making…" cue is shown (${refusedCues.join(' | ') || 'none'})`)
     await shot('refused')
     await page.keyboard.press('Escape')
     const refusedDone = await ended()
-    check(refusedDone.state === 'refused' && (await things()) === t0 && (await stored()) === null, `let go, nothing is made, and the refused key is not kept (${refusedDone.why})`)
+    const afterRefusedCues = await cuesShown(realm)
+    check(refusedDone.state === 'refused' && (await things()) === t0 && (await stored()) === null && afterRefusedCues.length === 0, `let go, nothing is made, no cue is left behind, and the refused key is not kept (${refusedDone.why}; cues: ${afterRefusedCues.join(' | ') || 'none'})`)
     state.mode = 'ok'
     // Connected again, by the settings key this time, to forget it there.
     await settingsKey()

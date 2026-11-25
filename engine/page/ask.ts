@@ -39,6 +39,8 @@ export type Stage =
   | { stage: 'reading' }
   | { stage: 'known'; name: string }
   | { stage: 'place'; at: [number, number, number]; facing: string }
+  /** Waiting for the visitor to connect their own AI before anything is sent to a model (#526). */
+  | { stage: 'connect' }
   | { stage: 'asking'; try: number }
   /** A wish nothing kept answers is being drawn from five sides (#245, make/drawn.mjs), and then carved from the drawing. */
   | { stage: 'drawing' }

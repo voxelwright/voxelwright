@@ -1014,7 +1014,7 @@ async function main() {
   // In a lobby joined through a door (#526) the same: the maker asks the world on the host's machine, as this page's person.
   const makesHere = MAKING && (!far || !!joined)
   /** The model the maker asks (`engine.making.model`: { system, prompt, pictures } to { text }): the visitor's own, through page/connect.ts, set below; null: none, and the bar says so. */
-  const makingSeam: { model: ((q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>) | null } = { model: null }
+  const makingSeam: { model: import('./maker.ts').Model | null } = { model: null }
   const wishes = makesHere ? later(() => import('./maker.ts').then(({ pageMaker }) => pageMaker({
       core, made, alive, eye: gaze, by: () => joined?.you ?? 'visitor', hud: over, ...(joined ? { lobby: { fetch: joined.fetch, may: () => joined.may() } } : {}), shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z), model: () => makingSeam.model,
       // As the page lays its own: finer cells only where every box of the world they reach takes them (`taken`).
@@ -1041,7 +1041,11 @@ async function main() {
   let asking: import('./ask.ts').Ask | null = null
   if (makesHere) wish.on((stage, ask) => { if (stage.stage === 'asking') asking = ask; else if (stage.stage === 'done' && ask === asking) asking = null })
   const connecting = () => (connected ??= import('./connect.ts').then(({ connect }) => connect({ hud: over, input: controls, wish, asking: () => asking }), (e) => { connected = null; throw e }))
-  if (makesHere) makingSeam.model = (q) => connecting().then((c) => c.ask(q))
+  if (makesHere) {
+    const model: import('./maker.ts').Model = (q, tell) => connecting().then((c) => c.ask(q, tell))
+    model.ready = (ask) => connecting().then((c) => c.ready(ask))
+    makingSeam.model = model
+  }
   /** What is seen at the place meanwhile: the world's loose cells gathering there (gather.ts). */
   const gathering = gather(debris, smoke, wish, made)
   // What is kept, shown as a ghost where it would stand while its words are typed (#220).

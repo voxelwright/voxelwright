@@ -114,9 +114,9 @@ export function hud(input: Input): Hud {
     which.textContent = taker ? taker.label : says ? 'Say' : 'Make'
     which.title = !saying && says ? 'These words will be said to whoever is here: Tab makes them a thing' : 'Make a thing, or say something: Tab changes it'
     ask.dataset.which = says ? 'say' : 'make'
-    line.placeholder = saying ? self.placeholder : leave ? 'A thing, a picture, a link' : 'Make something' + (camera.hidden ? '  (Enter)' : '')
     library.hidden = saying
     camera.hidden = saying || !matchMedia('(pointer: coarse)').matches
+    line.placeholder = saying ? self.placeholder : leave ? 'A thing, a picture, a link' : 'Make something' + (camera.hidden ? '  (Enter)' : '')
     ask.hidden = !self.onask && !self.onsubmit
     ask.classList.toggle('open', leave !== null)
     // What was given with the wish, each with a way to take it back.
@@ -316,7 +316,7 @@ export function hud(input: Input): Hud {
       e.hidden = true
       cues.append(e)
       shown.add(cue)
-      return { get text() { return cue.text }, set text(t: string) { cue.text = t; e.textContent = t }, remove() { shown.delete(cue); e.remove() } }
+      return { get text() { return cue.text }, set text(t: string) { cue.text = t; e.textContent = t; if (!t) e.hidden = true }, remove() { shown.delete(cue); e.remove() } }
     },
     panel(name) {
       let p = panels.get(name)
@@ -329,7 +329,7 @@ export function hud(input: Input): Hud {
       // that would be under one stands just below it instead, nearer its thing.
       const clear = [...document.querySelectorAll<HTMLElement>('[data-hud-clear]')].filter((e) => !e.hidden && e.offsetParent).map((e) => e.getBoundingClientRect())
       for (const cue of shown) {
-        const place = cue.at(), on = place && project(place)
+        const place = cue.at(), on = !!cue.text && place && project(place)
         cue.el.hidden = !on
         if (!on) continue
         // (Kept inside the screen: a thing near its edge has its cue whole, never cut off by it.)

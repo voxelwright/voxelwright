@@ -26,8 +26,10 @@ type Kit = { adopt(root?: Element): void; refresh?(el: Element): void }
 type Question = { system: string; prompt: string; pictures: { type: string; data: string }[] }
 
 export interface Connect {
+  /** Ensures a model is connected before making begins: with none, asks the visitor first and resolves to whether one is connected. */
+  ready(ask: Ask | null): Promise<boolean>
   /** The model as the maker asks one: the connected one, or, with none, the visitor is asked to connect first and the wish waits. Throws a short line fit to show, never the key. */
-  ask(q: Question): Promise<{ text: string }>
+  ask(q: Question, tell?: (stage: Stage) => void): Promise<{ text: string }>
   /** Opens the panel. */
   open(): void
 }
@@ -103,7 +105,7 @@ const STYLE = /* css */ `
 #ai-line { align-self: center; max-inline-size: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 8px 7px 12px; border-radius: 14px; background: rgba(12, 16, 22, 0.78); color: #e8ecf1; font: 500 14px/1.35 -apple-system, system-ui, sans-serif; pointer-events: auto; }
 #ai-line[hidden] { display: none; }
 /* By touch the thumb's keys stand down the right edge over the bar: the line keeps left of them, its Stop in reach. */
-@media (pointer: coarse) { #ai-line { align-self: flex-start; max-inline-size: calc(100% - 104px); } }
+@media (pointer: coarse) { #ai-line { box-sizing: border-box; align-self: flex-start; max-inline-size: calc(100% - 88px); } }
 #ai-line p { margin: 0; overflow-wrap: anywhere; }
 #ai-line .quiet { color: rgba(232, 236, 241, 0.72); }
 #ai-line .n { font-variant-numeric: tabular-nums; color: rgba(232, 236, 241, 0.72); }
@@ -189,7 +191,7 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
   const what = (ask: Ask | null) => (ask?.wish ? ask.wish : ask?.picture ? 'what your picture shows' : 'that')
 
   /** One answer from what is connected, the wait shown as it streams; a reason that is not the visitor's to fix is said and the wish let go. */
-  const answer = async (c: Connected, q: Question, ask: Ask | null): Promise<{ text: string }> => {
+  const answer = async (c: Connected, q: Question, ask: Ask | null, tell?: (stage: Stage) => void): Promise<{ text: string }> => {
     const stop = (stopping = new AbortController()), model = named(c.model), wished = what(ask)
     const writing = (letters: number, name?: string) => say([`${model} is making `, name ?? wished, ['n', letters ? ` · ${count(letters)} letters` : '']], { label: 'Stop', run: () => stop.abort() }, 0, false, 'busy')
     say([`${model} is making `, wished], { label: 'Stop', run: () => stop.abort() }, 0, true, 'busy')
@@ -209,8 +211,9 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
       if (e.why === 'key') {
         // Back to the panel, the reason in it; once connected again the same wish goes on.
         say([`${by} did not take your key.`], { label: 'Connect again', run: () => open() }, 0)
+        tell?.({ stage: 'connect' })
         const again = await open({ wish: ask, reason: `${by} did not take that key. Check it, or make a new one.` })
-        if (again && held) return answer(held, q, ask)
+        if (again && held) { tell?.({ stage: 'asking', try: 1 }); return answer(held, q, ask, tell) }
         if (ask) failed.set(ask, `${by} did not take your key. Nothing was made.`)
         say([`${by} did not take your key. Nothing was made.`], { label: 'Your AI', run: () => open() }, 9000)
         throw new Error('let go')
@@ -434,14 +437,23 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     return done
   }
 
+  const ready = async (ask: Ask | null) => {
+    if (held) return true
+    // Nothing connected: the bar asks, and the wish waits in its turn while the visitor connects.
+    const pick = await o.hud.choose(`“${what(ask).slice(0, 60)}” is something new. Your own AI can make it.`, ['Connect your AI', 'Not now'])
+    if (pick !== 0 || !(await open({ wish: ask })) || !held) { quiet(); return false }
+    return true
+  }
+
   return {
-    async ask(q) {
+    ready,
+    async ask(q, tell) {
       const ask = o.asking()
-      if (held) return answer(held, q, ask)
-      // Nothing connected: the bar asks, and the wish waits in its turn while the visitor connects.
-      const pick = await o.hud.choose(`“${what(ask).slice(0, 60)}” is something new. Your own AI can make it.`, ['Connect your AI', 'Not now'])
-      if (pick !== 0 || !(await open({ wish: ask })) || !held) { quiet(); throw new Error('let go') }
-      return answer(held, q, ask)
+      if (held) return answer(held, q, ask, tell)
+      tell?.({ stage: 'connect' })
+      if (!(await ready(ask)) || !held) throw new Error('let go')
+      tell?.({ stage: 'asking', try: 1 })
+      return answer(held, q, ask, tell)
     },
     open: () => void open(),
   }

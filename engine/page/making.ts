@@ -29,9 +29,9 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
   const told = new Set<(stage: Stage, ask: Ask) => void>()
   const make = async (ask: Ask) => {
     const what = called(ask)
-    let at: [number, number, number] | null = null, name = what
+    let at: [number, number, number] | null = null, paused = false, name = what
     // Beside the place once it is known; until then (a second or so) a notice says it was heard.
-    const cue = hud.cue(`Making ${what}`, () => at)
+    const cue = hud.cue(`Making ${what}`, () => (paused ? null : at))
     let heard = false
     // A thing being drawn (#245): what is being done, and for how long so far: the drawing takes some ten seconds.
     let drawing: 'no' | 'drawing' | 'carving' = 'no', ticks = 0
@@ -40,16 +40,21 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
     const each = (stage: Stage) => {
       for (const one of told) one(stage, ask)
       if (stage.stage === 'waiting') hud.notice(`${what}: after ${stage.ahead === 1 ? 'the one being made' : `the ${stage.ahead} before it`}`)
-      else if (stage.stage === 'reading') { cue.text = 'Reading the link'; if (!heard) hud.notice('Reading the link', 2500); heard = true }
+      else if (stage.stage === 'connect') { paused = true; cue.text = '' }
+      else if (stage.stage === 'reading') { paused = false; cue.text = 'Reading the link'; if (!heard) hud.notice('Reading the link', 2500); heard = true }
       else if (stage.stage === 'note') hud.notice(stage.why[0].toUpperCase() + stage.why.slice(1), 5000)
-      else if (stage.stage === 'drawing') { drawing = 'drawing'; ticks = performance.now(); drawn(); ticker = setInterval(drawn, 1000) }
-      else if (stage.stage === 'carving') { drawing = 'carving'; clearInterval(ticker); cue.text = `Carving ${name = stage.name} from the drawing` }
-      else if (stage.stage === 'place') { at = [stage.at[0], stage.at[1] + 12, stage.at[2]]; if (drawing === 'no') cue.text = `Making ${name}` }
+      else if (stage.stage === 'drawing') { paused = false; drawing = 'drawing'; ticks = performance.now(); drawn(); ticker = setInterval(drawn, 1000) }
+      else if (stage.stage === 'carving') { paused = false; drawing = 'carving'; clearInterval(ticker); cue.text = `Carving ${name = stage.name} from the drawing` }
+      else if (stage.stage === 'place') { paused = false; at = [stage.at[0], stage.at[1] + 12, stage.at[2]]; if (drawing === 'no') cue.text = `Making ${name}` }
       // Not drawn after all (make/drawn.mjs could not): it is made as any wish is, and the cue says so, with no alarm.
-      else if (stage.stage === 'asking' && drawing !== 'no') { drawing = 'no'; clearInterval(ticker); cue.text = `Making ${name}` }
-      else if (stage.stage === 'asking' && stage.try > 1) cue.text = `Making ${what}: another go`
-      else if (stage.stage === 'shaped' || stage.stage === 'known') { name = stage.name; if (drawing === 'drawing') drawn(); else if (drawing === 'no') cue.text = name }
-      else if (stage.stage === 'sending') { at = [stage.at[0], stage.at[1] + stage.size[1] + 4, stage.at[2]]; cue.text = stage.name }
+      else if (stage.stage === 'asking') {
+        paused = false
+        if (drawing !== 'no') { drawing = 'no'; clearInterval(ticker); cue.text = `Making ${name}` }
+        else if (stage.try > 1) cue.text = `Making ${what}: another go`
+        else cue.text = `Making ${name}`
+      }
+      else if (stage.stage === 'shaped' || stage.stage === 'known') { paused = false; name = stage.name; if (drawing === 'drawing') drawn(); else if (drawing === 'no') cue.text = name }
+      else if (stage.stage === 'sending') { paused = false; at = [stage.at[0], stage.at[1] + stage.size[1] + 4, stage.at[2]]; cue.text = stage.name }
     }
     let done = await asker.ask(ask, each).finally(() => clearInterval(ticker))
     // It is made and no place near there would take it. It is the asker's to say where: there, with what is in the

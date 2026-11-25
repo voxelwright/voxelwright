@@ -72,8 +72,8 @@ export interface Seam {
    */
   lobby?: { fetch(path: string, init?: RequestInit): Promise<Response>; may(): Promise<string | null> }
 }
-/** A model as another lane hands it in: the brief, the wish and any picture, to its reply as text. */
-export type Model = (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => Promise<{ text: string }>
+/** A model as another lane hands it in: the brief, the wish and any picture, to its reply as text. Optional `ready` asks to connect before work begins. */
+export type Model = ((q: { system: string; prompt: string; pictures: { type: string; data: string }[] }, tell?: (stage: Stage) => void) => Promise<{ text: string }>) & { ready?(ask: Ask): Promise<boolean> }
 /** The most a reply may be, in characters: more than any form reply the maker reads (form.mjs, cells.mjs `RUNS_MOST`). */
 const REPLY_MOST = 8 << 20
 /** What the shelf's index says of each kept thing: what the word rule reads (make/meant.mjs `meant`). */
@@ -237,8 +237,8 @@ export function pageMaker(seam: Seam): PageMaker {
     return done
   }
   /** The connected model as the maker asks one: its reply is text, and only text, timed here. */
-  const asking = (model: Model) => async (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => {
-    const began = performance.now(), got = await model({ system: q.system, prompt: q.prompt, pictures: q.pictures })
+  const asking = (model: Model, tell: (stage: Stage) => void) => async (q: { system: string; prompt: string; pictures: { type: string; data: string }[] }) => {
+    const began = performance.now(), got = await model({ system: q.system, prompt: q.prompt, pictures: q.pictures }, tell)
     if (typeof got?.text !== 'string') throw new Error('the model gave no text')
     return { text: got.text.slice(0, REPLY_MOST), model: 'the connected model', ms: Math.round(performance.now() - began), cost: 0 }
   }
@@ -298,10 +298,12 @@ export function pageMaker(seam: Seam): PageMaker {
           const model = seam.model()
           if (!ask.typed) return refused('only what a visitor types is made new here')
           if (!model) return refused('nothing kept is called that, and making new things needs an AI connected')
+          // Wait for a visitor to connect before placing, gathering or showing a "Making…" cue.
+          if (model.ready && !(await model.ready(ask))) return refused('let go')
           await seam.hold(from.eye[0], from.eye[2])
           // In a lobby the model is asked once for a wish: whether it is asked again would turn on what the host's
           // world answers (where it stands, what falls), and a host never spends a visitor's model.
-          r = await make({ ...how, picture: ask.picture, model: asking(model), ...(seam.lobby ? { tries: 1 } : {}) })
+          r = await make({ ...how, picture: ask.picture, model: asking(model, each), ...(seam.lobby ? { tries: 1 } : {}) })
         }
         const done = ended(r)
         if (done.state === 'held') asked.set(done, from)
