@@ -7,7 +7,7 @@ engine/bay/run-city.sh start
 engine/bay/run-city.sh status
 ```
 
-The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. The fixture rule is the exception: the manager cuts tiles from each square's fixtures as `street_furniture.standing` would draw them, and a state recorded under another `cutRule` cuts its level-0 square tiles again while its verified squares stay. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` for panel scoring and removes itself from launchd. After all 32 views pass, promote its pointer with the receipt described in `engine/sf/release.md`. On APFS the decoded objects are independent copy-on-write files.
+Use `start-private` to resume a frozen pre-public recipe that includes Public Works fixtures. The launchd job runs a pinned source snapshot under caffeinate. Its log is `~/.village/engine/bay/450-city.log`, with errors in `450-city.err`. The build lives under `~/.village/engine/bay/sf-450-city/`. Each completed task in `state.json` contains SHA-256 checksums. On restart the runner rechecks those files. A changed recipe needs a new output directory. The fixture rule is the exception: the manager cuts tiles from each square's fixtures as `street_furniture.standing` would draw them, and a state recorded under another `cutRule` cuts its level-0 square tiles again while its verified squares stay. Task logs are under `logs/`. The default disk stop is 15 GiB before a task or retry. Once the tile inventory is complete, the job stages the local release under `sf/` for panel scoring and removes itself from launchd. After all 32 views pass, promote its pointer with the receipt described in `engine/sf/release.md`. On APFS the decoded objects are independent copy-on-write files.
 
 ### Retained observations
 
@@ -29,13 +29,15 @@ The six original pack and name pairs qualify as seeds only when they match the p
 
 ### Street-level publication
 
-Three gzip JSON sidecars extend each square. Both include its `square` name. The quarter-metre ZIP remains the source of ground, surface, imagery and original footprint IDs.
+The public bake reads two gzip JSON sidecars for each square. Both include its `square` name. The quarter-metre ZIP remains the source of ground, surface, imagery and original footprint IDs.
 
 | Sidecar | Contents |
 |---|---|
 | `inputs/<square>.detail.json.gz`, version 1 | Additional DataSF outlines from a polygon intersection query (WGS84), OSM closed building ways, visible fixtures and wire paths, and 2025 Assessor year, units and storeys by parcel. OSM geometry is in global 10 cm engine cells. |
 | `inputs/<square>.stops.json.gz`, version 1 | Mapillary stop-sign points in global engine cells. The bake groups repeated sightings within 2.5 m and matches them to OSM control nodes within 11 m. |
-| `inputs/<square>.fixtures.json.gz`, version 2 | Public Works map layers 36 and 48, respectively street-light points and trolley overhead polylines, plus Mapillary utility-pole points. All coordinates are global engine x,z cells. |
+| `inputs/<square>.fixtures.json.gz`, version 2 | Private option only. Public Works map layers 36 and 48, respectively street-light points and trolley overhead polylines, plus Mapillary utility-pole points. All coordinates are global engine x,z cells. |
+
+Public bakes take lamp positions from OSM street-lamp nodes and overhead paths from OSM wire tags and trolleybus route members. Unmapped stretches have no lamps or wires. A private run can opt into the third sidecar with `--public-works-fixtures`. The choice is part of the checkpoint recipe. Start a fresh output directory when changing it.
 
 To collect these sidecars separately, run `street_detail_sources.py DEST INPUTS/*.zip` with the Bay Python environment. The full run collects and checkpoints the sidecars automatically. Sources include the [Assessor roll](https://data.sf.gov/d/wv5m-vpq2), the [Public Works map](https://bsm.sfdpw.org/mapviewer/) and [Mapillary point features](https://help.mapillary.com/hc/en-us/articles/115002332165-Map-features).
 
@@ -43,7 +45,7 @@ The publication pass checks DataSF polygons against BAY1 outlines and above-grou
 
 Near packs carry facade cues in the existing signed 32-bit vertex flags. Bits 0–2 keep their original meanings. Bit 7 enables the signed 16-bit eave height in bits 8–23, in cells above engine zero. Bits 24–29 select residential bays, cornice, garage, stoop, awning and fire escape on that edge. Assignment uses parcel occupancy, building age, storeys, units, frontage direction and the ground-floor classifier. These are architectural inferences. On pavement, class bit 7 selects a two-cell surveyed kerb and bit 5 a flush crossing.
 
-When a square or L0 tile contains fixtures, its last trunk is followed by ASCII `SFST`, a little-endian uint32 segment count and that many eight-int32 records. A record contains start x,y,z, end x,y,z in global cells, radius in centimetres and material kind. The section is optional. The tile cut carries crossing segments into both adjoining tiles. Elevations and dimensions of municipal masts, signs and hydrants are typologies. A utility span inferred from lidar requires narrow, elevated returns along its path and photo-supported pole endpoints. Timber is the inferred material for untyped utility poles. Nearby overhead cables occupy quarter cells (2.5 cm) along their measured segments.
+When a square or L0 tile contains fixtures, its last trunk is followed by ASCII `SFST`, a little-endian uint32 segment count and that many eight-int32 records. A record contains start x,y,z, end x,y,z in global cells, radius in centimetres and material kind. The section is optional. The tile cut carries crossing segments into both adjoining tiles. Elevations and dimensions of municipal masts, signs and hydrants are typologies. In the private survey, a utility span inferred from lidar requires narrow, elevated returns along its path and photo-supported pole endpoints. Timber is the inferred material for untyped utility poles. Nearby overhead cables occupy quarter cells (2.5 cm) along their measured segments.
 
 ## Coverage
 
@@ -124,4 +126,4 @@ The panel render of November 21 (sheets in `~/.village/engine/bay/450-city-paint
 
 A tile cut with `VILLAGE_FACADE_EVIDENCE=<records folder>` set (`tiles.py`) carries the records in its building rows (`evidence_tile.py` lists which rule reads which field). The far bake reads the same folder (`landing/ina/looks.py` `walls`). Without the variable both are byte for byte as before.
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/bay/run-city.sh":"3ef99e171f119d3ac6919f9ac99ba986","engine/bay/full_run.py":"6de4a3125d1b30515e7323aa10ffa54b"} -->
+<!-- docs-verified 8d750d36c0356c15c52a6f5e37312a451adb8f17 {"engine/bay/run-city.sh":"e7e656a5d0eac949e8d504c966202494","engine/bay/full_run.py":"cee1d3c99f810421fd19590045fd65b3"} -->

@@ -168,7 +168,7 @@
     ]
   },
   "engine/bay/README.md": {
-    "engine/bay/run-city.sh": "lines:^(case |start\\)|status\\)|\\*\\) echo \"usage:)",
+    "engine/bay/run-city.sh": "lines:^(case |start[^)]*\\)|status\\)|\\*\\) echo \"usage:)",
     "engine/bay/full_run.py": "lines:add_argument"
   },
   "engine/kit/README.md": {

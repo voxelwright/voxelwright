@@ -4,7 +4,6 @@ import gzip
 import json
 import os
 from pathlib import Path
-import sys
 import zipfile
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -273,12 +272,17 @@ def public_works(name, dest):
 
 
 if __name__ == "__main__":
-    for archive in map(Path, sys.argv[2:]):
-        for suffix, fetch in (
-            ("detail", lambda dest: acquire(archive, dest)),
-            ("fixtures", lambda dest: public_works(archive.stem, dest)),
-            ("stops", lambda dest: stop_signs(archive.stem, dest)),
-        ):
-            dest = Path(sys.argv[1]) / (archive.stem + "." + suffix + ".json.gz")
+    import argparse
+    import sys
+    from street_inputs import sidecars
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--public-works-fixtures", action="store_true")
+    parser.add_argument("destination", type=Path)
+    parser.add_argument("archives", type=Path, nargs="+")
+    args = parser.parse_args()
+    for archive in args.archives:
+        for suffix, fetch in sidecars(archive, sys.modules[__name__], args.public_works_fixtures):
+            dest = args.destination / (archive.stem + "." + suffix + ".json.gz")
             if not dest.exists():
                 fetch(dest)

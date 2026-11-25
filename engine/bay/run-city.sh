@@ -6,7 +6,7 @@ runner="$bay/450-runner"
 output="$bay/sf-450-city"
 label="village.sf450.citydata"
 case "${1:-status}" in
-start)
+start|start-private)
     mkdir -p "$runner" "$output"
     if [ ! -f "$runner/revision" ]; then
         rev=$(git rev-parse HEAD)
@@ -23,11 +23,13 @@ start)
     fi
     launchctl submit -l "$label" -o "$bay/450-city.log" -e "$bay/450-city.err" -- \
         /usr/bin/caffeinate -dimsu /bin/sh -ec '
-            "$1" -u "$2/engine/bay/full_run.py" --compact --bake-source "$3/engine/bay" --output "$4"
+            fixture_option=
+            if [ "$6" = start-private ]; then fixture_option=--public-works-fixtures; fi
+            "$1" -u "$2/engine/bay/full_run.py" --compact $fixture_option --bake-source "$3/engine/bay" --output "$4"
             "$1" "$2/engine/sf/release.py" "$4" "$4/sf" --compact-store "$4/objects"
             # A submitted job is kept alive. Once the release is staged, leave instead of baking it again.
             launchctl remove "$5"
-        ' sf-bake "$bay/venv/bin/python" "$manager" "$runner" "$output" "$label"
+        ' sf-bake "$bay/venv/bin/python" "$manager" "$runner" "$output" "$label" "$1"
     ;;
 status)
     launchctl list "$label" || true
@@ -37,5 +39,5 @@ status)
     if [ -f "$output/disk-hold.json" ]; then cat "$output/disk-hold.json"; fi
     df -h "$bay"
     ;;
-*) echo "usage: $0 start|status" >&2; exit 2 ;;
+*) echo "usage: $0 start|start-private|status" >&2; exit 2 ;;
 esac

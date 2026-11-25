@@ -19,6 +19,7 @@ from pathlib import Path
 
 from coverage import bounds, tile_keys
 import compact_store
+from street_inputs import sidecars
 from street_furniture import decode, encode, standing, verify_tile_tail
 
 HERE = Path(__file__).resolve().parent
@@ -173,6 +174,12 @@ def build(args, lock_fd):
         if f != "paint_tile.py" or (source / f).exists()
     ]
     recipe += [args.pilot]
+    # Frozen recipes predating fixture selection can resume only with their original private survey.
+    legacy = not (source / "street_inputs.py").is_file()
+    if legacy and not args.public_works_fixtures:
+        raise SystemExit("this frozen recipe requires --public-works-fixtures; use current sources for a public bake")
+    if not legacy:
+        recipe += [digest(HERE / "street_inputs.py"), args.public_works_fixtures]
     statefile = root / "state.json"
     state = (
         json.loads(statefile.read_text())
@@ -351,6 +358,7 @@ def build(args, lock_fd):
             root / "inputs" / (name + ".zip"),
             root / "inputs" / (name + ".detail.json.gz"),
             packs / "graph" / (name + ".json"),
+            **({} if legacy else {"public_works_fixtures": args.public_works_fixtures}),
         )
         stats.update(surface_detail.apply(pack, root / "inputs" / (name + ".zip")))
         report = root / "audits" / (name + ".json")
@@ -402,21 +410,8 @@ def build(args, lock_fd):
 
         def details(log, square_name):
             files = []
-            for suffix, get in (
-                (
-                    "detail",
-                    lambda dest: street_detail_sources.acquire(
-                        root / "inputs" / (square_name + ".zip"), dest
-                    ),
-                ),
-                (
-                    "fixtures",
-                    lambda dest: street_detail_sources.public_works(square_name, dest),
-                ),
-                (
-                    "stops",
-                    lambda dest: street_detail_sources.stop_signs(square_name, dest),
-                ),
+            for suffix, get in sidecars(
+                root / "inputs" / (square_name + ".zip"), street_detail_sources, args.public_works_fixtures
             ):
                 dest = root / "inputs" / (square_name + "." + suffix + ".json.gz")
                 if not dest.exists():
@@ -527,6 +522,7 @@ if __name__ == "__main__":
         type=Path,
         help="frozen input recipe and byte generators for an existing state",
     )
+    parser.add_argument("--public-works-fixtures", action="store_true", help="include the private Public Works survey")
     parser.add_argument("--output", type=Path, default=BAY / "sf-450-release")
     parser.add_argument("--street-seed", type=Path, default=BAY / "450-street-inputs")
     parser.add_argument(

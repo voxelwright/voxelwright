@@ -10,7 +10,7 @@ Raw and baked data live under `~/.village/engine/bay`, never in git. Git holds t
 flowchart TD
   Sources["Public sources<br/>USGS 3DEP lidar and DEM, NAIP, DataSF,<br/>OSM, Overture, Mapterhorn, Mapillary"]
   Fetch["fetch.py<br/>one 1 km square"]
-  Zip["inputs/&lt;square&gt;.zip<br/>+ detail, stops, fixtures sidecars"]
+  Zip["inputs/&lt;square&gt;.zip<br/>+ detail and stops sidecars"]
   Bake["bake.py<br/>square to pack"]
   Pack["packs: BAY1, one per square"]
   Tiles["tiles.py (+ earth.py for squares with no lidar)<br/>cut into 3 levels"]
@@ -34,7 +34,7 @@ flowchart TD
 | --- | --- | --- |
 | `engine/bay/coverage.py` | DataSF shoreline, the USGS lidar project hierarchy | `engine/bay/sf-squares.json`: every 1 km square that touches the city, with source hashes |
 | `engine/bay/fetch.py SQUARE` | EPT lidar, the 1 m DEM, NAIP imagery and DataSF layers (`EPT`, `DEM`, `NAIP`, `SF`, `LAYERS` at its top) | The retained observations for one square, `inputs/<square>.zip`: quarter-metre lidar grids, ground, imagery, map layers |
-| `engine/bay/street_sources.py`, `street_detail_sources.py` | OSM, DataSF, Mapillary, Public Works map layers | Gzip JSON sidecars beside each ZIP: OSM geometry and businesses, street detail, stop signs, fixtures |
+| `engine/bay/street_sources.py`, `street_detail_sources.py` | OSM, DataSF and Mapillary | Gzip JSON sidecars beside each ZIP: OSM geometry and businesses, street detail, stop signs, fixtures |
 | `engine/bay/bake.py` | One square's ZIP and sidecars | One `BAY1` pack for the square |
 | Appearance and paint (`appearance.py`, `frontage.py`, `paint_*.py`) | Packs, NAIP, Mapillary panoramas | Colours and facade cues written into packs and level-0 tiles |
 | `engine/bay/tiles.py` | Packs. `earth.py` makes tiles from Overture and Mapterhorn where no square reaches. | Tiles at level 0 (250 m), level 1 (1 km) and level 2 (4 km), each a `BAY1` pack, and `index.json` |
@@ -67,6 +67,10 @@ Every layer keeps its own terms, listed in [DATA-LICENSES.md](../DATA-LICENSES.m
 - Layers derived from Mapillary (CC BY-SA) stay separable and keep their image credits.
 - Some layers may not be shipped at all. `DATA-LICENSES.md` names them, for example the Public Works street lamp and trolley wire layers.
 
+For the six-square public candidate, the stage-five furniture bake starts with OSM lamp nodes, wire tags and trolleybus routes. Its output replaces the entire near-tile fixture section, including old utility poles whose detection used Public Works lamp locations. Wall paint follows that section. Far bands, transit, street graphs and coarser tiles come from separate stages. The private survey requires an explicit `--public-works-fixtures` and a separate output directory.
+
+Build a staged candidate with `node engine/sf/build.mjs --staged STAGE` to populate the quality-11 cache. Run `node deploy/data.mjs pack-local PIN DIRECTORY` to write the archive under its tag in DIRECTORY and the matching bundle record alongside that tag. The digest identifies the decompressed-file index. SHA-256 of the tar itself identifies that exact archive.
+
 Adding a source means adding its row to `DATA-LICENSES.md` and to the skill, with how its terms were checked.
 
 ## Check a change
@@ -78,4 +82,4 @@ cd engine && npm run sf      # the realm's checks in Chrome
 
 A change to `bake.py` or `tiles.py` changes tile bytes, so it needs a new release and a new panel pass before the pin moves. A change to how `bay.rs` reads a pack must keep reading the pinned release's tiles, or move the pin in the same change.
 
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"engine/bay/fetch.py":"968794059b05a96173d16f1d5077f5f0","engine/bay/full_run.py":"7af98d764f27e3197b224e3d55e8ed47","engine/bay/tiles.py":"033cfed90bc28ca58c540298fa18fb16","engine/sf/release.py":"fadaff1f9fb8de1e183527e67f560085","engine/sf/build.mjs":"ebe036b3a32abd7288ddbab036163277","deploy/data.mjs":"4f9853cb7b20504354b1c1b80d1074b0","scripts/world.mjs":"d61adc1411ad8c5d338b65fbd653b096","DATA-LICENSES.md":"4b1500a6b9061e19492e5fe4762b1400","engine/bay/panel-floors.json":"fe4b7c6330bbed7385480377104e29c4"} -->
+<!-- docs-verified 8499110fc76bf9af3dbc2739ba5aa93070cdc8f4 {"engine/bay/fetch.py":"968794059b05a96173d16f1d5077f5f0","engine/bay/full_run.py":"1e8aa1be42552311489fc3631527c039","engine/bay/tiles.py":"033cfed90bc28ca58c540298fa18fb16","engine/sf/release.py":"fadaff1f9fb8de1e183527e67f560085","engine/sf/build.mjs":"ebe036b3a32abd7288ddbab036163277","deploy/data.mjs":"ba58b01fa6153e130e18d9579e4af9d5","scripts/world.mjs":"d61adc1411ad8c5d338b65fbd653b096","DATA-LICENSES.md":"875175da51dc7da963f275cf937d424b","engine/bay/panel-floors.json":"fe4b7c6330bbed7385480377104e29c4"} -->

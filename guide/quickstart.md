@@ -12,7 +12,7 @@ Open the printed address. The first view looks across the park. Choose **Explore
 
 Exploring needs no account or key. To make something new, open the realm settings, choose **Your AI…**, select your provider and paste your own API key. The browser sends requests directly to that provider. Use **Forget** in the same panel to remove the saved key.
 
-The command downloads the pinned SF release bundle and verifies its contents. Each map layer retains its [data licence](../DATA-LICENSES.md). Before the public release is available, set `VOXELWRIGHT_DATA_URL` to an HTTPS release mirror with the pinned tag and data.tar under it. Local testing also accepts an HTTP loopback mirror.
+The command downloads the pinned SF release bundle and verifies its contents. Each map layer retains its [data licence](../DATA-LICENSES.md). Before the public release is available, set `VOXELWRIGHT_DATA_URL` to an HTTPS release mirror with the pinned tag and data.tar under it. Local testing also accepts an HTTP loopback mirror. A maintainer can create the same mirror layout with `node deploy/data.mjs pack-local PIN DIRECTORY` after building a staged release.
 
 In a Dev Container, forward port 5760 and run the same command in its terminal. Open the forwarded port at `/sf/index.html?making=1`.
 

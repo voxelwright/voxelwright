@@ -193,6 +193,8 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
         for v in {tuple(sorted(map(tuple, r["line"]))) for r in graph["roads"]}
     ]
     road_tree = STRtree(roads)
+    sensed_poles, spans = utility_evidence(sq, src, graph, survey, stats) if survey is not None else ([], [])
+    survey = survey or {"lamps": [], "trolley": []}
     lamp_pts = [Point(p) for p in survey["lamps"]]
     lamp_tree = STRtree(lamp_pts)
     fixtures = [
@@ -331,7 +333,6 @@ def bake(sq, src, detail, survey, stop_points, graph, stats):
                         rod(prev, cur, 3, dark)
                     prev = cur
             stats[kind + "WireSpans"] += 1
-    sensed_poles, spans = utility_evidence(sq, src, graph, survey, stats)
     for x, z, top in sensed_poles:
         rod((x, base(x, z), z), (x, top, z), SENSED_POLE, wood)
     for a, b in spans:

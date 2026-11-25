@@ -17,11 +17,11 @@ from compact_store import TileStore, link_libraries, read as read_base
 
 CREDITS = [
     "U.S. Geological Survey 3DEP",
-    "USDA NAIP",
-    "City and County of San Francisco (DataSF)",
-    "© OpenStreetMap contributors, Overture Maps Foundation",
-    "Terrain: Mapterhorn",
-    "© Mapillary contributors",
+    "USGS, USDA, The National Map: Orthoimagery (NAIP)",
+    "City and County of San Francisco (DataSF) — PDDL 1.0; parcel land use — CC0 1.0",
+    "© OpenStreetMap contributors, Overture Maps Foundation — ODbL 1.0 (https://www.openstreetmap.org/copyright)",
+    "Terrain: Mapterhorn (USGS 3DEP; https://mapterhorn.com/attribution/)",
+    "Street colours and sign observations adapted from © Mapillary and contributing photographers (CC BY-SA 4.0)",
 ]
 
 

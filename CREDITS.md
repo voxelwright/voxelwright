@@ -30,6 +30,10 @@ Licence for all fourteen: Creative Commons CC0 1.0 Universal (Public Domain Dedi
 - "BubblePopping" by Sess8it (https://freesound.org/people/Sess8it/), https://freesound.org/s/762781/ : one bubble pop, in `bubble-pops.ogg`.
 - "pop out, bubble, soft bursting" by chaferwitt (https://freesound.org/people/chaferwitt/), https://freesound.org/s/776443/ : one bubble pop, in `bubble-pops.ogg`.
 
+## San Francisco city data
+
+The six-square public candidate credits USGS 3DEP, USGS and USDA NAIP, DataSF, © OpenStreetMap contributors, Overture Maps Foundation, Mapterhorn, Mapillary and contributing photographers. Lamps and overhead paths use OSM. The source-image list in the realm’s full credits links the photographs used for street and facade surveys. The linked Mapillary mark comes from [Mapillary’s API demo](https://github.com/mapillary/api-demo/blob/main/logo_green.svg). See [Data licences](DATA-LICENSES.md) for each layer’s terms.
+
 ## Ina Coolbrith Park landing
 
 Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01445.jpg* on July 15, 2021. The landing reconstructs that view in voxels using the photograph for camera alignment, building outlines, colours and lighting. [Original photograph on Wikimedia Commons](https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg)

@@ -449,7 +449,7 @@ def streets(sq, network, stats):
     sq.cls[stripes] |= 32
 
 
-def apply(path, archive, sidecar, graph, stage=5):
+def apply(path, archive, sidecar, graph, stage=5, public_works_fixtures=False):
     sq = Square(path)
     stats = Counter()
     with zipfile.ZipFile(archive) as src, gzip.open(sidecar) as observations:
@@ -465,11 +465,13 @@ def apply(path, archive, sidecar, graph, stage=5):
             network = json.loads(graph.read_text())
             streets(sq, network, stats)
         if stage >= 5:
-            fixture_file = sidecar.with_name(path.stem + ".fixtures.json.gz")
-            with gzip.open(fixture_file) as file:
-                survey = json.load(file)
-            if survey["square"] != path.stem or survey["version"] != 2:
-                raise ValueError("incorrect street furniture input")
+            survey = None
+            if public_works_fixtures:
+                fixture_file = sidecar.with_name(path.stem + ".fixtures.json.gz")
+                with gzip.open(fixture_file) as file:
+                    survey = json.load(file)
+                if survey["square"] != path.stem or survey["version"] != 2:
+                    raise ValueError("incorrect street furniture input")
             with gzip.open(sidecar.with_name(path.stem + ".stops.json.gz")) as file:
                 stops = json.load(file)
             if stops["square"] != path.stem or stops["version"] != 1:
