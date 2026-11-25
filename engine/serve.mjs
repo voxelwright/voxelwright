@@ -345,6 +345,8 @@ async function pluginsLook() {
 /** The most an ask may be: a blast empties a box whose side goes with its radius, and its work with the cube of that. */
 /** An edit is at most this many whole numbers: 13,107 rows. It was 16,384 until one part of a house wall that runs along z (6,473 rows, #246) had to be refused; at 65,536 a wall of 13,000 rows is in the world a quarter of a second after it is asked (test/helper.mjs). */
 const RADIUS_MOST = 40, EDIT_MOST = 65536, ASKS_A_SECOND = 60
+/** The most a world's file and what it keeps in memory may grow to, bytes: every ask is kept for good and replayed to every page that joins, and strangers can ask (#526, door.mjs). Past it the world takes no more asks. */
+const LOG_MOST = 256 << 20
 /** How long an ask with `wait` is held for the world's word that its cells are laid, in ms: past that it is answered as any ask is. */
 const WAIT_MOST = 10_000
 /** The most whole numbers the cells of one made thing may be: 240,000 rows (a house front of 5 cm cells whose rows run across its boards was 177,000). And the most cells those rows may fill: a grid 256 a side, the most a program builds in (make/program.mjs). */
@@ -595,6 +597,7 @@ function open(of) {
     }
   }
   writeFileSync(worldFile, Buffer.concat(log))
+  let logBytes = log.reduce((n, f) => n + f.length, 0)
   /** The rows of a thing's cells: the edit it came with, kept once, in the log. */
   const rowsOf = (t) => JSON.parse(log[t.at].subarray(12).toString('utf8')).edit.slice(2)
   /** The edit that empties the rows the world keeps for a thing (never rows an asker sends), and the box they fill in the world's cells. */
@@ -644,7 +647,7 @@ function open(of) {
   let down = ''
   /** What the rules offer people to do, as last said: a frame for whoever joins. */
   let offered = null, showing = null, bodied = null
-  const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
+  const keep = (kind, payload) => { const f = frame(kind, log.length, payload); log.push(f); logBytes += f.length; appendFileSync(worldFile, f); for (const r of readers) r.write(f) }
   const minds = door({ send, answer: (thought) => thread.postMessage({ thought }), voiced: (voiced) => {
     thread.postMessage({ voiced })
     // People answer by default (#264): when someone's model first comes to answer, a world that has not put a rule of its own under that id, or taken it out, is given the engine's. It is not in the world's file: it is whatever the engine has now. Until then a world runs nothing it did not ask for.
@@ -866,6 +869,7 @@ function open(of) {
       // A big ask (a made thing's cells) counts as many: what all may send in a second is held to what it was when an ask was half a megabyte at most.
       asked += Math.floor(size / (512 << 10))
       if (asked > ASKS_A_SECOND) return send(res, 429, 'too many asks')
+      if (logBytes + size > LOG_MOST) return send(res, 507, `this world keeps no more: what was done to it is ${LOG_MOST >> 20} MB`)
       let body
       try { body = JSON.parse(Buffer.concat(parts).toString('utf8')) } catch { return send(res, 400, 'not JSON') }
       const ask = allowed(body)

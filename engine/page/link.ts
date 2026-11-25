@@ -6,6 +6,7 @@
 import type { Answer, Ask } from './mover.ts'
 import type { Thing } from './things.ts'
 import { WORLD } from './bay.ts'
+import { BLOW, BODIES, ECHO, GROUND, HERE, LIVING, LOG, NOW, OFFERS, PLUGGED, SAID, SHOWN, STATE } from './frames.ts'
 
 /** An ask as the world did it: who asked, and what. An edit comes with the box of cells it can change, worked out by the server. */
 /** What a rule gave someone's figure: a look (wear.ts), and a move by its name or its keys, the `n`th it was given, with what it is aimed at. */
@@ -27,8 +28,9 @@ export interface Realm {
   /** What a page shows there: the hour (null: the sun where it always stood), rain 0 to 1, the last pass's colour and contrast in place of the hour's own, and what the finished picture is multiplied by. */
   look?: { hour?: number | null; rain?: number; grade?: [number, number]; tint?: [number, number, number] }
 }
-/** A realm's record after a change to it, as the server makes it (serve.mjs `changed`). */
-const changed = (record: Realm, change: Partial<Realm>): Realm => ({ ...record, ...change, ...(change.look ? { look: { ...record.look, ...change.look } } : {}) })
+/** A realm's record after a change to it: only what a page reads of a realm (its name, about, arrival and look), whatever else a world's echo carries. */
+const changed = (record: Realm, { name = record.name, about = record.about, arrive = record.arrive, look }: Partial<Realm>): Realm =>
+  ({ ...record, name, about, arrive, look: look ? { ...record.look, ...look } : record.look })
 /** What of a figure may be chosen (people.ts `figure`); whatever is left out comes of who they are. */
 export type { Look } from './wear.ts'
 import type { Look } from './wear.ts'
@@ -110,9 +112,16 @@ export interface Link {
   onheld: ((frame: Held) => void) | null
   /** Whether all that was kept before this page joined has been read. */
   readonly live: boolean
+  /** A request to the world this line is to, as `fetch` makes one: through the door when the page joined through one (door.ts). */
+  fetch(path: string, init?: RequestInit): Promise<Response>
 }
-
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13, GROUND = 14
+/**
+ * The way to a world that did not serve this page (#526, door.ts): its `fetch` in place of the browser's, who the
+ * server says this page is, and the release this page draws, which the world must stand on.
+ */
+export interface Via { fetch(path: string, init?: RequestInit): Promise<Response>; readonly you: string; readonly pin: string | null; /** The stream broke: the way is closed, and the page told why. */ lost(why: string): void }
+/** The most one frame of a stream, or one reply through a door, may be (a made thing's cells are a few megabytes): a world is not trusted with a page's memory. */
+export const FRAME_MOST = 64 << 20
 
 /**
  * Who this page is to the world: made up once for this tab and kept while the tab lives, so a page loaded again is
@@ -126,7 +135,9 @@ function mine(): string {
 }
 
 /** A line to the world kept at `base`: `/world` is home, `/realm/<id>/world` another realm of the same server (#264). */
-export function link(base = '/world'): Link {
+export function link(base = '/world', via: Via | null = null): Link {
+  // Through a door every request goes over its channels; a page the world's own server served asks it straight.
+  const fetch = via ? via.fetch : globalThis.fetch.bind(globalThis)
   let live = false
   /** What is offered, as last said, and who hears it. */
   let offers: Offer[] = [], hears: ((offers: Offer[]) => void) | null = null
@@ -145,7 +156,8 @@ export function link(base = '/world'): Link {
   // How far this machine's clock is behind the world's, ms.
   let behind = 0
   const self: Link = {
-    me: mine(),
+    me: via ? via.you : mine(),
+    fetch,
     onmessage: null, onerror: null, onecho: null, onhere: null, onsaid: null, onliving: null, onbodies: null, onblow: null, onrealm: null,
     get base() { return base },
     ready: () => Promise.reject(new Error('not yet')), go: () => false, held: () => [], onheld: null, release: () => {},
@@ -215,27 +227,34 @@ export function link(base = '/world'): Link {
       const response = await fetch(`${at}/stream?from=0`, { signal: l.stop.signal })
       if (!response.ok || !response.body) throw new Error(`no shared world here (${response.status})`)
       const reader = response.body.getReader()
-      let held = new Uint8Array(0)
+      // What has come and is not yet a whole frame. `room` grows by doubling, so a big frame that comes in many pieces
+      // (up to 64 KB each through a door) costs about two copies in all, not one for every piece.
+      let room = new Uint8Array(1 << 16), length = 0
       for (;;) {
         const { done, value } = await reader.read()
         if (done) throw new Error('the world hung up')
-        const joined = new Uint8Array(held.length + value.length)
-        joined.set(held); joined.set(value, held.length)
-        held = joined
+        if (length + value.length > room.length) { const more = new Uint8Array(Math.max(room.length * 2, length + value.length)); more.set(room.subarray(0, length)); room = more }
+        room.set(value, length)
+        length += value.length
+        const held = room.subarray(0, length)
         let from = 0
         for (;;) {
           if (held.length - from < 12) break
           const head = new DataView(held.buffer, held.byteOffset + from, 12), kind = head.getUint32(0, true), size = head.getUint32(8, true)
+          if (size > FRAME_MOST) throw new Error('the world sent a frame too big for this page')
           if (held.length - from < 12 + size) break
           const data = read(kind, held.slice(from + 12, from + 12 + size))
           from += 12 + size
           if (l.stop.signal.aborted) return
           // What the world stands on comes first (#526): one that is not what this page was made for is not joined.
           if (kind === GROUND) {
-            const is = (data as { release: string | null }).release ?? null, was = WORLD?.release ?? null
+            const is = (data as { release: string | null }).release ?? null, was = via ? via.pin : WORLD?.release ?? null
             if (is !== was) { l.stop.abort(); self.onerror?.({ message: `This world now stands on ${is ? `San Francisco release ${is.slice(0, 12)}` : 'the generated town'}, and this page was made for ${was ? `release ${was.slice(0, 12)}` : 'the town'}: load the page again to join it.` }); return }
             continue
           }
+          // Through a door a page takes no plugin's page side and no core (#526): a host's code would run on this page's
+          // origin, beside a visitor's key. What a plugin says to its page side is dropped with it.
+          if (via && kind === PLUGGED) continue
           if (!l.held) { say(kind, data); continue }
           // Held for a page that is elsewhere: where things were a moment ago is of no use later, the rest is.
           if (kind === PLUGGED && ('once' in (data as Plugged) || 'core' in (data as Plugged))) continue
@@ -245,9 +264,17 @@ export function link(base = '/world'): Link {
           if (kind === NOW) { l.whole = true; whole?.(l) }
           else if (l.whole && l === next && (kind === ECHO || kind === LOG || kind === HERE)) self.onheld?.(framed(kind, data))
         }
-        held = held.slice(from)
+        // What is left of a frame goes to the front; the room stays, so the next pieces need no new one.
+        if (from) { room.copyWithin(0, from, length); length -= from }
+        if (room.length > 1 << 22 && length < 1 << 16) room = room.slice(0, 1 << 16)
       }
-    })().catch((e) => { if (!l.stop.signal.aborted) self.onerror?.({ message: String(e) }) })
+    })().catch((e) => {
+      if (l.stop.signal.aborted) return
+      // A stream that cannot be read on is let go, so nothing more of it is held; through a door, the door closes and says why.
+      l.stop.abort()
+      self.onerror?.({ message: String(e) })
+      via?.lost(e instanceof Error ? e.message : String(e))
+    })
     return l
   }
   const framed = (kind: number, data: unknown): Held => (kind === ECHO ? { echo: data as Echo } : kind === HERE ? { here: data as Someone } : { words: (data as Uint32Array<ArrayBuffer>).slice(4) })

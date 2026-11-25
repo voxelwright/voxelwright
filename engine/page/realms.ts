@@ -62,7 +62,8 @@ export function realms(o: {
     get selected() { return selected },
     set selected(id: string) { selected = id; try { localStorage.setItem('village.realm', id) } catch { /* the same */ } },
     first,
-    list: () => fetch('/realms').then((r) => r.json()).then((all: { realms: Listed[] }) => all.realms),
+    // Through a door (#526) only an admin may read /realms, and a page can only be in home: anyone else gets an empty list.
+    list: () => o.far.fetch('/realms').then((r) => (r.status === 403 ? { realms: [] } : r.json())).then((all: { realms: Listed[] }) => all.realms),
     async step(id, to, trade, body) {
       const began = performance.now(), before = o.made().sectors
       const realm = await o.far.ready(baseOf(id))

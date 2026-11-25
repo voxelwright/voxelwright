@@ -90,6 +90,8 @@ if (embedded) hear((m) => { if (m.type === 'explore') { if (explores) explores()
 
 async function main() {
   report.env = environment()
+  // A lobby (#526): a world on someone else's machine, joined through its door (door.ts) before anything is made; a join that fails says why and the page goes on alone.
+  const joined = query.has('lobby') && query.has('master') ? await import('./door.ts').then((d) => d.enter({ master: query.get('master')!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
   loading.step('gpu')
   const { device } = gpu
@@ -137,7 +139,7 @@ async function main() {
   world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
   // In a world whose process holds a release (#526), this page's core holds finer cells from the start, as that process
   // and this page's makers of sectors do: else what it says is underfoot is grass a cell lower than what they have.
-  if (world.options.bricks && WORLD?.release) core.fine_cells(1)
+  if (world.options.bricks && (WORLD?.release || joined?.pin)) core.fine_cells(1)
   const blit = await glow(gpu)
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
@@ -720,7 +722,7 @@ async function main() {
   // it. It applies nothing of its own: what it asks comes back in the world's stream, in the world's order, with
   // what everyone else asked.
   // `?realm=id`: another realm that the server keeps (#264), in place of home.
-  const far = query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
+  const far = joined ? link('/world', joined) : query.has('realm') ? link(`/realm/${encodeURIComponent(query.get('realm')!)}/world`) : query.has('shared') ? link() : null
   // The worker that moves things, hired again if it fails (#450): it ends without a word when a tab runs out of
   // memory, so one that answers none of the page's pings for a while is taken for gone too (`moverLost`, below).
   const heed: { message: ((e: MessageEvent<Answer>) => void) | null; error: ((e: ErrorEvent) => void) | null } = { message: null, error: null }
@@ -1258,6 +1260,7 @@ async function main() {
   // For the checks, and for looking round from the console.
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
+  if (joined) Object.assign((globalThis as unknown as { engine: object }).engine, { lobby: joined.lobby })
   Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
   // The last thing made in this page, taken out again (page/maker.ts; "undo" on the bar does the same).
   if (makesHere) Object.assign((globalThis as unknown as { engine: object }).engine, { unmake: () => wishes.rule('', { undo: true }), making: makingSeam })

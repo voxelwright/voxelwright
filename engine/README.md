@@ -50,6 +50,105 @@ One arrives where `--arrive x,y,z,yaw` says, else where `sf/realm.json` does. A 
 `GET /world/ground` says what a world stands on and what its process holds. Check: `node test/shared-sf.mjs`
 (`--address` serves the folder as a host and gives the server its address).
 
+## A server of your own (#526)
+
+A dedicated server is one shared world on your machine that strangers join from the deployed page, Quake-style: it
+has a name, a player limit, maybe a password, and admins. The site runs none of these servers: pages reach yours
+straight over WebRTC data channels, introduced by a master server (`master/`), which lists lobbies and passes one
+offer and one answer for each join, and never carries the game.
+
+```sh
+cd engine && npm ci && npm run core && node sf/build.mjs          # the world's release, the same one the site's pages draw
+(cd ../master && cargo build --release)                             # or use a master someone runs
+(umask 077; printf '%s\n' 'a long admin password' > ~/.village/admin.txt)   # passwords are read from files, never from the command line
+node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
+  --master https://<a master> --name "Fern Hollow" --about "bricks and talk" --most 8 \
+  --admin-password-file ~/.village/admin.txt [--password-file f] [--private]
+# it prints: lobby <id>, code <code>: a page joins with ?master=<master>&lobby=<id> (a --private lobby: its code)
+```
+
+- `server.mjs` runs the world's server (`serve.mjs`, bound to 127.0.0.1, `--port`, 5747 unless said) and the door
+  (`door.mjs`) in one process: stop it and both stop. Without `--master` it says nobody can find it and runs for this
+  machine alone. `--ice-ports a-b` pins the UDP ports WebRTC uses: each connection, a player's or a join not yet let in, holds one, so give at least as many as `--most` and a few more (joins waiting are held to what is left). `--release-cache dir`, `--arrive=x,y,z,yaw` and
+  `--reports file` go to `serve.mjs` as they are. A flag it does not know stops it.
+- A page joins with `?master=<address>&lobby=<id or code>&name=<a name>` on the static realm (`sf/index.html`; no
+  page lists lobbies yet). It joins only a world on its own release, and draws its own tiles. A server with a password
+  asks for it in the browser's prompt.
+- Limits for each connection (flags): `--asks 30` requests a second, `--up-mb 24` megabytes sent a minute,
+  `--columns 65536` columns of `/world/tops` a second, and `--backlog-mb 32` megabytes of replies a page asked for and
+  has not read before the door drops it. Each route also has a limit for each connection, under the pool the world's
+  server keeps for everyone: 15 asks a second, 15 `here`, 10 `act` and `pick`, 3 `say`, 12 `drive`, 20 questions,
+  20 `ctl` messages, 2 opens of the stream in 10 s and 4 look parts a minute (`LIMITS` and `pools` in `door.mjs`). A
+  page behind on the stream is waited for (where things are is skipped for it, as the world's server does for its own
+  readers); one that takes nothing for 15 s is dropped.
+- What the door keeps beside the world's file (`<world>.door.json`, mode 600): the key that ids and banned addresses
+  are made with, bans, the password's hash and the settings an admin changed. A flag given at start wins over what is
+  kept. A file that is there and cannot be read stops the server, rather than be written again without its bans.
+- The world's file and what its server keeps in memory stop growing at 256 MB: past that it takes no more asks.
+
+**Who someone is.** A page keeps an ECDSA P-256 key in IndexedDB (its private half cannot be read out). The first
+thing it says on the `ctl` channel is its hello, `{hello: {proto: 1, pin, name, key, sig, password?}}`: its public
+key and its signature over `village-door-1 <this connection's DTLS fingerprint>`, so a signature is good on that one
+connection and no server it joins can be it at another. The door answers `{welcome: {you, name, server}}`, where
+`you` is `v` and 9 hex characters of an HMAC of the key under a key only this server holds, or `{refuse: {why}}`
+(another protocol or release, not signed, banned, full, a password asked for or wrong) and closes. From then on the
+door writes `by` (and for `here` the name) of every request that connection makes, whatever the page wrote: it
+cannot act as another. The same key from a second page replaces the first. Names are what someone typed, shown as
+text, without invisible or direction-turning characters; two that look alike are told apart (`Ada (2)`). A page that
+the world's own server serves on this machine does not go through the door, and the server trusts it.
+
+**Through the door, everyone may** (anything else is refused, 404): read the stream (`GET /world/stream`), without
+rules' sources; say where they are (`here`), talk (`say`), do and pick what a rule offers (`act`, `pick`: playing its
+game), drive only what they ride (`drive`: the door remembers what they got on, or what a rule seated them on); ask
+about the world (`at`, `look`, `tops`, `things`, `realm`, `ground`, `rules` without sources, a living thing's fine
+look). **Builders** (everyone, or admins only, which an admin sets) may change the world with their hands: blasts,
+fire, balls, bricks, made things and holding, throwing, putting them (`POST /world/ask`), and a fine look's cells
+(`POST /world/fine`). With building for admins only, walking, talking and playing stay everyone's. **Admins only**,
+because they change the game for everyone: a rule put in, changed or taken out, the realm's record and its director
+(`POST /world/ask` with `rule`, `unrule`, `realm`), rules' sources, gaps, realms made and taken out, plugins and the
+core read again. **Never**, whoever asks: `/world/minds` and `/world/mind` (voicing the world's people would spend a
+visitor's tokens for the host), a seat's body (`join`, `walk`, `turn`, `leave`, `me`, `around`: for agents on the
+host's machine), tiles (`/release/`, `/bay/`: a page draws its own), the pages, their code and plugins' page sides,
+`/report`, and other realms (a page through a door can only be in the home realm). Each address upstream is built
+from the route's table entry (`ROUTES` in `door.mjs`); a page's path or query is never passed as it came.
+
+**Admins.** With `--admin-password-file`, a connection that gives that password (`engine.lobby.admin('…')` in the
+page's console) is an admin until it closes. `engine.lobby`: `who()`, `kick(you)`, `ban(you, {address})`,
+`unban(you)`, `bans()`, `lock(password | null)`, `most(n)`, `build('everyone' | 'admins')`, `say(text)`,
+`rename(name, about)`. Each try at a password (the admin's or the server's) is counted before it is checked, for that
+connection and that address: the next waits two seconds, twice as long after each, to half a minute, and a wrong
+admin password is answered a second late. Passwords are compared as scrypt hashes in constant time, never logged,
+never sent to the master.
+
+Bans are easy to evade. A ban by id is evaded by clearing the site's storage or by a private window (a new key is
+someone new). A ban by address is evaded by another network (a phone's, a VPN), and it also shuts out everyone else
+behind that address (a household, a carrier's shared address). The address is kept as an HMAC under the key in the
+same file, which only keeps it from being read at a glance: with the file, every IPv4 address can be tried in minutes.
+
+**What a page through a door does not take.** No code, markup or styles from the host: a host's code would run on
+the site's origin beside a visitor's API key. So a page through a door has none of the plugins' page sides: `make`
+(things made by a rule's `world.make`, which would also spend the visitor's model), `music`, `paint`, `sound` (a rule's
+sounds) and `write`, and takes no new core while it runs. It never asks a model for the host: voicing is off the
+route list, and the static realm turns models off. Replies are read as JSON, bytes or text and never as markup. A
+reply or a stream frame over 64 MB closes the door, and the page says so.
+
+The wire (what goes over `ctl`, `up` and `down`) is in the header of `door.mjs`.
+
+Check: `node test/door.mjs`. It runs the real master, `server.mjs`, and two pages from a plain host that join as
+strangers. They stand on one ground, see each other's blast and brick, and talk; a page cannot write another's
+`by`. It also covers a full server, admin passwords (one at a time, even sent together), a kick and a ban, hellos of
+another protocol or release, unsigned or with another's key, look-alike names, joins that say nothing, a peer that
+takes tiny messages, building for admins only, a stranger's rule refused and an admin's taken, rules' sources kept
+off a stranger's stream, a flood held to one connection, no plugin loaded, a password, a ban by address, and the
+host killed.
+
+What a join sends: `node test/door-join.mjs` (November 25, one machine, a Node client). A freshly released world
+sends 0.3 KB before the page is "now" in it. With 100 made things and 500 edits it sends 1.0 MB: 0.65 MB of log
+frames for the edits and 0.35 MB of echoes, mostly the things' rows as JSON. That took 0.7 s here, and would take 0.5
+to 1.4 s at the 6 to 15 Mbps a browser pulls down a data channel (lobby-transport skill). Rows as binary and a
+compressed stream would cut it; a snapshot of the changed sectors instead of every edit would bound it. None is
+built.
+
 ## Glass (#163)
 
 Glass is seen through. A look that meets a pane goes on through it and shows what is behind, tinted a little by the

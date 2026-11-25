@@ -296,14 +296,14 @@ export function living(o: {
   const fetched = new Map<string, Promise<Uint16Array | null>>()
   const fetchKinds = (f: FineKept) => {
     // One that could not be had (the network, a busy server) is not kept as none: the next thing that wears it asks again.
-    if (!fetched.has(f.kept)) fetched.set(f.kept, fetch(`${o.world!.base}/fine/${f.kept}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b && b.byteLength === f.size[0] * f.size[1] * f.size[2] * 2 ? new Uint16Array(b) : null), () => null).then((kinds) => { if (!kinds) fetched.delete(f.kept); return kinds }))
+    if (!fetched.has(f.kept)) fetched.set(f.kept, o.world!.fetch(`${o.world!.base}/fine/${f.kept}`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((b) => (b && b.byteLength === f.size[0] * f.size[1] * f.size[2] * 2 ? new Uint16Array(b) : null), () => null).then((kinds) => { if (!kinds) fetched.delete(f.kept); return kinds }))
     return fetched.get(f.kept)!
   }
   /** Sends a part's cells to the world to keep; what its record then says of it, or null. */
   const keep = async (f: Fine): Promise<FineKept | null> => {
     const kinds = kindsOf(f)
     if (!kinds || !o.world) return null
-    const r = await fetch(`${o.world.base}/fine`, { method: 'POST', body: kinds.slice() }).catch(() => null)
+    const r = await o.world.fetch(`${o.world.base}/fine`, { method: 'POST', body: kinds.slice() }).catch(() => null)
     const kept = r?.ok ? ((await r.json()) as { kept?: string }).kept : undefined
     if (!kept) return null
     fetched.set(kept, Promise.resolve(kinds))
