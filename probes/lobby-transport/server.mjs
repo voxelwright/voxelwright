@@ -63,7 +63,7 @@ createServer(async (req, res) => {
   }
   if (p === '/relay/offer' && req.method === 'POST') {
     const { run, sid, offer } = await body(req);
-    const mb = mailbox({ repo: 'the private source repository', issue: Number(process.env.MAILBOX_ISSUE), me: 'mac', run });
+    const mb = mailbox({ repo: 'voxelwright/voxelwright', issue: Number(process.env.MAILBOX_ISSUE), me: 'mac', run });
     const t0 = performance.now();
     await mb.post('offer', sid, offer);
     const ans = await mb.wait('answer', { sid, timeoutMs: 60000, everyMs: 1000 });

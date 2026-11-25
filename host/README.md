@@ -96,7 +96,8 @@ needs a timeout from 1 ms to one hour.
   result. The run fails when the `init` event is missing or lists an MCP
   server or `mcp__` tool; `result.json` records the servers, tools, usage and
   cost under `executorOutcome.report`.
-- `codex`: off. It registers only with `ELDER_ALLOW_CODEX=1`, because a lock file on the maintainer's machine can block the tool. Not run since
+- `codex`: off. It registers only with `ELDER_ALLOW_CODEX=1`, because a lock
+  file on the maintainer's machine can block the tool. Not run since
   November 6. Its `workspace-write` sandbox limits writes, not reads.
 
 ## Measured (November 6, 2026)

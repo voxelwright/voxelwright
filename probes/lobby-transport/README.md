@@ -50,12 +50,12 @@ node safari.mjs "$ORIGIN/?t=local#helperwt=<hash>" local-safari
 # .github/workflows/ on a branch (never main). Make a throwaway issue as the mailbox
 # and put its number in the workflow's MAILBOX_ISSUE.
 printf 'r1\n\n\n' > run.txt    # run id, PHASES (empty = all), SCTP_BUF (empty = default)
-git commit -am "[#526] run r1" && git push git@github.com:the private source repository.git HEAD   # push over SSH: the gh token cannot push workflows
+git commit -am "[#526] run r1" && git push git@github.com:voxelwright/voxelwright.git HEAD   # push over SSH: the gh token cannot push workflows
 MAILBOX_ISSUE=<n> SAY_BYE=0 node nat-peer.mjs mac r1          # STUN, UDP, WebTransport, A, then B from Node
 MAILBOX_ISSUE=<n> node server.mjs &                             # the relay for browsers
 node drive.mjs  "$ORIGIN/?t=rtc&relay=r1&sid=B-chromium&up=60" nat-B-chromium
 node safari.mjs "$ORIGIN/?t=rtc&relay=r1&sid=B-safari&up=60"   nat-B-safari
-node -e "import('./lib/mailbox.mjs').then(m=>m.mailbox({repo:'the private source repository',issue:<n>,me:'mac',run:'r1'}).post('bye','B',{}))"
+node -e "import('./lib/mailbox.mjs').then(m=>m.mailbox({repo:'voxelwright/voxelwright',issue:<n>,me:'mac',run:'r1'}).post('bye','B',{}))"
 # Afterwards: delete the comments (mailbox(...).clear()) and close the issue.
 ```
 

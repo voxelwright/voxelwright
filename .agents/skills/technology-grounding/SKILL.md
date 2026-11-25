@@ -112,7 +112,7 @@ restored. Assert that completed receipts and native values survive each attempt.
 When acceptance concerns side-effect ordering, exercise the public entrypoint and
 assert the absence of effects; testing a validator alone does not prove its caller
 uses it before creation. Include every configured role in registration checks.
-The source-bound regression and mutation controls are in the linked handoff record;
+The source-bound regression and mutation controls are in the handoff record;
 these are candidate engineering instructions, not automatic memory learning.
 
 Source-bound contract/testing lessons from the selected-memory and execution-facts

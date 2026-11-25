@@ -21,7 +21,7 @@ For the owner’s build, run this from the repository root with dependencies ins
 
 The directory holds `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A standalone site at `/` uses the two landing videos. The mounted blog has no landing of its own. Builds with the variable unset ship only the procedural eggs. The public data pack excludes the private media directory.
 
-When a clip changes, rebuild the archive and upload it to the private repository:
+When a clip changes, set `PRIVATE_OVERLAY_REPO` to the private repository that holds the clips. Rebuild the archive and upload it there:
 
 ```sh
 work=$(mktemp -d)
@@ -40,10 +40,10 @@ with tarfile.open(sys.argv[1], "w", format=tarfile.USTAR_FORMAT) as archive:
 PY
 digest=$(shasum -a 256 "$work/egg-media.tar")
 tag="eggs-overlay-$(printf '%.16s' "$digest")"
-gh release create "$tag" "$work/egg-media.tar" --repo the private source repository --title "Egg media overlay (private)" --notes "" --prerelease --latest=false
+gh release create "$tag" "$work/egg-media.tar" --repo "${PRIVATE_OVERLAY_REPO:?set the private overlay repository}" --title "Egg media overlay (private)" --notes "" --prerelease --latest=false
 ```
 
-The repository variable `EGG_OVERLAY_TAG` names that release. After the upload, point it at the new tag with `gh variable set EGG_OVERLAY_TAG --body "$tag" --repo the private source repository`. Leave it unset for public builds.
+The repository variable `EGG_OVERLAY_TAG` names that release. After the upload, point it at the new tag with `gh variable set EGG_OVERLAY_TAG --body "$tag" --repo "${PRIVATE_OVERLAY_REPO:?set the private overlay repository}"`. Leave it unset for public builds.
 
 ## When the pin or the city's other data moves
 

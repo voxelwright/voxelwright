@@ -22,7 +22,7 @@ const [role, run] = process.argv.slice(2);
 // PHASES (default all): nat,udp,wt,A,B. SCTP_BUF: libdatachannel's SCTP send and receive buffer, bytes.
 const PHASES = new Set((process.env.PHASES || 'nat,udp,wt,A,B').split(','));
 if (Number(process.env.SCTP_BUF)) ndc.setSctpSettings({ sendBufferSize: Number(process.env.SCTP_BUF), recvBufferSize: Number(process.env.SCTP_BUF) });
-const mb = mailbox({ repo: process.env.MAILBOX_REPO ?? 'the private source repository', issue: Number(process.env.MAILBOX_ISSUE), me: role, run });
+const mb = mailbox({ repo: process.env.MAILBOX_REPO ?? 'voxelwright/voxelwright', issue: Number(process.env.MAILBOX_ISSUE), me: role, run });
 const UP_SECONDS = Number(process.env.UP_SECONDS ?? 60);
 // libdatachannel 0.24 (libjuice) never finishes gathering when a STUN server is a
 // hostname and the host has no IPv6 route: the AAAA entry stays pending. Pass IPv4 literals.

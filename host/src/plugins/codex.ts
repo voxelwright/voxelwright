@@ -1,5 +1,5 @@
 // Codex exec in the candidate, using the operator's existing login in place.
-// Disabled unless ELDER_ALLOW_CODEX=1: a local lock file can block codex.
+// Disabled unless ELDER_ALLOW_CODEX=1: a lock file on the maintainer's machine can block codex.
 // workspace-write limits writes, not reads, so codex can read the operator's files.
 //
 // -s workspace-write lets the agent write only inside -C (plus temp dirs) and
