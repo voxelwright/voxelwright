@@ -21,14 +21,11 @@
 //
 // The result is a reply of cells with `living` (make/alive.mjs), read and checked as any reply is, and kept as one:
 // the next asker of the same words gets the living thing with nothing worked out again.
-import { readFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { BODY_MOST } from './alive.mjs'
 import { ran, written } from './cells.mjs'
+import { CORE, compiled } from './core.mjs'
 export { drivesOf } from './form.mjs'
 
-const here = dirname(fileURLToPath(import.meta.url))
 /** Which way each front points in a body's own cells (x, z), as page/living.ts `Motor.front` counts them. */
 const FRONTS = [[1, 0], [-1, 0], [0, 1], [0, -1]]
 const LAMP = 15
@@ -59,7 +56,7 @@ export function bodyOf({ size: [w, h, d], cells }) {
  * Resolves to { text: a reply of cells with living, said: [what was worked out, in words], wheels, front, unsure: why
  * its front is not known (or ''), facts }, or throws an Error with why it cannot live (too big).
  */
-export async function driven({ name, size, cm, cells, front, faced, asked = {}, open = false, core = join(here, '..', 'page', 'core.wasm') }) {
+export async function driven({ name, size, cm, cells, front, faced, asked = {}, open = false, core = CORE }) {
   const [w, h, d] = size, per = Math.round(10 / cm), said = []
   const at = (x, y, z) => (x < 0 || y < 0 || z < 0 || x >= w || y >= h || z >= d ? 0 : cells[(y * d + z) * w + x])
   // The body, in cells of 10 cm.
@@ -266,7 +263,7 @@ const H = 1 / 60, TOP_Y = 2400, X0 = 2000, Z0 = 2000
 let wasm = null
 /** A solver of the engine's own, with a level strip of asphalt laid high over its town, on which a body is driven flat out from standing. */
 async function solver(file) {
-  wasm ??= await WebAssembly.compile(readFileSync(file))
+  wasm ??= await compiled(file)
   return {
     /** How long it takes to reach 100 km/h from standing (null: not in 12 s). `all`: also whether it broke, and the fastest it went. */
     sprint(cells, size, motor, all = false) {

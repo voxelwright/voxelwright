@@ -237,3 +237,31 @@ export function asker(eye: () => { eye: [number, number, number]; toward: [numbe
   }
   return self
 }
+
+/**
+ * An Asker that is fetched when it is first asked something (#526): the page's own maker (page/maker.ts) is a module of
+ * its own, not in the bytes before the park. Until then, and while it comes, this answers for it: what is set on it
+ * (`kept`, `aim`) is handed on at each ask. One that could not be fetched is asked for again next time.
+ */
+export function later(load: () => Promise<Asker>): Asker {
+  let real: Promise<Asker> | null = null, waiting = 0
+  const got = () => (real ??= load().catch((e) => { real = null; throw e })).then((a) => { a.kept = self.kept; a.aim = self.aim; return a })
+  const failed = (each: (stage: Stage) => void): Done => { const done: Done = { stage: 'done', state: 'refused', why: 'the maker could not be fetched' }; each(done); return done }
+  const self: Asker = {
+    aim: null,
+    kept: null,
+    known: true,
+    get busy() { return waiting },
+    hello: async () => true,
+    async ask(ask, each = () => {}) { waiting++; try { return await (await got()).ask(ask, each) } catch { return failed(each) } finally { waiting-- } },
+    async put(held, how, each = () => {}) { waiting++; try { return await (await got()).put(held, how, each) } catch { return failed(each) } finally { waiting-- } },
+    async rule(wish, how, each = () => {}) { try { return await (await got()).rule(wish, how, each) } catch { return failed(each) } },
+    async realm(spec, each = () => {}) { try { return await (await got()).realm(spec, each) } catch { return failed(each) } },
+    guess: (words) => got().then((a) => a.guess(words), () => null),
+    faces: (id, facing) => got().then((a) => a.faces(id, facing), () => null),
+    drivable: async () => false,
+    imagine: async () => null,
+    call: async () => null,
+  }
+  return self
+}

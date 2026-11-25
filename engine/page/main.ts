@@ -46,8 +46,8 @@ import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
-import { asker } from './ask.ts'
-import { LOCAL, RULES } from './local.ts'
+import { asker, later } from './ask.ts'
+import { LOCAL, MAKING, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { playHud } from './play-hud.ts'
 import { making } from './making.ts'
@@ -941,7 +941,14 @@ async function main() {
   /** How this page has a thing made (ask.ts): the ask bar, the wand and the checks all ask through this. */
   /** Where this page's eye is and looks, in whole cells: what an ask is asked from. */
   const gaze = (): { eye: [number, number, number]; toward: [number, number, number] } => { const v = view(); return { eye: [Math.round(v.eye[0]), Math.round(v.eye[1]), Math.round(v.eye[2])], toward: [v.forward[0], v.forward[1], v.forward[2]] } }
-  const wishes = asker(gaze, () => others?.name ?? 'someone')
+  // A realm the page runs alone, whose rules allow it (local.ts `making`): things are made in the page itself, by the
+  // engine's own maker (page/maker.ts), fetched once the bar is first used in the realm. Elsewhere: the helper.
+  const makesHere = MAKING && !far
+  const wishes = makesHere ? later(() => import('./maker.ts').then(({ pageMaker }) => pageMaker({
+      core, made, alive, eye: gaze, by: () => 'visitor', hud: over, shelf: new URL('shelf/', location.href).href, core_url: new URL('./core.wasm', import.meta.url).href, hold: (x, z) => underfoot(inner, x, z),
+      // As the page lays its own: finer cells only where every box of the world they reach takes them (`taken`).
+      lay: (edit, at) => { if (edit.words[0] < 3) { make(edit, at); return true } put(); if (!taken(edit)) return false; waiting++; mover.postMessage({ edit: edit.words, after: heard, release: at } satisfies Ask); return true },
+    }))) : asker(gaze, () => others?.name ?? 'someone')
   /** The things made in this world, as the world tells of them (things.ts). Without a shared world there are none. */
   const made = things()
   /** What becomes of a wish: asked, and shown at its place as it goes (making.ts). */
@@ -966,8 +973,12 @@ async function main() {
   // What the bar says Enter will do is what making will do with the words (making.ts `says`).
   over.line.means = (text) => wish.says(text)
   // A realm whose rules allow no models has no bar to type a wish on (local.ts): spells from the kept library are cast with the wand.
-  if (!RULES.models) document.querySelector<HTMLElement>('#ask')?.style.setProperty('display', 'none')
+  // One that makes things in the page has it once the visitor is in the realm, starting from what is kept.
+  const askBar = document.querySelector<HTMLElement>('#ask')
+  if (!RULES.models && !makesHere) askBar?.style.setProperty('display', 'none')
+  if (makesHere) { over.line.starters = []; first?.during(() => { askBar?.style.setProperty('display', 'none'); return () => askBar?.style.removeProperty('display') }) }
   over.line.onask = (ask) => {
+    if (makesHere) return void wish(ask)
     if (!RULES.models) return over.notice('Nothing is made from words in this realm', 5000)
     // Things are made in a world that is kept and shared; and by a helper on the asker's own machine.
     if (!far) return over.notice('Things are made in a shared world: open this page with ?shared=1', 7000)
@@ -1243,6 +1254,8 @@ async function main() {
   Object.assign(globalThis, { engine: { world, pose, gpu, input: controls, hud: over, things: made, asker: wishes, ask: wishes.ask, wish, gathering, march, wand: staff, view, feet: (x: number, z: number) => core.feet_at(x, z), /** What the ground's top is made of at a column, by the land's rule (cells). */ top: (x: number, z: number) => core.top_at(Math.round(x), Math.round(z)), /** What a cell is made of as this page has it (0: nothing), for the checks: whether the eye is in something. */ kind: (x: number, y: number, z: number) => core.world_kind(Math.floor(x), Math.floor(y), Math.floor(z)), folk, folkClock, paced, steps, quiet, blast, strike, ignite, shoot, cut, place, set: (at: [number, number, number], radius: number, kind: number) => make(ball(at[0], at[1], at[2], radius, kind), at), pickTool, get tool() { return tools[tool].name }, ground: (x: number, z: number) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, pick, debris, smoke, get burning() { return burning }, get flowing() { return running }, water, get others() { return others?.count ?? 0 }, say: (text: string) => others?.say(text), shadowsDiffer, fell, get dropping() { return loose() + lying.length + putting.length }, get bodies() { return bodies }, get leaning() { return leaning() }, get hour() { return hour }, set hour(h: number | null) { setHour(h) }, get rain() { return march.rain }, set rain(v: number) { march.rain = v }, get settling() { return waiting > 0 }, /** Whether the page has stopped drawing (#367): set while another page on the same GPU is being timed (test/paired.mjs). */ get resting() { return paused }, set resting(on: boolean) { paused = on }, get gpuMs() { return gpuMs }, get windowMs() { return windowMs }, get cpuMs() { return cpuMs }, off, spent, laps, get frameMs() { return frameMs }, get scale() { return scale }, set scale(v: number) { scale = v; held = 1e9 }, get flags() { return flags }, set flags(v: number) { flags = v } } })
   Object.defineProperty((globalThis as unknown as { engine: object }).engine, 'ears', { get: () => ears })
   Object.assign((globalThis as unknown as { engine: object }).engine, { kept: ghost })
+  // The last thing made in this page, taken out again (page/maker.ts; "undo" on the bar does the same).
+  if (makesHere) Object.assign((globalThis as unknown as { engine: object }).engine, { unmake: () => wishes.rule('', { undo: true }) })
   // A voice for what people say (#264: being tried, off unless asked for): others' words, not this page's own.
   if (far && query.has('voices')) { const shown = far.onsaid; far.onsaid = (v) => { shown?.(v); if (v.by !== far.me) ears?.spoke(v, query.get('voices')) } }
   // The core built again and taken while the page runs (#264): this thread's own, then the workers', and every

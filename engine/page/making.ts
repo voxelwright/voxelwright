@@ -3,6 +3,7 @@
 import type { Ask, Asker, Done, Stage } from './ask.ts'
 import type { Hud } from './hud.ts'
 import { asksToDrive } from './living.ts'
+import { LOCAL } from './local.ts'
 
 /** A few words for what was asked, for a label. */
 const called = (ask: Ask) => (ask.wish ? (ask.wish.length > 40 ? `${ask.wish.slice(0, 38)}…` : ask.wish) : ask.picture ? 'what the picture shows' : 'what the link shows')
@@ -190,6 +191,8 @@ export function making(hud: Hud, asker: Asker, eye: () => { eye: [number, number
   /** One question at a time: the bar's label and the ghost ask on the same key. */
   const ruled = (): Promise<boolean> => (performance.now() - ruledAt < 4000 ? Promise.resolve(ruledSo) : (ruling ??= askRules().finally(() => { ruling = null })))
   const askRules = async (): Promise<boolean> => {
+    // A realm the page runs alone has no world's server to ask, and no rules (local.ts).
+    if (LOCAL) { ruledAt = performance.now(); return (ruledSo = false) }
     const realm = new URLSearchParams(location.search).get('realm')
     try { const r = await fetch(realm ? `/realm/${encodeURIComponent(realm)}/world/rules` : '/world/rules'); const list = r.ok ? await r.json() : []; ruledSo = Array.isArray(list) && list.some((x) => x.running) } catch { ruledSo = false }
     ruledAt = performance.now()

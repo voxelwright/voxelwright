@@ -18,7 +18,6 @@
 // It is data like any reply: nothing in it is run. The maker stands the body as the thing's cells with `controls` in
 // its record, sends each part of the look to the world first (`POST /world/fine`, kept by its sha256) so that the
 // record says where they are, and the world brings it to life.
-import { createHash } from 'node:crypto'
 import { FINE_FILLED, FINE_PARTS, controlsOf, fineWithin } from '../page/living.ts'
 import { paletted, unrun } from './cells.mjs'
 import { FACINGS } from './form.mjs'
@@ -91,11 +90,11 @@ export function alive(living, size, shift = [0, 0, 0]) {
   return { scheme: c.scheme, motor, seats, eye, look: look.map(({ size, per, low, kinds, filled }) => ({ size, per, low, kinds, filled })), facts, raw }
 }
 
-// A part's cells are read once for each text of them (a kept car is made over and over): by the sha1 of its runs.
+// A part's cells are read once for each text of them (a kept car is made over and over): by the text itself.
 const read = new Map()
 const remember = (map, key, value, most) => { map.set(key, value); if (map.size > most) map.delete(map.keys().next().value); return value }
 function kindsOf(p) {
-  const key = `${p.size.join()} ${createHash('sha1').update(String(p.runs)).update(JSON.stringify(p.palette ?? null)).digest('hex')}`
+  const key = `${p.size.join()} ${JSON.stringify(p.palette ?? null)} ${String(p.runs)}`
   const was = read.get(key)
   if (was) return was
   return remember(read, key, unrun(p.runs, p.size[0] * p.size[1] * p.size[2], paletted(p.palette)), 8)
@@ -134,7 +133,7 @@ const turnedLooks = new Map()
  * { body: the thing as the placing lays it (form.mjs `rows`, which mirrors: so its cells are laid mirrored here, and
  * come out turned), size and cells: the turned body in the world's axes, k: how many quarter turns, low: where the turned body's low corner is from the place it stands ([x, 0, z], world cells),
  * lift: how far over the ground it is set so that its feet just touch it, controls: the record's (without the
- * look), look: the turned parts [{ size, per, low, kinds, sha }] }.
+ * look), look: the turned parts [{ size, per, low, kinds }] }.
  */
 export function turned(thing, facing) {
   thing.turns ??= new Map()
@@ -156,11 +155,11 @@ export function turned(thing, facing) {
     let hit = turnedLooks.get(p.kinds)?.get(k)
     if (!hit) {
       const [kinds, s] = spun(p.kinds, p.size, k)
-      hit = { kinds, size: s, sha: createHash('sha256').update(Buffer.from(kinds.buffer, kinds.byteOffset, kinds.byteLength)).digest('hex') }
+      hit = { kinds, size: s }
       if (!turnedLooks.has(p.kinds)) remember(turnedLooks, p.kinds, new Map(), 8)
       turnedLooks.get(p.kinds).set(k, hit)
     }
-    return { size: hit.size, per: p.per, low: lows[j], kinds: hit.kinds, sha: hit.sha, filled: p.filled }
+    return { size: hit.size, per: p.per, low: lows[j], kinds: hit.kinds, filled: p.filled }
   })
   // As the placing lays it: a cell of its own (lx, lz) goes to (cx * xx + cz * xz, cx * zx + cz * zz) from where it
   // stands, cx and cz from its middle. So the cells it is given are the turned body's, read back through that.
@@ -177,34 +176,4 @@ export function turned(thing, facing) {
   const out = { body: { ...thing, size: [w, h, d], cells: laid, by: new Uint16Array(laid.length) }, low: [minx, 0, minz], lift, size, cells, k, controls, look }
   thing.turns.set(facing, out)
   return out
-}
-
-// ── The look, kept by the world ──────────────────────────────────────────
-/** What a world is known to keep already, by `world sha`: asked once each, so a second car of a kind sends nothing. */
-/** What each world is known to keep, or is being sent now: a look is asked after and sent once, however many ask at once (a ghost asks at every key). */
-const known = new Map()
-/**
- * Has the world keep each part of a look (`POST /world/fine`, which answers by the sha256 of the cells), unless it
- * says it has it already (`HEAD /world/fine/<sha>`). Resolves to what the record's `controls.fine` says, or throws
- * with why: a look that could not be kept is not made at all.
- */
-export async function keepLook(world, look, { post = fetch } = {}) {
-  return Promise.all(look.map(async (p) => {
-    const key = `${world} ${p.sha}`
-    if (!known.has(key)) {
-      const sent = (async () => {
-        const there = await post(`${world}/world/fine/${p.sha}`, { method: 'HEAD' }).then((r) => r.ok, () => false)
-        if (there) return
-        const r = await post(`${world}/world/fine`, { method: 'POST', body: Buffer.from(p.kinds.buffer, p.kinds.byteOffset, p.kinds.byteLength) }).catch((e) => ({ ok: false, status: 0, text: async () => e.message }))
-        if (!r.ok) no(`the world would not keep its look (${r.status}): ${(await r.text()).slice(0, 120)}`)
-        const said = await r.json()
-        if (said.kept !== p.sha) no('the world kept its look under another name')
-      })()
-      known.set(key, sent)
-      // One that failed is asked after again the next time.
-      sent.catch(() => known.delete(key))
-    }
-    await known.get(key)
-    return { size: p.size, per: p.per, low: p.low, kept: p.sha }
-  }))
 }

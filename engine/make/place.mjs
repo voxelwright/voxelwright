@@ -1,29 +1,8 @@
-// Where a made thing goes and how it gets there (#220). The maker is a client of a shared world like any other:
-// it asks what is where (`/world/look`, `/world/at`) and sends the thing as one edit (`POST /world/ask`), which
-// the world takes whole or refuses whole. Nothing here is on the server.
-import { readFile } from 'node:fs/promises'
+// Where a made thing goes (#220): where it can stand near a place, and its rows there. The world is handed in (a
+// world's server by its address, make/served.mjs; or a page's own world, page/maker.ts): what is under a footprint is
+// asked of it (`world.tops`). Nothing here talks to anything.
 import { FACINGS, ROWS_MOST, footprint, rows } from './form.mjs'
-
-const json = async (res) => { if (!res.ok) throw new Error(`the world said ${res.status}: ${(await res.text()).slice(0, 120)}`); return res.json() }
-export const at = (world, [x, y, z]) => fetch(`${world}/world/at?x=${x}&y=${y}&z=${z}`).then(json)
-/** The first thing down every column of a rectangle, looked for from height `y`: { high, material }, a row of x for each z. */
-export async function tops(world, [x0, z0, x1, z1], y) {
-  // The world gives so many columns a second to everyone together: told to wait, this waits and asks again.
-  for (let tries = 0; ; tries++) {
-    const res = await fetch(`${world}/world/tops?x0=${x0}&z0=${z0}&x1=${x1}&z1=${z1}&y=${y}`)
-    if (res.status !== 429 || tries === 40) return json(res)
-    await new Promise((r) => setTimeout(r, 300))
-  }
-}
-export const look = (world, [x, y, z], [dx, dy, dz]) => fetch(`${world}/world/look?x=${x}&y=${y}&z=${z}&dx=${dx}&dy=${dy}&dz=${dz}`).then(json)
-
-/** Many questions, a few at a time. */
-async function all(items, ask, together = 24) {
-  const out = new Array(items.length)
-  let next = 0
-  await Promise.all(Array.from({ length: together }, async () => { while (next < items.length) { const i = next++; out[i] = await ask(items[i]) } }))
-  return out
-}
+import { compiled } from './core.mjs'
 
 /** How uneven the ground under a thing's feet may be, and how far above or below the middle of its place anything may stand in its footprint, in cells. */
 const STEEP = 8, CLEAR = 6
@@ -53,7 +32,7 @@ export async function site(world, thing, spot, facing, back = [0, 0], { clear = 
     const columns = footprint(thing, [x, z], facing), top = spot[1] + thing.size[1] + CLEAR + 2
     // What is under it: one question for the rectangle its footprint lies in.
     const xs = columns.map((c) => c.x), zs = columns.map((c) => c.z), x0 = Math.min(...xs), z0 = Math.min(...zs), wide = Math.max(...xs) - x0 + 1
-    const under = await tops(world, [x0, z0, x0 + wide, Math.max(...zs) + 1], top)
+    const under = await world.tops([x0, z0, x0 + wide, Math.max(...zs) + 1], top)
     const met = columns.map((c) => { const i = (c.z - z0) * wide + (c.x - x0); return { at: under.high[i] === null ? null : [c.x, under.high[i], c.z], material: under.material[i] } })
     const high = met.map((m) => (m.at ? m.at[1] : -Infinity))
     const taken = columns.filter((c, i) => high[i] > spot[1] + CLEAR + steep - STEEP).length, gone = columns.filter((c, i) => high[i] < spot[1] - steep - CLEAR).length
@@ -94,7 +73,7 @@ export const outOf = (facing) => { const [, xz, , zz] = FACINGS[facing]; return 
 
 /** The rows as an edit (page/edits.ts), and with every row emptied: the same edit undone. */
 export const edit = (made, kind, grain = 1) => { const out = [grain === 4 ? 3 : grain === 8 ? 4 : 1, made.length]; for (const r of made) out.push(r[0], r[1], r[2], r[3], kind === undefined ? r[4] : kind); return out }
-const bounds = (made) => { const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (const r of made) [[r[0], r[1] - 1], [r[2], r[2]], [r[3], r[3]]].forEach(([a, b], k) => { lo[k] = Math.min(lo[k], a); hi[k] = Math.max(hi[k], b) }); return [lo, hi] }
+export const bounds = (made) => { const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity]; for (const r of made) [[r[0], r[1] - 1], [r[2], r[2]], [r[3], r[3]]].forEach(([a, b], k) => { lo[k] = Math.min(lo[k], a); hi[k] = Math.max(hi[k], b) }); return [lo, hi] }
 export const middle = (made) => { const [lo, hi] = bounds(made); return lo.map((v, k) => Math.round((v + hi[k]) / 2)) }
 /**
  * Where the world is asked what an edit left unheld: a cell of air beside the thing, never one of its own. The
@@ -106,11 +85,12 @@ export const beside = (made) => { const [lo, hi] = bounds(made); return [hi[0] +
 /**
  * Would it stand? Which of its rows would not: none if it would. The core's own rule, asked of a core of the maker's own before anything is sent: the edit is
  * put into a world as the rules make it and what it leaves unheld is counted. (That world has nobody's changes
- * in it: a thing stood on something another person built is judged as if it stood on air there.)
+ * in it: a thing stood on something another person built is judged as if it stood on air there.) `core` is the core
+ * (core.mjs `compiled` takes it), or a function that gives a fresh core ready for the rows (a page's own,
+ * page/maker.ts: one holding the city's tiles round them, as the page's world is made from them).
  */
 export async function stands(core, made) {
-  const { instance } = await WebAssembly.instantiate(await readFile(core), {})
-  const c = instance.exports, words = edit(made), mid = beside(made)
+  const c = typeof core === 'function' ? await core(made) : new WebAssembly.Instance(await compiled(core), {}).exports, words = edit(made), mid = beside(made)
   const room = c.edits_room(words.length)
   new Int32Array(c.memory.buffer, room, words.length).set(words)
   c.world_edit(-1)
@@ -122,89 +102,3 @@ export async function stands(core, made) {
 
 /** Up to `most` of a thing's cells, spread through it, as [x, y, z, kind]. */
 export const samples = (made, most = 24) => made.filter((_, i) => i % Math.ceil(made.length / most) === 0).map((r) => [r[0], r[2], r[3], r[4]])
-
-/** How many of the sampled cells are what they should be. */
-export async function counted(world, cells, kind) {
-  const found = await all(cells, (c) => at(world, c))
-  // A cell asked after as -1 is one that only has to hold something (a cell of finer cells has no one kind).
-  return found.filter((f, i) => { const want = kind ?? cells[i][3]; return want === -1 ? f.material !== 0 : f.kind === want }).length
-}
-
-/**
- * Sends the thing: one ask. Resolves to 'there' once the world's own cells are the thing's and stay so, 'fell'
- * if they were and then were not, 'not there' if they never were, and 'unknown' if the world could not be asked.
- * `gone`: the id of a made thing to take out, cells and record on one ask: the world empties the cells it keeps for it (`made` only says where to ask after them).
- * `replaces`: the id of a made thing this one is sent in place of: it is taken out on the same ask, which the world does whole or refuses whole.
- * It never sends twice: after a send whose answer was lost it asks the world what is there, and says.
- */
-export async function send(world, made, by, { kind, thing, gone, replaces, fine, wait = 5000, settle = 1500, pause = (ms) => new Promise((r) => setTimeout(r, ms)), post = fetch } = {}) {
-  // A thing of finer cells (`fine`: { grain, rows }) is sent as those rows; `made` is then its stand-in in the
-  // world's cells, which says where to ask after it: a cell of the world that holds any of it is no longer air.
-  const cells = samples(made).map((c) => (fine ? [c[0], c[1], c[2], kind === 0 ? 0 : -1] : c))
-  let sent = 'lost', laid = null
-  try {
-    // Cells are sent with `wait`: the world answers once it has laid them, with how many pieces they left unheld.
-    const res = await post(`${world}/world/ask`, { method: 'POST', body: JSON.stringify(gone ? { by, gone, release: beside(made), wait: true } : { by, edit: fine ? edit(fine.rows, kind, fine.grain) : edit(made, kind), release: beside(made), thing, ...(replaces ? { gone: replaces } : {}), wait: true }) })
-    if (res.status !== 202) return { state: 'not there', why: `the world refused it (${res.status}): ${(await res.text()).slice(0, 160)}` }
-    sent = 'taken'
-    try { const said = await res.json(); if (said.laid) laid = said } catch { /* said nothing more */ }
-  } catch { /* the answer was lost: whether the ask arrived is not known, so the world is asked */ }
-  try {
-    // Taken out: the world emptied the very rows it kept for the thing, and says it has (a cell of it that lay in the
-    // land is the land again, so its cells are not looked at).
-    if (gone && laid) return { state: 'there' }
-    // A living thing (make/alive.mjs): its cells leave the world as it is brought to life, so they are not looked
-    // for. The world says whether it lives.
-    if (thing?.controls) return laid ? (laid.alive ? { state: 'there' } : { state: 'not there', why: 'the world could not bring it to life' }) : { state: 'unknown', why: sent === 'lost' ? 'the world could not be reached when it was sent' : 'the world did not say whether it lives' }
-    // Pieces came loose somewhere round it (they may be its own or not): it is watched as before, until it settles.
-    // Laid, and nothing came loose: it stands as it was put, and one look at its cells says the world took all of it
-    // (a sector that holds too many finer cells takes none of them). Nothing is waited for.
-    if (laid?.loose === 0) {
-      const seen = await counted(world, cells, kind)
-      if (seen === cells.length) return { state: 'there' }
-    }
-    let seen = 0
-    for (const began = Date.now(); Date.now() - began < wait;) {
-      seen = await counted(world, cells, kind)
-      if (seen === cells.length) break
-      await pause(250)
-    }
-    if (seen < cells.length) return { state: 'not there', why: sent === 'lost' ? 'the world could not be reached when it was sent, and it is not there' : `only ${seen} of ${cells.length} cells asked after are there` }
-    // Whatever was going to come loose has by now.
-    await pause(settle)
-    const stayed = await counted(world, cells, kind)
-    return stayed === cells.length ? { state: 'there' } : { state: 'fell', why: `${cells.length - stayed} of ${cells.length} cells asked after came loose` }
-  } catch (e) {
-    return { state: 'unknown', why: `the world stopped answering after it was sent (${e.message}): look before making it again` }
-  }
-}
-
-/**
- * Who is in the world now and where: every page there says where its eye is a few times a second (`/world/here`),
- * and the world's stream carries it. Listens for `ms` and returns the last word from each who is still there:
- * { by, name, at (their feet), yaw, seat (true for an agent's body, which is not a page) }.
- */
-export async function people(world, ms = 1500) {
-  const stop = new AbortController(), seen = new Map()
-  const timer = setTimeout(() => stop.abort(), ms)
-  try {
-    // From past the end of what is kept: only what happens from now.
-    const res = await fetch(`${world}/world/stream?from=2147483647`, { signal: stop.signal })
-    let bytes = Buffer.alloc(0)
-    for await (const chunk of res.body) {
-      bytes = Buffer.concat([bytes, chunk])
-      let i = 0
-      for (; i + 12 <= bytes.length && i + 12 + bytes.readUInt32LE(i + 8) <= bytes.length; i += 12 + bytes.readUInt32LE(i + 8)) {
-        if (bytes.readUInt32LE(i) !== 5) continue
-        try { const who = JSON.parse(bytes.subarray(i + 12, i + 12 + bytes.readUInt32LE(i + 8)).toString('utf8')); if (who.gone) seen.delete(who.by); else seen.set(who.by, who) } catch { /* not for us */ }
-      }
-      bytes = bytes.subarray(i)
-    }
-  } catch { /* the listening was ended */ }
-  clearTimeout(timer)
-  return [...seen.values()]
-}
-/** How high over their feet someone's eyes are, in cells (the page's own figure: page/main.ts). */
-const EYES = 17
-/** The look of someone in the world: from their eyes, the way they face, a little down. The world says where their feet are and which way they face, not how high they look. */
-export const gaze = (who) => ({ from: [Math.round(who.at[0]), Math.round(who.at[1]) + EYES, Math.round(who.at[2])], toward: [Math.sin(who.yaw) * 0.97, -0.24, -Math.cos(who.yaw) * 0.97] })

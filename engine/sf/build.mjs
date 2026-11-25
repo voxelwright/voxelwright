@@ -41,7 +41,9 @@ const realm = JSON.parse(readFileSync(join(root, 'sf', 'realm.json'), 'utf8'))
 // Its billboards and banner (sf/boards.json, edited with sf/boards.mjs): in the page's own record, so nothing more is asked for.
 realm.signs = seated(JSON.parse(readFileSync(join(root, 'sf', 'boards.json'), 'utf8')))
 
-const NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.ts\b/g
+// A module the page reaches is TypeScript (stripped) or the engine's own JavaScript shared with Node (make/*.mjs: the
+// maker, page/maker.ts): both are written `.js`, which every host sends as a script.
+const NAMED = /(\bfrom\s*|\bimport\s*\(\s*|\bimport\s*|new URL\(\s*)(['"`])(\.{1,2}\/[^'"`?$]+?)\.(ts|mjs)\b/g
 const js = (text) => text.replace(NAMED, '$1$2$3.js')
 const files = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]))
 const put = (path, body) => { mkdirSync(dirname(join(out, path)), { recursive: true }); writeFileSync(join(out, path), body) }
@@ -70,13 +72,15 @@ if (streetManifest) {
 
 // ── The page and every module it reaches ──
 const modules = new Set(), todo = []
-const reachOf = (from, text) => { for (const [, , , path] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(from), `${path}.ts`)); if (!modules.has(to)) { modules.add(to); todo.push(to) } } }
+const reachOf = (from, text) => { for (const [, , , path, ext] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(from), `${path}.${ext}`)); if (!modules.has(to)) { modules.add(to); todo.push(to) } } }
 modules.add('page/main.ts'); todo.push('page/main.ts')
 while (todo.length) {
-  const path = todo.pop(), text = stripTypeScriptTypes(readFileSync(join(root, path), 'utf8'))
+  const path = todo.pop(), source = readFileSync(join(root, path), 'utf8'), text = path.endsWith('.ts') ? stripTypeScriptTypes(source) : source
   reachOf(path, text)
-  put(path.replace(/\.ts$/, '.js'), js(text))
+  put(path.replace(/\.(ts|mjs)$/, '.js'), js(text))
 }
+// The maker in the page (page/maker.ts) must reach nothing of Node: a module that imports it would not load there.
+for (const path of modules) if (path.endsWith('.mjs') && /\bfrom\s*['"]node:|\bimport\s*['"]node:/.test(readFileSync(join(root, path), 'utf8'))) fail(`${path} imports Node at its top, and the page reaches it`)
 if (!existsSync(join(root, 'page/core.wasm'))) fail('page/core.wasm is not built: npm run core')
 cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
 // ── The realm's controls (page/realm-ui.ts): the Voxelmorphism kit beside the page ──
@@ -89,12 +93,12 @@ cpSync(join(root, 'page/core.wasm'), join(out, 'page/core.wasm'))
   for (const file of files(join(root, 'kit/src')).map((f) => relative(root, f))) {
     const text = readFileSync(join(root, file), 'utf8')
     if (!file.endsWith('.js')) continue
-    for (const [, , , path] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(file), `${path}.ts`)); if (!modules.has(to)) { modules.add(to); kitTodo.push(to) } }
+    for (const [, , , path, ext] of text.matchAll(NAMED)) { const to = relative(root, resolve(root, dirname(file), `${path}.${ext}`)); if (!modules.has(to)) { modules.add(to); kitTodo.push(to) } }
     put(file, js(text))
   }
   while (kitTodo.length) {
     const path = kitTodo.pop(), text = stripTypeScriptTypes(readFileSync(join(root, path), 'utf8'))
-    for (const [, , , to] of text.matchAll(NAMED)) { const next = relative(root, resolve(root, dirname(path), `${to}.ts`)); if (!modules.has(next)) { modules.add(next); kitTodo.push(next) } }
+    for (const [, , , to, ext] of text.matchAll(NAMED)) { const next = relative(root, resolve(root, dirname(path), `${to}.${ext}`)); if (!modules.has(next)) { modules.add(next); kitTodo.push(next) } }
     put(path.replace(/\.ts$/, '.js'), js(text))
   }
   // The stylesheet as it is, and each font file it names beside it (with Plex's OFL.txt).
@@ -202,6 +206,25 @@ for (const k of realm.kept ?? []) {
   mkdirSync(dirname(join(out, 'sf', k.file)), { recursive: true })
   const kept = spawnSync(process.execPath, [join(root, 'sf/kept.mjs'), arg('car', join(SHELF, '1cb43f52cfc96e74e974e0a7.json')), join(out, 'sf', k.file), '--name', 'grey saloon'], { encoding: 'utf8' })
   if (kept.status !== 0) fail(kept.stderr)
+}
+
+// ── The shelf (#526, page/maker.ts): what came with the engine (make/kept), made in the page from its cells with no
+// model where the realm's rules let a visitor make things. An index the word rule reads (make/meant.mjs), and a file a
+// thing, fetched only once the bar is used. Not the asker's own shelf on this machine (~/.village/engine/library):
+// what came with the engine only. Each is kept as cells (`made`): a page runs no program, so one without is no use.
+// What a thing is called is what it is (a market stall, a saloon car): a make's name is a trademark, and a shelf for
+// visitors names none (sf/kept.mjs).
+if (realm.rules?.making) {
+  const { library } = await import('../make/library.mjs')
+  const entries = await library(join(out, '.no-shelf'), [join(root, 'make', 'kept')]).all()
+  const index = []
+  for (const e of entries.sort((a, b) => a.id.localeCompare(b.id))) {
+    if (!e.made) fail(`make/kept/${basename(e.file)} has no cells (made): a page cannot make it`)
+    index.push({ id: e.id, wish: e.wish, words: e.words, name: e.name, apart: e.apart ?? '', fields: e.fields ?? [] })
+    put(`sf/shelf/${e.id}.json`, JSON.stringify({ wish: e.wish, words: e.words, name: e.name, apart: e.apart ?? '', fields: e.fields ?? [], form: e.form, made: e.made, proved: e.proved }))
+  }
+  put('sf/shelf/index.json', JSON.stringify(index))
+  console.log(`  the shelf: ${index.length} kept things (${index.map((e) => e.name).join(', ')})`)
 }
 
 // ── Street life (#450, page/street.ts) not in the release: each square's graph (sf/life.py) and the kept vehicles (sf/cars.mjs) ──

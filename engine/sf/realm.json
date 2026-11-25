@@ -22,7 +22,8 @@
     "fov": 47
   },
   "rules": {
-    "models": false
+    "models": false,
+    "making": "preview"
   },
   "kept": [
     {

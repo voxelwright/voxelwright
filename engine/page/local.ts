@@ -15,6 +15,12 @@ export interface Rules {
    * helper (ask.ts) and shows no bar to type a wish on. Stage 2 of #450 turns it on for the realm's admin.
    */
   models: boolean
+  /**
+   * Whether a visitor here may make things in the page itself (#526, page/maker.ts): from what is kept, and with a model
+   * another lane connects (`engine.making.model`). No helper and no world's server: only this page's own world. Absent
+   * or false: off. `"preview"`: on only where the address has `?making=1`. True: on. It says nothing of `models`.
+   */
+  making?: boolean | 'preview'
 }
 
 export interface Local extends Realm {
@@ -50,7 +56,7 @@ export interface Local extends Realm {
 }
 
 /** Rules where a page is in no local realm: as the engine's page always was. */
-const OPEN: Rules = { models: true }
+const OPEN: Rules = { models: true, making: false }
 
 function read(): Local | null {
   // A worker has no page: it is told what it needs in its own address (bay.ts `BAY`).
@@ -58,7 +64,7 @@ function read(): Local | null {
   if (!tag?.textContent) return null
   const realm = JSON.parse(tag.textContent) as Local
   // Rules left unsaid are off: a realm turns on what it allows.
-  realm.rules = { models: realm.rules?.models === true }
+  realm.rules = { models: realm.rules?.models === true, making: realm.rules?.making === true ? true : realm.rules?.making === 'preview' ? 'preview' : false }
   return realm
 }
 
@@ -66,3 +72,5 @@ function read(): Local | null {
 export const LOCAL: Local | null = read()
 /** What this page may do: the local realm's rules, or everything. */
 export const RULES: Rules = LOCAL?.rules ?? OPEN
+/** Whether this page makes things itself (`Rules.making`): the one place the address is read for it, and only for a preview. */
+export const MAKING = RULES.making === true || (RULES.making === 'preview' && typeof location !== 'undefined' && new URLSearchParams(location.search).get('making') === '1')

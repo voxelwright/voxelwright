@@ -79,10 +79,14 @@ export function paletted(palette) {
   return kinds
 }
 
+/** Base64 to bytes and back, in Node as Buffer does it and in a page (page/maker.ts) by the browser's own. */
+const unbased = (text) => { if (typeof Buffer !== 'undefined') return Buffer.from(text, 'base64'); try { return Uint8Array.from(atob(text), (c) => c.charCodeAt(0)) } catch { no('runs is base64 text') } }
+const based = (bytes) => { if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64'); let out = ''; for (let i = 0; i < bytes.length; i += 0x8000) out += String.fromCharCode(...bytes.slice(i, i + 0x8000)); return btoa(out) }
+
 /** `runs` (base64 of LEB128 counts and pairs) as `n` kinds of a palette (`paletted`). Throws `Refused` if they do not fit. */
 export function unrun(runs, n, kinds) {
   if (typeof runs !== 'string' || runs.length > RUNS_MOST || !/^[A-Za-z0-9+/]*={0,2}$/.test(runs)) no('runs is base64 text')
-  const all = new Uint16Array(n), bytes = Buffer.from(runs, 'base64')
+  const all = new Uint16Array(n), bytes = unbased(runs)
   let at = 0, k = 0
   const number = () => { let v = 0, shift = 0; for (;;) { if (at >= bytes.length || shift > 28) no('the runs end in the middle of a number'); const b = bytes[at++]; v += (b & 127) * 2 ** shift; if (b < 128) return v; shift += 7 } }
   while (at < bytes.length) {
@@ -174,5 +178,5 @@ export function ran(cells) {
     put(end - k); put(v)
     k = end
   }
-  return { palette, runs: Buffer.from(bytes).toString('base64') }
+  return { palette, runs: based(bytes) }
 }

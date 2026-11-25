@@ -19,7 +19,7 @@ import { library, recalled } from '../make/library.mjs'
 import { BRIEF } from '../make/brief.mjs'
 import { ROWS_MOST, read, rows as formRows } from '../make/form.mjs'
 import { reply } from '../make/model.mjs'
-import { at, send } from '../make/place.mjs'
+import { at, send } from '../make/served.mjs'
 import { serve } from './kit.mjs'
 
 const failures = []
