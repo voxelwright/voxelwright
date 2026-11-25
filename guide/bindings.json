@@ -169,6 +169,7 @@
   },
   "engine/bay/README.md": {
     "engine/bay/run-city.sh": "lines:^(case |start[^)]*\\)|status\\)|\\*\\) echo \"usage:)",
+    "engine/bay/street_inputs.py": "lines:add_argument",
     "engine/bay/full_run.py": "lines:add_argument"
   },
   "engine/kit/README.md": {
@@ -374,6 +375,7 @@
   },
   "guide/city-pipeline.md": {
     "engine/bay/fetch.py": "lines:^(EPT|DEM|NAIP|SF|LAYERS) =",
+    "engine/bay/street_inputs.py": "lines:add_argument",
     "engine/bay/full_run.py": "lines:add_argument|^def (build|verify|plan)\\(",
     "engine/bay/tiles.py": "lines:^level [0-9]",
     "engine/sf/release.py": "lines:cli.add_argument|from panel_gate import check|panel-floors.json",

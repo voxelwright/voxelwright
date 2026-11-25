@@ -274,10 +274,10 @@ def public_works(name, dest):
 if __name__ == "__main__":
     import argparse
     import sys
-    from street_inputs import sidecars
+    from street_inputs import fixture_option, sidecars
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--public-works-fixtures", action="store_true")
+    fixture_option(parser)
     parser.add_argument("destination", type=Path)
     parser.add_argument("archives", type=Path, nargs="+")
     args = parser.parse_args()

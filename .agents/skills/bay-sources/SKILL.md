@@ -19,6 +19,10 @@ Rules that hold for all of it:
   one account so far (below). A key lives under `~/.village/engine/bay/keys/`, never in git, a page or a log.
 - The world holds real streets, names and addresses. It never says whose home a house is.
 
+## Street fixtures
+
+The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 27, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. See the [source checks](../../../DATA-LICENSES.md).
+
 ## Used in the first slice (no key, no share-alike)
 
 | Source | Holds | Fetch | Licence |

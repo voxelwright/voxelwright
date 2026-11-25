@@ -6,7 +6,7 @@ Walk San Francisco in a WebGPU browser. Install Node.js 25 or newer and stable R
 ./world
 ```
 
-Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The city downloads as a pinned bundle with [per-layer data licences](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers the release mirror needed before public cutover and running in a Dev Container.
+Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The pinned city includes street lamps and trolley wires mapped by San Francisco Public Works. See the [sources and licence records](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers the release mirror needed before public cutover and running in a Dev Container.
 
 ## Layout
 

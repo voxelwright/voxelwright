@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
+import { releaseCredits } from '../page/release-credits.ts'
 import { seated } from './boards.mjs'
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)))
@@ -228,7 +229,7 @@ if (realm.street && !(manifest.life && manifest.cars) && !streetManifest) {
 
 // ── Whose data it is: shown on the page by bay.ts from the manifest, and written beside it ──
 put('sf/CREDITS.txt', [
-  ...manifest.credits,
+  ...releaseCredits(pointer.release, manifest.credits),
   ...(manifest.attribution?.path === 'attribution.txt' ? [readFileSync(join(out, 'sf', dirname(pointer.manifest), 'attribution.txt'), 'utf8')] : []),
   ...(farApart ? [`The far model (sf/far.json, far/): ${JSON.parse(readFileSync(join(farFrom, 'far.json'), 'utf8')).credit}.`] : []),
   ...(EGG_VIDEOS.length ? ['', 'The eggs\' videos and music (sf/eggs/), used as parody on the owner\'s ruling, for these eggs only: "Never Gonna Give You Up", Rick Astley (1987), Stock Aitken Waterman, RCA Records / Sony Music, video by Simon West; "Bad Apple!! feat. nomico", Alstroemeria Records (Masayoshi Minoshima, after ZUN), shadow-art PV by Anira; music from the soundtrack of "The Matrix" (1999, the Wachowskis, Warner Bros.), as WMG / The Orchard Music. The meme clips, each as its uploader posted it on YouTube, its rights its makers\': ' + MEMES.filter((m) => EGG_VIDEOS.includes(`${m.id}.mp4`)).map((m) => `"${m.source}" (${m.by}, youtu.be/${m.youtube})`).join('; ') + '.'] : []),

@@ -175,6 +175,9 @@ def generate(
     index = json.loads((packs / "tiles/index.json").read_text())
     state = json.loads((root / "state.json").read_text())
     verified = {k: v for task in state["done"].values() for k, v in task.items()}
+    credits = list(CREDITS)
+    if any(path.endswith(".fixtures.json.gz") for path in verified):
+        credits.append("Street lamps and trolley wires: San Francisco Public Works")
     files = {}
     verified_files = {}
 
@@ -263,7 +266,7 @@ def generate(
         "frame": "10n4250",
         "levels": levels,
         "names": names,
-        "credits": CREDITS,
+        "credits": credits,
     }
     if graph_dir or (packs / "graph").is_dir():
         source = graph_dir or packs / "graph"
@@ -305,7 +308,7 @@ def generate(
                 ):
                     raise ValueError(f"invalid far object: {path}")
         if far.get("credit"):
-            inventory["credits"] = [*CREDITS, far["credit"]]
+            inventory["credits"] = [*credits, far["credit"]]
         inventory["far"] = far
     manifest = encode(inventory)
     digest = hashlib.sha256(manifest).hexdigest()

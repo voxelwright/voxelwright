@@ -449,7 +449,7 @@ def streets(sq, network, stats):
     sq.cls[stripes] |= 32
 
 
-def apply(path, archive, sidecar, graph, stage=5, public_works_fixtures=False):
+def apply(path, archive, sidecar, graph, stage=5, *, public_works_fixtures):
     sq = Square(path)
     stats = Counter()
     with zipfile.ZipFile(archive) as src, gzip.open(sidecar) as observations:

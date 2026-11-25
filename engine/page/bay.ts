@@ -2,6 +2,7 @@
 // page server holds (`/bay/<square>.bay`, baked by engine/bay/bake.py; the core's bay.rs reads them). Every core
 // that makes or asks about the world (this page's, each maker of sectors, the mover) must hold the same packs
 // before it is asked anything, so each opens its core through `open`.
+import { releaseCredits } from './release-credits.ts'
 import { LOCAL } from './local.ts'
 
 /** The squares baked first, whole: what `?bay=551.7_4183.5,550.7_4183.5` names, as the first slice was measured. */
@@ -189,7 +190,7 @@ async function released(pointer: URL): Promise<Source> {
     // Water, in the sea list or past what the release holds: nothing is asked.
     find: (level, key) => { const r = levels[level]?.tiles[key]; if (r) return { url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256, listed: true }; if (sea[level]?.has(key)) seaKeys++; else unlisted++; return null },
     names: Object.values(manifest.names).map((r) => ({ url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256 })),
-    credits: manifest.credits,
+    credits: releaseCredits(at.release, manifest.credits),
     release: at.release,
     manifest: where.href,
     far: !!manifest.far,
