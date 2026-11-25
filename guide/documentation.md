@@ -17,6 +17,8 @@ Add a page to [bindings.json](bindings.json). Each key below the page names a so
 | `checks` | Names, default CI eligibility and required files from the check manifest. |
 | `file` | The complete contents. Reserve this for a small contract, fixture or other source where every edit merits review. |
 
+To show a TypeScript schema in a hand-written page, put `<!-- schema PATH Name,Name -->` on the line before a `ts` fence. The gate prints the named exported interfaces and type aliases from `PATH` into that fence when the page is verified, and fails the page when the fence differs from the source. Bind the same declarations with `types:Name,Name` so the stamp moves with them.
+
 Use the source of the claim. A directory's modification history makes a poor signal for a single command. When adding prose, check whether its bindings would notice the change that would make that prose false. Generate lists and signatures when a source already enumerates them. The generators live in [scripts/docs.mjs](../scripts/docs.mjs).
 
 ## Check what a page mentions
@@ -34,4 +36,4 @@ For a historical source, example filename, external package or private output th
 
 A green check establishes agreement with the selected source. It cannot tell whether a paragraph accurately explains intent, whether every claim has a binding, or whether an external deployment works. For behavior a reader relies on, add a small runnable example beside the prose, as in [Drawing from a page plugin](render-passes.md). For intent, ask the reviewer to read the claim against the change.
 
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"scripts/docs.mjs":"29c29b9fc701992e205a83ae66db5d4f"} -->
+<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"scripts/docs.mjs":"6d91a12d166c367ec6367dcab0733ac1"} -->

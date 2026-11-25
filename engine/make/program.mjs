@@ -7,8 +7,8 @@
 // It fills a grid of its own inside the interpreter and one string comes out: the grid as runs, with the names of
 // the materials and colours it used. That string is data, read here as any reply is (form.mjs): a kind is built
 // from a named material and a named colour, never taken as a number. What holds a program: a memory of its own
-// with a maximum (the platform refuses to grow it), a count of the interpreter's steps, and a clock that ends the
-// whole thread (what the count does not see: a native fill, a regex).
+// with a maximum (the platform refuses to grow it), a deadline its interrupt handler checks (RUN_MS), and a clock that ends the
+// whole thread (what the handler does not see: a native fill, a regex).
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
 import { FONT, MATERIALS, colour, drivesOf } from './form.mjs'

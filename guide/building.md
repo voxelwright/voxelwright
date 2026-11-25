@@ -1,0 +1,66 @@
+# How the project is built
+
+AI agents write most of this repository. One lead agent decides what to build, splits the work, starts a builder agent for each unit and merges the results. The owner sets direction and judges the results by looking and listening. This page describes that process, the checks a change must pass, and how documentation stays true to the code. The rules themselves are in [AGENTS.md](../AGENTS.md), which wins where this page and it disagree.
+
+## Concepts
+
+- **Lead.** The agent that routes work. It follows the playbook in `.agents/skills/lead-orchestration/SKILL.md`: take stock, split work by file, write a brief, land, look closely at the output.
+- **Builder.** An agent given one unit of work, in its own git worktree and its own feature branch, with a stop condition and a time box.
+- **Brief.** The builder's only context: repository, branch, current state with numbers, numbered tasks, the commands that prove the work, files that are off limits and a reply format.
+- **Skill.** A versioned `SKILL.md` under `.agents/skills/<name>/` that holds what was learned about one technology or practice, from primary sources and short experiments. A new dependency needs one (`.agents/skills/technology-grounding`). An agent loads the skill for the area it changes before changing it.
+- **Dispatch log.** `.agents/dispatch-log.jsonl`, one JSON line per agent started, with its role, issue, task, provider and model. `.claude/hooks/dispatch-log.mjs` appends a row for each T3 delegation. It is the first dataset for routing work to models.
+- **Gate.** What must pass before a change lands: the changed flow run by hand, its own tests, and `npm run check -- --ci --webgl` on the branch merged with main.
+
+## A change, from issue to main
+
+```mermaid
+flowchart LR
+  Issue["GitHub issue #N"] --> Branch["feature/N-name<br/>own worktree"]
+  Branch --> Commits["commits '[#N] change'"]
+  Commits --> Proof["changed flow + its tests<br/>+ npm run check -- --ci --webgl"]
+  Proof --> PR["pull request<br/>result lines in the body"]
+  PR --> Merge["lead reads the diff against main<br/>and merges"]
+```
+
+1. Work is tracked in a GitHub issue. The branch is `feature/<issue>-<name>`. Commit subjects are `[#<issue>] <change>`.
+2. Run the flow you changed, then its own tests. Each part has its own: `npm run check` in `engine/` (core tests, types and page checks in Chrome), `npm test` in `site/`, the Python tests in `engine/bay`.
+3. Merge current main into the branch and run the root gate from the repository root: `npm run check -- --ci --webgl --timeout 240`. Put its result line in the pull request.
+4. GitHub's check workflows are turned off until the public cutover (#534). The run on the owner's Mac is the gate.
+5. Reviews are a tool, not a gate. Run `.agents/skills/adversarial-review` when you expect it to find something: a change you cannot fully test, a format others will build on, anything that touches real people's data.
+
+A mocked provider or a saved model reply proves the pipeline, never a model integration. Say which one you ran.
+
+## The root check runner
+
+`scripts/check.mjs` runs the checks listed in `scripts/checks.mjs` with free ports and one shared dev server, at most four at a time. `--ci` skips checks marked local-only, and `--webgl` runs Chrome with software WebGL2. Logs are written to `.check/<name>.log`. [Repository checks](checks.md) lists every check and [Check runner](check-cli.md) its options; both pages are generated from those files.
+
+## The documentation gate
+
+Every guide page, README and skill is bound in `guide/bindings.json` to the source surfaces that would make it false. `node scripts/docs.mjs` (also the `docs` check) hashes each surface and compares it with the stamp at the bottom of the page. A changed surface turns the page red until someone reads the change and re-verifies the page in the same pull request. The gate also checks that every path, link, command and flag a page mentions exists. A hand-written page can show a TypeScript schema printed from source with a `<!-- schema PATH Name -->` marker. See [Keeping a page current](documentation.md).
+
+The gate proves agreement with the bound surface. It does not prove that a sentence explains the code well. For behaviour a reader relies on, a page can carry a runnable example, as [Drawing from a page plugin](render-passes.md) does.
+
+## The first hour
+
+For a person:
+
+1. Run `./world` from the repository root ([Walk San Francisco](quickstart.md)).
+2. Read the [project map](project.md), then the page for the part you will change: [the engine](engine.md), [worlds as cells](cells.md), [the city pipeline](city-pipeline.md), [making](making.md) or [the kit](kit.md).
+3. Read that part's README for commands, and its skill under `.agents/skills` for what was learned the hard way.
+
+For an agent, before changing code:
+
+1. Read [AGENTS.md](../AGENTS.md). Read [DESIGN.md](../DESIGN.md) before UI work.
+2. Read the guide page for the part and its bound sources. The bindings in `guide/bindings.json` show which files the page's claims rest on.
+3. Load the skill for the technology you touch, and check its facts against the code. A skill records what was true when it was verified.
+4. Make the change with its docs in the same pull request. Run `node scripts/docs.mjs`. If a page you did not expect turns red, the change made a claim false: fix the page or the change.
+
+## Check a change to this process
+
+```sh
+node scripts/docs.mjs                       # every page against its sources
+node scripts/docs.mjs mentions              # paths, links and commands only
+npm run check -- --list                     # every check and whether CI runs it
+```
+
+<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"AGENTS.md":"10566cbd5f062caa13532abb033b7c43","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->

@@ -49,15 +49,7 @@ async function project(file, selector) {
   }
   const source = read(file)
   if (selector === 'types' || selector.startsWith?.('types:')) {
-    const names = selector === 'types' ? null : selector.slice(6).split(',')
-    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
-    if (tree.parseDiagnostics.length) throw Error('TypeScript parse failed')
-    const printer = ts.createPrinter({removeComments: true})
-    const declarations = tree.statements.filter(s => s.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
-      && (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s)))
-      .filter(s => !names || names.includes(s.name.text))
-    if (names && declarations.length !== names.length) throw Error('missing named type in ' + selector)
-    return declarations.map(s => printer.printNode(ts.EmitHint.Unspecified, s, tree))
+    return declarations(file, source, selector === 'types' ? null : selector.slice(6).split(','))
   }
   if (Array.isArray(selector)) {
     const json = JSON.parse(source)
@@ -73,6 +65,23 @@ async function project(file, selector) {
   if (!lines.length) throw Error(`no lines match ${pattern}`)
   return lines
 }
+
+function declarations(file, source, names) {
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true)
+  if (tree.parseDiagnostics.length) throw Error('TypeScript parse failed')
+  const printer = ts.createPrinter({removeComments: true})
+  const found = tree.statements.filter(s => s.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+    && (ts.isInterfaceDeclaration(s) || ts.isTypeAliasDeclaration(s)))
+    .filter(s => !names || names.includes(s.name.text))
+  if (names && found.length !== names.length) throw Error(`missing named type in ${file}: ${names.join(',')}`)
+  return found.map(s => printer.printNode(ts.EmitHint.Unspecified, s, tree))
+}
+
+// A hand-written page shows a schema as the source declares it: the ts fence after
+// `<!-- schema PATH Name,Name -->` is printed from those exported declarations.
+const schema = /^<!-- schema (\S+) ([\w,]+) -->\n```ts\n[\s\S]*?^```$/gm
+const schemas = body => body.replace(schema, (_, file, names) =>
+  `<!-- schema ${file} ${names} -->\n\`\`\`ts\n${declarations(file, read(file), names.split(',')).join('\n\n')}\n\`\`\``)
 
 function inventory() {
   const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', 'guide/*.md').split('\n')
@@ -159,6 +168,11 @@ async function checkPage(page) {
     assert.equal(values.length, 1, 'a reference page has one source')
     body = generate(values[0]).join('\n')
   } else if (!body.trim()) reasons.push('page missing or empty')
+  else try {
+    const printed = schemas(body)
+    if (printed !== body && !action) reasons.push('a schema differs from its source declaration')
+    body = printed
+  } catch (e) { reasons.push(`schema: ${e.message}`) }
   reasons.push(...mentions(page, body, undefined, ignores[page]))
   try { await example(page, body) } catch (e) { reasons.push(`example failed: ${e.message}`) }
   const base = action && (!stamp?.[1] || changed.length) ? git('rev-parse', 'HEAD') : stamp?.[1]

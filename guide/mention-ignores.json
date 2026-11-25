@@ -173,5 +173,24 @@
   },
   "street/README.md": {
     "src/sim.ts": "Historical benchmark for the removed bare solver."
+  },
+  "guide/engine.md": {
+    "page/core.wasm": "Build output of npm run core in engine/."
+  },
+  "guide/engine-core.md": {
+    "engine/page/core.wasm": "Build output of npm run core in engine/."
+  },
+  "guide/city-pipeline.md": {
+    "sf/current.json": "A staged release's pointer, written under ~/.village by engine/sf/release.py.",
+    "engine/dist-sf": "Build output of engine/sf/build.mjs.",
+    "OUT/current.json": "Placeholder for the release output directory.",
+    "state.json": "The city job's checkpoint under ~/.village/engine/bay."
+  },
+  "guide/kit.md": {
+    "./kit/src/index.js": "Example import path on a page that serves the kit under kit/.",
+    "browser/kit/src/index.js": "Package path written by browser.mjs at npm prepare, not in git.",
+    "./browser": "Package export subpath in engine/kit/package.json.",
+    "./voxelmorphism.css": "Package export subpath in engine/kit/package.json.",
+    "vendor/village/": "Site build output under the site's output folder."
   }
 }
