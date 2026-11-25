@@ -39,6 +39,9 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
   the seven-lens `.agents/skills/reviewers` when you expect it to find
   something: a change you cannot fully test, a format others will build on, or
   anything that handles real people's data.
+- GitHub's check workflows are off until the public cutover (#534). The run on
+  the Mac is the gate: `npm run check -- --ci --webgl` on the branch merged
+  with main, at the least. Put the result line in the PR.
 - Prefer shipping to main and fixing forward over long-lived branches. Keep
   main's checks green and a change easy to undo.
 - Tilt is optional. Use the shortest repeatable local proof.

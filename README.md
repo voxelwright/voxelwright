@@ -79,11 +79,14 @@ skipped and why) are the one place to look. Perf gates (`npm run perf-gate` in `
 Checks write pictures and clips under `home/screenshots/`, which git ignores; only the notes there
 (`*.md`) are tracked.
 
-GitHub Actions (`.github/workflows/check.yml`) runs `npm run check -- --ci --webgl` on pull
-requests to `main` and pushes to `main`, on `ubuntu-latest`: both typechecks, the home build, the host's
-villager and plan tests, the route check and the one page check (babble) that passes reliably in software WebGL2. It does not
-run the other page checks (too slow or past their time bounds without a GPU), the host regressions
-(macOS sandbox), the perf gates or anything with a model. Those run on your Mac.
+GitHub's check workflows (`check.yml`, `master.yml`) are switched off until the public cutover (#534):
+the private repo ran out of included minutes, and a public repo's standard runners cost nothing. Until then the
+Mac is the gate. Before a merge, run `npm run check -- --ci --webgl` on the branch merged with `main`. That
+is the set GitHub ran, about 40 seconds here: both typechecks, the home build, the host's villager and plan
+tests, the route check and the babble page check. Run the fuller `npm run check` for what the change
+touches, and `cargo fmt --check`, `cargo clippy` and `cargo test` in `master/` when it changes. The
+workflow files stay as they are, so the new repo starts with them on; `gh workflow enable check.yml` turns
+one back on here. `deploy.yml` is still on.
 
 ## Machine hygiene
 
