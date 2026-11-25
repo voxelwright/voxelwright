@@ -3,9 +3,8 @@ the top of validate.py, and written to kept.json with the reason for each.
 
     uv run python keep.py <damage.json> <people.json>
 """
-import json, os, sys
+import json, sys
 import score as S
-HERE = os.path.dirname(os.path.abspath(__file__))
 dmg = json.load(open(sys.argv[1])); ppl = json.load(open(sys.argv[2]))
 kinds = ["music", "oneshot", "bed", "instrument"]
 hard = {k for k, *_ in S.HARD}
@@ -41,7 +40,8 @@ for m in allm:
         if soft: out["advisory"][m] = {"for": soft, "why": said}
     elif soft: out["advisory"][m] = {"for": soft, "why": said}
     else: out["dropped"][m] = said
-json.dump(out, open(os.path.join(HERE, "kept.json"), "w"), indent=1)
+S.MUSICEVAL.mkdir(parents=True, exist_ok=True)
+json.dump(out, open(S.MUSICEVAL / "kept.json", "w"), indent=1)
 for part in ("hard", "kept", "advisory", "dropped"):
     print(f"\n{part.upper()} ({len(out[part])})")
     for m, v in out[part].items(): print(f"  {m:14s} {('[' + ','.join(v['for']) + '] ' + v['why']) if isinstance(v, dict) else v}"[:230])

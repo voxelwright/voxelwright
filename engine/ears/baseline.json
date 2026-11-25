@@ -1,0 +1,475 @@
+{
+ "step-hard": {
+  "score": 81.2,
+  "out": [
+   "plr",
+   "bass",
+   "rough",
+   "beats",
+   "floor",
+   "flutter",
+   "len40_ms",
+   "bright_fall",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "step-soft": {
+  "score": 81.6,
+  "out": [
+   "plr",
+   "rough",
+   "beats",
+   "floor",
+   "flutter",
+   "len40_ms",
+   "bright_fall",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "step-loose": {
+  "score": 83.1,
+  "out": [
+   "plr",
+   "sharp",
+   "rough",
+   "beats",
+   "floor",
+   "flutter",
+   "len40_ms",
+   "bright_fall",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "hit-wood": {
+  "score": 88.9,
+  "out": [
+   "mud",
+   "rough",
+   "beats",
+   "flutter"
+  ],
+  "hard": []
+ },
+ "hit-steel": {
+  "score": 95.3,
+  "out": [
+   "mud",
+   "beats",
+   "len20_ms"
+  ],
+  "hard": []
+ },
+ "hit-glass": {
+  "score": 90.9,
+  "out": [
+   "rough",
+   "beats"
+  ],
+  "hard": []
+ },
+ "hit-brick": {
+  "score": 87.4,
+  "out": [
+   "mud",
+   "rough",
+   "beats",
+   "floor",
+   "flutter",
+   "parts",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "hit-earth": {
+  "score": 99.6,
+  "out": [
+   "bright_fall",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "hit-concrete": {
+  "score": 89.8,
+  "out": [
+   "rough",
+   "beats",
+   "crest",
+   "floor"
+  ],
+  "hard": []
+ },
+ "break-glass": {
+  "score": 85.9,
+  "out": [
+   "rough",
+   "beats",
+   "bright",
+   "parts",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "break-brick": {
+  "score": 85.5,
+  "out": [
+   "rough",
+   "beats",
+   "len20_ms",
+   "len40_ms",
+   "parts"
+  ],
+  "hard": []
+ },
+ "break-wood": {
+  "score": 89.6,
+  "out": [
+   "rough",
+   "beats",
+   "floor",
+   "attack_ms"
+  ],
+  "hard": []
+ },
+ "blast-near": {
+  "score": 75.4,
+  "out": [
+   "tilt",
+   "air",
+   "sharp",
+   "floor",
+   "len20_ms",
+   "len40_ms",
+   "bright",
+   "parts",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "like-bell": {
+  "score": 88.8,
+  "out": [
+   "len20_ms",
+   "len40_ms",
+   "body"
+  ],
+  "hard": []
+ },
+ "like-drum": {
+  "score": 89.5,
+  "out": [
+   "tilt",
+   "rough",
+   "beats"
+  ],
+  "hard": []
+ },
+ "like-clang": {
+  "score": 95.8,
+  "out": [
+   "beats"
+  ],
+  "hard": []
+ },
+ "like-knock": {
+  "score": 99.9,
+  "out": [
+   "mud"
+  ],
+  "hard": []
+ },
+ "like-shot": {
+  "score": 74.6,
+  "out": [
+   "tilt",
+   "air",
+   "sharp",
+   "rough",
+   "beats",
+   "floor",
+   "bright",
+   "body",
+   "parts",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "like-cheer": {
+  "score": 83.5,
+  "out": [
+   "rough",
+   "attack_ms",
+   "len20_ms",
+   "len40_ms",
+   "parts"
+  ],
+  "hard": []
+ },
+ "like-whoosh": {
+  "score": 92.7,
+  "out": [
+   "beats",
+   "parts"
+  ],
+  "hard": []
+ },
+ "like-splash": {
+  "score": 86.6,
+  "out": [
+   "rough",
+   "beats",
+   "floor",
+   "len20_ms",
+   "parts",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "like-clap": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "like-pipe": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "like-horn": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "like-whistle": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "like-engine": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "tool-cutter": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "bed-rain": {
+  "score": 87.3,
+  "out": [
+   "lra",
+   "rough",
+   "beats",
+   "swell"
+  ],
+  "hard": []
+ },
+ "bed-wind": {
+  "score": 98.8,
+  "out": [
+   "beats",
+   "flutter",
+   "events"
+  ],
+  "hard": []
+ },
+ "bed-fire": {
+  "score": 98.6,
+  "out": [
+   "lra",
+   "mud",
+   "events"
+  ],
+  "hard": []
+ },
+ "bed-surf": {
+  "score": 97.9,
+  "out": [
+   "rough",
+   "beats",
+   "flutter",
+   "events"
+  ],
+  "hard": []
+ },
+ "bed-undersea": {
+  "score": 87.7,
+  "out": [
+   "lra",
+   "rough",
+   "beats",
+   "floor",
+   "events",
+   "swell"
+  ],
+  "hard": []
+ },
+ "play-piano": {
+  "score": 95.1,
+  "out": [
+   "rough",
+   "floor",
+   "attack_ms",
+   "body",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "play-guitar": {
+  "score": 97,
+  "out": [
+   "rough",
+   "floor",
+   "attack_ms",
+   "noisy"
+  ],
+  "hard": []
+ },
+ "play-ocarina": {
+  "score": 89.2,
+  "out": [
+   "plr",
+   "beats",
+   "crest",
+   "flutter",
+   "body",
+   "parts"
+  ],
+  "hard": []
+ },
+ "music-town-a": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "music-town-b": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "music-coast-a": {
+  "score": 99.6,
+  "out": [
+   "flutter",
+   "sameness"
+  ],
+  "hard": []
+ },
+ "music-coast-b": {
+  "score": 99.5,
+  "out": [
+   "flutter",
+   "key_clarity",
+   "sameness"
+  ],
+  "hard": []
+ },
+ "music-sea-a": {
+  "score": 99.7,
+  "out": [
+   "onsets"
+  ],
+  "hard": []
+ },
+ "music-sea-b": {
+  "score": 99.7,
+  "out": [
+   "onsets"
+  ],
+  "hard": []
+ },
+ "music-snow-a": {
+  "score": 99.5,
+  "out": [
+   "flutter",
+   "onsets"
+  ],
+  "hard": []
+ },
+ "music-snow-b": {
+  "score": 99.5,
+  "out": [
+   "flutter",
+   "onsets"
+  ],
+  "hard": []
+ },
+ "music-night-a": {
+  "score": 99.7,
+  "out": [
+   "flutter"
+  ],
+  "hard": []
+ },
+ "music-night-b": {
+  "score": 99.5,
+  "out": [
+   "flutter",
+   "key_clarity"
+  ],
+  "hard": []
+ },
+ "music-danger-a": {
+  "score": 99.3,
+  "out": [
+   "mud",
+   "flutter"
+  ],
+  "hard": []
+ },
+ "music-danger-b": {
+  "score": 99.1,
+  "out": [
+   "mud",
+   "rough",
+   "flutter"
+  ],
+  "hard": []
+ },
+ "music-making-a": {
+  "score": 99.1,
+  "out": [
+   "flutter",
+   "moves",
+   "sameness"
+  ],
+  "hard": []
+ },
+ "music-making-b": {
+  "score": 99.8,
+  "out": [
+   "comes_back"
+  ],
+  "hard": []
+ },
+ "music-realm-phrygian": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "music-town-to-coast": {
+  "score": 99.7,
+  "out": [
+   "flutter"
+  ],
+  "hard": []
+ },
+ "mix-town-walk": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "mix-night-rain": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ },
+ "mix-danger-blasts": {
+  "score": 100,
+  "out": [],
+  "hard": []
+ }
+}

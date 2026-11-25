@@ -8,8 +8,11 @@ which is in the repo: the checks need no reference audio.
     uv run python score.py ranges <refs folder>                 # writes ranges.json from measures.json and SOURCES.tsv
     uv run python score.py clips <folder> [--json out.json]     # scores a measured folder; prints the table and the faults
 """
-import argparse, csv, json, os, sys
+import argparse, csv, json, os
 import numpy as np
+from pathlib import Path
+
+MUSICEVAL = Path.home() / ".village/engine/ears/musiceval"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -92,10 +95,6 @@ def group_of(name, kind, cat=""):
 
 def ranges_from(refs):
     rows = json.load(open(os.path.join(refs, "measures.json")))
-    if os.path.exists(os.path.join(HERE, "people-model.json")):
-        import people
-        for m in rows.values():
-            if m.get("kind") == "music" and "pulse" in m: m["people"] = round(people.predict(m), 2)
     cats = {r["path"]: r["kind"] for r in csv.DictReader(open(os.path.join(refs, "SOURCES.tsv")), delimiter="\t")}
     groups = {}
     for name, m in rows.items():
@@ -108,17 +107,12 @@ def ranges_from(refs):
     out = {}
     for g, ms in groups.items():
         out[g] = {"n": len(ms)}
-        for k in sorted({k for m in ms for k in m if k != "kind"}):
+        for k in sorted({k for m in ms for k in m if k not in ("kind", "people")}):
             v = np.array([m[k] for m in ms if k in m and isinstance(m[k], (int, float))], dtype=float)
             if len(v) < 3: continue
             lo, hi = (np.percentile(v, 5), np.percentile(v, 95)) if len(v) >= 8 else (v.min(), v.max())
             out[g][k] = [round(float(lo), 4), round(float(hi), 4), round(float(np.median(v)), 4)]
     return out
-
-
-def kept():
-    p = os.path.join(HERE, "kept.json")
-    return json.load(open(p)) if os.path.exists(p) else None
 
 
 AS = {"tone": "instrument", "mix": "music"}
@@ -131,7 +125,7 @@ def score_clip(name, m, ranges, keep=None, group=None):
     R = ranges.get(g) or ranges["oneshot"]
     costs, faults, notes, used = {}, [], [], []
     m = dict(m)
-    if kind == "music" and "pulse" in m:  # fitted to music alone: a mix with rain and blasts over it is not what was rated
+    if keep is not None and kind == "music" and "pulse" in m:  # fitted to music alone: a mix with rain and blasts over it is not what was rated
         import people
         m["people"] = round(people.predict(m), 2)
     for k in APPLIES.get(kind, []) + (["people"] if "people" in m else []):
@@ -154,16 +148,15 @@ def score_clip(name, m, ranges, keep=None, group=None):
             elif word: notes.append(line)
     hard = []
     for k, limit, side, word in HARD:
-        if keep is not None and k not in keep["hard"]: continue
+        if k not in (keep["hard"] if keep is not None else ("clip_ppm", "dc", "heard_median")): continue
         if k in m and ((side == "over" and m[k] > limit) or (side == "under" and m[k] < limit)):
             hard.append(f"{word} ({k} {m[k]:.2f}, limit {limit})")
     s = 100 * (1 - sum(costs.values()) / max(1, len(used))) - 25 * len(hard)
     return {"score": round(max(0.0, s), 1), "group": g, "out": len(costs), "of": len(used), "hard": hard, "faults": [f for _, f in sorted(faults, reverse=True)], "notes": notes, "costs": costs, "people": m.get("people")}
 
 
-def score_folder(folder, ranges=None, keep="file"):
+def score_folder(folder, ranges=None, keep=None):
     ranges = ranges or json.load(open(os.path.join(HERE, "ranges.json")))
-    keep = kept() if keep == "file" else keep
     rows = json.load(open(os.path.join(folder, "measures.json")))
     return {n: score_clip(n, m, ranges, keep) for n, m in rows.items() if "error" not in m}
 
@@ -172,13 +165,19 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser(); sub = ap.add_subparsers(dest="cmd", required=True)
     a1 = sub.add_parser("ranges"); a1.add_argument("refs")
     a2 = sub.add_parser("clips"); a2.add_argument("folder"); a2.add_argument("--json"); a2.add_argument("--faults", type=int, default=3)
+    a2.add_argument("--musiceval", action="store_true", help="use the private listener calibration")
     a = ap.parse_args()
     if a.cmd == "ranges":
         r = ranges_from(a.refs)
         json.dump(r, open(os.path.join(HERE, "ranges.json"), "w"), indent=1)
         print({g: v["n"] for g, v in r.items()})
     else:
-        got = score_folder(a.folder)
+        if a.musiceval:
+            ranges = json.loads((MUSICEVAL / "ranges.json").read_text())
+            keep = json.loads((MUSICEVAL / "kept.json").read_text())
+            got = score_folder(a.folder, ranges, keep)
+        else:
+            got = score_folder(a.folder)
         for n, s in got.items():
             print(f"{s['score']:5.1f}  {n:26s} {s['group']:10s} out {s['out']:2d}/{s['of']:2d}" + (f"  people {s['people']:.2f}" if s["people"] else "") + (f"  HARD {len(s['hard'])}" if s["hard"] else ""))
             for f in (s["hard"] + s["faults"])[: a.faults]: print(f"         - {f}")

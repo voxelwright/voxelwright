@@ -75,12 +75,65 @@ Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01
 | `engine/page/almanac.ts`, `site/generator/pages.mjs` | Rewritten astronomical formulas | Vladimir Agafonkin, SunCalc (above) | BSD-2-Clause | Full text in root NOTICE |
 | `deploy/worker.mjs` | Weather observations at runtime | US National Weather Service | US public domain | Source linked above |
 | `engine/bay`, local bake outputs | Layer inventory including unresolved source terms | [Dataset and credit per layer](DATA-LICENSES.md) | Per source | Guide links, no bundled source licences |
-| `engine/kit/showcase/materials/{walnut.jpg,contours.png}` and same names in `site/static/vendor/village/kit/showcase/materials` | Desk textures | Unknown. Checked the introducing commit, stylesheet and vendor refresh script | unknown | No |
-| `engine/test/drawn/{racer,hydrant}.jpg` | Five-view fixture sheets | fal-generated for project, per engine README. Repository gives no model-specific output terms | unknown | No |
-| `site/posts/kitchen-sink` and `site/posts/ai-sessions-as-blocks` | Post illustrations, GLB examples and session extracts | Owner’s accompanying posts | Personal writing reserved. Separate third-party rights, if any, unknown for attachments | Folder notice for personal work |
-| `engine/ears/people-model.json`, `people-musiceval.json`, `kept.json` | Regression weights, correlations and selection results | [MusicEval, Liu et al., ICASSP 2025](https://huggingface.co/datasets/BAAI/MusicEval) | Dataset CC BY-NC 4.0. Redistribution terms for derived weights and statistics unknown | Dataset identified in model metadata, no full text |
-| `engine/ears/ranges.json`, `damage.json` | Reference-audio measurements | 126 clips identified in the sound-judge skill, per-recording list stored with external reference library | Source recordings include CC0, CC BY and CC BY-SA. Terms for aggregate outputs unknown | No |
+| Engine and vendored showcase desk materials | Walnut grain and contour lines | [Original NumPy/Pillow drawing](engine/kit/tools/draw-desk-materials.py), recovered from the session for commit 0125290. It reproduces both files byte for byte. | Apache-2.0 | Root licence |
+| `engine/test/drawn/*.png` | Racer and hydrant orthographic views | [Fixture drawing code](engine/test/drawn/make-sheets.py) | Apache-2.0 | Root licence |
+| `engine/ears/ranges.json` and `damage.json` | Counts, range endpoints, medians, damage response and false-alarm statistics | Numeric measurements. The source recordings are credited below. Neither JSON file contains samples or excerpts. | Project measurements | Root licence |
 | `engine/core/src/heroes.rs` | Salesforce Tower footprint dimensions and taper measured from a photograph | Overture, and Pi.1415926535, *San Francisco skyline from Potrero Hill, February 2020* (Wikimedia Commons) | Source map ODbL, source photo [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) | Credit in source header, no full text |
 | `engine/landing/ina/{outlines,pins,camera,light}.json`, `site/static/landing/place.json`, `engine/sf/pilot/releases/*/manifest.json` | Tracings, placement, lighting and baked-scene metadata | Frank Schulenburg and the geodata providers credited per manifest | Photograph CC BY-SA 4.0, other layers per DATA-LICENSES.md | Source notes and manifest credits |
 
 Dependencies are fetched by their respective package managers. Their lockfiles identify versions and do not bundle the dependency licence texts. Notable npm terms include MPL-2.0 (lightningcss, node-datachannel and their platform packages), LGPL-3.0-or-later (@img/sharp-libvips-* and combined licences on @img/sharp-win32-* and @img/sharp-wasm32), and Anthropic’s vendor agreements (@anthropic-ai/claude-agent-sdk and its eight platform packages). node-forge offers BSD-3-Clause or GPL-2.0. The Rust crate r-efi offers MIT, Apache-2.0 or LGPL-2.1-or-later. The Python tool dependencies include certifi (MPL-2.0) and soxr (LGPL-2.1-or-later).
+
+## Sound judge reference library
+
+The private listener calibration used MusicEval by Liu et al. (ICASSP 2025). The dataset card specifies “License: cc-by-nc-4.0”. The public judge uses acoustic ranges and hard faults. Listener weights, correlation results and the fitted measure selection live in the optional private overlay. [MusicEval dataset card](https://huggingface.co/datasets/BAAI/MusicEval)
+
+The reference library contains 126 recordings. The following CC BY and CC BY-SA works were measured for range and degradation tests. Recordings stay with the local library. Titles, creators and source pages come from its acquisition manifest.
+
+- [Breaking Bottle](https://opengameart.org/content/breaking-bottle) by spookymodem, [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- [Applause](https://opengameart.org/content/applause) by leezh, [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- [Rain and Thunder Loop](https://opengameart.org/content/rain-and-thunder-loop) by dokashiteru, [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- [Ambient Mountain, River, Wind and Forest and Waterfall](https://opengameart.org/content/ambient-mountain-river-wind-and-forest-and-waterfall) by lamoot, [CC-BY 3.0](https://creativecommons.org/licenses/by/3.0/).
+- [ocarina remembrance](https://opengameart.org/content/ocarina-remembrance) by mikeeusa, [CC-BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/).
+- [Frozen Star](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Colorless Aura](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Dreamy Flashback](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Mesmerize](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Lightless Dawn](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Ossuary 1 - A Beginning](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Funkorama](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Local Forecast - Elevator](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Reformat](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Tech Live](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Gymnopedie No 1](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Impromptu in Quarter Comma Meantone](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Ossuary 6 - Air](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Bossa Antigua](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Volatile Reaction](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Heroic Age](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Hitman](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Cephalopod](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Aggressor](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Newer Wave](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Digital Lemonade](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Mega Hyper Ultrastorm](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [8bit Dungeon Level](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- [Pixelland](https://incompetech.com/music/royalty-free/music.html) by Kevin MacLeod, [CC-BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## Former drawn fixtures
+
+The drawer used Google Nano Banana 2 via `fal-ai/nano-banana-2`. The model page states “Commercial use enabled through fal.ai”. Google says “Google won't claim ownership over that content.” fal expressly assigns the customer ownership of *input* in §6(b) and disclaims assurances of output rights in §4(c). I found no express grant covering unrestricted downstream redistribution of the sheets, so the public fixtures are project drawings. [Model](https://fal.ai/models/fal-ai/nano-banana-2) · [Google generated-content terms](https://ai.google.dev/gemini-api/terms#use-generated) · [fal terms](https://fal.ai/legal/terms-of-service)
+
+## Personal post attachments
+
+The owner reserves rights in his personal posts. Both examples entered Village in the site import. The draft posts describe their origins. Publication of these attachments is the owner's decision.
+
+| Post | Attachment | Origin evidenced in the post or file |
+| --- | --- | --- |
+| kitchen-sink | diagram.svg | Placeholder drawing of hills and sun for the image example |
+| kitchen-sink | scene-poster.svg | Blue placeholder still for the engine embed |
+| kitchen-sink | compare-poster.svg | Purple placeholder still for the comparison embed |
+| kitchen-sink | scene.json | Placeholder flag and a note for a future scene |
+| kitchen-sink | before.glb | Empty glTF container whose generator is “placeholder” |
+| kitchen-sink | after.glb | Empty glTF container whose generator is “placeholder” |
+| ai-sessions-as-blocks | founding.session.json | Four prompts from the site's founding Claude Code session, trimmed and redacted per the post |
+| ai-sessions-as-blocks | decision-sample.session.json | Handwritten synthetic example of a structured decision per the post |

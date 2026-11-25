@@ -768,8 +768,8 @@ node helper.mjs --world URL --sheets dir --facts sonnet    # keeps each sheet dr
   parts (spokes, slats) come out thick or lost. One material for all of it: glass and tyres are paint. A sheet may
   carry a real maker's badge (the truck's). The extra words added to the prompt on November 17 ended the labels and
   did not end the extra views (two sheets).
-- `node test/drawn.mjs --out dir` is the check, in Chrome, with stand-ins for the drawer (`test/drawn/racer.jpg` and
-  `hydrant.jpg`, two sheets fal drew for made-up words) and for the model. The builder is the real one. A drawn
+- `node test/drawn.mjs --out dir` is the check, in Chrome, with stand-ins for the drawer (`test/drawn/racer.png` and
+  `hydrant.png`, two synthetic sheets drawn by `test/drawn/make-sheets.py`) and for the model. The builder is the real one. A drawn
   racing car stands alive, E gets on, W takes it the way its low nose points (read from its look, not from its
   motor), and from its seat nothing of it is met straight ahead or 10 degrees down. Typed again, it stands from the
   shelf with no drawer or model asked. A hydrant stands as tall as the model said. A drawer that fails, words the

@@ -12,7 +12,7 @@ import csv, json, os, sys
 import numpy as np
 import scipy.stats as st
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+from score import MUSICEVAL
 USE = ["pulse", "comes_back", "sameness", "key_clarity", "key_holds", "harmony_moves", "moves", "onsets", "bass", "sub", "mud", "mid", "harsh", "tilt", "spread_oct", "flutter", "floor", "lra", "swell", "crest", "rough", "beats", "events"]
 
 
@@ -44,14 +44,15 @@ def fit(folder):
     rho = st.spearmanr(pred, y)[0]; r = np.corrcoef(pred, y)[0, 1]
     X, m = design(rows, names)
     m.update({"use": USE, "w": ridge(X, y).tolist(), "mean": float(y.mean()), "n": len(y), "cv_spearman": round(float(rho), 3), "cv_pearson": round(float(r), 3), "fitted_on": "MusicEval test split (BAAI/MusicEval, CC BY-NC 4.0), overall quality"})
-    json.dump(m, open(os.path.join(HERE, "people-model.json"), "w"))
+    MUSICEVAL.mkdir(parents=True, exist_ok=True)
+    json.dump(m, open(MUSICEVAL / "people-model.json", "w"))
     print(f"{len(y)} clips; on clips it was not fitted on: Spearman {rho:.3f}, Pearson {r:.3f}")
 
 
 _model = None
 def predict(m):
     global _model
-    _model = _model or json.load(open(os.path.join(HERE, "people-model.json")))
+    _model = _model or json.load(open(MUSICEVAL / "people-model.json"))
     X, _ = design({"x": m}, ["x"], _model)
     return float(np.clip(X[0] @ np.array(_model["w"]) + _model["mean"], 1, 5))
 

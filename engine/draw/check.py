@@ -3,7 +3,7 @@ drawer now and then does, is the same thing as one whose side views draw it to t
 by mirroring each side view where it stands (the car is mirror-alike side to side): built, it is turned so its front
 is at z 0, and its front end must be painted from the front view, as the sheet drawn as asked is.
 
-  uv run --project draw python draw/check.py test/drawn/racer.jpg"""
+  uv run --project draw python draw/check.py test/drawn/racer.png"""
 import json, sys
 import numpy as np
 from PIL import Image

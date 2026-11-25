@@ -1,6 +1,6 @@
 // A thing drawn and carved (#245, make/drawn.mjs). The real page in Chrome, a shared world of its own, and the
-// helper with stand-ins: a drawer that serves a sheet kept on disk (test/drawn/racer.jpg, test/drawn/hydrant.jpg:
-// two sheets fal drew for made-up words on November 16) and a model that says the facts a picture cannot. The
+// helper with stand-ins: a drawer that serves a sheet kept on disk (test/drawn/racer.png, test/drawn/hydrant.png:
+// two sheets drawn by make-sheets.py) and a model that says the facts a picture cannot. The
 // builder is the real one (draw/build.py through uv). A wish that nothing kept answers is drawn, built and stands;
 // a car wished for stands alive, E gets on, W takes it nose first (the end its tall rear wing is not at), and V puts
 // the eye where it sees the road, not inside the drawing's shell. Typed again, it stands at once from the shelf,
@@ -24,7 +24,7 @@ const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }
 const dir = mkdtempSync(join(tmpdir(), 'engine-drawn-')), out = arg('out', '') && resolve(arg('out', ''))
 if (out) mkdirSync(out, { recursive: true })
-const RACER = readFileSync(join(here, 'test/drawn/racer.jpg')), HYDRANT = readFileSync(join(here, 'test/drawn/hydrant.jpg'))
+const RACER = readFileSync(join(here, 'test/drawn/racer.png')), HYDRANT = readFileSync(join(here, 'test/drawn/hydrant.png'))
 /** What the stand-in for the maker's model makes, when a wish is not drawn: a plain grey box, its name saying which wish. */
 const BOX = (name) => JSON.stringify({ name, size: [8, 8, 8], parts: [['box', 'concrete', 'grey:6', 0, 0, 0, 8, 8, 8]] })
 
@@ -92,7 +92,7 @@ function seesAhead(look, eye, way) {
 // The builder alone: a sheet whose side views draw the front to the right (as the drawer now and then does) is turned
 // so its front is at z 0, and its front end is painted from its front view, as the same sheet drawn as asked is.
 {
-  const r = spawnSync('uv', ['run', '--quiet', '--project', 'draw', 'python', 'draw/check.py', 'test/drawn/racer.jpg'], { cwd: here, encoding: 'utf8' })
+  const r = spawnSync('uv', ['run', '--quiet', '--project', 'draw', 'python', 'draw/check.py', 'test/drawn/racer.png'], { cwd: here, encoding: 'utf8' })
   check(r.status === 0, `a sheet drawn the other way round is turned, and its front end painted from its front view: ${r.stdout.trim().replace(/\n/g, ' ')}${r.stderr ? ` ${r.stderr.trim().split('\n').at(-1)}` : ''}`)
 }
 
