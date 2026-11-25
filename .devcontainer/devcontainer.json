@@ -1,0 +1,7 @@
+{
+  "name": "Voxelwright San Francisco",
+  "build": { "dockerfile": "Dockerfile" },
+  "forwardPorts": [5760],
+  "portsAttributes": { "5760": { "label": "San Francisco" } },
+  "postStartCommand": "echo 'Run ./world from the repository root to start San Francisco.'"
+}

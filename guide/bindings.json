@@ -151,7 +151,8 @@
       "scripts.world",
       "scripts.page"
     ],
-    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join"
+    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join",
+    "world": "file"
   },
   "deploy/README.md": {
     "deploy/package.json": [
@@ -308,5 +309,14 @@
       "scripts"
     ],
     "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'"
+  },
+  "guide/quickstart.md": {
+    "world": "file",
+    "scripts/world.mjs": "lines:^step|const site =|console.log\\(`Open",
+    "deploy/data.mjs": "lines:const base =|let url =|record.pin !== pin|sha\\(listing\\) !== record.digest",
+    "engine/page/realm-ui.ts": "lines:Your AI…",
+    ".devcontainer/devcontainer.json": [
+      "forwardPorts"
+    ]
   }
 }

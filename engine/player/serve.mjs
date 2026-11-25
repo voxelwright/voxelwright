@@ -42,7 +42,7 @@ export async function plain(dir, host = '127.0.0.1', port = 0, { plainly = false
     res.writeHead(200, { ...headers, 'Content-Length': wire, ...(squeezed ? { 'Content-Encoding': 'br' } : {}) })
     createReadStream(squeezed ?? file).pipe(res)
   })
-  await new Promise((done) => server.listen(port, host, done))
+  await new Promise((done, reject) => server.once('error', reject).listen(port, host, done))
   return { url: `http://${host}:${server.address().port}`, asked, stop: () => server.close() }
 }
 

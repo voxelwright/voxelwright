@@ -1,14 +1,12 @@
 # Village
 
-Village is a game in the making: one systemic, multiplayer world that people
-make by talking, where their own agents live as characters. Today it has two
-places. The home is a 3D house you walk through (a kitchen and a living room)
-where each object is a way in: the notebook talks to a villager, a person's own
-helper that keeps notes, and the Elder turns a one-line request ("put a small
-radio on the windowsill") into a checked change you can keep or undo. The
-street is a shared, sloping block run by a world process, where each browser
-that joins gets a walker. It is a personal project, tested with synthetic
-people only, and it is not safe for real family data yet.
+Walk San Francisco in a WebGPU browser. Install Node.js 25 or newer and stable Rust, then add the target once with `rustup target add wasm32-unknown-unknown`. From the repository root on macOS or Linux:
+
+```sh
+./world
+```
+
+Open the printed address and choose **Explore** to enter the city. To make new things, add your provider key under **Your AI…** in the realm settings. The city downloads as a pinned bundle with [per-layer data licences](DATA-LICENSES.md). The [quickstart](guide/quickstart.md) covers the release mirror needed before public cutover and running in a Dev Container.
 
 ## Layout
 
@@ -24,7 +22,7 @@ Start with the [project map](guide/project.md) and [how to keep documentation cu
 - `docs/`: the handbook, published privately with Mintlify.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
-## Run it
+## Run the private home
 
 You need a recent Node (measured on 25.1), Google Chrome and a signed-in
 Claude Code.
@@ -108,4 +106,4 @@ Copyright 2026 Pavlo Zahynailo. Project code carries the [Apache License 2.0](LI
 
 Voxelwright and Voxelmorphism are names belonging to Pavlo Zahynailo. Please choose another name for your fork.
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","package.json":"8ce1e779c247a7ea73bf057505a56f3a","street/package.json":"631a60c23ff10de35394f84373fe599a","host/src/live.ts":"45499f1073f06a5c713a90a389267a56"} -->
+<!-- docs-verified 452a182c9cc8fc2ca4ffb8bba4e4c7c943646508 {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","package.json":"8ce1e779c247a7ea73bf057505a56f3a","street/package.json":"631a60c23ff10de35394f84373fe599a","host/src/live.ts":"45499f1073f06a5c713a90a389267a56","world":"2378ea1c03ac32ad3591a785e0f839d2"} -->

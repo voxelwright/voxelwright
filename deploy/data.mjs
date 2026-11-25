@@ -9,9 +9,11 @@
 //   node deploy/data.mjs fetch   in CI: downloads the bundle deploy/data.json names, checks it is for the pin and that
 //                                every file is the one packed, and writes it all under $HOME/.village
 import { brotliCompressSync, brotliDecompressSync, constants } from 'node:zlib'
+import { createWriteStream } from 'node:fs'
+import { pipeline } from 'node:stream/promises'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,6 +30,28 @@ const files = (dir) => readdirSync(dir).filter((name) => !name.startsWith('.')).
 // The bundle is a release of this repository, wherever the checkout's remote points.
 const REPO = process.env.GITHUB_REPOSITORY ?? 'the private source repository'
 const gh = (command, ...args) => execFileSync('gh', ['release', command, '--repo', REPO, ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+
+// Private Actions jobs already supply GH_TOKEN. Send it only to GitHub's API.
+async function download(tag, archive) {
+  const base = process.env.VOXELWRIGHT_DATA_URL
+  let url = new URL(`${base ?? `https://github.com/${REPO}/releases/download`}/${tag}/data.tar`)
+  let headers = {}
+  if (!base && process.env.GH_TOKEN && process.env.GITHUB_REPOSITORY) {
+    headers = { Authorization: `Bearer ${process.env.GH_TOKEN}` }
+    const release = await fetch(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, { headers })
+    if (!release.ok) throw new Error(`GitHub release lookup returned HTTP ${release.status}`)
+    const asset = (await release.json()).assets.find(a => a.name === 'data.tar')
+    if (!asset) throw new Error(`No data.tar in ${tag}`)
+    url = new URL(`https://api.github.com/repos/${REPO}/releases/assets/${asset.id}`)
+    headers.Accept = 'application/octet-stream'
+  }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname))) {
+    throw new Error('VOXELWRIGHT_DATA_URL requires HTTPS or a loopback mirror')
+  }
+  const response = await fetch(url, { headers })
+  if (!response.ok) throw new Error(`Cannot download ${tag}/data.tar (HTTP ${response.status}). Check VOXELWRIGHT_DATA_URL.`)
+  await pipeline(response.body, createWriteStream(archive))
+}
 
 // What the build reads, under ~/.village/engine (sf/build.mjs: STAGED, GRAPHS and SHELF).
 const RELEASE = `bay/450-city-paint/sf/releases/${pin}`
@@ -67,21 +91,32 @@ if (process.argv[2] === 'pack') {
   const record = JSON.parse(readFileSync(RECORD, 'utf8'))
   if (record.pin !== pin) fail(`deploy/data.json is for pin ${record.pin.slice(0, 12)} but engine/sf/pilot/current.json pins ${pin.slice(0, 12)}: run node deploy/data.mjs pack and commit deploy/data.json`)
   const work = mkdtempSync(join(tmpdir(), 'sf-data-'))
-  gh('download', record.tag, '--pattern', 'data.tar', '--dir', work)
-  execFileSync('tar', ['-xf', join(work, 'data.tar'), '-C', work])
-  const listing = readFileSync(join(work, 'index.json'), 'utf8')
-  if (sha(listing) !== record.digest) fail(`${record.tag} is not the bundle deploy/data.json names`)
-  const { files: index } = JSON.parse(listing)
-  mkdirSync(CACHE, { recursive: true })
-  for (const f of index) {
-    // Old private bundles included the overlay. Restore only the build's public inputs.
-    if (!INPUTS.some((path) => f.path === path || f.path.startsWith(path + '/'))) continue
-    const brotli = readFileSync(join(work, 'files', `${f.path}.br`)), body = brotliDecompressSync(brotli)
-    if (body.length !== f.bytes || sha(body) !== f.sha256) fail(`${f.path} is not the file that was packed`)
-    mkdirSync(dirname(join(VILLAGE, f.path)), { recursive: true })
-    writeFileSync(join(VILLAGE, f.path), body)
-    if (f.q11) writeFileSync(cached(body), brotli)
+  try {
+    await download(record.tag, join(work, 'data.tar'))
+    const archive = join(work, 'data.tar')
+    const listing = execFileSync('tar', ['-xOf', archive, 'index.json'], { maxBuffer: 8 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] })
+    if (sha(listing) !== record.digest) throw new Error(`${record.tag} is not the bundle deploy/data.json names`)
+    const { files: index } = JSON.parse(listing)
+    // The pinned index determines which members tar can restore. Older archives also hold private clips.
+    const publicFiles = index.filter(f => INPUTS.some(path => f.path === path || f.path.startsWith(path + '/')))
+    const members = join(work, 'members')
+    writeFileSync(members, publicFiles.map(f => `files/${f.path}.br\n`).join(''))
+    execFileSync('tar', ['-xf', archive, '-C', work, '-T', members], { stdio: ['ignore', 'ignore', 'pipe'] })
+    mkdirSync(CACHE, { recursive: true })
+    for (const f of publicFiles) {
+      const member = join(work, 'files', `${f.path}.br`)
+      if (!lstatSync(member).isFile()) throw new Error(`${f.path} is not a regular file`)
+      const brotli = readFileSync(member), body = brotliDecompressSync(brotli)
+      if (body.length !== f.bytes || sha(body) !== f.sha256) throw new Error(`${f.path} is not the file that was packed`)
+      mkdirSync(dirname(join(VILLAGE, f.path)), { recursive: true })
+      writeFileSync(join(VILLAGE, f.path), body)
+      if (f.q11) writeFileSync(cached(body), brotli)
+    }
+    console.log(`${record.tag}: ${publicFiles.length} files restored for pin ${pin.slice(0, 12)} under ${VILLAGE}`)
+  } catch (error) {
+    console.error(`data: ${error.message}`)
+    process.exitCode = 1
+  } finally {
+    rmSync(work, { recursive: true, force: true })
   }
-  rmSync(work, { recursive: true, force: true })
-  console.log(`${record.tag}: ${index.length} files for pin ${pin.slice(0, 12)} under ${VILLAGE}`)
 } else fail('usage: node deploy/data.mjs pack|fetch')

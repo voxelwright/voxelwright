@@ -1,0 +1,22 @@
+#!/bin/sh
+# Start the pinned static SF realm from a checkout.
+set -eu
+cd "$(dirname "$0")"
+missing=0
+if ! node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 25 ? 0 : 1)' 2>/dev/null; then
+  echo "Install Node.js 25 or newer." >&2
+  missing=1
+fi
+if ! rustc --version >/dev/null 2>&1 || ! cargo --version >/dev/null 2>&1; then
+  echo "Install stable Rust with Cargo (rustup)." >&2
+  missing=1
+else
+  lib=$(rustc --print target-libdir --target wasm32-unknown-unknown)
+  set -- "$lib"/libcore-*.rlib
+  if [ ! -f "$1" ]; then
+    echo "Install the Wasm target with rustup target add wasm32-unknown-unknown." >&2
+    missing=1
+  fi
+fi
+[ "$missing" = 0 ] || exit 1
+exec node scripts/world.mjs
