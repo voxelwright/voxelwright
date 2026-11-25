@@ -32,6 +32,7 @@
 // holds the sound back gets it muted and an Unmute key, which is that tap. The Matrix without its music is the Matrix.
 import type { Input } from './input.ts'
 import type { Marcher, View } from './march.ts'
+import { OWN_HOUR } from './weather.ts'
 import type { Skies, Weather } from './weather.ts'
 import type { Signs } from './signs.ts'
 import type { Picture } from './eggs-pictures.ts'
@@ -115,8 +116,6 @@ type Egg = string
 const KONAMI = ['ArrowUp', 'ArrowUp', 'ArrowDown', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'ArrowLeft', 'ArrowRight', 'KeyB', 'KeyA']
 /** The moon's sizes against its own (the site's three radii, 0.017, 0.028 and 0.044 of the view). */
 const MOONS = [0, 0.65, 1.6]
-/** The hour whose sun is nearest the realm's own (main.ts, sf/realm.json `air.sun`): the light glides there and is then the realm's own again. */
-const OWN_HOUR = 13.45
 
 /** A meme's evening, where it has no look of its own: after sunset, clear, the picture's own colours. */
 const EVENING: Look = { hour: 21.0, weather: 'clear', tint: [1, 0.97, 0.95] }
@@ -880,6 +879,8 @@ export function eggs(page: EggsPage) {
     /** Opens the line, as Enter or the slash does in the realm (main.ts asks for it in the first view, where they are not heard). */
     open,
     undo,
+    /** The sky is someone else's now (a Sky key, modes.ts): what was kept to give back when an egg ends is forgotten; the egg's own look (its mood) still ends with it. */
+    letSkyGo() { before = null; leaving = null; pending = null; goingHome = false },
     /** For the checks: each meme, a phrase that starts it and its file. */
     get memes() { return MEMES.map((m) => ({ id: m.id, title: m.title, says: m.says[0], file: VIDEOS[m.id].file, youtube: m.youtube })) },
     /** Holds a playing video at a time, s (null: plays on), as a pause would: for the checks, which compare the windows with a known frame. */

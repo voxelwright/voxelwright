@@ -27,6 +27,8 @@ export function setNight(night) {
   if (night === dark.matches) delete root.dataset.theme;
   else root.dataset.theme = night ? "dark" : "light";
   store.set("vx-theme", root.dataset.theme ?? null);
+  // a night chosen here is the city's too: it leaves the city's "SF now" sky (engine/page/modes.ts)
+  store.set("vx-sky", null);
   document.dispatchEvent(new CustomEvent("vx-night", { detail: { night } }));
 }
 dark.addEventListener("change", () => document.dispatchEvent(new CustomEvent("vx-night", { detail: { night: isNight() } })));

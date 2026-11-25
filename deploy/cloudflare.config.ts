@@ -17,8 +17,9 @@ export default defineConfig({
       htmlHandling: "auto-trailing-slash",
       notFoundHandling: "404-page",
       // Only these reach worker.mjs (each one counts against the Free plan's 100,000 requests a day); every other
-      // file is a free static asset. /releases/ is the city's pinned release; /bay/ the road's marks and landmarks.
-      runWorkerFirst: ["/releases/*", "/bay/*"],
+      // file is a free static asset. /releases/ is the city's pinned release; /bay/ the road's marks and landmarks; /weather San
+      // Francisco's weather now (worker.mjs).
+      runWorkerFirst: ["/releases/*", "/bay/*", "/weather"],
     },
   },
 });

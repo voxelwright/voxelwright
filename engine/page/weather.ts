@@ -19,6 +19,8 @@ const SKY: Record<Weather, { rain: number; cloud: number; fog: number }> = {
 const TAKES = { rain: 5, cloud: 6, fog: 12 }
 /** The hour nearest the light a realm with no hour of its own is lit by (main.ts `sunOf(null)`: the sun east and two fifths up). */
 export const UNSET = 9
+/** The hour whose sun is nearest a realm's own light (the SF landing's photograph, realm.json `air.sun`): where a glide from or home to that light goes (eggs.ts, modes.ts), and what the clock says while it is shown. */
+export const OWN_HOUR = 13.45
 /** How far west of the eye the fog's front starts, and how far east of it it ends up (finest cells): 6 km each way. */
 const REACH = 60_000
 

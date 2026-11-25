@@ -9,7 +9,8 @@
 import { offscreen, openGpu, pace, type Offscreen } from '../probe/gpu.ts'
 import { glow } from './glow.ts'
 import { fill } from '../probe/fill.ts'
-import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, marcher, materials, palette, type View } from './march.ts'
+import { COUNT, FLAT, HEAT, MIRRORS, PICK, SHADOWS, WHOLE_MOON, marcher, materials, palette, type Moon, type View } from './march.ts'
+import type { Heavens } from './almanac.ts'
 import { crumbs } from './crumbs.ts'
 import { flowing } from './water.ts'
 import { space } from './space.ts'
@@ -368,44 +369,72 @@ async function main() {
   if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
+  /** By the sun wherever it is (towards it, a unit direction): how much of the day it is, how low it is, and where the light comes from: by day the sun, never from under the ground; by night the moon, from a fixed place. */
+  const sunlight = (at: readonly number[]) => {
+    const ease = (lo: number, hi: number, v: number) => { const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo))); return t * t * (3 - 2 * t) }
+    const day = ease(-0.1, 0.1, at[1]), low = 1 - ease(0.02, 0.5, at[1])
+    const sun: [number, number, number] = day === 0 ? [0.45, 0.7, -0.55] : [at[0], Math.max(at[1], 0.06), at[2]]
+    return { sun, day, low }
+  }
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */
   const sunOf = (h: number | null) => {
-    const hour = h === null ? null : ((h % 24) + 24) % 24
-    let sun: [number, number, number] = [0.52, 0.62, 0.59], day = 1, low = 0
-    if (hour !== null) {
-      const a = ((hour - 6) / 12) * Math.PI, east = [0.8, 0, 0.6], top = [-0.27, 0.9, 0.36]
-      const at = east.map((e, i) => Math.cos(a) * e + Math.sin(a) * top[i])
-      const ease = (lo: number, hi: number, v: number) => { const t = Math.max(0, Math.min(1, (v - lo) / (hi - lo))); return t * t * (3 - 2 * t) }
-      day = ease(-0.1, 0.1, at[1])
-      low = 1 - ease(0.02, 0.5, at[1])
-      // By night the moon's light, from a fixed place; by day the sun's, never from under the ground.
-      sun = day === 0 ? [0.45, 0.7, -0.55] : [at[0], Math.max(at[1], 0.06), at[2]]
-    }
-    return { sun, day, low }
+    if (h === null) return { sun: [0.52, 0.62, 0.59] as [number, number, number], day: 1, low: 0 }
+    // From the east at six over the south to the sea in the west at eighteen.
+    const a = ((((h % 24) + 24) % 24 - 6) / 12) * Math.PI, east = [0.8, 0, 0.6], top = [-0.27, 0.9, 0.36]
+    return sunlight(east.map((e, i) => Math.cos(a) * e + Math.sin(a) * top[i]))
   }
   /** What the portal draws each frame, once there is one (#264, portal.ts). */
   let portalDraw: ((encoder: GPUCommandEncoder, to: Offscreen, v: View, time: number, timing?: GPURenderPassTimestampWrites) => boolean) | null = null
   /** The passes the engine's plugins add to a frame (plugins.ts). */
   const pluginDraws = pluginPasses()
-  const setHour = (h: number | null) => {
-    hour = h === null ? null : ((h % 24) + 24) % 24
-    const { sun, day, low } = sunOf(hour)
+  /** Lights everything from `sun` (towards it): the march, its moon, and what is drawn beside it; the grade the hour's unless told. */
+  let shown = { sun: [0.52, 0.62, 0.59] as readonly number[], day: 1, low: 0 }
+  const lightBy = (sun: readonly [number, number, number], day: number, low: number, moon: Moon = WHOLE_MOON, own?: [number, number]) => {
+    shown = { sun, day, low }
     march.light(sun, day, low)
+    march.moon = moon
     // Full day is 1, dusk and night 0.
     const noon = day * (1 - low)
-    grade = [1.25 - 0.2 * noon, 0.35 - 0.1 * noon]
+    grade = own ?? [1.25 - 0.2 * noon, 0.35 - 0.1 * noon]
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)
+  }
+  const setHour = (h: number | null) => {
+    hour = h === null ? null : ((h % 24) + 24) % 24
+    const { sun, day, low } = sunOf(hour)
+    lightBy(sun, day, low)
+  }
+  /**
+   * Lights the page as a real sky is (#524, almanac.ts: San Francisco's now): the hour its clocks say, its sun where it
+   * stands, and by night its moon where it stands and as much of it lit as is. A moon down leaves the night's own
+   * light from its fixed place, dimmer, and no disc; a moon up but thin gives less light than a full one.
+   *
+   * `ease`: how far of the way from the light as it is now to that sky's (1: all of it). Called again each frame, the
+   * light comes round to it instead of jumping (a mode chosen, the moon taking over from the sun at dusk). Says
+   * whether it is there.
+   */
+  const setSky = (h: number, sky: Heavens, ease = 1) => {
+    hour = ((h % 24) + 24) % 24
+    const lit = sunlight(sky.sun), byMoon = lit.day === 0 && sky.moon[1] > 0.06
+    const to = byMoon ? { sun: sky.moon, day: 0, low: 1 } : lit, toward = to.sun.map((v) => v / Math.hypot(...to.sun))
+    // A short way (a minute's move) at once, a long way eased.
+    const apart = Math.hypot(...shown.sun.map((v, i) => v - toward[i])) + Math.abs(shown.day - to.day) + Math.abs(shown.low - to.low)
+    const k = apart < 0.02 ? 1 : Math.max(0, Math.min(1, ease))
+    const dir = shown.sun.map((v, i) => v + (toward[i] - v) * k), length = Math.hypot(dir[0], dir[1], dir[2]) || 1
+    const sun: [number, number, number] = [dir[0] / length, dir[1] / length, dir[2] / length]
+    const day = shown.day + (to.day - shown.day) * k, low = shown.low + (to.low - shown.low) * k
+    const off = Math.hypot(sun[0] - toward[0], sun[1] - toward[1], sun[2] - toward[2])
+    // The moon's disc is drawn where the light comes from: shown once the light is the moon's, not sliding there.
+    lightBy(sun, day, low, byMoon && off < 0.01 ? { sun: sky.sun, disc: 1, light: 0.55 + 0.45 * sky.lit } : { sun: sky.sun, disc: -1, light: byMoon ? 0.55 + 0.45 * sky.lit : 0.55 })
+    return off < 0.003 && Math.abs(day - to.day) < 0.002 && Math.abs(low - to.low) < 0.002
   }
   // A local realm's own air (#450): its haze, cloud and sky, and the sun and grade of the afternoon it is seen in, until an hour is set.
   /** The realm's own light (#450): the sun and grade of the afternoon it is seen in, the hour unset (the eggs give it back, eggs.ts). */
   const ownLight = () => {
     if (!LOCAL?.air?.sun) return setHour(null)
     hour = null
-    const sun = LOCAL.air.sun
-    march.light(sun, 1, 0); smoke.light(sun, 1); debris.light(sun, 1); water.light(sun, 1)
-    if (LOCAL.air.grade) grade = LOCAL.air.grade
+    lightBy(LOCAL.air.sun, 1, 0, WHOLE_MOON, LOCAL.air.grade ? [LOCAL.air.grade[0], LOCAL.air.grade[1]] : grade)
   }
   // The landmarks as the night knows them (#450, heroes.rs `night`): where each stands, and its rule's numbers from the core.
   if (BAY_ON) void landmarksOf().then((list) => {
@@ -1634,7 +1663,9 @@ async function main() {
     own.keys.set('Backspace', () => void reset())
     // The realm's controls (#450, realm-ui.ts): the hour, the weather, the tools, reset, and a phone's thumbs.
     keptGraphics()
-    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open() })
+    const realmUi = realmControls({ march, controls, hour: () => hour, setHour, east: () => pose.x * M, tools: tools.map((t) => t.name), tool: () => tool, pickTool, reset, watch: (each) => void watchers.add(each), graphics, say: () => (globalThis as unknown as { engine: { eggs?: { open(): void } } }).engine.eggs?.open(),
+      // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
+      modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined })
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })
@@ -1661,6 +1692,8 @@ async function main() {
     const hatch = () => {
       if (!seen.near) return
       watchers.delete(hatch)
+      // The kept sky, once the park is shown: the loader clears onto the day it was pictured in, and the clock goes on from there.
+      realmUi.modes?.start()
       if (first && leads && signboards && !first.engaged) void import('./explore.ts').then(({ explore }) => {
         way = explore({
           board: leads, boards: signboards, first, input: controls, canvas, pose, view, me, ui: realmUi, home: firstEye, alight: () => { if (alive.riding) alive.mount(null) },

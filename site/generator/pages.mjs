@@ -99,13 +99,18 @@ const support = (base) => `<span id="support-dock" aria-hidden="true"></span>
 <script type="module" src="${sitePath(base, "/support/support-button.js")}"></script>
 `;
 
-// Before the first paint: the Night key's saved choice, and whether the page stays plain, so
-// neither the colours nor the controls change under the reader.
+// The city's "SF now" sky (engine/page/modes.ts, #524) as the site's night: "dark" while the sun
+// is under San Francisco's horizon, else "light". The sun as engine/page/almanac.ts reckons it
+// (Meeus, as suncalc has it), small enough to sit in the head of every page.
+export const SF_NIGHT = `(() => { const R = Math.PI / 180, d = Date.now() / 864e5 - 10957.5, m = R * (357.5291 + 0.98560028 * d), l = m + R * (1.9148 * Math.sin(m) + 0.02 * Math.sin(2 * m) + 0.0003 * Math.sin(3 * m) + 102.9372) + Math.PI, e = R * 23.4397, dec = Math.asin(Math.sin(e) * Math.sin(l)), h = R * (280.16 + 360.9856235 * d - 122.4194) - Math.atan2(Math.sin(l) * Math.cos(e), Math.cos(l)), f = R * 37.7749; return Math.sin(f) * Math.sin(dec) + Math.cos(f) * Math.cos(dec) * Math.cos(h) < 0 ? "dark" : "light"; })()`;
+
+// Before the first paint: the Night key's saved choice (or the city's "SF now"), and whether the
+// page stays plain, so neither the colours nor the controls change under the reader.
 const EARLY = `<script>
 {
   const r = document.documentElement, q = new URLSearchParams(location.search).get("view");
   let t = null, p = null;
-  try { t = localStorage.getItem("vx-theme"); p = localStorage.getItem("vx-plain"); } catch {}
+  try { t = localStorage.getItem("vx-sky") === "sf" ? ${SF_NIGHT} : localStorage.getItem("vx-theme"); p = localStorage.getItem("vx-plain"); } catch {}
   if (t === "dark" || t === "light") r.dataset.theme = t;
   // the Signal Desk's enclosure and caps, chosen this visit, fit every page
   try { const b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k]; } catch {}
@@ -230,7 +235,7 @@ const BETWEEN = `<script>
   const catchUp = () => {
     const was = night();
     let t = null, b = null;
-    try { t = localStorage.getItem("vx-theme"); b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); } catch {}
+    try { t = localStorage.getItem("vx-sky") === "sf" ? ${SF_NIGHT} : localStorage.getItem("vx-theme"); b = JSON.parse(sessionStorage.getItem("vx-instrument-build")); } catch {}
     if (t === "dark" || t === "light") r.dataset.theme = t; else delete r.dataset.theme;
     for (const k of ["shell", "caps", "profile", "rail"]) if (/^[a-z]+$/.test(b?.[k] ?? "")) r.dataset[k] = b[k];
     if (night() !== was) document.dispatchEvent(new CustomEvent("vx-night", { detail: { night: night() } }));

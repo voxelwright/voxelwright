@@ -29,3 +29,16 @@ Licence for all fourteen: Creative Commons CC0 1.0 Universal (Public Domain Dedi
 - "Bubble_Pop" by arttim (https://freesound.org/people/arttim/), https://freesound.org/s/733264/ : one bubble pop, in `bubble-pops.ogg`.
 - "BubblePopping" by Sess8it (https://freesound.org/people/Sess8it/), https://freesound.org/s/762781/ : one bubble pop, in `bubble-pops.ogg`.
 - "pop out, bubble, soft bursting" by chaferwitt (https://freesound.org/people/chaferwitt/), https://freesound.org/s/776443/ : one bubble pop, in `bubble-pops.ogg`.
+
+## Weather: the National Weather Service (public domain)
+
+- Source: the latest observation at San Francisco International Airport (station KSFO), from the National Weather Service's API, https://api.weather.gov/stations/KSFO/observations/latest
+- Licence: a work of the United States government, in the public domain; the API asks for no key and for a User-Agent that names the caller (https://www.weather.gov/documentation/services-web-api).
+- Where: `deploy/worker.mjs` answers `/weather` with it on zahynailo.dev, kept ten minutes; the SF realm's "SF now" sky reads it (`engine/page/modes.ts`, `engine/page/almanac.ts` `weatherOf`). The sky's title names the service.
+- Changes: trimmed to the report's time, its weather codes, its cloud amounts and its visibility, and read as one of the realm's four weathers.
+
+## Sun and moon: suncalc's formulas (BSD-2-Clause)
+
+- Source: the low-precision formulas of Jean Meeus, *Astronomical Algorithms*, as suncalc by Vladimir Agafonkin has them, https://github.com/mourner/suncalc
+- Licence: BSD 2-Clause, Copyright (c) 2014, Vladimir Agafonkin. The formulas are rewritten, not copied.
+- Where: `engine/page/almanac.ts` (where the sun and moon stand over San Francisco, and how much of the moon is lit), and the sun in the head of every blog page (`site/generator/pages.mjs` `SF_NIGHT`).

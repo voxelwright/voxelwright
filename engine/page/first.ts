@@ -40,27 +40,39 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
    from the top on the left, short of the tower. On its side the tower is at about three fifths across and BLOG low
    in the middle: the panel lies beside the corner's keys (the credits key, the lockers' count under it: where they
    end is --first-corner-right, measured), left of the tower, the hour across its top and the weather
-   and the graphics side by side under it, over BLOG's top (its ticks left out for the height). */
+   and the graphics side by side under it, over BLOG's top (its ticks left out for the height, and its fader where the
+   realm has the sky's keys: the realm's own panel has it). */
 @media (pointer: coarse) and (orientation: portrait) {
   html.first #realm.folds .sky { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 64px), calc(var(--vx) * 76)); }
+  /* (With the sky's keys, #524, its foot a cell less, so that its solid stands clear of BLOG's top.) */
+  html.first #realm.folds .sky:has(.modes) { padding-block-end: calc(var(--vx) * 4); }
 }
 @media (pointer: coarse) and (orientation: landscape) {
   html.first #realm.folds .sky { top: max(20px, env(safe-area-inset-top)); left: calc(var(--first-corner-right, calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 78px)) + 14px); right: 39vw; inline-size: auto; padding-inline: calc(var(--vx) * 3); column-gap: calc(var(--vx) * 3); grid-template-columns: 1.15fr 1fr; align-items: start; }
   html.first #realm.folds .sky .part { display: contents; }
   html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { grid-column: 1 / -1; }
   html.first #realm.folds .sky .ticks { display: none; }
+  /* (The sky's keys, Light, Dark and SF now, three across under the hour where its fader is in the realm's own panel:
+     a row more would take the panel down over BLOG, #524.) */
+  html.first #realm.folds .sky .modes { display: grid; grid-column: 1 / -1; grid-row: 2; }
+  html.first #realm.folds .sky:has(.modes) .vx-slider { display: none; }
   html.first #realm.folds .sky .weather { grid-column: 1; grid-row: 3 / span 2; }
   html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
   html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; }
   /* (The resolution's rows would take the panel down over BLOG: in the first view they wait for the realm's own panel.) */
   html.first #realm.folds .sky .part.res > * { display: none; }
 }
+/* A short screen at a desk (under 800 px: 1280 x 720, a laptop window of 1366 x 650): with the sky's keys the panel runs
+   off its foot. As on a phone on its side, the resolution's rows wait for the realm's own panel (#524). */
+@media (pointer: fine) and (max-height: 799px) {
+  html.first #realm .sky:has(.modes) .part.res > * { display: none; }
+}
 /* A smaller phone on its side (under 760 px, 667 x 375): beside the credits key the weather's words did not fit. The
    panel lies under the corner's keys instead (--first-corner-bottom), as wide as it may be left of the tower, with the
    weather and the graphics alone (the hour is the realm's, once in) so that it ends over BLOG. */
 @media (pointer: coarse) and (orientation: landscape) and (max-width: 759px) {
   html.first #realm.folds .sky { top: calc(var(--first-corner-bottom, calc(max(20px, env(safe-area-inset-top)) + 44px)) + 12px); left: max(12px, env(safe-area-inset-left)); right: 36vw; }
-  html.first #realm.folds .sky :is(header:not(.g), .vx-slider) { display: none; }
+  html.first #realm.folds .sky :is(header:not(.g), .vx-slider, .modes) { display: none; }
   html.first #realm.folds .sky .weather { grid-row: 1 / span 2; }
   html.first #realm.folds .sky header.g { grid-row: 1; }
   html.first #realm.folds .sky .graphics { grid-row: 2; }

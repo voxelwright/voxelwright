@@ -7,7 +7,8 @@
 // It is plain HTML and CSS first, working with no script of the kit's; the kit's own renderer then makes it
 // voxels (`?kit=plain` keeps it plain). Nothing here owns state: the page's keys ([ ] R 1 to 7 Backspace) and its
 // checks set the same things, and every frame what is shown is read back from the page.
-import { skies, UNSET, WEATHERS, type Weather } from './weather.ts'
+import { OWN_HOUR, skies, UNSET, WEATHERS, type Weather } from './weather.ts'
+import { modes, MODES, type Mode, type ModesPage } from './modes.ts'
 import type { Input } from './input.ts'
 import type { Marcher } from './march.ts'
 import { legends } from './typeface.ts'
@@ -34,7 +35,12 @@ export interface RealmPage {
   }
   /** Opens the line to say something to the city on (eggs.ts), where the page has one: by touch there is no Enter or slash. */
   say?(): void
+  /** Light, Dark or San Francisco now (#524, modes.ts), where the realm has a real sky to follow. Without it the panel has no such row. */
+  modes?: Omit<ModesPage, 'sky' | 'hour' | 'setHour'>
 }
+
+const MODE_NAMES: Record<Mode, string> = { light: 'Light', dark: 'Dark', sf: 'SF now' }
+const MODE_TITLES: Record<Mode, string> = { light: 'The city at a quarter past five, the sun low and the towers warm', dark: 'The city at half past nine at night, every window lit', sf: "San Francisco's own time, sun and moon, and its weather as the National Weather Service last saw it at SFO" }
 
 const GRAPHICS: Record<string, string> = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High' }
 
@@ -52,6 +58,14 @@ const STYLE = /* css */ `
 #realm .sky output { font: 600 20px/1 var(--vx-mono); font-variant-numeric: tabular-nums; color: var(--vx-ink); }
 #realm .sky .ticks { display: flex; justify-content: space-between; margin: calc(var(--vx) * -2) 2px 0; font: 400 11px/1 var(--vx-mono); color: var(--vx-ink-quiet); }
 #realm .sky .vx-toggle-group { inline-size: 100%; }
+/* The sky's keys (Light, Dark, SF now) under the Time header, over the fader they set: Light and Dark side by side, SF
+   now under them the whole row wide (three across at a desk's key size their words are not clear of their walls; at the
+   smaller size they read too small beside the others). A phone's panel is the smaller size: three across there. */
+#realm .sky .modes { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+#realm .sky .modes > label:last-child { grid-column: 1 / -1; }
+/* (On a screen under 830 px tall the realm's own panel, with its foot and the resolution, has no room for them: they are
+   the first view's there, first.ts, where a choice is made.) */
+@media (pointer: fine) and (max-height: 829px) { html:not(.first) #realm .sky .modes { display: none; } }
 /* The weather: four seats two by two. A raised cap's left wall stands over the first two voxels of its face, so the words
    keep that far in, and Overcast (84 px in Vox Zakon Text at the key size, 78 in Vox Text) has no room for that four across. */
 #realm .sky .weather { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
@@ -90,12 +104,19 @@ const STYLE = /* css */ `
   /* The line to say something on (eggs.ts) stands at the top by touch: the phone's keyboard comes up over the bottom. Its
      words are 16 px, under which Safari zooms the page to the field. */
   #realm .egg-line { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 140px) !important; z-index: 2; }
+  /* Upright, the panel is one column a key's height from BLOG: with the sky's keys, the fader's figures are left out (the
+     clock over it says the hour). */
+  #realm .sky .modes { grid-template-columns: repeat(3, 1fr); }
+  #realm .sky .modes > label:last-child { grid-column: auto; }
+  @media (orientation: portrait) { #realm .sky:has(.modes) .ticks { display: none; } }
   /* On its side the phone is low: the panel is two columns, the sky's on the left and the graphics and keys on the right. */
   @media (orientation: landscape) {
     #realm .sky { inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 24px), calc(var(--vx) * 150)); grid-template-columns: 1fr 1fr; column-gap: calc(var(--vx) * 6); align-items: start; }
     /* (With the resolution a third column: the panel as wide as the phone allows.) */
     #realm .sky:has(.part.res) { left: max(12px, env(safe-area-inset-left)); right: auto; inline-size: min(calc(100vw - max(12px, env(safe-area-inset-left)) - max(12px, env(safe-area-inset-right)) - 68px), calc(var(--vx) * 228)); grid-template-columns: 1fr 1fr 1fr; }
     #realm .sky .part { display: grid; gap: calc(var(--vx) * 3); }
+    /* (The sky's keys are the first view's here, first.ts: in the realm's own panel a row more runs off the screen.) */
+    #realm .sky .modes { display: none; }
   }
   #realm .egg-line input { font-size: 16px !important; }
   /* Down the right edge. Held upright, standing on the thumb's key: under the skyline's signs, which are the upper third of an upright
@@ -126,6 +147,7 @@ const STYLE = /* css */ `
 /** Puts the realm's controls on the page. Returns what the checks reach through `engine.realmControls`. */
 export function realmControls(page: RealmPage) {
   const sky = skies(page.march, page.hour, page.setHour, page.east)
+  const mode = page.modes ? modes({ ...page.modes, sky, hour: page.hour, setHour: page.setHour }) : null
   const style = document.createElement('style')
   style.textContent = STYLE
   const sheet = document.createElement('link')
@@ -145,6 +167,9 @@ export function realmControls(page: RealmPage) {
     <section class="vx-card sky" id="realm-sky" aria-label="Sky">
       <div class="part">
       <header><h2>Time</h2><output aria-live="off"></output></header>
+      ${page.modes ? `<div class="vx-toggle-group modes" role="radiogroup" aria-label="Sky">
+        ${MODES.map((m) => `<label title="${MODE_TITLES[m]}"><input type="radio" name="realm-mode" value="${m}">${MODE_NAMES[m]}</label>`).join('')}
+      </div>` : ''}
       <span class="vx-slider"><input type="range" min="0" max="24" step="0.25" aria-label="Time of day"></span>
       <div class="ticks" aria-hidden="true"><span>0</span><span>6</span><span>12</span><span>18</span><span>24</span></div>
       <div class="vx-toggle-group weather" role="radiogroup" aria-label="Weather">
@@ -188,6 +213,7 @@ export function realmControls(page: RealmPage) {
   const $ = <T extends Element>(s: string) => root.querySelector<T>(s)!
   const hourIn = $<HTMLInputElement>('.sky input[type=range]'), hourOut = $<HTMLOutputElement>('.sky output')
   const weathers = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-weather]')]
+  const modeKeys = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-mode]')]
   const tools = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-tool]')]
   const graphics = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-graphics]')]
   const res = page.graphics?.resolution, resIn = root.querySelector<HTMLInputElement>('input.res'), resOut = root.querySelector<HTMLOutputElement>('output.res')
@@ -205,8 +231,10 @@ export function realmControls(page: RealmPage) {
   let dragging = false
   hourIn.addEventListener('pointerdown', () => { dragging = true })
   addEventListener('pointerup', () => { dragging = false })
-  hourIn.addEventListener('input', () => sky.glide(Number(hourIn.value)))
-  for (const w of weathers) w.addEventListener('change', () => { if (w.checked) sky.set(w.value as Weather) })
+  // (The hour or the weather set by hand lets go of the mode: modes.ts.)
+  hourIn.addEventListener('input', () => { mode?.release(); sky.glide(Number(hourIn.value)) })
+  for (const w of weathers) w.addEventListener('change', () => { if (w.checked) { mode?.release(); sky.set(w.value as Weather) } })
+  for (const m of modeKeys) m.addEventListener('change', () => { if (m.checked) mode?.choose(m.value as Mode) })
   for (const t of tools) t.addEventListener('change', () => { if (t.checked) page.pickTool(Number(t.value)) })
   $<HTMLButtonElement>('.reset').addEventListener('click', () => void page.reset())
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
@@ -240,10 +268,13 @@ export function realmControls(page: RealmPage) {
   $<HTMLButtonElement>('.use').addEventListener('click', () => page.controls.use())
 
   // Every frame: the sky goes on towards what was asked, and the controls show what the page has.
-  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', shownRes = '', night: boolean | null = null, stickAt = ''
+  let shownHour = NaN, shownTool = -1, shownWeather = '', shownGraphics = '', shownRes = '', shownMode: Mode | null | undefined, night: boolean | null = null, stickAt = ''
   page.watch((gap) => {
     sky.step(gap / 1000)
-    const h = sky.hour ?? UNSET
+    mode?.step(gap / 1000)
+    if (mode && mode.showing !== shownMode) { shownMode = mode.showing; for (const m of modeKeys) m.checked = m.value === shownMode }
+    // (No hour: a realm's own light where it has one, as the Sky keys are offered only there; else the sun's own.)
+    const h = sky.hour ?? (mode ? OWN_HOUR : UNSET)
     // (24 is midnight as 0 is: a fader left at its right end stays there.)
     if (!dragging && h !== shownHour && !(h === 0 && hourIn.value === '24')) { hourIn.value = String(h); shownHour = h }
     const said = clock(Number(hourIn.value))
@@ -265,7 +296,8 @@ export function realmControls(page: RealmPage) {
       }
     }
     // The kit's day and night follow the hour (SPEC: a world with a time of day sets data-theme from its clock).
-    const dark = h < 6.5 || h >= 18.5
+    // (Following San Francisco, by its sun, which sets near five in winter and half past eight in summer.)
+    const dark = mode?.showing === 'sf' ? page.march.day < 0.5 : h < 6.5 || h >= 18.5
     if (dark !== night) { night = dark; html.dataset.theme = dark ? 'dark' : 'light' }
     // The stick: at rest bottom left, where a thumb goes; with a thumb down, under it, its cap where the thumb is.
     if (coarse.matches) {
@@ -293,6 +325,8 @@ export function realmControls(page: RealmPage) {
   }
   return {
     sky, root, get kit() { return kit },
+    /** Light, Dark or San Francisco now (modes.ts), where the realm has them. */
+    modes: mode,
     /** Folds the hour's panel behind its key, on a wide page too, or opens it. */
     fold(on: boolean) { root.classList.add('folds'); folded(on) },
     /** The panel as it is unasked: behind its key on a phone, open in its corner elsewhere (after the first view folded it, #506). */

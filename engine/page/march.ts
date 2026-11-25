@@ -240,6 +240,9 @@ struct Globals {
   fogTint: vec4f,
   // The landmarks' own lights by night (#450, LANDMARK_LIGHT): none where its strength is 0.
   beacon: array<Beacon, 8>,
+  // The moon (#524, Marcher.moon): towards the sun (xyz), and how its disc is drawn (w): 0 whole, as it always was; 1
+  // as much of its face as the sun lights, its disc at the light's place (the moon's own then); under 0 not at all.
+  moon: vec4f,
 }
 // A landmark's light (heroes.rs \`night\`): the middle of its foot, measured as the eye is, and half its lit part's width
 // at its foot (m); that part's foot and top over the landmark's own foot, half its width at the top, and how far apart
@@ -1205,10 +1208,20 @@ fn sky(rd: vec3f) -> vec3f {
   let toward = max(dot(rd, g.sun), 0.0);
   // The sun, or at night the moon: a disc and the brightness round it.
   if (g.day > 0.0) { col += g.lightSun.rgb * (pow(toward, 900.0) * g.cloudTintSun.a + pow(toward, 60.0) * 0.35) * g.day; }
-  if (g.day < 1.0) {
+  if (g.day < 1.0 && g.moon.w >= 0.0) {
     // The moon's disc, as large as the eggs make it (air.w, eggs.ts: shot at, it grows).
     let r = (1.0 + g.air.w) * (1.0 + g.air.w);
-    col += vec3f(0.8, 0.86, 1.0) * (smoothstep(1.0 - 0.00025 * r, 1.0 - 0.0002 * r, toward) * 0.9 + pow(toward, 400.0 / r) * 0.06) * (1.0 - g.day);
+    var disc = smoothstep(1.0 - 0.00025 * r, 1.0 - 0.0002 * r, toward);
+    var halo = pow(toward, 400.0 / r) * 0.06;
+    if (g.moon.w > 0.0) {
+      // Its phase (#524): a point of the disc is lit where the ball behind it faces the sun. The disc is 0.02 (1 + air.w)
+      // across from its middle; the side unlit keeps a little earthshine, and the glow round it is as the part lit.
+      let across = (rd - g.sun * toward) / (0.02 * (1.0 + g.air.w));
+      let n = across - g.sun * sqrt(max(0.0, 1.0 - dot(across, across)));
+      disc *= mix(0.05, 1.0, smoothstep(-0.04, 0.04, dot(n, g.moon.xyz)));
+      halo *= 0.5 - 0.5 * dot(g.sun, g.moon.xyz);
+    }
+    col += vec3f(0.8, 0.86, 1.0) * (disc * 0.9 + halo) * (1.0 - g.day);
   }
   if (g.day < 0.98 && rd.y > 0.0) {
     // Stars: one in some of the small squares the sky is cut into, the brighter the fewer. A star is a point a pixel
@@ -2112,7 +2125,17 @@ export interface Marcher {
    * than its own the moon's disc is drawn (0: its own).
    */
   readonly screen: { readonly texture: GPUTexture; readonly view: GPUTextureView; up: number; moon: number }
+  /** The moon (#524): how its disc is drawn and how much light it gives. Set after `light`; WHOLE_MOON is the hour's own. */
+  moon: Moon
 }
+
+/**
+ * The moon by night (#524, almanac.ts). `disc`: 0 its whole disc where the light comes from, as it always was; 1 that
+ * disc lit on the side towards `sun` (the moon's phase: the light comes from the moon then); -1 none (it is down).
+ * `light`: how much of the night's light it gives against a full moon's (1).
+ */
+export interface Moon { readonly sun: readonly [number, number, number]; readonly disc: -1 | 0 | 1; readonly light: number }
+export const WHOLE_MOON: Moon = { sun: [0, -1, 0], disc: 0, light: 1 }
 
 /** A landmark as the night knows it: the middle of its foot in the world's finest cells, and its rule's twelve numbers (heroes.rs `night`). */
 export interface Beacon { at: readonly [number, number, number]; night: readonly number[]; /** How far from its middle it reaches, m. */ reach: number }
@@ -2159,7 +2182,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
   // Those a march with mirrors has written: one without them (which writes none) clears them first.
   const panesWritten = new WeakSet<GPUTexture>()
   const panesView = (size: readonly [number, number]) => { const t = panesFor(size); let v = panesViews.get(t); if (!v) { v = t.createView(); panesViews.set(t, v) } return v }
-  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
+  const globals = device.createBuffer({ size: 144 + MAX_LEVELS * 128 + 192 + 512 + 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   const looks = device.createBuffer({ size: EDITS_AT + EDITS * 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
   device.queue.writeBuffer(looks, 0, palette())
   device.queue.writeBuffer(looks, 256 * 16, materials())
@@ -2182,7 +2205,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     const buffer = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })
     return { buffer, bind: device.createBindGroup({ layout: sunPipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }) }
   })
-  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192 + 512), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
+  const block = new ArrayBuffer(144 + MAX_LEVELS * 128 + 192 + 512 + 16), f = new Float32Array(block), u = new Uint32Array(block), i32 = new Int32Array(block)
   /**
    * The hour's colours (see Globals): by day white-gold light and a blue sky; with the sun low, orange light at
    * half strength, a mauve fill, the horizon red towards the sun, clouds gold and rose; at night the moon's blue
@@ -2206,7 +2229,7 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     // the panel's photographs are grey (#450, render_checks.py shade).
     const fill = (c: Colour): Colour => world.options.surveyedWalls ? mix(c, times(white, 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]), 0.55) : c
     f.set([
-      ...times(mix(times([0.45, 0.58, 0.9], 0.26), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
+      ...times(mix(times([0.45, 0.58, 0.9], 0.26 * moon.light), times(mix([0.8, 0.74, 0.64], [1, 0.52, 0.26], low), 1 - 0.45 * low), day), 1 - 0.8 * overcast), day * (1 - 0.5 * low) * (1 - 0.6 * overcast),
       ...fill(wet(times(mix([0.19, 0.28, 0.5], [0.3, 0.26, 0.4], low), some), 0.7)), some,
       ...wet(hour([0.006, 0.01, 0.03], [0.07, 0.22, 0.62], [0.07, 0.11, 0.36])), 0.42 + 0.18 * low,
       ...wet(hour(dark, [0.5, 0.66, 0.88], [0.62, 0.4, 0.46])), 1.1 * low * day * (1 - overcast),
@@ -2299,12 +2322,14 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
         if (!b) { f.fill(0, at, at + 16); continue }
         f.set([b.at[0] - anchor[0], b.at[1] - anchor[1], b.at[2] - anchor[2], b.night[2], b.night[0], b.night[1], b.night[3], b.night[8], b.night[4], b.night[5], b.night[6], b.night[7], b.night[9], b.night[10], b.night[11], b.reach], at)
       }
+      f.set([...moon.sun, moon.disc], s + 16 + 8 * 16)
       device.queue.writeBuffer(globals, 0, block)
       return anchor as [number, number, number]
   }
   let detail = 1, day = 1, low = 0, under = false, rain = 0, roofed = 0, cloud = 0, fog = 0, front = 0
   let air: Air = { haze: 1, clouds: 1 }
   let beacons: readonly Beacon[] = []
+  let moon: Moon = WHOLE_MOON
   colours()
   // One pixel to ask what is under a point.
   const pointTexture = device.createTexture({ size: [1, 1], format, usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC })
@@ -2340,6 +2365,8 @@ export async function marcher(device: GPUDevice, format: GPUTextureFormat, world
     get detail() { return detail },
     set detail(v: number) { detail = v },
     get day() { return day },
+    get moon() { return moon },
+    set moon(m: Moon) { if (m.disc !== moon.disc || m.light !== moon.light || m.sun.some((v, i) => v !== moon.sun[i])) { moon = m; colours() } },
     light(sun, isDay, isLow) { sunMaps.turn(sun); day = isDay; low = isLow; colours() },
     get air() { return air },
     set air(a: Air) { air = a; colours() },

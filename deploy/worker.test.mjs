@@ -32,3 +32,31 @@ test('a file with no Brotli copy, and a missing one, go as the assets answer the
   assert.equal(await (await get('/bay/marks.bin', 'br')).text(), 'MARKS')
   assert.equal((await get('/releases/p/none.bay', 'br')).status, 404)
 })
+
+test("/weather is the station's latest report of the sky, trimmed, kept five minutes; a failed service is a 502 not kept", async () => {
+  const real = globalThis.fetch
+  try {
+    let asked
+    const report = (timestamp, cloudLayers, presentWeather = []) => ({ properties: { timestamp, textDescription: 'Cloudy', presentWeather, cloudLayers, visibility: { unitCode: 'wmoUnit:m', value: 16093.44 } } })
+    const reports = { features: [
+      // the hour's main report, its layers unread: passed over
+      report('2026-11-25T06:56:00+00:00', []),
+      report('2026-11-25T06:20:00+00:00', [{ base: { value: 1188 }, amount: 'FEW' }, { base: { value: 2438 }, amount: 'BKN' }, { base: { value: 3352 }, amount: 'OVC' }], [{ intensity: 'light', weather: 'drizzle', rawString: '-DZ' }]),
+      report('2026-11-25T06:00:00+00:00', [{ base: { value: 3810 }, amount: 'CLR' }]),
+    ] }
+    globalThis.fetch = async (url, init) => { asked = { url: String(url), init }; return Response.json(reports) }
+    const answer = await get('/weather')
+    assert.equal(answer.status, 200)
+    assert.equal(asked.url, 'https://api.weather.gov/stations/KSFO/observations?limit=8')
+    assert.ok(asked.init.headers['User-Agent'])
+    assert.deepEqual(asked.init.cf.cacheTtlByStatus, { '200-299': 600, '400-599': -1 })
+    assert.match(answer.headers.get('cache-control'), /max-age=300/)
+    assert.deepEqual(await answer.json(), { observed: { time: '2026-11-25T06:20:00+00:00', present: ['-DZ'], clouds: ['FEW', 'BKN', 'OVC'], ceiling: 2438, visibility: 16093.44 } })
+    for (const failing of [async () => new Response('busy', { status: 503 }), async () => { throw Error('offline') }, async () => Response.json({ features: [report('2026-11-25T06:56:00+00:00', [])] }), async () => Response.json({})]) {
+      globalThis.fetch = failing
+      const failed = await get('/weather')
+      assert.equal(failed.status, 502)
+      assert.equal(failed.headers.get('cache-control'), 'no-store')
+    }
+  } finally { globalThis.fetch = real }
+})
