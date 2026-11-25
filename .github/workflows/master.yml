@@ -1,0 +1,75 @@
+# The master server (master/): test it, then build release binaries for five
+# platforms and keep them as workflow artifacts. Nothing is released, tagged or
+# pushed to a registry.
+name: master
+
+on:
+  push:
+    paths:
+      - 'master/**'
+      - '.github/workflows/master.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RUST: '1.96'
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: master
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$RUST" --profile minimal -c clippy,rustfmt && rustup default "$RUST"
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo test --locked
+
+  build:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-24.04-arm, target: aarch64-unknown-linux-musl }
+          - { os: macos-latest, target: aarch64-apple-darwin }
+          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, exe: .exe }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: master
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install "$RUST" --profile minimal -t ${{ matrix.target }} && rustup default "$RUST"
+      - if: contains(matrix.target, 'musl')
+        run: sudo apt-get update -q && sudo apt-get install -yq musl-tools
+      - run: cargo build --release --locked --target ${{ matrix.target }}
+      - name: Show what was built
+        run: |
+          bin=target/${{ matrix.target }}/release/village-master${{ matrix.exe }}
+          ls -l "$bin"
+          if [ "${{ matrix.target }}" != x86_64-apple-darwin ]; then "$bin" --version; fi
+          if command -v file >/dev/null; then file "$bin"; fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: village-master-${{ matrix.target }}
+          path: master/target/${{ matrix.target }}/release/village-master${{ matrix.exe }}
+          if-no-files-found: error
+          retention-days: 30
+
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: docker build -t village-master:ci master
+      - run: docker run --rm village-master:ci --version
+      - run: docker image ls village-master:ci

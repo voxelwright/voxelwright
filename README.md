@@ -18,6 +18,7 @@ people only, and it is not safe for real family data yet.
 - `engine/`: Village's own engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`.
 - `site/`: the personal site and blog, served under zahynailo.dev/blog/. It was brought in with `git subtree`, history kept. See `site/README.md`.
 - `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`. Splitting the realm, the site and the kit into separate repos waits until Village goes open source.
+- `master/`: the master server (Rust), which lists player-hosted lobbies and passes one WebRTC offer and one answer per join (#526). See `master/README.md`.
 - `docs/`: the handbook, published privately with Mintlify.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.
 
