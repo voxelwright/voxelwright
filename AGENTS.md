@@ -95,6 +95,25 @@ The owner had been first to spot six visible faults in 14 days.
     mundane work, but do use it.
   - For well-defined work that smaller models do well, the lead may choose
     Sonnet, Haiku or GPT-6.2 Sol.
+  - Google's Gemini 4 Neon (November 2026) is on trial, not a default. Once
+    the owner has chosen a route (next rule), try it at high on long,
+    well-specified implementation, debugging and review work, beside the
+    model the lead would otherwise pick. Keep it off 3D,
+    rendering and UI look work, where the first hands-on reports put it well
+    behind Opus. Log each trial run in the dispatch log with `"trial": true`,
+    and record whether it finished in its time box, passed its checks at
+    hand-back, followed the brief, and what review found. After about ten
+    runs, keep it for the kinds of work where it matched the usual model,
+    and drop it elsewhere.
+- Reach a model only by a route its vendor's terms allow. Google's
+  Antigravity terms forbid using third-party software to access the
+  service, and its FAQ says wrapping `agy` in other coding agents or apps is
+  not supported on consumer plans. Until the owner decides otherwise, agents
+  do not drive `agy` or the T3 Antigravity provider on a consumer plan.
+  Google recommends a Gemini API key for third-party agents; it is billed
+  per token and needs the owner's approval. Antigravity's plan quota
+  refreshes every five hours under a weekly limit, with no published
+  numbers, and its context there is 512K tokens (1M through the API).
 - Pace Claude usage to the weekly reset, Friday 8am Pacific. If usage runs
   ahead of the clock (for example half left on a Sunday), shift toward Astra
   and Sol. On Wednesday and Thursday, plan to use the allowance up by the
