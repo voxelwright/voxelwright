@@ -98,6 +98,7 @@ let checks = [
   ['drivable', 'node', ['test/drivable.mjs'], false],
   ['keys-stay', 'node', ['test/keys-stay.mjs'], true],
   ['words', 'node', ['test/words.mjs'], false],
+  ['models', 'node', ['test/models.mjs'], false],
   ['said', 'node', ['test/said.mjs'], true],
   ['rulewrite', 'node', ['test/rulewrite.mjs'], false],
   ['sound', 'node', ['test/sound.mjs'], false],
