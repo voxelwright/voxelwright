@@ -1,5 +1,6 @@
 {
   "name": "site-writing-spike",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "Store and auth spike for the editor's write path. Local only; not part of the site build.",

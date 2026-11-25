@@ -1,5 +1,6 @@
 {
   "name": "village-deploy",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "zahynailo.dev: the SF realm at / and the site under /blog/, one Cloudflare Worker (#450).",

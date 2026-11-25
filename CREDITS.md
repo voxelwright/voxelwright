@@ -48,3 +48,39 @@ Frank Schulenburg photographed *View of San Francisco from Ina Coolbrith Park-01
 - Source: the low-precision formulas of Jean Meeus, *Astronomical Algorithms*, as suncalc by Vladimir Agafonkin has them, https://github.com/mourner/suncalc
 - Licence: BSD 2-Clause, Copyright (c) 2014, Vladimir Agafonkin. The formulas are rewritten, not copied.
 - Where: `engine/page/almanac.ts` (where the sun and moon stand over San Francisco, and how much of the moon is lit), and the sun in the head of every blog page (`site/generator/pages.mjs` `SF_NIGHT`).
+
+## Fonts, samples and other assets
+
+| Path | Material | Source | Licence | Full text beside file |
+| --- | --- | --- | --- | --- |
+| `engine/kit/fonts/atkinson-hyperlegible-mono` | atkinson-hyperlegible-mono | [Copyright 2020-2024 The Atkinson Hyperlegible Mono Project Authors](https://github.com/googlefonts/atkinson-hyperlegible-next-mono) | OFL-1.1 | Yes |
+| `engine/kit/fonts/atkinson-hyperlegible-next` | atkinson-hyperlegible-next | [Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors](https://github.com/googlefonts/atkinson-hyperlegible-next) | OFL-1.1 | Yes |
+| `engine/kit/fonts/b612` | b612 | [Copyright 2012 The B612 Project Authors](https://github.com/polarsys/b612) | OFL-1.1 | Yes |
+| `engine/kit/fonts/barlow` | barlow | [Copyright 2017 The Barlow Project Authors](https://github.com/jpt/barlow) | OFL-1.1 | Yes |
+| `engine/kit/fonts/chakra-petch` | chakra-petch | [Copyright 2018 The Chakra Petch Project Authors](https://github.com/m4rc1e/Chakra-Petch.git) | OFL-1.1 | Yes |
+| `engine/kit/fonts/departure-mono` | departure-mono | [Copyright 2022–2024 Helena Zhang](https://helenazhang.com) | OFL-1.1 | Yes |
+| `site/static/fonts/fraunces`<br>`site/static/support/fonts` | fraunces | [Copyright 2020 The Fraunces Project Authors](https://github.com/undercasetype/Fraunces) | OFL-1.1 | Yes (family-specific notices in support/fonts) |
+| `engine/kit/fonts/geist-pixel` | geist-pixel | [Copyright 2026 The Geist Project Authors](https://github.com/vercel/geist-font) | OFL-1.1 | Yes |
+| `engine/kit/fonts/ibm-plex-mono`<br>`site/static/vendor/village/kit/fonts/ibm-plex-mono` | ibm-plex-mono | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
+| `engine/kit/fonts/ibm-plex-sans`<br>`site/static/vendor/village/kit/fonts/ibm-plex-sans` | ibm-plex-sans | [Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"](https://github.com/IBM/plex) | OFL-1.1 | Yes |
+| `engine/landing/site/fonts/literata` | literata | [Copyright 2017 The Literata Project Authors](https://github.com/googlefonts/literata) | OFL-1.1 | Yes |
+| `engine/kit/fonts/overpass`<br>`engine/landing/site/fonts/overpass`<br>`site/static/fonts/overpass` | overpass | [Copyright 2021 The Overpass Project Authors](https://github.com/RedHatOfficial/Overpass) | OFL-1.1 | Yes |
+| `engine/kit/fonts/overpass-mono`<br>`site/static/fonts/overpass-mono`<br>`site/static/support/fonts` | overpass-mono | [Copyright 2021 The Overpass Project Authors](https://github.com/RedHatOfficial/Overpass) | OFL-1.1 | Yes (family-specific notices in support/fonts) |
+| `site/static/fonts/source-serif-4` | source-serif-4 | [Copyright 2014 The Source Serif 4 Project Authors](https://github.com/adobe-fonts/source-serif) | OFL-1.1 | Yes |
+| `engine/kit/fonts/vox-*`, `engine/kit/src/core/fonts`, vendored kit fonts and CSS | Vox typefaces and embedded Block and Sign | Pavlo Zahynailo | OFL-1.1 with reserved names | Yes, also distributed with embedded fonts |
+| `engine/kit/src/core/audio`, `site/static/vendor/village/kit/shared/audio` | Press and release excerpts | [Mechvibes, Hải Nguyễn](https://github.com/hainguyents13/mechvibes/tree/16afce45bd7cf12be399e2d1a8d20f221067f534/soundpacks/keyboard/cherrymx-brown-pbt) | MIT | Yes, LICENSE in both |
+| `home/public/audio/groove-music.ogg` | Groove Music | [benpm, Freesound](https://freesound.org/s/203099/) | CC BY 4.0 | Adjacent credit and licence link |
+| `home/public/audio/sfx/*.ogg` | 14 recordings in 11 sprites | Freesound, individual credits and links above | CC0 1.0 | Adjacent credits and licence link |
+| `site/static/landing/ina.webp`, `ina.faces.gz` | Landing render and geometry | Frank Schulenburg, Wikimedia Commons (above) | CC BY-SA 4.0 | Link in root credits |
+| `engine/page/almanac.ts`, `site/generator/pages.mjs` | Rewritten astronomical formulas | Vladimir Agafonkin, SunCalc (above) | BSD-2-Clause | Full text in root NOTICE |
+| `deploy/worker.mjs` | Weather observations at runtime | US National Weather Service | US public domain | Source linked above |
+| `engine/bay`, local bake outputs | Layer inventory including unresolved source terms | [Dataset and credit per layer](DATA-LICENSES.md) | Per source | Guide links, no bundled source licences |
+| `engine/kit/showcase/materials/{walnut.jpg,contours.png}` and same names in `site/static/vendor/village/kit/showcase/materials` | Desk textures | Unknown. Checked the introducing commit, stylesheet and vendor refresh script | unknown | No |
+| `engine/test/drawn/{racer,hydrant}.jpg` | Five-view fixture sheets | fal-generated for project, per engine README. Repository gives no model-specific output terms | unknown | No |
+| `site/posts/kitchen-sink` and `site/posts/ai-sessions-as-blocks` | Post illustrations, GLB examples and session extracts | Owner’s accompanying posts | Personal writing reserved. Separate third-party rights, if any, unknown for attachments | Folder notice for personal work |
+| `engine/ears/people-model.json`, `people-musiceval.json`, `kept.json` | Regression weights, correlations and selection results | [MusicEval, Liu et al., ICASSP 2025](https://huggingface.co/datasets/BAAI/MusicEval) | Dataset CC BY-NC 4.0. Redistribution terms for derived weights and statistics unknown | Dataset identified in model metadata, no full text |
+| `engine/ears/ranges.json`, `damage.json` | Reference-audio measurements | 126 clips identified in the sound-judge skill, per-recording list stored with external reference library | Source recordings include CC0, CC BY and CC BY-SA. Terms for aggregate outputs unknown | No |
+| `engine/core/src/heroes.rs` | Salesforce Tower footprint dimensions and taper measured from a photograph | Overture, and Pi.1415926535, *San Francisco skyline from Potrero Hill, February 2020* (Wikimedia Commons) | Source map ODbL, source photo [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/) | Credit in source header, no full text |
+| `engine/landing/ina/{outlines,pins,camera,light}.json`, `site/static/landing/place.json`, `engine/sf/pilot/releases/*/manifest.json` | Tracings, placement, lighting and baked-scene metadata | Frank Schulenburg and the geodata providers credited per manifest | Photograph CC BY-SA 4.0, other layers per DATA-LICENSES.md | Source notes and manifest credits |
+
+Dependencies are fetched by their respective package managers. Their lockfiles identify versions and do not bundle the dependency licence texts. Notable npm terms include MPL-2.0 (lightningcss, node-datachannel and their platform packages), LGPL-3.0-or-later (@img/sharp-libvips-* and combined licences on @img/sharp-win32-* and @img/sharp-wasm32), and Anthropic’s vendor agreements (@anthropic-ai/claude-agent-sdk and its eight platform packages). node-forge offers BSD-3-Clause or GPL-2.0. The Rust crate r-efi offers MIT, Apache-2.0 or LGPL-2.1-or-later. The Python tool dependencies include certifi (MPL-2.0) and soxr (LGPL-2.1-or-later).

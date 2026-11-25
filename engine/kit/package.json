@@ -2,7 +2,7 @@
   "name": "voxelmorphism",
   "version": "0.1.0",
   "description": "A design language where every control is a small solid built from voxels.",
-  "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "main": "src/index.js",
   "exports": {
@@ -10,6 +10,6 @@
     "./voxelmorphism.css": "./voxelmorphism.css",
     "./fonts/*": "./fonts/*"
   },
-  "files": ["src", "fonts", "voxelmorphism.css", "SPEC.md", "README.md"],
+  "files": ["src", "fonts", "voxelmorphism.css", "SPEC.md", "README.md", "NOTICE"],
   "sideEffects": false
 }

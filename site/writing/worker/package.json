@@ -1,5 +1,6 @@
 {
   "name": "site-writing-spike-worker",
+  "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "description": "cf dev looks for a dev server here; it resolves to the site's own wrangler and cf.",

@@ -115,3 +115,9 @@ The earlier Python factory (Gas City workers and evidence records) is kept in
 the branch `archive/python-factory-2026-11`. Everything removed in the November 6
 restart cleanup, including older evidence and skills, is kept at the tag
 `archive/pre-cleanup-2026-11`.
+
+## Licences
+
+Copyright 2026 Pavlo Zahynailo. Project code carries the [Apache License 2.0](LICENSE). Project documentation and prose carry [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/), except for the owner's personal writing in [site/posts](site/posts/NOTICE) and [site/writing](site/writing/NOTICE), which is all rights reserved. The project's Vox fonts carry the SIL Open Font License 1.1 with reserved names. Third-party works and baked data retain their source terms. See [credits](CREDITS.md), [data licences](DATA-LICENSES.md) and [NOTICE](NOTICE).
+
+Voxelwright and Voxelmorphism are names belonging to Pavlo Zahynailo. Please choose another name for your fork.

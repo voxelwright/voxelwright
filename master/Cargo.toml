@@ -1,10 +1,10 @@
 [package]
+license = "Apache-2.0"
 name = "village-master"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 description = "Village's master server: lists player-hosted lobbies and passes one WebRTC offer and one answer per join."
-license = "UNLICENSED"
 publish = false
 
 [[bin]]

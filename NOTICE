@@ -1,0 +1,54 @@
+Voxelwright
+Copyright 2026 Pavlo Zahynailo
+
+Third-party attributions
+
+Fonts (SIL Open Font License 1.1). Each family includes its own notice.
+atkinson-hyperlegible-mono: Copyright 2020-2024 The Atkinson Hyperlegible Mono Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next-mono)
+atkinson-hyperlegible-next: Copyright 2020-2024 The Atkinson Hyperlegible Next Project Authors (https://github.com/googlefonts/atkinson-hyperlegible-next)
+b612: Copyright 2012 The B612 Project Authors (https://github.com/polarsys/b612)
+barlow: Copyright 2017 The Barlow Project Authors (https://github.com/jpt/barlow)
+chakra-petch: Copyright 2018 The Chakra Petch Project Authors (https://github.com/m4rc1e/Chakra-Petch.git)
+departure-mono: Copyright 2022–2024 Helena Zhang (helenazhang.com).
+fraunces: Copyright 2020 The Fraunces Project Authors (github.com/undercasetype/Fraunces)
+geist-pixel: Copyright 2026 The Geist Project Authors (https://github.com/vercel/geist-font)
+ibm-plex-mono: Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+ibm-plex-sans: Copyright © 2017 IBM Corp. with Reserved Font Name "Plex"
+literata: Copyright 2017 The Literata Project Authors (https://github.com/googlefonts/literata)
+overpass: Copyright 2021 The Overpass Project Authors (https://github.com/RedHatOfficial/Overpass)
+overpass-mono: Copyright 2021 The Overpass Project Authors (https://github.com/RedHatOfficial/Overpass)
+source-serif-4: Copyright 2014 The Source Serif 4 Project Authors (https://github.com/adobe-fonts/source-serif)
+
+Mechvibes keyboard recordings: Copyright (c) 2026 Hải Nguyễn, MIT.
+Groove Music: benpm, Freesound, CC BY 4.0.
+Sound effects: Anzbot, hollandm, moodyfingers, Valerie-Vivegnis, krnash, Pipelenisf, mincedbeats, davidbain, Tomycatts, SpliceSound, BenParamoreAudio, arttim, Sess8it and chaferwitt, Freesound, CC0 1.0.
+Ina Coolbrith Park geometry and render: adapted from Frank Schulenburg’s photograph, CC BY-SA 4.0.
+Salesforce Tower measurements: Overture Maps and Pi.1415926535, San Francisco skyline from Potrero Hill, February 2020 (CC BY-SA 3.0).
+Sound evaluation: MusicEval, Liu et al. (ICASSP 2025), source dataset CC BY-NC 4.0. See CREDITS.md for the status of the fitted weights.
+Weather observations: US National Weather Service.
+Bay layers: see DATA-LICENSES.md for source-specific attribution.
+See CREDITS.md for sources, changes and licence links.
+
+SunCalc formulas
+Copyright (c) 2014, Vladimir Agafonkin
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without modification, are
+permitted provided that the following conditions are met:
+
+   1. Redistributions of source code must retain the above copyright notice, this list of
+      conditions and the following disclaimer.
+
+   2. Redistributions in binary form must reproduce the above copyright notice, this list
+      of conditions and the following disclaimer in the documentation and/or other materials
+      provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY
+EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR
+TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
