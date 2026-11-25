@@ -6,26 +6,86 @@ import { LOCAL } from './local.ts'
 
 /** The squares baked first, whole: what `?bay=551.7_4183.5,550.7_4183.5` names, as the first slice was measured. */
 const query = new URLSearchParams(globalThis.location?.search ?? '')
-// A shared world or a realm is kept by the world's process (world.mjs), which holds no packs yet: there the page
-// stays with the town, or it would draw one world and walk in another. A realm this page runs alone (local.ts)
-// says which world it is in itself, where the address does not.
-const asked = query.has('shared') || query.has('realm') ? null : query.get('bay') ?? LOCAL?.world?.bay ?? null
+
+/**
+ * What a world the page server keeps says of its ground (#526, serve.mjs `--release`): the release it holds (its
+ * digest, sf/release.md), where the page reads its pointer, and where one arrives; or `release: null`, the generated
+ * town. Its process (world.mjs) holds the same tiles as every core of a page in it, from the same pin.
+ */
+export interface Ground { release: string | null; pointer: string | null; arrive: { at: [number, number, number]; yaw: number; pitch: number } | null }
+/**
+ * The ground of the world this page is a view of (`?shared=1`, `?realm=`): written into the page by the server that
+ * keeps it, read before anything is made, so that the page draws the world its process walks in. Null where the
+ * page is in no such world. A server that says nothing of its ground keeps the town.
+ */
+export const WORLD: Ground | null = typeof document === 'undefined' || !(query.has('shared') || query.has('realm')) ? null : (() => {
+  const said = document.getElementById('ground')?.textContent
+  return said ? (JSON.parse(said) as Ground) : { release: null, pointer: null, arrive: null }
+})()
+/** The release this page is pinned to itself (`?release=<digest>`), where it is one; else it takes the world's. */
+const pinned = query.get('release')
+/**
+ * Why this page does not join the world (#526): its own pin is not the world's ground, and it would draw one city
+ * and walk in another. In plain words, or null where it may join. The stream says the world's ground again first of
+ * all (link.ts `GROUND`), in case it changed since the page was served.
+ */
+export const refusal = (world: Ground, mine: string | null): string | null => !mine || mine === world.release ? null
+  : world.release ? `This page is pinned to San Francisco release ${mine.slice(0, 12)}, and this world holds release ${world.release.slice(0, 12)}. It has not joined: it would draw one city and walk in another. Open it without ?release= to take the world's.`
+    : `This page is pinned to San Francisco release ${mine.slice(0, 12)}, and this world is the generated town, not a release. It has not joined: it would draw one place and walk in another.`
+if (WORLD) {
+  const why = refusal(WORLD, pinned && /^[0-9a-f]{64}$/.test(pinned) ? pinned : null)
+  if (why) {
+    const say = document.createElement('div')
+    say.id = 'refused'
+    say.style.cssText = 'position:fixed;inset:0;display:grid;place-items:center;padding:24px;font:500 17px/1.5 system-ui,sans-serif;color:#e8ecf1;background:#10141a;text-align:center;z-index:99'
+    say.textContent = why
+    document.body.append(say)
+    throw new Error(why)
+  }
+}
+// A world the page server keeps is the town, or the release its process holds: the world says which, never the
+// address. A realm this page runs alone (local.ts) says which world it is in itself, where the address does not.
+let asked = WORLD ? (WORLD.release ? '1' : null) : query.get('bay') ?? LOCAL?.world?.bay ?? null
 /**
  * Where the packs are: beside the page's own folder (`/bay/` under the page server, `<site>/bay/` in a static
  * folder, #450), the same for the page and its workers, whose modules are all in page/.
  */
 const BASE = new URL('../bay/', import.meta.url).href
 /**
+ * How this context reads what a release names (sf/release.md): `fetch` in a page. The world's process (world.mjs,
+ * `hold`) reads files on disk and an address's copies kept on disk with the same calls, through this.
+ */
+let get: (url: string | URL, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init)
+/** Told of each object of a release that came and passed its checks (the world's process keeps an address's on disk). */
+let passed: (url: string, body: ArrayBuffer) => void = () => {}
+/** Whether this context fetches its own tiles (a page, the world's process) or asks the page for them (a worker). */
+let owns = typeof document !== 'undefined'
+/** How often a tile that does not come is asked for again, and how long is waited before the first time again (doubled each time). */
+let tries = 3, wait = 1000
+/** Told that a core has taken a tile, by where it starts and how wide it is (the world's process has its solver make again what it kept of the cells there). */
+let taken: (core: object, x0: number, z0: number, size: number) => void = () => {}
+/** Where tiles that did not come are not asked for again until a while has passed (the world's process, `hold`): by `level/key`, until when (Infinity: still on its way after it was given up on). */
+const resting = new Map<string, number>()
+/** How long each tile that did not come rests next time: doubled each time it fails again, up to a minute. */
+const restFor = new Map<string, number>()
+let rest = 0
+/** The most tiles a core may hold at once (the world's process, `hold`): past it the least lately wanted that nothing waits on is let go, or what is asked is refused. */
+let most = Infinity
+/** Why the ground was not had: on its way too long, resting after it failed, failed now, or more than a core may hold. */
+export type Unheld = 'slow' | 'resting' | 'failed' | 'full'
+/**
  * `?bay=1`: the world comes in tiles as the eye moves (bay/tiles.py), so that it has no edge the page must hold:
  * each core holds the few tiles round what it is asked about and lets the rest go.
  */
-export const STREAM = asked === '1' || asked === 'earth'
+export let STREAM = asked === '1' || asked === 'earth'
 /** The squares this page's world is made from where they are held whole (`?bay=a,b`). */
 export const SQUARES: readonly string[] = !asked || asked === '0' || STREAM ? [] : asked.split(',').filter((name) => /^[0-9._]+$/.test(name))
 /** Whether this page's world is the Bay's at all. */
-export const ON = STREAM || SQUARES.length > 0
+export let ON = STREAM || SQUARES.length > 0
+/** Where on Earth the address says the page starts (`&ll=`): never in a world the server keeps, whose frame is its release's. */
+const ll = WORLD ? null : query.get('ll')
 /** What a worker's address ends in, so that it opens its core as this page does. */
-export const BAY = (STREAM ? `?bay=${asked}${query.get('ll') ? `&ll=${query.get('ll')}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
+export const BAY = (STREAM ? `?bay=${asked}${ll ? `&ll=${ll}` : ''}` : SQUARES.length ? `?bay=${SQUARES.join(',')}` : '') + (ON && query.get('heroes') === '0' ? '&heroes=0' : '')
 
 /**
  * Where on Earth a latitude and longitude are, as the world's cells have it (bay/earth.py `frame_of`, which this
@@ -43,11 +103,11 @@ export function place(lat: number, lon: number): { frame: string; x: number; z: 
   return { frame: `${zone}${lat < 0 ? 's' : 'n'}${top}`, x: Math.round(E * 10), z: Math.round((top * 1000 - N) * 10) }
 }
 /** `&ll=latitude,longitude`: where on Earth the page starts; the Bay where it does not say. */
-const asked_ll = query.get('ll')?.split(',').map(Number)
+const asked_ll = ll?.split(',').map(Number)
 const there = STREAM && asked_ll?.length === 2 && asked_ll.every(Number.isFinite) ? place(asked_ll[0], asked_ll[1]) : null
 /** The frame this page's cells are counted in, and where it starts in it (the Bay's own start where null). */
 export const FRAME = there?.frame ?? '10n4250'
-export const START: [number, number] | null = there ? [there.x, there.z] : null
+export const START: [number, number] | null = there ? [there.x, there.z] : WORLD?.release && WORLD.arrive ? [WORLD.arrive.at[0], WORLD.arrive.at[2]] : null
 /** `?bay=earth`: nothing baked from lidar is used, only what is made from the planet's data. */
 const BAKED = asked === '1' && FRAME === '10n4250'
 
@@ -87,24 +147,27 @@ export interface Source {
   far: boolean
   /** Whether the manifest's hash was checked (crypto.subtle is only in secure contexts: https and localhost). */
   checked: boolean
+  /** An object the release lists anywhere in its manifest (a tile, names, the far model's, street life's), by its path there: where it is and what it must be. Null for anything it does not list. */
+  record(path: string): { url: string; bytes: number; sha256: string; listed: true } | null
 }
 const hex = (b: ArrayBuffer) => [...new Uint8Array(b)].map((v) => v.toString(16).padStart(2, '0')).join('')
 const digest = async (b: ArrayBuffer): Promise<string | null> => (globalThis.crypto?.subtle ? hex(await crypto.subtle.digest('SHA-256', b)) : null)
 
 async function released(pointer: URL): Promise<Source> {
   // Asked once a page load, past any cache: the pointer is the one file that changes between releases.
-  const p = await fetch(pointer, { cache: 'no-cache' })
+  const p = await get(pointer, { cache: 'no-cache' })
   if (!p.ok) throw new Error(`${pointer.pathname}: ${p.status}`)
   const at = (await p.json()) as { version: number; release: string; manifest: string }
   if (at.version !== 1 || !/^[0-9a-f]{64}$/.test(at.release)) throw new Error(`${pointer.pathname} is not a release pointer this page reads`)
-  const where = new URL(at.manifest, pointer), m = await fetch(where)
+  const where = new URL(at.manifest, pointer), m = await get(where)
   if (!m.ok) throw new Error(`${where.pathname}: ${m.status}`)
   const bytes = await m.arrayBuffer(), sum = await digest(bytes)
   if (sum !== null && sum !== at.release) throw new Error(`the manifest is not release ${at.release.slice(0, 12)}`)
+  if (sum !== null) passed(where.href, bytes)
   const manifest = JSON.parse(new TextDecoder().decode(bytes)) as Manifest
   if (manifest.version !== 1) throw new Error(`manifest version ${manifest.version}: this page reads 1`)
   if (manifest.frame !== FRAME) throw new Error(`the release is in frame ${manifest.frame}, the page in ${FRAME}`)
-  const levels = [...manifest.levels].sort((a, b) => a.level - b.level), sea = levels.map((l) => new Set(l.sea))
+  const levels = [...manifest.levels].sort((a, b) => a.level - b.level), sea = levels.map((l) => new Set(l.sea)), listed = records(manifest)
   return {
     levels: levels.map(({ size, gstep }) => ({ size, gstep })),
     // Water, in the sea list or past what the release holds: nothing is asked.
@@ -115,7 +178,18 @@ async function released(pointer: URL): Promise<Source> {
     manifest: where.href,
     far: !!manifest.far,
     checked: sum !== null,
+    record: (path) => { const r = listed.get(path); return r ? { url: new URL(r.path, where).href, bytes: r.bytes, sha256: r.sha256, listed: true } : null },
   }
+}
+/** Every object record in a manifest, wherever it is (sf/release.md: each has a relative `path`, its `bytes` and `sha256`), by path. */
+function records(of: unknown, into = new Map<string, Record>()): Map<string, Record> {
+  if (Array.isArray(of)) for (const v of of) records(v, into)
+  else if (of && typeof of === 'object') {
+    const r = of as Partial<Record>
+    if (typeof r.path === 'string' && typeof r.bytes === 'number' && typeof r.sha256 === 'string') into.set(r.path, r as Record)
+    else for (const v of Object.values(of)) records(v, into)
+  }
+  return into
 }
 async function served(): Promise<Source> {
   const r = await fetch(`${BASE}tiles/index.json`)
@@ -130,6 +204,7 @@ async function served(): Promise<Source> {
     manifest: null,
     far: false,
     checked: false,
+    record: () => null,
   }
 }
 let source: Promise<Source> | null = null
@@ -137,7 +212,7 @@ let source: Promise<Source> | null = null
 let seaKeys = 0, unlisted = 0
 export const water = () => ({ sea: seaKeys, unlisted })
 /** Where the tiles come from, read once: in the page only (a worker is told what it needs by the page). */
-export const where = (): Promise<Source> => (source ??= LOCAL?.release ? released(new URL(LOCAL.release, location.href)) : served())
+export const where = (): Promise<Source> => (source ??= WORLD?.pointer ? released(new URL(WORLD.pointer, location.href)) : LOCAL?.release ? released(new URL(LOCAL.release, location.href)) : served())
 
 /** How much a device may hold (#450): a phone's tab is killed long before a laptop's. */
 export const DEVICE: 'phone' | 'desktop' = typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0 && Math.min(globalThis.screen?.width ?? 1e4, globalThis.screen?.height ?? 1e4) < 600 ? 'phone' : 'desktop'
@@ -150,6 +225,15 @@ let heldTotal = 0, heldClock = 0
 /** What the page has done for its tiles, for the checks: requests, failures, retries, and how many asks were answered from what it held. */
 export const tally = { fetched: 0, failed: 0, retried: 0, shared: 0, water: 0, held: 0, bytes: 0 }
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * An object the pinned release lists, by its path in the manifest, checked as a tile is (its length and SHA-256) and so
+ * kept on disk by whoever reads an address's release (`hold`): null for anything the release does not list.
+ */
+export async function listed(path: string): Promise<ArrayBuffer | null> {
+  const found = (await where()).record(path)
+  return found ? fetchTile(found) : null
+}
 
 /** A tile's bytes, fetched once however many cores want it. Null for water. Throws where a tile that should come does not. */
 export async function tile(level: number, key: string): Promise<ArrayBuffer | null> {
@@ -179,18 +263,20 @@ export async function tile(level: number, key: string): Promise<ArrayBuffer | nu
 async function fetchTile(found: NonNullable<ReturnType<Source['find']>>): Promise<ArrayBuffer | null> {
   for (let again = 0; ; again++) {
     tally.fetched++
-    const answer = await fetch(found.url).catch(() => null)
+    const answer = await get(found.url).catch(() => null)
     // Under the page server a 404 or 204 is a place nobody made: sea. In a release a listed tile is never water.
     if (answer && !found.listed && (answer.status === 404 || answer.status === 204)) return null
     if (answer?.ok) {
       const body = await answer.arrayBuffer()
       if (!found.listed && !body.byteLength) return null
       // What the manifest says it is: a host that sends Brotli without saying so, or a file cut short, is caught here.
-      if (found.bytes === undefined || (body.byteLength === found.bytes && (!found.sha256 || ((await digest(body)) ?? found.sha256) === found.sha256))) { tally.bytes += body.byteLength; return body }
+      if (found.bytes === undefined) { tally.bytes += body.byteLength; return body }
+      const sum = found.sha256 ? await digest(body) : null
+      if (body.byteLength === found.bytes && (!found.sha256 || (sum ?? found.sha256) === found.sha256)) { tally.bytes += body.byteLength; if (sum) passed(found.url, body); return body }
     }
-    if (again >= 3) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${answer ? answer.status : 'no answer'}`) }
+    if (again >= tries) { tally.failed++; throw new Error(`${new URL(found.url).pathname}: ${answer ? answer.status : 'no answer'}`) }
     tally.retried++
-    await pause(1000 * 2 ** again)
+    await pause(wait * 2 ** again)
   }
 }
 
@@ -271,6 +357,11 @@ export async function memory(): Promise<{ page: number; workers: number[]; tiles
 /** A core from its address, holding the Bay's packs where the page asked for the Bay. */
 export async function open<T>(url: string): Promise<T> {
   const core = (await WebAssembly.instantiateStreaming(fetch(url), {})).instance.exports as unknown as Core
+  return prepare<T>(core)
+}
+/** Has a core just made hold what every core of this world holds before it is asked anything: the Bay begun, its landmarks, the squares its road's marks cover, any squares held whole. */
+export async function prepare<T>(instance: object): Promise<T> {
+  const core = instance as Core
   opened.push(core)
   if (STREAM) core.bay_begin()
   // Landmarks by rule (#450, core/src/heroes.rs): every core is told where each stands before it makes a sector.
@@ -339,7 +430,8 @@ function take(core: Core, body: ArrayBuffer | null): boolean {
 }
 
 /** What each core holds: a tile by level and place, when it was last wanted, and its coming. */
-const held = new WeakMap<object, Map<string, { level: number; x0: number; z0: number; used: number; came: Promise<boolean>; failed?: boolean }>>()
+interface Held { level: number; x0: number; z0: number; used: number; /** When it was last wanted, ms since 1970. */ seen: number; came: Promise<boolean>; failed?: boolean; /** Whether it has come (as a pack or as water). */ ready?: boolean; /** How many asks wait on it now: such a tile is never let go. */ waiters?: number }
+const held = new WeakMap<object, Map<string, Held>>()
 let clock = 0
 
 /**
@@ -349,31 +441,64 @@ let clock = 0
  * that should be there did not come: what was made from it is water there, and is to be made again later.
  */
 export async function need(core: object, x0: number, z0: number, x1: number, z1: number, cell: number): Promise<boolean> {
-  if (!STREAM) return true
-  const levels = typeof document === 'undefined' ? toldLevels : (await where()).levels, keep = typeof document === 'undefined' ? toldKeep : HOLD.keep
-  const level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, { size, gstep } = levels[level]
+  return (await ground(core, x0, z0, x1, z1, cell)) === null
+}
+/** The tiles a box of cells `cell` wide needs, by key, and where each starts. */
+const keysOf = (x0: number, z0: number, x1: number, z1: number, level: number, size: number) => {
   // What stands just past a sector's edge shapes it: a crown's trunk, a bay window's wall.
-  const reach = level ? 0 : 96
+  const reach = level ? 0 : 96, out: { key: string; tx: number; tz: number }[] = []
+  for (let tz = Math.floor((z0 - reach) / size); tz <= Math.floor((z1 - 1 + reach) / size); tz++) for (let tx = Math.floor((x0 - reach) / size); tx <= Math.floor((x1 - 1 + reach) / size); tx++) out.push({ key: `${level}/${tx}_${tz}`, tx, tz })
+  return out
+}
+/**
+ * `need`, saying why not (`Unheld`) or null where the ground is had. `within` (ms) is the longest it waits: past it,
+ * what is still on its way is given up on for now (it rests until it comes or fails), and it says `slow`.
+ */
+export async function ground(core: object, x0: number, z0: number, x1: number, z1: number, cell: number, within?: number): Promise<Unheld | null> {
+  if (!STREAM) return null
+  const levels = owns ? (await where()).levels : toldLevels, keep = owns ? HOLD.keep : toldKeep
+  const level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, { size, gstep } = levels[level]
   let mine = held.get(core)
   if (!mine) held.set(core, (mine = new Map()))
-  const coming: Promise<boolean>[] = [], wanted: { failed?: boolean }[] = [], stamp = ++clock
-  for (let tz = Math.floor((z0 - reach) / size); tz <= Math.floor((z1 - 1 + reach) / size); tz++) for (let tx = Math.floor((x0 - reach) / size); tx <= Math.floor((x1 - 1 + reach) / size); tx++) {
-    const key = `${level}/${tx}_${tz}`
+  const coming: Promise<boolean>[] = [], wanted: Held[] = [], stamp = ++clock
+  let why: Unheld | null = null
+  for (const { key, tx, tz } of keysOf(x0, z0, x1, z1, level, size)) {
     let t = mine.get(key)
+    // A tile that did not come a moment ago is not asked for again yet: whoever asks there hears so at once.
+    if (!t && rest && (resting.get(key) ?? 0) > Date.now()) { why ??= 'resting'; continue }
+    // One given up on while still on its way: nobody waits on it again until it has come.
+    if (t && !t.ready && resting.get(key) === Infinity) { why ??= 'slow'; continue }
+    // No more than a core may hold: the least lately wanted that nothing waits on makes room, or nothing is asked for.
+    if (!t && mine.size >= most && !roomIn(core, mine, stamp)) { why ??= 'full'; continue }
     if (!t) {
-      const body = typeof document === 'undefined' ? fromPage(level, `${tx}_${tz}`) : tile(level, `${tx}_${tz}`)
-      const entry: { level: number; x0: number; z0: number; used: number; came: Promise<boolean>; failed?: boolean } = { level, x0: tx * size, z0: tz * size, used: stamp, came: Promise.resolve(false) }
+      const body = owns ? tile(level, `${tx}_${tz}`) : fromPage(level, `${tx}_${tz}`)
+      const entry: Held = { level, x0: tx * size, z0: tz * size, used: stamp, seen: 0, came: Promise.resolve(false), waiters: 0 }
       // Failed, it is let go of (the next ask tries again), and every ask that waited on it hears so: each column made
       // meanwhile is made again (world.ts `lacking`), not only the one that first asked.
-      entry.came = body.then((b) => take(core as Core, b)).catch(() => { mine!.delete(key); entry.failed = true; return false })
+      entry.came = body.then((b) => {
+        const took = take(core as Core, b)
+        entry.ready = true; resting.delete(key); restFor.delete(key)
+        if (took) taken(core, entry.x0, entry.z0, size)
+        return took
+      }).catch(() => {
+        if (mine!.get(key) === entry) mine!.delete(key)
+        entry.failed = true
+        if (rest) { const r = Math.min(60_000, restFor.get(key) ?? rest); restFor.set(key, r * 2); resting.set(key, Date.now() + r) }
+        return false
+      })
       mine.set(key, (t = entry))
     }
-    t.used = stamp
+    t.used = stamp; t.seen = Date.now(); t.waiters = (t.waiters ?? 0) + 1
     coming.push(t.came)
     wanted.push(t)
   }
-  await Promise.all(coming)
-  const whole = !wanted.some((t) => t.failed)
+  let late = false
+  try {
+    if (within === undefined) await Promise.all(coming)
+    else await Promise.race([Promise.all(coming), new Promise((r) => setTimeout(() => { late = true; r(null) }, within))])
+  } finally { for (const t of wanted) t.waiters = (t.waiters ?? 1) - 1 }
+  if (late) for (const { key } of keysOf(x0, z0, x1, z1, level, size)) { const t = mine.get(key); if (t && !t.ready && rest) resting.set(key, Infinity) }
+  why ??= wanted.some((t) => t.failed) ? 'failed' : late && wanted.some((t) => !t.ready) ? 'slow' : null
   // Let go of the longest unwanted of this level, never one wanted since this ask began.
   const same = [...mine].filter(([, t]) => t.level === level && t.used < stamp).sort((a, b) => a[1].used - b[1].used)
   for (let over = [...mine.values()].filter((t) => t.level === level).length - keep[level]; over > 0 && same.length; over--) {
@@ -381,7 +506,25 @@ export async function need(core: object, x0: number, z0: number, x1: number, z1:
     mine.delete(key)
     void t.came.then((taken) => taken && (core as Core).bay_drop(t.x0, t.z0, gstep))
   }
-  return whole
+  return why
+}
+/** Makes room for one more tile in a core that holds `most`: lets go of the least lately wanted that has come, nothing waits on, and nobody wanted in the last two seconds. */
+function roomIn(core: object, mine: Map<string, Held>, stamp: number): boolean {
+  const now = Date.now()
+  let oldest: [string, Held] | null = null
+  for (const e of mine) if (e[1].ready && !e[1].waiters && e[1].used < stamp && now - e[1].seen > 2000 && (!oldest || e[1].seen < oldest[1].seen)) oldest = e
+  if (!oldest) return false
+  const [key, t] = oldest
+  mine.delete(key)
+  void t.came.then((took) => took && (core as Core).bay_drop(t.x0, t.z0, (toldLevels[t.level] ?? LEVELS[t.level]).gstep))
+  return true
+}
+/** Whether a core holds, now, every tile a box needs (has come, as a pack or as water): what is answered there is the place's. Counts as wanting them. */
+export function holds(core: object, x0: number, z0: number, x1: number, z1: number, cell: number): boolean {
+  if (!STREAM) return true
+  const mine = held.get(core), level = cell <= 8 ? 0 : cell <= 64 ? 1 : 2, size = (toldLevels[level] ?? LEVELS[level]).size, now = Date.now()
+  for (const { key } of keysOf(x0, z0, x1, z1, level, size)) { const t = mine?.get(key); if (!t?.ready || t.failed) return false; t.seen = now }
+  return true
 }
 
 /**
@@ -397,6 +540,47 @@ export async function warm(x: number, z: number, reach: number): Promise<void> {
 }
 /** Has a core hold the finest tiles round someone, for what is asked of the ground underfoot: what the page needs before its first picture. */
 export const underfoot = (core: object, x: number, z: number): Promise<boolean> => need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1)
+/**
+ * Lets go of every tile a core has not been made to hold (`need`) within the last `ms`: what the world's process
+ * does in place of a count, since it holds what is round everyone in it at once (#526). Says how many it let go.
+ */
+export function forget(core: object, ms: number): number {
+  const mine = held.get(core), before = Date.now() - ms
+  let n = 0
+  if (mine) for (const [key, t] of [...mine]) {
+    // Never one that is on its way or that something waits on.
+    if (t.seen >= before || !t.ready || t.waiters) continue
+    mine.delete(key); n++
+    void t.came.then((taken) => taken && (core as Core).bay_drop(t.x0, t.z0, (toldLevels[t.level] ?? LEVELS[t.level]).gstep))
+  }
+  return n
+}
+/** How many tiles a core holds (or is waiting for) at each level. */
+export const holding = (core: object): number[] => { const n = [0, 0, 0]; for (const t of held.get(core)?.values() ?? []) n[t.level]++; return n }
+/** A core that is no more (one swapped for another build): what it held is not counted again. */
+export const dropped = (core: object) => { const at = opened.indexOf(core as Core); if (at >= 0) opened.splice(at, 1) }
+
+/**
+ * The world's process holds San Francisco (#526): from here on this context reads the release at `pointer` itself,
+ * through `read` (files on disk, or an address's copies kept on disk), as a page does, with every check a page makes;
+ * holds no tile bytes beside its core's; and lets go by time (`forget`), not by count. `heroes` and `squares` are the
+ * landmarks and the squares the road's marks cover, the same the server gives its pages.
+ */
+export async function hold(o: { pointer: string; read: typeof get; passed?: (url: string, body: ArrayBuffer) => void; heroes: Landmark[]; squares: ArrayBuffer | null; taken?: (core: object, x0: number, z0: number, size: number) => void; most?: number }): Promise<Source> {
+  get = o.read; passed = o.passed ?? passed; owns = true; taken = o.taken ?? taken; most = o.most ?? most
+  asked = '1'; STREAM = true; ON = true
+  Object.assign(HOLD, { keep: [Infinity, Infinity, Infinity], bytes: 0 })
+  // A tile is asked for once, and one that does not come rests before it is asked for again (longer each time): the
+  // world answers nothing about that place meanwhile, and nobody waits on it (world.mjs).
+  tries = 0; wait = 250; rest = 5000
+  landmarks = Promise.resolve(o.heroes)
+  squaring = Promise.resolve(o.squares)
+  source = released(new URL(o.pointer))
+  const s = await source
+  toldLevels = s.levels
+  return s
+}
+
 /** Has a core that is asked about the world round someone hold it: every cell near, coarser the further out. */
 export const near = (core: object, x: number, z: number): Promise<boolean> => Promise.all([need(core, x - 2000, z - 2000, x + 2000, z + 2000, 1), need(core, x - 12000, z - 12000, x + 12000, z + 12000, 16), need(core, x - 50000, z - 50000, x + 50000, z + 50000, 128)]).then((w) => w.every(Boolean))
 

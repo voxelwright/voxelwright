@@ -39,6 +39,17 @@ says how: a body of its own that walks, turns, speaks and is told what is around
 world by), what a cell is, what a look along a line meets, a blast, a fire, a thrown ball, an edit. Nobody is asked
 who they are: whoever can reach the server can change that world, and can use any name, another's included.
 
+A shared world on San Francisco (#526): `node sf/build.mjs`, then `node serve.mjs --world ~/.village/engine/world/sf.log
+--release dist-sf` (a built static realm or a staged sf folder; or the address of a `current.json`, whose objects are
+fetched once and kept under `--release-cache`, by default `~/.village/engine/world/releases`). Every world the server
+keeps stands on that pinned release in place of the town: its process holds the release's tiles, landmarks and road's
+marks as a page's cores do, round everyone and everything asked about, and lets go of what nobody has been near for
+20 s. `/city?shared=1` draws the Bay from the same release, served at `/release/`; the page is told the release in
+itself and again first in the stream, and a page pinned to another (`&release=<digest>`) does not join and says why.
+One arrives where `--arrive x,y,z,yaw` says, else where `sf/realm.json` does. A released world has no residents yet.
+`GET /world/ground` says what a world stands on and what its process holds. Check: `node test/shared-sf.mjs`
+(`--address` serves the folder as a host and gives the server its address).
+
 ## Glass (#163)
 
 Glass is seen through. A look that meets a pane goes on through it and shows what is behind, tinted a little by the
@@ -1529,7 +1540,7 @@ node bay/shot.mjs --name look --where --views "51925,+1.7,66140,352,14"   # pict
 ```
 
 Raw data and packs stay outside the repo. Bottom left the page says the street underfoot and the nearest address.
-A shared world (`?shared=1`, `world.mjs`) does not load packs yet: the Bay is for a page by itself.
+A shared world holds the Bay only from a pinned release (`serve.mjs --release`, above); `?bay=` is ignored there.
 
 ## The player: one scene from static files (#419)
 

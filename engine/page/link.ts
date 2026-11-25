@@ -5,6 +5,7 @@
 // it. Nothing here is decided by the page.
 import type { Answer, Ask } from './mover.ts'
 import type { Thing } from './things.ts'
+import { WORLD } from './bay.ts'
 
 /** An ask as the world did it: who asked, and what. An edit comes with the box of cells it can change, worked out by the server. */
 /** What a rule gave someone's figure: a look (wear.ts), and a move by its name or its keys, the `n`th it was given, with what it is aimed at. */
@@ -111,7 +112,7 @@ export interface Link {
   readonly live: boolean
 }
 
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13, GROUND = 14
 
 /**
  * Who this page is to the world: made up once for this tab and kept while the tab lives, so a page loaded again is
@@ -229,6 +230,12 @@ export function link(base = '/world'): Link {
           const data = read(kind, held.slice(from + 12, from + 12 + size))
           from += 12 + size
           if (l.stop.signal.aborted) return
+          // What the world stands on comes first (#526): one that is not what this page was made for is not joined.
+          if (kind === GROUND) {
+            const is = (data as { release: string | null }).release ?? null, was = WORLD?.release ?? null
+            if (is !== was) { l.stop.abort(); self.onerror?.({ message: `This world now stands on ${is ? `San Francisco release ${is.slice(0, 12)}` : 'the generated town'}, and this page was made for ${was ? `release ${was.slice(0, 12)}` : 'the town'}: load the page again to join it.` }); return }
+            continue
+          }
           if (!l.held) { say(kind, data); continue }
           // Held for a page that is elsewhere: where things were a moment ago is of no use later, the rest is.
           if (kind === PLUGGED && ('once' in (data as Plugged) || 'core' in (data as Plugged))) continue

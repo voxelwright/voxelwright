@@ -286,6 +286,15 @@ impl Ground {
         self.kept.clear();
     }
 
+    /// What was made of the columns from (x0, z0) to (x1, z1) is forgotten (#526: a pack of the Bay came there after
+    /// it was asked about, when it was water): asked for again, it is made from the packs and the edits as they are now.
+    pub(crate) fn forget_columns(&mut self, x0: i32, z0: i32, x1: i32, z1: i32) {
+        let (lo, hi) = ([x0, i32::MIN, z0], [x1, i32::MAX, z1]);
+        self.forget((lo, hi));
+        let s = SIDE as i32;
+        self.kept.retain(|k, _| (0..3).any(|a| (k[a] + 1) * s <= lo[a] || k[a] * s >= hi[a]));
+    }
+
     fn forget(&mut self, (lo, hi): ([i32; 3], [i32; 3])) {
         let s = SIDE as i32;
         let spare = &mut self.spare;

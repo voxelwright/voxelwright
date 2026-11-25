@@ -407,6 +407,13 @@ pub extern "C" fn world_edit(after: i32) {
     })
 }
 
+/// Has the solver make again what it kept of the world's cells in a box of columns (#526): a pack of the Bay came there
+/// after it was asked about. Nothing done to the world is forgotten.
+#[unsafe(no_mangle)]
+pub extern "C" fn world_regrow(x0: i32, z0: i32, x1: i32, z1: i32) {
+    INSTANCE.with_borrow_mut(|i| moving(i).ground.forget_columns(x0, z0, x1, z1))
+}
+
 /// Forgets everything done to the world and everything that moves in it: the instance is as it began. For a page that
 /// leaves one world for another (#264): the other's edits are then told with `world_edit`.
 #[unsafe(no_mangle)]

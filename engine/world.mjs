@@ -32,6 +32,49 @@ import { boxOf, holding } from './rules/holding.mjs'
 import { thinking } from './mind/think.mjs'
 import { rules as ruling } from './rules/run.mjs'
 import { text } from './text.mjs'
+import { reading } from './ground.mjs'
+import { dropped, forget, ground as groundOf, hold, holding as tilesHeld, holds, prepare, underfoot } from './page/bay.ts'
+
+// ── The ground (#526) ──────────────────────────────────────────────────────
+// A world is the generated town, or San Francisco from the release the server was started with (ground.mjs): then
+// this process holds that release's tiles, through page/bay.ts as every core of a page does, from the same pin, with
+// the same landmarks and road's marks, round wherever it is asked about and wherever anything moves, before it does
+// what was asked. It lets go of what nobody has been near for a while.
+const GROUND = workerData.ground ?? null
+/** Objects of an address's release asked of the server's thread, by number: what to do with each when it comes. */
+const fetches = new Map()
+let fetching = 0
+/** What is said to this process before it is ready to do it (it is still reading its ground): done in order once it is (`hearing`, below). */
+const early = []
+let hearing = null
+// One listener for everything, from the start: an object asked of the server is heard at once, before anything that
+// waits its turn (what is waiting may be waiting for it); the rest is done in order.
+parentPort.on('message', (m) => { if (m.got) { fetches.get(m.got.n)?.(m.got); fetches.delete(m.got.n) } else if (hearing) hearing(m); else early.push(m) })
+if (GROUND) {
+  // What is not yet on disk is asked of the server's own thread, which asks the host once for everyone (ground.mjs `once`).
+  const fetcher = (url) => new Promise((resolve) => { const n = ++fetching; fetches.set(n, resolve); parentPort.postMessage({ wants: { n, url } }) })
+  const { read, passed } = reading({ pointer: GROUND.pointer, bytes: Buffer.from(GROUND.bytes), cache: GROUND.cache, remote: GROUND.remote, fetcher })
+  // A tile taken after the solver was asked about its place (it kept air there) has the solver make its cells there
+  // again (lib.rs `world_regrow`), past its edge as far as a sector reaches. Done again once everything asked for has
+  // come (`fresh`), for what was asked meanwhile of a place whose tile was still on its way.
+  const taken = (c, x0, z0, size) => { const b = [x0 - 96, z0 - 96, x0 + size + 96, z0 + size + 96]; c.world_regrow(...b); grew.push(b) }
+  const s = await hold({ pointer: GROUND.pointer, read, passed, heroes: JSON.parse(Buffer.from(GROUND.heroes).toString('utf8')), squares: GROUND.squares ? new Uint8Array(GROUND.squares).slice().buffer : null, taken, most: GROUND.most })
+  if (s.release !== GROUND.release) throw new Error(`the world's process read release ${s.release}, the server ${GROUND.release}`)
+}
+/** Where tiles have come since what was asked meanwhile was last made again (`fresh`): boxes of columns. */
+let grew = []
+/** After tiles were waited for: where any came, what was asked meanwhile while others were still on their way is made again. */
+const fresh = () => { for (const b of grew.splice(0)) core.world_regrow(...b) }
+/** Where one arrives in a released world, in cells: the realm's own word if it says one, else the server's (`--arrive`, sf/realm.json). */
+const arrival = () => realmIs?.arrive?.at ?? GROUND?.arrive?.at ?? null
+/** How long a tile nobody has been near is held, ms, and how often that is looked at. */
+const UNHELD_AFTER = 20_000, UNHELD_EVERY = 5_000
+/** What cannot be answered where the ground has not come: said, never answered as water. */
+const UNHELD = 'the ground there has not come yet (the release\'s tile did not load): ask again in a moment'
+/** What cannot be answered where holding the ground there would hold more of the city than this world may. */
+const FULL = 'the world holds as much of the city as it may now: ask nearer to someone, or again in a while'
+/** How long anything waits for its ground before it is refused, ms (serve.mjs --ground-wait). */
+const GROUND_WAIT = GROUND?.wait ?? 3000
 
 const { instance } = await WebAssembly.instantiate(await readFile(workerData.core), {})
 // The core may be swapped for a newer build while this process runs (`swap`, below): everything here asks `core` for
@@ -39,6 +82,7 @@ const { instance } = await WebAssembly.instantiate(await readFile(workerData.cor
 let core = instance.exports
 // Cells may hold finer cells here (#259, #372): a made thing may be of cells of 2.5 or 1.25 cm.
 core.fine_cells(1)
+if (GROUND) await prepare(core)
 /** While the core is being swapped: what was said meanwhile, to be done in order when the new one is whole; when it began; where the fire was. */
 let swapping = null
 /** Where the core last said some of its fire was (three numbers a cell), or null when nothing burns: to light it again in another core. */
@@ -261,6 +305,8 @@ function stand(x, z) {
   for (let y = ground + 60; y > ground - 60; y--) if (solid(x, y - 1, z) && footing(x, y, z) === y) return y
   return null
 }
+/** Where a seat that joins is set down, before room is found for it: where it asked, else near the start. */
+const joinAt = (m) => { if (m.at) return m.at; const a = arrival(), spread = (spoken + folk.size * 7) % 40; return GROUND && a ? [Math.round(a[0]) + spread, Math.round(a[a.length - 1])] : [690 + spread, 4009] }
 /** What a seat asks about its own body. Answers what came of it, or `error`. */
 function seat(m) {
   const now = Date.now()
@@ -268,8 +314,10 @@ function seat(m) {
   // A rule's actor is the rule's alone: nobody outside takes its body by using its name.
   if (p?.rule) return { error: 'that name is an actor of one of the world\'s rules: use another' }
   if (m.op === 'join') {
-    // On the pavement north of where the town starts, unless a place is given; at the height the world has ground there.
-    const [x, z] = getting.room(m.at ? m.at[0] : 690 + (spoken + folk.size * 7) % 40, m.at ? m.at[1] : 4009, p, (x, z) => stand(x, z) !== null)
+    // On the pavement north of where the town starts (in a released world, by where one arrives), unless a place is
+    // given; at the height the world has ground there.
+    const [jx, jz] = joinAt(m)
+    const [x, z] = getting.room(jx, jz, p, (x, z) => stand(x, z) !== null)
     const feet = stand(x, z)
     if (feet === null) return { error: 'there is no room to stand there' }
     p = { by: m.by, name: m.by, seat: true, at: [x, feet, z], yaw: m.yaw ?? Math.PI, goal: null, stopped: '', down: 0, flinch: 0, last: now, told: 0 }
@@ -306,7 +354,8 @@ function seat(m) {
       if (far <= within) people.push({ name: o.name, what: o.rule ? 'an actor of a rule' : o.seat ? 'in a seat' : 'at a page', at: o.at.map(Math.round), far: Math.round(far), towards: bearing(dx, dz), doing: o.down > now ? 'on the ground' : o.thinking ? 'thinking' : o.goal ? 'walking' : 'standing' })
     }
     // The town's residents, by the same rule the pages draw them from, at the realm's own hour (`hourNow`).
-    const found = [], n = residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken, standing())
+    // A released world has none yet: they walk the town's blocks, which are not its streets (#526).
+    const found = [], n = GROUND ? 0 : residents(core, [p.at[0], p.at[2]], Math.min(within, 400), now / 1000, hourNow(), found, shocks, taken, standing())
     const town = found.slice(0, n).map((r) => ({ far: Math.round(Math.hypot(r.at[0] - p.at[0], r.at[2] - p.at[2])), towards: bearing(r.at[0] - p.at[0], r.at[2] - p.at[2]), doing: r.down > 0.5 ? 'on the ground' : r.flinch > 0.5 ? 'shrinking from a blast' : r.walking > 0.5 ? 'walking' : r.reading > 0.5 ? 'reading a phone' : 'standing' })).filter((r) => r.far <= within).sort((a, b) => a.far - b.far)
     const heard = voices.filter((v) => v.n > (m.since || 0) && v.by !== p.by && Math.hypot(v.at[0] - p.at[0], v.at[1] - p.at[1], v.at[2] - p.at[2]) <= EARSHOT).map((v) => ({ n: v.n, name: v.name, text: v.text, far: Math.round(Math.hypot(v.at[0] - p.at[0], v.at[2] - p.at[2])), seconds_ago: Math.round((now - v.t) / 1000) }))
     // What the eyes meet, level, the eight ways round.
@@ -334,7 +383,7 @@ const residentId = (seed) => `r${(seed >>> 0).toString(36)}`
 let town = { at: 0, list: [], by: new Map() }
 /** The residents near people now (nearest first), found again four times a second at most. */
 function townNear(now) {
-  if (now - town.at < 250) return town
+  if (GROUND || now - town.at < 250) return town
   const by = new Map(), found = []
   let persons = 0
   for (const p of folk.values()) {
@@ -356,6 +405,7 @@ const looksOf = (seed) => { let l = looked.get(seed); if (!l) { if (looked.size 
 /** A resident becomes a body of a rule's, where they are this moment; or why not. */
 function take(rule, short, id, now, wrong) {
   const r = typeof id === 'string' ? townNear(now).by.get(id) : undefined
+  if (!r && GROUND) { wrong('this world is San Francisco from a release, and has no residents yet: there is nobody to take'); return null }
   if (!r) { wrong(`no resident "${String(id).slice(0, 16)}" is near anyone now: world.residents says who is`); return null }
   if (taken.has(r.seed)) { wrong(`resident "${r.id}" is somebody's actor already`); return null }
   if (taken.size >= TAKEN_MOST) { wrong(`the world's rules hold ${TAKEN_MOST} residents already: let one go first`); return null }
@@ -764,7 +814,7 @@ function livesNow() {
     return { at, reach: Math.hypot(hx, hz), top: at[1] + Math.max(...size) / 2, over: (x, z) => { const dx = x - at[0], dz = z - at[2]; return Math.abs(dx * ax[0] + dz * ax[1]) <= hx && Math.abs(dx * az[0] + dz * az[1]) <= hz } }
   })
 }
-parentPort.on('message', (said) => {
+function handle(said) {
   const { ask, replay, at, look: line, id, seat: asks, here, rows, revive, drive, nudge, tops: area, rule, rules: how, act, kept, pick, plugins, thought, swap, swapped, voiced: answers, called, talked, settle } = said
   // A thing a world started again finds still held by nobody: put down where it was taken from.
   if (settle) { const down = grasp.settle(settle.id, settle.rows, settle.at, settle.grain); if (down) { parentPort.postMessage({ echo: down }); edit(down.edit); nudged = true } return }
@@ -786,7 +836,7 @@ parentPort.on('message', (said) => {
     // what it had logged is on its way to the server ahead of the answer to this, and is in what the server sends back.
     swapping = { held: [], began, fire: fireSeen }
     alive.clear()
-    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(({ instance }) => { core = instance.exports; core.fine_cells(1); swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
+    void readFile(swap).then((bytes) => WebAssembly.instantiate(bytes, {})).then(async ({ instance }) => { const next = instance.exports; next.fine_cells(1); if (GROUND) { await prepare(next); await Promise.all([...folk.values()].map((p) => underfoot(next, Math.round(p.at[0]), Math.round(p.at[2])))); dropped(core) } core = next; swapping.ms = performance.now() - began }, (e) => { swapping.error = String(e?.message ?? e).slice(0, 200) }).then(() => parentPort.postMessage({ id, ready: { error: swapping.error ?? '' } }))
     return
   }
   // While the swap is under way: the world's own history is taken as it comes (the server sends it once the new
@@ -801,9 +851,10 @@ parentPort.on('message', (said) => {
     nudged = true
     plug.recored()
     parentPort.postMessage({ id, swapped: { instantiate: Number((was?.ms ?? 0).toFixed(1)), ms: Number((performance.now() - (was?.began ?? performance.now())).toFixed(1)), held: was?.held.length ?? 0, relit: lit, error: was?.error ?? '' } })
-    for (const m of was?.held ?? []) parentPort.emit('message', m)
-    return
+    // What was said meanwhile is done now, in the order it came, before anything said since (`step`).
+    return was?.held ?? []
   }
+  if (said.grounds) return parentPort.postMessage({ id, held: groundHeld() })
   if (plugins) { plugging = plugging.then(() => plug.load(plugins)).then((plugged) => parentPort.postMessage({ id, plugged }), (e) => parentPort.postMessage({ id, plugged: [], error: String(e) })); return }
   // What a helper answered for an actor that was asked to think.
   if (thought) return minds.answer(thought)
@@ -865,6 +916,8 @@ parentPort.on('message', (said) => {
   if (ask.blast) told(core.bodies_blast(ask.blast[0], ask.blast[1], ask.blast[2], ask.radius, -1, ask.spark ? 1 : 0), true)
   else if (ask.ignite) { core.bodies_ignite(ask.ignite[0], ask.ignite[1], ask.ignite[2], ask.radius); told(core.bodies_advance(0), false) }
   else if (ask.ball) told(core.bodies_throw(...ask.ball.from, ...ask.ball.speed, ask.ball.radius, ask.ball.kind), false)
+  // Asked to say it was done (`wait`): it was.
+  if ((ask.blast || ask.ignite || ask.ball) && id !== undefined) parentPort.postMessage({ id, done: true })
   else if (ask.edit) {
     edit(ask.edit)
     // A thing that comes with its controls lives at once: before the world is asked what the edit left unheld, or a
@@ -879,7 +932,140 @@ parentPort.on('message', (said) => {
   else if (ask.thing?.controls !== undefined) live(ask.thing.id, ask.thing.controls, rows, true, text(ask.thing.name ?? '', 40))
   // Water may have been let out: it is found when the world is next moved on.
   nudged = true
-})
+}
+
+// ── What is said, and the ground it waits for (#526) ─────────────────────────
+// In the town everything said is done at once, in the order it came, as it always was. In a released world:
+//   - a question (what is at a cell, a look, the tops of a box, a seat that joins, walks or looks round) waits for its
+//     own ground and for nothing else, and is answered as soon as it is held, out of turn;
+//   - what changes the world (an ask, an edit kept from before, a thing stood up again, a rule, a swap of the core) is
+//     done in the order it came, each once its own ground is held;
+//   - the rest (where a page's eye is, what is said, a rider's hands, a rule's act) waits for no ground at all.
+// Each asks for its tiles as it arrives, not when its turn comes, and waits at most GROUND_WAIT for them: then a
+// question is answered why not (503), an ask is refused (and an ask that waits for its answer is told why), and
+// nothing is answered as water. What is answered is answered from tiles held at that moment (bay.ts `holds`).
+/** Places lately asked about that things may still move at (a blast's pieces, a thrown ball): [x, z, when]. */
+const lately = []
+/** How far round a place an ask holds the ground (cells): its pieces fly there. How far round a body: what it walks and sees. */
+const ASK_REACH = 600, BODY_REACH = 2000
+/** The boxes of the ground, [x0, z0, x1, z1] in cells, that what is said needs held. */
+function boxesOf(said) {
+  const out = [], round = (v, r, k = 2) => { if (Array.isArray(v) && Number.isFinite(v[0]) && Number.isFinite(v[k])) out.push([Math.round(v[0]) - r, Math.round(v[k]) - r, Math.round(v[0]) + r + 1, Math.round(v[k]) + r + 1]) }
+  const { ask, at, look: line, tops: area, seat: asks, revive, settle, rows } = said
+  round(at, 0)
+  if (line) { const long = Math.hypot(...line.to) || 1, end = line.from.map((v, a) => v + (line.to[a] / long) * LOOK); out.push([Math.floor(Math.min(line.from[0], end[0])), Math.floor(Math.min(line.from[2], end[2])), Math.ceil(Math.max(line.from[0], end[0])) + 1, Math.ceil(Math.max(line.from[2], end[2])) + 1]) }
+  if (area) out.push(area.box)
+  if (asks) { if (asks.op === 'join') round(joinAt(asks), BODY_REACH, 1); else { round(folk.get(asks.by)?.at, BODY_REACH); round(asks.to, BODY_REACH, 1) } }
+  if (revive) { if (revive.controls?.rest?.at) round(revive.controls.rest.at, ASK_REACH); else if (revive.rows) round([revive.rows[0], 0, revive.rows[3]], ASK_REACH) }
+  round(settle?.at, ASK_REACH)
+  if (ask) {
+    for (const v of [ask.blast, ask.ignite, ask.ball?.from, ask.release, ask.at, ask.thing?.at]) round(v, ASK_REACH)
+    if (ask.box) out.push([ask.box[0] - 96, ask.box[2] - 96, ask.box[3] + 96, ask.box[5] + 96])
+    if (ask.by) round(folk.get(ask.by)?.at, ASK_REACH)
+    if (rows) round([rows[0], 0, rows[3]], ASK_REACH)
+  }
+  return out
+}
+/** Whether what is said is a question, answered out of turn on its own ground. */
+const questionOf = (said) => !!(said.at || said.look || said.tops || (said.seat && ['join', 'walk', 'around'].includes(said.seat.op)))
+/** Whether what is said changes the world, and so is done in turn. */
+const orderedOf = (said) => !!(said.ask || said.replay !== undefined || said.revive || said.settle || said.rule || said.swap || said.swapped)
+/** Has the ground round what is said held within GROUND_WAIT, from when it was said: null, or why not. */
+async function groundFor(said) {
+  const boxes = boxesOf(said), now = Date.now()
+  if (said.ask) for (const b of boxes) lately.push([(b[0] + b[2]) / 2, (b[1] + b[3]) / 2, now])
+  const whys = await Promise.all(boxes.map((b) => groundOf(core, b[0], b[1], b[2], b[3], 1, GROUND_WAIT)))
+  fresh()
+  return whys.find((w) => w) ?? null
+}
+/** Whether every tile what is said needs is held this moment. */
+const heldNow = (said) => boxesOf(said).every((b) => holds(core, b[0], b[1], b[2], b[3], 1))
+/** Tells whoever asked that it was not done, and why. */
+function refuse(said, why) {
+  const words = why === 'full' ? FULL : UNHELD
+  if (said.ask) { console.error(`an ask was not done: ${words}`); parentPort.postMessage({ refused: { by: said.ask.by, why: words, ...(said.ask.hold !== undefined ? { hold: said.ask.hold } : {}), ...(said.ask.thing?.id ? { thing: said.ask.thing.id } : {}), ...(said.ask.gone ? { gone: said.ask.gone } : {}) } }) }
+  if (said.id !== undefined) parentPort.postMessage({ id: said.id, error: words })
+  else if (said.revive) console.error(`the living thing ${said.revive.id} was not stood up: ${words}. It gets up when the world starts again.`)
+  else if (said.settle) console.error(`the thing ${said.settle.id} was not put down: ${words}. It is put down when the world starts again.`)
+}
+/** Set once something could not be done: nothing more is, and the world stops. */
+let stopped = false
+const fail = (e) => { stopped = true; setImmediate(() => { throw e }) }
+/** Does what is said (and what a swap held meanwhile, in the order it came). In the town at once; in a released world by its kind. */
+function hear(said) {
+  if (stopped) return
+  if (!GROUND) {
+    // A pair (`then`, serve.mjs) is its two asks, one after the other.
+    const { then, ...one } = said
+    for (const p of then ? [one, then] : [said]) { const more = handle(p); if (Array.isArray(more)) for (const m of more) hear(m) }
+    return
+  }
+  if (orderedOf(said)) return inTurn([said])
+  if (!questionOf(said)) { const more = handle(said); if (Array.isArray(more)) inTurn(more, true); return }
+  // While the core is swapped a question waits with everything else (`handle` keeps it), and asks its ground after.
+  if (swapping) return void handle(said)
+  void groundFor(said).then((why) => {
+    if (stopped) return
+    if (!why && !heldNow(said)) why = 'slow'
+    if (why) return refuse(said, why)
+    handle(said)
+  }).catch(fail)
+}
+/** What changes the world, in the order it came, each with its ground asked for as it came. */
+const turns = []
+let turning = false
+function inTurn(said, first = false) {
+  const items = said.map((m) => ({ said: m, ground: null }))
+  for (const item of items) {
+    // Two asks that are one (a thing made in place of another, serve.mjs): both stand on their ground, or neither is done.
+    const { then, ...one } = item.said, parts = then ? [one, then] : [item.said]
+    // Not while the core is swapped (it is asked for once the new core is in), and not for what keeps no place.
+    item.parts = parts
+    if (!swapping) item.ground = Promise.all(parts.map(groundFor)).then((w) => w.find((x) => x) ?? null)
+  }
+  if (first) turns.unshift(...items); else turns.push(...items)
+  if (!turning) void next().catch(fail)
+}
+async function next() {
+  turning = true
+  try {
+    while (turns.length && !stopped) {
+      const item = turns.shift(), { said, parts } = item
+      // During a swap it is kept as it came, a pair as one (`handle` keeps what is said meanwhile).
+      if (swapping && !said.swapped && !said.replay && !said.revive) { swapping.held.push(said); continue }
+      // While the core is swapped the history kept goes back into it as it was (edits keep no ground); a thing stood up
+      // again stands on the new core's ground, which is asked for now.
+      const skip = swapping && !said.revive
+      let why = skip ? null : await (item.ground ?? Promise.all(parts.map(groundFor)).then((w) => w.find((x) => x) ?? null))
+      // What it stands on may have been let go of while it waited its turn: asked for again, within the same bound.
+      if (!why && !skip && !parts.every(heldNow)) why = (await Promise.all(parts.map(groundFor))).find((x) => x) ?? (parts.every(heldNow) ? null : 'slow')
+      if (why) {
+        for (const p of parts) refuse(p, why)
+        // Nothing else is done where the ground is not: what moves there is held still by the clock until it comes.
+        if (parts.some((p) => p.id !== undefined || p.ask || p.revive || p.settle)) continue
+      }
+      for (const p of parts) {
+        const more = handle(p)
+        // What a swap held, before anything said since.
+        if (Array.isArray(more)) { const ordered = more.filter(orderedOf), rest = more.filter((m) => !orderedOf(m)); inTurn(ordered, true); for (const m of rest) hear(m) }
+      }
+    }
+  } finally { turning = false }
+}
+// Round everyone, every living thing and everywhere lately asked about, once a second, and let go of what nobody has
+// been near for a while: tiles are held for what is here now, never by how many.
+let forgotten = Date.now()
+if (GROUND) setInterval(() => {
+  if (swapping) return
+  const now = Date.now()
+  while (lately.length && now - lately[0][2] > 15_000) lately.shift()
+  const places = [...[...folk.values()].map((p) => p.at), ...[...alive.values()].map((a) => (a.pose ?? a.born)?.at).filter(Boolean)].map((at) => [at[0], at[2]])
+  if (fireSeen?.length >= 3) places.push([fireSeen[0], fireSeen[2]])
+  void Promise.all([...places, ...lately].map(([x, z]) => underfoot(core, Math.round(x), Math.round(z)))).then(fresh)
+  if (now - forgotten > UNHELD_EVERY) { forgotten = now; forget(core, UNHELD_AFTER) }
+}, 1000)
+/** What this process holds of the ground now (serve.mjs `/world/ground`): tiles by level. */
+const groundHeld = () => (GROUND ? { tiles: tilesHeld(core) } : null)
 
 // Its own clock: sixty times a second while anything moves, burns or flows.
 let last = performance.now()
@@ -894,4 +1080,8 @@ setInterval(() => {
   blow.track()
   told(core.bodies_advance(dt * body.rate), false)
 }, 16)
+// What cannot be done stops the world, as it always has (serve.mjs says so): never left half done and gone on from.
+// Heard from here on, once everything above is ready to do it; what came meanwhile first, in the order it came.
+hearing = (said) => { try { hear(said) } catch (e) { fail(e) } }
+for (const m of early.splice(0)) hearing(m)
 parentPort.postMessage({ ready: true })

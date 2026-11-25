@@ -41,7 +41,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -135,6 +135,9 @@ async function main() {
   const march = await marcher(device, gpu.format, world)
   // A world that comes to hold finer cells is drawn by a shader that looks into them: made again behind the frames, the old one drawing until it is ready.
   world.onFine = () => { core.fine_cells(1); void march.reshade((wgsl) => wgsl) }
+  // In a world whose process holds a release (#526), this page's core holds finer cells from the start, as that process
+  // and this page's makers of sectors do: else what it says is underfoot is grass a cell lower than what they have.
+  if (world.options.bricks && WORLD?.release) core.fine_cells(1)
   const blit = await glow(gpu)
   const debris = await crumbs(device, gpu.format)
   const smoke = await puffs(device, gpu.format)
@@ -360,7 +363,7 @@ async function main() {
   // A realm with street life (#450, street.ts) has its own people, on its own pavements: made below, once there are living things to get into.
   let streetLife: Street | null = null
   const lively = !!LOCAL?.street && query.get('street') !== '0'
-  if (query.get('people') !== '0' && !LOCAL?.street) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
+  if (query.get('people') !== '0' && !LOCAL?.street && !WORLD?.release) folk.from.push(townsfolk(core, () => (worldHour ? worldHour() : hour ?? 11), () => march.rain, () => folkClock.now(), shocks, takenOff, () => inTheWay()))
   /** How much colour and how much contrast the last pass gives the picture (glow.ts): the day's, until an hour is set. */
   let grade: [number, number] = [0.9, 0.1]
   /** Where the light comes from at an hour, how much of the day it is and how low the sun: null is the sun where it always stood. */

@@ -3,6 +3,7 @@
 // keeps what a page reports about the device it ran on: one JSON line a report, outside the repo.
 //
 //   node serve.mjs [--port 5740] [--reports ~/.village/engine/reports.jsonl] [--world file] [--realms dir] [--idle 300]
+//                  [--release <folder or address of a current.json>] [--release-cache dir] [--arrive x,y,z,yaw]
 //
 // With --world it also keeps one shared world (world.mjs): everyone who opens the page with ?shared=1 is in it,
 // what any of them breaks all of them see, and it is kept in that file across restarts. Without it there is none.
@@ -10,6 +11,10 @@
 // its own under --realms (unsaid: a folder named after the world's file; --realms alone keeps home there too), each
 // with a process of its own that is started when someone needs it and stopped when nobody has for --idle seconds.
 // "The realms" below says how.
+//
+// With --release every world it keeps stands on San Francisco from that pinned release (sf/release.md, ground.mjs)
+// in place of the generated town: each world's process holds the release's tiles as a page's cores do, and the
+// pages it serves are told the release before anything else and take the same tiles from it (`/release/`).
 //
 // It listens on this machine only. A phone reaches it through `tailscale serve`.
 import { createHash } from 'node:crypto'
@@ -32,6 +37,7 @@ import { foreign, named } from './guard.mjs'
 import { RULES_MOST, SOURCE_MOST } from './rules/run.mjs'
 import { door } from './mind/door.mjs'
 import { text } from './text.mjs'
+import { arrival, ground as groundOf } from './ground.mjs'
 
 const root = dirname(fileURLToPath(import.meta.url))
 const arg = (name, fallback) => { const at = process.argv.indexOf(`--${name}`); return at > 0 ? process.argv[at + 1] : fallback }
@@ -57,6 +63,7 @@ async function file(res, path, host = '') {
   }
   // A page talks to this server and to a helper on this machine or on the host it came from, and to nothing else:
   // a wish and a picture cannot be sent anywhere a made-up address says.
+  if (extname(rel) === '.html' && rel === join('page', 'index.html') && realms.size) body = pageWith(body)
   if (extname(rel) === '.html') { res.writeHead(200, { ...HEADERS, 'Content-Type': TYPES['.html'], 'Content-Security-Policy': `connect-src 'self' data: blob: http://127.0.0.1:* http://localhost:*${host.endsWith('.ts.net') ? ` https://${host}:*` : ''}` }); return res.end(body) }
   send(res, 200, body, TYPES[extname(rel)])
 }
@@ -92,6 +99,7 @@ async function report(req, res) {
 //             thinking: an actor asked to think has not answered yet (#264).
 //   6 said    something someone said, as JSON: {n, by, name, text, at}.
 //   9 shown   what the world's rules show people, all of it, as JSON: [{rule, id, line, meters: [{label, full, colour}], score: {label, value}, choice: [{id, word}], to}]. Not kept: said to each reader as it joins.
+//  14 ground  what the world stands on, the first frame of every stream, as JSON: {release (the pinned release's digest, or null for the generated town), pointer (where a page reads it, or null)}. Not kept.
 //  13 blow    a blow on someone at a page, as JSON: {by, push: [vx, vy, vz]} (the speed it gives them) or {by, down: seconds}. Not kept: their own page moves their body.
 //  12 bodies  what people's bodies can do and how fast the world goes, as JSON: {clock: {rate, spare}, can: {by: {pace, jump, climb, fly, fall}}}. Not kept: said to each reader as it joins.
 //   8 offers  what the world's rules offer people to do, all of it, as JSON: [{rule, id, word, hold, aim, key, to}]. Not kept: said to each reader as it joins.
@@ -99,7 +107,29 @@ async function report(req, res) {
 //  11 plugged what of the engine's plugins a page is to have (plugins.mjs), as JSON: {list: [{name, v}]} (the page sides there are: a page imports /plugins/<name>/page.ts?v=<v> for each that is new to it), {plugin, state} (given to that plugin's page side; the latest is said to each reader as it joins), {plugin, once} (the same, kept for nobody) or {plugin, gone}; and {core: v} when the core has been built again and the world's process has taken it: a page takes /page/core.wasm?v=<v> the same way.
 //   7 living  which body of the core a living thing is now, as JSON: {thing, body}; body 0 when it lives no more. Not kept: said to each reader as it joins.
 const worldFile = arg('world', '')
-const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13
+const LOG = 1, STATE = 2, ECHO = 3, NOW = 4, HERE = 5, SAID = 6, LIVING = 7, OFFERS = 8, SHOWN = 9, PLUGGED = 11, BODIES = 12, BLOW = 13, GROUND = 14
+// ── The ground (#526) ────────────────────────────────────────────────────
+/** The release every world here stands on, read once (ground.mjs), or null: the generated town. */
+const ground = arg('release', '') ? await groundOf(arg('release', ''), { cache: arg('release-cache', undefined), arrive: arrival(arg('arrive', '')) }).catch((e) => { console.error(e.message); process.exit(1) }) : null
+if (ground && !ground.squares) {
+  // A staged release has no road's marks beside it: made from the city's street graphs, as `/bay/marks.bin` always was.
+  const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
+  try { const m = await import('./sf/marks.mjs'), made = m.marksIn(graphs); ground.marks = m.marksBytes(made); ground.squares = m.squaresBytes(made) } catch (e) { console.error(`no road marks from ${graphs}: ${e.message}: the world and its pages keep the bake's paint`) }
+}
+if (ground?.remote) {
+  // From an address: what this server hands its pages of the release is read through bay.ts as its worlds read it,
+  // only what the manifest lists, checked, and so kept on disk once (ground.mjs `object`). Nothing else of bay.ts is used here.
+  const bay = await import('./page/bay.ts')
+  await bay.hold({ pointer: ground.pointer, read: ground.read, passed: ground.passed, heroes: [], squares: null })
+  ground.listed = bay.listed
+}
+if (ground) console.log(`the ground is San Francisco, release ${ground.release.slice(0, 12)} (${ground.pointer}${ground.remote ? `, objects kept in ${ground.cache} once checked` : ''})`)
+/** How long a question or an ask waits for its ground before it is refused, ms; and the most tiles a world's process holds (#526). */
+const GROUND_WAIT = Number(arg('ground-wait', '3000')), TILES_MOST = Number(arg('tiles-most', '64'))
+/** What a world says of its ground: to a page before it makes anything (in the page itself, and first in the stream) and to anyone at `/world/ground`. */
+const groundWord = () => ({ release: ground?.release ?? null, pointer: ground ? '/release/current.json' : null, arrive: ground ? { at: ground.arrive.at, yaw: ground.arrive.yaw, pitch: ground.arrive.pitch ?? 0 } : null })
+/** The page, with its ground said in it (bay.ts `WORLD`), where this server keeps a world. */
+const pageWith = (body) => Buffer.from(body.toString('utf8').replace('</head>', `<script type="application/json" id="ground">${JSON.stringify(groundWord()).replace(/</g, '\\u003c')}</script>\n</head>`))
 /** What someone outside a browser is told when they ask what this is. */
 const GUIDE = `A shared world of 10 cm cells (Village's engine). Everyone in it sees what anyone does. What is done to the world is kept; where people are and what they say is not.
 
@@ -244,7 +274,21 @@ const pluginsDir = arg('plugins', join(root, 'plugins'))
 let plugins = pluginsFound(pluginsDir)
 /** By name, how each plugin's world side last went in a world's process: {v (the version that is in), does, ms, error}. */
 const plugged = new Map()
-const guide = () => GUIDE.replace('%PLUGINS%', plugins.filter((p) => p.guide && !p.error && (p.world ? plugged.has(p.name) && !plugged.get(p.name).error : true)).map((p) => `${p.guide}\n`).join(''))
+const guide = () => grounded(GUIDE).replace('%PLUGINS%', plugins.filter((p) => p.guide && !p.error && (p.world ? plugged.has(p.name) && !plugged.get(p.name).error : true)).map((p) => `${p.guide}\n`).join(''))
+/**
+ * The guide's words for the world's ground: in a released world the town's lines (where it starts, its blocks, its
+ * residents) are said of San Francisco, whose streets the guide cannot list.
+ */
+function grounded(words) {
+  if (!ground) return words
+  const [x, y, z] = ground.arrive.at.map(Math.round)
+  return words.split('\n').map((line) => {
+    if (line.startsWith('The town starts near')) return `This world is San Francisco at true size, from open data: release ${ground.release} (GET /world/ground). One arrives near x ${x}, y ${y}, z ${z}. Streets, buildings and hills are where they are in the city; ask what is where (at, look, tops) rather than guessing.`
+    if (line.startsWith('Cars are parked along both kerbs')) return null
+    if (line.startsWith('Residents of the town walk')) return `Nobody lives on its streets yet: there are no residents, only whoever is here (world.residents is empty).\nThe world holds the city's ground round whoever is here and whatever is asked about, up to ${TILES_MOST} tiles of 250 m. Where the ground has not come within ${GROUND_WAIT / 1000} s, or holding it would pass that, a question is answered 503 with why, and an ask is not done: an ask sent with "wait": true is answered 503 with why; any other is answered 202 and is simply not done.`
+    return line.replace('get a body on the north pavement near the start', 'get a body near where one arrives')
+  }).filter((line) => line !== null).join('\n')
+}
 const pluggedList = () => frame(PLUGGED, 0, Buffer.from(JSON.stringify({ list: plugins.filter((p) => p.page && !p.error).map((p) => ({ name: p.name, v: p.page })) })))
 const pluginsNow = () => plugins.map((p) => ({ name: p.name, world: p.world, page: p.page, does: plugged.get(p.name)?.does ?? [], error: p.error || plugged.get(p.name)?.error || '' }))
 /** The core each world's process runs, by the hash of its file when the server started or last swapped it. */
@@ -505,7 +549,7 @@ function open(of) {
   /** Questions waiting for the world's answer, by number. */
   const waiting = new Map()
   let questions = 0
-  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir } })
+  const thread = new Worker(new URL('./world.mjs', import.meta.url), { workerData: { core: join(root, 'page', 'core.wasm'), plugins: pluginsDir, ground: ground && { release: ground.release, pointer: ground.pointer, bytes: ground.bytes, cache: ground.cache, remote: ground.remote, heroes: ground.heroes, squares: ground.squares, arrive: ground.arrive, wait: GROUND_WAIT, most: TILES_MOST } } })
   // What was kept: the edits go back into the core in order, and the file is written again as those alone (bodies
   // that were in the air when the world last stopped are lost; where they came from is as they left it).
   const log = []
@@ -528,7 +572,7 @@ function open(of) {
   let talks = true, given = false
   /** The world's process is told what the realm is called and is about (#264): its people, asked to think, are told where they live. Said when the world starts and when it changes. */
   // And its hour, if it says one: the world's process has the town's residents out by it, as every page there does.
-  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '', hour: typeof realm.look?.hour === 'number' ? realm.look.hour : null, director: realm.director === true } })
+  const called = () => thread.postMessage({ called: { name: realm.name ?? '', about: realm.about ?? '', hour: typeof realm.look?.hour === 'number' ? realm.look.hour : null, director: realm.director === true, ...(realm.arrive ? { arrive: realm.arrive } : {}) } })
   const note = (ask, at) => {
     if (ask.rule) { rules.set(ask.rule.id, ask.rule); awaited.delete(ask.rule.id); if (ask.rule.id === TALK.id) talks = true }
     else if (ask.unrule) { rules.delete(ask.unrule); if (ask.unrule === TALK.id) { talks = false; given = false } }
@@ -607,6 +651,8 @@ function open(of) {
     if (voiced && talks && !rules.has(TALK.id) && !given) { given = true; thread.postMessage({ rule: TALK }) }
   } })
   thread.on('message', (m) => {
+    // An object of an address's release the world's process has not on disk (#526): asked of the host once for every world here.
+    if (m.wants) return void ground.fetchOnce(m.wants.url).then((got) => thread.postMessage({ got: { n: m.wants.n, ...got } }))
     if (m.id !== undefined) { waiting.get(m.id)?.(m); waiting.delete(m.id); return }
     // An actor was asked to think (#264): handed to whoever voices this world. This server runs no model.
     if (m.think) return minds.think(m.think)
@@ -614,7 +660,7 @@ function open(of) {
     // A rule gives someone a thing or takes it from them: the cells are here, so the ask starts here.
     if (m.want) { const t = m.want.hold && things.get(m.want.hold.id); if (t && !t.record.held && !t.record.controls?.motor && !going.has(m.want.hold.id)) going.add(m.want.hold.id), thread.postMessage({ ask: { by: m.want.hold.by, hold: m.want.hold.id, name: t.record.name, grain: t.record.grain }, rows: rowsOf(t) }); else if (m.want.put) thread.postMessage({ ask: { by: m.want.put.by, put: true } }); return }
     // A hold the world's process would not do: the thing is nobody's to wait for any more.
-    if (m.refused) { if (m.refused.hold !== undefined) going.delete(m.refused.hold); return }
+    if (m.refused) { if (m.refused.hold !== undefined) going.delete(m.refused.hold); if (m.refused.thing) coming.delete(m.refused.thing); if (m.refused.gone) going.delete(m.refused.gone); return }
     // What the rules' people are and what each rule keeps (#218): beside the world's file, whole each time, so a
     // restart finds them where they stood. Written to one side and moved into place: a stop half way leaves the old one.
     if (m.kept !== undefined) { try { writeFileSync(`${peopleFile}.part`, m.kept); renameSync(`${peopleFile}.part`, peopleFile) } catch (e) { console.error(`the rules' people were not kept: ${e}`) } return }
@@ -679,6 +725,7 @@ function open(of) {
       if (!place(at)) return send(res, 400, 'a place is x, y and z, whole numbers of cells')
       const id = questions++
       const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ at, id }) })
+      if (m.error) return send(res, 503, m.error)
       send(res, 200, JSON.stringify({ kind: m.kind, material: m.kind & 15, colour: m.kind >> 8, rubble: (m.kind & 16) !== 0, ground: m.ground }), TYPES['.json'])
     },
     /** The first thing along a line, asked of the world itself. */
@@ -688,6 +735,7 @@ function open(of) {
       if (!place([x, y, z]) || ![dx, dy, dz].every(Number.isFinite) || !(Math.hypot(dx, dy, dz) > 0)) return send(res, 400, 'a look is from x, y and z (whole cells) along dx, dy and dz')
       const id = questions++
       const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ look: { from: [x + 0.5, y + 0.5, z + 0.5], to: [dx, dy, dz] }, id }) })
+      if (m.error) return send(res, 503, m.error)
       send(res, 200, JSON.stringify({ at: m.at, kind: m.kind, material: m.kind & 15, colour: m.kind >> 8, rubble: (m.kind & 16) !== 0, far: m.far }), TYPES['.json'])
     },
     /** The first thing down every column of a rectangle, asked of the world itself in one go. */
@@ -697,6 +745,7 @@ function open(of) {
       if (![x0, z0, x1, z1, y].every((v) => whole(v)) || !(x0 < x1 && z0 < z1) || (x1 - x0) * (z1 - z0) > TOPS_MOST) return send(res, 400, `tops are of a rectangle x0, z0 to x1, z1 (not included) of at most ${TOPS_MOST} columns, looked for down from y`)
       const id = questions++
       const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ tops: { box: [x0, z0, x1, z1], from: y }, id }) })
+      if (m.error) return send(res, 503, m.error)
       send(res, 200, JSON.stringify({ high: m.high, material: m.kinds.map((k) => k & 15) }), TYPES['.json'])
     },
     /** Where a page's own body is: the world tells everyone, and keeps it for five seconds. */
@@ -777,10 +826,21 @@ function open(of) {
     /** A helper that voices this world asks what its people were asked to think, and answers (mind/door.mjs). */
     minds: (url, res) => (down ? send(res, 503, 'the world has stopped') : minds.take(url, res)),
     mind: async (req, res) => { const b = await body(req, 4096); return down ? send(res, 503, 'the world has stopped') : minds.mind(b, res) },
-    realm: (res) => send(res, 200, JSON.stringify({ ...realm, rules: [...rules.keys()] }), TYPES['.json']),
+    realm: (res) => send(res, 200, JSON.stringify({ ...realm, ...(ground && !realm.arrive ? { arrive: groundWord().arrive } : {}), rules: [...rules.keys()] }), TYPES['.json']),
+    /** What it stands on, and what of that its process holds now (tiles by level), with this server's memory. */
+    async ground(res) {
+      if (down) return send(res, 503, 'the world has stopped')
+      const id = questions++
+      const m = await new Promise((resolve) => { waiting.set(id, resolve); thread.postMessage({ grounds: true, id }) })
+      send(res, 200, JSON.stringify({ ...groundWord(), held: m.held, rss: process.memoryUsage().rss }), TYPES['.json'])
+    },
     stream(res, from) {
       res.writeHead(200, { ...HEADERS, 'Content-Type': 'application/octet-stream', 'X-Accel-Buffering': 'no' })
+      // What the world stands on, before anything else: a page whose own pin is another does not join (link.ts).
+      res.write(frame(GROUND, 0, Buffer.from(JSON.stringify(groundWord()))))
       for (let i = Math.max(0, from); i < log.length; i++) res.write(log[i])
+      // A released world whose record says nowhere to arrive arrives where the server says (--arrive, sf/realm.json): said, not kept.
+      if (ground && !realm.arrive) res.write(frame(ECHO, log.length, Buffer.from(JSON.stringify({ by: 'the world', realm: { arrive: groundWord().arrive } }))))
       res.write(frame(NOW, log.length, Buffer.from(Float64Array.of(Date.now()).buffer)))
       for (const [thing, body] of living) res.write(frame(LIVING, 0, Buffer.from(JSON.stringify({ thing, body }))))
       if (offered) res.write(offered)
@@ -857,13 +917,19 @@ function open(of) {
       // `wait: true` with cells: answered once the world has laid them, with how many bodies they left loose (0: it all stands). Else at once.
       // A thing that comes with its controls is answered too, with whether it lives (`alive`); and a living thing taken out, once it is.
       if (ask.gone) going.add(ask.gone)
-      if (body.wait === true && (ask.edit || (ask.gone && !ask.release))) {
+      // A blast, a fire or a ball waited for is answered once done, or with why it was not (#526: where its ground has not come).
+      if (body.wait === true && (ask.blast || ask.ignite || ask.ball) && !replaced) {
         const id = questions++, timer = setTimeout(() => { waiting.delete(id); send(res, 202, '{"asked":true}', TYPES['.json']) }, WAIT_MOST)
-        waiting.set(id, (m) => { clearTimeout(timer); send(res, 202, JSON.stringify({ asked: true, laid: true, loose: m.loose, ...(m.alive !== undefined ? { alive: m.alive } : {}) }), TYPES['.json']) })
-        if (replaced) thread.postMessage({ ask: replaced })
+        waiting.set(id, (m) => { clearTimeout(timer); if (m.error) return send(res, 503, m.error); send(res, 202, '{"asked":true,"done":true}', TYPES['.json']) })
         return thread.postMessage({ ask, id })
       }
-      if (replaced) thread.postMessage({ ask: replaced })
+      if (body.wait === true && (ask.edit || (ask.gone && !ask.release))) {
+        const id = questions++, timer = setTimeout(() => { waiting.delete(id); send(res, 202, '{"asked":true}', TYPES['.json']) }, WAIT_MOST)
+        waiting.set(id, (m) => { clearTimeout(timer); if (m.error) return send(res, 503, m.error); send(res, 202, JSON.stringify({ asked: true, laid: true, loose: m.loose, ...(m.alive !== undefined ? { alive: m.alive } : {}) }), TYPES['.json']) })
+        // The two as one message: the world's process does both on their ground, or neither (world.mjs `step`).
+        return thread.postMessage(replaced ? { ask: replaced, then: { ask, id } } : { ask, id })
+      }
+      if (replaced) return thread.postMessage({ ask: replaced, then: { ask } }), send(res, 202, '{"asked":true}', TYPES['.json'])
       thread.postMessage(ask.thing && !ask.edit && ask.thing.controls !== undefined ? { ask, rows: rowsOf(things.get(ask.thing.id)) } : { ask })
       send(res, 202, '{"asked":true}', TYPES['.json'])
     },
@@ -1095,6 +1161,7 @@ const server = createServer((req, res) => {
     if ((req.method === 'GET' || req.method === 'HEAD') && fineAsked) return fineSend(fineAsked[1], res, req.method === 'HEAD')
     const world = awake(realm)
     if (!world) return send(res, 503, 'too many realms are awake: try again in a while')
+    if (req.method === 'GET' && route === '/world/ground') return done(world.ground(res))
     if (req.method === 'GET' && route === '/world/stream') return world.stream(res, Number(url.searchParams.get('from') ?? 0) | 0)
     if (req.method === 'POST' && route === '/world/ask') return done(world.ask(req, res))
     if (req.method === 'POST' && route === '/world/here') return done(world.here(req, res))
@@ -1131,6 +1198,13 @@ const server = createServer((req, res) => {
     const none = (e) => send(res, 503, `no tile: ${String(e?.message ?? e).slice(0, 200)}`)
     if (existsSync(path)) { try { return answer() } catch (e) { return none(e) } }
     return void earth(`${frame} ${level} ${tx} ${tz}`).then(answer).catch(none)
+  }
+  // The release every world here stands on (#526): its pointer and its own objects, the bytes its worlds' processes hold.
+  if (ground && url.pathname.startsWith('/release/')) return done(Promise.resolve().then(() => ground.object(decodeURIComponent(url.pathname.slice(9)))).then((bytes) => (bytes ? send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream') : send(res, 404, 'not of the release this world holds'))))
+  // Its landmarks and road's marks are the ones its worlds hold, for every page here.
+  if (ground && ['/bay/heroes.json', '/bay/marks.bin', '/bay/marks-squares.bin'].includes(url.pathname)) {
+    const bytes = url.pathname === '/bay/heroes.json' ? ground.heroes : url.pathname === '/bay/marks.bin' ? ground.marks : ground.squares
+    return bytes ? send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream') : send(res, 404, 'no road marks')
   }
   // The road's marks for the whole city (#450, sf/marks.mjs over the city run's street graphs), as sf/build.mjs writes
   // them beside a realm's tiles: made once, the first time they are asked for.
