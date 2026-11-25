@@ -1,11 +1,5 @@
 #!/usr/bin/env node
 // One command that runs every stub check once: node scripts/check.mjs (npm run check).
-//   --list                 print the manifest and exit
-//   --only a b c           run just these (names from scripts/checks.mjs), even ones the manifest skips
-//   --ci                   skip the checks the manifest marks local-only
-//   --webgl                run Chrome without WebGPU, software WebGL2 (what CI does; see scripts/chrome-webgl.mjs)
-//   --jobs N               checks at once (default 4); --jobs 1 is the serial run
-//   --timeout S            kill a check after S seconds (default 900)
 // Ports: the runner picks free ports for every check and starts one shared dev server for the
 // checks that open a page on one, so nothing depends on a fixed port. Full logs: .check/<name>.log.
 import { execFileSync, spawn } from 'node:child_process'
@@ -21,12 +15,12 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const { values, positionals } = parseArgs({
   allowPositionals: true,
   options: {
-    list: { type: 'boolean', default: false },
-    only: { type: 'boolean', default: false },
-    ci: { type: 'boolean', default: false },
-    webgl: { type: 'boolean', default: false },
-    jobs: { type: 'string', default: String(Math.min(4, cpus().length)) },
-    timeout: { type: 'string', default: '900' },
+    list: { type: 'boolean', description: 'List the checks and their eligibility.', default: false },
+    only: { type: 'boolean', description: 'Run the named checks, including skipped checks when their prerequisites exist.', default: false },
+    ci: { type: 'boolean', description: 'Skip local-only checks.', default: false },
+    webgl: { type: 'boolean', description: 'Run Chrome with software WebGL2.', default: false },
+    jobs: { type: 'string', description: 'Maximum number of checks running at once.', default: String(Math.min(4, cpus().length)) },
+    timeout: { type: 'string', description: 'Seconds allowed per check.', default: '900' },
   },
 })
 

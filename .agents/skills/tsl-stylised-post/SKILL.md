@@ -159,3 +159,5 @@ Do the same in any new theme: step the pose, never the render loop or camera. TS
 Installed source (primary). Complementary, status 200 on 2026-11-07, not read line by line:
 https://threejs.org/examples/webgpu_postprocessing_pixel.html, `..._retro.html`, `..._sobel.html`, `..._ssr.html`,
 `..._outline.html`, `..._bloom_emissive.html`; TSL wiki https://github.com/mrdoob/three.js/wiki/Three.js-Shading-Language.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/package.json":"d5fdb6e198dee4c3d04f8eca0f9da40c","home/src/plugins/postfx.ts":"c2d3d5e725ae0333786587b01675d2a5"} -->

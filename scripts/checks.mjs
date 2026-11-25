@@ -23,7 +23,8 @@ const SOFTWARE_GL = 'timeouts or time bounds on a hosted Linux runner, in softwa
 
 export const CHECKS = [
   // Static
-  { name: 'docs', cwd: 'home', run: ['node', '../scripts/docs.mjs'], seconds: 1 },
+  { name: 'docs', cwd: 'home', run: ['node', '../scripts/docs.mjs'], seconds: 4 },
+  { name: 'docs-mentions', cwd: 'home', run: ['node', '--test', '../scripts/doc-mentions.test.mjs'], seconds: 1 },
   { name: 'host-typecheck', cwd: 'host', run: ['npm', 'run', 'typecheck'], seconds: 10 },
   { name: 'home-typecheck', cwd: 'home', run: ['npm', 'run', 'typecheck'], seconds: 10 },
   { name: 'home-build', cwd: 'home', run: ['npm', 'run', 'build'], seconds: 15 },

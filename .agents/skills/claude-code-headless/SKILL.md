@@ -127,3 +127,5 @@ so the binary's own additions are about 640 tokens.
 - Only macOS with a subscription login was run. API-key logins and other platforms were not.
 - Refresh when the binary's major or minor version changes: run `node test/make.mjs`, one real
   `node make.mjs ... --dry`, and the context probe (ask it to list what is in its context) again.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/make/model.mjs":"0af33a022d89b946a16c87728a761957"} -->

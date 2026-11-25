@@ -1910,7 +1910,7 @@ side of that:
   kept).
 
 ```sh
-npm run player && node blocks/serve.mjs --port 5991 --as kit    # the kit's own pages drawn by the engine: http://127.0.0.1:5991/showcase/ (?gl: by its WebGL2)
+npm run player && node blocks/serve.mjs --port 5991    # the kit's own pages drawn by the engine: http://127.0.0.1:5991/kit/showcase/ (?gl: by its WebGL2)
 node blocks/proof/showcase.mjs           # every part of the kit's showcase against WebGL2, by day and night
 (cd ~/.village/engine/blocks/film && PORT=5991 node ~/Developer/plant-a-seed/tools/film.mjs)   # the kit's own film, on the engine
 node blocks/serve.mjs                    # the proof on http://127.0.0.1:5990/blocks/proof/ (the kit under /kit/, read only)
@@ -2023,11 +2023,7 @@ are kept, and one of the stage's `passes` draws them with the world's eye and de
 that one's face. The light is the kit's own, turned to where the world's sun stands and as strong as the hour
 (`march.day`), and the kit's night colours and halos come on when it is night.
 
-```sh
-npm run player && node blocks/serve.mjs --port 5991 --as kit
-open 'http://127.0.0.1:5991/engine/landing/index.html?kit=/packages/voxelmorphism/&hour=10.4'   # the landing street with a panel on it
-node blocks/proof/stand.mjs --hours 10.4,17.8,22     # pictures in ~/.village/engine/blocks/world
-```
+The pictures from the original landing experiment used `blocks/proof/stand.mjs` and an earlier server that served the landing and kit together.
 
 What is rough there:
 

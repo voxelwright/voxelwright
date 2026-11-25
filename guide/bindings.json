@@ -1,9 +1,60 @@
 {
+  ".agents/skills/adversarial-review/SKILL.md": {
+    "AGENTS.md": "lines:^- Reviews are a tool"
+  },
+  ".agents/skills/bay-sources/SKILL.md": {
+    "engine/bay/fetch.py": "lines:^(EPT|DEM|NAIP|SF|LAYERS) ="
+  },
+  ".agents/skills/cell-engine/SKILL.md": {
+    "engine/core/src/tree.rs": "lines:^pub const (SIDE|UNIFORM)|^pub type Kind"
+  },
+  ".agents/skills/claude-agent-sdk/SKILL.md": {
+    "host/package.json": [
+      "dependencies.@anthropic-ai/claude-agent-sdk",
+      "dependencies.zod"
+    ]
+  },
+  ".agents/skills/claude-code-headless/SKILL.md": {
+    "engine/make/model.mjs": "lines:^const args =|^if .*args.push"
+  },
+  ".agents/skills/documentation-maintenance/SKILL.md": {
+    "AGENTS.md": "lines:^- Keep README commands|^Mintlify is pre-authorized"
+  },
+  ".agents/skills/facade-evidence/SKILL.md": {
+    "engine/bay/facade_evidence.py": "lines:^(SEGMENTER|CLASSIFIER) =|^cli.add_argument"
+  },
+  ".agents/skills/fal-model-api/SKILL.md": {
+    "engine/make/drawn.mjs": "lines:^export const ENDPOINT|^export async function falDrawer"
+  },
+  ".agents/skills/game-hud/SKILL.md": {
+    "engine/page/realm-ui.ts": "lines:^export function realmControls"
+  },
+  ".agents/skills/game-sound/SKILL.md": {
+    "engine/page/sound/sound.ts": "lines:^export async function sound|^export interface Sound"
+  },
   ".agents/skills/jolt-physics/SKILL.md": {
     "home/package.json": [
       "dependencies.jolt-physics"
     ],
     "home/src/engine/jolt.ts": "lines:^import .*jolt-physics"
+  },
+  ".agents/skills/lead-orchestration/SKILL.md": {
+    "AGENTS.md": "lines:^- The lead decides|^- GitHub's check workflows"
+  },
+  ".agents/skills/lobby-transport/SKILL.md": {
+    "probes/lobby-transport/package.json": [
+      "dependencies"
+    ]
+  },
+  ".agents/skills/master-server/SKILL.md": {
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
+    "master/Cargo.toml": "lines:^(edition|axum|tokio|hyper|hyper-util|tower|tower-http|http-body-util|serde|serde_json|clap) ="
+  },
+  ".agents/skills/mintlify-docs/SKILL.md": {
+    "docs/docs.json": [
+      "name",
+      "navigation.groups"
+    ]
   },
   ".agents/skills/quickjs-sandbox/SKILL.md": {
     "home/package.json": [
@@ -12,10 +63,69 @@
     ],
     "home/src/invent/limits.ts": "lines:^\\w+:"
   },
+  ".agents/skills/raw-webgpu/SKILL.md": {
+    "engine/blocks/renderer.ts": "lines:^export async function renderer"
+  },
   ".agents/skills/rust-wasm-core/SKILL.md": {
     "engine/core/.cargo/config.toml": "file",
     "engine/core/Cargo.toml": "lines:^edition|^crate-type|^opt-level|^lto|^codegen-units|^panic|^\\[.*dependencies",
     "engine/core/build.mjs": "lines:execFileSync\\('cargo'|^const built =|out = join"
+  },
+  ".agents/skills/sandbox-runtime/SKILL.md": {
+    "host/package.json": [
+      "dependencies.@anthropic-ai/sandbox-runtime",
+      "dependencies.pngjs",
+      "dependencies.@types/pngjs"
+    ]
+  },
+  ".agents/skills/sdf-sculpting/SKILL.md": {
+    "home/src/engine/world.ts": "lines:^snapshot\\(\\): Snapshot|^restore\\(s: Snapshot"
+  },
+  ".agents/skills/seat-transport/SKILL.md": {
+    "street/package.json": [
+      "dependencies.@modelcontextprotocol/sdk",
+      "dependencies.@fails-components/webtransport",
+      "devDependencies.playwright",
+      "dependencies.zod"
+    ],
+    "engine/package.json": [
+      "dependencies.node-datachannel"
+    ]
+  },
+  ".agents/skills/sf-sky/SKILL.md": {
+    "engine/page/almanac.ts": "lines:^export const SF|^export function (weatherOf|heavens)"
+  },
+  ".agents/skills/sound-judge/SKILL.md": {
+    "engine/test/judged.mjs": "lines:^const hard|^const was|^const fresh"
+  },
+  ".agents/skills/technology-grounding/SKILL.md": {
+    "AGENTS.md": "lines:^- When work enters|^Adding a vendor"
+  },
+  ".agents/skills/tsl-stylised-post/SKILL.md": {
+    "home/package.json": [
+      "dependencies.three"
+    ],
+    "home/src/plugins/postfx.ts": "types:Chain"
+  },
+  ".agents/skills/ui-craft/SKILL.md": {
+    "AGENTS.md": "lines:^- Look before you score|^reference. A listed defect",
+    "engine/kit/tools/physical-specimens.mjs": "lines:^const pageOptions|^async function specimens"
+  },
+  ".agents/skills/village-home-stack/SKILL.md": {
+    "home/package.json": [
+      "dependencies.three",
+      "dependencies.cordis",
+      "scripts.measure"
+    ]
+  },
+  ".agents/skills/voxel-world/SKILL.md": {
+    "home/src/engine/voxels.ts": "lines:^export (interface Voxels|const KINDS|function voxels)"
+  },
+  ".agents/skills/web-audio-voice/SKILL.md": {
+    "home/src/voice/context.ts": "types:AudioUser,SharedAudio",
+    "home/package.json": [
+      "devDependencies.playwright"
+    ]
   },
   "README.md": {
     "site/package.json": [
@@ -97,11 +207,17 @@
   "engine/sf/far/README.md": {
     "engine/sf/far/check.mjs": "lines:arg\\('only'"
   },
+  "guide/check-cli.md": {
+    "scripts/check.mjs": "options"
+  },
   "guide/checks.md": {
     "scripts/checks.mjs": "checks"
   },
   "guide/documentation.md": {
     "scripts/docs.mjs": "lines:^const usage =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith"
+  },
+  "guide/history-cli.md": {
+    "scripts/public-history/run": "options"
   },
   "guide/plugin-types.md": {
     "engine/page/plugins.ts": "types"

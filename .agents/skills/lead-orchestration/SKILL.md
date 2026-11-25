@@ -63,7 +63,7 @@ them. The evidence is in `~/.village/retro/` (2026-11-20-process.md,
     run the full suite once, on the head you report. On Nov 21 the full suite
     reran after every change: up to 15.6 of 40.8 lane-hours;
   - done means proven. The report needs a before/after crop at the same camera
-    for each owner note, and its `npm run sf` bytes against main. Before the
+    for each owner note, and its `npm --prefix engine run sf` bytes against main. Before the
     report, a fresh agent hunts for defects in the shots;
   - end the turn while checks run: run them in the background and wake on the
     notification, with no polling loops or long foreground timeouts;
@@ -146,3 +146,5 @@ proposes how to structure parts so that one edit reaches every use.
   his to decide, ask once, with a recommendation.
 - Things only the owner can do go in one batch at the end: a real phone,
   listening, uploads to Cloudflare, taste vetoes.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"AGENTS.md":"8f537e255199d8a627bd861af8b4f3a5"} -->

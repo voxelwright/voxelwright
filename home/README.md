@@ -1023,7 +1023,7 @@ the role cue on top, and a check that the body is not the default round template
 After the round, `THREE.RoundedBoxGeometry` also resolves in the sandbox (the cause of 9 of 25
 repairs), the persona caps are 64 characters for role and 80 for speciality (40 cut mid-phrase), and
 repeated quirks are dropped. `node scripts/check-villager-gen.mjs` 23 of 23 (dev server on 5332),
-`node scripts/check-prop-sandbox.mjs --port=5336` 39 of 39.
+`node scripts/check-prop-sandbox.mjs --dev=5336` 39 of 39.
 
 ### Round 3 (November 7, 2026): species first, role on top
 
@@ -1169,7 +1169,7 @@ more than the marks: it compares whole outlines, so it is not the role test. The
 hedgehog maker's small lens among its spines, the hedgehog tidier's plume against its spines, and
 the sheep carer's cap merging into its wool. Personas (`round4/personas-readability.md`) stay adult,
 with no exclamation marks, "yay" or "hehe". The blind silhouette test with Opus and Sol is next.
-`node scripts/check-villager-gen.mjs` passes 33 of 33, `node scripts/check-prop-sandbox.mjs --port=5336`
+`node scripts/check-villager-gen.mjs` passes 33 of 33, `node scripts/check-prop-sandbox.mjs --dev=5336`
 passes 40 of 40, and `npm run typecheck` passes.
 
 Silhouette role test, round 4 (same method as round 3, a new shuffle, the new legend): Opus 17 of
@@ -1234,7 +1234,7 @@ node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=49 --
 
 Earlier rounds still load with `&checks=off`, but their marks are now dyed and their scarves moved
 towards oatmeal, so their old sheets will not render the same again.
-`node scripts/check-villager-gen.mjs` passes 41 of 41, `node scripts/check-prop-sandbox.mjs --port=5336`
+`node scripts/check-villager-gen.mjs` passes 41 of 41, `node scripts/check-prop-sandbox.mjs --dev=5336`
 passes 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck`
 passes.
 
@@ -1288,7 +1288,7 @@ node scripts/villagers/run.mjs <out> http://localhost:5332/ --set readability --
 node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=50 --close=r6-01,r6-07,r6-12,r6-18
 ```
 
-`node scripts/check-villager-gen.mjs` passes 56 of 56, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+`node scripts/check-villager-gen.mjs` passes 56 of 56, `node scripts/check-prop-sandbox.mjs --dev=5336` passes
 40 of 40, host `node test/villager-make.ts` passes 81 of 81 (stub maker), and `npm run typecheck` passes.
 
 #### Round 7: appeal
@@ -1339,7 +1339,7 @@ node scripts/villagers/readability.mjs <out> http://localhost:5332/ --seed=51 --
 node scripts/villagers/measure-marks.mjs r7-
 ```
 
-`node scripts/check-villager-gen.mjs` passes 66 of 66, `node scripts/check-prop-sandbox.mjs --port=5336` passes
+`node scripts/check-villager-gen.mjs` passes 66 of 66, `node scripts/check-prop-sandbox.mjs --dev=5336` passes
 40 of 40 (one earlier run 39 of 40, not reproduced in two reruns), host `node test/villager-make.ts` passes 81 of 81
 (stub maker). `npm run typecheck` fails only in `setup-d.ts` (`sizeAt` missing from `setup-b`), builder N's files.
 
@@ -1579,7 +1579,7 @@ and person scoping as the props endpoints; model failures answer 422:
   patterns as data files under `people/<id>/persona-templates/`.
 
 ```sh
-node test/villager-make.ts [--live]                 # in host/: 108 checks, stub maker; --live adds one Sonnet call
+(cd host && node test/villager-make.ts [--live])                 # in host/: 108 checks, stub maker; --live adds one Sonnet call
 node scripts/villagers/check-setup.mjs [--live] [--shots=dir] [--viewport=390x844]
 node scripts/villagers/check-setup.mjs --strategy=1|b|bench [--shots=dir] [--viewports=1440x900,1024x768,390x844]
 ```
@@ -1674,7 +1674,7 @@ it from the address bar with `history.replaceState` and trades it at
 `POST /villager/api/pair` for a session the host sets as an HttpOnly,
 SameSite=Strict cookie on `/villager/api`. Page scripts never see the session;
 the page keeps only its public tag. A paired device stays paired when the host
-restarts. `npm run village -- link <person>` makes a new link (and unpairs that
+restarts. `cd host && npm run village -- link <person>` makes a new link (and unpairs that
 person's other devices unless `--add`). A page that was never paired asks the
 host nothing. The dev server (`vite.config.ts`) only forwards
 `/villager/api/*` to the host on `127.0.0.1:$VILLAGER_PORT` (default 5190). It
@@ -1723,7 +1723,7 @@ chest answering, the upper body trailing a start or a stop, the head leading int
 swinging from the shoulder. The plush is no longer drawn on twos (a theme can still ask, with
 `motion.characterFps`). The setup bench's puppet stays unskinned (its pieces grow in by scale).
 
-- `node scripts/check-villager-motion.mjs [base]` (40 checks, dev server running; in `npm run check`
+- `node scripts/check-villager-motion.mjs [base]` (40 checks, dev server running; in the root `npm --prefix .. run check`
   as `villager-motion`): weights sum to 1 and nothing moves at rest, planted feet do not slide, the
   felt bends, the gather, springs that hold at 4 poses a second, generated fixtures skinned.
 - `node scripts/villagers/motion-shots.mjs <out-dir> --who=Tuft --wait=walk|idle|start|stop` takes a

@@ -79,3 +79,5 @@ marks). The engine checks the sheet's proportions against the model's own size o
 ## Refresh when
 
 fal changes the sync API's headers, `nano-banana-2`'s inputs or price, or a probe contradicts a row above.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/make/drawn.mjs":"18aa0cb97922963b56e484d75f31de20"} -->

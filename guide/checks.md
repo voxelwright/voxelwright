@@ -8,6 +8,7 @@ Use a name with `npm run check -- --only NAME`. The default CI run excludes loca
 | `build-addroom` | local |  |
 | `build-plan` | local |  |
 | `docs` | ci |  |
+| `docs-mentions` | ci |  |
 | `engine-no-page` | ci |  |
 | `entries` | local |  |
 | `home-build` | ci |  |
@@ -66,4 +67,4 @@ Use a name with `npm run check -- --only NAME`. The default CI run excludes loca
 | `villager-motion` | local |  |
 | `voxels` | ci |  |
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"scripts/checks.mjs":"19f4beda5cfc164bd9aabd6e72446648"} -->
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"scripts/checks.mjs":"6dd10fff06f4c72081c33e3173c3c751"} -->

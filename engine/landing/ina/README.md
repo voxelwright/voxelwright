@@ -5,7 +5,7 @@ closely enough that a half-transparent screenshot laid over this photograph line
 "View of San Francisco from Ina Coolbrith Park-01445.jpg", Frank Schulenburg, CC BY-SA 4.0, taken 2021-07-15
 15:37:30, <https://commons.wikimedia.org/wiki/File:View_of_San_Francisco_from_Ina_Coolbrith_Park-01445.jpg>.
 
-What the page draws is in `engine/page/matte.ts` (`?place=ina`). Everything here makes and measures it. Nothing
+The original renderer was in `engine/page/matte.ts` (`?place=ina`). Everything here makes and measures it. Nothing
 made is in the repo: data, the photograph and pictures are under `~/.village/engine/landing/ina/`, and the server
 runs with that lane's own home so that nothing is written under `~/.village/engine/bay/`.
 

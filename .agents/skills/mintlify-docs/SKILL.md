@@ -5,7 +5,7 @@ description: Maintain and publish Village's reviewed private owner handbook usin
 
 # Mintlify documentation integration
 
-Scope: docs/docs.json, six owner MDX pages and their reviewed private Mintlify Site deployment. For the separate Base workspace, read [Base context](references/base-context.md). This pack records the adopted interface, not a complete vendor manual. Use documentation-maintenance for change ownership and review.
+Scope: docs/docs.json, the owner pages listed in its navigation and their reviewed private Mintlify Site deployment. For the separate Base workspace, read [Base context](references/base-context.md). This pack records the adopted interface, not a complete vendor manual. Use documentation-maintenance for change ownership and review.
 
 ## Adopted interface and refresh
 
@@ -32,3 +32,5 @@ Local docs.json follows the current required theme/name/colors/navigation shape.
 Official connection guidance: https://www.mintlify.com/docs/deploy/github links to https://app.mintlify.com/settings/project/git-settings. GitHub App installation must start through Mintlify's dashboard and should grant only the private source repository. Do not replace the artifact-backed docs source merely to add workflow context. The guide's manual source migration deletes hosted content; repository deployment changes also need a verified privacy boundary. No installation or migration has been performed.
 
 Current authentication guide: https://www.mintlify.com/docs/deploy/authentication-setup. Mintlify-managed private authentication requires organization sign-in and is available on all plans. Authenticated sites can have public-page overrides and older previews can remain accessible, so do not replace route checks with a settings-only claim. The November 5 probes and sanitized settings are recorded in docs/.mintlify/private-publishing-preflight.json. Do not change authentication, billing, source integration or source migration during ordinary handbook synchronization.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"docs/docs.json":"19b69a58a69cd7e7e692c8aea4463b87"} -->

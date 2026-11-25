@@ -168,3 +168,5 @@ Read it before quoting a game as precedent.
 - the owner changes the direction (record which, and why);
 - a real iPhone run contradicts a touch rule;
 - the kit changes how keys are drawn past their box (the check's measurement depends on it).
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/page/realm-ui.ts":"44af0e1f714ca945335f50c338e8d8d2"} -->

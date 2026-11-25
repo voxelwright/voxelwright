@@ -5,13 +5,15 @@ description: How Village judges and improves the engine's sound with nobody list
 
 # Judging sound without ears
 
+Run commands from `engine/`.
+
 Version 1, November 14, 2026 (issue #410). Scope: `engine/ears/`, `engine/test/judged.mjs`, and any change to
 `engine/page/sound/`. How the synthesiser itself works is `game-sound`. Nobody who wrote this has heard the engine:
 every claim here is a measurement, and the limits section says what the measurements cannot see.
 
 The public gate scores every applicable acoustic measure against the reference range and checks clipping, DC offset and buried events. It has no predicted listener rating or listener-calibrated selection. The November 14 scores below used the private calibration.
 
-For a private comparison, run `uv run python score.py clips <measured-folder> --musiceval` from `engine/ears`. It reads `people-model.json`, `kept.json` and the corresponding `ranges.json` under `~/.village/engine/ears/musiceval/`. That directory also holds `people-musiceval.json` and the former benchmark. The public regression test always uses its shipped acoustic baseline.
+For a private comparison, run `(cd ears && uv run python score.py clips <measured-folder> --musiceval)`. It reads `people-model.json`, `kept.json` and the corresponding `ranges.json` under `~/.village/engine/ears/musiceval/`. That directory also holds `people-musiceval.json` and the former benchmark. The public regression test always uses its shipped acoustic baseline.
 
 ## The loop (the sound's `ui-craft`)
 
@@ -19,10 +21,10 @@ For a private comparison, run `uv run python score.py clips <measured-folder> --
    place's music from two seeds, a handover, three mixes with stems) through `page/sound/dsp.ts` in Node. That file is
    the page's worklet and the page connects it straight to the output, so this is what is played. `--held 1` renders
    the same from other seeds: never tune on those.
-2. `cd ears && uv run python judge.py measure <dir>` then `uv run python score.py clips <dir> --json <dir>/score.json`
+2. `(cd ears && uv run python judge.py measure <dir>)` then `(cd ears && uv run python score.py clips <dir> --json <dir>/score.json)`
    prints each clip's score and its faults in words an ear would use ("thin: no low end", "hissy: reads as white noise").
-3. Change the engine for the worst fault. Re-render, `uv run python compare.py <before> <after>`. Keep what scores
-   better with no clip worse. Look at pictures when a number surprises: `uv run python look.py a.wav b.wav --out x.png`.
+3. Change the engine for the worst fault. Re-render, `(cd ears && uv run python compare.py <before> <after>)`. Keep what scores
+   better with no clip worse. Look at pictures when a number surprises: `(cd ears && uv run python look.py a.wav b.wav --out x.png)`.
 4. `node test/judged.mjs` is the gate (in `test/all.mjs`): it fails on a hard fault, on a measure newly outside the
    range of well-made sound, on a clip 1.5 under its accepted score, or a mean half a point down. Accept an intended
    change with `--accept` (rewrites `ears/baseline.json`) and say in the PR what moved.
@@ -83,7 +85,7 @@ The optional overlay holds the selection, advisory list and measured correlation
 
 | Tool | Version | Used for | Notes |
 | --- | --- | --- | --- |
-| uv | on this Mac | the environment: `cd engine/ears && uv sync` (Python 3.12, `uv.lock`) | the gate fails, not skips, without it |
+| uv | on this Mac | the environment: `(cd ears && uv sync)` (Python 3.12, `uv.lock`) | the gate fails, not skips, without it |
 | librosa | 0.11 line (`uv.lock`) | STFT, chroma, onsets, resampling (soxr) | chroma_cqt at 22.05 kHz |
 | pyloudnorm | `uv.lock` | BS.1770 loudness, its K-weighting filters reused for 3 s loudness | pads clips under 1 s |
 | soundfile, scipy, numpy, matplotlib | `uv.lock` | reading wav/ogg/mp3/aiff, filters, pictures | |
@@ -112,3 +114,5 @@ rest as principle until a measurement here supports it.
   is unknown. Taste choices are on the page `~/.village/engine/ears/taste/index.html`; write his answers here.
 - The public baseline records each clip's accepted score and out-of-range measures. Composition also has rule checks in `test/music.mjs`.
 - No iPhone or speaker has played it; the page path was not tapped again after the change (same worklet file).
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/test/judged.mjs":"fb39eaf69657b120ad59fec94599cdf3"} -->

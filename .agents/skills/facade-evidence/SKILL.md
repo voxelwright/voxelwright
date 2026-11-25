@@ -124,3 +124,5 @@ printed.
 
 transformers or torch change major version; a model is swapped; ADE20K labels change; the renderer gains a
 material; the panel references change.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/bay/facade_evidence.py":"4d486d18c9364c919cf7714b41a6ea76"} -->

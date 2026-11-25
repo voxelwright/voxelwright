@@ -28,6 +28,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 
 ## Delivery
 
+- Change docs in the same pull request as their source. The [documentation gate](guide/documentation.md) enforces this.
 - Track work in GitHub issues. Branches use `feature/`. Commit subjects use
   `[#<issue>] <change>`.
 - The lead decides, builds or delegates, and merges to main. Builders write

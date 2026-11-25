@@ -104,3 +104,5 @@ and tree heights from USGS 3DEP lidar (through Microsoft Planetary Computer) and
 height from Meta and the World Resources Institute (CC BY 4.0). None of these has been fetched or
 tried here. A real San Francisco would start from building footprints with heights, a terrain
 tile and lidar roofs; check each licence before any of it enters the repo.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/src/engine/voxels.ts":"16888f9938e682ae371e0c72848b40e0"} -->

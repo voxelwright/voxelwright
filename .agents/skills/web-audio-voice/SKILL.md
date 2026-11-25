@@ -195,3 +195,5 @@ in black until the sound starts, find the cover's end with ffmpeg
 
 Refresh when Chrome changes autoplay or AudioParam behaviour, when another
 browser becomes a target, or when a probe contradicts a value above.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/src/voice/context.ts":"38bd4e06255b842bd2fc919b2895a425","home/package.json":"5764d2ed2c14ac63911bbbd72871933c"} -->

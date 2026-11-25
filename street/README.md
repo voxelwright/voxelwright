@@ -147,7 +147,7 @@ meshes for them (`client/look/`):
 - `street.ts`, `facade.ts`, `trees.ts`, `poles.ts`, `signs.ts`, `cars.ts`, `things.ts`: the
   ground with a raised kerb, the house fronts, trees and palms, poles and wires, signs, parked
   cars, and the materials of loose and made things.
-- `../place.ts`: the land round the block: streets and yards, three more blocks of the same
+- `client/place.ts`: the land round the block: streets and yards, three more blocks of the same
   street built as the block's own houses are, far rows as painted boxes, a waterfront, the bay,
   the bridge, the hills across it and a skyline up the hill.
 

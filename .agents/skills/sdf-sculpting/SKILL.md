@@ -103,3 +103,5 @@ These are all *inference*. Check each with a short experiment before relying on 
 - Someone reads slides 101–145 or the speaker notes.
 - Someone watches the GDC 2020 architecture talk.
 - Village builds its first SDF terrain experiment.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/src/engine/world.ts":"d4f158d7927f632492b1477d53e036f0"} -->

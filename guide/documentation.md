@@ -13,10 +13,17 @@ Add a page to [bindings.json](bindings.json). Each key below the page names a so
 | An array of dotted paths | Those fields of a JSON document. For example, `["scripts.dev"]` tracks the command a contributor runs. |
 | `lines:<pattern>` | All trimmed source lines matching a regular expression. Anchor it on the declaration or option that owns the rule. A selector with no matches fails. |
 | `types` | Exported TypeScript interfaces and type aliases declared in the file, printed without comments. Use `types:Pass,Passes` to select only named declarations. |
+| `options` | CLI options from parser declarations. The [check runner](check-cli.md) and [public history tool](history-cli.md) use this selector. |
 | `checks` | Names, default CI eligibility and required files from the check manifest. |
 | `file` | The complete contents. Reserve this for a small contract, fixture or other source where every edit merits review. |
 
-Use the source of the claim. A directory's modification history makes a poor signal for a single command. When adding prose, check whether its bindings would notice the change that would make that prose false. Generate lists and signatures when a source already enumerates them. The first two generators live in [scripts/docs.mjs](../scripts/docs.mjs).
+Use the source of the claim. A directory's modification history makes a poor signal for a single command. When adding prose, check whether its bindings would notice the change that would make that prose false. Generate lists and signatures when a source already enumerates them. The generators live in [scripts/docs.mjs](../scripts/docs.mjs).
+
+## Check what a page mentions
+
+Run `node scripts/docs.mjs mentions` for this check alone. Relative Markdown links resolve from their page. In examples, use `cd` or npm's prefix option to identify another package. A skill with examples throughout can say “Run commands from `engine/`.” A bare module name in prose can refer to a file named elsewhere in the checkout.
+
+For a historical source, example filename, external package or private output that looks like a checkout path, record its exact token and reason under the page in [mention-ignores.json](mention-ignores.json). The check reads parser declarations and common argument accessors. It does not execute commands from Markdown.
 
 ## Resolve a failure
 
@@ -27,4 +34,4 @@ Use the source of the claim. A directory's modification history makes a poor sig
 
 A green check establishes agreement with the selected source. It cannot tell whether a paragraph accurately explains intent, whether every claim has a binding, or whether an external deployment works. For behavior a reader relies on, add a small runnable example beside the prose, as in [Drawing from a page plugin](render-passes.md). For intent, ask the reviewer to read the claim against the change.
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"scripts/docs.mjs":"e219f9a69f652d9fd4797ab0703d5422"} -->
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"scripts/docs.mjs":"29c29b9fc701992e205a83ae66db5d4f"} -->

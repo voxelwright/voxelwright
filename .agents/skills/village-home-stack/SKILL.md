@@ -62,3 +62,5 @@ three 0.187.0, cordis 4.0.0-rc.12, vite 8.3.6, typescript 5.9.3, playwright 1.65
   The count does not grow.
 
 Refresh when any pinned version changes or a probe contradicts this file.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"home/package.json":"d1d16efa99869ae127bb5567d2e41775"} -->

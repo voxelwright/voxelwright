@@ -3,18 +3,29 @@ import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { ts, options } from './doc-options.mjs'
+import { mentions } from './doc-mentions.mjs'
 import { fileURLToPath } from 'node:url'
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)))
-const ts = createRequire(new URL('../home/package.json', import.meta.url))('typescript')
-const usage = 'node scripts/docs.mjs [verify PAGE | generate PAGE]'
+const ignores = JSON.parse(readFileSync('guide/mention-ignores.json', 'utf8'))
+const usage = 'node scripts/docs.mjs [mentions | verify PAGE | generate PAGE]'
 const [action, target] = process.argv.slice(2)
 const read = path => readFileSync(path, 'utf8')
 const git = (...args) => execFileSync('git', args, {encoding: 'utf8'}).trimEnd()
 const bindings = JSON.parse(read('guide/bindings.json'))
 const marker = /^<!-- docs-verified (?:([0-9a-f]{40}) )?(\{.*\}) -->$/m
+function cli(title, command, fields, row) {
+  return rows => [
+    `# ${title}`, '', `Run \`${command}\` with the following options.`, '',
+    `| Option | ${fields.join(' | ')} |`, `| --- | ${fields.map(() => '---').join(' | ')} |`,
+    ...rows.map(([name, ...values]) => `| \`--${name}\` | ${row(...values).join(' | ')} |`),
+  ]
+}
 const generators = {
+  'guide/check-cli.md': cli('Check runner', 'npm run check --', ['Type', 'Default', 'Purpose'],
+    (purpose, type, value) => [type, `\`${value}\``, purpose]),
+  'guide/history-cli.md': cli('Public history candidate', 'scripts/public-history/run', ['Purpose'], purpose => [purpose]),
   'guide/checks.md': rows => [
     '# Repository checks', '',
     'Use a name with `npm run check -- --only NAME`. The default CI run excludes local and skipped checks. A file prerequisite must exist even for a named run.', '',
@@ -30,6 +41,7 @@ const generators = {
 
 async function project(file, selector) {
   if (selector === 'file') return readFileSync(file)
+  if (selector === 'options') return options(file, read(file))
   if (selector === 'checks') {
     const { CHECKS } = await import(new URL('../' + file, import.meta.url))
     return CHECKS.map(c => [c.name, c.skip ? 'skip' : c.local ? 'local' : 'ci', c.needsFile ?? ''])
@@ -63,9 +75,9 @@ async function project(file, selector) {
 }
 
 function inventory() {
-  const paths = git('ls-files', '--', '*README.md', '.agents/skills/*/SKILL.md', 'guide/*.md').split('\n')
+  const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', 'guide/*.md').split('\n')
   for (const page of paths) {
-    if (!Object.hasOwn(bindings, page) && (page.endsWith('README.md') || page.startsWith('guide/') || (existsSync(page) && marker.test(read(page))))) {
+    if (!Object.hasOwn(bindings, page)) {
       throw Error(`${page} needs a source in guide/bindings.json`)
     }
   }
@@ -147,6 +159,7 @@ async function checkPage(page) {
     assert.equal(values.length, 1, 'a reference page has one source')
     body = generate(values[0]).join('\n')
   } else if (!body.trim()) reasons.push('page missing or empty')
+  reasons.push(...mentions(page, body, undefined, ignores[page]))
   try { await example(page, body) } catch (e) { reasons.push(`example failed: ${e.message}`) }
   const base = action && (!stamp?.[1] || changed.length) ? git('rev-parse', 'HEAD') : stamp?.[1]
   const output = body + '\n\n<!-- docs-verified ' + base + ' ' + JSON.stringify(hashes) + ' -->\n'
@@ -160,6 +173,13 @@ async function checkPage(page) {
   if (reasons.length) report(page, changed, reasons, Object.keys(sources), base)
 }
 
+if (action === 'mentions' && !target) {
+  inventory()
+  const errors = Object.keys(bindings).flatMap(page => mentions(page, read(page), undefined, ignores[page]))
+  if (errors.length) console.error(errors.join('\n'))
+  else console.log(`Mentions current: ${Object.keys(bindings).length} pages.`)
+  process.exit(errors.length ? 1 : 0)
+}
 if (process.argv.length > 2 && (process.argv.length !== 4 || !Object.hasOwn(bindings, target)
     || action !== (generators[target] ? 'generate' : 'verify'))) throw Error(usage)
 inventory()

@@ -44,3 +44,5 @@ non-commercial use. Reconsider only with a reason.
 
 The NWS changes the observation schema or the station stops reporting; a probe here stops answering; the realm moves
 its first view away from San Francisco.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/page/almanac.ts":"327c1b6fd41d1b1971f5ccc98b58c200"} -->

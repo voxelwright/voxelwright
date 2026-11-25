@@ -70,3 +70,5 @@ meta-reviewer). On SWE-bench Verified it scored 75.2% against 72.6%, at about
 - Note in the record any unconfirmed result of this protocol on Village
   changes, until we have compared it with the seven-lens review on real
   changes.
+
+<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"AGENTS.md":"a675a3991ecb4f59e3910f0cd48c72f3"} -->
