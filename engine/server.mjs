@@ -61,7 +61,7 @@ try {
 } catch (e) { console.error(e.message); process.exit(1) }
 console.log(`a dedicated server on ${pin === 'town' ? 'the generated town' : `San Francisco release ${pin.slice(0, 12)}`}`)
 if (!master) console.log('no --master: nobody can find this server. A page joins a lobby the master lists; give the address of one (node server.mjs ... --master https://<a master>).')
-else void opened.lobby.then(({ id, code }) => console.log(`lobby ${id}, code ${code}: a page joins with ?master=${encodeURIComponent(master)}&lobby=${a.private ? code : id}`))
+else void opened.lobby.then(({ id, code }) => console.log(`lobby ${id}, code ${code}: a page joins with ?lobbies=1&master=${encodeURIComponent(master)}&lobby=${a.private ? code : id}`))
 const stop = () => { opened.close(); setTimeout(() => process.exit(0), 500) }
 process.on('SIGINT', stop)
 process.on('SIGTERM', stop)

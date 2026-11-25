@@ -48,7 +48,7 @@ import { input } from './input.ts'
 import { hud } from './hud.ts'
 import { things } from './things.ts'
 import { asker, later } from './ask.ts'
-import { LOCAL, MAKING, MASTER, RULES } from './local.ts'
+import { LOCAL, MAKING, MASTER, MASTER_NAMED, RULES } from './local.ts'
 import { realmControls } from './realm-ui.ts'
 import { playHud } from './play-hud.ts'
 import { making } from './making.ts'
@@ -95,9 +95,37 @@ async function main() {
   // Only where the realm's rule allows (local.ts `MASTER`): a link alone takes nobody into a stranger's server. The way
   // in is the server list (lobbies.ts), which loads the page again with the lobby chosen in this tab's ticket, taken and
   // forgotten here; an address names one only in a realm's preview (`?lobby=`, for the checks and the console).
+  /**
+   * Where a request to the master would go, read as the browser reads it (against this page: `//host` and a bare path
+   * are addresses too), or null where it is no address and nothing can be sent. The question shows its host only, so
+   * nothing a link's author wrote reaches the question but a host name.
+   */
+  const masterAt = (() => { try { const u = new URL(MASTER ?? '', location.href); return /^https?:$/.test(u.protocol) ? u : null } catch { return null } })()
+  /**
+   * Whether the visitor agrees to a master the address named (local.ts `MASTER_NAMED`): asked once a tab for that
+   * master, before anything is sent to it. One this site's realm names, one on this site, or the engine's own page,
+   * needs no asking.
+   */
+  const agreed = (what: 'join' | 'list'): boolean => {
+    if (!MASTER_NAMED || !masterAt || masterAt.origin === location.origin) return true
+    const masterHost = masterAt.host
+    const kept = 'village.master.agreed'
+    try { if (sessionStorage.getItem(kept) === MASTER) return true } catch { /* nothing kept: asked each time */ }
+    // The browser's own question: it is asked before the page has drawn anything of its own to ask on (the bar and its
+    // cards are hidden in the first view, hud.ts), and where a browser will not show it the answer is no.
+    const yes = globalThis.confirm(what === 'join'
+      ? `This link wants to take you into a server found through ${masterHost}.\n\nThat is not this site. Servers run on players' own machines: the host will see your address and what you do there.\n\nJoin it?`
+      : `The link you followed names a server list at ${masterHost}.\n\nThat is not this site: it, and any server you join from it, will see your address.\n\nShow it?`)
+    if (!yes) return false
+    try { sessionStorage.setItem(kept, MASTER!) } catch { /* asked again next time */ }
+    return true
+  }
   const ticket = (() => { try { const t = sessionStorage.getItem('village.join'); sessionStorage.removeItem('village.join'); const v = t ? JSON.parse(t) : null; return MASTER && v && v.master === MASTER && typeof v.lobby === 'string' && Math.abs(Date.now() - v.at) < 60_000 ? { lobby: String(v.lobby), name: typeof v.name === 'string' ? v.name : null, label: String(v.label ?? '') } : null } catch { return null } })()
   const joined = ticket ? await import('./lobbies.ts').then((l) => l.arrive({ master: MASTER!, ...ticket, hud: over, input: controls }))
-    : query.has('lobby') && MASTER && RULES.lobbies === 'preview' ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
+    // (In a realm a link is not a choice: found on the live preview on November 25, a link with a master and a lobby
+    // had the page ask that master and join that server with no click. It asks first now, and says whose it is;
+    // until the visitor agrees nothing is sent to either, and the door's code is not fetched.)
+    : query.has('lobby') && MASTER && RULES.lobbies === 'preview' && agreed('join') ? await import('./door.ts').then((d) => d.enter({ master: MASTER!, lobby: query.get('lobby')!, name: query.get('name') }).then((door) => { door.ongone = d.notice; door.ontold = (t) => over.notice(`The server says: ${t}`, 6000); return door }, (e: Error) => { d.notice(e.message); return null })) : null
   const gpu = await openGpu()
   loading.step('gpu')
   const { device } = gpu
@@ -1682,7 +1710,7 @@ async function main() {
       // Light, Dark or San Francisco now (#524): only where the realm is lit as San Francisco is (its own light is the photograph's).
       modes: LOCAL.air?.sun ? { setSky, claim: () => (globalThis as unknown as { engine: { eggs?: { letSkyGo(): void } } }).engine.eggs?.letSkyGo(), weather: new URL('/weather', location.href).href, pinned: query.has('hour') || query.has('rain') || LOCAL.look?.hour !== undefined || LOCAL.look?.rain !== undefined } : undefined, ...(makesHere ? { ai: () => void connecting().then((c) => c.open()) } : {}),
       // The servers (#526, lobbies.ts): where the realm's rule allows lobbies and a master is known, out of any lobby; fetched when first pressed.
-      ...(MASTER && !joined ? { servers: () => void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } : {}) })
+      ...(MASTER && !joined ? { servers: () => { if (agreed('list')) void import('./lobbies.ts').then((l) => l.open({ master: MASTER!, hud: over, input: controls, door: null })) } } : {}) })
     // In the first view the settings key is there, its panel folded behind it (#506, first.ts); as the visitor engages, the
     // panel is as it is unasked (explore.ts folds it again on the roof).
     first?.during(() => { realmUi.fold(true); return () => realmUi.rest() })

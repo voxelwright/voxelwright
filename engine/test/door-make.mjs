@@ -74,6 +74,8 @@ async function open(name) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   page.on('console', (m) => { if (m.type() === 'error') console.log(`  ${name}'s page: ${m.text().slice(0, 300)}`) })
+  // A link that names a master and a lobby asks before it joins (main.ts `agreed`): this visitor says yes.
+  page.on('dialog', (d) => void (d.type() === 'confirm' ? d.accept() : d.dismiss()))
   await page.goto(`${site.url}/sf/index.html?lobbies=1&making=1&master=${encodeURIComponent(MASTER)}&lobby=${lobby}&name=${name}&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0`)
   return { name, page, errors, context }
 }

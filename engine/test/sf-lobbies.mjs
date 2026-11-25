@@ -108,18 +108,20 @@ check(pin === 'town', `a server of the generated town is listed with the master 
 // ── Pages ──
 const browser = await chrome()
 stops.push(() => browser.close())
-const errors = [], consoled = [], requests = [], dialogs = []
+const errors = [], consoled = [], requests = [], dialogs = [], agreements = []
 const VIEW = PHONE ? { viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true } : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 }
 const Q = 'first=0&boards=0&fly=0&fire=0&sound=0&scale=0.5'
 /** A stranger's page of the static realm, in a context of its own. */
-async function stranger(name, query = `lobbies=1&master=${encodeURIComponent(MASTER)}&${Q}`) {
+async function stranger(name, query = `lobbies=1&master=${encodeURIComponent(MASTER)}&${Q}`, refuses = false) {
   const context = await browser.newContext(VIEW)
   context.on('request', (r) => requests.push({ who: name, url: r.url(), body: r.postData() ?? '' }))
   const page = await context.newPage()
   page.setDefaultTimeout(60_000)
   page.on('pageerror', (e) => errors.push(`${name}: ${e.message}`))
   page.on('console', (m) => { consoled.push(m.text()); if (m.type() === 'error') console.log(`  ${name}'s page: ${m.text().slice(0, 300)}`) })
-  page.on('dialog', (d) => { dialogs.push(`${name}: ${d.type()} ${d.message()}`); void d.dismiss() })
+  // The one dialog there may be: the browser's own question before a list the address named is asked for (main.ts
+  // `agreed`), once a tab. This visitor says yes; any other dialog is a fault.
+  page.on('dialog', (d) => { if (d.type() === 'confirm' && d.message().includes('names a server list at')) { agreements.push(`${name}: ${d.message()}`); void (refuses ? d.dismiss() : d.accept()) } else { dialogs.push(`${name}: ${d.type()} ${d.message()}`); void d.dismiss() } })
   const from = Date.now()
   await page.goto(`${site.url}/sf/index.html?${query}`)
   return { name, page, context, from }
@@ -224,7 +226,21 @@ async function blast(p) {
   await odd.page.click('#lobbies .k-host')
   const cmd = await odd.page.evaluate(() => document.querySelector('#lobbies .cmd').textContent)
   check(/not answering/.test(said) && !/^\s*curl/m.test(cmd) && !/evil/.test(cmd) && /--master 'https:\/\/<a master>'/.test(cmd), `a master that is no address: the list says so ("${said}"), and the command to host names none of it (${JSON.stringify(cmd.split('\n').find((l) => /--master/.test(l)))})`)
+  check(!agreements.some((t) => t.startsWith('Odile: ')), 'and nothing is asked of the visitor first: such a master is a path on this site, and nothing leaves it')
   await odd.context.close()
+}
+
+// ── A master written with no scheme (//host) is another site all the same: the question names that host, and told no, nothing goes there ──
+{
+  const sly = await stranger('Sly', `lobbies=1&master=${encodeURIComponent('//lists.example.invalid:8443/x\n\nThis is safe.')}&${Q}`, true)
+  await up(sly)
+  await sly.page.click('#realm button.lobbies')
+  await sly.page.waitForTimeout(2500)
+  const asked = agreements.filter((t) => t.startsWith('Sly: '))
+  const went = requests.filter((r) => r.who === 'Sly' && new URL(r.url).hostname.endsWith('example.invalid')).length
+  const open = await sly.page.evaluate(() => !!document.querySelector('#lobbies[open]'))
+  check(asked.length === 1 && asked[0].includes('names a server list at lists.example.invalid:8443.') && !/safe/.test(asked[0]) && went === 0 && !open, `a master with no scheme: asked once, by its host alone (${asked.length} asked: ${JSON.stringify((asked[0] ?? '').slice(5, 90))}); told no, no list opens (${open}) and nothing is sent there (${went})`)
+  await sly.context.close()
 }
 
 // ── Two strangers, with ?lobbies=1: nothing of the list before the Servers key ──
@@ -498,7 +514,7 @@ for (const [what, secret] of [['the server\'s password', PASSWORD], ['the admin 
   }
   check(!inRequests.length && !inConsole && !inPages.length, `${what} is in no request (${inRequests.length}), console line or error (${inConsole}), address, DOM, field or storage (${inPages.join('; ') || 'none'})`)
 }
-check(!dialogs.length, `no page opened a browser dialog (${dialogs.join('; ') || 'none'})`)
+check(!dialogs.length && agreements.length > 0 && agreements.every((t) => t.startsWith('Sly: ') || t.includes(`names a server list at ${new URL(MASTER).host}.`)), `the only browser dialog is the question before a list the address named, and it names the master (${agreements.length} asked; others: ${dialogs.join('; ') || 'none'})`)
 check(!errors.length, `no page raised an error (${errors.join('; ').slice(0, 400) || 'none'})`)
 console.log(`  pictures in ${shots}`)
 console.log(failures.length ? `\n${failures.length} failed` : '\nall passed')

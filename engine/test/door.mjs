@@ -66,6 +66,8 @@ async function open(name, { lobby = server.id, query = '' } = {}) {
   const errors = []
   page.on('pageerror', (e) => errors.push(e.message))
   page.on('console', (m) => { if (m.type() === 'error') console.log(`  ${name}'s page: ${m.text().slice(0, 300)}`) })
+  // A link that names a master and a lobby asks before it joins (main.ts `agreed`): this visitor says yes.
+  page.on('dialog', (d) => void (d.type() === 'confirm' ? d.accept() : d.dismiss()))
   await page.goto(`${site.url}/sf/index.html?lobbies=1&master=${encodeURIComponent(MASTER)}&lobby=${lobby}&name=${name}&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0${query}`)
   const p = { name, page, errors, context }
   pages.push(p)
@@ -360,6 +362,24 @@ try {
     const lobby = await page.evaluate(() => typeof globalThis.engine?.lobby)
     const door = site.asked.filter((q) => q.at >= from && /\/page\/(door|wire)\.js/.test(q.path)).length
     check(lobby === 'undefined' && toMaster.length === 0 && door === 0, `without ?lobbies=1 a link with a master and a lobby joins nothing: no lobby (${lobby}), ${toMaster.length} requests to the master, the door's code not fetched (${door})`)
+    await context.close()
+  }
+
+  // ── With ?lobbies=1 a link still takes nobody in by itself: it asks, says whose list it is, and a visitor who says
+  // no has sent nothing (found on the live preview on November 25: the page asked the link's master and joined its
+  // server with no click) ──
+  {
+    const context = await browser.newContext({ viewport: { width: 640, height: 360 }, deviceScaleFactor: 1 }), page = await context.newPage()
+    const toMaster = [], asked = [], from = Date.now()
+    page.on('request', (r) => { if (r.url().startsWith(MASTER)) toMaster.push(r.url()) })
+    page.on('dialog', (d) => { asked.push(`${d.type()}: ${d.message()}`); void d.dismiss() })
+    await page.goto(`${site.url}/sf/index.html?lobbies=1&master=${encodeURIComponent(MASTER)}&lobby=${server.id}&name=Cleo&first=0&boards=0&fly=0&fire=0&scale=0.5&sound=0`)
+    await page.waitForFunction(() => globalThis.engine?.seen?.near, null, { timeout: 120_000 }).catch(() => {})
+    await page.waitForTimeout(3000)
+    const lobby = await page.evaluate(() => typeof globalThis.engine?.lobby)
+    const door = site.asked.filter((q) => q.at >= from && /\/page\/(door|wire|lobbies)\.js/.test(q.path)).length
+    const named = asked.length === 1 && asked[0].startsWith('confirm: ') && asked[0].includes(new URL(MASTER).host)
+    check(named && lobby === 'undefined' && toMaster.length === 0 && door === 0, `with ?lobbies=1 a link with a master and a lobby asks first, naming the master (${asked.length} asked${asked[0] ? `: "${asked[0].slice(9, 80)}…"` : ''}); told no, it joins nothing: no lobby (${lobby}), ${toMaster.length} requests to the master, the door's code not fetched (${door})`)
     await context.close()
   }
 

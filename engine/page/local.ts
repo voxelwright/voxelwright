@@ -95,3 +95,9 @@ export const MASTER: string | null = (() => {
   const q = new URLSearchParams(location.search)
   return LOCAL && q.get('lobbies') !== '1' ? null : q.get('master')
 })()
+/**
+ * Whether that master is one the address named, in a realm (a preview): not this site's, so whoever follows a link
+ * here has not chosen it. Nothing is asked of it, or of a server found through it, until the visitor says so (main.ts).
+ */
+export const MASTER_NAMED = LOCAL !== null && RULES.lobbies === 'preview' && MASTER !== null
+
