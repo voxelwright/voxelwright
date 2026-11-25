@@ -92,8 +92,8 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 - `zahynailo.workers.dev` also serves the site (`workersDev` in `cloudflare.config.ts`).
 - Only a machine with `~/.village` can run `node deploy/data.mjs pack`, and it needs a local `node engine/sf/build.mjs` first, for the release's quality-11 copies.
 
-## Later
+## One repository
 
-The realm, the site and the Voxelmorphism kit share one repo and one deploy for now. Splitting them into separate repos, each with its own build and deploy, waits until Voxelwright goes open source.
+The realm, the site and the Voxelmorphism kit stay in one repository with one deploy (#534).
 
 <!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"deploy/package.json":"28bdf2d986d84d8fa55a27c5df8d9d23","deploy/assemble.mjs":"0338276fb038a47c9b504192a26606f9","deploy/worker.mjs":"4ae8c3551c6dbf8ee63b017d57d87f9a"} -->

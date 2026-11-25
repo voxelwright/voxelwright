@@ -66,7 +66,7 @@ Every layer keeps its own terms, listed in [DATA-LICENSES.md](../DATA-LICENSES.m
 - A source that needs a key is not used until the owner provides one. Keys live under `~/.village/engine/bay/keys/`, never in git or a log.
 - Layers derived from Mapillary (CC BY-SA) stay separable and keep their image credits.
 
-The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 27, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. Start a fresh output directory when switching recipes.
+The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 25, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. Start a fresh output directory when switching recipes.
 
 Build a staged candidate with `node engine/sf/build.mjs --staged STAGE` to populate the quality-11 cache. Run `node deploy/data.mjs pack-local PIN DIRECTORY` to write the archive under its tag in DIRECTORY and the matching bundle record alongside that tag. The digest identifies the decompressed-file index. SHA-256 of the tar itself identifies that exact archive.
 

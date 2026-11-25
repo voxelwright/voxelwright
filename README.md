@@ -36,7 +36,7 @@ Start with the [project map](guide/project.md) and [how to keep documentation cu
 - `street/`: the shared street's world process and page. See `street/README.md`.
 - `engine/`: the engine (#140): a world of 10 cm cells drawn with raw WebGPU, its core in Rust. See `engine/README.md`. Its UI kit, Voxelmorphism, is in `engine/kit/`.
 - `site/`: the personal site and blog, served under zahynailo.dev/blog/. It was brought in with `git subtree`, history kept. See `site/README.md`.
-- `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`. Splitting the realm, the site and the kit into separate repos waits until Voxelwright goes open source.
+- `deploy/`: zahynailo.dev, one Cloudflare Worker with the SF realm at `/` and the site under `/blog/`, deployed on every push to main. See `deploy/README.md`.
 - `master/`: the master server (Rust), which lists player-hosted lobbies and passes one WebRTC offer and one answer per join (#526). See `master/README.md`.
 - `guide/`: the quickstart, project map and contributor documentation.
 - `.agents/`: skills and the dispatch log. `AGENTS.md` holds the working rules.

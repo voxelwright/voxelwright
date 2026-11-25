@@ -32,7 +32,7 @@ Licence for all fourteen: Creative Commons CC0 1.0 Universal (Public Domain Dedi
 
 ## San Francisco city data
 
-The pinned six-square city credits USGS 3DEP, USGS and USDA NAIP, DataSF, © OpenStreetMap contributors, Overture Maps Foundation, Mapterhorn, Mapillary and contributing photographers. The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 27, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. The source-image list in the realm’s full credits links the photographs used for street and facade surveys. The linked Mapillary mark comes from [Mapillary’s API demo](https://github.com/mapillary/api-demo/blob/main/logo_green.svg). See [Data licences](DATA-LICENSES.md) for each layer’s terms.
+The pinned six-square city credits USGS 3DEP, USGS and USDA NAIP, DataSF, © OpenStreetMap contributors, Overture Maps Foundation, Mapterhorn, Mapillary and contributing photographers. The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 25, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. The source-image list in the realm’s full credits links the photographs used for street and facade surveys. The linked Mapillary mark comes from [Mapillary’s API demo](https://github.com/mapillary/api-demo/blob/main/logo_green.svg). See [Data licences](DATA-LICENSES.md) for each layer’s terms.
 
 ## Ina Coolbrith Park landing
 

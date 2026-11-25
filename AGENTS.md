@@ -115,7 +115,7 @@ The owner had been first to spot six visible faults in 14 days.
   Google's own documents disagree: its Antigravity FAQ says wrapping the
   `agy` tool in other coding agents or apps is not supported on consumer
   plans, and its Agent Client Protocol documentation says any client may
-  launch the tool. On November 27, 2026 the owner chose T3 Code's
+  launch the tool. On November 25, 2026 the owner chose T3 Code's
   Antigravity provider, which uses that protocol. Delegate to Neon through
   that provider only (`antigravity`, model `gemini-4-neon`, option
   `thought_level`); never run or wrap `agy` yourself. If Google settles

@@ -14,7 +14,7 @@ Needs Node 24 or later (developed on Node 25). Run `npm install` once.
 | `npm run build` | Production build into `dist/`. Drafts are left out. |
 | `npm run check` | Builds, checks the output (production and a drafts-included build), and runs the tests. |
 
-The site is not deployed on its own. zahynailo.dev is one Worker, the SF realm at `/` and this site under `/blog/`, built and deployed together from `deploy/` in the Voxelwright repository on every push to main (`deploy/README.md`). This folder came in with `git subtree` (history kept). Splitting the realm, the site and the Voxelmorphism kit into separate repos, with a build and deploy strategy for each, waits until Voxelwright goes open source.
+The site is not deployed on its own. zahynailo.dev is one Worker, the SF realm at `/` and this site under `/blog/`, built and deployed together from `deploy/` in the Voxelwright repository on every push to main (`deploy/README.md`). This folder came in with `git subtree` (history kept). The realm, the site and the Voxelmorphism kit stay together in this one repository (#534).
 
 ## Writing a post
 

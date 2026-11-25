@@ -37,7 +37,7 @@ The public bake reads three gzip JSON sidecars for each square. Each includes it
 | `inputs/<square>.stops.json.gz`, version 1 | Mapillary stop-sign points in global engine cells. The bake groups repeated sightings within 2.5 m and matches them to OSM control nodes within 11 m. |
 | `inputs/<square>.fixtures.json.gz`, version 2 | San Francisco Public Works map layers 36 and 48, respectively street-light points and trolley overhead polylines, plus Mapillary utility-pole points. All coordinates are global engine x,z cells. |
 
-The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 27, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. Use a fresh output directory when changing the fixture setting. [Source checks](../../DATA-LICENSES.md)
+The shipped city includes public street lamp positions and trolley wire paths from San Francisco Public Works. The layer records state no licence. The maintainer chose to include them on November 25, 2026 after no terms were found. Use `--no-public-works-fixtures` for an OSM-only lamp and wire bake. Use a fresh output directory when changing the fixture setting. [Source checks](../../DATA-LICENSES.md)
 
 To collect these sidecars separately, run `street_detail_sources.py DEST INPUTS/*.zip` with the Bay Python environment. The full run collects and checkpoints the sidecars automatically. Sources include the [Assessor roll](https://data.sf.gov/d/wv5m-vpq2), the [Public Works map](https://bsm.sfdpw.org/mapviewer/) and [Mapillary point features](https://help.mapillary.com/hc/en-us/articles/115002332165-Map-features).
 
