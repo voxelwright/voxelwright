@@ -480,8 +480,8 @@ const fromFirst = async () => {
       await turned(page, 0)
       const on = await until((egg) => globalThis.engine.eggs.state.running === egg, egg)
       check(on, `${kind}: "${line}" ${touch ? 'tapped' : 'clicked'} starts ${egg}`)
-      if (egg !== 'matrix') {
-        // The player: in the first view, on top where it is, a thumb's size by touch, and the sound playing from the tap.
+      {
+        // The player (the Matrix's too, for its music): in the first view, on top where it is, a thumb's size by touch, and the sound playing from the tap.
         await until(() => globalThis.engine.eggs.state.playing, null, 20_000)
         await page.waitForTimeout(1500)
         const player = await page.evaluate(() => {
@@ -496,7 +496,7 @@ const fromFirst = async () => {
         check(player.shown && player.keys.every((k) => k.onTop && (!touch || k.h >= 44)) && !player.meets && !player.under.length, `${kind}: its player is shown in the first view at ${player.box.join(' ')}, clear of the credits and settings keys${player.under.length ? ` but over ${player.under.join(', ')}` : ', the spots and the boards'}, its keys on top${touch ? ' and a thumb tall' : ''}: ${player.keys.map((k) => `${k.text} ${k.w} x ${k.h} at ${k.x}, ${k.y}`).join('; ')}`)
         const played = await page.evaluate(() => globalThis.playedIn)
         check(player.playing && !player.muted && player.sound > 0 && played[0] === 'click', `${kind}: ${egg} plays with its sound, its video first played inside the ${touch ? 'tap' : 'click'}'s own handler (plays called in: ${played.join(', ')}; muted ${player.muted}, ${player.sound} bytes of sound decoded; Chrome, not Safari)`)
-        await page.screenshot({ path: join(dir, `${kind}-${egg}.png`) })
+        await page.screenshot({ path: join(dir, `${kind}-${egg === 'matrix' ? 'line-matrix-on' : egg}.png`) })
         if (egg === 'apple') {
           const stop = player.keys.find((k) => k.text === 'Stop')
           await press(stop.x, stop.y)
@@ -507,9 +507,6 @@ const fromFirst = async () => {
           await still(page)
           continue
         }
-      } else {
-        await still(page)
-        await page.screenshot({ path: join(dir, `${kind}-line-matrix-on.png`) })
       }
       l = await hit('banner')
       check(l && l.eggs.running === null && l.called, `${kind}: the banner ${touch ? 'tapped' : 'clicked'} again ends ${egg}, its plane still called`)
@@ -688,7 +685,8 @@ try {
   s = await state(page)
   let seen = await bannerSeen(page)
   results.matrix = { banner: seen }
-  check(s.signs.banner === 'The Matrix has you' && seen.seen, `the banner says "${s.signs.banner}" and its plane brings it into the picture: ${JSON.stringify(seen)}`)
+  // (Its second line may have come by now: the first is said once it has been read a while, checked below.)
+  check(['The Matrix has you', 'Red pill or blue pill?'].includes(s.signs.banner) && seen.seen, `the banner says "${s.signs.banner}" and its plane brings it into the picture: ${JSON.stringify(seen)}`)
   await still(page)
   // (Its second line once the first could be read for 8 s.)
   results.matrix.firstLine = await firstLine
@@ -696,7 +694,7 @@ try {
   s = await state(page)
   check(s.running === 'matrix' && s.up === 1 && s.weather === 'overcast' && s.hour > 22 && s.signs.banner === 'Red pill or blue pill?', `the Matrix is up: the screen ${s.up}, ${s.weather}, ${round(s.hour)} h; then the banner asks "${s.signs.banner}"`)
   const card = await page.evaluate(() => !document.querySelector('.egg-player')?.hidden)
-  check(s.playing && !s.muted && s.sound > 0 && s.time > 1 && !card, `its music plays in the background, typed, with its sound: ${s.sound} bytes decoded, ${round(s.time, 1)} s in, no player over the city (${card ? 'shown' : 'none'})`)
+  check(s.playing && !s.muted && s.sound > 0 && s.time > 1 && card, `its music plays, typed, with its sound: ${s.sound} bytes decoded, ${round(s.time, 1)} s in, and its player is shown as the videos' is (${card ? 'shown' : 'none'})`)
   // The boards' own light is out while it has the windows: each board as the Matrix leaves it, and as it is lit again
   // over the same picture (the letters struck and warmed up), the plane held off the boards meanwhile.
   {
@@ -733,6 +731,8 @@ try {
       let best = null
       for (let i = 0; i < 60; i++) { p.hold = i / 60; await frame(); const c = p.box; if (!c) continue; const far = Math.min(...marks.map((m) => Math.hypot((c.x0 + c.x1) / 2 - (m.x0 + m.x1) / 2, (c.y0 + c.y1) / 2 - (m.y0 + m.y1) / 2))); if (!best || far > best.far) best = { phase: i / 60, far } }
       p.hold = best ? best.phase : null
+      // (The player is put out of sight meanwhile: on a desk it lies over the Pyramid's spire.)
+      document.querySelector('.egg-player').style.visibility = 'hidden'
       await frame()
     }, TOWERS.toString())
     await page.waitForTimeout(800)
@@ -759,7 +759,7 @@ try {
     // (How far the green moves a pixel from one picture to the next, of 255.)
     const of = (k) => round((sums[k] ?? 0) / Math.max(1, counts[k] ?? 0), 2), round_ = Object.keys(sums).filter((k) => k.endsWith('tower')).map(of), lo = Math.min(...round_), hi = Math.max(...round_)
     results.matrix.towers = Object.fromEntries(Object.keys(sums).map((k) => [k, of(k)]))
-    await page.evaluate(() => { globalThis.engine.boards.plane.hold = null })
+    await page.evaluate(() => { globalThis.engine.boards.plane.hold = null; document.querySelector('.egg-player').style.visibility = '' })
     const within = (v, a, b) => v >= a && v <= b
     check(round_.length >= 2 && within(of('salesforce'), lo * 0.5, hi * 2), `Salesforce Tower's shaft shows the rain as the towers round it do: its green moves ${of('salesforce')} a pixel from picture to picture, theirs ${round_.join(', ')} (asked: ${round(lo * 0.5, 2)} to ${round(hi * 2, 2)})`)
     check(within(of("salesforce's crown"), of('salesforce') / 3, of('salesforce') * 3) && within(of("pyramid's spire"), of('pyramid') / 3, of('pyramid') * 3), `the landmarks' own lamps show it as their windows do: Salesforce's crown ${of("salesforce's crown")} against its shaft's ${of('salesforce')} (${round(of("salesforce's crown") / of('salesforce'))} times), the Pyramid's spire ${of("pyramid's spire")} against its body's ${of('pyramid')} (${round(of("pyramid's spire") / of('pyramid'))} times) (asked: a third to three times, each the mean of ${pairs} pairs of pictures over ${SECONDS} s: which columns of the rain cross a part is luck, and over a full round of it that evens out)`)

@@ -214,8 +214,8 @@ export function eggs(page: EggsPage) {
   const enter = async () => {
     if (running?.egg === 'matrix') return running.blocked ? unblock(running) : say('You are already in. Esc, or say “blue pill”, to leave.')
     stop(true, false, true)
-    // Its music is started inside the gesture, as a video is (`play`), and comes round again at its end. It has no
-    // player unless its sound is held back: Esc, “blue pill” or the phone again end it, and the music with it.
+    // Its music is started inside the gesture, as a video is (`play`), and comes round again at its end. Its player is
+    // the videos' own: Esc, “blue pill”, the phone again or Stop end it, and the music with it.
     const m = element()
     m.muted = false
     m.loop = true
@@ -436,8 +436,6 @@ export function eggs(page: EggsPage) {
     fader.setAttribute('aria-valuetext', `${at.value} of ${of.value}`)
   }
   const showPlayer = () => {
-    // (The Matrix's music is in the background: no player over the city, only Unmute where the browser held its sound back.)
-    if (running?.egg === 'matrix' && !running.blocked) return hidePlayer()
     if (!running?.media) return
     laidOn().append(player)
     player.hidden = false
