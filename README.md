@@ -8,7 +8,7 @@ Voxelwright is a stack for worlds that people make by talking. It has its own en
 
 What you can do with it today:
 
-- Walk San Francisco in a WebGPU browser.
+- Walk San Francisco in a WebGPU browser. It is live at [voxelwright.world](https://voxelwright.world).
 - Make new things in the city with your own AI provider key.
 - Run Village, a private home for a family with villagers, reminders and the Elder. See [Run Village, the private home](#run-village-the-private-home).
 

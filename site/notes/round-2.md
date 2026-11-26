@@ -1,6 +1,6 @@
 # Round 2: site-side work
 
-Engine parts are tracked on the private source repository: #421 (landing; comment of Nov 17), #423 (the place), #424 (sky and
+Engine parts are tracked in the project's issues: #421 (landing; comment of Nov 17), #423 (the place), #424 (sky and
 time), #425 (graphics settings), #426 (easter eggs). The full brief is in COORDINATOR.md. This file covers the parts
 that live in this repo.
 
