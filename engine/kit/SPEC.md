@@ -39,6 +39,24 @@ the construction rules in the numbered sections.
   A destructive menu row carries a red tracking light when selected.
 - The chart opens at the reading in its table and animates a subsequent change.
 
+## Slim HUD look
+
+Set `--vx-look: slim` on a region (`src/looks/slim.js`, inheriting from `lit`) for a compact,
+low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
+
+- Keys rise 3 courses (1.5-course travel) with no outer collar, using `--vx: 2px` so cabinet
+  overhang stays within a few CSS pixels while chamfered octagonal silhouettes and backlit
+  under-rings remain legible.
+- Smoked translucent polycarbonate (`chalk`, `key`, `transmission: 0.14–0.15`) lets the world
+  breathe through with physical Fresnel edge gleam while holding contrast over both bright sky and
+  dark streets; primary/active keys use deep cobalt enamel (`transmission: 0.06`) with an optional
+  top status LED bar.
+- Small cue cards use 2 courses with a 1-voxel left accent edge; larger panels (such as the in-play
+  Settings drawer at `--vx: 3px`) use 4 courses with no top bolt shoulder.
+- A floating touch thumbstick recess (`.vx-recess.float`) builds a hollow stepped octagonal gimbal
+  ring with backlit cardinal ticks so the world shows through its interior, paired with a sculpted
+  concave voxel thumbstick cap (`[data-vx-stick-cap]`).
+
 ## 1. Principles
 
 1. **The voxel is the unit.** Size every part in whole voxels. Build the cap, mount and light

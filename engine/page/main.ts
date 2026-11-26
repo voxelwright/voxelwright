@@ -2070,6 +2070,15 @@ async function main() {
     ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
   })
   own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  // Mobile touch trigger for Summon Car (G): sleek 44x44 slim voxel key beside ✦ Make at bottom-left (play-hud.ts).
+  const summonPanel = over.panel('summon')
+  const summonBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button' })
+  summonBtn.dataset.vxIcon = 'car'
+  summonBtn.setAttribute('data-vx-icon-only', '')
+  summonBtn.setAttribute('aria-label', 'Summon sports car')
+  summonBtn.title = 'Summon sports car (G)'
+  summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  summonPanel.append(summonBtn)
   resetting.add(() => carSummon.clear())
   // Living things, on a line of their own: every lane adds to the line above.
   Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels, smoothing: () => smoothing.size })

@@ -10,7 +10,7 @@
   /* The line that says how the page is doing is the workshop's, not a phone's: on a small screen held in the hand it took the top of the picture (#367). `?status=1` shows it there. */
   @media (pointer: coarse) and (max-height: 520px), (pointer: coarse) and (max-width: 520px) { body:not(.status) #hud { display: none; } }
   #hud { position: fixed; left: max(10px, env(safe-area-inset-left)); top: max(10px, env(safe-area-inset-top)); padding: 5px 9px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); font-variant-numeric: tabular-nums; max-width: calc(100vw - 20px); pointer-events: none; }
-  #aim { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); pointer-events: none; }
+  #aim { position: fixed; left: 50%; top: 50%; width: 5px; height: 5px; margin: -2.5px; border-radius: 50%; background: rgba(255, 255, 255, 0.82); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 1px 3px rgba(0, 0, 0, 0.4); pointer-events: none; transition: opacity 0.2s ease-out; }
   #tools { position: fixed; left: 50%; bottom: max(14px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; gap: 4px; padding: 5px; border-radius: 12px; background: rgba(12, 16, 22, 0.62); max-width: calc(100vw - 120px); overflow-x: auto; }
   #tools button { border: 0; border-radius: 8px; padding: 6px 10px 6px 8px; background: transparent; color: #cfd6df; font: 600 12px -apple-system, system-ui, sans-serif; white-space: nowrap; touch-action: manipulation; }
   #tools button i { font-style: normal; font-weight: 400; opacity: 0.55; margin-right: 6px; }
@@ -19,44 +19,52 @@
   @media (hover: hover) and (pointer: fine) { #boom { display: none; } }
   #boom { position: fixed; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); width: 76px; height: 76px; border-radius: 50%; border: 0; background: rgba(210, 70, 40, 0.85); color: #fff; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   /* The layer over the picture (hud.ts). It takes no touch or click itself: only what is in it that is for pressing. */
-  #over { position: fixed; inset: 0; pointer-events: none; }
+  #over { position: fixed; inset: 0; pointer-events: none; z-index: 6; }
   #over [hidden] { display: none; }
-  #said { position: absolute; left: max(10px, env(safe-area-inset-left)); bottom: 132px; max-width: min(420px, 70vw); padding: 6px 10px; border-radius: 8px; background: rgba(12, 16, 22, 0.6); white-space: pre-wrap; overflow-wrap: anywhere; }
-  /* The ask bar: always there, quiet until it is opened. */
-  #ask { position: absolute; left: 50%; bottom: calc(max(64px, env(safe-area-inset-bottom) + 58px) + var(--lift, 0px)); transform: translateX(-50%); width: min(560px, calc(100vw - 24px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-  /* By touch the round button is at the bar's height: the bar goes over it, keeping left of the thumb's keys on the right edge. */
-  @media (pointer: coarse) { #ask { bottom: calc(max(104px, env(safe-area-inset-bottom) + 100px) + var(--lift, 0px)); } #ask-row { box-sizing: border-box; width: calc(100% - 88px); } }
-  #ask-row { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 14px; background: rgba(12, 16, 22, 0.5); pointer-events: auto; transition: background 0.15s, box-shadow 0.15s; }
-  #ask.open #ask-row { background: rgba(246, 245, 240, 0.97); box-shadow: 0 6px 28px rgba(0, 0, 0, 0.35); }
-  #line { flex: 1; min-width: 0; padding: 8px 8px; border: 0; outline: 0; background: transparent; color: #e8ecf1; font: 500 16px -apple-system, system-ui, sans-serif; user-select: text; -webkit-user-select: text; }
-  #line::placeholder { color: rgba(232, 236, 241, 0.7); }
-  #ask.open #line { color: #14181d; }
-  #ask.open #line::placeholder { color: rgba(20, 24, 29, 0.45); }
-  #ask-row button { flex: none; min-width: 36px; height: 36px; padding: 0 9px; border: 0; border-radius: 11px; background: transparent; color: #e8ecf1; font: 600 15px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
-  #ask.open #ask-row button { color: #2a3038; }
-  #ask-row #ask-which { font-size: 12px; background: rgba(232, 236, 241, 0.14); }
-  #ask.open #ask-row #ask-which { background: rgba(20, 24, 29, 0.08); }
-  #ask.open #ask-row #ask-send { background: #14181d; color: #f6f5f0; }
+  #said { position: absolute; left: max(14px, env(safe-area-inset-left)); bottom: 184px; max-width: min(400px, 70vw); padding: 7px 11px; border-radius: 3px; background: rgba(18, 24, 34, 0.72); border: 1.5px solid rgba(94, 114, 146, 0.36); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* The ask bar: collapsed into a slim low-profile voxel key at rest (play-hud.ts), expanding into a machined composer when opened. */
+  #ask { position: absolute; left: 50%; bottom: calc(max(24px, env(safe-area-inset-bottom) + 18px) + var(--lift, 0px)); transform: translateX(-50%); width: min(520px, calc(100vw - 28px)); display: flex; flex-direction: column; gap: 6px; pointer-events: none; transition: opacity 0.22s ease-out; }
+  html:not([data-hud]) #ask { bottom: calc(max(64px, env(safe-area-inset-bottom) + 58px) + var(--lift, 0px)); }
+  @media (pointer: coarse) { html:not([data-hud]) #ask { bottom: calc(max(104px, env(safe-area-inset-bottom) + 100px) + var(--lift, 0px)); } html:not([data-hud]) #ask-row { box-sizing: border-box; width: calc(100% - 88px); } }
+  #ask-row { position: relative; display: flex; align-items: center; gap: 3px; padding: 4px 5px; border-radius: 3px; background: rgba(20, 26, 38, 0.72); border: 1.5px solid rgba(94, 114, 146, 0.42); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); pointer-events: auto; cursor: pointer; transition: background 0.16s ease-out, border-color 0.16s ease-out, box-shadow 0.16s ease-out; }
+  #ask-row .ask-voxel { display: none; position: absolute; inset: 0; pointer-events: none; z-index: 0; min-inline-size: 0; min-block-size: 0; padding: 0; }
+  #ask-row > :not(.ask-voxel) { position: relative; z-index: 1; }
+  #ask-row:hover { background: rgba(26, 34, 48, 0.82); border-color: rgba(128, 156, 198, 0.58); }
+  #ask.open #ask-row { cursor: text; background: rgba(244, 246, 250, 0.97); border: 2px solid #4e9aff; border-radius: 3px; box-shadow: 0 10px 34px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(12, 18, 28, 0.35); }
+  #ask.open #ask-row .ask-voxel { display: none !important; }
+  #ask-row .ask-trigger-ic { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; color: #eef3fa; pointer-events: none; }
+  #ask.open #ask-row .ask-trigger-ic { display: none; }
+  #ask-row .ask-kbd { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 19px; height: 19px; padding: 0 5px; margin-right: 4px; border-radius: 2px; border: 1px solid rgba(255, 255, 255, 0.18); background: rgba(255, 255, 255, 0.1); color: rgba(232, 238, 246, 0.82); font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; pointer-events: none; }
+  #ask.open #ask-row .ask-kbd { display: none; }
+  #line { flex: 1; min-width: 0; padding: 7px 6px; border: 0; outline: 0; background: transparent; color: #f2f5f9; font: 500 15px/1.3 -apple-system, system-ui, sans-serif; user-select: text; -webkit-user-select: text; }
+  @media (pointer: coarse) { #line { font-size: 16px; } }
+  #line::placeholder { color: rgba(236, 241, 248, 0.88); }
+  #ask.open #line { color: #121720; padding: 8px 10px; }
+  #ask.open #line::placeholder { color: rgba(18, 23, 32, 0.45); }
+  #ask-row button { flex: none; display: inline-flex; align-items: center; justify-content: center; min-width: 34px; height: 34px; padding: 0 8px; border: 0; border-radius: 3px; background: transparent; color: rgba(232, 238, 246, 0.88); font: 600 13px -apple-system, system-ui, sans-serif; cursor: pointer; touch-action: manipulation; transition: background 0.12s, color 0.12s; }
+  #ask.open #ask-row button { color: #2b323c; }
+  #ask.open #ask-row button:hover { background: rgba(18, 23, 32, 0.08); }
+  #ask-row #ask-which { font-size: 12px; padding: 0 10px; background: rgba(232, 238, 246, 0.14); }
+  #ask.open #ask-row #ask-which { background: rgba(18, 23, 32, 0.08); }
+  #ask.open #ask-row #ask-send { width: 34px; padding: 0; border-radius: 3px; background: #1e4ed8; color: #f6f7fa; }
   #ask:not(.open) #ask-send { display: none; }
-  #choice { align-self: center; max-width: 100%; padding: 8px 10px 9px; border-radius: 14px; background: rgba(12, 16, 22, 0.78); pointer-events: auto; }
-  /* By touch the thumb's keys stand down the right edge over the bar: a question keeps left of them, its answers in reach. */
-  @media (pointer: coarse) { #choice { box-sizing: border-box; align-self: flex-start; max-width: calc(100% - 88px); } }
-  #choice p { margin: 0 2px 7px; font-size: 14px; }
+  #choice { align-self: center; max-width: 100%; padding: 10px 12px; border-radius: 3px; background: rgba(16, 22, 32, 0.86); border: 1.5px solid rgba(94, 114, 146, 0.45); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36); pointer-events: auto; }
+  @media (pointer: coarse) { #choice { box-sizing: border-box; align-self: flex-start; max-width: calc(100vw - 28px); } }
+  #choice p { margin: 0 2px 8px; font-size: 14px; }
   #choice div { display: flex; flex-wrap: wrap; gap: 6px; }
-  #choice button { border: 0; border-radius: 9px; padding: 7px 12px 7px 9px; background: rgba(232, 236, 241, 0.14); color: #e8ecf1; font: 600 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
-  #choice button:first-child { background: #e8ecf1; color: #10141a; }
-  #choice button i { font-style: normal; font-weight: 400; opacity: 0.6; margin-right: 7px; }
+  #choice button { border: 0; border-radius: 3px; padding: 7px 12px 7px 9px; background: rgba(232, 236, 241, 0.14); color: #e8ecf1; font: 600 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  #choice button:first-child { background: #2154e4; color: #f4f7fb; }
+  #choice button i { font-style: normal; font-weight: 400; opacity: 0.65; margin-right: 7px; }
   #starters, #given { display: flex; flex-wrap: wrap; gap: 6px; pointer-events: auto; }
-  #starters button { border: 0; border-radius: 999px; padding: 6px 12px; background: rgba(12, 16, 22, 0.66); color: #e8ecf1; font: 500 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
-  #given span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.72); max-width: 100%; overflow: hidden; white-space: nowrap; }
-  #given img { height: 44px; max-width: 88px; margin: 0 0 0 -6px; border-radius: 7px; object-fit: cover; display: block; }
-  #given button { width: 24px; height: 24px; border: 0; border-radius: 50%; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 14px/1 -apple-system, system-ui, sans-serif; }
-  #notices { position: absolute; left: 50%; top: max(44px, calc(env(safe-area-inset-top) + 34px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(520px, 86vw); }
-  #notices p { margin: 0; padding: 6px 12px; border-radius: 8px; background: rgba(12, 16, 22, 0.72); overflow-wrap: anywhere; }
-  /* Top left, under the line that says how the page is doing: at the top right it lay under the Portal and Realms buttons (#367). */
-  #card { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(max(12px, env(safe-area-inset-top)) + 46px); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
-  /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, from the bottom up.
-     (In a realm they are the kit's keys and play-hud.ts places them; this is how they look on a page without the kit.) */
+  #starters button { border: 1px solid rgba(94, 114, 146, 0.42); border-radius: 3px; padding: 6px 11px; background: rgba(18, 24, 34, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #e8ecf1; font: 500 13px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  #given span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 4px 4px 10px; border-radius: 3px; background: rgba(18, 24, 34, 0.82); border: 1px solid rgba(94, 114, 146, 0.42); max-width: 100%; overflow: hidden; white-space: nowrap; }
+  #given img { height: 44px; max-width: 88px; margin: 0 0 0 -6px; border-radius: 2px; object-fit: cover; display: block; }
+  #given button { width: 24px; height: 24px; border: 0; border-radius: 2px; background: rgba(232, 236, 241, 0.16); color: #e8ecf1; font: 600 14px/1 -apple-system, system-ui, sans-serif; }
+  #notices { position: absolute; left: 50%; top: max(20px, calc(env(safe-area-inset-top) + 14px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 6px; max-width: min(480px, 84vw); }
+  #notices p { margin: 0; padding: 7px 14px; border-radius: 3px; background: rgba(18, 24, 34, 0.82); border: 1.5px solid rgba(94, 114, 146, 0.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 4px 18px rgba(0, 0, 0, 0.32); font: 500 13px/1.3 -apple-system, system-ui, sans-serif; overflow-wrap: anywhere; }
+  /* Top left, slim machined controls card when mounted on desktop. */
+  #card { position: absolute; left: max(18px, env(safe-area-inset-left)); top: max(18px, env(safe-area-inset-top)); min-width: 148px; padding: 10px 13px 11px; border-radius: 3px; background: rgba(20, 26, 38, 0.72); border: 1.5px solid rgba(94, 114, 146, 0.42); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34), inset 1px 1px 0 rgba(255, 255, 255, 0.12); }
+  /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, from the bottom up. */
   [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(110px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
   @media (pointer: coarse) { html.riding [data-panel="living"] { display: flex; } }
   /* By touch (and while driving a car) the ask bar steps aside unless opened, keeping the car and road clear. */
@@ -70,8 +78,8 @@
   [data-panel="cockpit"] { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
   [data-panel="cockpit"][hidden] { display: none; }
   [data-panel="cockpit"] canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; pointer-events: none; }
-  /* Driving cluster (living.ts): speed, gear, 12-segment RPM bar, and DRIFT badge. Bottom-right on desk, compact top-center by touch. */
-  [data-panel="drive-hud"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 5px; padding: 9px 13px 10px; border-radius: 12px; background: rgba(12, 16, 22, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #f2f5f9; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28); }
+  /* Driving cluster (living.ts): speed, gear, 12-segment RPM bar, and DRIFT badge. Machined low-profile housing. */
+  [data-panel="drive-hud"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 5px; padding: 9px 13px 10px; border-radius: 3px; background: rgba(20, 26, 38, 0.74); border: 1.5px solid rgba(94, 114, 146, 0.44); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f2f5f9; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34), inset 1px 1px 0 rgba(255, 255, 255, 0.14); }
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
   html:has(#ask.open) [data-panel="drive-hud"] { display: none; }
   [data-panel="drive-hud"] .dh-top { display: flex; align-items: baseline; gap: 6px; }
@@ -79,10 +87,10 @@
   @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-cam { transition: none; } }
   [data-panel="drive-hud"] .dh-spd { font: 700 28px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; min-width: 44px; text-align: right; }
   [data-panel="drive-hud"] .dh-unit { font: 600 10px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.62; margin-right: 4px; }
-  [data-panel="drive-hud"] .dh-gear { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px; background: rgba(232, 236, 241, 0.16); font: 700 12px/1 ui-monospace, monospace; color: #f2f5f9; }
-  [data-panel="drive-hud"] .dh-drift { padding: 2px 6px; border-radius: 5px; background: #ff7a1a; color: #10141a; font: 800 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; }
+  [data-panel="drive-hud"] .dh-gear { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 2px; background: rgba(232, 236, 241, 0.14); border: 1px solid rgba(255, 255, 255, 0.14); font: 700 12px/1 ui-monospace, monospace; color: #f2f5f9; }
+  [data-panel="drive-hud"] .dh-drift { padding: 2px 6px; border-radius: 2px; background: #ff7a1a; color: #10141a; font: 800 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; }
   [data-panel="drive-hud"] .dh-rpm { display: flex; gap: 3px; height: 5px; }
-  [data-panel="drive-hud"] .dh-rpm i { display: block; width: 9px; height: 100%; border-radius: 2px; background: rgba(232, 236, 241, 0.16); }
+  [data-panel="drive-hud"] .dh-rpm i { display: block; width: 9px; height: 100%; border-radius: 1px; background: rgba(232, 236, 241, 0.16); }
   [data-panel="drive-hud"] .dh-rpm i.on { background: #e8ecf1; }
   [data-panel="drive-hud"] .dh-rpm i.hot { background: #ffae34; }
   [data-panel="drive-hud"] .dh-rpm i.red { background: #ff453a; }
@@ -92,7 +100,7 @@
   [data-panel="drive-hud"].burn .dh-boost i { background: linear-gradient(90deg, #ff7a1a, #ffd666); }
   @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-boost i { transition: none; } }
   @media (pointer: coarse) {
-    [data-panel="drive-hud"] { right: auto; bottom: auto; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 20px); transform: translateX(-50%); padding: 6px 10px 7px; gap: 4px; border-radius: 10px; }
+    [data-panel="drive-hud"] { right: auto; bottom: auto; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateX(-50%); padding: 6px 10px 7px; gap: 4px; border-radius: 3px; }
     [data-panel="drive-hud"] .dh-spd { font-size: 20px; min-width: 30px; }
     [data-panel="drive-hud"] .dh-gear { min-width: 18px; height: 18px; font-size: 11px; }
     [data-panel="drive-hud"] .dh-rpm { gap: 2px; height: 4px; }
@@ -100,7 +108,7 @@
     [data-panel="drive-hud"] .dh-boost { height: 3px; }
   }
   @media (pointer: coarse) and (orientation: portrait) {
-    [data-panel="drive-hud"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 98px); transform: none; }
+    [data-panel="drive-hud"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 66px); transform: none; }
   }
   /* Driving stunt & combo HUD (stunts.ts): completely hidden until scoring, banking, or busting. */
   [data-panel="stunts"] { position: absolute; left: 50%; top: max(22px, calc(env(safe-area-inset-top, 0px) + 14px)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 4px; min-width: 196px; max-width: min(380px, calc(100vw - 32px)); padding: 8px 16px 10px; border-radius: 13px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(12, 16, 22, 0.76); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f4f7fb; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34); overflow: hidden; opacity: 1; transition: opacity 0.22s ease-out, border-color 0.2s ease-out; }

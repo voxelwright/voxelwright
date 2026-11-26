@@ -77,8 +77,22 @@ export function hud(input: Input): Hud {
   let quiet: ReturnType<typeof setTimeout> | undefined
   const said = el('div', 'said'), notices = el('div', 'notices'), card = el('div', 'card'), cues = el('div', 'cues')
   const ask = el('div', 'ask'), starters = el('div', 'starters'), given = el('div', 'given'), row = el('div', 'ask-row'), line = el('input', 'line')
-  const button = (id: string, label: string, text: string) => { const b = el('button', id); b.type = 'button'; b.textContent = text; b.setAttribute('aria-label', label); b.title = label; return b }
-  const which = button('ask-which', 'Make a thing, or say something: Tab changes it', 'Make'), library = button('ask-picture', 'Add a picture', '\u25a3'), camera = button('ask-camera', 'Take a picture', '\u25c9'), send = button('ask-send', 'Send', '\u2191')
+  const button = (id: string, label: string, text: string, svg?: string) => { const b = el('button', id); b.type = 'button'; if (svg) b.innerHTML = svg; else b.textContent = text; b.setAttribute('aria-label', label); b.title = label; return b }
+  const IC_SPARK = '<svg class="ask-ic" viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M10 1.8l2 5.2 5.2 2-5.2 2-2 5.2-2-5.2-5.2-2 5.2-2 2-5.2z"/><circle cx="15.8" cy="4.2" r="1.2"/></svg>'
+  const IC_PHOTO = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="3.5" width="15" height="13" rx="2.5"/><circle cx="7" cy="8" r="1.3" fill="currentColor" stroke="none"/><path d="M3.5 14l4.2-4.2a1 1 0 0 1 1.4 0L12.5 13l1.8-1.8a1 1 0 0 1 1.4 0L17.5 13"/></svg>'
+  const IC_CAM = '<svg viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h1.6l1.2-1.6h4.4L13.4 5H15a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/><circle cx="10" cy="10.8" r="2.7"/></svg>'
+  const IC_SEND = '<svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15.5V4.5"/><path d="M5.5 9L10 4.5 14.5 9"/></svg>'
+  const spark = document.createElement('span')
+  spark.className = 'ask-trigger-ic'
+  spark.setAttribute('aria-hidden', 'true')
+  spark.innerHTML = IC_SPARK
+  const voxelBg = document.createElement('span')
+  voxelBg.className = 'vx-button ask-voxel'
+  voxelBg.setAttribute('aria-hidden', 'true')
+  const which = button('ask-which', 'Make a thing, or say something: Tab changes it', 'Make')
+  const library = button('ask-picture', 'Add a picture', '', IC_PHOTO)
+  const camera = button('ask-camera', 'Take a picture', '', IC_CAM)
+  const send = button('ask-send', 'Send', '', IC_SEND)
   // Two ways to a picture on a phone: one asks for any (its sheet offers the library), one for the camera itself.
   const picked = document.createElement('input'), taken = document.createElement('input')
   for (const f of [picked, taken]) { f.type = 'file'; f.accept = 'image/*'; f.hidden = true }
@@ -89,7 +103,13 @@ export function hud(input: Input): Hud {
   line.autocomplete = 'off'
   line.enterKeyHint = 'send'
   line.setAttribute('aria-label', 'What to make')
-  row.append(which, line, library, camera, send)
+  const keycap = document.createElement('kbd')
+  keycap.className = 'ask-kbd'
+  keycap.setAttribute('aria-hidden', 'true')
+  keycap.textContent = '\u21b5'
+  row.append(voxelBg, spark, which, line, keycap, library, camera, send)
+  // Tapping anywhere on the collapsed trigger pill opens the composer in the same gesture (so iOS opens the keyboard).
+  row.addEventListener('click', (e) => { if (!leave && e.target !== library && e.target !== camera && e.target !== which) self.show() })
   ask.append(starters, given, row, picked, taken)
   card.hidden = said.hidden = starters.hidden = true
   layer.append(cues, said, notices, card, ask)
@@ -116,7 +136,7 @@ export function hud(input: Input): Hud {
     ask.dataset.which = says ? 'say' : 'make'
     library.hidden = saying
     camera.hidden = saying || !matchMedia('(pointer: coarse)').matches
-    line.placeholder = saying ? self.placeholder : leave ? 'A thing, a picture, a link' : 'Make something' + (camera.hidden ? '  (Enter)' : '')
+    line.placeholder = saying ? self.placeholder : leave ? 'Make anything…' : 'Make'
     ask.hidden = !self.onask && !self.onsubmit
     ask.classList.toggle('open', leave !== null)
     // What was given with the wish, each with a way to take it back.

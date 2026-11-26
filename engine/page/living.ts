@@ -291,7 +291,7 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { rise: 0, boost: false }
+  const held = { rise: 0, boost: false, horn: false }
   const buttons = o.hud.panel('living')
   const cabin = cockpit(o.hud)
   // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
@@ -342,6 +342,7 @@ export function living(o: {
     telemetryNow = null
     wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
+    held.horn = false
     cabin.reset()
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
@@ -358,14 +359,20 @@ export function living(o: {
   }
   let seat: HTMLButtonElement | null = null
   const showButtons = (scheme: Scheme | null) => {
-    held.rise = 0; held.boost = false
+    held.rise = 0; held.boost = false; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
     if (!scheme) { buttons.replaceChildren(); seat = null; return }
-    // From the bottom up (the column stands on the corner under the right thumb): drift & boost (or down/up), what is done once, the
-    // seat, and getting off at the top, farthest from the thumb.
+    // From the bottom up (the column stands on the corner under the right thumb): drift, boost, horn (or down/up),
+    // what is done once, seat, camera & radio, and getting off at the top, farthest from the thumb.
+    const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
+    driftBtn.dataset.vxKind = 'main'
+    const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
+    boostBtn.setAttribute('aria-label', 'Nitrous boost')
+    const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
+    hornBtn.setAttribute('aria-label', 'Honk horn')
     const rises = scheme.name === 'drive'
-      ? [button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 }), button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })]
+      ? [driftBtn, boostBtn, hornBtn]
       : scheme.lines.some((l) => l.rise)
         ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
         : []
@@ -374,7 +381,18 @@ export function living(o: {
     seat = button('seat', 'Seat', () => view(!inside))
     seat.setAttribute('aria-label', 'Look from the seat')
     seat.setAttribute('aria-pressed', String(inside))
-    buttons.replaceChildren(...rises, ...onces, seat, ...leaves)
+    const driveExtras: HTMLButtonElement[] = []
+    if (scheme.name === 'drive') {
+      const camBtn = button('cam', 'Cam', () => { if (inside) view(false); cam.cycle(); showCamToast() })
+      camBtn.setAttribute('aria-label', 'Cycle camera view')
+      driveExtras.push(camBtn)
+      if (o.audio?.radio) {
+        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('next') })
+        radioBtn.setAttribute('aria-label', 'Next car radio station')
+        driveExtras.push(radioBtn)
+      }
+    }
+    buttons.replaceChildren(...rises, ...onces, seat, ...driveExtras, ...leaves)
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
@@ -810,7 +828,7 @@ export function living(o: {
       let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, onWheels = riding.motor.feet.length, rough = 0
       let boostFuel = 1, boosting = false, launching = false, burnoutCharge = 0
       if (isDrive && at && dt > 0) {
-        const wantHorn = o.input.held('KeyH')
+        const wantHorn = o.input.held('KeyH') || held.horn
         if (wantHorn !== hornOn) { hornOn = wantHorn; o.audio?.horn(hornOn) }
         if (prevAt) {
           const ivx = (at.at[0] - prevAt[0]) / dt, ivy = (at.at[1] - prevAt[1]) / dt, ivz = (at.at[2] - prevAt[2]) / dt

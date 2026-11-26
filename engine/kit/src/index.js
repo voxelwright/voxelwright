@@ -22,6 +22,7 @@ import { toastDef, makeToast } from './components/toast.js';
 import { lettering } from './components/lettering.js';
 import { block } from './components/block.js';
 import { groove, recess, lamp, pointer, applyTheme } from './looks/lit.js';
+import './looks/slim.js';
 import { accordion } from './components/accordion.js';
 import { avatar } from './components/avatar.js';
 import { callout } from './components/callout.js';

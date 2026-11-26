@@ -22,7 +22,7 @@
 // ever laid over the body's parts (`parts()`, which test/sf-hud.mjs reads against every element of the page).
 import type { Input } from './input.ts'
 import type { Me } from './person.ts'
-import { radial } from './radial.ts'
+import { radial, TOOL_ICONS } from './radial.ts'
 
 export const HUDS = ['wheel', 'context', 'quiet'] as const
 /** The keys that move the body, let go while a tool is chosen. */
@@ -43,134 +43,538 @@ export interface PlayHud {
   choose(open: boolean): void
 }
 
+const JUMP_SVG = '<svg class="hud-ic ic-jump" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 15V5"/><path d="M5.5 9.5L10 5l4.5 4.5"/></svg>'
+const CHUTE_SVG = '<svg class="hud-ic ic-chute" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5a7 7 0 0 1 14 0H3z"/><path d="M4.5 10.5L10 16.5l5.5-6"/><path d="M10 10.5v6"/></svg>'
+const FLY_SVG = '<svg class="hud-ic ic-fly" viewBox="0 0 20 20" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 13c2.5-5 6-7.5 15-8-1.8 4.2-4.8 7-9.2 7.5"/><path d="M7.5 12.5L5 16.5"/></svg>'
+const WALK_SVG = '<svg class="hud-ic ic-walk" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 4.5v10.5"/><path d="M5.5 10.5L10 15l4.5-4.5"/><path d="M5 17.5h10"/></svg>'
+const DOWN_SVG = '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 5v10"/><path d="M5.5 10.5L10 15l4.5-4.5"/></svg>'
+const DRIVE_ICONS: Record<string, string> = {
+  drift: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 15.5c1.5-5 4.5-7 11-7"/><path d="M12.5 5.5L15.5 8.5 12.5 11.5"/><path d="M4.5 11.5c1-2.5 2.8-4 5.5-4.5" opacity="0.55"/></svg>',
+  horn: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 8.5h3.2L12 5v10l-5.3-3.5H3.5z"/><path d="M15 7.5a3.5 3.5 0 0 1 0 5"/><path d="M17 5.5a6.5 6.5 0 0 1 0 9" opacity="0.6"/></svg>',
+  cam: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="6" width="10.5" height="8" rx="1.5"/><path d="M13 8.8l4.5-2.3v7L13 11.2z"/></svg>',
+  seat: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><circle cx="10" cy="10" r="1.6"/><path d="M4 9.5h4.4M11.6 9.5H16M10 11.6V16"/></svg>',
+  leave: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4.5v12H8"/><path d="M10 10h6.5"/><path d="M13.5 7l3 3-3 3"/></svg>',
+  radio: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="14" height="9" rx="1.5"/><path d="M6 7l7-3.5"/><circle cx="7.5" cy="11.5" r="2"/><path d="M12 10h2.5M12 13h2.5"/></svg>',
+  lights: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 6a4 4 0 0 0 0 8H11V6H9.5z"/><path d="M13.5 7l3.5-1M13.5 10H17.5M13.5 13l3.5 1"/></svg>',
+  rear: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5.5 8.5L3 11l2.5 2.5"/><path d="M3.5 11h9a3.5 3.5 0 0 0 0-7H9"/></svg>',
+  boost: '<svg class="hud-ic" viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5L4.5 11h5l-1 6.5L15.5 9h-5l.5-6.5z"/></svg>',
+}
+const toolSvg = (toolName: string) => {
+  const path = TOOL_ICONS[toolName]
+  return path
+    ? `<svg class="tool-ic" viewBox="0 0 64 32" aria-hidden="true">${path}</svg>`
+    : `<span class="tool-glyph" aria-hidden="true">${toolName.slice(0, 1).toUpperCase()}</span>`
+}
+
 const STYLE = /* css */ `
+/* ── Voxelmorphism v1 "slim" look for live gameplay HUD (First View stays on classic "lit" look) ── */
+html:not(.first)[data-hud] :is(#realm, #over, #lobby-tag) {
+  --vx-look: slim;
+  --vx-ink: #f0f4fa;
+  --vx-ink-quiet: #9eb0ca;
+  --lit-legend: #f0f4fa;
+  --vx-on-enamel: #ffffff;
+  --vx-danger-text: #ff7e70;
+  --vx-danger-legend: #ff8e80;
+  --vx-key: #242d3e;
+  --vx-chalk: #1a2130;
+  --vx-chalk-top: #37445a;
+  --vx-chalk-side: #111620;
+  --vx-slate: #151c28;
+  --vx-floor: #111620;
+  --vx-steel: #4e5d75;
+  --vx-enamel: #2154e4;
+  --vx-enamel-top: #4b79ff;
+  --vx-enamel-side: #173bb0;
+  --hud-font: "IBM Plex Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+}
+
+/* Fine 2px voxel pitch for sleek low-profile in-play keys; 3px for the Settings enclosure. */
+html:not(.first)[data-hud] #realm :is(.fold, .lobbies, .home-key, .held, .toolkey, .act .vx-button, .cue, .float, .float .cap),
+html:not(.first)[data-hud] #lobby-tag,
+html:not(.first)[data-hud] #ask-row .ask-voxel,
+html:not(.first)[data-hud] [data-panel="living"] .vx-button,
+html:not(.first)[data-hud] [data-panel="wand-take"] .vx-button {
+  --vx: 2px;
+}
+html:not(.first)[data-hud] #realm .sky {
+  --vx: 3px;
+  border-top: 0;
+  --vx-key-size: 13px;
+}
+
+/* In play, Credits moves into the Settings panel header and Mapillary attribution sits cleanly inside #minimap. */
+html:not(.first)[data-hud] #first .corner { display: none !important; }
+/* While the Settings panel or radial pie wheel is open, hide overlapping corner chrome cleanly. */
+html:not(.first)[data-hud]:has(#realm.open) :is(#ask:not(.open), #realm .held),
+html:not(.first)[data-hud].choosing #ask:not(.open) { visibility: hidden !important; }
+
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
-#realm .cues { position: absolute; left: 0; top: 0; display: grid; gap: 8px; pointer-events: none !important; }
-/* Step aside at once while the ask bar, a choice over it (connect offer), the connect panel or the line of the visitor's AI is shown. */
+
+/* ── Shared crisp typography & surface polish for slim voxel buttons ── */
+html:not(.first)[data-hud] #realm :is(.fold, .lobbies, .home-key, .held, .toolkey, .act .vx-button),
+html:not(.first)[data-hud] #lobby-tag,
+html:not(.first)[data-hud] [data-panel="living"] .vx-button,
+html:not(.first)[data-hud] [data-panel="wand-take"] .vx-button {
+  font: 600 12.5px/1 var(--hud-font);
+  letter-spacing: 0.015em;
+  color: var(--lit-legend);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.25s ease-out;
+}
+html:not(.first)[data-hud] #realm .act .use,
+html:not(.first)[data-hud] #realm .act .up.chute {
+  color: #ffffff;
+}
+
+/* Settings gear button in play: crisp low-profile slim voxel key with inlaid pearl-ivory gear relief. */
+html:not(.first)[data-hud] #realm .fold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  top: max(18px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  inline-size: 40px;
+  block-size: 40px;
+  min-inline-size: 40px;
+  min-block-size: 40px;
+  padding: 0;
+}
+html:not(.first)[data-hud] #realm.folds .sky { top: calc(max(18px, env(safe-area-inset-top)) + 52px); right: max(18px, env(safe-area-inset-right)); }
+
+/* Servers / active lobby badge in play: slim voxel key at top-left. */
+html:not(.first)[data-hud] #realm .lobbies,
+html:not(.first)[data-hud] #lobby-tag {
+  top: max(18px, env(safe-area-inset-top));
+  left: max(18px, env(safe-area-inset-left));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  block-size: 38px;
+  min-block-size: 38px;
+  padding: 0 14px;
+}
+html:not(.first)[data-hud]:has(#realm .lobbies, #lobby-tag) #card { top: calc(max(18px, env(safe-area-inset-top)) + 50px); }
+
+/* ── Contextual cues: slim 2-course smoked voxel card with miniature voxel keycap ── */
+#realm .cues { position: absolute; left: 0; top: 0; display: grid; gap: 6px; pointer-events: none !important; }
 html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
-#realm .cue { --vx: 3px; margin: 0; padding: calc(var(--vx) * 2.5) calc(var(--vx) * 4); font-size: 14px; line-height: 1.3; white-space: nowrap; opacity: 0; translate: -6px 0; transition: opacity 0.25s ease-out, translate 0.35s cubic-bezier(0.23, 1, 0.32, 1); }
+#realm .cue {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 6px 12px 6px 10px;
+  border-top: 0;
+  color: var(--vx-ink);
+  font: 500 12.5px/1.2 var(--hud-font);
+  white-space: nowrap;
+  opacity: 0;
+  translate: -4px 0;
+  transition: opacity 0.25s ease-out, translate 0.3s cubic-bezier(0.23, 1, 0.32, 1);
+}
 #realm .cue.on { opacity: 1; translate: 0 0; }
-/* (A cue not shown takes no row: the grid is as tall as what it shows, and is placed by that.) */
 #realm .cue:not(.on) { position: absolute; }
-#realm .cue kbd { margin-inline-end: 8px; }
-/* The floating stick: a well that comes under the thumb. */
-#realm .float { position: absolute; left: 0; top: 0; inline-size: 116px; block-size: 116px; margin: -58px 0 0 -58px; pointer-events: none !important; opacity: 0; transition: opacity 0.12s ease-out; }
+#realm .cue .vx-kbd {
+  --vx: 2px;
+  min-inline-size: 20px;
+  min-block-size: 20px;
+  padding: 0 6px;
+  font: 600 11px/1 var(--vx-mono);
+  color: #f4f7fc;
+}
+
+/* ── Floating hollow stepped octagonal voxel thumbstick gimbal + sculpted concave voxel cap ── */
+#realm .float {
+  position: absolute;
+  left: 0;
+  top: 0;
+  inline-size: 108px;
+  block-size: 108px;
+  margin: -54px 0 0 -54px;
+  background: none;
+  box-shadow: none;
+  pointer-events: none !important;
+  opacity: 0;
+  transition: opacity 0.12s ease-out;
+}
 #realm .float.on { opacity: 1; }
-#realm .float .cap { position: absolute; left: 50%; top: 50%; inline-size: 48px; block-size: 48px; margin: -24px 0 0 -24px; min-inline-size: 0; padding: 0; pointer-events: none; }
-/* The held tool's key, and the wheel. */
+#realm .float .cap {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  inline-size: 40px;
+  block-size: 40px;
+  margin: -20px 0 0 -20px;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0;
+  pointer-events: none;
+}
+
+/* ── Held tool slim voxel key (desktop bottom-right) & pie wheel ── */
 #realm .held { display: none; }
-/* The pie is over the middle of the picture, over the body too (owner, November 24): only its disc takes the pointer. */
 #realm .wheel { z-index: 3; pointer-events: none !important; }
-/* The tools' names as the realm's bank has them (realm-ui.ts, typeface.ts): the smaller key size, 5.5 cells before the words and 4 after. */
-#realm :is(.held, .toolkey) { --vx-key-size: var(--vx-key-small); }
-/* Less motion: things still come and go, at once, and nothing slides (where they are placed is their translate, and is kept). */
-@media (prefers-reduced-motion: reduce) { #realm .cue, #realm .float, #realm[data-hud] :is(.tools, .act, .act *, .held) { transition: none !important; } #realm .cue { translate: none; } }
+#realm .tool-ic { inline-size: 24px; block-size: 12px; fill: currentColor; flex: none; opacity: 0.94; }
+#realm .tool-glyph { display: inline-grid; place-items: center; inline-size: 18px; block-size: 18px; border-radius: 3px; border: 1.5px solid currentColor; font-size: 10px; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  #realm .cue, #realm .float, #realm[data-hud] :is(.tools, .act, .act *, .held, .fold, .home-key) { transition: none !important; }
+  #realm .cue { translate: none; }
+}
 
 /* ── wheel ── */
 #realm[data-hud="wheel"] .tools { display: none; }
-#realm[data-hud="wheel"] .held { display: flex; position: absolute; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); --vx: 3px; }
-#realm .held kbd { margin-inline-end: 6px; }
-/* The tool's key owns its slide down the column: the browser is not to take it for a scroll or a zoom (which would cancel it). */
+html:not(.first)[data-hud="wheel"] #realm .held {
+  display: inline-flex;
+  align-items: center;
+  position: absolute;
+  right: max(18px, env(safe-area-inset-right));
+  bottom: max(18px, env(safe-area-inset-bottom));
+  block-size: 40px;
+  min-block-size: 40px;
+  padding: 0 14px 0 10px;
+}
+html:not(.first)[data-hud="wheel"] #realm .held .vx-label { gap: 8px; }
+html:not(.first)[data-hud="wheel"].away #realm .held { opacity: 0.78; }
+#realm .held .vx-kbd {
+  --vx: 2px;
+  min-inline-size: 20px;
+  min-block-size: 20px;
+  padding: 0 5px;
+  font: 600 11px/1 var(--vx-mono);
+  color: #f4f7fc;
+}
 #realm .toolkey { touch-action: none; }
 
-/* ── context: the tools down the right edge ── */
+/* ── context & quiet ── */
 #realm[data-hud="context"] .tools { left: auto; right: max(16px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-50%); }
-
-/* ── quiet: put away while the picture holds the pointer ── */
 #realm[data-hud="quiet"] .tools { left: auto; right: max(16px, env(safe-area-inset-right)); bottom: auto; top: 50%; transform: translateY(-50%); transition: opacity 0.3s ease-out; }
-html[data-hud].hung #aim, html.choosing #aim { visibility: hidden; }
+html[data-hud].hung #aim, html.choosing #aim, html.drawer #aim, html:has(#ask.open) #aim { visibility: hidden; }
 #realm[data-hud="quiet"]:not(.flash) .tools { opacity: 0; pointer-events: none; }
-/* On a desk, with the pointer let go of (Esc), the bank is back with the rest. */
 @media (pointer: fine) { html[data-hud="quiet"]:not(.away) #realm[data-hud="quiet"] .tools { opacity: 1; pointer-events: auto; } }
-html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#first .credits, #realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.4s ease-out; }
-/* (The place's name is not a control: in play it still says where one has come to, and goes.) */
+
+/* Active play fade (pointer locked on desktop): fade secondary chrome so San Francisco fills the screen. */
+html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#first .credits, #realm .fold, #realm .sky, #hud) { opacity: 0 !important; pointer-events: none !important; transition: opacity 0.35s ease-out; }
+html:is([data-hud="quiet"], [data-hud="wheel"]).away #ask:not(.open) { opacity: 0 !important; pointer-events: none !important; }
 html:is([data-hud="quiet"], [data-hud="wheel"]).away:not(.arrived) #where { opacity: 0 !important; transition: opacity 0.4s ease-out; }
 html[data-hud="quiet"] :is(#where, #first .credits, #realm .fold) { transition: opacity 0.25s ease-out; }
-/* On a desk the minimap occupies bottom-left once engaged: Credits stands beside it, and the street name & wand key stand above it. */
-@media (pointer: fine) {
-  html:not(.first) #first .corner { left: calc(max(18px, env(safe-area-inset-left)) + 264px); bottom: max(18px, env(safe-area-inset-bottom)); }
-  html:not(.first) #where { bottom: calc(env(safe-area-inset-bottom, 0px) + 186px) !important; }
-  html[data-hud] [data-panel="wand-take"] { bottom: calc(env(safe-area-inset-bottom, 0px) + 224px); left: max(18px, env(safe-area-inset-left)); }
+
+/* ── Collapsed Ask trigger: real slim voxel keycap behind ✦ Make ↵ (desktop) and ✦ (mobile) ── */
+html:not(.first)[data-hud] #ask:not(.open) #ask-row {
+  position: relative;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
-/* The place's name says where one has come to, and goes (as a game names a region on arrival). */
-html[data-hud] #where { transition: opacity 0.6s ease-out; }
+html:not(.first)[data-hud] #ask:not(.open) #ask-row > :not(.ask-voxel) { position: relative; z-index: 1; }
+html:not(.first)[data-hud] #ask:not(.open) #ask-row .ask-voxel {
+  display: block;
+  position: absolute;
+  inset: 0;
+  min-inline-size: 0;
+  min-block-size: 0;
+  padding: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+html:not(.first)[data-hud] #ask.open #ask-row .ask-voxel { display: none; }
+
+@media (pointer: fine) {
+  html:not(.first)[data-hud] #ask:not(.open) {
+    left: auto;
+    right: max(18px, env(safe-area-inset-right));
+    bottom: calc(max(18px, env(safe-area-inset-bottom)) + 48px);
+    transform: none;
+    width: auto;
+  }
+  html:not(.first)[data-hud] #ask:not(.open) #ask-row {
+    gap: 4px;
+    padding: 4px 8px 4px 10px;
+    block-size: 36px;
+    box-sizing: border-box;
+  }
+  html:not(.first)[data-hud] #ask:not(.open) #line {
+    width: 46px;
+    flex: none;
+    padding: 0 2px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  html:not(.first)[data-hud] #ask:not(.open) :is(#ask-picture, #ask-camera, #ask-which) { display: none; }
+  html:not(.first) #where { bottom: calc(env(safe-area-inset-bottom, 0px) + 176px) !important; left: max(20px, env(safe-area-inset-left)) !important; font-size: 13px !important; letter-spacing: 0.01em; }
+  html[data-hud] [data-panel="wand-take"] { bottom: calc(env(safe-area-inset-bottom, 0px) + 206px); left: max(18px, env(safe-area-inset-left)); }
+}
+
+/* Street name: appears smoothly on arrival and fades out cleanly. */
+html[data-hud] #where { transition: opacity 0.55s ease-out; }
 html[data-hud]:not(.arrived) #where { opacity: 0; }
 
-/* The line to say something on (eggs.ts) at the top, in the middle: at the bottom it was over the body (by touch realm-ui.ts has it there too). */
+/* The line to say something on (eggs.ts) at the top, in the middle. */
 @media (pointer: fine) { html[data-hud] #realm .egg-line { bottom: auto !important; top: 20px !important; } }
-/* The wand's key (wand.ts puts it in its panel): a kit key as the others are, latched down while the wand is in hand. */
-html[data-hud] [data-panel="wand-take"] button.vx-button, html[data-hud] [data-panel="wand-take"] button.vx-button.on { --vx: 3px; --vx-key-size: var(--vx-key-small); padding: 0 calc(var(--vx) * 4) 0 calc(var(--vx) * 5); border-radius: 0; background: none; color: var(--_on); font: 400 var(--vx-key-size)/1 var(--vx-key-font); letter-spacing: 0; }
-html[data-hud] [data-panel="wand-take"] .vx-kbd { margin-inline-end: 6px; }
-/* With the wheel the wand is chosen among the tools: it has no key of its own. */
-html[data-hud="wheel"] [data-panel="wand-take"] { display: none !important; }
-/* The wand's bar (what a cast takes, wand.ts) at the top in the middle, under the line to say something on: at the bottom it was over the body. */
-html[data-hud] [data-panel="wand"] { bottom: auto; top: max(72px, calc(env(safe-area-inset-top) + 56px)); }
 
+/* The wand's key (non-wheel modes) & wand bar. */
+html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { display: inline-flex; align-items: center; gap: 6px; block-size: 38px; min-block-size: 38px; padding: 0 12px; }
+html[data-hud="wheel"] [data-panel="wand-take"] { display: none !important; }
+html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-area-inset-top) + 56px)); }
+/* Summon Car button is touch-only (desktop uses G). */
+[data-panel="summon"] { display: none; }
+
+/* ── Mobile / Touch layout: clean top corners, hollow voxel thumbstick gimbal, compact slim voxel thumb cluster ── */
 @media (pointer: coarse) {
-  /* The thumb's keys, placed one by one in the corner: each mode sets where (--x, --y: the key's middle from the corner, right and up). */
   #realm[data-hud] .act { position: absolute; inset: 0; display: block; pointer-events: none !important; }
   #realm[data-hud] .act .fly { display: contents; }
-  #realm[data-hud] .act :is(.use, .up, .down, .walks, .toolkey) { position: absolute; right: calc(env(safe-area-inset-right, 0px) + 14px + var(--x) - var(--w) / 2); bottom: calc(env(safe-area-inset-bottom, 0px) + 12px + var(--y) - var(--h) / 2); inline-size: var(--w); block-size: var(--h); min-inline-size: 0; min-block-size: 0; padding: 0; justify-content: center; pointer-events: auto; --vx: 3px; --vx-key-size: var(--vx-key-small); transition: opacity 0.3s ease-out; }
-  /* Sizes by the touch guidance (game-hud rule 16): 44 px a side at the least for a key used often, Use a little more. A
-     key's solid stands up and to the left of its face by half its height (the kit's --vx-face-z): Use's by 16 px, the
-     others' by 9; the keys keep that clear of one another. */
-  #realm[data-hud] .act .use { --vx: 4px; --w: 60px; --h: 60px; --x: 30px; --y: 30px; }
-  #realm[data-hud] .act :is(.up, .down, .walks) { --w: 64px; --h: 44px; --x: 32px; }
-  /* Held upright, the keys stand in one column at the right edge, Use in the corner under the thumb and the key that
-     sinks (flying) over them all: beside them it was on the BLOG board from the park (sf-boards). */
-  #realm[data-hud] .act .up { --y: 108px; }
-  #realm[data-hud] .act .walks { --y: 171px; }
-  #realm[data-hud] .act .down { --y: 234px; }
-  #realm[data-hud] .act .down[hidden] { display: none; }
-  /* On its side the picture is low: the keys are two by two round the corner, Use in it. */
-  @media (orientation: landscape) {
-    #realm[data-hud] .act .up { --x: 118px; --y: 22px; }
-    #realm[data-hud] .act .walks { --x: 32px; --y: 108px; }
-    #realm[data-hud] .act .down { --x: 118px; --y: 108px; }
+  #realm[data-hud] .act :is(.use, .up, .down, .walks, .toolkey) {
+    position: absolute;
+    right: calc(env(safe-area-inset-right, 0px) + 14px + var(--x) - var(--w) / 2);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px + var(--y) - var(--h) / 2);
+    inline-size: var(--w);
+    block-size: var(--h);
+    min-inline-size: 0;
+    min-block-size: 0;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: auto;
+    transition: opacity 0.28s ease-out, bottom 0.2s cubic-bezier(0.23, 1, 0.32, 1);
   }
-  /* The tool's key is a secondary control: at the top, under the sky's key (Apple, Game controls: "Place secondary
-     controls, like menus, at the top"). While the wheel is open its middle says the tool: the key is not shown twice. */
-  #realm[data-hud] .act .toolkey { --h: 44px; --w: 96px; --x: 48px; bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 86px); }
+  #realm[data-hud] .act :is(.use, .up, .down, .walks, .toolkey) .vx-label {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  #realm[data-hud] .act .hud-lbl { font: 600 9.5px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.9; }
+  html:not(.first)[data-hud] #realm .act .use {
+    --w: 58px;
+    --h: 58px;
+    --x: 29px;
+    --y: 29px;
+  }
+  #realm[data-hud] .act .use .tool-ic { inline-size: 26px; block-size: 13px; }
+  #realm[data-hud] .act .use .hud-lbl { font-size: 10px; opacity: 0.95; }
+
+  #realm[data-hud] .act :is(.up, .down, .walks) { --w: 48px; --h: 48px; --x: 29px; }
+  #realm[data-hud] .act .up { --y: 94px; }
+  #realm[data-hud] .act .walks { --y: 154px; }
+  #realm[data-hud] .act .down { --y: 214px; }
+  #realm[data-hud] .act .down[hidden] { display: none; }
+
+  /* Contextual icon swapping on mobile action keys. */
+  #realm[data-hud] .act .up .ic-chute { display: none; }
+  #realm[data-hud] .act .up.chute .ic-jump { display: none; }
+  #realm[data-hud] .act .up.chute .ic-chute { display: block; }
+  #realm[data-hud] .act .walks .ic-walk { display: none; }
+  #realm[data-hud] .act .walks.flying .ic-fly { display: none; }
+  #realm[data-hud] .act .walks.flying .ic-walk { display: block; }
+
+  /* Tool switcher: compact slim voxel key right in thumb reach above Fly (shifts up cleanly while flying). */
+  #realm[data-hud] .act .toolkey {
+    --w: 54px;
+    --h: 48px;
+    --x: 29px;
+    --y: 214px;
+    padding: 0 4px;
+  }
+  html.flying #realm[data-hud] .act .toolkey { --y: 274px; }
+  #realm[data-hud] .act .toolkey .tool-ic { inline-size: 24px; block-size: 12px; }
+  #realm[data-hud] .act .toolkey .name { font: 600 9px/1 var(--hud-font); max-inline-size: 46px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.9; }
+
+  /* Landscape phone: compact 2x2 thumb cluster at bottom-right + compact slim voxel tool pill under top-right settings. */
+  @media (orientation: landscape) {
+    #realm[data-hud] .act .use { --w: 56px; --h: 56px; --x: 28px; --y: 28px; }
+    #realm[data-hud] .act :is(.up, .down, .walks) { --w: 46px; --h: 46px; }
+    #realm[data-hud] .act .up { --x: 90px; --y: 28px; }
+    #realm[data-hud] .act .walks { --x: 28px; --y: 90px; }
+    #realm[data-hud] .act .down { --x: 90px; --y: 90px; }
+    #realm[data-hud] .act .toolkey {
+      --w: 112px;
+      --h: 44px;
+      --x: 56px;
+      bottom: auto;
+      top: calc(env(safe-area-inset-top, 0px) + 66px);
+      padding: 0 10px;
+    }
+    #realm[data-hud] .act .toolkey .vx-label { flex-direction: row; gap: 7px; }
+    html.flying #realm[data-hud] .act .toolkey { bottom: auto; }
+    #realm[data-hud] .act .toolkey .name { font-size: 11.5px; max-inline-size: 72px; }
+  }
+
   #realm[data-hud].open .act .toolkey { display: none; }
   #realm[data-hud].choosing .act .toolkey { opacity: 0; }
-  /* While the wheel is open the thumb's keys step aside: it is most of the screen's width. */
   #realm[data-hud].choosing .act :is(.use, .up, .down, .walks) { visibility: hidden; }
-  #realm[data-hud="wheel"] .held { display: none; }
-  /* (By touch the tool's key says the tool: the bank is not shown, nor flashed in quiet, where on its side it stood over the thumb's keys.) */
+  html:not(.first)[data-hud="wheel"] #realm .held,
+  #realm[data-hud="wheel"] .held { display: none !important; }
   #realm:is([data-hud="context"], [data-hud="quiet"]) .tools { display: none; }
-  /* quiet: the keys faint a moment after the thumbs are lifted. */
+
+  /* Contextual auto-dimming when idle so the city shines through. */
   #realm[data-hud="quiet"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.22; }
-  /* wheel: the keys are kept, dimmed, at rest; the top keys stay (a phone has no Esc to bring them back). */
-  #realm[data-hud="wheel"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.72; }
-  html[data-hud="wheel"].away :is(#first .credits, #realm .fold) { opacity: 1 !important; pointer-events: auto !important; }
-  /* The top keys clear of the Dynamic Island (their solids stand 9 px over their faces), as small as the credits key, and
-     what was in the bottom left corner, where the left thumb steers, under the credits key: the wand's key and the place's name. */
-  html[data-hud] #realm .fold { top: calc(env(safe-area-inset-top, 0px) + 20px); right: max(14px, calc(env(safe-area-inset-right) + 8px)); --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 64px; min-block-size: 44px; padding: 0; }
-  html[data-hud] #realm .sky { top: calc(env(safe-area-inset-top, 0px) + 92px); }
-  html[data-hud] #first .corner { top: calc(env(safe-area-inset-top, 0px) + 20px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); }
-  html[data-hud] #first .credits { min-block-size: 44px; }
-  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 76px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); }
+  #realm[data-hud="wheel"].rest .act :is(.use, .up, .down, .walks, .toolkey) { opacity: 0.7; }
+  html[data-hud="wheel"].away :is(#first .credits, #realm .fold, #realm .home-key) { opacity: 0.86 !important; pointer-events: auto !important; }
+  html[data-hud="wheel"].away #ask:not(.open) { opacity: 0.72 !important; pointer-events: auto !important; }
+
+  /* Clean top-right slim voxel utility keys: Back chevron + Settings gear side by side, matching minimap top-left. */
+  html:not(.first)[data-hud] #realm .fold {
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
+    right: max(14px, calc(env(safe-area-inset-right) + 14px));
+    inline-size: 44px;
+    block-size: 44px;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+  }
+  html:not(.first)[data-hud="wheel"] #realm .home-key {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
+    right: calc(max(14px, env(safe-area-inset-right) + 14px) + 52px);
+    left: auto;
+    inline-size: 44px;
+    block-size: 44px;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 0;
+  }
+
+  /* Servers / lobby tag on touch: tucked cleanly under the top-left minimap. */
+  html:not(.first)[data-hud] #realm .lobbies,
+  html:not(.first)[data-hud] #lobby-tag {
+    top: calc(env(safe-area-inset-top, 0px) + 96px);
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
+    block-size: 36px;
+    min-block-size: 36px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  /* Ask bar on touch: compact 44x44 slim voxel sparkle button at bottom-left, vanishing while thumb steers! */
+  html:not(.first)[data-hud] #ask:not(.open) {
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    transform: none;
+    width: 44px;
+  }
+  html:not(.first)[data-hud] #ask:not(.open) #ask-row {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  html:not(.first)[data-hud] #ask:not(.open) :is(#line, #ask-picture, #ask-camera, #ask-which, .ask-kbd) { display: none; }
+  html:not(.first)[data-hud].thumb-down #ask:not(.open) { opacity: 0 !important; pointer-events: none !important; }
+  html:not(.first)[data-hud]:has(#ask.open) #realm .act { visibility: hidden; }
+  html:not(.first)[data-hud] #ask.open {
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100vw - max(28px, env(safe-area-inset-left) + env(safe-area-inset-right) + 28px));
+    bottom: calc(max(14px, env(safe-area-inset-bottom) + 10px) + var(--lift, 0px));
+  }
+
+  /* Sky panel drawer clears top utility icons cleanly (including its 3D slim bevel). */
+  html:not(.first)[data-hud] #realm .sky,
+  html:not(.first)[data-hud] #realm.folds .sky { top: calc(env(safe-area-inset-top, 0px) + 74px); right: max(12px, env(safe-area-inset-right)); }
+  /* Say card (.egg-line) sits cleanly in the upper sky, compact and clear of the parachute canopy. */
+  html:not(.first)[data-hud] #realm .egg-line { --vx: 2px; --vx-key-size: 12px; border-top: 0; padding: 10px 12px !important; gap: 6px !important; top: calc(env(safe-area-inset-top, 0px) + 74px) !important; }
+  html:not(.first)[data-hud] #realm .egg-line .vx-button { --vx: 2px; min-block-size: 30px; padding: 0 9px; font-size: 12px; }
+  @media (orientation: landscape) {
+    html:not(.first)[data-hud] #realm .sky,
+    html:not(.first)[data-hud] #realm.folds .sky,
+    html:not(.first)[data-hud] #realm .sky:has(.part.res) {
+      top: max(18px, calc(env(safe-area-inset-top, 0px) + 12px));
+      left: calc(max(12px, env(safe-area-inset-left, 0px)) + 12px);
+      right: auto;
+      inline-size: min(calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 96px), 540px);
+      padding-block: calc(var(--vx) * 2.5);
+      gap: calc(var(--vx) * 2);
+    }
+    html[data-hud] [data-panel="wand"] { top: 68px; }
+    html:not(.first)[data-hud] #realm .egg-line {
+      top: max(16px, calc(env(safe-area-inset-top, 0px) + 12px)) !important;
+      max-inline-size: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 120px) !important;
+      padding: 8px 12px !important;
+      gap: 4px !important;
+    }
+    html:not(.first)[data-hud] #realm .egg-line .vx-button { min-block-size: 26px; padding: 0 8px; font-size: 11px; }
+  }
+
+  /* Wand key (non-wheel modes) & wand bar. */
+  html[data-hud] [data-panel="wand-take"] { bottom: auto; top: calc(env(safe-area-inset-top, 0px) + 96px); left: max(14px, calc(env(safe-area-inset-left) + 14px)); }
   html[data-hud] [data-panel="wand-take"] button.vx-button { min-block-size: 44px; }
-  /* Back to the view, with the wheel by touch: where the wand's key was, under the credits key (in the Sky panel it is
-     two taps deep). */
-  #realm[data-hud="wheel"] .home-key { position: absolute; top: calc(env(safe-area-inset-top, 0px) + 76px); left: max(22px, calc(env(safe-area-inset-left) + 16px)); --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 64px; min-block-size: 44px; padding: 0 calc(var(--vx) * 4); }
   html[data-hud] [data-panel="wand-take"] .vx-kbd { display: none; }
-  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 200px); }
-  /* On its side the picture is low, and the body's middle: the line and the bar at the top, between the top keys. */
-  @media (orientation: landscape) { html[data-hud] [data-panel="wand"] { top: 72px; } html[data-hud] #realm .egg-line { top: 20px !important; } }
-  /* On its side the panel's foot has three keys and two rows, and under the settings key it ran into the bottom's safe area:
-     it opens to the left of that key, from the top, and no wider than leaves the credits key clear. */
-  @media (orientation: landscape) { html[data-hud] #realm .sky { top: max(20px, env(safe-area-inset-top)); right: calc(env(safe-area-inset-right, 0px) + 88px); inline-size: min(calc(100vw - 2 * max(12px, env(safe-area-inset-left)) - 24px), 480px); } }
-  /* The sky's panel open is a drawer over the picture, a menu: the keys of play and what stands under it step aside
-     meanwhile (the settings key folds it again). */
-  html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .home-key, #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
-  html[data-hud] #where { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 136px); left: max(16px, env(safe-area-inset-left)) !important; }
-  /* Riding (living.ts): the thing's keys are kit keys where the thumb's keys stood, a column on the corner from the bottom up,
-     44 px tall (rule 16) and 19 px apart (each solid stands 9 px up and to the left of its face). On its side five keys
-     are too tall for the picture: they stand in two columns, the first three on the right. */
-  html[data-hud] [data-panel="living"] { right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 12px); gap: 19px; }
-  html[data-hud] [data-panel="living"] .vx-button { --vx: 3px; --vx-key-size: var(--vx-key-small); min-inline-size: 72px; min-block-size: 44px; padding: 0 calc(var(--vx) * 4); justify-content: center; }
-  @media (orientation: landscape) { html[data-hud] [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 19px); inline-size: calc(2 * 96px + 19px); column-gap: 19px; } }
+  html[data-hud] [data-panel="wand"] { top: calc(env(safe-area-inset-top, 0px) + 100px); }
+
+  /* Sky drawer open: gameplay chrome steps aside cleanly. */
+  html[data-hud].drawer :is([data-panel="wand-take"], #where, #realm .home-key, #realm .lobbies, #lobby-tag, #ask:not(.open), #realm .act :is(.use, .up, .down, .walks, .toolkey)) { visibility: hidden; }
+  html:not(.first)[data-hud] #where {
+    bottom: auto !important;
+    top: calc(env(safe-area-inset-top, 0px) + 94px) !important;
+    left: max(16px, calc(env(safe-area-inset-left) + 16px)) !important;
+    font-size: 12.5px !important;
+  }
+
+  /* On-foot bottom-left utility slot beside ✦ (Summon Car G): vanishes while steering, riding, choosing, or drawer open. */
+  html:not(.first)[data-hud] [data-panel="summon"] { display: block; position: absolute; inset: 0; pointer-events: none; }
+  html:not(.first)[data-hud] #realm .foot-summon,
+  html:not(.first)[data-hud] [data-panel="summon"] .vx-button {
+    position: absolute;
+    left: calc(max(14px, env(safe-area-inset-left) + 14px) + 52px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 14px);
+    inline-size: 44px;
+    block-size: 44px;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 0;
+    --vx: 2px;
+    pointer-events: auto;
+    transition: opacity 0.22s ease-out;
+  }
+  html:not(.first)[data-hud]:is(.thumb-down, .riding, .drawer, .choosing) :is(#realm .foot-summon, [data-panel="summon"]),
+  html:not(.first)[data-hud]:has(#ask.open) :is(#realm .foot-summon, [data-panel="summon"]) { opacity: 0 !important; pointer-events: none !important; }
+
+  /* Riding keys (living.ts): compact slim voxel cluster at bottom-right, leaving bottom-left clear for thumbstick & radio-yt (216x200). */
+  html[data-hud] [data-panel="living"] { right: calc(env(safe-area-inset-right, 0px) + 14px); bottom: calc(env(safe-area-inset-bottom, 0px) + 14px); gap: 8px; }
+  html[data-hud] [data-panel="living"] .vx-button { min-inline-size: 74px; min-block-size: 44px; padding: 0 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 12.5px; }
+  html[data-hud].driving [data-panel="living"] {
+    display: grid;
+    grid-template-columns: 52px 58px;
+    grid-auto-rows: 46px;
+    gap: 8px;
+    align-items: stretch;
+    justify-items: stretch;
+  }
+  html[data-hud].driving [data-panel="living"] .vx-button {
+    inline-size: 100%;
+    block-size: 100%;
+    min-inline-size: 44px;
+    min-block-size: 44px;
+    padding: 0;
+  }
+  html[data-hud].driving [data-panel="living"] .vx-button .vx-label {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { font: 600 9px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.92; }
+  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Seat, Cam, Radio. */
+  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 4; }
+  html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 2; grid-row: 3; }
+  html[data-hud].driving [data-panel="living"] [data-act="horn"] { grid-column: 2; grid-row: 2; }
+  html[data-hud].driving [data-panel="living"] [data-act="leave"] { grid-column: 2; grid-row: 1; }
+  html[data-hud].driving [data-panel="living"] [data-act="seat"] { grid-column: 1; grid-row: 4; }
+  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 3; }
+  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 2; }
+  @media (orientation: landscape) {
+    html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
+    html[data-hud].driving [data-panel="living"] { grid-auto-rows: 44px; gap: 6px; }
+  }
 }
 `
 
@@ -239,8 +643,6 @@ export function playHud(o: {
   style.textContent = STYLE
   document.head.append(style)
   const coarse = matchMedia('(pointer: coarse)')
-  // (The kit may never come: ?kit=plain, or its import failed. Then what waits for it gives up after a minute, and the plain keys stand.)
-  const kitDo = (run: (kit: Kit) => void) => { if (o.ui.kit) { run(o.ui.kit); return } let tries = 0; const wait = setInterval(() => { if (o.ui.kit) { clearInterval(wait); run(o.ui.kit) } else if (++tries > 300) clearInterval(wait) }, 200) }
   const short = (name: string) => name
 
   // ── The safe area, as the page has it (env() read through a probe) ──
@@ -250,7 +652,35 @@ export function playHud(o: {
   const safe = () => { const s = getComputedStyle(probe); return { top: parseFloat(s.paddingTop) || 0, right: parseFloat(s.paddingRight) || 0, bottom: parseFloat(s.paddingBottom) || 0, left: parseFloat(s.paddingLeft) || 0 } }
   const meets = (a: Box, b: Box) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
   /** How far a kit part's solid stands up and to the left of its face (half its --vx-face-z, SPEC), and the voxel drawn past it all round, CSS px. */
-  const solidOf = (el: HTMLElement) => { if (!el.hasAttribute('data-vx-live')) return { lift: 0, bleed: 0 }; const cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4; return { lift: (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx, bleed: vx } }
+  const solidOf = (el: HTMLElement) => {
+    if (!el.hasAttribute('data-vx-live')) return { lift: 0, bleed: 0 }
+    const cv = el.querySelector<HTMLElement>(':scope > .vx-canvas')
+    if (!cv || !cv.checkVisibility()) return { lift: 0, bleed: 0 }
+    const cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4
+    return { lift: (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx, bleed: vx }
+  }
+
+  // ── Kit adoption & live look transitions (First View stays on lit; gameplay switches to slim) ──
+  const pendingKit: ((k: Kit) => void)[] = []
+  const kitDo = (fn: (k: Kit) => void) => { if (o.ui.kit) fn(o.ui.kit); else pendingKit.push(fn) }
+  const flushKit = () => {
+    const k = o.ui.kit
+    if (!k || !pendingKit.length) return
+    while (pendingKit.length) pendingKit.shift()!(k)
+  }
+  const adoptOne = (el: HTMLElement | null) => {
+    if (!el) return
+    kitDo((k) => { if (!el.hasAttribute('data-vx-live')) k.adopt(el) })
+  }
+  const refreshAll = (k: Kit) => {
+    for (const el of root.querySelectorAll<HTMLElement>('[data-vx-live]')) if (el.offsetWidth && el.offsetHeight) k.refresh?.(el)
+    for (const sel of ['#lobby-tag', '#ask-row .ask-voxel', '[data-panel="wand-take"] button', '[data-panel="living"] .vx-button', '[data-panel="summon"] .vx-button']) {
+      for (const el of document.querySelectorAll<HTMLElement>(sel)) {
+        if (!el.hasAttribute('data-vx-live')) k.adopt(el)
+        else if (el.offsetWidth && el.offsetHeight) k.refresh?.(el)
+      }
+    }
+  }
 
   // ── The cues beside the body ──
   const cues = document.createElement('div')
@@ -266,34 +696,38 @@ export function playHud(o: {
     return el
   }
   const chute = cue('chute'), fly = cue('fly'), land = cue('land')
+  kitDo((k) => k.adopt(cues))
   const said = new Map<HTMLElement, string>()
-  // (Its words are changed in place: the kit's solid is the element's own, and is drawn again for them.)
   const say = (el: HTMLElement, key: string, words: string) => {
     if (said.get(el) === key + words) return
     said.set(el, key + words)
-    el.querySelector('kbd')!.textContent = key
+    const kbd = el.querySelector<HTMLElement>('.vx-kbd')!
+    const kbdLbl = kbd.querySelector<HTMLElement>(':scope > .vx-label') ?? kbd
+    kbdLbl.textContent = key
     el.querySelector('.words')!.textContent = words
-    // (Adopted once it has words: a keycap built empty has no top to carry its legend.)
-    if (!el.hasAttribute('data-vx-live')) o.ui.kit?.adopt(el)
-    else { o.ui.kit?.refresh?.(el); o.ui.kit?.refresh?.(el.querySelector('kbd')!) }
+    if (o.ui.kit) {
+      if (!el.hasAttribute('data-vx-live')) o.ui.kit.adopt(el)
+      else { o.ui.kit.refresh?.(kbd); o.ui.kit.refresh?.(el) }
+    }
   }
 
-  // ── The stick that comes under the thumb ──
+  // ── The stick that comes under the thumb (hollow stepped octagonal voxel gimbal + concave cap) ──
   const float = document.createElement('div')
   float.className = 'vx-recess float'
   float.setAttribute('aria-hidden', 'true')
-  float.innerHTML = '<span class="vx-button cap" tabindex="-1"></span>'
+  float.innerHTML = '<span class="vx-button cap" data-vx-stick-cap tabindex="-1"></span>'
   root.append(float)
   const cap = float.querySelector<HTMLElement>('.cap')!
   kitDo((k) => k.adopt(float))
 
   // ── The tool's key: on a desk (wheel) the held tool and its key; by touch, among the thumb's keys ──
-  const held = Object.assign(document.createElement('button'), { className: 'vx-button held', type: 'button', innerHTML: '<kbd class="vx-kbd">E</kbd><span class="name"></span>' })
+  const held = Object.assign(document.createElement('button'), { className: 'vx-button held', type: 'button', innerHTML: '<kbd class="vx-kbd">E</kbd><span class="ic"></span><span class="name"></span>' })
   held.setAttribute('aria-haspopup', 'dialog')
   root.append(held)
-  const toolkey = Object.assign(document.createElement('button'), { className: 'vx-button toolkey', type: 'button', innerHTML: '<span class="name"></span>' })
+  const toolkey = Object.assign(document.createElement('button'), { className: 'vx-button toolkey', type: 'button', innerHTML: '<span class="ic"></span><span class="name"></span>' })
   root.querySelector('.act')?.append(toolkey)
-  kitDo((k) => { k.adopt(held); k.adopt(toolkey) })
+  adoptOne(held)
+  adoptOne(toolkey)
   const next = (step: number) => { const n = o.tools.length; o.pickTool((((o.tool() + step) % n) + n) % n) }
   // What the wheel chooses from: the tools, and the wand after them (with the wheel it is a tool as they are: Q still
   // takes it up and puts it away). Held, it is what is chosen; any other choice puts it away.
@@ -303,16 +737,30 @@ export function playHud(o: {
   const take = (i: number) => { if (i === WAND) { o.wand!.held = true; return } if (o.wand && WAND >= 0) o.wand.held = false; o.pickTool(i) }
   const name = (i: number) => choices[i] ?? ''
 
-  // ── Back to the view, with the wheel by touch: one tap, where in the Sky panel it is two (a desk has the backquote) ──
-  const home = Object.assign(document.createElement('button'), { className: 'vx-button home-key', type: 'button', textContent: 'Back', hidden: true })
+  // ── Back to the view, with the wheel by touch: slim voxel key with inlaid pearl-ivory chevron relief ──
+  const home = Object.assign(document.createElement('button'), { className: 'vx-button home-key', type: 'button', hidden: true })
+  home.dataset.vxIcon = 'back'
+  home.setAttribute('data-vx-icon-only', '')
   home.setAttribute('aria-label', 'Back to the view')
+  home.title = 'Back to the view'
   home.addEventListener('click', () => o.back?.go())
-  if (mode === 'wheel' && o.back) { root.append(home); kitDo((k) => k.adopt(home)) }
+  if (mode === 'wheel' && o.back) { root.append(home); adoptOne(home) }
 
-  // ── The wand's key: wand.ts makes it in a panel of its own once the wand is ready. Here it becomes a kit key as the
-  // others are, latched down while the wand is in hand (wand.ts marks that `on`). ──
+  // ── Sleek SVG icon decoration for touch action keys (.use, .up, .down, .walks) ──
+  const styledKeys = new WeakSet<HTMLElement>()
+  const decorateAction = (el: HTMLElement | null, svg: string, fallback: string) => {
+    if (!el || styledKeys.has(el)) return
+    styledKeys.add(el)
+    const host = el.querySelector<HTMLElement>(':scope > .vx-label') ?? el
+    const label = host.textContent?.trim() || fallback
+    const canvas = el.querySelector(':scope > .vx-canvas')
+    host.innerHTML = `${svg}<span class="hud-lbl"></span>`
+    host.querySelector('.hud-lbl')!.textContent = label
+    if (canvas && host === el) el.prepend(canvas)
+  }
+
+  // ── The wand's key (non-wheel modes) ──
   let wandKey: HTMLButtonElement | null = null
-  const ridingKeys = new WeakSet<HTMLElement>()
   const wandKeyed = () => {
     const el = wandKey ?? document.querySelector<HTMLButtonElement>('[data-panel="wand-take"] button')
     if (!el) return
@@ -320,7 +768,7 @@ export function playHud(o: {
       wandKey = el
       el.classList.add('vx-button')
       el.querySelector('i')?.replaceWith(Object.assign(document.createElement('kbd'), { className: 'vx-kbd', textContent: 'Q' }))
-      kitDo((k) => k.adopt(el))
+      adoptOne(el)
     }
     const on = String(el.classList.contains('on'))
     if (el.getAttribute('aria-pressed') !== on) el.setAttribute('aria-pressed', on)
@@ -408,8 +856,10 @@ export function playHud(o: {
   slots.forEach((s, i) => s.addEventListener('click', (e) => { if (e.detail === 0) { point(i); choose(false, true) } }))
   // By touch, a tap away from the disc (not a thumb that steers: a short touch that stays where it was) puts it away as it was.
   const taps = new Map<number, { x: number; y: number; t: number }>()
+  let dismissedAt = 0
   addEventListener('pointerdown', (e) => { if (open && e.pointerType === 'touch' && !disc.contains(e.target as Node) && e.target !== toolkey) taps.set(e.pointerId, { x: e.clientX, y: e.clientY, t: performance.now() }) }, true)
-  addEventListener('pointerup', (e) => { const t = taps.get(e.pointerId); taps.delete(e.pointerId); if (open && t && performance.now() - t.t < 350 && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 12) choose(false) }, true)
+  addEventListener('pointerup', (e) => { const t = taps.get(e.pointerId); taps.delete(e.pointerId); if (open && t && performance.now() - t.t < 350 && Math.hypot(e.clientX - t.x, e.clientY - t.y) < 12) { dismissedAt = performance.now(); choose(false) } }, true)
+  addEventListener('click', (e) => { if (performance.now() - dismissedAt < 350) { e.preventDefault(); e.stopImmediatePropagation() } }, true)
   addEventListener('pointercancel', (e) => taps.delete(e.pointerId), true)
   // E let go: held and pointed, that is the choice; held a while and pointed at nothing, put away as it was; a tap leaves it open.
   addEventListener('keyup', (e) => {
@@ -486,36 +936,93 @@ export function playHud(o: {
   const down = new Set<number>()
   addEventListener('pointerdown', (e) => { down.add(e.pointerId); touched = performance.now() }, true)
   for (const t of ['pointerup', 'pointercancel'] as const) addEventListener(t, (e) => { down.delete(e.pointerId); touched = performance.now() }, true)
-  const idle = (now: number) => down.size === 0 && now - touched > 3000 && !root.classList.contains('open')
+  const idle = (now: number) => down.size === 0 && now - touched > 5000 && !root.classList.contains('open')
 
   // ── Every frame ──
   let shownTool = -1, b: Box | null = null, inside = false, stickOver = false, panelWas = false
+  let appliedLook: 'lit' | 'slim' | null = null, floatShown = false, askWasOpen = false, lastTouch = coarse.matches
   const did = { chute: 0, flew: false, landed: 0 }
-  let wasOn = true, wasCanopy = false, flyingSince = 0, since = 0, offSince = 0
+  let wasOn = true, wasCanopy = false, flyingSince = 0, afootMs = 0, offSince = 0
   const place = (el: HTMLElement, x: number, y: number) => { el.style.translate = `${Math.round(x)}px ${Math.round(y)}px` }
-  o.watch(() => {
+  o.watch((gap) => {
+    flushKit()
+    const eng = o.engaged()
+    const wantLook = eng ? 'slim' : 'lit'
     // (Back in the first view, the key goes with the rest: asked before the frame is left to it.)
-    const homeShown = coarse.matches && o.engaged() && !!o.back?.can()
-    if (home.hidden === homeShown) { home.hidden = !homeShown; if (homeShown) o.ui.kit?.refresh?.(home) }
-    if (!o.engaged()) return
+    const homeShown = coarse.matches && eng && !!o.back?.can()
+    if (home.hidden === homeShown) {
+      home.hidden = !homeShown
+      if (homeShown && o.ui.kit) o.ui.kit.refresh?.(home)
+    }
+    if (o.ui.kit && wantLook !== appliedLook) {
+      appliedLook = wantLook
+      refreshAll(o.ui.kit)
+    }
+    if (!eng) return
     wandKeyed()
-    // The keys of a thing ridden (living.ts makes them each time one is got on): kit keys as the others are, once shown.
-    if (coarse.matches) for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] .vx-button')) if (!ridingKeys.has(el)) { ridingKeys.add(el); kitDo((k) => k.adopt(el)) }
+    // Ensure Ask collapsed trigger voxel backing & dynamically mounted riding keys are adopted into slim.
+    if (o.ui.kit) {
+      const askVoxel = document.querySelector<HTMLElement>('#ask-row .ask-voxel')
+      const askOpen = !!document.getElementById('ask')?.classList.contains('open')
+      if (askVoxel && !askOpen && askVoxel.offsetWidth && askVoxel.offsetHeight) {
+        if (!askVoxel.hasAttribute('data-vx-live')) o.ui.kit.adopt(askVoxel)
+        else if (askWasOpen || lastTouch !== coarse.matches) o.ui.kit.refresh?.(askVoxel)
+      }
+      askWasOpen = askOpen
+      if (html.classList.contains('riding')) {
+        const driving = html.classList.contains('driving')
+        for (const el of document.querySelectorAll<HTMLElement>('[data-panel="living"] .vx-button')) {
+          if (driving && coarse.matches) {
+            const act = el.dataset.act ?? ''
+            if (DRIVE_ICONS[act]) decorateAction(el, DRIVE_ICONS[act], el.textContent?.trim() || act)
+          }
+          if (!el.hasAttribute('data-vx-live') && el.offsetWidth && el.offsetHeight) o.ui.kit.adopt(el)
+        }
+      } else {
+        for (const el of document.querySelectorAll<HTMLElement>('[data-panel="summon"] .vx-button:not([data-vx-live])')) {
+          if (el.offsetWidth && el.offsetHeight) o.ui.kit.adopt(el)
+        }
+      }
+      if (lastTouch !== coarse.matches) {
+        lastTouch = coarse.matches
+        refreshAll(o.ui.kit)
+      }
+    }
+    // Decorate touch action buttons with crisp SVG icons once mounted.
+    if (coarse.matches) {
+      decorateAction(root.querySelector<HTMLElement>('.act .use'), '<span class="ic"></span>', 'Use')
+      decorateAction(root.querySelector<HTMLElement>('.act .up'), JUMP_SVG + CHUTE_SVG, 'Jump')
+      decorateAction(root.querySelector<HTMLElement>('.act .walks'), FLY_SVG + WALK_SVG, 'Fly')
+      decorateAction(root.querySelector<HTMLElement>('.act .down'), DOWN_SVG, 'Down')
+    }
     // (Come in: where one is, said once on arrival.)
-    if (!inside) { inside = true; named(); since = performance.now(); wasOn = o.me.on }
+    if (!inside) { inside = true; named(); afootMs = 0; wasOn = o.me.on }
     if (tools && tools.dataset.vxWay !== 'down') { tools.dataset.vxWay = 'down'; o.ui.kit?.refresh?.(tools) }
     const now = performance.now(), s = safe(), vw = innerWidth, vh = innerHeight, touch = coarse.matches
     b = body()
     const all = parts()
-    // The tool's name, on its keys.
+    // The tool's name and crisp icon on its keys (and on the mobile Use button).
     const t = current()
     if (t !== shownTool) {
       shownTool = t
-      held.querySelector('.name')!.textContent = name(t)
-      held.setAttribute('aria-label', `Tool: ${name(t)}. Choose another (E)`)
-      toolkey.querySelector('.name')!.textContent = short(name(t))
-      toolkey.setAttribute('aria-label', mode === 'wheel' ? `Tool: ${name(t)}. Hold and slide down to choose another` : `Tool: ${name(t)}. Tap for the next`)
-      o.ui.kit?.refresh?.(held); o.ui.kit?.refresh?.(toolkey)
+      const label = name(t), ic = toolSvg(label)
+      held.querySelector('.ic')!.innerHTML = ic
+      held.querySelector('.name')!.textContent = label
+      held.setAttribute('aria-label', `Tool: ${label}. Choose another (E)`)
+      toolkey.querySelector('.ic')!.innerHTML = ic
+      toolkey.querySelector('.name')!.textContent = short(label)
+      toolkey.setAttribute('aria-label', mode === 'wheel' ? `Tool: ${label}. Hold and slide to choose another` : `Tool: ${label}. Tap for the next`)
+      const useIc = root.querySelector<HTMLElement>('.act .use .ic')
+      if (useIc) useIc.innerHTML = ic
+      if (o.ui.kit) {
+        if (held.offsetWidth) o.ui.kit.refresh?.(held)
+        if (toolkey.offsetWidth) o.ui.kit.refresh?.(toolkey)
+      }
+    }
+    // Ensure Use icon is populated once decorated even if tool did not change this frame.
+    if (touch) {
+      const useIc = root.querySelector<HTMLElement>('.act .use .ic')
+      if (useIc && !useIc.firstElementChild) useIc.innerHTML = toolSvg(name(t))
     }
     // What has been done, for the cues.
     if (o.me.canopy && !wasCanopy) did.chute++
@@ -533,22 +1040,29 @@ export function playHud(o: {
     else if (!offSince) offSince = now
     const falling = off && now - offSince > 500
     const cueChute = falling && did.chute < 3
-    const cueFly = o.me.on && !o.me.aloft && !did.flew && now - since < 60_000
-    const cueLand = !o.me.on && did.landed < 2 && now - flyingSince < 6000
-    if (cueChute) say(chute, touch ? 'Chute' : 'Space', 'Open the parachute')
-    if (cueFly) say(fly, touch ? 'Fly' : 'B', 'Take to the air')
-    if (cueLand) say(land, touch ? 'Walk' : 'B', 'Back on your feet')
-    // (Not while a tool is being chosen: the wheel has the room then.)
-    // (Nor, by touch, while the sky's panel is open: it is a drawer over the picture's middle then, and the cue would be on it.)
-    // (Nor while the line to say something on, the ask bar, an offer over it, the connect panel or the line of the visitor's AI is shown.)
+    // On mobile the Fly button is already visible in the thumb cluster: no redundant floating banner over the character.
+    // On desktop show a brief, subtle [B] Fly cue for 12s of on-foot time on first arrival.
+    if (!o.vehicle?.() && o.me.on && !o.me.aloft) afootMs += Math.min(gap, 100)
+    const cueFly = !touch && !o.vehicle?.() && o.me.on && !o.me.aloft && !did.flew && afootMs < 12_000
+    const cueLand = !touch && !o.me.on && did.landed < 2 && now - flyingSince < 5000
+    if (cueChute) say(chute, touch ? 'Chute' : 'Space', 'Parachute')
+    if (cueFly) say(fly, 'B', 'Fly')
+    if (cueLand) say(land, 'B', 'Walk')
     const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])')
     html.classList.toggle('drawer', drawer)
-    chute.classList.toggle('on', cueChute && free); fly.classList.toggle('on', cueFly && free); land.classList.toggle('on', cueLand && free)
+    for (const [el, want] of [[chute, cueChute && free], [fly, cueFly && free], [land, cueLand && free]] as const) {
+      const was = el.classList.contains('on')
+      el.classList.toggle('on', want)
+      if (want && !was && o.ui.kit) {
+        const kbd = el.querySelector<HTMLElement>('.vx-kbd')
+        if (kbd) o.ui.kit.refresh?.(kbd)
+        o.ui.kit.refresh?.(el)
+      }
+    }
     // Beside the body, on the side with more room; with no body seen, in the middle a third of the way up.
     if (cueChute || cueFly || cueLand) {
       const w = cues.offsetWidth, h = cues.offsetHeight
-      // (A card's solid stands up and to the left of its face, and a voxel past it all round: measured, as the check does.)
-      const shown = [chute, fly, land].find((el) => el.classList.contains('on')) ?? fly, { lift, bleed } = solidOf(shown), up = lift + bleed, gap = 12
+      const shown = [chute, fly, land].find((el) => el.classList.contains('on')) ?? fly, { lift, bleed } = solidOf(shown), up = lift + bleed, gap = 18
       let x: number, y: number
       if (b) {
         const right = vw - s.right - 16 - b.right, left = b.left - s.left - 16
@@ -556,34 +1070,36 @@ export function playHud(o: {
         if (right >= room || left >= room) {
           x = right >= room ? b.right + up + gap : b.left - bleed - gap - w
           y = Math.max(s.top + 72, Math.min(vh - s.bottom - h - 120, (b.top + b.bottom) / 2 - h))
-        } else { x = (b.left + b.right - w) / 2; y = Math.max(s.top + 140, b.top - h - bleed - gap) }
+        } else { x = (b.left + b.right - w) / 2; y = Math.max(s.top + 88, b.top - h - bleed - 28) }
       } else { x = (vw - w) / 2; y = vh * 0.62 }
       x = Math.max(s.left + 12 + up, Math.min(vw - s.right - 12 - w - bleed, x))
-      // Clear of the keys too: where the card would meet one (by the solids of both), it goes up above them.
-      const keys = [...root.querySelectorAll<HTMLElement>('.act .use, .act .up, .act .down, .act .walks, .held'), ...document.querySelectorAll<HTMLElement>('#minimap')].filter((el) => el.offsetParent).map((el) => { const r = el.getBoundingClientRect(), k = solidOf(el); return { left: r.left - k.lift - k.bleed, top: r.top - k.lift - k.bleed, right: r.right + k.bleed, bottom: r.bottom + k.bleed } })
+      // Clear of the keys, minimap and ask pill too: where the cue would meet one, it goes up above them.
+      const keys = [...root.querySelectorAll<HTMLElement>('.act .use, .act .up, .act .down, .act .walks, .act .toolkey, .held'), ...document.querySelectorAll<HTMLElement>('#minimap, #ask-row')].filter((el) => el.offsetParent).map((el) => { const r = el.getBoundingClientRect(), k = solidOf(el); return { left: r.left - k.lift - k.bleed, top: r.top - k.lift - k.bleed, right: r.right + k.bleed, bottom: r.bottom + k.bleed } })
       for (const k of keys) if (x - up < k.right && x + w + bleed > k.left && y - up < k.bottom && y + h + bleed > k.top) y = Math.min(y, k.top - gap - h - bleed)
       y = Math.max(s.top + 20 + up, y)
       place(cues, x, y)
-      // Never over the body, nor in the safe area: where no place was found this frame (the body moving fast, a fall
-      // beginning), the cue is not shown until there is one.
       const card: Box = { left: x - up, top: y - up, right: x + w + bleed, bottom: y + h + bleed }
-      // (With a margin of 12 px round the body: in a fall it is somewhere else by the next frame.)
       cues.style.visibility = all.some((p) => meets(card, { left: p.left - 12, top: p.top - 12, right: p.right + 12, bottom: p.bottom + 12 })) || card.top < s.top || card.bottom > vh - s.bottom || card.left < s.left || card.right > vw - s.right ? 'hidden' : ''
     }
     // The stick, where the thumb is; not drawn at all where that is over the body (the thumb is the mark then, and the body is seen).
-    // (With a margin either way: put away as soon as the body meets it, as the body walks under a thumb that stays; back only
-    // when the body is 16 px clear. Decided at the edge itself, it flickered as the body bobbed there.)
-    const th = o.input.thumb, r = 62
+    const th = o.input.thumb, r = 56
+    html.classList.toggle('thumb-down', !!th)
     const well = (m: number): Box | null => th && { left: th.from[0] - r - m, top: th.from[1] - r - m, right: th.from[0] + r + m, bottom: th.from[1] + r + m }
     const near = (m: number) => { const w = well(m); return !!w && all.some((p) => meets(w, p)) }
     stickOver = !!th && (stickOver ? near(16) : near(0))
     const over = stickOver
-    float.classList.toggle('on', !!th && !over)
-    if (th && !over) {
+    const stickNow = !!th && !over
+    float.classList.toggle('on', stickNow)
+    if (stickNow && !floatShown && o.ui.kit) {
+      o.ui.kit.refresh?.(float)
+      o.ui.kit.refresh?.(cap)
+    }
+    floatShown = stickNow
+    if (stickNow && th) {
       place(float, th.from[0], th.from[1])
       let dx = th.at[0] - th.from[0], dy = th.at[1] - th.from[1]
       const far = Math.hypot(dx, dy)
-      if (far > 34) { dx *= 34 / far; dy *= 34 / far }
+      if (far > 32) { dx *= 32 / far; dy *= 32 / far }
       cap.style.translate = `${Math.round(dx)}px ${Math.round(dy)}px`
     }
     // By touch, held upright, no ring of seven keys fits clear of the body and the top keys (measured at 390 x 844): the
