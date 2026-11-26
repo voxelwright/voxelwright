@@ -23,6 +23,7 @@
 import { createHmac, createPublicKey, randomBytes, scrypt as scryptCb, timingSafeEqual, verify } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { isIP } from 'node:net'
 import { promisify } from 'node:util'
 import { RTCPeerConnection } from 'node-datachannel/polyfill'
 import { text } from './text.mjs'
@@ -148,6 +149,46 @@ async function literal(servers) {
 }
 /** The addresses an SDP's candidates name (to refuse a banned one before any channel opens). */
 const addressesIn = (sdp) => [...String(sdp).matchAll(/a=candidate:\S+ \d+ \S+ \d+ (\S+) \d+ typ/g)].map((m) => m[1]).filter((a) => !a.endsWith('.local'))
+/**
+ * Who an address is for per-address limits, eviction rank and bans: an IPv4 address unchanged, an IPv4-mapped IPv6
+ * address as its IPv4, and any other IPv6 address as its /56 (the same rule the master uses in `master/src/text.rs`).
+ */
+export function addressKey(address) {
+  if (typeof address !== 'string') return null
+  const raw = address.trim().replace(/^\[|\]$/g, '').split('%')[0]
+  if (!raw) return null
+  const family = isIP(raw)
+  if (family === 4) return raw
+  if (family !== 6) return raw.toLowerCase()
+  let text = raw.toLowerCase()
+  const lastColon = text.lastIndexOf(':')
+  if (lastColon >= 0 && text.includes('.')) {
+    const v4 = text.slice(lastColon + 1)
+    if (isIP(v4) !== 4) return text
+    const b = v4.split('.').map(Number)
+    text = `${text.slice(0, lastColon)}:${((b[0] << 8) | b[1]).toString(16)}:${((b[2] << 8) | b[3]).toString(16)}`
+  }
+  const halves = text.split('::')
+  if (halves.length > 2) return text
+  const left = halves[0] ? halves[0].split(':') : []
+  const right = halves.length === 2 && halves[1] ? halves[1].split(':') : []
+  const missing = 8 - left.length - right.length
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return text
+  const s = [...left, ...Array(missing).fill('0'), ...right].map((p) => parseInt(p, 16))
+  if (s[0] === 0 && s[1] === 0 && s[2] === 0 && s[3] === 0 && s[4] === 0 && s[5] === 0xffff) {
+    return `${s[6] >> 8}.${s[6] & 0xff}.${s[7] >> 8}.${s[7] & 0xff}`
+  }
+  return `${s[0].toString(16)}:${s[1].toString(16)}:${s[2].toString(16)}:${(s[3] & 0xff00).toString(16)}::/56`
+}
+/** Whether an SDP has what a WebRTC data-channel offer must have, checked before it waits for or takes a place. */
+const looksLikeOffer = (sdp) =>
+  typeof sdp === 'string' &&
+  sdp.length <= 16384 &&
+  /^v=0\r?\n/.test(sdp) &&
+  /^m=application /m.test(sdp) &&
+  /^a=fingerprint:sha-256 (?:[0-9a-f]{2}:){31}[0-9a-f]{2}\r?$/im.test(sdp) &&
+  /^a=ice-ufrag:\S+\r?$/m.test(sdp) &&
+  /^a=ice-pwd:\S+\r?$/m.test(sdp)
 /** Whether a hello's key signed this connection's fingerprint. */
 function proves(h, fingerprint) {
   if (!fingerprint || typeof h.key !== 'string' || typeof h.sig !== 'string' || h.key.length > 200 || h.sig.length > 200) return false
@@ -175,8 +216,8 @@ export function door(o) {
   const keyed = (what, v) => createHmac('sha256', kept.secret).update(`${what}:${v}`).digest('hex')
   /** Who a page's key is here: the same every time it comes, and nothing another server can work out from it. */
   const youOf = (key) => `v${keyed('key', key).slice(0, 9)}`
-  /** An address as it is kept: keyed, so the file does not hold it plainly (the key is beside it: see the README). */
-  const placeOf = (address) => (address ? keyed('address', address).slice(0, 24) : null)
+  /** An address as it is kept: keyed by its IPv4 or IPv6 /56, so the file does not hold it plainly (the key is beside it: see the README). */
+  const placeOf = (address) => { const k = addressKey(address); return k ? keyed('address', k).slice(0, 24) : null }
   // What the command line says wins at start; what an admin changes is kept until the next start with a flag that says otherwise.
   if (o.name) kept.name = text(o.name, 48)
   if (o.about !== undefined && o.about !== null) kept.about = text(o.about, 200)
@@ -211,31 +252,94 @@ export function door(o) {
    * already closed. (Channels that open late still get their HELLO_GRACE: the hello is a round trip behind them.)
    */
   const settled = (c, at) => !!c.sent && (c.ready ? at - c.ready > HELLO_GRACE : at - c.sent > FRESH)
-  /** Joins waiting from an address, whether or not they have had their chance. */
-  const waitingFrom = (address) => pending().filter((d) => d.address === address && !d.greeting).length
+  /** Joins waiting from an address key (IPv4 or IPv6 /56), whether or not they have had their chance. */
+  const waitingFrom = (key) => pending().filter((d) => d.addressKey === key && !d.greeting).length
   /**
    * The join to let go when an offer needs its place: one already refused, then one still not connected well after its
-   * offer, then one from the address with the most joins waiting, then the one silent longest (since it connected, or
+   * offer, then one from the address key with the most joins waiting, then the one silent longest (since it connected, or
    * since its offer). A page says hello the moment its channels open, so the one silent longest is the least likely
    * to be one. One whose hello is being checked is not let go: that takes a moment.
    */
   function evictable() {
     const at = Date.now(), silent = pending().filter((c) => settled(c, at) && (!c.greeting || c.refused))
-    const rank = (c) => [c.refused ? 1 : 0, !c.connected && at - c.sent > CONNECT_GRACE ? 1 : 0, c.address ? waitingFrom(c.address) : 1, -(c.connected ?? c.sent)]
+    const rank = (c) => [c.refused ? 1 : 0, !c.connected && at - c.sent > CONNECT_GRACE ? 1 : 0, c.addressKey ? waitingFrom(c.addressKey) : 1, -(c.connected ?? c.sent)]
     const before = (a, b) => { const x = rank(a), y = rank(b); for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return y[i] - x[i]; return 0 }
     return silent.sort(before)[0]
   }
-  /** Once a join's address is known (its connection's, never its offer's): past the most for one address, the one of that address silent longest goes. */
+  /** Once a join's address is known (its connection's, never its offer's): past the most for one address key, the one of that key silent longest goes. */
   function counted(c) {
     if (c.closed) return
     c.connected ??= Date.now()
     if (!c.address) try { c.address = c.pc.selectedCandidatePair()?.remote?.address ?? null } catch { /* not known */ }
-    if (!c.address) return
+    const key = addressKey(c.address)
+    if (!key) return
+    c.addressKey = key
     // Asked again as each join of the address connects and as its channels open. The join that has just come is kept,
     // and so is one that has not had its chance yet (`settled`): a join over the most goes once it has.
-    const at = Date.now(), same = pending().filter((d) => d.address === c.address && !d.greeting)
+    const at = Date.now(), same = pending().filter((d) => d.addressKey === key && !d.greeting)
     let over = same.length - limits.waitingPerAddress
     for (const d of same.filter((d) => d !== c && settled(d, at)).sort((a, b) => a.connected - b.connected)) if (over-- > 0) close(d)
+  }
+  /**
+   * Offers waiting for a place, served strictly in arrival order (first come, first served). Each place claimed here
+   * increments `held` and `placing` synchronously before the waiter resumes, so nothing arriving later can jump ahead.
+   */
+  const waiters = []
+  let poll = null, serving = false
+  const stopPoll = () => { if (poll) { clearInterval(poll); poll = null } }
+  const startPoll = () => { if (!poll) poll = setInterval(serve, 25).unref() }
+  function claim() {
+    while (held >= ports || pending().length + placing >= PENDING_MOST) {
+      const oldest = evictable()
+      if (!oldest) return false
+      close(oldest)
+    }
+    held++; placing++
+    return true
+  }
+  function serve() {
+    if (serving) return
+    serving = true
+    try {
+      while (waiters.length) {
+        if (stopped) {
+          const w = waiters.shift()
+          w.done = true
+          clearTimeout(w.timer)
+          w.resolve(false)
+          continue
+        }
+        if (!claim()) break
+        const w = waiters.shift()
+        w.done = true
+        clearTimeout(w.timer)
+        w.resolve(true)
+      }
+      if (!waiters.length) stopPoll()
+    } finally {
+      serving = false
+    }
+  }
+  function takePlace(until) {
+    if (stopped) return false
+    if (!waiters.length && claim()) return true
+    const left = until - Date.now()
+    if (left <= 0) return false
+    return new Promise((resolve) => {
+      const w = { done: false, resolve, timer: null }
+      w.timer = setTimeout(() => {
+        if (w.done) return
+        w.done = true
+        const i = waiters.indexOf(w)
+        if (i >= 0) waiters.splice(i, 1)
+        if (!waiters.length) stopPoll()
+        resolve(false)
+        serve()
+      }, left)
+      waiters.push(w)
+      startPoll()
+      serve()
+    })
   }
 
   // ── The master ──
@@ -294,35 +398,32 @@ export function door(o) {
   // ── A join ──
   /** Answers [what the master is told, the join when it has one]. */
   async function answer(n, sdp) {
-    if (typeof sdp !== 'string' || sdp.length > 16384) return [{ refuse: { n, why: 'that is not an offer' } }]
+    if (!looksLikeOffer(sdp)) return [{ refuse: { n, why: 'that is not an offer' } }]
     // Full is said at the hello, once it is known who is asking: the same person from another page is let in there.
     if (addressesIn(sdp).some((a) => kept.bans.some((b) => b.place && b.place === placeOf(a)))) return [{ refuse: { n, why: 'you are banned from this server' } }]
     // A place: a port (with --ice-ports) and fewer than PENDING_MOST joins waiting. Without one, a join that has not
     // said hello gives its up: joins that say nothing cannot keep the door shut. With none to let go (every port a
-    // player's, or hellos being checked), the offer waits for one, a while.
+    // player's, or hellos being checked), the offer waits its turn in order, a while.
     const until = Date.now() + PLACE_WAIT
-    while (held >= ports || pending().length + placing >= PENDING_MOST) {
-      const oldest = evictable()
-      if (oldest) { close(oldest); continue }
-      if (Date.now() >= until) return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }]
-      await new Promise((r) => setTimeout(r, 25))
-    }
-    held++; placing++
+    if (!(await takePlace(until))) return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }]
     let pc, c, placed = true
     const unplace = () => { if (placed) { placed = false; placing-- } }
     try {
+      if (stopped) { unplace(); held--; serve(); return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }] }
       // libdatachannel frees a closed connection's port on a thread of its own, a millisecond or three after close()
       // (measured: 0.6 to 2.7 ms), and a peer connection made before then finds no port in the range: it is made again.
+      const bindUntil = Math.max(until, Date.now() + 200)
       for (;;) {
         pc = new RTCPeerConnection({ iceServers, ...(o.ports ? { portRangeBegin: o.ports[0], portRangeEnd: o.ports[1] } : {}) })
         try { await pc.setRemoteDescription({ type: 'offer', sdp }); break } catch (e) {
           try { pc.close() } catch { /* already */ }
           pc = null
-          if (!/gather/i.test(String(e?.message)) || Date.now() >= until || stopped) throw e
+          if (!/gather/i.test(String(e?.message)) || Date.now() >= bindUntil || stopped) throw e
           await new Promise((r) => setTimeout(r, 10))
         }
       }
-      c = { pc, ch: {}, n, chunk: CHUNK_LEAST, you: null, name: '', admin: false, address: null, since: Date.now(), last: Date.now(), streams: new Map(), parts: null, inflight: 0, riding: new Set(), seat: null, closed: false, aborts: new Set(), queued: 0, queue: [], drained: null,
+      if (stopped) { try { pc.close() } catch { /* already */ } pc = null; unplace(); held--; serve(); return [{ refuse: { n, why: 'the server is busy: try again in a moment' } }] }
+      c = { pc, ch: {}, n, chunk: CHUNK_LEAST, you: null, name: '', admin: false, address: null, addressKey: null, since: Date.now(), last: Date.now(), streams: new Map(), parts: null, inflight: 0, riding: new Set(), seat: null, closed: false, aborts: new Set(), queued: 0, queue: [], drained: null,
         pools: { ctl: pool(20), fine: pool(4, 60_000), stream: pool(2, 10_000), asks: pool(limits.asks), up: pool(limits.upMinute, 60_000), columns: pool(limits.columns), ask: pool(limits.ask), say: pool(limits.say), here: pool(limits.here), act: pool(limits.act), drive: pool(limits.drive), look: pool(limits.look) } }
       // The place is the join's now: its port is given back when it closes. A peer connection closed while it is being
       // answered never settles what it was doing (libdatachannel), so each step is raced against its closing.
@@ -362,13 +463,13 @@ export function door(o) {
       return [{ answer: { n, sdp: pc.localDescription.sdp } }, c]
     } catch {
       if (c) close(c)
-      else { unplace(); held-- }
+      else { try { pc?.close() } catch { /* already */ } unplace(); held--; serve() }
       return [{ refuse: { n, why: 'the server could not answer that offer' } }]
     }
   }
 
   const tell = (c, m) => { try { if (c.ch.ctl?.readyState === 'open') c.ch.ctl.send(JSON.stringify(m)) } catch { /* closing */ } }
-  const refuse = (c, why) => { c.refused = true; tell(c, { refuse: { why } }); setTimeout(() => close(c), 200) }
+  const refuse = (c, why) => { c.refused = true; tell(c, { refuse: { why } }); setTimeout(() => close(c), 200); serve() }
   function close(c, why) {
     if (c.closed) return
     if (why && c.you) tell(c, { gone: { why } })
@@ -381,7 +482,7 @@ export function door(o) {
     c.drained?.(false)
     // Let a player's last word go out before the line is cut; anyone else's is cut now. Its port is counted as held
     // until then, and is free a moment after (`answer`).
-    const cut = () => { try { c.pc.close() } catch { /* already */ } held-- }
+    const cut = () => { try { c.pc.close() } catch { /* already */ } held--; serve() }
     if (why && c.you) setTimeout(cut, 300)
     else cut()
     if (c.you) { log(`${c.name} (${c.you}) left${why ? `: ${why}` : ''}`); now() }
@@ -448,6 +549,7 @@ export function door(o) {
     tell(c, { welcome: { you, name, spot: c.spot, server: { name: kept.name, about: kept.about, most: kept.most, build: kept.build, admins: !!adminSealed } } })
     log(`${name} (${you}) joined`)
     now()
+    serve()
   }
   async function becomeAdmin(c, password) {
     if (!adminSealed) return { why: 'this server has no admins' }
@@ -675,6 +777,7 @@ export function door(o) {
     lobby,
     close() {
       stopped = true
+      serve()
       for (const c of [...conns]) close(c, 'the server is stopping')
       try { master?.close(1000, 'stopping') } catch { /* already */ }
     },

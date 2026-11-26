@@ -113,14 +113,18 @@ node server.mjs --world ~/.village/engine/world/mine.log --release dist-sf \
   20 `ctl` messages, 2 opens of the stream in 10 s and 4 look parts a minute (`LIMITS` and `pools` in `door.mjs`). A
   page behind on the stream is waited for (where things are is skipped for it, as the world's server does for its own
   readers); one that takes nothing for 15 s is dropped.
-- Joins that have not said hello (`answer` in `door.mjs`). Each holds a place, and a port, for 8 s from the moment
-  it is given one (an offer may wait 3 s for that), however it stalls: channels never opened, opened and silent, one of three; a hello being checked is left the moment that takes. At most 8
+- Joins that have not said hello (`answer` in `door.mjs`). An offer that cannot be a WebRTC data-channel offer (no
+  `m=application` line, no SHA-256 fingerprint, or no ICE ufrag or password) is refused at once ("that is not an offer")
+  before it waits for or takes a place. Each join that passes holds a place, and a port, for 8 s from the moment
+  it is given one (offers waiting for a place are served in order, first come first served, waiting 3 s at most), however it stalls: channels never opened, opened and silent, one of three; a hello being checked is left the moment that takes. At most 8
   wait at once (the master lets 8 wait on one host), and with `--ice-ports` no more than the ports the players leave.
   An offer with no place free takes the place of one waiting whose answer has left (its channels open half a second with no hello, or, with none open, 2 s
   after its answer left: before that a page would hold an answer for a connection already closed, and blame its network): one
-  refused already, then one not connected 3 s after its answer, then one from the address with the most waiting, then the one silent longest. A page says hello as its
-  channels open, so one silent longest is the least likely to be one. Each address (its connection's, never what its
-  offer says) holds `--waiting-per-address 2` at most; past that its silent-longest goes, once it has had the same chance. (It is counted as that address's joins connect and open their channels: ones that connect and never open a channel may stand over it until the next comes, and are the first let go when a place is wanted.) libdatachannel frees a closed
+  refused already, then one not connected 3 s after its answer, then one from the address key with the most waiting, then the one silent longest. A page says hello as its
+  channels open, so one silent longest is the least likely to be one. Each address is keyed by its IPv4 address or IPv6
+  /56 (with IPv4-mapped IPv6 treated as its IPv4, the same rule the master uses; `addressKey` in `door.mjs`, read from
+  the connection, never what the offer says) for `--waiting-per-address 2`, eviction rank and bans; past `--waiting-per-address`
+  its silent-longest goes, once it has had the same chance. (It is counted as that address's joins connect and open their channels: ones that connect and never open a channel may stand over it until the next comes, and are the first let go when a place is wanted.) libdatachannel frees a closed
   connection's port on a thread of its own, 0.6 to 2.7 ms after `close()` (measured here), so a join that takes another's
   place makes its connection again until the port binds, for 3 s at most, and is refused as busy when no place came in those 3 s
   (every port a player's, or every join waiting still being answered, answered under 2 s ago, or saying hello); a port that still will not bind by then is refused as "could not answer". Before November 25 it was made once, and about one
@@ -212,7 +216,9 @@ takes tiny messages, building for admins only, a stranger's rule refused and an 
 off a stranger's stream, a flood held to one connection, no plugin loaded, a password, a ban by address, and the
 host killed. `node test/door-silent.mjs [--ports 6070]` needs no page: with the door's ports pinned tight, nine silent
 joins and then one that says hello, three times; a 30 s trickle of joins that stall every way, with a player arriving
-every 1.2 s through it; eight offers at once; sixty refused at once; and twelve silent joins from one address beside one from another. Every player is let in within
+every 1.2 s through it; eight offers at once; sixty refused at once; waiting offers served in order over twenty-four
+trials; malformed offers refused at once without disturbing waiting joins; the address key (IPv4, IPv4-mapped IPv6 and
+IPv6 /56); and twelve silent joins from one address beside one from another. Every player is let in within
 4 s (a place within 3 s, then its answer and channels; here 34 ms to 2.4 s, median 0.1 to 0.2 s).
 
 What a join sends: `node test/door-join.mjs` (November 25, one machine, a Node client). A freshly released world

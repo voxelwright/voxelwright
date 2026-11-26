@@ -9,9 +9,10 @@
 import { spawn, spawnSync } from 'node:child_process'
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { Agent, request } from 'node:http'
-import { existsSync, mkdtempSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { networkInterfaces, tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { arg, here } from './kit.mjs'
 import { PROTO, fingerprintOf, signed } from '../page/wire.ts'
 
@@ -155,6 +156,137 @@ try {
     check(bad.filter((b) => b === 409).length >= 40 && still === 200 && !!after.you, `sixty offers refused in ${took} ms (${Object.entries(bad.reduce((t, w) => ({ ...t, [w]: (t[w] ?? 0) + 1 }), {})).map(([w, k]) => `${k} × ${w}`).join(', ')}) leave the lobby listed as it was (${still}), and Jun joins after (${after.you ?? after.why})`)
     after.close()
     await wait(500)
+  }
+
+  // ── A malformed offer sent to a full door is refused at once and disturbs nobody waiting ──
+  {
+    const quiet = []
+    for (let i = 0; i < 4; i++) quiet.push(await wire('Quiet', { as: 'silent', from: mine.length >= 2 ? mine[i % 2] : null }))
+    // Let every waiting join become settled (evictable): a malformed offer that took a place would evict one of them.
+    await wait(700)
+    const samplePc = new RTCPeerConnection({ iceServers: [] })
+    samplePc.createDataChannel('ctl')
+    await samplePc.setLocalDescription(await samplePc.createOffer())
+    await wait(200)
+    const realSdp = samplePc.localDescription.sdp
+    samplePc.close()
+    const badOffers = [
+      ['bare v=0', 'v=0\r\n'],
+      ['no m=application', realSdp.replace(/^m=application .*$/m, 'm=audio 9 UDP/TLS/RTP/SAVPF 111')],
+      ['no fingerprint', realSdp.replace(/^a=fingerprint:.*(?:\r?\n)?/gm, '')],
+      ['no ice-ufrag', realSdp.replace(/^a=ice-ufrag:.*(?:\r?\n)?/gm, '')],
+      ['no ice-pwd', realSdp.replace(/^a=ice-pwd:.*(?:\r?\n)?/gm, '')],
+    ]
+    const t0 = Date.now()
+    const replies = await Promise.all(badOffers.map(async ([label, sdp]) => {
+      const r = await fetch(`${MASTER}/lobbies/${lobby}/join`, { method: 'POST', body: JSON.stringify({ sdp }) })
+      const v = await r.json().catch(() => ({}))
+      return { label, status: r.status, why: v.why }
+    }))
+    const took = Date.now() - t0
+    await wait(200)
+    const allRefused = replies.every((r) => r.status === 409 && r.why === 'that is not an offer')
+    const allStillOpen = quiet.every((q) => q.open())
+    check(allRefused && took < 1000 && allStillOpen, `five malformed offers on a full door are refused at once in ${took} ms (${replies.map((r) => `${r.label}: ${r.status} "${r.why}"`).join('; ')}) and all ${quiet.filter((q) => q.open()).length}/${quiet.length} waiting joins are still open`)
+    for (const q of quiet) q.close()
+    await wait(500)
+  }
+
+  // ── Waiting offers are served in order (first come, first served) ──
+  {
+    const TRIALS = 24, QUEUE_SIZE = 3
+    // A third player leaves 3 spare ports; we fill all 3 with ctl-only joins (< FRESH, so too fresh to evict).
+    const bea = await wire('Bea')
+    const prepareCtl = async () => {
+      const pc = new RTCPeerConnection({ iceServers: [] })
+      stops.push(() => pc.close())
+      const ctl = pc.createDataChannel('ctl')
+      await pc.setLocalDescription(await pc.createOffer())
+      await wait(300)
+      return { pc, ctl, sdp: pc.localDescription.sdp }
+    }
+    const connectCtl = async (prep, sdp) => {
+      await prep.pc.setRemoteDescription({ type: 'answer', sdp })
+      await Promise.race([
+        prep.ctl.readyState === 'open' ? null : new Promise((done) => prep.ctl.addEventListener('open', done, { once: true })),
+        wait(3000),
+      ])
+    }
+    const sendOffer = (idx, prep) => {
+      const entry = { idx, prep, promise: null }
+      entry.promise = fetch(`${MASTER}/lobbies/${lobby}/join`, { method: 'POST', body: JSON.stringify({ sdp: prep.sdp }) })
+        .then(async (r) => ({ entry, status: r.status, body: await r.json().catch(() => ({})) }))
+        .catch((e) => ({ entry, status: 0, body: { why: e.message } }))
+      return entry
+    }
+    const initial = await Promise.all(Array.from({ length: 3 + QUEUE_SIZE }, prepareCtl))
+    const holderPreps = initial.slice(0, 3), waiterPreps = initial.slice(3)
+    const holders = await Promise.all(holderPreps.map(async (prep) => {
+      const r = await fetch(`${MASTER}/lobbies/${lobby}/join`, { method: 'POST', body: JSON.stringify({ sdp: prep.sdp }) })
+      const v = await r.json()
+      if (r.ok) await connectCtl(prep, v.sdp)
+      return prep
+    }))
+    const queue = []
+    let nextIdx = 0
+    for (const prep of waiterPreps) {
+      queue.push(sendOffer(nextIdx++, prep))
+      await wait(25)
+    }
+    let ordered = 0, answered = 0, outOfOrder = []
+    for (let k = 0; k < TRIALS; k++) {
+      await wait(35 + ((k * 7) % 25))
+      const nextPrep = k + 1 < TRIALS ? prepareCtl() : null
+      const expected = queue[0].idx
+      const old = holders.shift()
+      old?.pc.close()
+      let got = null
+      while (queue.length) {
+        const res = await Promise.race(queue.map((q) => q.promise))
+        const i = queue.indexOf(res.entry)
+        if (i >= 0) queue.splice(i, 1)
+        if (res.status === 200) { got = res; break }
+        res.entry.prep.pc.close()
+        outOfOrder.push(`#${res.entry.idx} got ${res.status} (${res.body.why ?? 'err'})`)
+      }
+      if (got) {
+        answered++
+        if (got.entry.idx === expected) ordered++
+        else outOfOrder.push(`expected #${expected}, got #${got.entry.idx}`)
+        const connectP = connectCtl(got.entry.prep, got.body.sdp)
+        if (nextPrep) queue.push(sendOffer(nextIdx++, await nextPrep))
+        await connectP
+        holders.push(got.entry.prep)
+      } else if (nextPrep) {
+        (await nextPrep).pc.close()
+      }
+    }
+    for (const h of holders) h.pc.close()
+    const leftover = await Promise.all(queue.map((q) => q.promise))
+    for (const res of leftover) res.entry.prep.pc.close()
+    bea.close()
+    check(!!bea.you && answered === TRIALS && ordered === TRIALS, `waiting offers are served in order (${ordered}/${TRIALS} answered first with ${QUEUE_SIZE} waiting${outOfOrder.length ? `; ${outOfOrder.slice(0, 5).join(', ')}` : ''})`)
+    await wait(500)
+  }
+
+  // ── Address key: IPv4 unchanged, IPv4-mapped IPv6 as its IPv4, IPv6 keyed by its /56 ──
+  {
+    const serverPath = resolve(here, SERVER)
+    const doorImport = /from\s+['"]([^'"]*door[^'"]*\.mjs)['"]/.exec(readFileSync(serverPath, 'utf8'))?.[1] ?? './door.mjs'
+    const mod = await import(pathToFileURL(resolve(dirname(serverPath), doorImport)).href)
+    const key = mod.addressKey
+    const ok = typeof key === 'function'
+      && key('2001:db8:1:2:aaaa::1') === key('2001:db8:1:ff:bbbb::9')
+      && key('2001:0DB8:0001:0002::1') === key('2001:db8:1:ff:bbbb::9')
+      && key('2001:db8:1:2::1%en0') === key('2001:db8:1:ff::9')
+      && key('2001:db8:1:2:aaaa::1') !== key('2001:db8:1:100::1')
+      && key('192.0.2.7') === '192.0.2.7'
+      && key('192.0.2.7') !== key('192.0.2.8')
+      && key('::ffff:192.0.2.7') === '192.0.2.7'
+      && key('::FFFF:192.0.2.7') === '192.0.2.7'
+      && key('0:0:0:0:0:ffff:c000:0207') === '192.0.2.7'
+      && key(null) === null && key('') === null
+    check(ok, `addressKey groups IPv6 by /56, leaves IPv4 unchanged, and maps IPv4-mapped IPv6 to IPv4 (${typeof key === 'function' ? `${key('2001:db8:1:2:aaaa::1')} vs ${key('2001:db8:1:100::1')}; ${key('::ffff:192.0.2.7')}` : 'missing'})`)
   }
 
   // ── A flood from one address, and someone from another ──
