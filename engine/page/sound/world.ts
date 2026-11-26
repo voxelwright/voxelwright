@@ -40,6 +40,8 @@ export interface Scene {
   kind(x: number, y: number, z: number): number
   /** Whether the person at this page is currently riding a vehicle (suppresses walking footsteps). */
   riding?(): boolean
+  /** Whether the listener is sitting inside an enclosed vehicle cabin (warms cabin acoustics and softens exterior weather). */
+  inside?(): boolean
   /** The made things, the layer over the picture and the keys, once the page has them: for things that sound and are played. */
   seam?(): { things: Things; hud: Hud; input: Input }
 }
@@ -310,12 +312,13 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
       clock += dt
       const under = scene.under(), ground = scene.ground(Math.round(eye[0]), Math.round(eye[2])), high = Math.max(0, (eye[1] - Math.max(ground, 0)) / M)
       const speed = Math.hypot(eye[0] - last[0], eye[1] - last[1], eye[2] - last[2]) / M / Math.max(dt, 1e-3)
+      const cabin = !under && !!scene.inside?.()
       voice.set(SET.under, under ? 1 : 0)
-      voice.set(SET.muffle, under ? 650 : 20000)
-      voice.set(SET.cover, under ? 1 : 0)
+      voice.set(SET.muffle, under ? 650 : cabin ? 3400 : 20000)
+      voice.set(SET.cover, under ? 1 : cabin ? 0.45 : 0)
       voice.set(SET.rain, scene.rain())
       // Wind: a little always, more the higher the ears are over the land and the faster they go through the air.
-      voice.set(SET.wind, Math.min(1, 0.06 + high / 400 + speed / 90 + 0.2 * scene.rain()))
+      voice.set(SET.wind, Math.min(1, 0.06 + high / 400 + speed / 90 + 0.2 * scene.rain()) * (cabin ? 0.6 : 1))
       // Fire: the nearer and the more of it, the louder; it comes from where most of it is.
       const flames = scene.flames()
       let fire = 0, fx = 0, fz = 0, near = Infinity

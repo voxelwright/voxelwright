@@ -218,7 +218,7 @@ async function main() {
   // What is heard (#247): `?sound=0` leaves it out. The picture never waits for it: it is there when it is ready, and a
   // page that cannot make sound goes on without it.
   let ears: ReturnType<typeof hearing> | null = null
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1' }); }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1' }); }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -749,7 +749,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
     lap('draw')
