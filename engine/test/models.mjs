@@ -130,6 +130,8 @@ await step('what a provider refuses is said in plain words, without the key', as
   await fails(() => reply({ ...c, route: 'gemini' }, Q, { fetch: stand(() => json({ error: { code: 400, message: 'API key not valid. Please pass a valid API key.' } }, 400)) }), 'key')
   await fails(() => reply(c, Q, { fetch: stand(() => json({ error: { message: 'rate limited' } }, 429)) }), 'limit')
   await fails(() => reply({ ...c, route: 'openrouter' }, Q, { fetch: stand(() => json({ error: { message: 'Insufficient credits' } }, 402)) }), 'limit')
+  // Anthropic's own answer to an account with no credit (met with a real key on November 26): 400, and a limit all the same.
+  await fails(() => reply(c, Q, { fetch: stand(() => json({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.' } }, 400)) }), 'limit')
   await fails(() => reply(c, Q, { fetch: stand(() => json({}, 529)) }), 'busy')
   const asked = await fails(() => reply(c, Q, { fetch: stand(() => json({ error: { message: `model: not found ${'x'.repeat(500)}` } }, 404)) }), 'asked')
   assert.ok(asked.message.length < 280)

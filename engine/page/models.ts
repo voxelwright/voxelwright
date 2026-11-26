@@ -67,7 +67,8 @@ async function refused(route: Route, res: Response): Promise<Unanswered> {
   const name = ABOUT[route].name
   // Gemini answers a key that is none with 400, not 401.
   if (res.status === 401 || res.status === 403 || /api key not valid/i.test(said)) return new Unanswered('key', `${name} did not take that key`)
-  if (res.status === 429 || res.status === 402) return new Unanswered('limit', `${name} says this key is at its limit or out of credit${said ? `: ${said}` : ''}`)
+  // (Anthropic answers an account with no credit with 400, not 402: "Your credit balance is too low…".)
+  if (res.status === 429 || res.status === 402 || /credit balance/i.test(said)) return new Unanswered('limit', `${name} says this key is at its limit or out of credit${said ? `: ${said}` : ''}`)
   if (res.status >= 500) return new Unanswered('busy', `${name} is not answering just now (${res.status})`)
   return new Unanswered('asked', `${name} refused the request (${res.status})${said ? `: ${said}` : ''}`)
 }

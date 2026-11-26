@@ -225,6 +225,34 @@ for (const [label, opts, safe] of [
   const afterOfferLine = await rp.evaluate(() => { const l = document.querySelector('#ai-line'); return l && !l.hidden ? l.textContent.trim() : '' })
   check(gotOffer2 && declinedDone?.why === 'let go' && afterOfferCues.length === 0 && !afterOfferLine, `roof (${label}): declining the offer ("Not now") leaves no cue behind (why: ${declinedDone?.why}; cues: ${afterOfferCues.join(' | ') || 'none'}; line: ${afterOfferLine || 'none'})`)
   check(await flyCueShown(rp), `roof (${label}): "Take to the air" hint card comes back after declining the offer`)
+
+  // 3) Connected to an account with no credit (met on the live site with a real key, November 26): the line says so
+  //    in words that are true ("out of credit", not "another model may take it"), with no hint card over it.
+  state.mode = 'credit'
+  const gotOffer3 = await askByKeys('a tin kettle')
+  if (phone) await rp.tap('#choice button >> nth=0'); else await rp.keyboard.press('Digit1')
+  await rp.waitForFunction(() => document.querySelector('#connect')?.open, null, { timeout: 15_000 }).catch(() => {})
+  await rp.fill('#connect-key', KEYS.anthropic); await rp.press('#connect-key', 'Enter')
+  await rp.waitForFunction(() => { const s = document.querySelector('#connect select'); return s && !s.closest('label').hidden && s.options.length > 0 }, null, { timeout: 15_000 }).catch(() => {})
+  if (phone) await rp.tap('#connect .go'); else await rp.click('#connect .go')
+  const refusal = await rp.waitForFunction(() => { const l = document.querySelector('#ai-line'); return l && !l.hidden && /credit/.test(l.textContent) ? l.textContent.trim() : null }, null, { timeout: 30_000 }).then((h) => h.jsonValue(), () => '')
+  await rp.waitForTimeout(500)
+  await rp.screenshot({ path: join(shots, `roof-no-credit-${label}.png`) })
+  const over = await rp.evaluate(() => {
+    const box = (e) => { const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom] }
+    const line = box(document.querySelector('#ai-line'))
+    return [...document.querySelectorAll('#realm .cue')].filter((e) => e.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && e.classList.contains('on')).filter((e) => { const b = box(e); return b[0] < line[2] && b[2] > line[0] && b[1] < line[3] && b[3] > line[1] }).map((e) => e.textContent.trim())
+  })
+  check(gotOffer3 && /out of credit/.test(refusal) && !/Another model/.test(refusal) && !refusal.includes(KEYS.anthropic), `roof (${label}): an account with no credit is told so, truly ("${refusal.slice(0, 110)}")`)
+  check(over.length === 0 && !(await flyCueShown(rp)), `roof (${label}): no hint card over the line that says it (${over.join(' | ') || 'none'})`)
+  state.mode = 'ok'
+  // From that line, "Your AI" opens the panel, and Forget there forgets the key (what a visitor does next with an account they will not pay into).
+  if (phone) await rp.tap('#ai-line button'); else await rp.click('#ai-line button')
+  const reopened = await rp.waitForFunction(() => document.querySelector('#connect')?.open, null, { timeout: 15_000 }).then(() => true, () => false)
+  if (phone) await rp.tap('#connect .forget').catch(() => {}); else await rp.click('#connect .forget').catch(() => {})
+  await rp.waitForTimeout(500)
+  const forgotten = await rp.evaluate(() => localStorage.getItem('village.ai') === null)
+  check(reopened && forgotten, `roof (${label}): "Your AI" on that line opens the panel (${reopened}), and Forget there forgets the key (${forgotten})`)
   await rc.close()
 }
 

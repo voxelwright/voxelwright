@@ -37,7 +37,7 @@ const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers
 /**
  * Stand-ins for the providers. `state.mode` says what they do next: `ok`; `cut` (a stream that stops part way);
  * `slow` (an answer that takes `state.slow` ms); `slowlist` (a list of models that does); `echo` (a limit whose words
- * quote the key); `refuse` (the key is not taken). `state.asked` counts what was asked, and keeps each question.
+ * quote the key); `credit` (Anthropic's 400 for an account with no credit, word for word); `refuse` (the key is not taken). `state.asked` counts what was asked, and keeps each question.
  */
 export function providers() {
   const state = { mode: 'ok', slow: 20_000, asked: { models: 0, answers: 0, prompts: [] } }
@@ -50,6 +50,7 @@ export function providers() {
     if (r.method() === 'GET') { state.asked.models++; if (state.mode === 'slowlist') await new Promise((done) => setTimeout(done, state.slow)); return json(LISTS[at]) }
     state.asked.answers++
     try { const b = JSON.parse(r.postData() ?? '{}'); state.asked.prompts.push(JSON.stringify(b.messages ?? b.contents ?? '')) } catch { /* not JSON */ }
+    if (state.mode === 'credit') return json({ type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.' } }, 400)
     if (state.mode === 'echo') return json({ error: { message: `Rate limit reached for key ${key} in your organisation` } }, 429)
     if (state.mode === 'slow') await new Promise((done) => setTimeout(done, state.slow))
     return route.fulfill({ status: 200, headers: { ...CORS, 'content-type': 'text/event-stream' }, body: stream(at, state.mode !== 'cut') }).catch(() => {})

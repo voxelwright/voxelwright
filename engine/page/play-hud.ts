@@ -44,8 +44,8 @@ export interface PlayHud {
 const STYLE = /* css */ `
 #realm[data-hud] .help, #realm[data-hud] .stick { display: none !important; }
 #realm .cues { position: absolute; left: 0; top: 0; display: grid; gap: 8px; pointer-events: none !important; }
-/* Step aside at once while the ask bar, a choice over it (connect offer) or the connect panel is shown. */
-html:has(#choice:not([hidden]), #ask.open, #connect[open]) #realm .cues { visibility: hidden; }
+/* Step aside at once while the ask bar, a choice over it (connect offer), the connect panel or the line of the visitor's AI is shown. */
+html:has(#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])) #realm .cues { visibility: hidden; }
 #realm .cue { --vx: 3px; margin: 0; padding: calc(var(--vx) * 2.5) calc(var(--vx) * 4); font-size: 14px; line-height: 1.3; white-space: nowrap; opacity: 0; translate: -6px 0; transition: opacity 0.25s ease-out, translate 0.35s cubic-bezier(0.23, 1, 0.32, 1); }
 #realm .cue.on { opacity: 1; translate: 0 0; }
 /* (A cue not shown takes no row: the grid is as tall as what it shows, and is placed by that.) */
@@ -491,8 +491,8 @@ export function playHud(o: {
     if (cueLand) say(land, touch ? 'Walk' : 'B', 'Back on your feet')
     // (Not while a tool is being chosen: the wheel has the room then.)
     // (Nor, by touch, while the sky's panel is open: it is a drawer over the picture's middle then, and the cue would be on it.)
-    // (Nor while the line to say something on, the ask bar, an offer over it, or the connect panel is open.)
-    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open]')
+    // (Nor while the line to say something on, the ask bar, an offer over it, the connect panel or the line of the visitor's AI is shown.)
+    const drawer = touch && root.classList.contains('open'), free = !open && !drawer && !root.querySelector('.egg-line:not([hidden])') && !document.querySelector('#choice:not([hidden]), #ask.open, #connect[open], #ai-line:not([hidden])')
     html.classList.toggle('drawer', drawer)
     chute.classList.toggle('on', cueChute && free); fly.classList.toggle('on', cueFly && free); land.classList.toggle('on', cueLand && free)
     // Beside the body, on the side with more room; with no body seen, in the middle a third of the way up.
