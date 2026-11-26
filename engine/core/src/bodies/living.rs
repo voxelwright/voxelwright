@@ -119,6 +119,11 @@ pub struct Live {
     /// thing that lives is broken by how much of its speed one step takes, however many touches share the blow.
     pub(super) was: V,
     pub jolt: f32,
+    /// Progressive steering angle (-1 to 1) and smoothed longitudinal/lateral acceleration (cells/s²) for weight transfer.
+    steer_now: f32,
+    prev_rolls: f32,
+    long_acc: f32,
+    lat_acc: f32,
 }
 
 impl Live {
@@ -126,6 +131,7 @@ impl Live {
         Live {
             front: 0, feet: Vec::new(), grip: 1.0, power: 0.0, top: 0.0, steer: 0.0, hover: 0.0, lift: 0.0, upright: 0.0, turns: 0.0, jump: 0.0, tough: 120.0,
             go: 0.0, turn: 0.0, rise: 0.0, side: 0.0, figure: false, ghost: false, hop: false, rolling: 0.0, rolled: 0.0, heard: HOLD, heading: 0.0, aloft: false, on: 0, quiet: 0.0, hurt: false, fall: 1.0, climb: 0.0, climbing: None, reel: 0.0, base: None, frame: None, cling: false, turning: 0, lost: 0.0, fresh: 0.0, was: [0.0; 3], jolt: 0.0,
+            steer_now: 0.0, prev_rolls: 0.0, long_acc: 0.0, lat_acc: 0.0,
         }
     }
 
@@ -296,8 +302,36 @@ impl Live {
         // takes a moment to come round, and its legs must find the floor meanwhile.
         let down = if self.steer == 0.0 && self.upright > 0.0 { [0.0, -1.0, 0.0] } else { turn(b.rot, [0.0, -1.0, 0.0]) };
         let rolls = dot(b.vel, flat);
-        // Feet steer less the faster it goes.
-        let (sin, cos) = (self.steer * turning / (1.0 + rolls.abs() / self.top.max(1.0))).sin_cos();
+        let lat_vel = dot(b.vel, right);
+        // For what rolls and does not fly, `rise > 0` is the handbrake (Space / touch Drift): unlocks the rear to drift.
+        let handbrake = if rolling && !flies { rise.clamp(0.0, 1.0) } else { 0.0 };
+        // Progressive steering ramp (fast counter-steer, smooth turn-in, crisp self-center) so keyboard taps feel
+        // planted instead of twitchy, plus speed-sensitive steering falloff and mild slip-angle counter-steer assist.
+        let steer_rad = if rolling {
+            let rate = if turning == 0.0 {
+                8.5
+            } else if turning * self.steer_now < 0.0 {
+                12.5
+            } else {
+                6.5
+            };
+            self.steer_now += (turning - self.steer_now) * (rate * h).min(1.0);
+            if turning == 0.0 && self.steer_now.abs() < 1e-4 {
+                self.steer_now = 0.0;
+            }
+            let ratio = (rolls.abs() / self.top.max(1.0)).min(1.5);
+            let curve = 1.0 / (1.0 + ratio * 1.15 + ratio * ratio * 0.55);
+            let slip = if rolls > 20.0 { lat_vel.atan2(rolls.max(15.0)) } else { 0.0 };
+            let assist = if rolls > 25.0 && slip.abs() > 0.14 && handbrake < 0.8 {
+                (slip * 0.35).clamp(-0.22, 0.22)
+            } else {
+                0.0
+            };
+            (self.steer * self.steer_now * curve + assist).clamp(-self.steer * 1.1, self.steer * 1.1)
+        } else {
+            self.steer * turning / (1.0 + rolls.abs() / self.top.max(1.0))
+        };
+        let (sin, cos) = steer_rad.sin_cos();
         self.on = 0;
         // Every foot meets the body as it was when the step began, and their pushes are given together after: pushed
         // one after another, each met the body as the one before left it, and whichever went first had the edge (a car
@@ -377,11 +411,43 @@ impl Live {
                 continue;
             }
             let (wheel, across) = if foot.steers { (add(scale(flat, cos), scale(right, sin)), sub(scale(right, cos), scale(flat, sin))) } else { (flat, right) };
-            let (most, share) = (self.grip * press * h, mass / n);
-            grips.push((at, across, most));
+            let (base_most, share) = (self.grip * press * h, mass / n);
             let along = dot(b.speed_at(at), wheel);
+            // Weight-transfer and drift grip balance: handbrake frees the rear to slide while keeping the front biting;
+            // flooring it hard in a fast corner gently loosens the rear for playful power-slides; braking loads the front.
+            let lat_grip = if rolling {
+                if !foot.steers {
+                    if handbrake > 0.05 {
+                        base_most * (1.0 - 0.56 * handbrake)
+                    } else if go > 0.5 && self.steer_now.abs() > 0.4 && rolls > 45.0 {
+                        base_most * (1.0 - 0.18 * (go - 0.5) * 2.0 * self.steer_now.abs())
+                    } else {
+                        base_most
+                    }
+                } else if along * go < 0.0 {
+                    base_most * 1.08
+                } else {
+                    base_most
+                }
+            } else {
+                base_most
+            };
+            grips.push((at, across, lat_grip));
             foot.spun += along * h;
-            let push = if go == 0.0 || flies && self.aloft {
+            let push = if rolling && !foot.steers && handbrake > 0.05 {
+                // Handbrake on the rear axle: without gas it locks down smoothly to a J-turn stop; with gas held it
+                // bleeds just enough speed to hold a sweeping, smoke-billowing drift.
+                if along.abs() < 6.0 && go <= 0.0 {
+                    -along * share
+                } else if go > 0.0 && foot.drives {
+                    let top = self.top;
+                    let gear = 2.0 - (along.abs() / 30.0).min(1.0);
+                    go * self.power * 0.45 * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
+                        - along.signum() * self.grip * G * 0.14 * mass / n * h * handbrake
+                } else {
+                    -along.signum() * self.grip * G * (if go > 0.0 { 0.16 } else { 0.65 }) * mass / n * h * handbrake
+                }
+            } else if go == 0.0 || flies && self.aloft {
                 // Told nothing it rolls to a stop, and stands where it stopped, on a hill too.
                 if flies && self.aloft { 0.0 } else if along.abs() < 6.0 { -along * share } else { -along.signum() * self.power.max(40.0) * 0.6 * share * h }
             } else if along * go < 0.0 {
@@ -398,7 +464,7 @@ impl Live {
                 let gear = 2.0 - (along.abs() / 30.0).min(1.0);
                 go * self.power * gear * (1.0 - along.abs() / top.max(1.0)).clamp(0.0, 1.0) * mass / drivers * h
             };
-            pushes.push((at, scale(wheel, push.clamp(-most, most))));
+            pushes.push((at, scale(wheel, push.clamp(-base_most, base_most))));
         }
         for (at, push) in pushes {
             kick(b, at, push);
@@ -414,6 +480,58 @@ impl Live {
             for ((&(at, across, _), was), more) in grips.iter().zip(gripped.iter_mut()).zip(more) {
                 kick(b, at, scale(across, more));
                 *was += more;
+            }
+        }
+        // GTA-style handling polish for rolling vehicles: drift initiation, yaw stability, visible weight transfer
+        // (launch squat, braking dive, cornering body roll bounded against flipping), and poised hill jumps.
+        if rolling {
+            let new_rolls = dot(b.vel, flat);
+            let raw_long = if h > 0.0 { ((new_rolls - self.prev_rolls) / h).clamp(-220.0, 220.0) } else { 0.0 };
+            self.prev_rolls = new_rolls;
+            let raw_lat = (-new_rolls * b.spin[1]).clamp(-220.0, 220.0);
+            let smooth = (h * 10.0).min(1.0);
+            self.long_acc += (raw_long - self.long_acc) * smooth;
+            self.lat_acc += (raw_lat - self.lat_acc) * smooth;
+            let body_up = turn(b.rot, [0.0, 1.0, 0.0]);
+            if self.on >= 2 && body_up[1] > 0.85 {
+                // Crisp drift initiation when pulling handbrake into a corner, holding a heroic ~30-50° drift angle
+                // rather than spinning out uncontrollably.
+                let slip_now = if new_rolls > 15.0 { dot(b.vel, right).atan2(new_rolls) } else { 0.0 };
+                if handbrake > 0.1 && self.steer_now.abs() > 0.1 && new_rolls > 25.0 {
+                    let over = slip_now.abs();
+                    let hold = (1.0 - ((over - 0.45) / 0.4).clamp(0.0, 1.0)) * handbrake;
+                    let want_yaw = -self.steer_now * (1.1 + (new_rolls / self.top.max(1.0)).min(1.0) * 0.95) * hold;
+                    b.spin[1] += (want_yaw - b.spin[1]) * (h * 4.2).min(1.0);
+                } else if turning == 0.0 && handbrake < 0.05 {
+                    // Gently settle residual yaw rate when straightening out of a slide.
+                    b.spin[1] *= (1.0 - 2.6 * h).max(0.0);
+                }
+                // Expressive, flip-safe weight transfer: rear squats on launch, nose dives on brakes, chassis rolls in corners.
+                // Pure acceleration-driven torque so cruising straight never fights the road's grade or cross-camber.
+                if self.on as usize >= self.feet.len() {
+                    let local_right = cross(FRONTS[self.front as usize], [0.0, 1.0, 0.0]);
+                    let body_right = turn(b.rot, local_right);
+                    let cur_pitch = front[1] - grade;
+                    let cur_roll = dot(body_up, right);
+                    let pitch_torque = if (self.long_acc > 8.0 && cur_pitch < 0.026) || (self.long_acc < -8.0 && cur_pitch > -0.045) {
+                        (self.long_acc / 150.0).clamp(-1.8, 0.95) * h
+                    } else {
+                        0.0
+                    };
+                    let roll_torque = if (self.lat_acc > 12.0 && cur_roll > -0.085) || (self.lat_acc < -12.0 && cur_roll < 0.085) {
+                        -(self.lat_acc / 75.0).clamp(-2.8, 2.8) * h
+                    } else {
+                        0.0
+                    };
+                    if pitch_torque != 0.0 || roll_torque != 0.0 {
+                        b.spin = add(b.spin, add(scale(body_right, pitch_torque), scale(flat, roll_torque)));
+                    }
+                }
+            } else if self.on == 0 {
+                // Airborne off a hill crest: damp wild pitch/roll tumble while keeping true ballistic trajectory.
+                let damp = (1.0 - 1.4 * h).max(0.0);
+                b.spin[0] *= damp;
+                b.spin[2] *= damp;
             }
         }
         self.reel = (self.reel - h).max(0.0);
@@ -751,6 +869,7 @@ impl Bodies {
         let front = turn(b.rot, FRONTS[b.live.as_ref().unwrap().front as usize]);
         let live = b.live.as_mut().unwrap();
         live.heading = front[2].atan2(front[0]);
+        (live.steer_now, live.prev_rolls, live.long_acc, live.lat_acc) = (0.0, 0.0, 0.0, 0.0);
         // What its feet knew of the road was where it stood before.
         for foot in &mut live.feet {
             (foot.road, foot.rise) = (f32::NAN, 0.0);
@@ -1942,6 +2061,57 @@ pub mod tests {
         let went = sub(b.pos, from);
         assert!(went[0] > 20.0 && high > 3.0, "three hops took it forward, off the ground: {went:?}, {high} up");
         assert!(tipped(b) < 15.0, "and it lands on its feet");
+    }
+
+    #[test]
+    fn a_car_drifts_with_handbrake_and_transfers_weight_safely() {
+        let mut bodies = Bodies::new();
+        let low = level(&mut bodies);
+        let id = car(&mut bodies, low);
+        run(&mut bodies, 1.5, id, [0.0; 3]);
+        // Launch hard: verify visible rear squat (nose pitched up) and upright stability.
+        let mut max_squat = -1.0f32;
+        for _ in 0..90 {
+            bodies.drive(id, 1.0, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let f = turn(the(&bodies, id).rot, FRONTS[0]);
+            max_squat = max_squat.max(f[1]);
+        }
+        // Build speed then initiate a handbrake drift (rise = 1.0 while turning right).
+        run(&mut bodies, 1.5, id, [1.0, 0.0, 0.0]);
+        let mut max_slip = 0.0f32;
+        let mut max_tip = 0.0f32;
+        for _ in 0..75 {
+            bodies.drive(id, 1.0, 1.0, 1.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let b = the(&bodies, id);
+            let f = turn(b.rot, FRONTS[0]);
+            let flat = unit([f[0], 0.0, f[2]]);
+            let right = [-flat[2], 0.0, flat[0]];
+            let fwd = dot(b.vel, flat);
+            let lat = dot(b.vel, right).abs();
+            if fwd > 10.0 {
+                max_slip = max_slip.max(lat.atan2(fwd));
+            }
+            max_tip = max_tip.max(tipped(b));
+        }
+        // Brake hard from speed and verify nose dive (front[1] < -0.015).
+        run(&mut bodies, 1.5, id, [1.0, 0.0, 0.0]);
+        let mut min_dive = 1.0f32;
+        for _ in 0..40 {
+            bodies.drive(id, -1.0, 0.0, 0.0, false, false);
+            bodies.out.clear();
+            bodies.advance(1.0 / 60.0);
+            let f = turn(the(&bodies, id).rot, FRONTS[0]);
+            min_dive = min_dive.min(f[1]);
+        }
+        eprintln!("drift & weight transfer: squat {:.3}, dive {:.3}, max drift slip {:.1} deg, max tip {:.1} deg", max_squat, min_dive, max_slip.to_degrees(), max_tip);
+        assert!(max_squat > 0.012, "launch visibly squats the rear: {max_squat:.4}");
+        assert!(min_dive < -0.015, "hard braking visibly dives the nose: {min_dive:.4}");
+        assert!(max_slip.to_degrees() > 12.0, "handbrake kicks out a real drift slip angle: {:.1} deg", max_slip.to_degrees());
+        assert!(max_tip < 18.0, "stays planted and never rolls over: {:.1} deg", max_tip);
     }
 }
 

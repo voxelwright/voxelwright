@@ -32,9 +32,10 @@ export interface Scheme { name: string; verb: string; lines: Binding[] }
 const LEAVE: Binding = { keys: ['KeyE'], shown: 'E', does: 'get off', once: 'leave' }
 const GO: Binding = { keys: ['KeyW', 'KeyS'], shown: 'W S', does: 'forward and back', go: 1 }
 const TURN: Binding = { keys: ['KeyD', 'KeyA'], shown: 'A D', does: 'left and right', turn: 1 }
+const DRIFT: Binding = { keys: ['Space'], shown: 'Space', does: 'drift', rise: 1 }
 const RISE: Binding = { keys: ['Space', 'KeyC'], shown: 'Space C', does: 'up and down', rise: 1 }
 export const SCHEMES: Record<'drive' | 'fly' | 'hover' | 'ride', Scheme> = {
-  drive: { name: 'drive', verb: 'drive', lines: [{ ...GO, does: 'drive and reverse' }, { ...TURN, does: 'steer' }, LEAVE] },
+  drive: { name: 'drive', verb: 'drive', lines: [{ ...GO, does: 'drive and reverse' }, { ...TURN, does: 'steer' }, DRIFT, LEAVE] },
   fly: { name: 'fly', verb: 'fly', lines: [GO, { ...TURN, does: 'turn' }, RISE, LEAVE] },
   hover: { name: 'hover', verb: 'ride', lines: [GO, { ...TURN, does: 'turn' }, RISE, { keys: ['KeyQ'], shown: 'Q', does: 'roll over', once: 'roll' }, LEAVE] },
   ride: { name: 'ride', verb: 'ride', lines: [GO, { ...TURN, does: 'turn' }, { keys: ['Space'], shown: 'Space', does: 'jump', once: 'jump' }, LEAVE] },
@@ -174,6 +175,8 @@ export interface Living {
   where(thing: Thing): { at: [number, number, number]; rot: [number, number, number, number]; front: [number, number, number] } | null
   /** The eight corners of a thing's own box where they are now (cells), or null: what the controls keep off while it is ridden (play-hud.ts). */
   corners(thing: Thing): [number, number, number][] | null
+  /** Live driving telemetry while driving a wheeled vehicle, or null. */
+  readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: 'close' | 'far'; fovAdd: number } | null
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -214,6 +217,26 @@ export function living(o: {
   made?: () => Things
   /** A body taken out of the solver with nothing told of it (`vanish`): whoever keeps its piece lets it go. */
   dropped?: (id: number) => void
+  /** Dynamic camera lens effects while driving: extra FOV (degrees), roll (radians), and speed-energy (0..1). */
+  lens?: (fovAdd: number, rollAdd: number, energy: number) => void
+  /** Driving visual FX: tire smoke, exhaust pops, persistent skidmarks, ground light pools, sparks, and weather/surface reads. */
+  fx?: {
+    smoke(at: readonly [number, number, number], vel: readonly [number, number, number], intensity: number, colour?: readonly [number, number, number]): void
+    exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean): void
+    track(wheel: number, at: readonly [number, number, number], strength: number, colour?: readonly [number, number, number]): void
+    lift(wheel?: number): void
+    light(at: readonly [number, number, number], dir: readonly [number, number], size: readonly [number, number], colour: readonly [number, number, number], alpha: number): void
+    sparks(at: readonly [number, number, number], strength: number): void
+    rain(): number
+    day(): number
+    surface(x: number, z: number): number
+  }
+  /** Driving audio hooks: continuous engine/tire/road beds, one-shot events, and horn. */
+  audio?: {
+    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number } | null): void
+    event(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force?: number): void
+    horn(on: boolean): void
+  }
 }): Living {
   const M = 10
   const things: Thing[] = [], waiting: { making: Making; done: (thing: Thing) => void }[] = [], struck: Struck[] = []
@@ -221,6 +244,16 @@ export function living(o: {
   // The eye that rides: how much of the way back it is (0 to 1), and what it is kept out of.
   let room = 1, was: number[] | null = null
   const stands = standsBy(o.kind)
+  const wrap = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a }
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
+  // GTA-style chase camera, 6-speed gearbox, drift & audio/FX telemetry state.
+  let camMode: 0 | 1 = 0
+  let chaseYaw = 0, orbitYaw = 0, orbitPitch = 0, lookIdle = 99
+  let camFov = 0, camRoll = 0, camPull = 0, camHill = 0, camEnergy = 0
+  let shakeAmp = 0, shakeT = 0
+  let prevAt: [number, number, number] | null = null, velSm = [0, 0, 0], prevFwd = 0, prevOn = 4
+  let gear = 1, rpm = 0.16, shiftCool = 0, popCool = 0, wasThrottle = 0, hornOn = false, smokeAcc = 0
+  let telemetryNow: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: 'close' | 'far'; fovAdd: number } | null = null
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
@@ -231,6 +264,40 @@ export function living(o: {
   const coarse = matchMedia('(pointer: coarse)')
   const held = { rise: 0 }
   const buttons = o.hud.panel('living')
+  // Sleek speed, gear, RPM bar and DRIFT indicator shown while driving a car.
+  const drivePanel = o.hud.panel('drive-hud')
+  drivePanel.innerHTML = '<div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div>'
+  const dhSpd = drivePanel.querySelector<HTMLElement>('.dh-spd')!
+  const dhGear = drivePanel.querySelector<HTMLElement>('.dh-gear')!
+  const dhDrift = drivePanel.querySelector<HTMLElement>('.dh-drift')!
+  const dhBars = [...drivePanel.querySelectorAll<HTMLElement>('.dh-rpm i')]
+  let lastHudSpd = -1, lastHudGear = '', lastHudBars = -1, lastHudDrift = false
+  const updateDriveHud = (kmh: number, g: number, r: number, drifting: boolean) => {
+    const s = Math.max(0, Math.round(kmh))
+    if (s !== lastHudSpd) { dhSpd.textContent = String(s); lastHudSpd = s }
+    const gl = g < 0 ? 'R' : g === 0 ? 'N' : String(g)
+    if (gl !== lastHudGear) { dhGear.textContent = gl; lastHudGear = gl }
+    const lit = Math.max(0, Math.min(12, Math.round(((r - 0.14) / 0.84) * 12)))
+    if (lit !== lastHudBars) {
+      for (let i = 0; i < 12; i++) {
+        const b = dhBars[i]
+        b.className = i < lit ? (i >= 10 ? 'red' : i >= 7 ? 'hot' : 'on') : ''
+      }
+      lastHudBars = lit
+    }
+    if (drifting !== lastHudDrift) { dhDrift.hidden = !drifting; lastHudDrift = drifting }
+  }
+  const resetDriveState = () => {
+    camFov = 0; camRoll = 0; camPull = 0; camHill = 0; camEnergy = 0
+    shakeAmp = 0; shakeT = 0; prevAt = null; velSm = [0, 0, 0]; prevFwd = 0; prevOn = 4
+    gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0
+    telemetryNow = null
+    if (hornOn) { hornOn = false; o.audio?.horn(false) }
+    o.lens?.(0, 0, 0)
+    o.audio?.drive(null)
+    o.fx?.lift()
+    updateDriveHud(0, 0, 0.15, false)
+  }
   const button = (act: string, words: string, press: () => void, release?: () => void) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button', textContent: words })
     b.dataset.act = act
@@ -242,10 +309,15 @@ export function living(o: {
   const showButtons = (scheme: Scheme | null) => {
     held.rise = 0
     document.documentElement.classList.toggle('riding', !!scheme)
+    document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
     if (!scheme) { buttons.replaceChildren(); seat = null; return }
-    // From the bottom up (the column stands on the corner under the right thumb): down and up, what is done once, the
+    // From the bottom up (the column stands on the corner under the right thumb): drift (or down/up), what is done once, the
     // seat, and getting off at the top, farthest from the thumb.
-    const rises = scheme.lines.some((l) => l.rise) ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })] : []
+    const rises = scheme.name === 'drive'
+      ? [button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })]
+      : scheme.lines.some((l) => l.rise)
+        ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
+        : []
     const onces = scheme.lines.filter((l) => l.once && l.once !== 'leave').map((l) => button(l.once!, l.does[0].toUpperCase() + l.does.slice(1), () => { once = l.once }))
     const leaves = scheme.lines.filter((l) => l.once === 'leave').map((l) => button('leave', 'Get off', () => { once = l.once }))
     seat = button('seat', 'Seat', () => view(!inside))
@@ -334,12 +406,17 @@ export function living(o: {
     if (on === inside) return
     inside = on && !!riding
     seat?.setAttribute('aria-pressed', String(inside))
-    if (inside && riding) { head[0] = 0; head[1] = -0.08 }
+    if (inside && riding) { head[0] = 0; head[1] = -0.08; o.lens?.(0, 0, 0) }
     else {
       // Behind again: looking the way the head was turned.
       o.pose.tilt = undefined
+      const isDrive = riding && (riding.controls ?? 'drive') === 'drive'
+      chaseYaw = facing
+      orbitYaw = head[0]
+      orbitPitch = 0
+      lookIdle = 0
       o.pose.yaw = facing + head[0]
-      o.pose.pitch = -0.22
+      o.pose.pitch = isDrive ? (camMode === 0 ? -0.135 : -0.19) : -0.22
       room = 0
     }
   }
@@ -386,28 +463,40 @@ export function living(o: {
     view(false)
     riding = thing?.alive ? thing : null
     said = ''
+    resetDriveState()
     // The world is told who rides what, and a body on foot is taken up or set down.
     if (was !== riding) {
       if (was?.ref) o.world?.ride(was.ref, false)
       if (riding?.ref) o.world?.ride(riding.ref, true)
       // Off: the seat's keys go first, and then the person is on their feet again (#367).
-      if (!riding) { leave?.(); leave = null }
+      if (!riding) { leave?.(); leave = null; if (was && (was.controls ?? 'drive') === 'drive') o.audio?.event('door', 0.65) }
       if (!was !== !riding) o.ridden?.(!!riding)
     }
     const at = riding && where(riding)
-    if (riding && at) {
-      // The eye goes behind it, looking the way it faces and a little down.
-      facing = Math.atan2(at.front[0], -at.front[2])
-      o.pose.yaw = facing
-      o.pose.pitch = -0.22
-    }
     const scheme = riding && SCHEMES[riding.controls ?? 'drive']
+    const isDrive = scheme?.name === 'drive'
+    if (riding && at) {
+      // The eye goes behind it, looking the way it faces and a little down (low & heroic for cars).
+      facing = Math.atan2(at.front[0], -at.front[2])
+      chaseYaw = facing
+      orbitYaw = 0
+      orbitPitch = 0
+      lookIdle = 99
+      o.pose.yaw = facing
+      o.pose.pitch = isDrive ? (camMode === 0 ? -0.135 : -0.19) : -0.22
+      if (isDrive && was !== riding) {
+        const mounted = riding
+        o.audio?.event('door', 0.72)
+        setTimeout(() => { if (riding === mounted) o.audio?.event('start', 0.85) }, 140)
+      }
+    }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
-    o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
+    const extraRows: readonly (readonly [string, string])[] = isDrive ? [['C', 'camera'], ['H', 'horn']] : []
+    o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { if (code === 'KeyV') { view(!inside); return true } const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { camMode = camMode === 0 ? 1 : 0; return true } if (isDrive && code === 'KeyH') return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
@@ -421,6 +510,7 @@ export function living(o: {
     },
     get riding() { return riding },
     get inside() { return inside && !!riding },
+    get telemetry() { return telemetryNow },
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, per: w.per } }) }),
     get rider() {
       const at = riding && where(riding)
@@ -487,7 +577,15 @@ export function living(o: {
         if (riding === thing) mount(null)
       }
       for (const state of told.live) { const thing = things.find((t) => t.id === state.id); if (thing) thing.state = state }
-      for (const s of told.struck) { struck.push(s); if (struck.length > 64) struck.shift() }
+      for (const s of told.struck) {
+        struck.push(s)
+        if (struck.length > 64) struck.shift()
+        if (riding && (s.a === riding.id || s.b === riding.id) && (s.flags & 3) !== 0 && s.speed > 18) {
+          const hit = Math.min(1, s.speed / 120)
+          shakeAmp = Math.max(shakeAmp, hit * 0.032)
+          o.fx?.sparks(s.at, hit)
+        }
+      }
     },
     frame(dt) {
       follow()
@@ -530,23 +628,243 @@ export function living(o: {
       if (now !== said || asked || (since > 0.25 && now !== '0,0,0')) { tell(riding, axes.go, axes.turn, axes.rise, asked); said = now; since = 0 }
       // The head still turns, round the thing.
       const [right, up] = o.input.turn()
-      const at0 = inside ? where(riding) : null, sitting = at0 && placeOf(riding, eyeOf(riding))
-      if (at0 && sitting) {
+      const isDrive = scheme.name === 'drive'
+      const at = where(riding)
+      // Driving telemetry, 6-speed gearbox, procedural engine/tire/road audio, and tire smoke / skidmarks / light pools.
+      let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, frontY = 0
+      if (isDrive && at && dt > 0) {
+        const wantHorn = o.input.held('KeyH')
+        if (wantHorn !== hornOn) { hornOn = wantHorn; o.audio?.horn(hornOn) }
+        if (prevAt) {
+          const ivx = (at.at[0] - prevAt[0]) / dt, ivy = (at.at[1] - prevAt[1]) / dt, ivz = (at.at[2] - prevAt[2]) / dt
+          if (Math.hypot(ivx, ivy, ivz) < 2500) {
+            const k = Math.min(1, dt * 16)
+            velSm[0] += (ivx - velSm[0]) * k; velSm[1] += (ivy - velSm[1]) * k; velSm[2] += (ivz - velSm[2]) * k
+          }
+        }
+        prevAt = [at.at[0], at.at[1], at.at[2]]
+        const rightX = -at.front[2], rightZ = at.front[0]
+        const rawFwd = velSm[0] * at.front[0] + velSm[2] * at.front[2]
+        fwdSpeed = riding.state ? riding.state.speed * 0.65 + rawFwd * 0.35 : rawFwd
+        latSpeed = velSm[0] * rightX + velSm[2] * rightZ
+        horizSpeed = Math.hypot(velSm[0], velSm[2])
+        longAcc = Math.max(-220, Math.min(220, (fwdSpeed - prevFwd) / Math.max(dt, 0.008)))
+        prevFwd = fwdSpeed
+        const front3d = turned(at.rot, FRONTS[riding.motor.front])
+        frontY = front3d[1]
+        const onWheels = riding.state ? riding.state.feet : riding.motor.feet.length
+        const grounded = onWheels >= 2
+        // Suspension landing thump & camera punch after cresting an SF hill.
+        if (prevOn === 0 && onWheels >= 2 && velSm[1] < -20) {
+          const drop = Math.min(1, (-velSm[1] - 18) / 70)
+          o.audio?.event('thump', 0.4 + drop * 0.6)
+          shakeAmp = Math.max(shakeAmp, 0.01 + drop * 0.024)
+        }
+        prevOn = onWheels
+        const handbraking = axes.rise > 0.1
+        const braking = (axes.go < -0.1 && fwdSpeed > 8) || (axes.go > 0.1 && fwdSpeed < -8)
+        const slipAngle = horizSpeed > 18 ? Math.abs(Math.atan2(latSpeed, Math.abs(fwdSpeed) + 8)) : 0
+        drifting = grounded && horizSpeed > 26 && (slipAngle > 0.17 || (handbraking && Math.abs(axes.turn) > 0.15 && horizSpeed > 28))
+        const burnout = grounded && handbraking && axes.go > 0.5 && horizSpeed < 38 ? 0.75 : 0
+        const lockup = grounded && braking && Math.abs(fwdSpeed) > 35 && Math.abs(axes.go) > 0.6 ? 0.45 : 0
+        slipAmt = grounded ? Math.max(0, Math.min(1, Math.max(burnout, lockup, (slipAngle - 0.12) * 1.9 + (handbraking && horizSpeed > 24 ? 0.42 : 0)))) : 0
+        // 6-speed gearbox + rev limiter + upshift/overrun exhaust crackles.
+        const top = Math.max(120, riding.motor.top)
+        const RATIOS = [0, 0.21, 0.36, 0.52, 0.69, 0.85, 1.06]
+        shiftCool = Math.max(0, shiftCool - dt)
+        popCool = Math.max(0, popCool - dt)
+        const exhaustDir = [-at.front[0], 0.12, -at.front[2]] as const
+        const rearTip = placeOf(riding, [riding.motor.front === 0 ? 1 : riding.motor.front === 1 ? riding.size[0] - 1 : riding.size[0] * 0.5, 2.5, riding.motor.front === 2 ? 1 : riding.motor.front === 3 ? riding.size[2] - 1 : riding.size[2] * 0.5])
+        if (fwdSpeed < -6 && axes.go < -0.1) {
+          gear = -1
+          const want = 0.22 + Math.min(0.68, Math.abs(fwdSpeed) / (top * 0.35))
+          rpm += (want - rpm) * Math.min(1, dt * 10)
+        } else if (Math.abs(fwdSpeed) < 5 && Math.abs(axes.go) < 0.05) {
+          gear = 0
+          rpm += (0.15 - rpm) * Math.min(1, dt * 6)
+        } else {
+          if (gear <= 0) gear = 1
+          const hi = top * RATIOS[gear], lo = gear === 1 ? 0 : top * RATIOS[gear - 1] * 0.62
+          let want = 0.2 + 0.78 * Math.max(0, Math.min(1.05, (Math.max(0, fwdSpeed) - lo) / Math.max(18, hi - lo)))
+          if (burnout > 0 || !grounded) want = Math.max(want, 0.22 + Math.max(0, axes.go) * 0.74)
+          if (drifting && axes.go > 0.2) want = Math.max(want, 0.68 + slipAmt * 0.24)
+          if (gear < 6 && want > 0.91 && shiftCool <= 0 && axes.go > 0.2 && grounded) {
+            gear++
+            shiftCool = 0.32
+            rpm = Math.max(0.46, rpm - 0.34)
+            o.audio?.event('shift', 0.68 + Math.min(0.3, Math.abs(axes.go) * 0.25))
+            if (gear >= 2 && top >= 260 && popCool <= 0) {
+              popCool = 0.55
+              o.audio?.event('pop', 0.65)
+              if (rearTip) o.fx?.exhaust(rearTip, exhaustDir, true)
+            }
+          } else if (gear > 1 && want < 0.32 && shiftCool <= 0) {
+            gear--
+            shiftCool = 0.24
+            rpm = Math.min(0.78, rpm + 0.22)
+          } else {
+            rpm += (Math.min(0.99, want) - rpm) * Math.min(1, dt * (want > rpm ? 11 : 7))
+          }
+          // High-RPM throttle lift-off overrun backfire pop!
+          if (wasThrottle > 0.65 && axes.go <= 0.05 && rpm > 0.58 && popCool <= 0 && horizSpeed > 35) {
+            popCool = 0.85
+            o.audio?.event('pop', 0.75)
+            if (rearTip) o.fx?.exhaust(rearTip, exhaustDir, true)
+          }
+        }
+        wasThrottle = axes.go
+        const kmh = Math.abs(fwdSpeed) * 0.36
+        const mat = o.fx ? o.fx.surface(Math.round(at.at[0]), Math.round(at.at[2])) : 6
+        // Materials 1..3 are grass, earth, sand (off-road); 6..12 are asphalt, concrete, brick, stone, wood, steel (paved).
+        const offroad = mat >= 1 && mat <= 3
+        const paved = !offroad
+        const wet = o.fx ? o.fx.rain() > 0.2 : false
+        const rough = grounded ? (paved ? (wet ? 0.32 : 0.05) : 0.9) : 0
+        const tone = Math.max(0, Math.min(1, (top - 180) / 360))
+        const load = Math.max(0, Math.min(1, (axes.go > 0.05 ? 0.45 + 0.55 * axes.go : 0.1) + (drifting ? 0.25 : 0)))
+        o.audio?.drive({ rpm, load, tone, slip: slipAmt, roll: grounded ? Math.min(1, horizSpeed / 260) : 0, rough })
+        updateDriveHud(kmh, gear, rpm, drifting)
+        telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: camMode === 0 ? 'close' : 'far', fovAdd: camFov }
+        // Tire smoke, skidmarks, and road light pools (brake glow + night headlights).
+        if (o.fx) {
+          const rearFeet = riding.motor.feet.filter((f) => f.drives || !f.steers)
+          const wheels = rearFeet.length ? rearFeet : riding.motor.feet
+          smokeAcc += dt * (14 + slipAmt * 28)
+          const emitSmoke = smokeAcc >= 1
+          if (emitSmoke) smokeAcc -= Math.floor(smokeAcc)
+          const smokeCol: readonly [number, number, number] = wet ? [0.76, 0.83, 0.90] : paved ? [0.85, 0.85, 0.88] : [0.64, 0.52, 0.36]
+          const trackCol: readonly [number, number, number] = paved ? (wet ? [0.03, 0.04, 0.055] : [0.04, 0.04, 0.045]) : [0.16, 0.11, 0.07]
+          for (let i = 0; i < wheels.length; i++) {
+            const f = wheels[i], p = placeOf(riding, [f.at[0], f.at[1] - f.reach * 0.72, f.at[2]])
+            if (!p || !grounded) { o.fx.lift(i); continue }
+            const markStrength = slipAmt > 0.16 ? slipAmt : 0
+            if (markStrength > 0) o.fx.track(i, p, markStrength, trackCol)
+            else o.fx.lift(i)
+            const puffLevel = Math.max(slipAmt, wet && horizSpeed > 55 ? Math.min(0.55, (horizSpeed - 50) / 140) : 0, !paved && horizSpeed > 30 ? Math.min(0.65, horizSpeed / 120) : 0)
+            if (emitSmoke && puffLevel > 0.14) o.fx.smoke(p, [-velSm[0] * 0.15, 6 + puffLevel * 12, -velSm[2] * 0.15], puffLevel, smokeCol)
+          }
+          // Red brake-light asphalt splash when braking or pulling the handbrake; twin warm headlight cones at dusk/night.
+          const dir2: readonly [number, number] = [at.front[0], at.front[2]]
+          const dark = Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15))
+          const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
+          const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
+          if (braking || handbraking) {
+            const backPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 9), at.at[1], at.at[2] - at.front[2] * (halfLen + 9)]
+            o.fx.light(backPos, dir2, [14, halfWide + 10], [1.0, 0.08, 0.03], (0.28 + dark * 0.45 + (wet ? 0.2 : 0)) * (handbraking ? 1.15 : 1))
+          } else if (dark > 0.12) {
+            const tailPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 6), at.at[1], at.at[2] - at.front[2] * (halfLen + 6)]
+            o.fx.light(tailPos, dir2, [8, halfWide + 5], [0.95, 0.06, 0.02], dark * 0.25)
+          }
+          if (dark > 0.12) {
+            const beamPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + 68), at.at[1], at.at[2] + at.front[2] * (halfLen + 68)]
+            o.fx.light(beamPos, dir2, [74, halfWide + 26], [1.0, 0.93, 0.78], dark * (0.34 + (wet ? 0.12 : 0)))
+          }
+        }
+      } else if (telemetryNow) {
+        telemetryNow = null
+        o.audio?.drive(null)
+      }
+
+      const sitting = inside && at ? placeOf(riding, eyeOf(riding)) : null
+      if (inside && at && sitting) {
         // In the seat: the eye is the driver's, and the whole frame turns and leans with the thing (main.ts `view`), so
         // yaw and pitch are the head's own, from straight ahead.
         head[0] += right
         head[1] = Math.max(-1.4, Math.min(1.2, head[1] + up))
         o.pose.x = sitting[0] / M; o.pose.y = sitting[1] / M; o.pose.z = sitting[2] / M
-        o.pose.tilt = [...at0.rot]
+        o.pose.tilt = [...at.rot]
         o.pose.yaw = AHEADS[riding.motor.front] + head[0]
         o.pose.pitch = head[1]
-        facing = Math.atan2(at0.front[0], -at0.front[2])
+        facing = Math.atan2(at.front[0], -at.front[2])
         was = null
+        if (isDrive) {
+          const motion = reducedMotion.matches ? 0 : 1
+          const top = Math.max(120, riding.motor.top), speedFrac = Math.min(1.2, Math.abs(fwdSpeed) / Math.max(160, top))
+          const targetFov = motion * Math.min(10, speedFrac * speedFrac * 8 + speedFrac * 2)
+          camFov += (targetFov - camFov) * Math.min(1, dt * 6)
+          camEnergy += (motion * Math.max(0, Math.min(0.7, (Math.abs(fwdSpeed) * 0.36 - 65) / 130)) - camEnergy) * Math.min(1, dt * 5)
+          o.lens?.(camFov, 0, camEnergy)
+        }
+        return true
+      }
+      if (at && isDrive) {
+        // GTA 6-style low, velocity-blended, spring-damped chase camera with dynamic speed FOV, corner roll, and impact shake.
+        const carYaw = Math.atan2(at.front[0], -at.front[2])
+        facing = carYaw
+        if (Math.abs(right) > 0.0005 || Math.abs(up) > 0.0005) {
+          orbitYaw = wrap(orbitYaw + right)
+          orbitPitch = Math.max(-0.55, Math.min(0.65, orbitPitch + up))
+          lookIdle = 0
+        } else {
+          lookIdle += dt
+          if (lookIdle > 1.5 && horizSpeed > 14) {
+            const recenter = Math.exp(-dt * 3.4)
+            orbitYaw *= recenter
+            orbitPitch *= recenter
+          }
+        }
+        const top = Math.max(120, riding.motor.top)
+        const speedFrac = Math.min(1.25, Math.abs(fwdSpeed) / Math.max(160, top))
+        let targetYaw = carYaw
+        if (fwdSpeed > 22 && horizSpeed > 24) {
+          const velYaw = Math.atan2(velSm[0], -velSm[2])
+          const driftDiff = wrap(velYaw - carYaw)
+          // Blend toward the travel vector during drifts so the camera swings out to showcase the 3/4 side profile & tire smoke.
+          targetYaw = wrap(carYaw + driftDiff * (drifting ? 0.58 : 0.42))
+        }
+        const yawStiff = drifting ? 2.8 : 4.6 + speedFrac * 3.8
+        chaseYaw = wrap(chaseYaw + wrap(targetYaw - chaseYaw) * Math.min(1, dt * yawStiff))
+        const motion = reducedMotion.matches ? 0 : 1
+        // Dynamic FOV widening with speed + subtle acceleration surge / brake compression.
+        const targetFov = motion * (Math.min(14, speedFrac * speedFrac * 12 + speedFrac * 2.5) + Math.max(-2.4, Math.min(2.2, longAcc * 0.015)))
+        camFov += (targetFov - camFov) * Math.min(1, dt * 6.5)
+        // Subtle cornering camera roll into lateral g-forces.
+        const targetRoll = motion * Math.max(-0.028, Math.min(0.028, -latSpeed * 0.00055 - axes.turn * speedFrac * 0.012))
+        camRoll += (targetRoll - camRoll) * Math.min(1, dt * 7)
+        // Elastic pull-back on hard launch, push-in on hard braking.
+        const targetPull = motion * Math.max(-0.38, Math.min(0.58, longAcc * 0.0038 + (drifting ? 0.22 : 0)))
+        camPull += (targetPull - camPull) * Math.min(1, dt * 5)
+        // Hill pitch tracking so San Francisco climbs and crests frame cleanly ahead.
+        const targetHill = Math.max(-0.15, Math.min(0.15, frontY * 0.55))
+        camHill += (targetHill - camHill) * Math.min(1, dt * 4.5)
+        // High-speed radial lens energy for glow.ts post-process.
+        const targetEnergy = motion * Math.max(0, Math.min(1, (Math.abs(fwdSpeed) * 0.36 - 55) / 115))
+        camEnergy += (targetEnergy - camEnergy) * Math.min(1, dt * 5)
+        // Impact / landing camera shake.
+        let shakeYaw = 0, shakePitch = 0, shakeRoll = 0
+        if (shakeAmp > 0.0005 && motion > 0) {
+          shakeT += dt * 46
+          shakeYaw = Math.sin(shakeT * 1.13) * shakeAmp * 0.65
+          shakePitch = Math.cos(shakeT * 1.47) * shakeAmp * 0.75
+          shakeRoll = Math.sin(shakeT * 1.83) * shakeAmp * 0.55
+          shakeAmp *= Math.exp(-dt * 8.5)
+        } else {
+          shakeAmp = 0
+        }
+        const basePitch = camMode === 0 ? -0.135 : -0.19
+        o.pose.yaw = wrap(chaseYaw + orbitYaw + shakeYaw)
+        o.pose.pitch = Math.max(-1.2, Math.min(0.85, basePitch + camHill + orbitPitch + shakePitch))
+        o.lens?.(camFov, camRoll + shakeRoll, camEnergy)
+        const cp = Math.cos(o.pose.pitch), look = [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]
+        const len = Math.max(...riding.size)
+        const tall = innerHeight > innerWidth
+        const closeBack = ((len * 1.15 + 17) / M) * (tall ? 1.48 : 1)
+        const farBack = ((len * 1.58 + 26) / M) * (tall ? 1.35 : 1)
+        const back = (camMode === 0 ? closeBack : farBack) + camPull
+        const high = (camMode === 0 ? (riding.size[1] * 0.88 + 6.4) / M : (riding.size[1] * 1.05 + 8.5) / M) * (tall ? 1.15 : 1)
+        const headPos = [at.at[0], at.at[1] + riding.size[1] / 2 + 5, at.at[2]]
+        const wantY = Math.max(at.at[1] + (high - look[1] * back) * M, o.ground(at.at[0] / M - look[0] * back, at.at[2] / M - look[2] * back) * M + 4)
+        const off = [-look[0] * back * M, wantY - headPos[1], -look[2] * back * M], free = clearWay(stands, headPos, off)
+        const going = was && dt > 0 ? [(headPos[0] - was[0]) / dt * AHEAD, (headPos[2] - was[2]) / dt * AHEAD] : [0, 0], far = Math.hypot(going[0], going[1])
+        was = [headPos[0], headPos[1], headPos[2]]
+        room = roomAfter(room, free, far > 0.5 && far < 60 ? clearWay(stands, [headPos[0] + going[0], headPos[1], headPos[2] + going[1]], off) : 1, dt)
+        o.pose.x = (headPos[0] + off[0] * room) / M
+        o.pose.y = (headPos[1] + off[1] * room) / M
+        o.pose.z = (headPos[2] + off[2] * room) / M
         return true
       }
       o.pose.yaw += right
       o.pose.pitch = Math.max(-1.4, Math.min(1.2, o.pose.pitch + up))
-      const at = where(riding)
       if (at) {
         // The eye turns with the thing, and stays behind and above it wherever the head is turned.
         const yaw = Math.atan2(at.front[0], -at.front[2])

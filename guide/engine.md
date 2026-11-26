@@ -80,4 +80,4 @@ node test/all.mjs --changed   # only the checks that cover your branch's changes
 
 `node test/bench.mjs` (in `engine/`) measures frame cost. Run it before and after a change to the march or the frame.
 
-<!-- docs-verified 709f0f1571244b4df884c50517f79ca26f554252 {"engine/page/main.ts":"e95340ce41a54d029dc99af40f26f390","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->
+<!-- docs-verified 13b2f77f06751d55ddcb322bb0effe9444dde16b {"engine/page/main.ts":"1001dafb9cbfa737d710f93756c21cef","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->

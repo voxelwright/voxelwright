@@ -59,13 +59,37 @@
      (In a realm they are the kit's keys and play-hud.ts places them; this is how they look on a page without the kit.) */
   [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(110px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
   @media (pointer: coarse) { html.riding [data-panel="living"] { display: flex; } }
-  /* By touch the ask bar steps aside while riding, unless it is open: on its side it lay across the thing ridden and the
-     keys beside the thumb. Getting off brings it back. */
+  /* By touch (and while driving a car) the ask bar steps aside unless opened, keeping the car and road clear. */
   @media (pointer: coarse) { html.riding #ask:not(.open) { visibility: hidden; } }
+  html.riding.driving #ask:not(.open) { visibility: hidden; }
   /* Nothing is aimed at from a seat: the aim's dot was over the thing ridden. */
   html.riding #aim { display: none; }
   html:not([data-hud]) [data-panel="living"] button { min-width: 84px; min-height: 44px; padding: 12px 14px; border: 0; border-radius: 12px; background: rgba(12, 16, 22, 0.72); color: #e8ecf1; font: 600 14px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   html:not([data-hud]) [data-panel="living"] button[aria-pressed="true"] { background: #e8ecf1; color: #10141a; }
+  /* Driving cluster (living.ts): speed, gear, 12-segment RPM bar, and DRIFT badge. Bottom-right on desk, compact top-center by touch. */
+  [data-panel="drive-hud"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 5px; padding: 9px 13px 10px; border-radius: 12px; background: rgba(12, 16, 22, 0.72); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); color: #f2f5f9; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.28); }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
+  html:has(#ask.open) [data-panel="drive-hud"] { display: none; }
+  [data-panel="drive-hud"] .dh-top { display: flex; align-items: baseline; gap: 6px; }
+  [data-panel="drive-hud"] .dh-spd { font: 700 28px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; min-width: 44px; text-align: right; }
+  [data-panel="drive-hud"] .dh-unit { font: 600 10px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.62; margin-right: 4px; }
+  [data-panel="drive-hud"] .dh-gear { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 6px; background: rgba(232, 236, 241, 0.16); font: 700 12px/1 ui-monospace, monospace; color: #f2f5f9; }
+  [data-panel="drive-hud"] .dh-drift { padding: 2px 6px; border-radius: 5px; background: #ff7a1a; color: #10141a; font: 800 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; }
+  [data-panel="drive-hud"] .dh-rpm { display: flex; gap: 3px; height: 5px; }
+  [data-panel="drive-hud"] .dh-rpm i { display: block; width: 9px; height: 100%; border-radius: 2px; background: rgba(232, 236, 241, 0.16); }
+  [data-panel="drive-hud"] .dh-rpm i.on { background: #e8ecf1; }
+  [data-panel="drive-hud"] .dh-rpm i.hot { background: #ffae34; }
+  [data-panel="drive-hud"] .dh-rpm i.red { background: #ff453a; }
+  @media (pointer: coarse) {
+    [data-panel="drive-hud"] { right: auto; bottom: auto; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 20px); transform: translateX(-50%); padding: 6px 10px 7px; gap: 4px; border-radius: 10px; }
+    [data-panel="drive-hud"] .dh-spd { font-size: 20px; min-width: 30px; }
+    [data-panel="drive-hud"] .dh-gear { min-width: 18px; height: 18px; font-size: 11px; }
+    [data-panel="drive-hud"] .dh-rpm { gap: 2px; height: 4px; }
+    [data-panel="drive-hud"] .dh-rpm i { width: 7px; }
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    [data-panel="drive-hud"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 98px); transform: none; }
+  }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card p.note { margin: -2px 0 6px; color: #9aa5b1; font-size: 12px; }

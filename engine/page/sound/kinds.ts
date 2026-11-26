@@ -59,4 +59,11 @@ export const WORLD: Record<string, Patch> = {
   shot: { how: 'struck', hard: 0.6, rough: 0.8, shape: 'skin', pitch: 70, ring: 0.5, damp: 0.7, bend: 1, air: { from: 3000, to: 250, for: 0.5, gain: 0.9, q: 0.5 }, gain: 0.9 },
   // Something set down.
   place: { how: 'struck', hard: 0.7, rough: 0.5, shape: 'lump', pitch: 300, ring: 0.05, damp: 0.85, gain: 0.5 },
+  // Driven vehicle foley: door thump, ignition bark, upshift burble, exhaust overrun pop, suspension landing thud, dual-tone horn.
+  carDoor: { how: 'struck', hard: 0.35, rough: 0.4, shape: 'lump', pitch: 72, ring: 0.09, damp: 0.9, air: { from: 420, to: 110, for: 0.08, gain: 0.45, q: 0.8 }, gain: 0.75 },
+  carStart: { how: 'struck', hard: 0.4, rough: 0.85, shape: 'skin', pitch: 58, ring: 0.32, damp: 0.75, bend: 0.65, air: { from: 260, to: 900, for: 0.28, gain: 0.65, q: 1.1 }, gain: 0.8 },
+  carShift: { how: 'struck', hard: 0.45, rough: 0.8, shape: 'skin', pitch: 76, ring: 0.14, damp: 0.85, bend: -0.35, air: { from: 700, to: 180, for: 0.12, gain: 0.55, q: 0.7 }, gain: 0.65 },
+  carPop: { how: 'struck', hard: 0.85, rough: 1, shape: 'lump', pitch: 140, ring: 0.05, damp: 0.9, air: { from: 1900, to: 260, for: 0.09, gain: 0.75, q: 0.8 }, gain: 0.7 },
+  carThump: { how: 'struck', hard: 0.2, rough: 0.5, shape: 'skin', pitch: 54, ring: 0.18, damp: 0.92, bend: -0.25, air: { from: 320, to: 85, for: 0.14, gain: 0.55, q: 0.6 }, gain: 0.85 },
+  carHorn: { how: 'blown', hard: 0.9, rough: 0.15, shape: 'tube', pitch: 415, ring: 0.08, damp: 0.28, gain: 0.55 },
 }

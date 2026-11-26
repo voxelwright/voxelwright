@@ -50,10 +50,24 @@ struct Out { @builtin(position) pos: vec4f, @location(0) uv: vec2f }
   return vec4f(sum, 1.0);
 }
 @fragment fn last(in: Out) -> @location(0) vec4f {
-  var c = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb + textureSampleLevel(spread, smooth_, in.uv, 0.0).rgb * u.strength;
-  // The corners of the picture a little darker, as a lens leaves them.
   let d = in.uv - 0.5;
-  c *= 1.0 - dot(d, d) * 0.42;
+  var c = textureSampleLevel(picture, smooth_, in.uv, 0.0).rgb;
+  // High-speed driving lens energy (u.pad = 0..1): subtle peripheral radial streak + edge chroma while keeping center crisp.
+  if (u.pad > 0.001) {
+    let r2 = dot(d, d);
+    let edge = smoothstep(0.05, 0.42, r2) * u.pad;
+    let streak = d * edge * 0.036;
+    let s1 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak * 0.5, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    let s2 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    let s3 = textureSampleLevel(picture, smooth_, clamp(in.uv - streak * 1.5, vec2f(0.001), vec2f(0.999)), 0.0).rgb;
+    c = c * 0.46 + s1 * 0.27 + s2 * 0.17 + s3 * 0.10;
+    let ca = d * edge * 0.008;
+    c.r = mix(c.r, textureSampleLevel(picture, smooth_, clamp(in.uv + ca, vec2f(0.001), vec2f(0.999)), 0.0).r, 0.55);
+    c.b = mix(c.b, textureSampleLevel(picture, smooth_, clamp(in.uv - ca, vec2f(0.001), vec2f(0.999)), 0.0).b, 0.55);
+  }
+  c += textureSampleLevel(spread, smooth_, in.uv, 0.0).rgb * u.strength;
+  // The corners of the picture a little darker, as a lens leaves them (tightening subtly at high speed).
+  c *= 1.0 - dot(d, d) * (0.42 + u.pad * 0.16);
   // The grade, which follows the hour (u.step here is how much colour, how much contrast). With the sun low and at
   // night, more of both than the tone curve leaves: that is what made the sunset. By day, a little less colour and
   // nearly no more contrast: with the evening's grade a street by day was called bright and toy-coloured by every
@@ -98,8 +112,8 @@ fn chance(c: vec2i) -> f32 {
 }
 `
 
-/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by. Returns the pass to call each frame. */
-export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number]) => void> {
+/** Draws `from` to the screen with its glow, and rain over it when `rain` (0 to 1, times how light it is) is not 0. `grade` is how much colour and how much contrast the hour asks for; `tint` is what the finished picture is multiplied by; `drive` (0 to 1) adds high-speed radial lens energy while driving. Returns the pass to call each frame. */
+export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from: Offscreen, to: GPUTextureView, rain?: number, time?: number, grade?: readonly [number, number], night?: number, tint?: readonly [number, number, number], drive?: number) => void> {
   const { device } = gpu
   const module = await shader(device, 'glow', CODE), rainModule = await shader(device, 'rain', RAIN)
   const layout = device.createBindGroupLayout({
@@ -154,10 +168,10 @@ export async function glow(gpu: Gpu): Promise<(encoder: GPUCommandEncoder, from:
     p.draw(3)
     p.end()
   }
-  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1]) => {
+  return (encoder, from, to, rain = 0, time = 0, grade = [1.25, 0.35], night = 0, tint = [1, 1, 1], drive = 0) => {
     const k = keep(from)
     device.queue.writeBuffer(k.blocks[0], 0, new Float32Array([1 / from.size[0], 1 / from.size[1], night, 0]))
-    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, 0, tint[0], tint[1], tint[2], 1]))
+    device.queue.writeBuffer(k.blocks[3], 0, new Float32Array([grade[0], grade[1], 1.0, Math.max(0, Math.min(1, drive)), tint[0], tint[1], tint[2], 1]))
     pass(encoder, bright, k.binds[0], k.views[0])
     // Twice over: the looks are close together, and once is too narrow a glow.
     for (let twice = 0; twice < 2; twice++) {

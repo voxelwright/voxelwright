@@ -90,6 +90,10 @@ export interface Puffs {
   flame(at: readonly [number, number, number], dt: number): void
   /** A place where falling water lands, for one frame of `dt` seconds: now and then mist. */
   spray(at: readonly [number, number, number], dt: number): void
+  /** Tire smoke, dirt dust or wet road spray kicked up behind a sliding wheel (intensity 0 to 1). */
+  tireSmoke(at: readonly [number, number, number], vel: readonly [number, number, number], intensity: number, colour?: readonly [number, number, number]): void
+  /** Exhaust puff or backfire flame flash on upshift / high-RPM overrun. */
+  exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean): void
   step(dt: number): void
   draw(encoder: GPUCommandEncoder, to: Target, view: View): void
   /** Where the light comes from and how much of the day it is: smoke is lit by it. */
@@ -199,6 +203,43 @@ export async function puffs(device: GPUDevice, format: GPUTextureFormat): Promis
     },
     spray(at, dt) {
       if (Math.random() < dt * 0.9) puff(at, 3, rnd(8, 22), rnd(6, 16), { size: rnd(6, 11), grow: rnd(6, 10), life: rnd(0.9, 1.8), heat: 0, cool: 0, rise: 3, drag: 1.6, colour: [0.86, 0.9, 0.94], cover: 0.3 })
+    },
+    tireSmoke(at, vel, intensity, colour = [0.84, 0.86, 0.9]) {
+      const k = Math.max(0, Math.min(1, intensity))
+      if (k <= 0.02) return
+      const i = KEPT + (next++ % (MOST - KEPT))
+      const dx = (Math.random() - 0.5) * 2.2, dy = Math.random() * 0.8, dz = (Math.random() - 0.5) * 2.2
+      p[i * 3] = at[0] + dx; p[i * 3 + 1] = at[1] + dy + 0.6; p[i * 3 + 2] = at[2] + dz
+      v[i * 3] = vel[0] * 0.22 + (Math.random() - 0.5) * 10
+      v[i * 3 + 1] = 4 + 8 * k + Math.random() * 5
+      v[i * 3 + 2] = vel[2] * 0.22 + (Math.random() - 0.5) * 10
+      size[i] = 2.4 + 2.4 * k + Math.random() * 1.4
+      grow[i] = 5.5 + 5.0 * k
+      life[i] = span[i] = 0.75 + 0.85 * k + Math.random() * 0.45
+      heat[i] = 0; cool[i] = 0; rise[i] = 6 + 4 * k; drag[i] = 2.2
+      tone.set([colour[0], colour[1], colour[2], 0.24 + 0.32 * k], i * 4)
+      seed[i] = Math.floor(Math.random() * 65536)
+      late[i] = 0
+    },
+    exhaust(at, dir, pop = false) {
+      if (pop) {
+        const i = KEPT + (next++ % (MOST - KEPT))
+        p[i * 3] = at[0]; p[i * 3 + 1] = at[1]; p[i * 3 + 2] = at[2]
+        v[i * 3] = dir[0] * 26; v[i * 3 + 1] = dir[1] * 26 + 2; v[i * 3 + 2] = dir[2] * 26
+        size[i] = 1.4; grow[i] = 6.5; life[i] = span[i] = 0.13
+        heat[i] = 0.92; cool[i] = 5.5; rise[i] = 6; drag[i] = 5
+        tone.set([0.2, 0.18, 0.17, 0.28], i * 4)
+        seed[i] = Math.floor(Math.random() * 65536)
+        late[i] = 0
+      }
+      const j = KEPT + (next++ % (MOST - KEPT))
+      p[j * 3] = at[0]; p[j * 3 + 1] = at[1]; p[j * 3 + 2] = at[2]
+      v[j * 3] = dir[0] * 18 + (Math.random() - 0.5) * 4; v[j * 3 + 1] = dir[1] * 18 + 4; v[j * 3 + 2] = dir[2] * 18 + (Math.random() - 0.5) * 4
+      size[j] = 1.6; grow[j] = 4.5; life[j] = span[j] = pop ? 0.55 : 0.42
+      heat[j] = 0; cool[j] = 0; rise[j] = 8; drag[j] = 3.0
+      tone.set([0.28, 0.29, 0.32, pop ? 0.36 : 0.22], j * 4)
+      seed[j] = Math.floor(Math.random() * 65536)
+      late[j] = 0
     },
     step(dt) {
       live = 0
