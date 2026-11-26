@@ -57,7 +57,10 @@ const STYLE = /* css */ `
 #realm [hidden] { display: none !important; }
 /* The sky: one panel at the top right. */
 #realm .sky { position: absolute; right: max(16px, env(safe-area-inset-right)); top: max(16px, env(safe-area-inset-top)); inline-size: calc(var(--vx) * 76); box-sizing: border-box; padding: calc(var(--vx) * 4) calc(var(--vx) * 5) calc(var(--vx) * 5); display: grid; gap: calc(var(--vx) * 3); }
-#realm .sky header { display: flex; align-items: baseline; justify-content: space-between; }
+#realm .sky header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+#realm .sky .sky-credits-link { appearance: none; border: 0; background: none; padding: 0; margin-inline-end: auto; font: 500 11.5px/1 var(--vx-font); color: var(--vx-ink-quiet); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; opacity: 0.78; }
+#realm .sky .sky-credits-link:hover { opacity: 1; color: var(--vx-ink); }
+html.first #realm .sky .sky-credits-link { display: none; }
 #realm .sky h2 { margin: 0; font: 600 13px/1 var(--vx-font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--vx-ink-quiet); }
 #realm .sky output { font: 600 20px/1 var(--vx-mono); font-variant-numeric: tabular-nums; color: var(--vx-ink); }
 #realm .sky .ticks { display: flex; justify-content: space-between; margin: calc(var(--vx) * -2) 2px 0; font: 400 11px/1 var(--vx-mono); color: var(--vx-ink-quiet); }
@@ -191,7 +194,7 @@ export function realmControls(page: RealmPage) {
     <button class="vx-button fold" type="button" aria-expanded="false" aria-controls="realm-sky" aria-label="Weather, time of day and graphics" title="Weather, time of day and graphics" data-vx-icon="gear" data-vx-icon-only></button>
     <section class="vx-card sky" id="realm-sky" aria-label="Sky">
       <div class="part">
-      <header><h2>Time</h2><output aria-live="off"></output></header>
+      <header><h2>Time</h2><button class="sky-credits-link" type="button" popovertarget="first-credits">Credits</button><output aria-live="off"></output></header>
       ${page.modes ? `<div class="vx-toggle-group modes" role="radiogroup" aria-label="Sky">
         ${MODES.map((m) => `<label title="${MODE_TITLES[m]}"><input type="radio" name="realm-mode" value="${m}">${MODE_NAMES[m]}</label>`).join('')}
       </div>` : ''}

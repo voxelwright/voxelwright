@@ -5,7 +5,7 @@
 const SVG = 'http://www.w3.org/2000/svg'
 
 /** White pictures, 64 by 32, for the realm's tools by name. An entry with none shows its first letter. */
-const ICONS: Record<string, string> = {
+export const TOOL_ICONS: Record<string, string> = {
   Hammer: '<rect x="15" y="13.5" width="45" height="5" rx="2.5"/><path d="M6 4h10v24H6z"/><rect x="2" y="9" width="5" height="14" rx="1"/>',
   Charge: '<path fill-rule="evenodd" d="M10 10h34a3 3 0 0 1 3 3v6a3 3 0 0 1-3 3H10a3 3 0 0 1-3-3v-6a3 3 0 0 1 3-3zm6 0v12h3V10zm16 0v12h3V10z"/><path d="M47 16c5 0 7-3 8-7" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M56 2l1.4 3.6L61 7l-3.6 1.4L56 12l-1.4-3.6L51 7l3.6-1.4z"/>',
   'Big charge': '<rect x="6" y="3" width="38" height="8" rx="2.5"/><rect x="6" y="12" width="38" height="8" rx="2.5"/><rect x="6" y="21" width="38" height="8" rx="2.5"/><rect x="21" y="1" width="6" height="30" rx="1" fill-opacity=".55"/><path d="M44 16c5 0 8-3 9-8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/><path d="M55 1l1.4 3.6L60 6l-3.6 1.4L55 11l-1.4-3.6L50 6l3.6-1.4z"/>',
@@ -15,6 +15,7 @@ const ICONS: Record<string, string> = {
   Brick: '<rect x="4" y="5" width="26" height="10" rx="1.5"/><rect x="33" y="5" width="27" height="10" rx="1.5"/><rect x="4" y="18" width="12" height="10" rx="1.5"/><rect x="19" y="18" width="26" height="10" rx="1.5"/><rect x="48" y="18" width="12" height="10" rx="1.5"/>',
   Wand: '<path d="M8 28L40 10" stroke="#fff" stroke-width="4.5" stroke-linecap="round"/><path d="M47 1l2.2 5.8L55 9l-5.8 2.2L47 17l-2.2-5.8L39 9l5.8-2.2z"/><path d="M58 17l1 2.6 2.6 1-2.6 1-1 2.6-1-2.6-2.6-1 2.6-1z"/><path d="M34 2l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
 }
+const ICONS = TOOL_ICONS
 
 const STYLE = /* css */ `
 .radial { position: absolute; inset: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); display: grid; place-items: center; pointer-events: none; visibility: hidden; }

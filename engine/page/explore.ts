@@ -554,13 +554,30 @@ export function explore(o: Needs): Explore {
     if (!adopt()) { const wait = setInterval(() => { if (adopt()) clearInterval(wait) }, 200) }
     requestAnimationFrame(() => requestAnimationFrame(() => card.classList.add('on')))
     const said = { up: '', walks: '' }, did = { chute: false, flies: false }
-    const legend = (el: HTMLElement | null, key: 'up' | 'walks', text: string) => { if (!el || said[key] === text) return; said[key] = text; (el.querySelector('.vx-label') ?? el).textContent = text; ui.kit?.refresh?.(el) }
+    const legend = (el: HTMLElement | null, key: 'up' | 'walks', text: string) => {
+      if (!el || said[key] === text) return
+      said[key] = text
+      const lbl = el.querySelector('.hud-lbl') ?? el.querySelector('.vx-label') ?? el
+      lbl.textContent = text
+      el.dataset.state = text.toLowerCase()
+      ui.kit?.refresh?.(el)
+    }
     const since = performance.now()
     let leaving = 0
     const stop = o.watch(() => {
       const afoot = o.me.on
-      legend(up, 'up', afoot ? (o.me.aloft && !o.me.canopy ? 'Chute' : 'Jump') : 'Up')
+      const chuteReady = afoot && o.me.aloft && !o.me.canopy
+      legend(up, 'up', afoot ? (chuteReady ? 'Chute' : 'Jump') : 'Up')
       legend(walks, 'walks', afoot ? 'Fly' : 'Walk')
+      if (up && up.classList.contains('chute') !== chuteReady) {
+        up.classList.toggle('chute', chuteReady)
+        ui.kit?.refresh?.(up)
+      }
+      if (walks && walks.classList.contains('flying') !== !afoot) {
+        walks.classList.toggle('flying', !afoot)
+        ui.kit?.refresh?.(walks)
+      }
+      document.documentElement.classList.toggle('flying', o.first.engaged && !afoot)
       if (down) down.hidden = afoot
       if (o.me.canopy && !did.chute) { did.chute = true; card.querySelector('.chute')?.classList.add('done') }
       if (!afoot && !did.flies) { did.flies = true; card.querySelector('.flies')?.classList.add('done') }

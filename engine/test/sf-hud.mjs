@@ -60,9 +60,11 @@ const measure = (page, safe) => page.evaluate((safe) => {
     if (el === canvas || el.classList.contains('vx-canvas') || el.closest('[hidden]') || ['STYLE', 'SCRIPT', 'LINK', 'TEMPLATE'].includes(el.tagName)) continue
     if (!el.checkVisibility({ visibilityProperty: true, opacityProperty: true })) continue
     const b = el.getBoundingClientRect()
-    // A kit part drawn in voxels stands up and to the left of its face by half its height (SPEC: --vx-face-z, SHEAR 0.5), and a voxel past it all round.
-    const cs0 = getComputedStyle(el), lift = el.hasAttribute('data-vx-live') ? (parseFloat(cs0.getPropertyValue('--vx-face-z')) || 0) * 0.5 * (parseFloat(cs0.getPropertyValue('--vx')) || 4) : 0
-    const v1 = el.hasAttribute('data-vx-live') ? parseFloat(cs0.getPropertyValue('--vx')) || 4 : 0
+    // A kit part drawn in voxels stands up and to the left of its face by half its height (SPEC: --vx-face-z, SHEAR 0.5), and a voxel past it all round — only when its voxel canvas is actually visible.
+    const cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null
+    const liveKit = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+    const cs0 = getComputedStyle(el), lift = liveKit ? (parseFloat(cs0.getPropertyValue('--vx-face-z')) || 0) * 0.5 * (parseFloat(cs0.getPropertyValue('--vx')) || 4) : 0
+    const v1 = liveKit ? parseFloat(cs0.getPropertyValue('--vx')) || 4 : 0
     const r = { left: b.left - lift - v1, top: b.top - lift - v1, right: b.right + v1, bottom: b.bottom + v1, width: b.width, height: b.height }
     if (r.width < 2 || r.height < 2 || r.right <= 0 || r.bottom <= 0 || r.left >= vw || r.top >= vh) continue
     // A layer over the whole page (the realm's root, the thumbs' box) is not itself seen: what is in it is.
@@ -78,9 +80,9 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const meets = (a, b) => a.left < b.right - 0.5 && a.right > b.left + 0.5 && a.top < b.bottom - 0.5 && a.bottom > b.top + 0.5
   const over = seen.filter((s) => parts.some((p) => meets(s, p)))
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
-  // Controls against each other, by their solids: a cue on a key, a key on a key.
-  const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, live = el.hasAttribute('data-vx-live'), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #realm .lobbies, #first .credits, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  // Controls against each other, by their visible bounds (including voxel overhang only where a voxel canvas is drawn).
+  const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, cv = el.hasAttribute('data-vx-live') ? el.querySelector(':scope > .vx-canvas') : null, live = !!cv && cv.checkVisibility({ visibilityProperty: true, opacityProperty: true }), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #realm .lobbies, #first .credits, #first .corner a, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where, #minimap, #ask-row')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -184,11 +186,11 @@ try {
         })
         check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
         if (phone) {
-          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['seat', 'leave'], acts = shown.keys.map((k) => k.act)
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'horn', 'cam', 'seat', 'leave'], acts = shown.keys.map((k) => k.act)
           check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
           const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
           check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)
-          check(shown.keys.every((k) => k.kit), `${scheme}: its keys are the kit's`, gate)
+          check(shown.keys.every((k) => k.kit), `${scheme}: its keys are live Voxelmorphism controls`, gate)
           check(!shown.card, `${scheme}: the card of keyboard keys is not shown by touch`)
           const tap = async (act) => { const k = shown.keys.find((k) => k.act === act); if (k) { await page.touchscreen.tap(k.x, k.y); await page.waitForTimeout(500) } return !!k }
           await tap('seat')
@@ -239,12 +241,16 @@ try {
         }
         // The wand: with the wheel it is chosen among the tools and has no key of its own; else its key is a key of the kit
         // as the others are (main's was a dark pill of its own).
-        const wandKey = await page.evaluate(() => { const el = document.querySelector('[data-panel="wand-take"] button'); return el && { kit: el.classList.contains('vx-button') && el.hasAttribute('data-vx-live'), shown: el.checkVisibility(), words: el.textContent.trim() } })
+        const wandKey = await page.evaluate(() => { const el = document.querySelector('[data-panel="wand-take"] button'); return el && { styled: el.classList.contains('vx-button'), shown: el.checkVisibility(), words: el.textContent.trim() } })
         if (wheel) check(!!wandKey && !wandKey.shown, `with the wheel the wand has no key of its own (${JSON.stringify(wandKey)})`)
-        else check(!!wandKey?.kit, `the wand's key is a key of the kit (${JSON.stringify(wandKey)})`)
-        // The cue to fly stands beside the body, shown (it is hidden where it finds no room off the body).
+        else check(!!wandKey?.styled, `the wand's key is styled in the HUD (${JSON.stringify(wandKey)})`)
+        // On desktop a brief [B] Fly cue appears beside the body; on mobile the Fly touch button is already on screen so no redundant floating banner clutters the center.
         const cueShown = await page.evaluate(() => { const c = document.querySelector('#realm .cue[data-cue="fly"]'); return !!c?.classList.contains('on') && c.checkVisibility({ visibilityProperty: true }) })
-        check(cueShown, 'the cue to fly is shown beside the body')
+        if (phone) check(!cueShown, 'on mobile no redundant floating Fly banner clutters the center')
+        else check(cueShown, 'on desktop the brief cue to fly is shown beside the body')
+        // Credits stays on the first view and inside Settings rather than cluttering gameplay corners.
+        const creditsInPlay = await page.evaluate(() => !!document.querySelector('#first .corner')?.checkVisibility({ visibilityProperty: true, opacityProperty: true }))
+        check(!creditsInPlay, 'Credits corner does not clutter active gameplay')
       }
       // Choosing a tool: E (by touch the tool's key) as a person would; the default has its bank.
       if (mode !== 'classic') {
@@ -380,10 +386,10 @@ try {
         if (locked) {
           await page.waitForTimeout(600)
           await look('play', 'in play, the pointer held')
-          const shown = await page.evaluate(() => Object.fromEntries(Object.entries({ credits: '#first .credits', sky: '#realm .fold', held: '#realm .held', bank: '#realm .tools' }).map(([k, sel]) => [k, !!document.querySelector(sel)?.checkVisibility({ visibilityProperty: true, opacityProperty: true })])))
-          if (wheel) check(!shown.credits && !shown.sky && shown.held, `in play the corner keys step away and the tool's key stays (${JSON.stringify(shown)})`)
-          if (mode === 'quiet') check(!shown.credits && !shown.sky && !shown.bank, `in play everything is put away (${JSON.stringify(shown)})`)
-          if (mode === 'context') check(shown.credits && shown.sky && shown.bank, `in play nothing hides itself (${JSON.stringify(shown)})`)
+          const shown = await page.evaluate(() => Object.fromEntries(Object.entries({ sky: '#realm .fold', ask: '#ask', held: '#realm .held', bank: '#realm .tools' }).map(([k, sel]) => [k, !!document.querySelector(sel)?.checkVisibility({ visibilityProperty: true, opacityProperty: true })])))
+          if (wheel) check(!shown.sky && !shown.ask && shown.held, `in play secondary chrome and collapsed ask pill step away while the tool pill stays (${JSON.stringify(shown)})`)
+          if (mode === 'quiet') check(!shown.sky && !shown.ask && !shown.bank, `in play everything is put away (${JSON.stringify(shown)})`)
+          if (mode === 'context') check(shown.sky && shown.bank, `in play nothing hides itself (${JSON.stringify(shown)})`)
           if (wheel) {
             const tools = await page.evaluate(() => [...document.querySelectorAll('#realm .wheel .slot')].map((el) => el.textContent.replace(/^\d+/, '').trim()))
             // Held E, the mouse moved right: the tool to the right of the ring (third, Big charge, at about -13 degrees); let go, it is taken.
@@ -401,7 +407,7 @@ try {
             check(!up.choosing && up.tool === tools[0], `a tap of E, the mouse moved up and a click picks ${tools[0]} (${up.tool})`)
           }
           await page.evaluate(() => document.exitPointerLock()); await page.waitForTimeout(600)
-          if (mode !== 'context') check(await page.evaluate(() => !!document.querySelector('#first .credits')?.checkVisibility({ opacityProperty: true })), 'the pointer let go, the corner keys come back')
+          if (mode !== 'context') check(await page.evaluate(() => !!document.querySelector('#realm .fold')?.checkVisibility({ opacityProperty: true })), 'the pointer let go, the corner controls come back')
         }
       }
       // A phone, mid-move: a thumb down on the body (the stick must not be drawn there), then in the corner.
@@ -486,7 +492,7 @@ try {
         await page.evaluate(() => { globalThis.engine.scale = 0.75; try { localStorage.removeItem('village.resolution') } catch {} })
         // Say: the line opens with the focus in it (a phone's keyboard comes up for that), stays, and takes what is typed.
         await press('#realm .sky .say')
-        const line = await page.evaluate(() => { const f = document.querySelector('#realm .egg-line input'); return { open: !!f?.closest('label')?.checkVisibility(), focused: document.activeElement === f, folded: !document.querySelector('#realm .sky')?.checkVisibility() } })
+        const line = await page.evaluate(() => { const f = document.querySelector('#realm .egg-line input'); return { open: !!f?.closest('.egg-line')?.checkVisibility(), focused: document.activeElement === f, folded: !document.querySelector('#realm .sky')?.checkVisibility() } })
         await look('say', 'the line to say something on')
         await page.keyboard.type('iddqd'); await page.keyboard.press('Enter'); await page.waitForTimeout(400)
         const heard = await page.evaluate(() => globalThis.engine.eggs.state)

@@ -262,7 +262,7 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { rise: 0 }
+  const held = { rise: 0, horn: false }
   const buttons = o.hud.panel('living')
   // Sleek speed, gear, RPM bar and DRIFT indicator shown while driving a car.
   const drivePanel = o.hud.panel('drive-hud')
@@ -293,6 +293,7 @@ export function living(o: {
     gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0
     telemetryNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
+    held.horn = false
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
     o.fx?.lift()
@@ -308,13 +309,18 @@ export function living(o: {
   let seat: HTMLButtonElement | null = null
   const showButtons = (scheme: Scheme | null) => {
     held.rise = 0
+    held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
     if (!scheme) { buttons.replaceChildren(); seat = null; return }
     // From the bottom up (the column stands on the corner under the right thumb): drift (or down/up), what is done once, the
-    // seat, and getting off at the top, farthest from the thumb.
+    // seat, and getting off at the top, farthest from the thumb. Driving adds Horn (hold) and Cam (toggle chase view).
+    const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
+    driftBtn.dataset.vxKind = 'main'
+    const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
+    hornBtn.setAttribute('aria-label', 'Honk horn')
     const rises = scheme.name === 'drive'
-      ? [button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })]
+      ? [driftBtn, hornBtn]
       : scheme.lines.some((l) => l.rise)
         ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
         : []
@@ -323,7 +329,14 @@ export function living(o: {
     seat = button('seat', 'Seat', () => view(!inside))
     seat.setAttribute('aria-label', 'Look from the seat')
     seat.setAttribute('aria-pressed', String(inside))
-    buttons.replaceChildren(...rises, ...onces, seat, ...leaves)
+    const driveExtras: HTMLButtonElement[] = []
+    if (scheme.name === 'drive') {
+      const cam = button('cam', 'Cam', () => { camMode = camMode === 0 ? 1 : 0; cam.setAttribute('aria-pressed', String(camMode !== 0)) })
+      cam.setAttribute('aria-label', 'Switch camera view')
+      cam.setAttribute('aria-pressed', String(camMode !== 0))
+      driveExtras.push(cam)
+    }
+    buttons.replaceChildren(...rises, ...onces, seat, ...driveExtras, ...leaves)
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
@@ -633,7 +646,7 @@ export function living(o: {
       // Driving telemetry, 6-speed gearbox, procedural engine/tire/road audio, and tire smoke / skidmarks / light pools.
       let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, frontY = 0
       if (isDrive && at && dt > 0) {
-        const wantHorn = o.input.held('KeyH')
+        const wantHorn = o.input.held('KeyH') || held.horn
         if (wantHorn !== hornOn) { hornOn = wantHorn; o.audio?.horn(hornOn) }
         if (prevAt) {
           const ivx = (at.at[0] - prevAt[0]) / dt, ivy = (at.at[1] - prevAt[1]) / dt, ivz = (at.at[2] - prevAt[2]) / dt

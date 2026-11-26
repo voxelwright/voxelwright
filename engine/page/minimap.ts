@@ -70,17 +70,17 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
 #minimap .mm-clip {
   position: absolute;
   inset: 0;
-  border-radius: 14px;
+  border-radius: 4px;
   overflow: hidden;
   background: #173642;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.14);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5), 0 1px 0 rgba(255, 255, 255, 0.14);
 }
 #minimap .mm-rim {
   position: absolute;
   inset: 0;
-  border-radius: 14px;
-  border: 1.5px solid rgba(255, 255, 255, 0.24);
-  box-shadow: inset 0 0 0 1px rgba(10, 18, 24, 0.42), inset 0 10px 18px rgba(0, 0, 0, 0.22);
+  border-radius: 4px;
+  border: 2px solid rgba(94, 114, 146, 0.45);
+  box-shadow: inset 1px 1px 0 rgba(255, 255, 255, 0.18), inset -1px -1px 0 rgba(6, 10, 18, 0.65);
   pointer-events: none;
 }
 #minimap canvas, #world-map canvas {
@@ -112,12 +112,30 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   opacity: 0.55;
   transition: opacity 0.18s ease-out;
 }
+#minimap .mm-mly {
+  position: absolute;
+  left: 7px;
+  bottom: 6px;
+  width: 16px;
+  height: 16px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  background: rgba(12, 16, 22, 0.52);
+  opacity: 0.72;
+  z-index: 2;
+  transition: opacity 0.16s ease-out;
+}
+html.has-mapillary #minimap .mm-mly { display: inline-flex; }
+#minimap .mm-mly:hover { opacity: 1; }
+#minimap .mm-mly svg { width: 11px; height: 11px; display: block; }
 #minimap:hover { transform: translateY(-1px); }
 #minimap:hover .mm-rim { border-color: rgba(255, 255, 255, 0.42); }
 #minimap:hover .mm-key { opacity: 1; }
 #minimap:focus-visible .mm-rim { border-color: #ff4fa0; box-shadow: 0 0 0 2px rgba(255, 42, 133, 0.55); }
 
-/* Touch layouts: keep bottom-left completely free for the floating thumb stick and clear of all safe insets & buttons. */
+/* Touch layouts: keep bottom-left completely free for the floating thumb stick and place minimap cleanly in top-left. */
 @media (pointer: coarse) {
   #minimap .mm-key { display: none; }
   html.drawer #minimap,
@@ -129,13 +147,13 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
 }
 @media (pointer: coarse) and (orientation: portrait) {
   #minimap {
-    top: calc(env(safe-area-inset-top, 0px) + 16px);
+    top: calc(env(safe-area-inset-top, 0px) + 14px);
     bottom: auto;
-    left: 138px;
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
     width: 124px;
     height: 74px;
   }
-  #minimap .mm-clip, #minimap .mm-rim { border-radius: 11px; }
+  #minimap .mm-clip, #minimap .mm-rim { border-radius: 3px; }
   #minimap .mm-ov {
     inset: -6px !important;
     width: calc(100% + 12px) !important;
@@ -146,11 +164,11 @@ html[data-hud="quiet"].away #minimap { opacity: 0 !important; pointer-events: no
   #minimap {
     top: calc(env(safe-area-inset-top, 0px) + 14px);
     bottom: auto;
-    left: calc(max(22px, calc(env(safe-area-inset-left) + 16px)) + 100px);
+    left: max(14px, calc(env(safe-area-inset-left) + 14px));
     width: 136px;
     height: 78px;
   }
-  #minimap .mm-clip, #minimap .mm-rim { border-radius: 12px; }
+  #minimap .mm-clip, #minimap .mm-rim { border-radius: 3px; }
 }
 
 /* ── Full-Screen Interactive Map & GPS Navigator ── */
@@ -525,8 +543,10 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       <div class="mm-rim"></div>
     </div>
     <canvas class="mm-ov"></canvas>
+    <a class="mm-mly" href="https://www.mapillary.com/" target="_blank" rel="noopener noreferrer" aria-label="Mapillary street imagery" title="Mapillary street imagery"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 35 35" fill="none" aria-hidden="true"><path fill="#05cb63" fill-rule="evenodd" d="M16.468 25.735c.624.327 15.734 8.542 16.21 8.807.954.528 1.963-.494 1.444-1.45-.261-.48-8.446-15.977-8.722-16.451-.276-.475-.956-.714-1.467-.396-.5.312-1.077.663-1.4.832-.651.34-.731.851-.439 1.42.643 1.248 2.664 5.038 2.896 5.435.484.831-.596 1.78-1.329 1.366-.31-.176-5.107-2.768-5.446-2.971-.339-.203-.94-.201-1.351.484a53.63 53.63 0 00-.837 1.425c-.334.61-.182 1.172.441 1.499zM.517 17.069c-.805-.448-.658-1.613.357-1.91.86-.252 7.844-2.657 9.957-3.386.382-.131.679-.434.807-.82L15.032.724c.317-.957 1.466-.96 1.935-.034.166.33 6.49 12.106 6.71 12.606.22.5.078 1.053-.42 1.372-.5.319-1.312.796-1.596.977-.513.328-1.004.1-1.238-.408-.234-.507-2.038-3.78-2.774-5.169-.368-.694-1.476-.96-1.848.162l-1.224 3.689a1.343 1.343 0 01-.812.827l-3.683 1.254c-.727.247-1.08 1.392-.099 1.874.205.1 4.626 2.538 5.082 2.76.457.224.71.867.443 1.323-.364.622-.83 1.411-1 1.668-.293.444-.87.591-1.353.33C12.671 23.69.804 17.228.517 17.068z" clip-rule="evenodd"/></svg></a>
     <span class="mm-key" aria-hidden="true">M</span>
   `
+  mmRoot.querySelector('.mm-mly')?.addEventListener('click', (e) => e.stopPropagation())
   document.body.append(mmRoot)
   const mmGpu = mmRoot.querySelector<HTMLCanvasElement>('.mm-gpu')!
   const mmOv = mmRoot.querySelector<HTMLCanvasElement>('.mm-ov')!

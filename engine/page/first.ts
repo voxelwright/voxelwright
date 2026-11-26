@@ -176,7 +176,9 @@ export function firstView(on: boolean): First {
     during(start) { starts.push(start); if (!engaged) stops.push(start()) },
     // (Said once each, however it was written: two releases name the same terrain with a capital and without.)
     credits(said) {
-      mapillary.hidden = !said.some(c => c.includes('Mapillary'))
+      const hasMly = said.some(c => c.includes('Mapillary'))
+      mapillary.hidden = !hasMly
+      html.classList.toggle('has-mapillary', hasMly)
       list.replaceChildren(...said.filter((c, i) => said.findIndex((d) => d.toLowerCase() === c.toLowerCase()) === i).map((c) => Object.assign(document.createElement('li'), { textContent: c })))
     },
   }
