@@ -16,7 +16,7 @@
 //
 // The panel is the Voxelmorphism kit's dialog (engine/kit): plain HTML first, voxels when the kit draws them. It sits
 // outside the realm's controls (realm-ui.ts gives the keys back to the world when a pointer is let go there).
-import { ABOUT, keep, kept, models, reply, Unanswered, type Connected, type Listed, type Route } from './models.ts'
+import { ABOUT, keep, kept, models, preferred, reply, Unanswered, type Connected, type Listed, type Route } from './models.ts'
 import type { Ask, Stage } from './ask.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
@@ -35,15 +35,6 @@ export interface Connect {
 }
 
 const ROUTES = Object.keys(ABOUT) as Route[]
-/** The model offered first for a key, by provider: a strong one that makes things well, before the small and the dated. */
-const FIRST: Record<Route, RegExp[]> = {
-  anthropic: [/opus/i, /sonnet/i],
-  openai: [/^gpt-\d+(\.\d+)?$/i, /^gpt-\d/i],
-  gemini: [/pro$/i, /pro/i, /flash$/i],
-  openrouter: [/^anthropic\/claude-opus/i, /^anthropic\/claude-sonnet/i, /^openai\/gpt-\d/i, /^google\/gemini.*pro/i],
-}
-const SMALL = /(^|[-_/. ])(mini|nano|lite|tiny|haiku|preview|exp)\b|\d{4}-\d{2}/i
-const first = (route: Route, list: Listed[], was?: string) => (was && list.find((m) => m.id === was)) || FIRST[route].map((re) => list.find((m) => re.test(m.id) && !SMALL.test(m.id))).find(Boolean) || list[0]
 /** Thousands with a comma, as a bill shows them. */
 const count = (n: number) => n.toLocaleString('en-US')
 /** Whether this browser keeps anything for this site (a private window may not). */
@@ -343,10 +334,10 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     const choose = $<HTMLSelectElement>('select'), box = $<HTMLElement>('.models')
     box.hidden = !list?.length
     if (list?.length) {
-      const pick = connected ? first(held!.route, list, held!.model) : first(route, list, held?.route === route ? held.model : undefined)
+      const pick = (connected ? preferred(held!.route, list, held!.model) : preferred(route, list, held?.route === route ? held.model : undefined)) ?? list[0]
       const ids = list.map((m) => m.id).join('\n')
-      if (choose.dataset.ids !== ids) { choose.replaceChildren(...list.map((m) => new Option(m.name === m.id ? m.id : `${m.name}`, m.id))); choose.dataset.ids = ids }
-      if (!connected || !choose.value || choose.value !== held!.model) choose.value = pick.id
+      if (choose.dataset.ids !== ids) { choose.replaceChildren(...list.map((m) => new Option(m.name === m.id ? m.id : `${m.name}`, m.id))); choose.dataset.ids = ids; choose.value = pick.id }
+      else if (!choose.value || (connected && choose.value !== held!.model)) choose.value = pick.id
     }
     const keeps = storable()
     $<HTMLElement>('.truth').replaceChildren(
@@ -402,7 +393,7 @@ export function connect(o: { hud: Hud; input: Input; wish: Making; /** The ask t
     const key = field!.value.trim()
     if (!key) { said(`Paste your ${ABOUT[route].name} key first.`, true); field!.focus(); return }
     if (!(await tryKey())) { field!.focus(); return }
-    const model = $<HTMLSelectElement>('select').value || first(route, listed!.list).id
+    const model = $<HTMLSelectElement>('select').value || preferred(route, listed!.list)!.id
     held = { route, key, model }
     const kept = keep(held)
     field!.value = ''

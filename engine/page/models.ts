@@ -186,8 +186,127 @@ export async function reply(c: Connected, q: Question, how: How = {}): Promise<R
   return { text, model, ms: Math.round(performance.now() - began), cut, tokens }
 }
 
-/** Which of a provider's models are for words in and words out, by their names: the rest (speech, pictures, embeddings) cannot make a thing. */
-const WRITES = /^(?!.*(embed|tts|whisper|audio|speech|image|dall|moderation|realtime|transcribe|search|vision-preview|imagen|veo|aqa|robotics|computer-use|guard))/i
+/** Which of a provider's models are for words in and words out, by their names: the rest (speech, pictures, embeddings, video, legacy base) cannot make a thing. */
+const WRITES = /^(?!.*(embed|tts|whisper|audio|speech|image|dall|moderation|realtime|transcribe|search|vision-preview|imagen|veo|lyria|sora|aqa|robotics|computer-use|guard|(^|[-_/.])live($|[-_/.]|\d)))(?!(babbage|davinci|curie|text-ada)\b)/i
+
+const SMALL = /(^|[-_/.:])(mini|nano|lite|tiny|haiku|instant|small)\b/i
+const PREVIEW = /(^|[-_/.:])(preview|exp|experimental|beta|alpha|dev)\b/i
+const SPECIALIZED = /(^|[-_/.:])(cyber|codex|deep-research|research|instruct|chat-latest|chatgpt|oss|orchestrator|safeguard|shield|translator|rerank)\b/i
+
+/** Strips a snapshot date or build number from a model id and reports whether one was there and its sortable date. */
+function undated(id: string): { clean: string; dated: boolean; date: number } {
+  let clean = id, dated = false, date = 0
+  const take = (re: RegExp, toDate: (m: RegExpExecArray) => number) => {
+    const m = re.exec(clean)
+    if (!m) return
+    dated = true
+    date = Math.max(date, toDate(m))
+    clean = clean.replace(re, '')
+  }
+  take(/(?:^|[-_/.])(20\d{2})-(\d{2})(?:-(\d{2}))?(?=$|[-_/.])/, (m) => Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3] ?? 0))
+  take(/(?:^|[-_/.])(20\d{2})(\d{2})(\d{2})(?=$|[-_/.])/, (m) => Number(m[1]) * 10000 + Number(m[2]) * 100 + Number(m[3]))
+  take(/(?:^|[-_/.])(0[1-9]|1[0-2])-(20\d{2})(?=$|[-_/.])/, (m) => Number(m[2]) * 10000 + Number(m[1]) * 100)
+  take(/(?:^|[-_/.])(0[1-9]|1[0-2])-([0-3]\d)(?=$|[-_/.])/, (m) => Number(m[1]) * 100 + Number(m[2]))
+  take(/(?:^|[-_/.])(0\d{2}|1106|0125|0613)(?=$|[-_/.])/, () => 0)
+  return { clean, dated, date }
+}
+
+/**
+ * Scores one provider's model id as a sortable tuple `[class, version, notDated, tier, date]` (higher is better):
+ * newest general-purpose GA generation first, preferring balanced strong tiers over tiny, specialized, preview or dated copies.
+ */
+function scoreOne(route: Exclude<Route, 'openrouter'>, id: string): [number, number, number, number, number] {
+  if (/^ft:/i.test(id)) return [0, 0, 0, 0, 0]
+  const { clean, dated, date } = undated(id)
+  const small = SMALL.test(clean), preview = PREVIEW.test(clean), specialized = SPECIALIZED.test(clean)
+  const notDated = dated ? 0 : 1
+  const clsOf = (main: boolean, secondary = false) =>
+    specialized ? (preview ? 0 : 1)
+      : preview ? (small ? 0 : main || secondary ? 2 : 0)
+        : small ? (main || secondary ? 3 : 0)
+          : main ? 5 : secondary ? 4 : 1
+
+  if (route === 'openai') {
+    const gpt = /^gpt-(\d+)(?:\.(\d+))?(o)?(?=$|[-_/.])/i.exec(clean)
+    if (gpt) {
+      const ver = Number(gpt[1]) * 100 + Math.min(Number(gpt[2] ?? 0), 99) + (gpt[3] ? 0.5 : 0)
+      const tier = /(^|-)sol($|-)/i.test(clean) ? 5
+        : /^gpt-\d+(\.\d+)?o?$/i.test(clean) ? 4
+          : /(^|-)(astra|pro)($|-)/i.test(clean) ? 3
+            : /(^|-)terra($|-)/i.test(clean) ? 1
+              : /(^|-)luna($|-)/i.test(clean) ? 0
+                : 2
+      return [clsOf(true), ver, notDated, tier, date]
+    }
+    const o = /^o(\d+)(?:\.(\d+))?(?=$|[-_/.])/i.exec(clean)
+    if (o) {
+      const ver = Number(o[1]) * 100 + Math.min(Number(o[2] ?? 0), 99)
+      return [clsOf(false, true), ver, notDated, /(^|-)pro($|-)/i.test(clean) ? 1 : 2, date]
+    }
+    return [clsOf(false), 0, notDated, 0, date]
+  }
+
+  if (route === 'anthropic') {
+    if (/^claude-/i.test(clean)) {
+      const v = /(?:^|-)(\d{1,2})(?:[.-](\d{1,2}))?(?=$|-)/.exec(clean)
+      const ver = v ? Number(v[1]) * 100 + Math.min(Number(v[2] ?? 0), 99) : 0
+      const tier = /opus/i.test(clean) ? 4 : /sonnet/i.test(clean) ? 3 : /fable/i.test(clean) ? 2 : 1
+      const main = /(opus|sonnet|fable)/i.test(clean) || ver >= 400
+      return [clsOf(main), ver, notDated, tier, date]
+    }
+    return [clsOf(false), 0, notDated, 0, date]
+  }
+
+  // Gemini
+  if (/^gemini-/i.test(clean)) {
+    const v = /^gemini-(\d+)(?:\.(\d+))?(?=$|[-_/.])/i.exec(clean)
+    const ver = v ? Number(v[1]) * 100 + Math.min(Number(v[2] ?? 0), 99) : 0
+    const tier = /(^|-)neon($|-)/i.test(clean) ? 5
+      : /(^|-)pro($|-)/i.test(clean) ? 4
+        : /(^|-)argon($|-)/i.test(clean) ? 3
+          : /(^|-)carbon($|-)/i.test(clean) ? 2
+            : /(^|-)(hydrogen|flash)($|-)/i.test(clean) ? 0
+              : 1
+    return [clsOf(true), ver, notDated, tier, date]
+  }
+  return [clsOf(false), 0, notDated, 0, date]
+}
+
+function rankOf(route: Route, id: string): number[] {
+  if (route !== 'openrouter') return scoreOne(route, id)
+  const slash = id.indexOf('/')
+  const vendor = slash > 0 ? id.slice(0, slash).toLowerCase() : ''
+  const rest = slash > 0 ? id.slice(slash + 1) : id
+  const tagged = rest.includes(':')
+  const slug = tagged ? rest.slice(0, rest.indexOf(':')) : rest
+  const mapped: Exclude<Route, 'openrouter'> | null = vendor === 'anthropic' ? 'anthropic' : vendor === 'openai' ? 'openai' : vendor === 'google' ? 'gemini' : null
+  if (mapped) {
+    const [cls, ver, notDated, tier, date] = scoreOne(mapped, slug)
+    const lab = mapped === 'anthropic' ? 3 : mapped === 'openai' ? 2 : 1
+    return [tagged ? Math.min(cls, 2) : cls, lab, ver, notDated, tier, date]
+  }
+  if (vendor === 'openrouter') return [0, 0, 0, 1, 0, 0]
+  const { clean, dated, date } = undated(slug)
+  const cls = tagged || PREVIEW.test(clean) || SMALL.test(clean) || SPECIALIZED.test(clean) ? 0 : 1
+  return [cls, 0, 0, dated ? 0 : 1, 0, date]
+}
+
+const compareRank = (a: number[], b: number[]): number => {
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return b[i] - a[i]
+  return 0
+}
+
+/** The model offered first for a provider's list: keeps `was` when still listed, otherwise picks the strongest recent default. */
+export function preferred(route: Route, list: Listed[], was?: string): Listed | undefined {
+  if (!list.length) return undefined
+  if (was) { const kept = list.find((m) => m.id === was); if (kept) return kept }
+  let best = list[0], bestRank = rankOf(route, best.id)
+  for (let i = 1; i < list.length; i++) {
+    const r = rankOf(route, list[i].id)
+    if (compareRank(r, bestRank) < 0) { best = list[i]; bestRank = r }
+  }
+  return best
+}
 
 /**
  * The models a key can use, as its provider lists them, the likeliest to be wanted first. Also how a key is tried:
@@ -201,12 +320,21 @@ export async function models(route: Route, key: string, how: { fetch?: Fetch; si
   if (!res.ok) throw await refused(route, res)
   const body = await res.json().catch(() => ({})) as Record<string, any>
   const short = (s: unknown) => String(s ?? '').slice(0, 80)
-  if (route === 'anthropic') return (body.data ?? []).map((m: any) => ({ id: short(m.id), name: short(m.display_name ?? m.id) }))
-  if (route === 'gemini') return (body.models ?? []).filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent') && WRITES.test(m.name)).map((m: any) => ({ id: short(m.name).replace(/^models\//, ''), name: short(m.displayName ?? m.name) })).reverse()
-  const listed = (body.data ?? []).filter((m: any) => WRITES.test(String(m.id)))
-  // OpenAI lists in no order: the newest first. Fine-tunes and dated copies of a model after its plain name.
-  if (route === 'openai') listed.sort((a: any, b: any) => (b.created ?? 0) - (a.created ?? 0))
-  return listed.map((m: any) => ({ id: short(m.id), name: short(m.name ?? m.id) }))
+  let out: Listed[]
+  if (route === 'anthropic') {
+    out = (body.data ?? []).map((m: any) => ({ id: short(m.id), name: short(m.display_name ?? m.id) }))
+  } else if (route === 'gemini') {
+    out = (body.models ?? []).filter((m: any) => (m.supportedGenerationMethods ?? []).includes('generateContent') && WRITES.test(m.name)).map((m: any) => ({ id: short(m.name).replace(/^models\//, ''), name: short(m.displayName ?? m.name) })).reverse()
+  } else {
+    const listed = (body.data ?? []).filter((m: any) => WRITES.test(String(m.id)))
+    // OpenAI lists in no order: newest first as the tie-breaker before ranking by generation and tier.
+    if (route === 'openai') listed.sort((a: any, b: any) => (b.created ?? 0) - (a.created ?? 0))
+    else if (listed.some((m: any) => typeof m.created === 'number')) listed.sort((a: any, b: any) => (b.created ?? 0) - (a.created ?? 0))
+    out = listed.map((m: any) => ({ id: short(m.id), name: short(m.name ?? m.id) }))
+  }
+  const ranked = out.map((m) => ({ m, r: rankOf(route, m.id) }))
+  ranked.sort((a, b) => compareRank(a.r, b.r))
+  return ranked.map((x) => x.m)
 }
 
 const KEPT = 'village.ai'

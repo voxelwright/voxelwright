@@ -4,7 +4,7 @@
 //
 //   node test/models.mjs
 import assert from 'node:assert/strict'
-import { ABOUT, AT, Unanswered, keep, kept, models, reply } from '../page/models.ts'
+import { ABOUT, AT, Unanswered, keep, kept, models, preferred, reply } from '../page/models.ts'
 
 let steps = 0
 const step = async (name, run) => { await run(); steps++; console.log(`ok  ${name}`) }
@@ -149,11 +149,67 @@ await step('what a provider refuses is said in plain words, without the key', as
 await step('the models a key can use', async () => {
   const a = await models('anthropic', KEY, { fetch: stand(() => json({ data: [{ id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5' }, { id: 'claude-haiku-5-5', display_name: 'Claude Haiku 5.5' }] })) })
   assert.deepEqual(a[0], { id: 'claude-opus-5-5', name: 'Claude Opus 5.5' })
-  const o = await models('openai', KEY, { fetch: stand(() => json({ data: [{ id: 'old-writer', created: 1 }, { id: 'text-embedding-9', created: 9 }, { id: 'new-writer', created: 5 }, { id: 'tts-2', created: 7 }, { id: 'gpt-image-3', created: 8 }] })) })
+  const o = await models('openai', KEY, { fetch: stand(() => json({ data: [{ id: 'old-writer', created: 1 }, { id: 'text-embedding-9', created: 9 }, { id: 'new-writer', created: 5 }, { id: 'tts-2', created: 7 }, { id: 'gpt-image-3', created: 8 }, { id: 'sora-2', created: 10 }, { id: 'gpt-live-1', created: 11 }, { id: 'babbage-002', created: 2 }, { id: 'davinci-002', created: 3 }] })) })
   assert.deepEqual(o.map((m) => m.id), ['new-writer', 'old-writer'])
   const g = await models('gemini', KEY, { fetch: stand(() => json({ models: [{ name: 'models/gemini-a', displayName: 'Gemini A', supportedGenerationMethods: ['generateContent'] }, { name: 'models/embedding-1', supportedGenerationMethods: ['embedContent'] }, { name: 'models/gemini-b', displayName: 'Gemini B', supportedGenerationMethods: ['generateContent', 'countTokens'] }] })) })
   assert.deepEqual(g, [{ id: 'gemini-b', name: 'Gemini B' }, { id: 'gemini-a', name: 'Gemini A' }])
   await fails(() => models('openai', KEY, { fetch: stand(() => json({ error: { message: 'Incorrect API key provided' } }, 401)) }), 'key')
+})
+
+await step('smarter defaults across all four providers', async () => {
+  const list = (...ids) => ids.map((id) => ({ id, name: id }))
+
+  // OpenAI: latest 6.2 generation beats bare 5.5 (even when 5.5 has a newer created timestamp);
+  // sol beats astra/luna within 6.2; undated alias beats dated snapshot; small/specialized/fine-tunes stay out of default.
+  const oai = await models('openai', KEY, {
+    fetch: stand(() => json({
+      data: [
+        { id: 'gpt-5.5', created: 100 },
+        { id: 'gpt-6-cyber', created: 99 },
+        { id: 'gpt-6.2-mini', created: 98 },
+        { id: 'gpt-6.2-sol-2026-11-10', created: 97 },
+        { id: 'gpt-6.2-luna', created: 95 },
+        { id: 'gpt-6.2-astra', created: 94 },
+        { id: 'gpt-6.2-sol', created: 90 },
+        { id: 'gpt-6.1-sol', created: 80 },
+        { id: 'gpt-5-codex', created: 85 },
+        { id: 'ft:gpt-6.2-sol:org::1', created: 120 },
+      ],
+    })),
+  })
+  assert.equal(oai[0].id, 'gpt-6.2-sol')
+  assert.equal(preferred('openai', oai)?.id, 'gpt-6.2-sol')
+  assert.deepEqual(oai.slice(0, 4).map((m) => m.id), ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.2-luna', 'gpt-6.2-sol-2026-11-10'])
+  assert.equal(preferred('openai', list('gpt-5.5', 'gpt-6.2-astra', 'gpt-6.2-luna'))?.id, 'gpt-6.2-astra')
+  assert.equal(preferred('openai', list('gpt-5.5', 'gpt-6.2-luna'))?.id, 'gpt-6.2-luna')
+  assert.equal(preferred('openai', list('gpt-6.2-mini', 'gpt-6.2'))?.id, 'gpt-6.2')
+  assert.equal(preferred('openai', list('gpt-6.2-sol', 'gpt-7-nova'))?.id, 'gpt-7-nova')
+  assert.equal(preferred('openai', list('gpt-5.5', 'gpt-6.2-sol-2026-11-10'))?.id, 'gpt-6.2-sol-2026-11-10')
+  assert.equal(preferred('openai', list('gpt-4', 'gpt-4o', 'gpt-4.1'))?.id, 'gpt-4.1')
+  assert.equal(preferred('openai', list('gpt-4', 'gpt-4o'))?.id, 'gpt-4o')
+  assert.equal(preferred('openai', list('o4-mini', 'o3', 'gpt-6-cyber'))?.id, 'o3')
+
+  // Anthropic: newest Opus > Sonnet > Fable; undated alias beats compact YYYYMMDD snapshot; dated newer beats undated older; future versions win automatically.
+  assert.equal(preferred('anthropic', list('claude-haiku-5-5', 'claude-opus-5-5-20260925', 'claude-fable-5-2', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-opus-4-6'))?.id, 'claude-opus-5-5')
+  assert.equal(preferred('anthropic', list('claude-opus-4-6', 'claude-opus-5-5-20260925', 'claude-opus-5-5-20261015'))?.id, 'claude-opus-5-5-20261015')
+  assert.equal(preferred('anthropic', list('claude-opus-5-5', 'claude-sonnet-6-0'))?.id, 'claude-sonnet-6-0')
+
+  // Gemini: Gemini 4 element tiers beat older 2.5/3.x pro/flash; neon > argon > carbon > hydrogen; previews, lite, orchestrator and gemma stay below GA mainline.
+  assert.equal(preferred('gemini', list('gemini-2.5-pro', 'gemini-3.8-flash', 'gemini-4-hydrogen', 'gemini-4-carbon', 'gemini-4-argon', 'gemini-4-neon', 'gemini-4-neon-preview-11-2026', 'gemini-pro-orchestrator-neon', 'gemma-3-27b-it'))?.id, 'gemini-4-neon')
+  assert.equal(preferred('gemini', list('gemini-2.5-pro', 'gemini-4-carbon', 'gemini-4-hydrogen'))?.id, 'gemini-4-carbon')
+  assert.equal(preferred('gemini', list('gemini-4-flash', 'gemini-4-pro'))?.id, 'gemini-4-pro')
+  assert.equal(preferred('gemini', list('gemini-2.5-pro', 'gemini-3.8-flash', 'gemini-2.5-flash-lite'))?.id, 'gemini-3.8-flash')
+  assert.equal(preferred('gemini', list('gemini-4-neon', 'gemini-5-krypton'))?.id, 'gemini-5-krypton')
+
+  // OpenRouter: clean frontier models beat :free/:batch/:beta variants and meta-routers; picks latest version per lab and falls back cleanly across labs.
+  assert.equal(preferred('openrouter', list('openrouter/auto', 'mistral/large-3', 'anthropic/claude-opus-5.5:free', 'anthropic/claude-3.7-sonnet', 'openai/gpt-6.2-sol', 'google/gemini-4-neon', 'anthropic/claude-opus-5.5'))?.id, 'anthropic/claude-opus-5.5')
+  assert.equal(preferred('openrouter', list('openrouter/auto', 'mistral/large-3', 'anthropic/claude-haiku-5.5', 'openai/gpt-5.5', 'openai/gpt-6.2-sol', 'google/gemini-4-neon'))?.id, 'openai/gpt-6.2-sol')
+  assert.equal(preferred('openrouter', list('openrouter/auto', 'mistral/large-3', 'google/gemini-2.5-pro', 'google/gemini-4-neon'))?.id, 'google/gemini-4-neon')
+
+  // Preserves a visitor's saved model when still listed; falls back to the smart default if it disappeared.
+  assert.equal(preferred('openai', oai, 'gpt-6.2-astra')?.id, 'gpt-6.2-astra')
+  assert.equal(preferred('openai', oai, 'gpt-removed')?.id, 'gpt-6.2-sol')
+  assert.equal(preferred('openai', []), undefined)
 })
 
 await step('what is connected is kept in this browser only, and a record that is not one is nothing', async () => {

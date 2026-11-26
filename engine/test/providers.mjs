@@ -7,12 +7,42 @@ export const KEYS = { anthropic: 'sk-ant-madeup-0001-Q7b2Lx', openai: 'sk-proj-m
 export const HOSTS = { anthropic: 'api.anthropic.com', openai: 'api.openai.com', gemini: 'generativelanguage.googleapis.com', openrouter: 'openrouter.ai' }
 export const ROUTES = Object.keys(KEYS)
 /** The model the panel should offer first from each list below. */
-export const FIRST = { anthropic: 'claude-opus-5-5', openai: 'gpt-6.2', gemini: 'gemini-4-pro', openrouter: 'anthropic/claude-opus-5.5' }
+export const FIRST = { anthropic: 'claude-opus-5-5', openai: 'gpt-6.2-sol', gemini: 'gemini-4-neon', openrouter: 'anthropic/claude-opus-5.5' }
 const LISTS = {
-  anthropic: { data: [{ id: 'claude-haiku-5-5', display_name: 'Claude Haiku 5.5' }, { id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5' }, { id: 'claude-sonnet-5-5', display_name: 'Claude Sonnet 5.5' }] },
-  openai: { data: [{ id: 'gpt-6.2-mini', created: 10 }, { id: 'gpt-6.2', created: 9 }, { id: 'text-embedding-9', created: 11 }] },
-  gemini: { models: [{ name: 'models/gemini-4-pro', displayName: 'Gemini 4 Pro', supportedGenerationMethods: ['generateContent'] }, { name: 'models/gemini-4-flash', displayName: 'Gemini 4 Flash', supportedGenerationMethods: ['generateContent'] }] },
-  openrouter: { data: [{ id: 'mistral/large-3', name: 'Mistral Large 3' }, { id: 'anthropic/claude-opus-5.5', name: 'Anthropic: Claude Opus 5.5' }] },
+  anthropic: { data: [
+    { id: 'claude-haiku-5-5', display_name: 'Claude Haiku 5.5' },
+    { id: 'claude-opus-5-5-20260925', display_name: 'Claude Opus 5.5 (2026-09-25)' },
+    { id: 'claude-fable-5-2', display_name: 'Claude Fable 5.2' },
+    { id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5' },
+    { id: 'claude-sonnet-5-5', display_name: 'Claude Sonnet 5.5' },
+  ] },
+  openai: { data: [
+    { id: 'gpt-5.5', created: 12 },
+    { id: 'gpt-6.2-mini', created: 10 },
+    { id: 'gpt-6-cyber', created: 11 },
+    { id: 'gpt-6.2-sol-2026-11-10', created: 10 },
+    { id: 'gpt-6.2-astra', created: 9 },
+    { id: 'gpt-6.2-sol', created: 9 },
+    { id: 'gpt-6-luna', created: 8 },
+    { id: 'text-embedding-9', created: 13 },
+  ] },
+  gemini: { models: [
+    { name: 'models/gemini-2.5-pro', displayName: 'Gemini 2.5 Pro', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-3.8-flash', displayName: 'Gemini 3.8 Flash', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-4-hydrogen', displayName: 'Gemini 4 Hydrogen', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-4-carbon', displayName: 'Gemini 4 Carbon', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-4-neon', displayName: 'Gemini 4 Neon', supportedGenerationMethods: ['generateContent'] },
+    { name: 'models/gemini-4-neon-preview-11-2026', displayName: 'Gemini 4 Neon Preview', supportedGenerationMethods: ['generateContent'] },
+  ] },
+  openrouter: { data: [
+    { id: 'openrouter/auto', name: 'OpenRouter: Auto' },
+    { id: 'mistral/large-3', name: 'Mistral Large 3' },
+    { id: 'anthropic/claude-opus-5.5:free', name: 'Anthropic: Claude Opus 5.5 (free)' },
+    { id: 'anthropic/claude-3.7-sonnet', name: 'Anthropic: Claude 3.7 Sonnet' },
+    { id: 'openai/gpt-6.2-sol', name: 'OpenAI: GPT-6.2 Sol' },
+    { id: 'google/gemini-4-neon', name: 'Google: Gemini 4 Neon' },
+    { id: 'anthropic/claude-opus-5.5', name: 'Anthropic: Claude Opus 5.5' },
+  ] },
 }
 /** A small thing in the maker's form (make/form.mjs), as test/sf-make.mjs has it. */
 export const STALL = JSON.stringify({ name: 'fruit stall', size: [34, 25, 18], parts: [
@@ -27,8 +57,8 @@ const sse = (events) => events.map((e) => `data: ${typeof e === 'string' ? e : J
 /** The stream a provider sends for the stall; `whole` false leaves off its end, as a line that drops part way. */
 export const stream = (route, whole = true) => {
   const p = pieces(STALL), half = whole ? p : p.slice(0, Math.ceil(p.length / 2))
-  if (route === 'anthropic') return sse([{ type: 'message_start', message: { model: 'claude-opus-5-5', usage: { input_tokens: 1200 } } }, ...half.map((text) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })), ...(whole ? [{ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 800 } }, { type: 'message_stop' }] : [])])
-  if (route === 'gemini') return sse([...half.map((text) => ({ candidates: [{ content: { parts: [{ text }] } }] })), ...(whole ? [{ candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 1200, candidatesTokenCount: 800 }, modelVersion: 'gemini-4-pro' }] : [])])
+  if (route === 'anthropic') return sse([{ type: 'message_start', message: { model: FIRST.anthropic, usage: { input_tokens: 1200 } } }, ...half.map((text) => ({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text } })), ...(whole ? [{ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 800 } }, { type: 'message_stop' }] : [])])
+  if (route === 'gemini') return sse([...half.map((text) => ({ candidates: [{ content: { parts: [{ text }] } }] })), ...(whole ? [{ candidates: [{ content: { parts: [{ text: '' }] }, finishReason: 'STOP' }], usageMetadata: { promptTokenCount: 1200, candidatesTokenCount: 800 }, modelVersion: FIRST.gemini }] : [])])
   return sse([...half.map((content) => ({ model: FIRST[route], choices: [{ delta: { content } }] })), ...(whole ? [{ choices: [{ delta: {}, finish_reason: 'stop' }] }, { choices: [], usage: { prompt_tokens: 1200, completion_tokens: 800 } }, '[DONE]'] : [])])
 }
 export const PROVIDERS = /^https:\/\/(api\.anthropic\.com|api\.openai\.com|generativelanguage\.googleapis\.com|openrouter\.ai)\//
