@@ -44,8 +44,7 @@ const PLACES = [
   ['Coit Tower', 37.80241, -122.40582, 'landmark'],
   ['Lombard Street', 37.80214, -122.41874, 'landmark'],
   ['Pier 39', 37.80867, -122.40982, 'landmark'],
-  ['Alcatraz Island', 37.82698, -122.42296, 'landmark'],
-  ['Golden Gate Bridge', 37.8199, -122.4783, 'landmark'],
+  ['Golden Gate Bridge', 37.8078, -122.4748, 'landmark'],
   ['Painted Ladies', 37.7763, -122.4328, 'landmark'],
   ['Twin Peaks', 37.7544, -122.4477, 'landmark'],
   ['Sutro Tower', 37.7552, -122.4528, 'landmark'],
@@ -452,18 +451,34 @@ export function buildMap({ releaseDir, graphDir, tagsPath = join(HERE, 'street-t
     for (let i = 0; i < Math.min(spare, ranked.length); i++) bldgs.push(ranked[i].b)
   }
 
-  // Add iconic hero landmarks from sf/heroes.json as crisp 3D silhouettes when outside L0 or taller.
+  // Add iconic hero landmarks from sf/heroes.json; water-spanning bridges map to their SF shore viewpoints so GPS
+  // routing and Visit fast-travel land on dry ground beside the span instead of mid-water.
+  const HERO_SHORE = {
+    'Golden Gate Bridge': [37.8078, -122.4748],
+    'Bay Bridge, western span': [37.7913, -122.3889],
+  }
   const heroes = existsSync(heroesPath) ? JSON.parse(readFileSync(heroesPath, 'utf8')) : []
   const landmarks = []
+  const hasSquare = (px, pz) => {
+    const names = manifest.names ? Object.keys(manifest.names) : []
+    if (names.length < 20) return true
+    for (const key of names) {
+      const [e, n] = key.split('_').map(Number)
+      const sx0 = (e * 1000 - 500000) * 10, sz1 = (4250000 - n * 1000) * 10
+      if (px >= sx0 - 1500 && px <= sx0 + 11500 && pz >= sz1 - 11500 && pz <= sz1 + 1500) return true
+    }
+    return false
+  }
   for (const h of heroes) {
-    const [hx, hz] = place(h.at[0], h.at[1])
-    if (hx >= x0 && hx <= x1 && hz >= z0 && hz <= z1) {
+    const ll = HERO_SHORE[h.name] ?? h.at
+    const [hx, hz] = place(ll[0], ll[1])
+    if (hx >= x0 && hx <= x1 && hz >= z0 && hz <= z1 && hasSquare(hx, hz)) {
       landmarks.push({ name: h.name, x: hx, z: hz, kind: 'landmark' })
     }
   }
   for (const [name, lat, lon, kind] of PLACES) {
     const [px, pz] = place(lat, lon)
-    if (px >= x0 && px <= x1 && pz >= z0 && pz <= z1) {
+    if (px >= x0 && px <= x1 && pz >= z0 && pz <= z1 && hasSquare(px, pz)) {
       if (!landmarks.some((l) => l.name === name)) landmarks.push({ name, x: px, z: pz, kind })
     }
   }
