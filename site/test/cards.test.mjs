@@ -138,6 +138,7 @@ test("the committed cards are 1200×630 PNGs within the size budget", () => {
   const dir = path.join(ROOT, "static", "og");
   const pngs = fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith(".png"));
   assert.ok(pngs.includes("home.png"));
+  assert.ok(pngs.includes("front.png"));
   for (const file of pngs) {
     const png = fs.readFileSync(path.join(dir, file));
     assert.equal(png.subarray(1, 4).toString(), "PNG", file);

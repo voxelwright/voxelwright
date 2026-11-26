@@ -10,12 +10,12 @@ Needs Node 24 or later (developed on Node 25). Run `npm install` once.
 | Command | What it does |
 | --- | --- |
 | `npm run new "Title"` | Creates `posts/<slug>/index.md` with front matter and `draft: true`. No body. |
-| `npm run dev` | Builds with drafts into `.dev/`, watches, serves at http://localhost:4321/blog/ with live reload (`/` is the realm's and answers 404 here). Uses `cf dev` (the Workers runtime, Markdown negotiation on); falls back to a Node server that mimics it. `npm run dev -- --node` forces the fallback. |
-| `npm run build` | Production build into `dist/`. Drafts are left out. |
+| `npm run dev` | Builds with drafts into `.dev/`, watches, serves at http://localhost:4321/ with live reload (personal front page at `/`, blog under `/blog/`). Uses `cf dev` (the Workers runtime, Markdown negotiation on); falls back to a Node server that mimics it. `npm run dev -- --node` forces the fallback. |
+| `npm run build` | Production build into `dist/` (personal front page at `/` and blog under `/blog/`). Drafts are left out. Set `SITE_PERSONAL_HOME=0` to omit `/`. |
 | `npm run check` | Builds, checks the output (production and a drafts-included build), and runs the tests. |
-| `npm run check-home` | Verifies the personal front page at `/` (off-switch identity, links, no-JS/no-WebGPU, WebGPU break/mend, reduced motion, keyboard focus). |
+| `npm run check-home` | Verifies the personal front page at `/` (switch behavior, links, share card, `village.ai` cleanup, no-JS/no-WebGPU, WebGPU break/mend, reduced motion, keyboard focus). |
 
-The main-branch workflow builds two Workers from `deploy/`. zahynailo.dev serves the SF realm at `/` and this site under `/blog/`. voxelwright.world serves the realm and links here for the blog. See [deployment](../deploy/README.md). This folder came in with `git subtree` (history kept). The realm, the site and the Voxelmorphism kit stay together in this one repository (#534).
+The main-branch workflow builds two Workers from `deploy/`. zahynailo.dev serves this site (the personal front page at `/` and the blog under `/blog/`) as static assets only. voxelwright.world serves the SF realm and links here for the blog. See [deployment](../deploy/README.md). This folder came in with `git subtree` (history kept). The realm, the site and the Voxelmorphism kit stay together in this one repository (#534).
 
 ## Writing a post
 
@@ -75,15 +75,14 @@ and the import options are in `notes/ai-session-format.md`.
 
 ## What the build writes
 
-`site.config.mjs` mounts the site at `base: "/blog/"` on zahynailo.dev, whose `/` is the SF
-realm. `dist/` mirrors the origin, so a deploy copies it into the Worker's assets unchanged:
+`site.config.mjs` keeps `base: "/blog/"` so every blog route stays under `/blog/` on zahynailo.dev. `dist/` mirrors the origin, so a deploy copies it into the Worker's assets unchanged:
 
+- At `/`: the personal front page (`/index.html` and `/index.md`, with its minimal Voxelmorphism enhancement bundle at `/blog/front/front.js`), built on by default by `npm run build`, `npm run dev` and `npm run check`. Set `SITE_PERSONAL_HOME=0` to omit `/`; direct `generator/build.mjs` calls in unit tests keep it off by default unless `personalHome: true` or `SITE_PERSONAL_HOME=1` is passed.
 - `/blog/` (posts list), `/blog/<slug>/`, `/blog/tags/`, `/blog/tags/<tag>/`, `/blog/voxelmorphism/`, and every static file under `/blog/`
 - A Markdown twin for every page: `/blog/index.md`, `/blog/<slug>.md`, `/blog/tags/<tag>.md`, `/blog/voxelmorphism.md`, linked from each page's `<link rel="alternate" type="text/markdown">`
 - `/blog/llms.txt` ([llmstxt.org](https://llmstxt.org)), `/blog/feed.xml` (Atom), `/blog/sitemap.xml`
 - At the root: `/robots.txt` (AI crawlers allowed, Sitemap at `/blog/sitemap.xml`), `/404.html` (the host's not-found page), and `/_headers` (`static/_headers` with its patterns moved under `/blog/`)
-- No `/` by default: the old 3D landing is built only with `base: "/"`, which writes the site as the whole origin (`/`, `/blog/`, `/tags/`, `/index.md`, `/blog.md`, ...). `npm run cards` builds that way.
-- Optional personal front page at `/` (`SITE_PERSONAL_HOME=1`, off by default): while `base` stays `"/blog/"`, setting `SITE_PERSONAL_HOME=1` for `npm run build` or `npm run dev` also writes the standalone personal front page at `/index.html` and `/index.md` (with its minimal Voxelmorphism enhancement bundle at `/blog/front/front.js`), leaving every `/blog/` path unchanged. Preview locally with `SITE_PERSONAL_HOME=1 npm run dev -- --node`.
+- The old 3D landing is built only with `base: "/"`, which writes the site as the whole origin (`/`, `/blog/`, `/tags/`, `/index.md`, `/blog.md`, ...). `npm run cards` builds that way.
 
 The base path rule lives in `lib/paths.mjs`.
 

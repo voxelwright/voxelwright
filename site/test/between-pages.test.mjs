@@ -103,5 +103,8 @@ test("every page opts in to transitions and names at most one title", () => {
     const titles = (html.match(/class="[^"]*\b(?:page-title|post-title)\b[^"]*"/g) ?? []).length;
     assert.ok(titles <= 1, `${file}: ${titles} titles would share the name page-title`);
     assert.equal((html.match(/class="[^"]*\bsite-bar\b/g) ?? []).length, 1, `${file}: one bar`);
+    // mounted under /blog/, "/" is the personal page rather than the 3D city landing
+    assert.doesNotMatch(head, /from-city|to-city/, `${file}: mounted blog pages must not play the city arrival transition`);
+    assert.match(head, /localStorage\.removeItem\("village\.ai"\)/, `${file}: clears left-behind village.ai key`);
   }
 });

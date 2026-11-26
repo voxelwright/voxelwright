@@ -1,6 +1,7 @@
-// Personal front page at "/" when SITE_PERSONAL_HOME=1 (OFF by default).
-// Built only when the site is mounted below "/" (site.base !== "/") and the switch is on,
-// so the blog keeps every path under /blog/ while "/" becomes this fast personal page.
+// Personal front page at "/".
+// Built when the site is mounted below "/" (site.base !== "/") and personalHome is enabled:
+// scripts/build.mjs, scripts/dev.mjs and scripts/check.mjs enable it by default (SITE_PERSONAL_HOME=0 disables it),
+// while direct generator/build.mjs calls in tests keep it off by default (SITE_PERSONAL_HOME=1 enables it).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 import { build, transform } from "esbuild";
 import { copyModules } from "voxelmorphism/browser";
 import { escapeHtml as e } from "./markdown.mjs";
-import { CARD, SF_NIGHT } from "./pages.mjs";
+import { CARD, CLEAR_REALM_KEY, SF_NIGHT } from "./pages.mjs";
 import { blogPath, sitePath } from "../lib/paths.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
@@ -36,9 +37,11 @@ const UNUSED_KIT_SECTIONS = new Set([
 export const WORLD_URL = "https://voxelwright.world";
 export const BIO = "Building Voxelwright in San Francisco: worlds people make by talking, with AI agents.";
 
-/** True when the personal front page switch is enabled (SITE_PERSONAL_HOME=1). */
-export function personalHomeOn(env = process.env) {
-  return env?.SITE_PERSONAL_HOME === "1";
+/** True when the personal front page should be built; explicit SITE_PERSONAL_HOME=1/0 overrides fallback. */
+export function personalHomeOn(env = process.env, fallback = false) {
+  if (env?.SITE_PERSONAL_HOME === "1") return true;
+  if (env?.SITE_PERSONAL_HOME === "0") return false;
+  return fallback;
 }
 
 /** Social links read directly from site.config.mjs `links`. */
@@ -159,7 +162,7 @@ es.onmessage = () => location.reload();
 </script>`;
 
 function shareMetaFront(site, description) {
-  const image = site.origin + sitePath(site.base, "/og/home.png");
+  const image = site.origin + sitePath(site.base, "/og/front.png");
   const url = site.origin + "/";
   const alt = `${site.title} — ${description}`;
   const tags = [
@@ -209,7 +212,7 @@ ${shareMetaFront(site, description)}
 <link rel="icon" href="${at("/favicon.svg")}" type="image/svg+xml">
 <style>${css}</style>
 ${EARLY_FRONT}
-</head>
+${CLEAR_REALM_KEY}</head>
 <body class="front-page" data-page="front">
 <main class="front-column">
 <header class="front-head">

@@ -14,6 +14,7 @@ import path from "node:path";
 import zlib from "node:zlib";
 import { createRequire } from "node:module";
 import { build } from "../generator/build.mjs";
+import { BIO, WORLD_URL } from "../generator/front.mjs";
 import { shareCard, CARD } from "../generator/pages.mjs";
 import { startServer } from "./serve.mjs";
 import siteConfig from "../site.config.mjs";
@@ -49,6 +50,7 @@ const PAGE = `<!doctype html>
 <meta charset="utf-8">
 <style>
 @font-face { font-family: "IBM Plex Sans"; src: url(/vendor/village/kit/fonts/ibm-plex-sans/ibm-plex-sans-latin-wght-normal.woff2) format("woff2"); font-weight: 100 700; }
+@font-face { font-family: "IBM Plex Mono"; src: url(/vendor/village/kit/fonts/ibm-plex-mono/ibm-plex-mono-latin-400-normal.woff2) format("woff2"); font-weight: 400; }
 @font-face { font-family: "Source Serif 4"; src: url(/fonts/source-serif-4/source-serif-4-latin-opsz-normal.woff2) format("woff2"); font-weight: 200 900; }
 html, body { margin: 0; background: #000; }
 </style>
@@ -63,13 +65,13 @@ import { surveyCamera, cropCamera, project, cellsPerMetre } from "/landing/surve
 
 const W = ${CARD.width}, H = ${CARD.height}, R = devicePixelRatio;
 const cream = "#fff1ce", dark = "#082a29";
-const serif = '"Source Serif 4"', sans = '"IBM Plex Sans"';
+const serif = '"Source Serif 4"', sans = '"IBM Plex Sans"', mono = '"IBM Plex Mono"';
 
 const index = await (await fetch("/landing/place.json")).json();
 const poster = new Image();
 poster.src = "/landing/ina.webp";
 await poster.decode();
-for (const font of ["560 40px " + serif, "650 40px " + sans, "700 40px " + sans])
+for (const font of ["560 40px " + serif, "400 40px " + sans, "650 40px " + sans, "700 40px " + sans, "400 28px " + mono])
   if (!(await document.fonts.load(font)).length) throw Error("The sign's face did not load: " + font);
 
 const distance = (a, b) => Math.hypot(...a.map((v, i) => v - b[i]));
@@ -192,6 +194,46 @@ window.paintCard = ({ title, plates, frame }) => {
   o.imageSmoothingQuality = "high";
   o.drawImage(big, 0, 0, W, H);
   const data = o.getImageData(0, 0, W, H).data;
+  let text = "";
+  for (let i = 0; i < data.length; i += 0x8000) text += String.fromCharCode(...data.subarray(i, i + 0x8000));
+  return btoa(text);
+};
+window.paintFrontCard = ({ title, bio, host, worldHost }) => {
+  const out = document.createElement("canvas");
+  out.width = W;
+  out.height = H;
+  const c = out.getContext("2d");
+  // Walnut instrument day tokens (engine/kit/css/fittings.css): warm ground, charcoal ink, enamel accent.
+  c.fillStyle = "#efece3";
+  c.fillRect(0, 0, W, H);
+  c.fillStyle = "#aa4a27";
+  c.fillRect(0, 0, W, 12);
+
+  const x = 112;
+  const maxWidth = W - x * 2;
+  c.textAlign = "left";
+  c.textBaseline = "alphabetic";
+  c.fillStyle = "#262b25";
+  c.font = "650 76px " + serif;
+  c.fillText(title, x, 240);
+
+  c.fillStyle = "#3e4037";
+  c.font = "400 32px " + sans;
+  const lines = wrap(c, bio.trim().split(/\s+/), maxWidth);
+  lines.forEach((line, i) => c.fillText(line, x, 314 + i * 48));
+
+  const ruleY = 314 + lines.length * 48 + 38;
+  c.fillStyle = "#d4cbb5";
+  c.fillRect(x, ruleY, maxWidth, 3);
+
+  c.font = "400 24px " + mono;
+  c.fillStyle = "#aa4a27";
+  c.fillText(host, x, ruleY + 54);
+  const hostW = c.measureText(host).width;
+  c.fillStyle = "#3e4037";
+  c.fillText("  ·  " + worldHost, x + hostW, ruleY + 54);
+
+  const data = c.getImageData(0, 0, W, H).data;
   let text = "";
   for (let i = 0; i < data.length; i += 0x8000) text += String.fromCharCode(...data.subarray(i, i + 0x8000));
   return btoa(text);
@@ -383,7 +425,10 @@ export async function renderCards(jobs, { root, frame = FRAME }) {
     });
     const results = [];
     for (const job of jobs) {
-      const rgba = Buffer.from(await page.evaluate((args) => window.paintCard(args), { ...job, frame }), "base64");
+      const rgba = Buffer.from(
+        await page.evaluate((args) => (args.front ? window.paintFrontCard(args) : window.paintCard(args)), { ...job, frame }),
+        "base64",
+      );
       results.push({ ...job, rgba });
     }
     return results;
@@ -406,6 +451,7 @@ async function main(args) {
     let jobs = cardJobs(pages, site);
     const title = option("--title");
     if (title) jobs = [{ file: option("--out") ?? "preview.png", title, plates: [site.author, new URL(site.origin).host] }];
+    else jobs.push({ file: "front.png", front: true, title: site.title, bio: BIO, host: new URL(site.origin).host, worldHost: new URL(WORLD_URL).host });
     const frame = { ...FRAME, ...(option("--scale") && { scale: Number(option("--scale")) }), ...(option("--x") && { x: Number(option("--x")) }), ...(option("--y") && { y: Number(option("--y")) }) };
     const cards = (await renderCards(jobs, { root: tmp, frame })).map((card) => ({ ...card, png: encodeCard(card.rgba, CARD.width, CARD.height) }));
     if (title) {

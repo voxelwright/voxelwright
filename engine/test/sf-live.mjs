@@ -2,7 +2,7 @@
 // test/sf.mjs measures the local folder, but from Chrome's own count of the bytes on the wire (CDP encodedDataLength,
 // headers included), since this host is not ours to ask.
 //
-//   node test/sf-live.mjs [--url https://zahynailo.dev/] [--mbit 25] [--shots ~/.village/engine/deploy] [--headed]
+//   node test/sf-live.mjs [--url https://voxelwright.world/] [--mbit 25] [--shots ~/.village/engine/deploy] [--headed]
 //
 // It fails unless: the park is shown within 8 MB over the wire on a cold cache (25 Mbit/s, 40 ms); two clicks on the
 // EXPLORE board take the visitor onto the roof; the credits are on the page; and every board's link, and the blog's
@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { chromium } from 'playwright'
 import { arg, CHROME } from './kit.mjs'
 
-const url = arg('url', 'https://zahynailo.dev/'), mbit = Number(arg('mbit', '25')), shots = arg('shots', join(homedir(), '.village', 'engine', 'deploy'))
+const url = arg('url', 'https://voxelwright.world/'), mbit = Number(arg('mbit', '25')), shots = arg('shots', join(homedir(), '.village', 'engine', 'deploy'))
 const mb = (n) => Math.round((n / 1048576) * 100) / 100
 const failures = []
 const check = (ok, what) => { console.log(`  ${ok ? 'ok  ' : 'FAIL'} ${what}`); if (!ok) failures.push(what) }

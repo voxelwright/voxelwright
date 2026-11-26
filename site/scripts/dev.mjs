@@ -13,7 +13,7 @@ import site from "../site.config.mjs";
 const ROOT = path.resolve(import.meta.dirname, "..");
 const DEV_DIR = ".dev";
 const PORT = Number(process.env.PORT ?? 4321);
-const BASE = personalHomeOn() ? "/" : normalizeBase(site.base); // the site is served at its mount, or "/" when the personal front page is on
+const BASE = personalHomeOn(process.env, true) ? "/" : normalizeBase(site.base); // "/" for the personal front page, or the mount when SITE_PERSONAL_HOME=0
 const RELOAD_PORT = PORT + 1; // the dev pages listen here (see generator/pages.mjs)
 const WATCH = ["posts", "static", "generator", "lib", "src", "site.config.mjs"];
 

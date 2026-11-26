@@ -4,11 +4,13 @@
 //   node scripts/check-home.mjs [--shots <dir>] [--bench]
 //
 // Fails if:
-//   - the off-switch build differs in any file path or byte from origin/main (or leaks front files)
+//   - generator/build.mjs defaults to emitting the front page when SITE_PERSONAL_HOME is unset, or leaks front files
+//   - npm run build omits the personal front page when SITE_PERSONAL_HOME is unset
 //   - any required link is missing, out of order, or points at a private repository
 //   - the page needs JavaScript or WebGPU to show its name, line, and links
 //   - reduced motion breaks the sign, keyboard focus is invisible, contrast fails, or 390 px overflows
 //   - any existing /blog/ path disappears or changes when the switch is turned on
+//   - left-behind localStorage key `village.ai` survives loading `/` or `/blog/`
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import crypto from "node:crypto";
@@ -119,7 +121,8 @@ try {
   const ghSegments = new URL(ghLinks[0].url).pathname.split("/").filter(Boolean);
   assert.equal(ghSegments.length, 1, "GitHub link in site.config.mjs must be a profile URL, never a repository URL");
 
-  // 1. Verify default switch is OFF and off-switch build matches origin/main (with current site.config.mjs) file-for-file.
+  // 1. Verify direct generator/build.mjs stays OFF by default (for mounted /blog/ tests),
+  //    while scripts/build.mjs builds the personal front page ON by default without any env var.
   const offDir = path.join(tmp, "out-off");
   const savedEnv = process.env.SITE_PERSONAL_HOME;
   delete process.env.SITE_PERSONAL_HOME;
@@ -130,37 +133,14 @@ try {
   assert.equal(offMap.has("index.html"), false, "off-switch build must not emit index.html");
   assert.equal(offMap.has("index.md"), false, "off-switch build must not emit index.md");
   assert.equal([...offMap.keys()].some((k) => k.includes("/front/")), false, "off-switch build must not emit front/ assets");
+  console.log(`off-switch build: ${offMap.size} files, sha256=${manifestDigest(offMap)}`);
 
-  // Compare against clean origin/main generator + current site.config.mjs (the one authorized links line).
-  let mainChecked = false;
-  try {
-    const ref = execFileSync("git", ["rev-parse", "--verify", "--quiet", "origin/main^{commit}"], { cwd: REPO_ROOT, encoding: "utf8" }).trim();
-    if (ref) {
-      const baseCheckout = path.join(tmp, "base-site");
-      fs.mkdirSync(baseCheckout, { recursive: true });
-      const tar = execFileSync("git", ["archive", ref, "site"], { cwd: REPO_ROOT, maxBuffer: 1 << 30 });
-      execFileSync("tar", ["-x", "-C", baseCheckout, "--strip-components=1"], { input: tar });
-      fs.copyFileSync(path.join(ROOT, "site.config.mjs"), path.join(baseCheckout, "site.config.mjs"));
-      fs.symlinkSync(path.join(ROOT, "node_modules"), path.join(baseCheckout, "node_modules"));
-      const mainOut = path.join(tmp, "out-main");
-      execFileSync(
-        process.execPath,
-        ["--input-type=module", "-e", `const { build } = await import("./generator/build.mjs"); await build({ outDir: ${JSON.stringify(mainOut)} });`],
-        { cwd: baseCheckout, env: { PATH: process.env.PATH, HOME: tmp, TMPDIR: tmp }, stdio: "pipe" },
-      );
-      const mainMap = manifest(mainOut);
-      const diffs = compareManifests(mainMap, offMap);
-      assert.deepEqual(diffs, [], `off-switch build differs from origin/main:\n  ${diffs.join("\n  ")}`);
-      console.log(`off-switch proof: identical to origin/main (${offMap.size} files, sha256=${manifestDigest(offMap)})`);
-      mainChecked = true;
-    }
-  } catch (e) {
-    if (e instanceof assert.AssertionError) throw e;
-    console.log(`off-switch proof: skipped origin/main archive compare (${e.message.split("\n")[0]})`);
-  }
-  if (!mainChecked) {
-    console.log(`off-switch build: ${offMap.size} files, sha256=${manifestDigest(offMap)}`);
-  }
+  // Verify `npm run build` (scripts/build.mjs) emits `/` without SITE_PERSONAL_HOME set.
+  const envWithoutSwitch = { ...process.env };
+  delete envWithoutSwitch.SITE_PERSONAL_HOME;
+  execFileSync(process.execPath, [path.join(ROOT, "scripts/build.mjs")], { cwd: ROOT, env: envWithoutSwitch, stdio: "pipe" });
+  assert.ok(fs.existsSync(path.join(ROOT, "dist/index.html")), "scripts/build.mjs must emit dist/index.html by default");
+  assert.ok(fs.existsSync(path.join(ROOT, "dist/index.md")), "scripts/build.mjs must emit dist/index.md by default");
 
   // 2. Build with personalHome ON and verify all HTML/Markdown/blog-preservation invariants.
   const onDir = path.join(tmp, "out-on");
@@ -185,7 +165,10 @@ try {
   assert.match(html, /<h1 class="vx-sign[^"]*"[^>]*data-vx-board="none"[^>]*>Pavlo Zahynailo<\/h1>/, "vx-sign heading");
   assert.ok(html.includes(BIO), "bio line present in static HTML");
 
-  // Share card / OG / Twitter tags.
+  // Share card / OG / Twitter tags (must use the personal page's own card, not the city's home.png).
+  assert.match(html, /property="og:image" content="https:\/\/zahynailo\.dev\/blog\/og\/front\.png"/, "personal share card");
+  assert.doesNotMatch(html, /\/og\/home\.png/, "must not reuse the city's home.png share card");
+  assert.ok(html.includes('localStorage.removeItem("village.ai")'), "clears left-behind village.ai localStorage key");
   const shareErrs = shareProblems("/", html, { ...baseConfig, base: "/blog/" }, onDir);
   assert.deepEqual(shareErrs, [], `share meta problems: ${shareErrs.join("; ")}`);
 
@@ -419,6 +402,33 @@ try {
       await ctx.close();
       console.log("reduced-motion check: passed");
     }
+
+    // 3e. Left-behind realm AI key (`village.ai`) is removed from localStorage on `/` and `/blog/`, leaving other keys alone.
+    for (const route of ["/", "/blog/"]) {
+      const ctx = await browser.newContext({
+        viewport: { width: 1280, height: 800 },
+        storageState: {
+          cookies: [],
+          origins: [{
+            origin,
+            localStorage: [
+              { name: "village.ai", value: '{"provider":"synthetic","key":"not-real"}' },
+              { name: "vx-theme", value: "dark" },
+            ],
+          }],
+        },
+      });
+      const page = await ctx.newPage();
+      await page.goto(origin + route, { waitUntil: "load" });
+      const after = await page.evaluate(() => ({
+        ai: localStorage.getItem("village.ai"),
+        theme: localStorage.getItem("vx-theme"),
+      }));
+      assert.equal(after.ai, null, `${route}: village.ai must be removed from localStorage`);
+      assert.equal(after.theme, "dark", `${route}: unrelated localStorage keys must be kept`);
+      await ctx.close();
+    }
+    console.log("left-behind village.ai localStorage cleanup check (/ and /blog/): passed");
 
     // 4. Performance benchmark: "/" vs "/blog/" on desktop and phone (cold load, median of 3 runs).
     if (bench) {

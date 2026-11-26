@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import { XMLParser, XMLValidator } from "fast-xml-parser";
 import { build, ContentError } from "../generator/build.mjs";
+import { personalHomeOn } from "../generator/front.mjs";
 import { loadPosts } from "../generator/posts.mjs";
 import { markdownTwin, postPath, sitePath, blogPath, isMounted, HOME } from "../lib/paths.mjs";
 
@@ -36,9 +37,10 @@ function checkOutput(label, out, { posts, site }) {
   const pageFiles = files.filter((f) => f.endsWith("index.html"));
   const pageRoutes = pageFiles.map((f) => rel(f).replace(/index\.html$/, ""));
   const mounted = isMounted(site.base);
-  // mounted below its origin, the site has no home page: "/" is the app mounted there
+  const front = mounted && fs.existsSync(path.join(out, "index.html"));
+  // mounted below its origin without a personal front page, "/" is another app; with one, "/" is built here
   const home = mounted ? null : HOME;
-  for (const route of [home, blogPath(site.base), sitePath(site.base, "/voxelmorphism/")].filter(Boolean)) {
+  for (const route of [home, front ? HOME : null, blogPath(site.base), sitePath(site.base, "/voxelmorphism/")].filter(Boolean)) {
     if (!pageRoutes.includes(route)) fail(label, `missing destination ${route}`);
   }
   let embeds = 0;
@@ -56,7 +58,7 @@ function checkOutput(label, out, { posts, site }) {
     else if (/^[a-z][a-z0-9+.-]*:|^\/\//i.test(url)) return; // external
     else p = new URL(url, "https://site.invalid" + from).pathname;
     p = p.split("#")[0].split("?")[0];
-    if (mounted && p === HOME) return; // the app that owns "/", not part of this build
+    if (mounted && !front && p === HOME) return; // the app that owns "/", not part of this build
     links++;
     if (!exists(p)) fail(label, `${from}: broken internal link ${url}`);
   };
@@ -71,7 +73,7 @@ function checkOutput(label, out, { posts, site }) {
         fail(label, "the landing must mount the enamel support button directly");
       }
     } else if (support.length) fail(label, `${route}: support belongs on the landing`);
-    const twin = markdownTwin(route, site.base);
+    const twin = front && route === HOME ? "/index.md" : markdownTwin(route, site.base);
     if (!exists(twin)) fail(label, `${route}: missing Markdown twin ${twin}`);
     if (!html.includes(`<link rel="alternate" type="text/markdown" href="${twin}"`)) fail(label, `${route}: missing <link rel="alternate" type="text/markdown" href="${twin}">`);
     for (const m of html.matchAll(/\s(?:href|src|poster|before|after)="([^"]*)"/g)) checkLink(route, decode(m[1]));
@@ -142,8 +144,9 @@ function checkOutput(label, out, { posts, site }) {
   if (sitemapValid !== true) fail(label, `sitemap.xml: ${JSON.stringify(sitemapValid.err)}`);
   else {
     const urls = (parser.parse(sitemapXml).urlset?.url ?? []).map((u) => u.loc);
-    for (const route of pageRoutes) if (!urls.includes(site.origin + route)) fail(label, `sitemap.xml: missing ${route}`);
-    if (urls.length !== pageRoutes.length) fail(label, `sitemap.xml: ${urls.length} URLs for ${pageRoutes.length} pages`);
+    const sitemapRoutes = pageRoutes.filter((r) => !(front && r === HOME));
+    for (const route of sitemapRoutes) if (!urls.includes(site.origin + route)) fail(label, `sitemap.xml: missing ${route}`);
+    if (urls.length !== sitemapRoutes.length) fail(label, `sitemap.xml: ${urls.length} URLs for ${sitemapRoutes.length} pages`);
   }
 
   const robots = fs.readFileSync(path.join(out, "robots.txt"), "utf8");
@@ -212,10 +215,11 @@ function decode(s) {
 // Run as a script; tests import shareProblems.
 if (process.argv[1] && path.resolve(process.argv[1]) === import.meta.filename) {
   const draftsDir = fs.mkdtempSync(path.join(os.tmpdir(), "site-check-"));
+  const personalHome = personalHomeOn(process.env, true);
   try {
-    const prod = await run("production", { outDir: path.join(ROOT, "dist") });
+    const prod = await run("production", { outDir: path.join(ROOT, "dist"), personalHome });
     if (prod) console.log(`production: ${checkNoDrafts(path.join(ROOT, "dist"), prod.site)} draft(s) kept out`);
-    await run("with drafts", { outDir: draftsDir, drafts: true });
+    await run("with drafts", { outDir: draftsDir, drafts: true, personalHome });
   } finally {
     fs.rmSync(draftsDir, { recursive: true, force: true });
   }

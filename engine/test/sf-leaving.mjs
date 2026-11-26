@@ -1,4 +1,4 @@
-// A logo's link, run as a page of its own as zahynailo.dev runs it (#450, boards.ts `leaving`): the folder
+// A logo's link, run as a page of its own as voxelwright.world runs it (#450, boards.ts `leaving`): the folder
 // `node sf/build.mjs` writes, served as plain files, not in a frame. Chrome with WebGPU.
 //
 // It fails unless, at 1280 x 720 and on an upright phone (390 x 844):

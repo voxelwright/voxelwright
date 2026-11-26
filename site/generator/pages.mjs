@@ -77,7 +77,7 @@ ${twin ? `<link rel="canonical" href="${e(canonical)}">
 <link rel="stylesheet" href="${at(KIT)}/voxelmorphism.css">
 <link rel="stylesheet" href="${at("/site.css")}">
 ${(page.stylesheets ?? []).map((href) => `<link rel="stylesheet" href="${e(at(href))}">`).join("\n")}
-${EARLY}${BETWEEN}${speculation(site.base)}</head>
+${EARLY}${CLEAR_REALM_KEY}${between(site.base)}${speculation(site.base)}</head>
 <body class="vx-page" data-page="${page.kind}"${page.script ? ' data-boot="page"' : ""}>
 ${home ? '<a class="skip" href="/?view=2d#main">Plain page</a>' : '<a class="skip" href="#main">Skip to content</a>'}
 <div class="vx-page-column">
@@ -128,6 +128,9 @@ const EARLY = `<script>
 }
 </script>
 `;
+
+// Clears any AI provider key left in localStorage when zahynailo.dev served the SF realm.
+export const CLEAR_REALM_KEY = `<script>try{localStorage.removeItem("village.ai")}catch{}</script>\n`;
 
 // ---------------------------------------------------------------------------
 // Share cards: what a link to a page shows on X, LinkedIn, iMessage, Slack and Discord. A card is
@@ -182,25 +185,26 @@ export function shareMeta(page, site) {
 
 // Between pages: the site moves as one place (site.css, "Between pages"). A browser without
 // cross-document view transitions just navigates; this script only names and sorts them.
-//   - The bar stays put and the page's title travels into the next one's: the city sign that was
-//     pressed rises into the Blog's lettering, a list's row grows into its post's title, and back.
-//   - Back to the city is instant: the city waits whole in the back/forward cache.
+//   - The bar stays put and the page's title travels into the next one's: a list's row grows into
+//     its post's title, and back.
+//   - When the site owns "/" (base: "/"), "/" is the standalone 3D landing: the sign rises into the
+//     Blog's lettering ("from-city") and Back to the city is instant. When mounted under /blog/,
+//     "/" is the personal page, so no city arrival transition plays.
 // What it names for one departure is cleared when the page shows again, since the back/forward
 // cache keeps the page as it left. A page prepared ahead (prerendered, see SPECULATION) takes up
 // the night and the instrument chosen since, as the early script would have.
-const BETWEEN = `<script>
+const between = (base) => {
+  const hasCityLanding = !isMounted(base);
+  return `<script>
 {
   const r = document.documentElement, still = matchMedia("(prefers-reduced-motion: reduce)");
   const at = (u) => { try { const x = new URL(u, location.href); return x.origin === location.origin ? x : null; } catch { return null; } };
-  const city = (x) => x?.pathname === "/" && x.searchParams.get("view") !== "2d";
-  const seen = (el) => { const b = el?.getBoundingClientRect(); return !!b && b.width > 1 && b.height > 1 && b.bottom > 0 && b.right > 0 && b.top < innerHeight && b.left < innerWidth; };
+  ${hasCityLanding ? 'const city = (x) => x?.pathname === "/" && x.searchParams.get("view") !== "2d";\n  ' : ""}const seen = (el) => { const b = el?.getBoundingClientRect(); return !!b && b.width > 1 && b.height > 1 && b.bottom > 0 && b.right > 0 && b.top < innerHeight && b.left < innerWidth; };
   const named = new Set();
   const name = (el, n) => { el.style.viewTransitionName = n; named.add(el); };
   const forget = () => { for (const el of named) el.style.viewTransitionName = ""; named.clear(); };
   const travellers = () => document.querySelectorAll(".site-bar, .page-title, .post-title");
-  // a skipped transition rejects its ready promise; nobody waits on it here
-  const skip = (vt) => { vt.ready.catch(() => {}); vt.skipTransition(); };
-  // the row in a list that opens the page at x
+  ${hasCityLanding ? '// a skipped transition rejects its ready promise; nobody waits on it here\n  const skip = (vt) => { vt.ready.catch(() => {}); vt.skipTransition(); };\n  ' : ""}// the row in a list that opens the page at x
   const row = (x) => [...document.querySelectorAll(".post-list a.vx-item")].find((a) => at(a.href)?.pathname === x?.pathname)?.querySelector(".vx-item-title");
   // the title travels from (or to) a stand-in for it on this page; the page's own title stays
   const stand = (el) => { if (!seen(el)) return; for (const t of document.querySelectorAll(".page-title, .post-title")) name(t, "none"); name(el, "page-title"); };
@@ -211,20 +215,15 @@ const BETWEEN = `<script>
   addEventListener("pageswap", (e) => {
     const vt = e.viewTransition, to = at(e.activation?.entry.url ?? pressed?.href ?? "");
     if (!vt) return;
-    if (city(to) && e.activation?.navigationType === "traverse") return skip(vt);
-    if (still.matches || !to) return;
-    if (pressed?.matches(".park-sign a[data-hit]") && at(pressed.href)?.pathname === to.pathname) stand(pressed);
-    else stand(row(to));
+    ${hasCityLanding ? 'if (city(to) && e.activation?.navigationType === "traverse") return skip(vt);\n    ' : ""}if (still.matches || !to) return;
+    ${hasCityLanding ? 'if (pressed?.matches(".park-sign a[data-hit]") && at(pressed.href)?.pathname === to.pathname) stand(pressed);\n    else ' : ""}stand(row(to));
     settle();
   });
   addEventListener("pagereveal", (e) => {
     const vt = e.viewTransition, a = window.navigation?.activation, from = at(a?.from?.url ?? document.referrer);
     if (!vt) return;
-    if (city(at(location.href)) && a?.navigationType === "traverse") return skip(vt);
-    if (still.matches) return;
-    if (city(from)) vt.types?.add("from-city");
-    else if (city(at(location.href))) vt.types?.add("to-city");
-    if (from && from.pathname !== location.pathname) stand(row(from));
+    ${hasCityLanding ? 'if (city(at(location.href)) && a?.navigationType === "traverse") return skip(vt);\n    ' : ""}if (still.matches) return;
+    ${hasCityLanding ? 'if (city(from)) vt.types?.add("from-city");\n    else if (city(at(location.href))) vt.types?.add("to-city");\n    ' : ""}if (from && from.pathname !== location.pathname) stand(row(from));
     settle();
     vt.finished.finally(forget);
   });
@@ -245,6 +244,7 @@ const BETWEEN = `<script>
 }
 </script>
 `;
+};
 
 // The next page, ready before the press. A page route of the site's own (under the base) the
 // pointer rests on (or presses) is prerendered: its kit waits for the page to be shown before it
@@ -392,7 +392,7 @@ export function notFoundPage(site) {
     path: "/404.html",
     kind: "not-found",
     title: "Not found",
-    description: "Nothing stands at this address. Ways back to the city, the blog and Voxelmorphism.",
+    description: "Nothing stands at this address. Ways back home, to the blog and to Voxelmorphism.",
     stylesheets: ["/lost/lost.css"],
     html: `<div class="lost">
 <div class="lost-scene" aria-hidden="true">
@@ -406,7 +406,7 @@ export function notFoundPage(site) {
 <h1 class="lost-title" id="lost-title">Nothing here but fog</h1>
 <p class="lost-note">No page stands at <span class="lost-where">this address</span>. Either it was never built, or Karl the Fog has it.</p>
 <nav class="lost-ways" aria-label="Ways out">
-<a class="lost-home" href="${HOME}">Back to the city</a>
+<a class="lost-home" href="${HOME}">Home</a>
 <a href="${blogPath(site.base)}">Blog</a>
 <a href="${at("/voxelmorphism/")}">Voxelmorphism</a>
 </nav>

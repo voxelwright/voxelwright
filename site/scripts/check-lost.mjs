@@ -115,7 +115,7 @@ try {
   {
     const { context, page } = await open({ colorScheme: "light" });
     const ways = await page.locator(".lost-ways a").evaluateAll((as) => as.map((a) => [a.textContent, a.getAttribute("href")]));
-    assert.deepEqual(ways, [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]]);
+    assert.deepEqual(ways, [["Home", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]]);
     // "/" is the realm's, which dist/ does not hold; the deploy serves it
     for (const [name, href] of ways.filter(([, href]) => href !== "/")) {
       const res = await fetch(url(href));
@@ -132,7 +132,7 @@ try {
     const outline = await home.evaluate((a) => getComputedStyle(a).outlineStyle);
     assert.equal(outline, "solid", "a focused plate shows its outline");
     await context.close();
-    ok("links: Back to the city, Blog and Voxelmorphism all reach 200 pages, focus visible");
+    ok("links: Home, Blog and Voxelmorphism all reach 200 pages, focus visible");
   }
 
   // ---- no script: static fog, real links, the sentence still reads ----

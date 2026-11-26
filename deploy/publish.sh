@@ -4,11 +4,13 @@ set -euo pipefail
 publish() (
   set -e
   local worker=$1 origin=$2 folder=$3
-  local args=(--message "$GITHUB_SHA") pages=(/ /current.json)
+  local args=(--message "$GITHUB_SHA") pages=() manifest=""
   if [[ "$worker" == voxelwright ]]; then
     args+=(--mode world)
+    manifest="/$(node -p "require('../engine/sf/pilot/current.json').manifest")"
+    pages=(/ /current.json "$manifest")
   else
-    pages+=(/blog/ /blog/feed.xml)
+    pages=(/ /blog/ /blog/feed.xml)
   fi
   local deployed=false
   finish() {
@@ -35,15 +37,16 @@ publish() (
   grep -Fq "(100%)" status.txt
   grep -Fq "$GITHUB_SHA" status.txt
   get() { curl -sS --retry 4 --retry-all-errors --max-time 30 -o /dev/null -D headers.txt -w '%{http_code}' -H 'Accept-Encoding: br, gzip' "$origin$1"; }
-  local page status manifest
-  manifest="/$(node -p "require('../engine/sf/pilot/current.json').manifest")"
-  for page in "${pages[@]}" "$manifest"; do
+  local page status
+  for page in "${pages[@]}"; do
     status=$(get "$page")
     echo "$origin$page $status"
     test "$status" = 200
   done
-  grep -qi '^content-encoding: br' headers.txt
-  grep -qi "^content-length: $(stat -c%s "$folder$manifest.br")"$'\r'"\?$" headers.txt
+  if [[ "$worker" == voxelwright ]]; then
+    grep -qi '^content-encoding: br' headers.txt
+    grep -qi "^content-length: $(stat -c%s "$folder$manifest.br")"$'\r'"\?$" headers.txt
+  fi
   echo "- $worker deployed and passed the live check at $GITHUB_SHA." >> "$GITHUB_STEP_SUMMARY"
 )
 echo "Deploy order is voxelwright, then zahynailo. A failure stops the sequence." >> "$GITHUB_STEP_SUMMARY"

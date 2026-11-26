@@ -41,7 +41,7 @@ test("without a script the sign still reads and its ways out are real links", ()
   const ways = [...html.matchAll(/<nav class="lost-ways"[^>]*>([\s\S]*?)<\/nav>/g)][0][1];
   assert.deepEqual(
     [...ways.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/g)].map((m) => [m[2], m[1]]),
-    [["Back to the city", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]],
+    [["Home", "/"], ["Blog", "/blog/"], ["Voxelmorphism", "/blog/voxelmorphism/"]],
   );
   // the scene is decoration; the sign is the page
   assert.match(html, /<div class="lost-scene" aria-hidden="true">/);
