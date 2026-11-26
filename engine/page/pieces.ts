@@ -252,10 +252,10 @@ fn vehicleLamp(in: Out, albedo: vec3f) -> vec3f {
   var open = in.open;
   var coat = 1.0;
   // Only its outside (the faces with smooth words): the seats inside a struck door are not scraped. Scrapes are bands a
-  // couple of centimetres wide, 17 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
+  // centimetre or two wide, 11 cm apart, fading out by 9 m: finer, they were a sparkle of single pixels. Most of
   // the clear coat stays, so a dent shows as its bent reflections more than as a dark patch.
   if (in.hasSmooth != 0u && (in.wear.x > 0.005 || in.wear.y > 0.005)) {
-    let worn = deformPaintSeen(albedo, in.wear.x * 0.7, in.wear.y * 0.5, in.at * u.cell * 0.1, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
+    let worn = deformPaintSeen(albedo, in.wear.x, in.wear.y * 0.5, in.at * u.cell * 0.15, 1.0 - smoothstep(30.0, 90.0, length(in.seen)));
     albedo = worn.albedo;
     rough = min(1.0, rough + worn.roughBoost * 0.6);
     open *= 1.0 - 0.12 * clamp(in.wear.y, 0.0, 1.0);
@@ -339,7 +339,11 @@ fn paneCrack(in: Out) -> f32 {
   else if (a.y >= a.z) { across = vec3f(p.x, p.z, 0.0); }
   let amount = crack * (1.0 - smoothstep(4.0 + 8.0 * crack, 12.0 + 34.0 * crack, length(p)));
   if (amount <= 0.0) { return 0.0; }
-  return max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
+  // Its lines are finer than a pixel from the street: there they glittered, so further than 3 m they give way to an
+  // even whitening of the broken glass.
+  let seenNear = 1.0 - smoothstep(30.0, 90.0, length(in.seen));
+  let lines = max(deformGlass(crack, amount, across), crackNet(across.xy) * clamp(amount * 1.4, 0.0, 0.85));
+  return mix(amount * 0.3, lines, seenNear);
 }
 @fragment fn fs_tint(in: Out) -> @location(0) vec4f {
   if (!pane(in)) { discard; }

@@ -1011,8 +1011,8 @@ async function main() {
       crash: (at, strength, kind, glass) => {
         const c = hue(kind)
         smoke.crash(at, strength)
-        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.5, 8, 0.9 + strength * 0.4)
-        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.74, 0.84, 0.88], 0.3, 6, 1.1)
+        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.3, 8, 0.9 + strength * 0.4)
+        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.5, 0.58, 0.62], 0.16, 3, 1.1)
       },
       engine: (at, level, dt) => smoke.engine(at, level, dt),
       rain: () => march.rain,
