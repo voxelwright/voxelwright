@@ -88,8 +88,17 @@ test('cloudflare.config.ts deploys zahynailo as assets-only and voxelwright with
   assert.deepEqual(world.assets.runWorkerFirst, ['/releases/*', '/bay/*', '/weather'])
 })
 
-test('zahynailo-realm-rule.json uses only Free-plan constructs and redirects only realm queries at /', () => {
-  const rule = JSON.parse(readFileSync(new URL('./zahynailo-realm-rule.json', import.meta.url), 'utf8'))
+test('the two zahynailo-realm rules use only Free-plan constructs and redirect only realm queries at /', () => {
+  // Two rules, not one: the cf CLI is killed when one --body carries all 69 keys. Together they are the whole list.
+  const rules = ['a', 'b'].map((part) => JSON.parse(readFileSync(new URL(`./zahynailo-realm-rule-${part}.json`, import.meta.url), 'utf8')))
+  const inner = (rule) => rule.expression.match(/any\(http\.request\.uri\.args\.names\[\*\] in \{([^}]+)\}\)/)[1]
+  for (const other of rules) {
+    assert.equal(other.expression.replace(inner(other), ''), rules[0].expression.replace(inner(rules[0]), ''), 'the rules differ only in their keys')
+    assert.deepEqual(other.action_parameters, rules[0].action_parameters)
+    assert.ok(JSON.stringify(other).length < 900, 'each body stays small enough for the cf CLI')
+  }
+  assert.notEqual(rules[0].ref, rules[1].ref)
+  const rule = { ...rules[0], expression: rules[0].expression.replace(inner(rules[0]), rules.map(inner).join(' ')) }
   assert.equal(rule.action, 'redirect')
   assert.equal(rule.action_parameters.from_value.status_code, 301)
   assert.equal(rule.action_parameters.from_value.target_url.value, 'https://voxelwright.world/')

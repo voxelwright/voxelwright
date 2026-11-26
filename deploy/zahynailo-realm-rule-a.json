@@ -1,0 +1,15 @@
+{
+  "ref": "zahynailo_realm_query_a",
+  "description": "Send old realm query links on zahynailo.dev/ to voxelwright.world (keys arms to letters)",
+  "expression": "(http.host in {\"zahynailo.dev\" \"www.zahynailo.dev\"} and http.request.uri.path eq \"/\" and any(http.request.uri.args.names[*] in {\"arms\" \"at\" \"bay\" \"boards\" \"breaks\" \"bricks\" \"clouds\" \"debug\" \"detail\" \"face\" \"far\" \"farcutfit\" \"fardetail\" \"farfaces\" \"farlanding\" \"farlight\" \"farnear\" \"farreach\" \"farthest\" \"fine\" \"finesun\" \"fire\" \"first\" \"flat\" \"fly\" \"fog\" \"fov\" \"grid\" \"haze\" \"heat\" \"heroes\" \"hour\" \"hud\" \"kit\" \"letters\"}))",
+  "action": "redirect",
+  "action_parameters": {
+    "from_value": {
+      "status_code": 301,
+      "target_url": {
+        "value": "https://voxelwright.world/"
+      },
+      "preserve_query_string": true
+    }
+  }
+}
