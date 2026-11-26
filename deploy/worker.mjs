@@ -56,6 +56,15 @@ export default {
       }
     }
     const plain = await env.ASSETS.fetch(request)
+    if (plain.status === 404 && (request.method === 'GET' || request.method === 'HEAD') && !url.pathname.endsWith('.br')) {
+      const hasBr = await env.ASSETS.fetch(new Request(new URL(`${url.pathname}.br`, url), { method: 'HEAD' }))
+      if (hasBr.status === 200) {
+        return new Response('Brotli encoding required (send Accept-Encoding: br)', {
+          status: 406,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8', Vary: 'Accept-Encoding' },
+        })
+      }
+    }
     if (!url.pathname.startsWith('/releases/') || plain.status !== 200) return plain
     const headers = new Headers(plain.headers)
     headers.set('Cache-Control', 'public, max-age=31536000, immutable')

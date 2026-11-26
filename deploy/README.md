@@ -4,7 +4,7 @@ The `voxelwright` Worker serves San Francisco at voxelwright.world and www.voxel
 
 ## What is where
 
-- **Static assets** hold two separate folders written by `assemble.mjs`. `deploy/dist` (for `zahynailo`) holds the site alone from `site/dist`: the personal front page at `/` (`index.html` and `index.md`), the blog under `/blog/`, `robots.txt`, `404.html` and the site's `_headers`, with no realm files and no alpha notice. `deploy/dist-world` (for `voxelwright`, about 12,370 files and 6.7 GB uncompressed, 732 MB as Brotli) holds the full-city 155-square SF realm: `engine/dist-sf/sf/*` at the root, beside its `page/`, `kit/`, `blocks/` and `bay/`, plus its own canonical and social metadata, `robots.txt`, `404.html` and `alpha.js`. The personal blog board in the realm links to https://zahynailo.dev/blog/.
+- **Static assets** hold two separate folders written by `assemble.mjs`. `deploy/dist` (for `zahynailo`) holds the site alone from `site/dist`: the personal front page at `/` (`index.html` and `index.md`), the blog under `/blog/`, `robots.txt`, `404.html` and the site's `_headers`, with no realm files and no alpha notice. `deploy/dist-world` (for `voxelwright`, about 6,823 files and 927 MB, largest 3.2 MB) holds the full-city 155-square SF realm: `engine/dist-sf/sf/*` at the root, beside its `page/`, `kit/`, `blocks/` and `bay/`, plus its own canonical and social metadata, `robots.txt`, `404.html` and `alpha.js`. Binary city payloads (`.bay`, `.far`, `.bin`) under `releases/` and `bay/` ship only as their quality-11 `.br` copies when present (every WebGPU browser sends `Accept-Encoding: br`; non-Brotli requests for a `.br`-only asset get `406 Not Acceptable` with `Vary: Accept-Encoding`), while JSON and text files keep both plain and `.br` copies. The personal blog board in the realm links to https://zahynailo.dev/blog/.
 - **The early-alpha notice:** `assemble.mjs` adds `alpha.js` (served at `/alpha.js`) only to `deploy/dist-world` (the realm), through `notice.mjs`. A dismissal is kept in `localStorage` for that origin. Neither the personal page nor the blog carries it.
 - **`worker.mjs` and `world-worker.mjs`** run only on the `voxelwright` Worker (`--mode world`), for `/releases/*` (the city's pinned release) and `/bay/*` (the road's marks and the landmarks). It sends the quality-11 Brotli copy that `sf/build.mjs` wrote beside each file, unchanged, so the bytes on the wire are the ones the realm's checks measure. Static assets alone can't do this. Setting `Content-Encoding: br` in `_headers` makes the edge compress the file a second time, and the edge doesn't compress `.bay`, `.far` or `.bin` files at all. The edge compresses the code itself, which comes to about 0.25 MB more than the local quality-11 copies. The `zahynailo` Worker has no entrypoint or `runWorkerFirst` rules, so it serves static assets directly and runs no Worker code.
 - **`/weather`** also runs on the `voxelwright` Worker (`worker.mjs`). It answers San Francisco's weather now for the realm's "SF now" sky: the latest report from the National Weather Service's SFO station that saw the sky, trimmed, kept ten minutes at the edge and five in the browser. If the service fails, it answers 502 and the sky keeps its own weather. To check it after a deploy, run `curl -s https://voxelwright.world/weather`.
@@ -60,7 +60,14 @@ If the pin and `deploy/data.json` disagree, CI fails before it deploys. Don't de
 
 ## Deploy by hand
 
-From the repository root with the pinned data present, run the build once. `npm --prefix site run build` includes the personal front page at `/` by default (no environment variable needed). Set `VOXELWRIGHT_EGG_MEDIA` before building to include the private clips.
+From a clean checkout with the pinned data present, run the one-command ship script (`deploy/ship.mjs`). It automatically includes `~/.village/engine/sf/eggs/media` when present (pass `--public` for procedural eggs only), checks local `cf` auth up front (`cf` and `wrangler` keep separate local logins — check `cf` auth with `cd deploy && npx cf accounts list`), builds `core` + SF realm + `site` + `assemble`, deploys both Workers tagged with `HEAD`'s SHA, and verifies live endpoints plus `engine/test/sf-live.mjs`:
+
+```sh
+npm --prefix deploy run ship
+# Useful flags: --world-only | --site-only | --public | --skip-build | --skip-live | --allow-dirty | --dry-run
+```
+
+Or run each step individually (`npm --prefix site run build` includes the personal front page at `/` by default; set `VOXELWRIGHT_EGG_MEDIA` before building to include the private clips):
 
 ```sh
 npm ci --prefix site && npm ci --prefix deploy &&
@@ -128,7 +135,7 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 ## Limits to know
 
 - Each request to `/releases/*`, `/bay/*` or `/weather` on the `voxelwright` Worker runs Worker code (a visitor in SF now asks `/weather` once every ten minutes), and the Free plan allows 100,000 a day. A visit that only loads the landing makes about 140 of them, and exploring makes more, so the cap is roughly 700 such visits a day. Past it those requests get 429 and the city stops loading until midnight UTC. Workers Paid ($5 a month) removes the cap. That is the owner's call. The `zahynailo` Worker is assets-only and does not count against this limit.
-- A static asset can be at most 25 MiB (the largest today is 10.5 MB), and a version can have at most 20,000 files on the Free plan.
+- A static asset can be at most 25 MiB (the largest today is 3.2 MB in `dist-world` / 4.4 MB in `dist`), and a version can have at most 20,000 files on the Free plan (`dist-world` is about 6,823 files with `.br`-only binary tiles).
 - `CLOUDFLARE_API_TOKEN` is an Account API token with the "Edit Cloudflare Workers" permission policy, scoped to this account. `CLOUDFLARE_ACCOUNT_ID` is the account. Both are secrets of the repo's `production` environment, which only main may use, so a branch's workflow can't reach them.
 - The park is shown after about 6.1 MB on the wire locally (~6.35 MB from Cloudflare's edge, since the edge compresses code about 0.25 MB less tightly than local quality-11 copies): comfortably under both the 8 MB limit and the 6.75 MB budget.
 - Static assets answer a `Range` request with the whole file (200, not 206). Safari's video asks for ranges, so the eggs' videos (`/eggs/*.mp4`) may not play there. This is untested.
@@ -139,4 +146,4 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 
 The realm, the site and the Voxelmorphism kit stay in one repository with two Worker targets (#578).
 
-<!-- docs-verified bac471765680fbfb55631e91e771136227b3b725 {"deploy/package.json":"28bdf2d986d84d8fa55a27c5df8d9d23","deploy/assemble.mjs":"fd9345ff8ee4c546a4194cdd12de75e6","deploy/worker.mjs":"4ae8c3551c6dbf8ee63b017d57d87f9a"} -->
+<!-- docs-verified 7da0557e95da1ce39128bd4d145f73c6212c6479 {"deploy/package.json":"d0901c848d9e3486e682fc6e7e44a232","deploy/assemble.mjs":"fd9345ff8ee4c546a4194cdd12de75e6","deploy/worker.mjs":"e5b7b80e71ce21564da2658088d5a459"} -->
