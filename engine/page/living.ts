@@ -172,6 +172,8 @@ export interface Living {
   readonly struck: Struck[]
   /** Where a thing is: its middle of mass (cells), how it is turned, and which way its front points along the ground. */
   where(thing: Thing): { at: [number, number, number]; rot: [number, number, number, number]; front: [number, number, number] } | null
+  /** The eight corners of a thing's own box where they are now (cells), or null: what the controls keep off while it is ridden (play-hud.ts). */
+  corners(thing: Thing): [number, number, number][] | null
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -223,24 +225,33 @@ export function living(o: {
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
   // A phone has no keys: the cue is touched to get on, the left thumb's stick drives, and what a scheme's other
-  // keys do is a row of buttons while riding (held ones for up and down, touched ones for what is done once).
-  const touch = navigator.maxTouchPoints > 0
+  // keys do is a column of keys while riding (held ones for up and down, touched ones for what is done once). They
+  // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
+  // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
+  const coarse = matchMedia('(pointer: coarse)')
   const held = { rise: 0 }
   const buttons = o.hud.panel('living')
-  buttons.style.cssText = 'position:absolute;right:max(14px,env(safe-area-inset-right));bottom:max(110px,env(safe-area-inset-bottom));display:none;flex-direction:column;gap:8px;pointer-events:auto'
-  const button = (words: string, press: () => void, release?: () => void) => {
-    const b = document.createElement('button')
-    b.textContent = words
-    b.style.cssText = 'min-width:84px;padding:12px 14px;border:0;border-radius:12px;background:rgba(12,16,22,0.72);color:#e8ecf1;font:600 14px -apple-system,system-ui,sans-serif;touch-action:manipulation'
+  const button = (act: string, words: string, press: () => void, release?: () => void) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button', textContent: words })
+    b.dataset.act = act
     b.addEventListener('pointerdown', (e) => { e.preventDefault(); press() })
     if (release) for (const up of ['pointerup', 'pointercancel', 'pointerleave'] as const) b.addEventListener(up, release)
     return b
   }
+  let seat: HTMLButtonElement | null = null
   const showButtons = (scheme: Scheme | null) => {
     held.rise = 0
-    buttons.style.display = scheme && touch ? 'flex' : 'none'
-    if (!scheme) return
-    buttons.replaceChildren(...scheme.lines.flatMap((line) => line.once ? [button(line.does, () => { once = line.once })] : line.rise ? [button('up', () => { held.rise = 1 }, () => { held.rise = 0 }), button('down', () => { held.rise = -1 }, () => { held.rise = 0 })] : []), button('seat', () => view(!inside)))
+    document.documentElement.classList.toggle('riding', !!scheme)
+    if (!scheme) { buttons.replaceChildren(); seat = null; return }
+    // From the bottom up (the column stands on the corner under the right thumb): down and up, what is done once, the
+    // seat, and getting off at the top, farthest from the thumb.
+    const rises = scheme.lines.some((l) => l.rise) ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })] : []
+    const onces = scheme.lines.filter((l) => l.once && l.once !== 'leave').map((l) => button(l.once!, l.does[0].toUpperCase() + l.does.slice(1), () => { once = l.once }))
+    const leaves = scheme.lines.filter((l) => l.once === 'leave').map((l) => button('leave', 'Get off', () => { once = l.once }))
+    seat = button('seat', 'Seat', () => view(!inside))
+    seat.setAttribute('aria-label', 'Look from the seat')
+    seat.setAttribute('aria-pressed', String(inside))
+    buttons.replaceChildren(...rises, ...onces, seat, ...leaves)
   }
   // Beside a thing, E gets on it: a mode that is there only while the cue is, and takes that one key.
   let beside: (() => void) | null = null
@@ -322,6 +333,7 @@ export function living(o: {
   const view = (on: boolean) => {
     if (on === inside) return
     inside = on && !!riding
+    seat?.setAttribute('aria-pressed', String(inside))
     if (inside && riding) { head[0] = 0; head[1] = -0.08 }
     else {
       // Behind again: looking the way the head was turned.
@@ -390,7 +402,8 @@ export function living(o: {
       o.pose.pitch = -0.22
     }
     const scheme = riding && SCHEMES[riding.controls ?? 'drive']
-    o.hud.card(riding && scheme ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
+    // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
+    o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
@@ -401,6 +414,11 @@ export function living(o: {
 
   return {
     things, struck, where, mount, view,
+    corners: (thing) => {
+      const all: [number, number, number][] = []
+      for (let i = 0; i < 8; i++) { const p = placeOf(thing, [i & 1 ? thing.size[0] : 0, i & 2 ? thing.size[1] : 0, i & 4 ? thing.size[2] : 0]); if (!p) return null; all.push(p) }
+      return all
+    },
     get riding() { return riding },
     get inside() { return inside && !!riding },
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, per: w.per } }) }),
@@ -488,7 +506,7 @@ export function living(o: {
         }
         reach(near !== null)
         if (cue && cue.thing !== near) { cue.remove(); cue = null }
-        if (near && !cue) { const thing = near; cue = { thing, remove: o.hud.cue(`${touch ? '' : 'E  '}${SCHEMES[thing.controls ?? 'drive'].verb} the ${thing.name}`, () => { const at = where(thing); return at && [at.at[0], at.at[1] + thing.size[1] / 2 + 4, at.at[2]] }, () => { if (!riding && thing.alive) mount(thing) }).remove } }
+        if (near && !cue) { const thing = near; cue = { thing, remove: o.hud.cue(`${coarse.matches ? '' : 'E  '}${SCHEMES[thing.controls ?? 'drive'].verb} the ${thing.name}`, () => { const at = where(thing); return at && [at.at[0], at.at[1] + thing.size[1] / 2 + 4, at.at[2]] }, () => { if (!riding && thing.alive) mount(thing) }).remove } }
         return false
       }
       if (cue) { cue.remove(); cue = null }

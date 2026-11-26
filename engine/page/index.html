@@ -55,6 +55,17 @@
   #notices p { margin: 0; padding: 6px 12px; border-radius: 8px; background: rgba(12, 16, 22, 0.72); overflow-wrap: anywhere; }
   /* Top left, under the line that says how the page is doing: at the top right it lay under the Portal and Realms buttons (#367). */
   #card { position: absolute; left: max(12px, env(safe-area-inset-left)); top: calc(max(12px, env(safe-area-inset-top)) + 46px); min-width: 150px; padding: 8px 12px 10px; border-radius: 10px; background: rgba(12, 16, 22, 0.66); }
+  /* The keys of a thing ridden, by touch only (living.ts): a column on the corner under the right thumb, from the bottom up.
+     (In a realm they are the kit's keys and play-hud.ts places them; this is how they look on a page without the kit.) */
+  [data-panel="living"] { position: absolute; right: max(14px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); display: none; flex-direction: column-reverse; align-items: flex-end; gap: 8px; pointer-events: auto; }
+  @media (pointer: coarse) { html.riding [data-panel="living"] { display: flex; } }
+  /* By touch the ask bar steps aside while riding, unless it is open: on its side it lay across the thing ridden and the
+     keys beside the thumb. Getting off brings it back. */
+  @media (pointer: coarse) { html.riding #ask:not(.open) { visibility: hidden; } }
+  /* Nothing is aimed at from a seat: the aim's dot was over the thing ridden. */
+  html.riding #aim { display: none; }
+  html:not([data-hud]) [data-panel="living"] button { min-width: 84px; min-height: 44px; padding: 12px 14px; border: 0; border-radius: 12px; background: rgba(12, 16, 22, 0.72); color: #e8ecf1; font: 600 14px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
+  html:not([data-hud]) [data-panel="living"] button[aria-pressed="true"] { background: #e8ecf1; color: #10141a; }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }
   #card p.note { margin: -2px 0 6px; color: #9aa5b1; font-size: 12px; }

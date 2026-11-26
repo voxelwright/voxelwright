@@ -30,6 +30,8 @@ import { plain } from '../player/serve.mjs'
 
 const dist = join(here, arg('dist', 'dist-sf')), shots = arg('shots', join(homedir(), '.village', 'engine', 'sf', 'hud-default'))
 const modes = arg('modes', 'default,context,quiet,classic').split(','), sizes = arg('sizes', 'wide,phone,side').split(',')
+// (`--ride-only`: only standing and riding, for a quick look at the keys of a thing ridden.)
+const rideOnly = has('ride-only')
 const SAFES = { wide: { top: 0, bottom: 0, left: 0, right: 0 }, phone: { top: 59, bottom: 34, left: 0, right: 0 }, side: { top: 0, bottom: 21, left: 59, right: 59 } }
 const NAMED = { wide: '1280x720', phone: '390x844', side: '844x390' }
 const failures = [], said = []
@@ -78,7 +80,7 @@ const measure = (page, safe) => page.evaluate((safe) => {
   const unsafe = seen.filter((s) => s.top < safe.top - 0.5 || s.bottom > vh - safe.bottom + 0.5 || s.left < safe.left - 0.5 || s.right > vw - safe.right + 0.5)
   // Controls against each other, by their solids: a cue on a key, a key on a key.
   const solid = (el) => { const b = el.getBoundingClientRect(), cs = getComputedStyle(el), vx = parseFloat(cs.getPropertyValue('--vx')) || 4, live = el.hasAttribute('data-vx-live'), lift = live ? (parseFloat(cs.getPropertyValue('--vx-face-z')) || 0) * 0.5 * vx : 0; return { left: b.left - lift, top: b.top - lift, right: b.right, bottom: b.bottom } }
-  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #first .credits, #realm .wheel .slot, [data-panel="wand-take"] button, #where')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
+  const controls = [...document.querySelectorAll('#realm .cue.on, #realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held, #realm .fold, #realm .sky, #realm .egg-line, #realm .home-key, #realm .lobbies, #first .credits, #realm .wheel .slot, [data-panel="wand-take"] button, [data-panel="living"] button, #card, #where')].filter((el) => !el.closest('[hidden]') && el.checkVisibility({ visibilityProperty: true, opacityProperty: true }) && el.getBoundingClientRect().width > 2)
   const name = (el) => el.id ? `#${el.id}` : el.closest('[data-panel]') ? `[data-panel=${el.closest('[data-panel]').dataset.panel}]` : `.${[...el.classList].filter((c) => !c.startsWith('vx-')).join('.')}`
   const clash = []
   for (let i = 0; i < controls.length; i++) for (let j = i + 1; j < controls.length; j++) { const a = controls[i], b = controls[j]; if (a.contains(b) || b.contains(a)) continue; if (meets(solid(a), solid(b))) clash.push(`${name(a)} on ${name(b)}`) }
@@ -119,14 +121,14 @@ try {
       check(inside, 'on the roof, the eye behind the body')
       const gate = mode !== 'classic', at = {}
       // (`menu`: the Sky panel open is a menu, which the game-hud rules leave out: what is under it is said, not failed.)
-      const look = async (name, what, menu = false) => {
+      const look = async (name, what, menu = false, seated = false) => {
         const file = join(shots, `${mode}${reduced ? '-less' : ''}-${name}-${NAMED[size]}.png`)
         await page.screenshot({ path: file })
         const m = await measure(page, safe)
         at[name] = { body: m.body && Object.fromEntries(Object.entries(m.body).map(([k, v]) => [k, Math.round(v)])), over: m.over.map((s) => s.id), unsafe: m.unsafe.map((s) => s.id), state: m.state }
         await drawn(page, m, join(shots, 'boxes', `${mode}${reduced ? '-less' : ''}-${name}-${NAMED[size]}.png`))
-        check(!!m.body, `${name}: the body is seen (${what})`, gate)
-        check(m.body && m.over.length === 0, `${name}: nothing over the body${m.over.length ? `: ${[...new Set(m.over.map((s) => s.path || s.id))].join(', ')}` : ''} (${m.seen} things over the picture)`, gate && !menu)
+        check(!!m.body || seated, `${name}: the body is seen (${what})`, gate)
+        check((m.body || seated) && m.over.length === 0, `${name}: nothing over the body${m.over.length ? `: ${[...new Set(m.over.map((s) => s.path || s.id))].join(', ')}` : ''} (${m.seen} things over the picture)`, gate && !menu)
         check(m.clash.length === 0, `${name}: no control on another${m.clash.length ? `: ${m.clash.join(', ')}` : ''}`, gate)
         if (phone) check(m.unsafe.length === 0, `${name}: nothing in the safe area${m.unsafe.length ? `: ${[...new Set(m.unsafe.map((s) => s.path || s.id))].join(', ')}` : ''}`, gate)
       }
@@ -151,6 +153,73 @@ try {
       await page.evaluate(() => { globalThis.engine.me.standOff = 0 })
       await page.waitForTimeout(3500)
       await look('stand', 'standing on the roof')
+      // Riding (#11): a car got into beside the body on the roof, and then the same as a thing that rises (hover: five keys,
+      // the most a scheme has). While riding the keys of one on foot are not shown, the thing's own keys are, each a kit key
+      // 44 px a side or more that a touch at its middle reaches; by touch the card of the keyboard's keys is not shown; and
+      // nothing meets the thing, another control or the safe area (`look`). Seat puts the eye in the seat and back (V on a
+      // desk), and Get off sets the body down (E on a desk, which does not open the wheel).
+      const ride = async (scheme) => {
+        // (On a desk the servers key has the top left corner where a master is known, as on the live site: one stands in for it here.)
+        if (!phone) await page.evaluate(() => { const r = document.querySelector('div#realm'); if (r && !r.querySelector('.lobbies')) { const b = Object.assign(document.createElement('button'), { className: 'vx-button lobbies stand-in', type: 'button', textContent: 'Servers' }); r.append(b) } })
+        const got = await page.evaluate(async (scheme) => {
+          const e = globalThis.engine
+          // (Off whatever was ridden before, where getting off failed.)
+          if (e.alive.riding) { e.alive.mount(null); await new Promise((r) => setTimeout(r, 500)) }
+          for (const t of e.alive.things) if (t.alive) e.alive.vanish(t)
+          // (Set down 4 m north of where the body first stood, on the open roof: the same place each time, a little over it.)
+          const f = (globalThis.__rideAt ??= e.me.feet.at.map(Math.round)), made = e.car([f[0], f[1] + 5, f[2] - 40])
+          const thing = await e.alive.spawn(scheme === 'drive' ? made : { ...made, controls: scheme })
+          if (!thing.alive) return false
+          e.alive.mount(thing)
+          return e.alive.riding === thing
+        }, scheme)
+        check(got, `${scheme}: a car got into on the roof`)
+        if (!got) return
+        await page.waitForTimeout(2500)
+        await look(`ride-${scheme}`, `riding (${scheme})`)
+        const shown = await page.evaluate(() => {
+          const seen = (el) => !!el && el.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+          const keys = [...document.querySelectorAll('[data-panel="living"] [data-act]')].filter(seen).map((el) => { const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y); return { act: el.dataset.act, w: Math.round(r.width), h: Math.round(r.height), x, y, reached: !!hit && el.contains(hit), kit: el.hasAttribute('data-vx-live') } })
+          return { servers: seen(document.querySelector('#realm .lobbies')), keys, afoot: [...document.querySelectorAll('#realm .act :is(.use, .up, .down, .walks, .toolkey), #realm .held')].filter(seen).map((el) => el.className), card: seen(document.querySelector('#card')) }
+        })
+        check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
+        if (phone) {
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['seat', 'leave'], acts = shown.keys.map((k) => k.act)
+          check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
+          const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
+          check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)
+          check(shown.keys.every((k) => k.kit), `${scheme}: its keys are the kit's`, gate)
+          check(!shown.card, `${scheme}: the card of keyboard keys is not shown by touch`)
+          const tap = async (act) => { const k = shown.keys.find((k) => k.act === act); if (k) { await page.touchscreen.tap(k.x, k.y); await page.waitForTimeout(500) } return !!k }
+          await tap('seat')
+          const inSeat = await page.evaluate(() => globalThis.engine.alive.inside)
+          if (scheme === 'drive') await look('ride-seat', 'riding, the eye in the seat', false, true)
+          await tap('seat')
+          const behind = await page.evaluate(() => !globalThis.engine.alive.inside)
+          check(inSeat && behind, `${scheme}: Seat puts the eye in the seat, and again behind (${inSeat}, ${behind})`)
+          await tap('leave')
+        } else {
+          check(shown.keys.length === 0 && shown.card, `${scheme}: on a desk the card says the keys, and no keys are shown`)
+          check(shown.servers, `${scheme}: the servers key is shown beside the card (measured against it above)`)
+          await page.keyboard.press('KeyV'); await page.waitForTimeout(400)
+          const inSeat = await page.evaluate(() => globalThis.engine.alive.inside)
+          await page.keyboard.press('KeyV'); await page.waitForTimeout(400)
+          check(inSeat && await page.evaluate(() => !globalThis.engine.alive.inside), `${scheme}: V puts the eye in the seat, and again behind`)
+          await page.keyboard.press('KeyE')
+        }
+        const off = await until(page, () => !globalThis.engine.alive.riding, 3000)
+        await page.waitForTimeout(600)
+        const after = await page.evaluate(() => ({ choosing: globalThis.engine.playHud.choosing, afoot: [...document.querySelectorAll(matchMedia('(pointer: coarse)').matches ? '#realm .act .use' : '#realm .held')].some((el) => el.checkVisibility({ visibilityProperty: true })) }))
+        check(off && !after.choosing && after.afoot, `${scheme}: ${phone ? 'Get off' : 'E'} sets the body down, the wheel not opened, and the keys of one on foot are back (${JSON.stringify({ off, ...after })})`)
+        await page.evaluate(() => { const e = globalThis.engine; for (const t of e.alive.things) if (t.alive) e.alive.vanish(t); document.querySelector('#realm .lobbies.stand-in')?.remove() })
+      }
+      if (mode === 'default') { await ride('drive'); await ride('hover'); await page.waitForTimeout(1500) }
+      if (rideOnly) {
+        check(errors.length === 0, `no errors${errors.length ? `: ${errors.slice(0, 2).join(' | ')}` : ''}`)
+        results[`${mode}-${size}`] = at
+        await page.close()
+        continue
+      }
       // That the controls are there, where each way has them: a control missing meets nothing, and the measures above would pass.
       const seen = (sel) => page.evaluate((sel) => { const el = document.querySelector(sel); if (!el) return null; const r = el.getBoundingClientRect(); return { on: el.checkVisibility({ visibilityProperty: true, opacityProperty: true }), left: r.left, right: r.right, top: r.top, bottom: r.bottom, wide: r.width, tall: r.height } }, sel)
       if (mode !== 'classic') {
