@@ -3,7 +3,11 @@
 // every body is now.
 
 /** A body as it came loose: its outside as faces (the core's `support::faces`), its size, its middle of mass from its own low corner, and where that corner was. */
-export interface Born { id: number; cells: number; size: [number, number, number]; com: [number, number, number]; low: [number, number, number]; faces: Uint32Array<ArrayBuffer> }
+export interface Born {
+  id: number; cells: number; size: [number, number, number]; com: [number, number, number]; low: [number, number, number]; faces: Uint32Array<ArrayBuffer>
+  /** Four words for each face (two words of `faces`), one a corner: its smooth normal and how open it is there (fine.ts `facesWithSmooth`, #38). None for the core's bodies. */
+  smooth?: Uint32Array<ArrayBuffer>
+}
 /** Where a body is: its middle of mass in the world's finest cells, and its turn as a quaternion (x, y, z, w). */
 export interface Placed { id: number; pos: [number, number, number]; rot: [number, number, number, number] }
 export interface Told {
