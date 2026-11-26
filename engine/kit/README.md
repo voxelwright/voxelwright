@@ -78,5 +78,3 @@ the same grid: a display set (`zakon.js`, its spacing in `zakon-spacing.js`), a 
 compact set of capitals (`zakon-text.js`), and its web fonts in `fonts/vox-zakon/`; a page picks
 it by setting `--vx-key-font` to "Vox Zakon Text" (the SF realm does, `page/typeface.ts`). Latin and Ukrainian are drawn. The other folders in `fonts/` are the
 candidates the type study compared (`showcase/type.html`); the kit does not load them.
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/kit/package.json":"c24276f0b21de044fa379d4a4606e799","engine/kit/src/index.js":"b3a2ef88b32f68f2cc0ac0759dbc73ff","engine/kit/tools/serve.mjs":"72b5e18d2ce1a19c10741ae4d719ac10"} -->

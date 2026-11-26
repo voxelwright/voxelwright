@@ -137,5 +137,3 @@ The kit must be at plant-a-seed 37c271f or later (`ownsCanvas`).
 
 - Compute shaders. Workers that draw. A phone held sideways, or for more than a minute.
 - Many canvases on one device on an iPhone, in Firefox, or in a tab hidden and come back to.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/blocks/renderer.ts":"f6e0edefd400b8cde63bab6ff7ec5b62"} -->

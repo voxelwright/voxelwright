@@ -1,4 +1,7 @@
-# Host a server
+---
+title: Host a server
+description: Run the master server or a dedicated world server yourself from one archive each.
+---
 
 Voxelwright has two programs you can run yourself.
 
@@ -117,7 +120,3 @@ The server archive holds:
 - `engine/`, the server's own files, the same as `engine/` in the repository at that commit: about 80 files of the engine's code that the server imports, its plugins, the compiled core (`page/core.wasm`) and San Francisco's arrival point. Nothing for tests, the city pipeline or the page that draws the world is included.
 - `engine/node_modules/`, its three dependencies and what they need: node-datachannel (WebRTC, with the prebuilt library for this platform), and quickjs for running a world's rules in a box.
 - `THIRD-PARTY.md` and `licenses/`, the licences of everything above, including the libraries inside node-datachannel's prebuilt library: libdatachannel, libjuice, usrsctp, libsrtp, plog and OpenSSL.
-
-<!-- docs-verified -->
-
-<!-- docs-verified 29eeb815ae09da45d25dcaf9dc1064957b6a7e43 {"engine/server.mjs":"a9868d90394bb1e66f8e0be61e8621fb","scripts/packages.mjs":"0f61fdc3d696b7cbe474731cb0c1dc03","engine/ground.mjs":"306384f7780c554468343e8c9339d2e2","master/src/config.rs":"17fb726a77712b7205a15a882e4ee581"} -->

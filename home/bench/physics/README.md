@@ -78,5 +78,3 @@ latest numbers are in [RESULTS.md](RESULTS.md).
 - Browser: the home's CSP is `script-src 'self'` without `'wasm-unsafe-eval'`,
   which browsers require to compile WebAssembly. Either engine needs that CSP
   change (not yet tried in a browser).
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"home/bench/physics/package.json":"10837322d81e06d9e8033828382c03b5","home/bench/physics/core.ts":"1bd7045ca7a42acafabf73f0ad91b59a"} -->

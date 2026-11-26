@@ -3,6 +3,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { options } from './doc-options.mjs'
 
+export const REPO = 'https://github.com/voxelwright/voxelwright'
+const repoLink = new RegExp(`^${REPO.replaceAll('.', '\\.')}/(?:blob|tree)/main/?(.*)$`)
+
 // A relative module name in prose can be abbreviated to its last few components.
 let suffixes
 export const workingTree = {
@@ -50,6 +53,7 @@ function ancestors(dir) {
 
 export function mentions(page, content, fs = workingTree, ignores = {}) {
   const errors = []
+  const site = /^guide\/[^/]+\.mdx?$/.test(page)
   const dirs = ancestors(dirname(page))
   const declared = content.match(/^Run commands from `([.\w/-]+)`/m)?.[1]
   if (declared) dirs.unshift(declared)
@@ -75,13 +79,22 @@ export function mentions(page, content, fs = workingTree, ignores = {}) {
       cwd = null
       continue
     }
-    if (line.startsWith('<!-- docs-verified') || (fence && line.trimStart().startsWith('#'))) continue
+    if (fence && line.trimStart().startsWith('#')) continue
     const fail = (token, message) => {
       if (!Object.hasOwn(ignores, token) || !ignores[token].trim()) errors.push(`${page}:${i+1}: ${message}`)
     }
     for (const [, target] of line.matchAll(/\]\(([^\s()]+)\)/g)) {
       const path = target.split(/[?#]/)[0]
-      if (path && !/^([a-z]+:|\/)/i.test(path) && !find(path, [dirname(page)])) fail(path, 'missing link ' + path)
+      const tracked = path.match(repoLink)?.[1]
+      if (tracked !== undefined) {
+        if (!fs.exists(tracked.replace(/\/$/, '') || '.')) fail(target, 'missing link ' + tracked)
+      } else if (!path || /^[a-z]+:/i.test(path)) {
+        continue
+      } else if (site) {
+        // Mintlify publishes guide/ alone: a page is /slug, anything else is on GitHub.
+        if (!path.startsWith('/')) fail(path, `link ${path}: link a guide page as /slug and a repository file by its ${REPO} URL`)
+        else if (!fs.file(`guide${path === '/' ? '/index' : path}.md`) && !fs.file('guide' + path)) fail(path, 'missing page ' + path)
+      } else if (!path.startsWith('/') && !find(path, [dirname(page)])) fail(path, 'missing link ' + path)
     }
     const spans = fence || /^ {4}\S/.test(line) ? [line] : inlineExamples(line)
     for (const span of spans) {

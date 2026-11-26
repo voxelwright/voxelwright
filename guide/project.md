@@ -1,4 +1,7 @@
-# Project map
+---
+title: Project map
+description: The parts of Voxelwright, how they fit together and what each name means.
+---
 
 Start in the part you want to run. The home and the street share a physics world implementation. The city uses a separate cell engine with a Rust core.
 
@@ -14,13 +17,13 @@ flowchart LR
 
 | Part | Where to start |
 | --- | --- |
-| [Home](../home/README.md) | Walk Village's house or work on the scene, interactions and physics. |
-| [Host](../host/README.md) | Start Village's live home. Follow a request from the Elder to a candidate change. |
-| [Street](../street/README.md) | Run the shared block and join it from two pages. |
-| [Engine](../engine/README.md) | Build the Rust core as WebAssembly and draw the city with WebGPU. Page plugins can [draw into a frame](render-passes.md). |
-| [Kit](../engine/kit/README.md) | Run the showcase to work on a voxel control in isolation. |
-| [Site](../site/README.md) and [deploy](../deploy/README.md) | Build the personal front page and blog as HTML and Markdown. The deploy assembly publishes the site alone on zahynailo.dev and the SF realm alone on voxelwright.world. |
-| [Master](../master/README.md) | Find a player-hosted lobby and pass the WebRTC offer and answer. Game traffic goes between peers. |
+| [Home](https://github.com/voxelwright/voxelwright/blob/main/home/README.md) | Walk Village's house or work on the scene, interactions and physics. |
+| [Host](https://github.com/voxelwright/voxelwright/blob/main/host/README.md) | Start Village's live home. Follow a request from the Elder to a candidate change. |
+| [Street](https://github.com/voxelwright/voxelwright/blob/main/street/README.md) | Run the shared block and join it from two pages. |
+| [Engine](https://github.com/voxelwright/voxelwright/blob/main/engine/README.md) | Build the Rust core as WebAssembly and draw the city with WebGPU. Page plugins can [draw into a frame](/render-passes). |
+| [Kit](https://github.com/voxelwright/voxelwright/blob/main/engine/kit/README.md) | Run the showcase to work on a voxel control in isolation. |
+| [Site](https://github.com/voxelwright/voxelwright/blob/main/site/README.md) and [deploy](https://github.com/voxelwright/voxelwright/blob/main/deploy/README.md) | Build the personal front page and blog as HTML and Markdown. The deploy assembly publishes the site alone on zahynailo.dev and the SF realm alone on voxelwright.world. |
+| [Master](https://github.com/voxelwright/voxelwright/blob/main/master/README.md) | Find a player-hosted lobby and pass the WebRTC offer and answer. Game traffic goes between peers. |
 
 ## Names
 
@@ -33,13 +36,11 @@ The project began as Village, so older issues, branches, paths and identifiers s
 
 ## How the parts work
 
-- [The engine](engine.md): the parts and how a frame is made. Then [the core](engine-core.md), [the page](engine-page.md), and [plugins and rules](engine-plugins.md).
-- [Worlds as cells](cells.md): cells, sectors, edits, San Francisco tiles and releases, with their formats.
-- [The city pipeline](city-pipeline.md): from public data to the pinned release a realm loads.
-- [Making](making.md): how a typed wish becomes a thing, with the asker's own model, and what a model may do.
-- [The kit](kit.md): Voxelmorphism, its parts and tokens, and how the site tailors it.
-- [How the project is built](building.md): agents, skills, the gate and the documentation check.
+- [The engine](/engine): the parts and how a frame is made. Then [the core](/engine-core), [the page](/engine-page), and [plugins and rules](/engine-plugins).
+- [Worlds as cells](/cells): cells, sectors, edits, San Francisco tiles and releases, with their formats.
+- [The city pipeline](/city-pipeline): from public data to the pinned release a realm loads.
+- [Making](/making): how a typed wish becomes a thing, with the asker's own model, and what a model may do.
+- [The kit](/kit): Voxelmorphism, its parts and tokens, and how the site tailors it.
+- [How the project is built](/building): agents, skills, the gate and the documentation check.
 
-The [check list](checks.md) gives the names accepted by the root check runner. Project-specific instructions for agents live in [.agents/skills](../.agents/skills). Read the [working rules](../AGENTS.md) before changing code.
-
-<!-- docs-verified bac471765680fbfb55631e91e771136227b3b725 {"site/package.json":"25065cd6f9cdf5bfc5bcd1c193705eab","deploy/assemble.mjs":"fd9345ff8ee4c546a4194cdd12de75e6","street/src/block.ts":"2e98fa7be8da57128e03b83dd0ff766f","master/src/lib.rs":"e7a60006f48f6ca1730542b56b688e86","host/package.json":"7a50b8c947871907fef6d025d0f5b639","engine/package.json":"fcff01d1444ba359e1d890232761e78f","home/package.json":"2b43e8013bc6abfbe95c89da9f2a128c","host/src/live.ts":"45499f1073f06a5c713a90a389267a56"} -->
+The [check list](/checks) gives the names accepted by the root check runner. Project-specific instructions for agents live in [.agents/skills](https://github.com/voxelwright/voxelwright/tree/main/.agents/skills). Read the [working rules](https://github.com/voxelwright/voxelwright/blob/main/AGENTS.md) before changing code.

@@ -18,7 +18,8 @@
     "engine/make/model.mjs": "lines:^const args =|^if .*args.push"
   },
   ".agents/skills/documentation-maintenance/SKILL.md": {
-    "AGENTS.md": "lines:^- Change docs|^- Keep README commands"
+    "AGENTS.md": "lines:^- Change docs|^- Keep README commands",
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\["
   },
   ".agents/skills/facade-evidence/SKILL.md": {
     "engine/bay/facade_evidence.py": "lines:^(SEGMENTER|CLASSIFIER) =|^cli.add_argument"
@@ -54,7 +55,9 @@
     "guide/docs.json": [
       "name",
       "navigation.groups"
-    ]
+    ],
+    "scripts/mint.mjs": "lines:^const MINT|mint validate",
+    "scripts/doc-site.mjs": "lines:errors.push\\(`"
   },
   ".agents/skills/quickjs-sandbox/SKILL.md": {
     "home/package.json": [
@@ -216,7 +219,11 @@
     "scripts/checks.mjs": "checks"
   },
   "guide/documentation.md": {
-    "scripts/docs.mjs": "lines:^const usage =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith|^const schema = "
+    "scripts/docs.mjs": "lines:^const usage =|^const STAMPS =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith|^const schema = ",
+    "scripts/doc-site.mjs": "lines:errors.push\\(`",
+    "scripts/doc-mentions.mjs": "lines:fail\\(path, `link",
+    "scripts/doc-coverage.mjs": "lines:^export const component|^const quiet|^  /|Docs-unchanged:\\[",
+    "scripts/checks.mjs": "lines:name: 'docs"
   },
   "guide/plugin-types.md": {
     "engine/page/plugins.ts": "types"
@@ -422,7 +429,8 @@
     "site/package.json": [
       "scripts.test"
     ],
-    "scripts/docs.mjs": "lines:^const usage =|^const schema = "
+    "scripts/docs.mjs": "lines:^const usage =|^const schema = ",
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\["
   },
   "guide/hosting.md": {
     "engine/server.mjs": "lines:^a\\['release-cache'\\]|^a\\.reports|^const \\{ values: a \\}|^  world: string|^  master: string|console\\.log\\(`(a dedicated|lobby)",

@@ -145,5 +145,3 @@ This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms
 ## One repository
 
 The realm, the site and the Voxelmorphism kit stay in one repository with two Worker targets (#578).
-
-<!-- docs-verified 7da0557e95da1ce39128bd4d145f73c6212c6479 {"deploy/package.json":"d0901c848d9e3486e682fc6e7e44a232","deploy/assemble.mjs":"fd9345ff8ee4c546a4194cdd12de75e6","deploy/worker.mjs":"e5b7b80e71ce21564da2658088d5a459"} -->

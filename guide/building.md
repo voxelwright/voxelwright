@@ -1,6 +1,9 @@
-# How the project is built
+---
+title: How the project is built
+description: How agents build Voxelwright, from the lead and its builders to the gate and the documentation check.
+---
 
-AI agents write most of this repository. One lead agent decides what to build, splits the work, starts a builder agent for each unit and merges the results. The owner sets direction and judges the results by looking and listening. This page describes that process, the checks a change must pass, and how documentation stays true to the code. The rules themselves are in [AGENTS.md](../AGENTS.md), which wins where this page and it disagree.
+AI agents write most of this repository. One lead agent decides what to build, splits the work, starts a builder agent for each unit and merges the results. The owner sets direction and judges the results by looking and listening. This page describes that process, the checks a change must pass, and how documentation stays true to the code. The rules themselves are in [AGENTS.md](https://github.com/voxelwright/voxelwright/blob/main/AGENTS.md), which wins where this page and it disagree.
 
 ## Concepts
 
@@ -32,25 +35,25 @@ A mocked provider or a saved model reply proves the pipeline, never a model inte
 
 ## The root check runner
 
-`scripts/check.mjs` runs the checks listed in `scripts/checks.mjs` with free ports and one shared dev server, at most four at a time. `--ci` skips checks marked local-only, and `--webgl` runs Chrome with software WebGL2. Logs are written to `.check/<name>.log`. [Repository checks](checks.md) lists every check and [Check runner](check-cli.md) its options; both pages are generated from those files.
+`scripts/check.mjs` runs the checks listed in `scripts/checks.mjs` with free ports and one shared dev server, at most four at a time. `--ci` skips checks marked local-only, and `--webgl` runs Chrome with software WebGL2. Logs are written to `.check/<name>.log`. [Repository checks](/checks) lists every check and [Check runner](/check-cli) its options; both pages are generated from those files.
 
 ## The documentation gate
 
-Every guide page, README and skill is bound in `guide/bindings.json` to the source surfaces that would make it false. `node scripts/docs.mjs` (also the `docs` check) hashes each surface and compares it with the stamp at the bottom of the page. A changed surface turns the page red until someone reads the change and re-verifies the page in the same pull request. The gate also checks that every path, link, command and flag a page mentions exists. A hand-written page can show a TypeScript schema printed from source with a `<!-- schema PATH Name -->` marker. See [Keeping a page current](documentation.md).
+Every guide page, README and skill is bound in `guide/bindings.json` to the source surfaces that would make it false. `node scripts/docs.mjs` (the `docs` check) hashes each surface and compares it with the page's stamp in `guide/stamps.json`. A changed surface turns the page red until someone reads the change and re-verifies the page in the same pull request. The gate also checks that every path, link, command and flag a page mentions exists. The `docs-coverage` check fails a branch that changes a component's source without touching any of its pages, unless a `Docs-unchanged:` line says why. The `docs-site` check builds `guide/` with the Mintlify CLI. See [Keeping a page current](/documentation).
 
-The gate proves agreement with the bound surface. It does not prove that a sentence explains the code well. For behaviour a reader relies on, a page can carry a runnable example, as [Drawing from a page plugin](render-passes.md) does.
+The gate proves agreement with the bound surface. It does not prove that a sentence explains the code well. For behaviour a reader relies on, a page can carry a runnable example, as [Drawing from a page plugin](/render-passes) does.
 
 ## The first hour
 
 For a person:
 
-1. Run `./world` from the repository root ([Walk San Francisco](quickstart.md)).
-2. Read the [project map](project.md), then the page for the part you will change: [the engine](engine.md), [worlds as cells](cells.md), [the city pipeline](city-pipeline.md), [making](making.md) or [the kit](kit.md).
+1. Run `./world` from the repository root ([Walk San Francisco](/quickstart)).
+2. Read the [project map](/project), then the page for the part you will change: [the engine](/engine), [worlds as cells](/cells), [the city pipeline](/city-pipeline), [making](/making) or [the kit](/kit).
 3. Read that part's README for commands, and its skill under `.agents/skills` for what was learned the hard way.
 
 For an agent, before changing code:
 
-1. Read [AGENTS.md](../AGENTS.md). Read [DESIGN.md](../DESIGN.md) before UI work.
+1. Read [AGENTS.md](https://github.com/voxelwright/voxelwright/blob/main/AGENTS.md). Read [DESIGN.md](https://github.com/voxelwright/voxelwright/blob/main/DESIGN.md) before UI work.
 2. Read the guide page for the part and its bound sources. The bindings in `guide/bindings.json` show which files the page's claims rest on.
 3. Load the skill for the technology you touch, and check its facts against the code. A skill records what was true when it was verified.
 4. Make the change with its docs in the same pull request. Run `node scripts/docs.mjs`. If a page you did not expect turns red, the change made a claim false: fix the page or the change.
@@ -60,7 +63,6 @@ For an agent, before changing code:
 ```sh
 node scripts/docs.mjs                       # every page against its sources
 node scripts/docs.mjs mentions              # paths, links and commands only
+node scripts/doc-coverage.mjs               # every changed component has a reviewed page
 npm run check -- --list                     # every check and whether CI runs it
 ```
-
-<!-- docs-verified f9a6b0a446ebed84ee4222918f4765d025f53a80 {"AGENTS.md":"8ee0204ca9f15871fc22622357c7c846","scripts/check.mjs":"be243050b01166fea23f15b61440cd1d",".claude/hooks/dispatch-log.mjs":"2ef2b07f0b20333d9c59c210e736156c","engine/package.json":"3ac396d1a99821a73b43881eec58f023","site/package.json":"2418d0bb5d8550813a9ca4b17fc344ed","scripts/docs.mjs":"1778d14d1225222326b7370652ece8cb"} -->

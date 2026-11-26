@@ -94,5 +94,3 @@ Since the full-screen city (fd954ee) the character waits off-screen until the pa
 control summons it, so this script's first step (a visible Support key on `/`) times out; it
 needs updating to summon the button first. `scripts/landing/check-eggs.mjs` covers the summoned
 button meanwhile.
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"site/static/support/support-button.js":"f8ff5e5bfc0b01acae1cedc8ad77bd8f"} -->

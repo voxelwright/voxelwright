@@ -1,11 +1,14 @@
-# The core
+---
+title: The core
+description: The Rust core compiled to WebAssembly. It decides what every cell is, applies edits and moves what comes loose.
+---
 
-The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes. The page's workers, the mover and the shared world process all load that same file. Read [the engine](engine.md) first for where it sits.
+The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes. The page's workers, the mover and the shared world process all load that same file. Read [the engine](/engine) first for where it sits.
 
 ## Concepts
 
 - **Kind** (`Kind` in `engine/core/src/tree.rs`). A `u16`. The low byte is the material and its flags. The high byte is a colour from one shared palette of 256. Kind 0 is air. `engine/core/src/kinds.rs` names the materials and flags.
-- **Sector.** 64 cells a side (`SIDE`), `CELLS` cells in all. `tree::encode` writes a sector as a tree of words, described in [worlds as cells](cells.md).
+- **Sector.** 64 cells a side (`SIDE`), `CELLS` cells in all. `tree::encode` writes a sector as a tree of words, described in [worlds as cells](/cells).
 - **Scratch** (`engine/core/src/scratch.rs`). The dense 64³ array a sector is built in before it is encoded.
 - **Edit** (`Edit` in `engine/core/src/lib.rs`). `Ball`, `Runs`, `Rows` or `Fine`. `fill_of` makes a sector by running the place's rules (`city::make`), then applying the edits that reach it in order.
 - **Level** (`lod` in the code). The core makes a sector at any coarseness. At level `lod` a cell stands for 2^lod finest cells each way.
@@ -17,7 +20,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | --- | --- |
 | `city.rs` | The generated town: hills, streets, houses, towers, parks. Synthetic data, made by rule, so none of it is stored. |
 | `land.rs` | The ground beyond the town: mountains, a plain, open country. |
-| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](city-pipeline.md) bakes. Where no pack is loaded the world is level water. |
+| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
 | `scratch.rs` | Building a sector's cells, edits, blasts, finer cells. |
 | `tree.rs` | Encoding a sector as a tree. |
@@ -78,5 +81,3 @@ cd engine && npm run core && npm run check
 ```
 
 A core can be swapped into a running server without a restart: build it, then `POST /core/look`. Each world process starts the new module and replays the kept edits. Bodies in flight are lost.
-
-<!-- docs-verified 3351fa1b50cbe8f10801d860752f5fd32e583365 {"engine/core/src/lib.rs":"f1f8590b59a7e5e80f57c07d2bd8e255","engine/core/src/tree.rs":"2b36ff2da4a2d3e1c196eca9b069764a","engine/core/src/kinds.rs":"c30ebd4301c6126c7b5c00a10dcd272b","engine/core/build.mjs":"f2e002ecf190fe86bf660486e1e58d40","engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/page/edits.ts":"41ecf2c88d16227f32797a4371ee5a48"} -->

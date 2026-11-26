@@ -245,5 +245,3 @@ Details and scores are in `home/notes/build/look-log.md`.
   signal; discard its score (9:50-10:59, his Gemini "jester").
 - A high council score is model opinion, not owner approval. Report it so,
   with the screenshots.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"AGENTS.md":"e0d62ce46cbc2a9e9e70879b22911108","engine/kit/tools/physical-specimens.mjs":"a8cb2999ab8163ed359f746c79986692"} -->

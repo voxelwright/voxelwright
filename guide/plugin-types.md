@@ -1,6 +1,9 @@
-# Page plugin types
+---
+title: Page plugin types
+description: The TypeScript contract a page plugin implements, printed from engine/page/plugins.ts.
+---
 
-Local type declarations exported by the [page plugin registry](../engine/page/plugins.ts). See [Drawing from a page plugin](render-passes.md) for a render pass example.
+Local type declarations exported by the [page plugin registry](https://github.com/voxelwright/voxelwright/blob/main/engine/page/plugins.ts). See [Drawing from a page plugin](/render-passes) for a render pass example.
 
 ```ts
 export interface PagePlugin {
@@ -25,5 +28,3 @@ export interface Passes {
     readonly names: string[];
 }
 ```
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/page/plugins.ts":"1a490851e31a3b2d179d96047a544054"} -->
