@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { ts, options } from './doc-options.mjs'
-import { mentions } from './doc-mentions.mjs'
+import { mentions, REPO } from './doc-mentions.mjs'
+import { pageProblems, site } from './doc-site.mjs'
 import { fileURLToPath } from 'node:url'
 
 process.chdir(fileURLToPath(new URL('..', import.meta.url)))
@@ -14,26 +15,33 @@ const [action, target] = process.argv.slice(2)
 const read = path => readFileSync(path, 'utf8')
 const git = (...args) => execFileSync('git', args, {encoding: 'utf8'}).trimEnd()
 const bindings = JSON.parse(read('guide/bindings.json'))
-const marker = /^<!-- docs-verified (?:([0-9a-f]{40}) )?(\{.*\}) -->$/m
-function cli(title, command, fields, row) {
+// One line per page, so two branches that verify different pages merge cleanly.
+const STAMPS = 'guide/stamps.json'
+const stamps = existsSync(STAMPS) ? JSON.parse(read(STAMPS)) : {}
+const saveStamps = () => writeFileSync(STAMPS, '{\n' + Object.keys(stamps).sort()
+  .map(page => `  ${JSON.stringify(page)}: ${JSON.stringify(stamps[page])}`).join(',\n') + '\n}\n')
+const front = (title, description) => ['---', `title: ${title}`, `description: ${description}`, '---', '']
+// A literal default prints as code. A computed one is explained in the option's purpose.
+const literal = value => /^['"]?[\w.-]*['"]?$/.test(value) ? `\`${value}\`` : 'computed'
+function cli(title, description, command, fields, row) {
   return rows => [
-    `# ${title}`, '', `Run \`${command}\` with the following options.`, '',
+    ...front(title, description), `Run \`${command}\` with the following options.`, '',
     `| Option | ${fields.join(' | ')} |`, `| --- | ${fields.map(() => '---').join(' | ')} |`,
     ...rows.map(([name, ...values]) => `| \`--${name}\` | ${row(...values).join(' | ')} |`),
   ]
 }
 const generators = {
-  'guide/check-cli.md': cli('Check runner', 'npm run check --', ['Type', 'Default', 'Purpose'],
-    (purpose, type, value) => [type, `\`${value}\``, purpose]),
+  'guide/check-cli.md': cli('Check runner', 'Every option of the root check runner, generated from scripts/check.mjs.',
+    'npm run check --', ['Type', 'Default', 'Purpose'], (purpose, type, value) => [type, literal(value), purpose]),
   'guide/checks.md': rows => [
-    '# Repository checks', '',
+    ...front('Repository checks', 'Every check the root runner knows, whether CI runs it, and what it needs.'),
     'Use a name with `npm run check -- --only NAME`. The default CI run excludes local and skipped checks. A file prerequisite must exist even for a named run.', '',
     '| Name | Default run | Required file |', '| --- | --- | --- |',
     ...rows.map(([name, mode, file]) => `| \`${name}\` | ${mode} | ${file ? '\`' + file + '\`' : ''} |`),
   ],
   'guide/plugin-types.md': declarations => [
-    '# Page plugin types', '',
-    'Local type declarations exported by the [page plugin registry](../engine/page/plugins.ts). See [Drawing from a page plugin](render-passes.md) for a render pass example.', '',
+    ...front('Page plugin types', 'The TypeScript contract a page plugin implements, printed from engine/page/plugins.ts.'),
+    `Local type declarations exported by the [page plugin registry](${REPO}/blob/main/engine/page/plugins.ts). See [Drawing from a page plugin](/render-passes) for a render pass example.`, '',
     '```ts', declarations.join('\n\n'), '```',
   ],
 }
@@ -77,17 +85,22 @@ function declarations(file, source, names) {
 }
 
 // A hand-written page shows a schema as the source declares it: the ts fence after
-// `<!-- schema PATH Name,Name -->` is printed from those exported declarations.
-const schema = /^<!-- schema (\S+) ([\w,]+) -->\n```ts\n[\s\S]*?^```$/gm
+// `{/* schema PATH Name,Name */}` is printed from those exported declarations. The
+// marker is an MDX comment, so Mintlify renders nothing for it.
+const schema = /^\{\/\* schema (\S+) ([\w,]+) \*\/\}\n```ts\n[\s\S]*?^```$/gm
 const schemas = body => body.replace(schema, (_, file, names) =>
-  `<!-- schema ${file} ${names} -->\n\`\`\`ts\n${declarations(file, read(file), names.split(',')).join('\n\n')}\n\`\`\``)
+  `{/* schema ${file} ${names} */}\n\`\`\`ts\n${declarations(file, read(file), names.split(',')).join('\n\n')}\n\`\`\``)
 
 function inventory() {
-  const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', 'guide/*.md').split('\n')
-  for (const page of paths) {
-    if (!Object.hasOwn(bindings, page)) {
-      throw Error(`${page} needs a source in guide/bindings.json`)
-    }
+  const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', ':(glob)guide/*.md',
+    'AGENTS.md', 'CONTRIBUTING.md', 'DESIGN.md', 'CREDITS.md', 'DATA-LICENSES.md', 'engine/kit/*.md', 'engine/sf/*.md').split('\n')
+  const errors = paths.filter(page => !Object.hasOwn(bindings, page)).map(page => `${page} needs a source in guide/bindings.json`)
+  errors.push(...Object.keys(stamps).filter(page => !Object.hasOwn(bindings, page))
+    .map(page => `${STAMPS} has a stamp for ${page}, which has no binding: delete the line`))
+  errors.push(...site(paths, read('guide/docs.json')))
+  if (errors.length) {
+    console.error(errors.join('\n'))
+    process.exit(1)
   }
 }
 
@@ -115,10 +128,11 @@ async function example(page, content) {
 }
 
 function report(page, changed, reasons, sources, base) {
-  // A stamp travels with its page through merges and squash merges. Look up
-  // its introducing commit only on failure. Hash comparison needs no history.
+  // A stamp travels with its page's line in guide/stamps.json through merges and
+  // squash merges. Look up the commit that last wrote that line only on failure.
   const shallow = git('rev-parse', '--is-shallow-repository') === 'true'
-  const start = shallow ? '' : git('log', '-1', '--format=%H', '-G', '^<!-- docs-verified ', '--', page)
+  const line = '^  ' + JSON.stringify(page).replaceAll('.', '\\.') + ':'
+  const start = shallow ? '' : git('log', '-1', '--format=%H', '-G', line, '--', STAMPS)
   const covered = [...new Set([...sources, ...changed])]
   const paths = [...new Set([...covered, page, 'guide/bindings.json', 'scripts/docs.mjs'])]
   if (start && covered.length) {
@@ -139,16 +153,15 @@ function report(page, changed, reasons, sources, base) {
 async function checkPage(page) {
   const sources = bindings[page]
   const content = existsSync(page) ? read(page) : ''
-  const stamp = content.match(marker)
+  const stamp = stamps[page]
   let previous = {}
   const reasons = []
-  try {
-    if (stamp) {
-      const parsed = JSON.parse(stamp[2])
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') throw Error()
-      previous = parsed
-    }
-  } catch { reasons.push('invalid verification stamp') }
+  if (stamp) {
+    const valid = stamp.sources && typeof stamp.sources === 'object' && !Array.isArray(stamp.sources)
+      && (stamp.verified === undefined || /^[0-9a-f]{40}$/.test(stamp.verified))
+    if (valid) previous = stamp.sources
+    else reasons.push('invalid verification stamp')
+  }
   const hashes = {}, values = [], invalid = []
   for (const [file, selector] of Object.entries(sources)) {
     try {
@@ -162,27 +175,29 @@ async function checkPage(page) {
   const changed = [...new Set([...Object.keys(previous), ...Object.keys(sources)])]
     .filter(file => previous[file] !== hashes[file] || invalid.includes(file))
   const generate = generators[page]
-  let body = content.replace(marker, '').trimEnd()
+  let body = content
   if (generate && !reasons.length) {
     assert.equal(values.length, 1, 'a reference page has one source')
-    body = generate(values[0]).join('\n')
+    body = generate(values[0]).join('\n') + '\n'
   } else if (!body.trim()) reasons.push('page missing or empty')
   else try {
     const printed = schemas(body)
     if (printed !== body && !action) reasons.push('a schema differs from its source declaration')
     body = printed
   } catch (e) { reasons.push(`schema: ${e.message}`) }
+  if (/^guide\/[^/]+\.mdx?$/.test(page)) reasons.push(...pageProblems(page, body))
   reasons.push(...mentions(page, body, undefined, ignores[page]))
   try { await example(page, body) } catch (e) { reasons.push(`example failed: ${e.message}`) }
-  const base = action && (!stamp?.[1] || changed.length) ? git('rev-parse', 'HEAD') : stamp?.[1]
-  const output = body + '\n\n<!-- docs-verified ' + base + ' ' + JSON.stringify(hashes) + ' -->\n'
+  const base = action && (!stamp?.verified || changed.length) ? git('rev-parse', 'HEAD') : stamp?.verified
   if (action && !reasons.length) {
-    if (output !== content) writeFileSync(page, output)
+    if (body !== content) writeFileSync(page, body)
+    stamps[page] = {verified: base, sources: hashes}
+    saveStamps()
     return
   }
-  if (!stamp?.[1]) reasons.push('missing verification stamp')
+  if (!stamp?.verified) reasons.push('missing verification stamp')
   if (changed.length) reasons.push('binding differs from its verified surface')
-  if (generate && output !== content) reasons.push('generated page differs from source')
+  if (generate && body !== content) reasons.push('generated page differs from source')
   if (reasons.length) report(page, changed, reasons, Object.keys(sources), base)
 }
 

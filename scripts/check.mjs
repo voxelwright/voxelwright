@@ -19,7 +19,7 @@ const { values, positionals } = parseArgs({
     only: { type: 'boolean', description: 'Run the named checks, including skipped checks when their prerequisites exist.', default: false },
     ci: { type: 'boolean', description: 'Skip local-only checks.', default: false },
     webgl: { type: 'boolean', description: 'Run Chrome with software WebGL2.', default: false },
-    jobs: { type: 'string', description: 'Maximum number of checks running at once.', default: String(Math.min(4, cpus().length)) },
+    jobs: { type: 'string', description: 'Maximum number of checks running at once: 4, or the CPU count if lower.', default: String(Math.min(4, cpus().length)) },
     timeout: { type: 'string', description: 'Seconds allowed per check.', default: '900' },
   },
 })

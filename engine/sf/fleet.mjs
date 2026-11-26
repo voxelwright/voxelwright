@@ -9,6 +9,8 @@
 // have a motor and seats and are driven as any kept car is; the rest are too long for a living body (96 cells) and
 // are driven by the street (page/street.ts).
 
+import { COUPE_KINDS, GT_COUPE, sculptCoupe } from '../page/car-sculpt.ts'
+
 const STEEL = 12, GLASS = 11, PLASTER = 9, WOOD = 10, ROOFING = 14, LAMP = 15
 const k = (material, colour = 0) => material | (colour << 8)
 /** A hue (0 red, 3 orange-yellow, 8 green, 16 blue) in a tone (0 palest .. 6 dark, 7 to 9 dusty). */
@@ -89,7 +91,7 @@ export function streetcar() {
   coach(g, { L, Wd, floor: 0.75, roof: 3.05, lower: k(STEEL, hue(8, 6)), upper: k(PLASTER, hue(3, 0)), belt: k(STEEL, hue(3, 4)), beltAt: 1.55, win0: 1.6, win1: 2.5, pitch: 0.95, doors: [[2.0, 3.1], [10.9, 12.0]], nose: 1.2, seat: k(WOOD, hue(2, 8)) })
   // A domed roof, the pole and its rope, headlamp, bumpers.
   g.rounded(0.6, L - 0.6, 3.05, 3.2, 0.3, Wd - 0.3, 1.0, k(ROOFING, grey(9)))
-  for (let i = 0; i < 40; i++) { const t = i / 40; g.box(4 + t * 5.5, 4.08 + t * 5.5, 3.2 + t * 0.65, 3.27 + t * 0.65, Wd / 2 - 0.03, Wd / 2 + 0.03, k(STEEL, grey(12))) }
+  for (let i = 0; i < 160; i++) { const t = i / 160; g.box(4 + t * 5.5, 4.08 + t * 5.5, 3.2 + t * 0.65, 3.27 + t * 0.65, Wd / 2 - 0.03, Wd / 2 + 0.03, k(STEEL, grey(12))) }
   g.box(L - 0.05, L, 1.0, 1.25, Wd / 2 - 0.15, Wd / 2 + 0.15, k(LAMP, 1))
   for (const x of [0, L - 0.1]) g.box(x, x + 0.1, 0.55, 0.75, 0.2, Wd - 0.2, k(STEEL, grey(12)))
   // Two bogies, four wheels each, under the floor.
@@ -124,32 +126,84 @@ function bus(name, kind, poles) {
   if (poles) {
     // Two poles from the roof back to the wires, and the frame they stand on.
     g.box(6.5, 8.5, 3.25, 3.4, 0.6, Wd - 0.6, k(STEEL, grey(10)))
-    for (const z of [0.9, Wd - 0.9]) for (let i = 0; i < 60; i++) { const t = i / 60; g.box(7.5 - t * 6.0, 7.56 - t * 6.0, 3.4 + t * 1.15, 3.46 + t * 1.15, z - 0.03, z + 0.03, k(STEEL, grey(13))) }
+    for (const z of [0.9, Wd - 0.9]) for (let i = 0; i < 240; i++) { const t = i / 240; g.box(7.5 - t * 6.0, 7.56 - t * 6.0, 3.4 + t * 1.15, 3.46 + t * 1.15, z - 0.03, z + 0.03, k(STEEL, grey(13))) }
   }
   return { name, kind, per, cells: g.cells, size: [g.W, g.H, g.D], paint: [k(STEEL, hue(0, 5)), k(STEEL, grey(0))], tyre: [k(ROOFING, grey(13))] }
 }
 export const cityBus = () => bus('city bus', 'bus', false)
 export const trolleybus = () => bus('trolleybus', 'trolley', true)
 
+/**
+ * Tuned SF vehicle handling archetypes (lengths in 10 cm cells; speeds in cells/s where 1 cell/s = 0.36 km/h).
+ * Shared by `sf/cars.mjs` and `sf/fleet.mjs` so every vehicle class has distinct, responsive San Francisco feel:
+ *   - coupe:  blistering acceleration & drift-happy rear balance (212 km/h)
+ *   - saloon: punchy, planted, nimble executive saloon (171 km/h)
+ *   - hatch:  nimble city saloon & SF taxi (160 km/h)
+ *   - suv:    confident, high-grip hill climber (151 km/h)
+ *   - van:    weighty, torquey urban delivery van (124 km/h)
+ *   - truck:  heavy, torquey, unstoppable freight hauler (106 km/h)
+ *   - bus:    heavy transit reference spec (kept ready if >96-cell living bodies are enabled)
+ */
+export const HANDLING = {
+  coupe:  { power: 142, top: 590, grip: 1.24, steer: 0.62, tough: 220 },
+  saloon: { power: 112, top: 475, grip: 1.38, steer: 0.58, tough: 210 },
+  hatch:  { power: 100, top: 445, grip: 1.42, steer: 0.60, tough: 200 },
+  suv:    { power: 96,  top: 420, grip: 1.48, steer: 0.54, tough: 280 },
+  van:    { power: 84,  top: 345, grip: 1.32, steer: 0.48, tough: 360 },
+  truck:  { power: 76,  top: 295, grip: 1.28, steer: 0.42, tough: 500 },
+  bus:    { power: 70,  top: 265, grip: 1.35, steer: 0.38, tough: 620 },
+}
+
 /** A motor for something driven on four wheels, its feet at the wheels' middles (body cells), front two steering. */
-const motorOf = (length, width, wheelX, top) => ({
-  front: 0, grip: 1.25, power: 55, top, steer: 0.5, hover: 0, lift: 0, upright: 0, turns: 0, jump: 0, tough: 160,
-  feet: [[wheelX[0], 1], [wheelX[0], width - 1], [wheelX[1], 1], [wheelX[1], width - 1]].map(([x, z], i) => ({ at: [x, 3.2, z], reach: 6, steers: i >= 2, drives: i < 2 })),
+const motorOf = (length, width, wheelX, spec, opts = {}) => ({
+  front: 0,
+  grip: spec.grip,
+  power: spec.power,
+  top: spec.top,
+  steer: spec.steer,
+  hover: 0, lift: 0, upright: 0, turns: 0, jump: 0,
+  tough: spec.tough,
+  feet: [[wheelX[0], 1], [wheelX[0], width - 1], [wheelX[1], 1], [wheelX[1], width - 1]].map(([x, z], i) => ({
+    at: [x, opts.footY ?? 3.2, z],
+    reach: opts.reach ?? 6,
+    steers: i >= 2,
+    drives: opts.awd ? true : i < 2,
+  })),
 })
+
+/**
+ * The GT coupe (#39): 4.5 m long, 1.28 m high, 1.92 m wide at 2.5 cm, sculpted from continuous shapes (page/car-sculpt.ts,
+ * the same coupe G brings and the hand-written car wears): a low nose with recessed lamps and a honeycomb intake, fenders
+ * over the wheels and haunches over the back ones, a fastback roof over a glasshouse that leans in, a full-width tail
+ * lamp, a diffuser and twin exhausts; bucket seats, a dash and a wheel inside.
+ */
+export function sportsCoupe() {
+  const PAINT = k(STEEL, hue(0, 4)), { cells, size } = sculptCoupe({ ...GT_COUPE, paint: PAINT })
+  const [x0, x1] = GT_COUPE.wheels, body = [Math.ceil(size[0] / 4), Math.ceil(size[1] / 4), Math.ceil(size[2] / 4)], [ex, ey, ez] = GT_COUPE.eye
+  return {
+    name: 'sports coupe', kind: 'car', per: GT_COUPE.per, cells, size, body,
+    motor: motorOf(body[0], body[2], [x0 * 10, x1 * 10], HANDLING.coupe, { footY: 3.0, reach: 5.5 }),
+    seats: [[ex * 10 + 0.5, -1.2, ez * 10], [ex * 10 + 0.5, -1.2, body[2] - ez * 10]],
+    eye: [ex * 10, ey * 10, ez * 10],
+    paint: [PAINT], tyre: [COUPE_KINDS.tyre],
+  }
+}
 
 /** A delivery van: 6 m, a tall white box with a sloped nose, sliding door, back doors. Driven like a car. */
 export function van() {
   const per = 4, L = 6.0, Wd = 2.05, H = 2.6, g = grid(L, H, Wd, per), WHITE = k(STEEL, grey(1)), BLACK = k(ROOFING, grey(13)), TYRE = k(ROOFING, grey(14))
-  g.rounded(0, L - 0.9, 0.35, H, 0, Wd, 0.15, WHITE)
-  // The nose: bonnet, then the windscreen sloping back.
-  g.rounded(L - 1.2, L, 0.35, 1.1, 0, Wd, 0.2, WHITE)
-  for (let i = 0; i < 20; i++) { const t = i / 20; g.box(L - 1.25 - t * 0.0, L - 0.9 - t * 0.5, 1.1 + t * 1.3, 1.1 + (t + 0.05) * 1.3, 0.05, Wd - 0.05, WHITE) }
-  for (let i = 0; i < 20; i++) { const t = i / 20; g.box(L - 0.95 - t * 0.5, L - 0.88 - t * 0.5, 1.12 + t * 1.2, 1.12 + (t + 0.06) * 1.2, 0.12, Wd - 0.12, k(GLASS, grey(12))) }
+  g.rounded(0, L - 1.5, 0.35, H, 0, Wd, 0.15, WHITE)
+  // The nose, a cell's row at a time so that nothing steps more than a cell: the grille's face, the bonnet's front
+  // rounded over, the bonnet rising gently to the windscreen, the windscreen raked back, the roof's front rounded down.
+  const cell = 1 / g.s
+  const nose = (y) => y < 0.9 ? L : y < 1.12 ? L - 0.25 * (1 - Math.sqrt(Math.max(0, 1 - ((y - 0.9) / 0.22) ** 2))) : y < 1.2 ? L - 0.25 - ((y - 1.12) / 0.08) * 0.73 : y < 2.42 ? L - 0.98 - ((y - 1.2) / 1.22) * 0.5 : L - 1.48 - 0.16 * (1 - Math.sqrt(Math.max(0, 1 - ((y - 2.42) / 0.18) ** 2)))
+  for (let y = 0.35; y < H; y += cell) g.rounded(0, nose(y + cell / 2), y, y + cell, 0, Wd, y < 1.2 ? 0.2 : 0.15, WHITE)
+  for (let y = 1.25; y < 2.36; y += cell) { const x = nose(y + cell / 2); g.box(x - 2 * cell, x, y, y + cell, 0.12, Wd - 0.12, k(GLASS, grey(12))) }
   // Cab side windows, the sliding door with its window, seams and handles, a rubbing strip along each side, wheel
   // arches, marker lamps; the back doors with their windows, handles and seam, a plate, tall lamp clusters, a step.
   const SEAM = k(STEEL, grey(11)), TRIM = k(ROOFING, grey(12)), DARK_GLASS = k(GLASS, grey(13))
   for (const [z0, z1] of [[0, 0.04], [Wd - 0.04, Wd]]) {
-    g.box(L - 1.75, L - 1.0, 1.25, 2.0, z0, z1, k(GLASS, grey(12)))
+    for (let y = 1.25; y < 2.0; y += cell) g.box(L - 1.75, nose(y + cell / 2) - 0.08, y, y + cell, z0, z1, k(GLASS, grey(12)))
     g.box(L - 2.85, L - 2.05, 1.35, 1.95, z0, z1, DARK_GLASS)
     for (const x of [L - 1.82, L - 2.95, 1.6]) g.box(x, x + 0.06, 0.45, 2.35, z0, z1, SEAM)
     g.box(L - 2.85, L - 1.85, 2.35, 2.4, z0, z1, SEAM)
@@ -163,23 +217,30 @@ export function van() {
   g.box(0, 0.05, 1.15, 1.22, Wd / 2 - 0.2, Wd / 2 - 0.06, BLACK); g.box(0, 0.05, 1.15, 1.22, Wd / 2 + 0.06, Wd / 2 + 0.2, BLACK)
   g.box(0, 0.05, 0.62, 0.78, Wd / 2 - 0.26, Wd / 2 + 0.26, k(PLASTER, grey(1))); g.box(0, 0.06, 0.66, 0.74, Wd / 2 - 0.2, Wd / 2 + 0.2, k(STEEL, hue(16, 5)))
   for (const z of [0.0, Wd - 0.14]) { g.box(0, 0.05, 1.3, 1.9, z, z + 0.14, k(LAMP, hue(0, 4))); g.box(0, 0.05, 1.12, 1.3, z, z + 0.14, k(LAMP, hue(3, 4))); g.box(0, 0.05, 0.98, 1.12, z, z + 0.14, k(LAMP, 1)) }
-  for (const z of [0.15, Wd - 0.45]) g.box(L - 0.04, L, 0.75, 0.95, z, z + 0.3, k(LAMP, 1))
+  // Headlamps set a cell into the nose in dark bezels, and a grille of bars recessed between them.
+  for (const z of [0.15, Wd - 0.45]) { g.box(L - 0.05, L, 0.73, 0.97, z - 0.02, z + 0.32, BLACK); g.box(L - 0.05, L - 0.025, 0.75, 0.95, z, z + 0.3, k(LAMP, 1)); g.box(L - 0.025, L, 0.75, 0.95, z, z + 0.3, 0) }
   g.box(L - 0.04, L, 0.55, 0.72, 0.5, Wd - 0.5, TRIM)
-  // A grille of bars between the lamps, with a badge's plate in it.
-  g.box(L - 0.03, L, 0.74, 1.0, 0.48, Wd - 0.48, BLACK)
-  for (let y = 0.77; y < 0.98; y += 0.07) g.box(L - 0.02, L, y, y + 0.03, 0.5, Wd - 0.5, k(STEEL, grey(6)))
+  g.box(L - 0.05, L, 0.74, 1.0, 0.48, Wd - 0.48, BLACK)
+  g.box(L - 0.025, L, 0.76, 0.98, 0.5, Wd - 0.5, 0)
+  for (let y = 0.77; y < 0.98; y += 0.07) g.box(L - 0.05, L - 0.01, y, y + 0.025, 0.5, Wd - 0.5, k(STEEL, grey(6)))
   g.box(L - 0.08, L, 0.3, 0.5, 0.05, Wd - 0.05, BLACK); g.box(0, 0.08, 0.3, 0.5, 0.05, Wd - 0.05, BLACK); g.box(-0.0, 0.25, 0.28, 0.33, 0.3, Wd - 0.3, BLACK)
   for (const z of [-0.12, Wd]) g.box(L - 1.2, L - 1.1, 1.6, 1.85, Math.max(0, z), Math.min(Wd, z + 0.12), BLACK)
+  // The wheel arches: a round well cut in from each side over the wheel, before the shell is hollowed so its walls stay.
+  const arch = (x, y, xm) => Math.hypot(x - g.c(xm), y - g.c(0.36))
+  for (const xm of [1.1, L - 1.3]) for (let y = 0; y <= g.c(0.85); y++) for (let x = g.c(xm - 0.5); x <= g.c(xm + 0.5); x++) if (arch(x, y, xm) < 0.43 * g.s) for (let z = 0; z < g.c(0.3); z++) { g.set(x, y, z, 0); g.set(x, y, g.D - 1 - z, 0) }
   g.hollow()
   // Two seats in the cab, seen through the glass.
   for (const z of [0.3, Wd - 0.85]) { g.box(L - 2.1, L - 1.6, 0.45, 0.95, z, z + 0.55, BLACK); g.box(L - 2.2, L - 2.05, 0.95, 1.6, z, z + 0.55, BLACK) }
   for (const xm of [1.1, L - 1.3]) {
-    // Arches: a dark band round each wheel's top on the body's sides.
-    for (let y = g.c(0.35); y <= g.c(0.85); y++) for (let x = g.c(xm - 0.5); x <= g.c(xm + 0.5); x++) { const d = Math.hypot(x - g.c(xm), y - g.c(0.36)); if (d > 0.42 * g.s && d < 0.5 * g.s) for (const z of [0, 1, g.D - 2, g.D - 1]) if (g.get(x, y, z)) g.set(x, y, z, TRIM) }
+    // The wells lined dark, a flare of dark trim round each one's lip on the body's sides.
+    for (let y = 0; y <= g.c(0.92); y++) for (let x = g.c(xm - 0.56); x <= g.c(xm + 0.56); x++) for (let z = 0; z < g.D; z++) {
+      const r = arch(x, y, xm), out = Math.min(z, g.D - 1 - z)
+      if (g.get(x, y, z) && ((r < 0.47 * g.s && out < g.c(0.34)) || (r < 0.5 * g.s && out < 2))) g.set(x, y, z, TRIM)
+    }
     for (const [z0, z1] of [[0, 0.22], [Wd - 0.22, Wd]]) g.wheel(xm, 0.36, z0, z1, 0.36, TYRE, k(STEEL, grey(10)), k(STEEL, grey(6)))
   }
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
-  return { name: 'delivery van', kind: 'van', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [11, 47], 140), seats: [[42, 4.5, 6.5], [42, 4.5, 14]], paint: [WHITE], tyre: [TYRE] }
+  return { name: 'delivery van', kind: 'van', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [11, 47], HANDLING.van), seats: [[42, 4.5, 6.5], [42, 4.5, 14]], paint: [WHITE], tyre: [TYRE] }
 }
 
 /** A box truck: 8 m, a cab and a dry-freight box behind it on six wheels. Driven like a car, more slowly. */
@@ -209,7 +270,8 @@ export function boxTruck() {
   for (let y = floor + 0.18; y < H - 0.25; y += 0.24) g.box(0, b0 + 0.03, y, y + 0.03, 0.15, Wd - 0.15, SEAM)
   g.box(0, 0.06, floor + 0.12, floor + 0.2, Wd / 2 - 0.25, Wd / 2 + 0.25, BLACK)
   for (const z of [0.3, Wd / 2 - 0.1, Wd / 2 + 0.05, Wd - 0.35]) g.box(0, 0.04, H - 0.17, H - 0.12, z, z + 0.05, AMBER)
-  for (const z of [0.08, Wd - 0.28]) { g.box(0, 0.04, floor - 0.2, floor - 0.02, z, z + 0.2, RED); g.box(0, 0.04, floor - 0.32, floor - 0.2, z, z + 0.2, AMBER) }
+  // Tail lamps under the door, each a red brake lamp over an amber turn lamp and a white reversing lamp, big enough to read.
+  for (const z of [0.06, Wd - 0.36]) { g.box(0, 0.04, floor - 0.3, floor - 0.02, z, z + 0.3, RED); g.box(0, 0.04, floor - 0.42, floor - 0.3, z, z + 0.18, AMBER); g.box(0, 0.04, floor - 0.42, floor - 0.3, z + 0.18, z + 0.3, WHITE) }
   g.box(0.05, 0.12, 0.62, 0.8, Wd / 2 - 0.26, Wd / 2 + 0.26, k(PLASTER, grey(1))); g.box(0.04, 0.11, 0.66, 0.76, Wd / 2 - 0.2, Wd / 2 + 0.2, k(STEEL, hue(16, 5)))
   g.box(0.08, 0.22, 0.42, 0.56, 0.12, Wd - 0.12, FRAME)
   for (const z of [0.5, Wd - 0.6]) g.box(0.15, 0.3, 0.56, floor, z, z + 0.1, FRAME)
@@ -224,7 +286,9 @@ export function boxTruck() {
   // ── The cab: its body squared off and rounded at the front corners, a short bonnet, a high windscreen.
   const c0 = 6.0
   g.rounded(c0, L - 0.25, 0.75, 2.85, 0.05, Wd - 0.05, 0.2, CAB)
-  g.rounded(c0 + 1.2, L, 0.55, 1.55, 0.08, Wd - 0.08, 0.25, CAB)
+  // The bonnet, a cell's row at a time: its front edge rounded over into its top.
+  const cell = 1 / g.s, bonnet = (y) => (y < 1.3 ? L : L - 0.22 * (1 - Math.sqrt(Math.max(0, 1 - ((y - 1.3) / 0.25) ** 2))))
+  for (let y = 0.55; y < 1.55; y += cell) g.rounded(c0 + 1.2, bonnet(y + cell / 2), y, y + cell, 0.08, Wd - 0.08, 0.25, CAB)
   g.box(c0, c0 + 0.08, 0.75, 2.85, 0.1, Wd - 0.1, FRAME)
   // A deflector over the cab's roof, up to the box's front.
   for (let i = 0; i < 16; i++) { const t = i / 16; g.box(c0 + 0.05, c0 + 0.9 - t * 0.85, 2.85 + t * 0.55, 2.85 + (t + 0.07) * 0.55, 0.15, Wd - 0.15, CAB) }
@@ -240,21 +304,31 @@ export function boxTruck() {
     g.box(L - 0.6, L - 0.52, 1.75, 2.45, z0 < 1 ? 0 : Wd - 0.05, z0 < 1 ? 0.05 : Wd, BLACK)
   }
   // A grille of bars between the headlamps, the lamps, a bumper, the plate and amber lamps along the roof's front.
-  g.box(L - 0.04, L, 0.7, 1.45, 0.55, Wd - 0.55, BLACK)
-  for (let y = 0.76; y < 1.42; y += 0.1) g.box(L - 0.02, L, y, y + 0.04, 0.58, Wd - 0.58, k(STEEL, grey(6)))
-  for (const z of [0.15, Wd - 0.5]) { g.box(L - 0.05, L, 1.05, 1.3, z, z + 0.35, WHITE); g.box(L - 0.05, L, 0.9, 1.0, z, z + 0.35, AMBER) }
+  // The grille's bars and the lamps set into the nose, each in a dark surround.
+  g.box(L - 0.06, L, 0.7, 1.28, 0.55, Wd - 0.55, BLACK); g.box(L - 0.03, L, 0.73, 1.25, 0.58, Wd - 0.58, 0)
+  for (let y = 0.76; y < 1.22; y += 0.1) g.box(L - 0.06, L - 0.01, y, y + 0.04, 0.58, Wd - 0.58, k(STEEL, grey(6)))
+  for (const z of [0.15, Wd - 0.5]) {
+    g.box(L - 0.06, L, 0.87, 1.32, z - 0.02, z + 0.37, BLACK)
+    g.box(L - 0.06, L - 0.03, 1.05, 1.3, z, z + 0.35, WHITE); g.box(L - 0.06, L - 0.03, 0.9, 1.0, z, z + 0.35, AMBER); g.box(L - 0.03, L, 0.9, 1.3, z, z + 0.35, 0)
+  }
   g.box(L - 0.12, L, 0.38, 0.62, 0.02, Wd - 0.02, k(STEEL, grey(8)))
   g.box(L - 0.01, L, 0.45, 0.58, Wd / 2 - 0.18, Wd / 2 + 0.18, k(PLASTER, grey(1)))
   for (const z of [0.5, 0.85, Wd / 2 - 0.05, Wd - 0.95, Wd - 0.6]) g.box(L - 0.5, L - 0.4, 2.85, 2.92, z, z + 0.1, AMBER)
+  // The front wheels' wells, cut in from each side before the cab is hollowed so their walls stay.
+  const well = (x, y) => Math.hypot(x - g.c(L - 1.1), y - g.c(0.48))
+  for (let y = 0; y <= g.c(1.1); y++) for (let x = g.c(L - 1.7); x <= g.c(L - 0.5); x++) if (well(x, y) < 0.56 * g.s) for (let z = 0; z < g.c(0.36); z++) { g.set(x, y, z, 0); g.set(x, y, g.D - 1 - z, 0) }
   g.hollow()
   // Two seats and a wheel inside, seen through the glass.
   for (const z of [0.3, Wd - 0.85]) { g.box(c0 + 0.4, c0 + 0.9, 0.95, 1.45, z, z + 0.55, BLACK); g.box(c0 + 0.3, c0 + 0.45, 1.45, 2.2, z, z + 0.55, BLACK) }
   g.box(L - 0.75, L - 0.7, 1.4, 1.8, 0.4, 0.9, BLACK)
   for (const xm of [1.0, 2.2, L - 1.1]) for (const [z0, z1] of [[0, 0.3], [Wd - 0.3, Wd]]) g.wheel(xm, 0.48, z0, z1, 0.48, TYRE, RIM, FRAME)
-  // The arches over the front wheels in the cab's sides.
-  for (let y = g.c(0.5); y <= g.c(1.1); y++) for (let x = g.c(L - 1.75); x <= g.c(L - 0.45); x++) { const d = Math.hypot(x - g.c(L - 1.1), y - g.c(0.48)); if (d > 0.5 * g.s && d < 0.6 * g.s) for (let z = 0; z < g.D; z++) if (g.get(x, y, z) === CAB) g.set(x, y, z, BLACK) }
+  // The wells lined dark, and a dark flare round each one's lip in the cab's sides.
+  for (let y = 0; y <= g.c(1.2); y++) for (let x = g.c(L - 1.8); x <= g.c(L - 0.4); x++) for (let z = 0; z < g.D; z++) {
+    const r = well(x, y), out = Math.min(z, g.D - 1 - z)
+    if (g.get(x, y, z) === CAB && ((r < 0.6 * g.s && out < g.c(0.4)) || (r < 0.64 * g.s && out < 2))) g.set(x, y, z, BLACK)
+  }
   const size = [Math.round(L * 10), Math.round(H * 10), Math.round(Wd * 10)]
-  return { name: 'box truck', kind: 'truck', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [16, 69], 110), seats: [[66, 9, 7], [66, 9, 17]], paint: [CAB, BOX], tyre: [TYRE] }
+  return { name: 'box truck', kind: 'truck', per, cells: g.cells, size: [g.W, g.H, g.D], body: size, motor: motorOf(size[0], size[2], [16, 69], HANDLING.truck), seats: [[66, 9, 7], [66, 9, 17]], paint: [CAB, BOX], tyre: [TYRE] }
 }
 
 /**

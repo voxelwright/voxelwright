@@ -6,7 +6,7 @@ description: The crates, versions and verified recipes behind master/ (village-m
 # Master server
 
 Pinned in `master/Cargo.lock`, built with Rust 1.96.1 (edition 2024), checked November 25,
-2026. The protocol and its numbers are in `master/README.md`; why WebRTC is in
+2026. The protocol and its numbers are in `guide/master.md`; why WebRTC is in
 `.agents/skills/lobby-transport/SKILL.md`.
 
 ## Crates and why each is there
@@ -73,5 +73,3 @@ run locally (no daemon here; CI builds and runs `--version`); memory on Linux (m
 macOS arm64 only); behaviour past 1,000 lobbies or 100 joins a second; whether hyper's
 IPv6 limits beyond the /56 and /48 caps (a holder of many /48s still adds up). Refresh
 when a pinned version changes or a probe contradicts a line above.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"master/src/config.rs":"17fb726a77712b7205a15a882e4ee581","master/Cargo.toml":"2d278ce86f503d10ec576ac26bb1052d"} -->

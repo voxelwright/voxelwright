@@ -1,9 +1,11 @@
 ---
 name: site-craft
-description: Rules for designing and building the site's look, motion and feel: typography, reading column, colour, light and dark, motion curves and durations, press feedback, juice for the playful parts, and how the 2D page and the later 3D world relate. Use for any change to static/site.css, the Voxelmorphism kit's parts on the site, page templates, or anything that moves, makes sound or reacts to touch.
+description: Rules for designing and building the site's look, motion and feel: typography, reading column, colour, light and dark, motion curves and durations, press feedback, juice for the playful parts, and how the 2D page and the later 3D world relate. Use for any change to site/static/site.css, the Voxelmorphism kit's parts on the site, page templates, or anything that moves, makes sound or reacts to touch.
 ---
 
 # Site craft
+
+For `site/` and the parts of the Voxelmorphism kit the site uses. Paths are from the repository root.
 
 The blog is a calm building inside a playful world. Reading comes first, play second, and
 the play never costs the reader anything. When a rule here conflicts with a nicer idea,
@@ -48,7 +50,7 @@ out; everything here is plain CSS, HTML and small vanilla JS.
 
 ## 3. Type
 
-- Self-host woff2 under `static/fonts/<family>/` with the licence (`OFL.txt`) beside it.
+- Self-host woff2 under `site/static/fonts/<family>/` with the licence (`OFL.txt`) beside it.
   No runtime requests to font services.
 - Latin subset, variable when the axes are used, at most three text families plus one
   monospace per look, and about 300 KB of fonts per look at most.

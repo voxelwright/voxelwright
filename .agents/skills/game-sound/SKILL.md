@@ -10,7 +10,7 @@ description: How Voxelwright's engine makes sound (#247), all of it synthesised 
 > body; ringing things have a thump under them; a 20 Hz DC blocker sits before the ceiling. Numbers below that say
 > otherwise are from before. How it sounds is judged by `node test/judged.mjs`.
 
-Version 7, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds, a realm's music, a voice being tried). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears}.mjs`.
+Version 7, November 14, 2026 (music, instruments, model-written sounds, a rule's sounds, a realm's music, a voice being tried). Scope: `engine/page/sound/` and `engine/test/{sound,music,heard,played,listen,ears,radio}.mjs`.
 Verified on the installed Chrome (headless, macOS, M1 Pro, 44.1 kHz device) and Playwright's WebKit build on the same Mac.
 **No iPhone has played it yet** (see Limits). Nobody who wrote it has heard it: every claim about how a thing
 sounds is a measurement or a principle, and is marked as such.
@@ -51,7 +51,7 @@ output, not by the source.
    reaches; duller with distance (one pole at `400 + 19600 exp(-d / 90)` Hz: our curve, tuned by the far blast
    check, not from a table); later by `d / 343` s; more of it to the room. Close by, a thing is not panned
    hard: side goes with `min(1, d / 1.5 m)`.
-5. **The mix.** Three buses (world, music, play). The world ducks the music by up to 9 dB inside the
+5. **The mix.** Three buses (world, music, play). The world ducks the music by up to about 11 dB inside the
    synthesiser. Beds full up measure -30 to -18 LUFS; a charge on a house front peaks at -4 dB.
 6. **A budget of voices.** 64 struck, 16 strings, 16 tones, 24 airs, 40 grains. When a pool is full the
    quietest gives way. Of the blows in one telling of the solver, five are played and the rest feed the
@@ -68,7 +68,7 @@ output, not by the source.
 - `dsp.ts`: the synthesiser. One file, no imports at run time. In a page it registers the worklet
   `village-voice`; in Node `new Synth(rate).render(l, r)` gives the same samples. Messages: `define`, `notes`
   (twelve float64 each: frame, patch, pitch, size, force, held, left, right, low-pass, room, bus, piece), `set`,
-  `hush`.
+  `hush`, and for a named held note `release`, `glide` and `place`.
 - `sound.ts`: the context, the unlock, `play(patch, {at, force, size, reach, ...})`, `listen(eye, yaw)`,
   `hear(at)`. `kinds.ts`: the world's own patches, by the core's materials. `world.ts`: what the page tells
   (tools, blasts, the solver's words, a frame) turned into plays and bed levels. `tap.ts`: a worklet that
@@ -173,16 +173,16 @@ yes in the thread that asks), so this is built from the post's description and f
 - A patch a rule wrote is kept by its JSON, the last 96; an older one gives its place in the synthesiser back
   (`voice.forget`). Before this a stranger could have used up the worklet's 4,096 patch places and silenced the
   page for good.
-- **The guide is the interface.** `serve.mjs` `GUIDE` lists every kept sound with what it is like (made from
-  `LIKES`, so the two cannot drift) and the patch form in six lines. Asked for a busker and a night watchman
+- **The guide is the interface.** `plugins/sound/guide.txt` lists every kept sound with what it is like and the
+  patch form; `plugins/sound/check.mjs` fails if it drifts from `LIKES` or the plugin's limits. Asked for a busker and a night watchman
   (`make/rules.mjs`, Opus 5.5, November 14), a model used it at once: chords as `notes` with `gap: 25`, a melody
   with `gap: 250`, a hand bell as `bell` at `size: 0.6` struck n times, a `whistle` held 0.8 s. Neither used
   `patch`: with a word that fits, a model takes the word. Two runs; no model has yet written a patch in a rule.
 - Measured (`test/sounded.mjs`): an anvil of the rule's own at 940 Hz is heard at 941 Hz and 9 dB louder on the
   side the smith stands; a bell 84 m off arrives 0.25 s after the rule strikes it (0.24 by distance); a bell of
   size 2 sounds at 260 Hz.
-- Not built: a sound that follows a moving actor after it starts (it is placed once); a held sound a rule can stop
-  early or bend; anything heard by rules.
+- Not built: anything heard by rules. A sound that follows someone, and can be bent or stopped while it lasts,
+  came later (`as`, below).
 
 ## A realm's music, set by a rule (`engine/plugins/music/`, `music/compose.ts` `resolve`; #264)
 
@@ -233,6 +233,23 @@ Two ways, side by side, behind `?voices=babble` or `?voices=speech`; off by defa
   the words arrive and is cheap for a crowd; speech is understood without reading. A third way, a model that speaks
   (a speech model on the asker's machine), was not looked at.
 - The owner once turned down "cartoons for 3-year-olds" as personas (memory): wordless babble may read that way.
+
+## In a car (`radio.ts`, the cabin in `world.ts`)
+
+- **The cabin.** In the driver's seat the muffle low-pass is 3,400 Hz (20,000 outside, 650 under the sea) and the
+  cover 0.45, so rain, wind and surf play at 55%; wind is cut a further 40%. The muffle is on the whole mix.
+- **The radio** (`STATIONS`): Radio Off, Bay Drive FM (116 BPM, Dorian), Twin Peaks Chill (86, Lydian) and Fillmore
+  Funk (108, Mixolydian), cycled by N. Each is a mood in `RADIO_MOODS` in `compose.ts`, outside `MOODS` so the
+  realm rules and the 54-clip benchmark are unchanged; `resolve()` finds both. A conductor of its own plays with
+  `steady` (no rest between pieces) and changes station with `cut()`. Tuning plays a `click` and a `static` patch.
+  It ducks under the horn (to 40%) and under hard landings and crashes (never below 32%), pauses the place's music
+  while it plays, and remembers the station across getting out and in. Webdriver starts it off; `?radio=` picks.
+- **Pass-by whooshes** above 70 km/h: `whoosh` (noise swept 2,800 to 260 Hz) and `whooshTail` 55 ms later, panned
+  to the side passed. Triggers: a solid cell newly 2.6 or 4.6 m to one side (scanned every 55 ms, 0.36 s per side),
+  another living vehicle within 7.5 m to the side, and `voxelwright:nearmiss`.
+- `node test/radio.mjs` (`--node-only` skips Chrome) measured each station at -25 to -22 LUFS with a peak of
+  -9.6 dB, and a whoosh that sweeps from about 2.6 kHz to 1.1 kHz and peaks at -4.3 dB. It is not in
+  `test/all.mjs`, so `npm run check` does not run it. Nobody has heard the stations.
 
 ## Rules that hold
 
@@ -302,15 +319,18 @@ whether the mix is right. The owner chose recorded foley over synthesised wood a
 
 - Not heard by its makers. Not run on an iPhone: first touch, the ringer switch, glitches and cost there are
   all unproved.
-- A body's blow is read from its change of speed between two tellings (late by one, misses a glance) until
-  the core reports impacts (#245).
+- A loose body's blow is read from its change of speed between two tellings (late by one, misses a glance). The
+  core does report a living thing's impacts (`told.struck`: cars against walls, kerbs, props or each other).
 - A hammer was first heard as an explosion too (the engine calls it a small blast): blasts under 8 cells are
   now blows only, and a check compares the two.
 - The picture never waits for sound: `main.ts` starts it and goes on; a worklet that never loads leaves a silent
   page, not a black one.
-- Nothing is occluded: a wall between does not dull a sound. No Doppler. The room is one small reverb for
+- Nothing is occluded: a wall between does not dull a sound. Nothing is Doppler-shifted: the pass-by whoosh
+  (below) is a played sweep, not a shift of the passing thing's own sound. The room is one small reverb for
   everywhere.
-- Residents' steps, vehicles, doors and water that flows make no sound yet.
+- Residents' steps, doors other than a driven car's, and water that flows make no sound yet. A driven vehicle does: engine,
+  tyre and road beds (`world.ts` `drive`, with `boost` setting `SET.turboBoost`), one-shot foley (`carEvent`: door,
+  start, shift, pop, landing), a horn, the cabin and the radio (below).
 - A struck string has no double decay and at most twelve partials; plate, lump and cup mode ratios are our
   own choice, not measured.
 
@@ -350,5 +370,3 @@ Refresh when a phone has played it, when the core reports impacts, or when a che
 - Each rule has one lean, lasting 1 to 120 s (20 unless said). Leans of several rules are added and held to -1..1,
   so two that agree push further, two that pull apart cancel, and none takes another's away. It goes with its rule.
 - Mode and mood are not leant on: a darker scale under tension is still the realm's rule's to say.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/page/sound/sound.ts":"50669d9d08740e08b9425e284acca451"} -->

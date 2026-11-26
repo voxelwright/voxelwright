@@ -320,6 +320,8 @@ html[data-hud]:not(.arrived) #where { opacity: 0; }
 html:not(.first)[data-hud] [data-panel="wand-take"] button.vx-button { display: inline-flex; align-items: center; gap: 6px; block-size: 38px; min-block-size: 38px; padding: 0 12px; }
 html[data-hud="wheel"] [data-panel="wand-take"] { display: none !important; }
 html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-area-inset-top) + 56px)); }
+/* Summon Car button is touch-only (desktop uses G). */
+[data-panel="summon"] { display: none; }
 
 /* ── Mobile / Touch layout: clean top corners, hollow voxel thumbstick gimbal, compact slim voxel thumb cluster ── */
 @media (pointer: coarse) {
@@ -516,7 +518,8 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     font-size: 12.5px !important;
   }
 
-  /* Optional on-foot bottom-left utility slot beside ✦ (e.g. Summon Car G): vanishes while steering, riding, choosing, or drawer open. */
+  /* On-foot bottom-left utility slot beside ✦ (Summon Car G): vanishes while steering, riding, choosing, or drawer open. */
+  html:not(.first)[data-hud] [data-panel="summon"] { display: block; position: absolute; inset: 0; pointer-events: none; }
   html:not(.first)[data-hud] #realm .foot-summon,
   html:not(.first)[data-hud] [data-panel="summon"] .vx-button {
     position: absolute;
@@ -528,6 +531,8 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     min-block-size: 44px;
     padding: 0;
     --vx: 2px;
+    pointer-events: auto;
+    transition: opacity 0.22s ease-out;
   }
   html:not(.first)[data-hud]:is(.thumb-down, .riding, .drawer, .choosing) :is(#realm .foot-summon, [data-panel="summon"]),
   html:not(.first)[data-hud]:has(#ask.open) :is(#realm .foot-summon, [data-panel="summon"]) { opacity: 0 !important; pointer-events: none !important; }
@@ -538,7 +543,7 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
   html[data-hud].driving [data-panel="living"] {
     display: grid;
     grid-template-columns: 52px 58px;
-    grid-auto-rows: 48px;
+    grid-auto-rows: 46px;
     gap: 8px;
     align-items: stretch;
     justify-items: stretch;
@@ -558,16 +563,17 @@ html[data-hud] [data-panel="wand"] { bottom: auto; top: max(68px, calc(env(safe-
     gap: 2px;
   }
   html[data-hud].driving [data-panel="living"] .vx-button .hud-lbl { font: 600 9px/1 var(--hud-font); letter-spacing: 0.02em; opacity: 0.92; }
-  /* Primary right thumb column: Drift (bottom), Horn (middle), Get off (top); left utility column: Seat, Cam, Radio/extras. */
-  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 3; }
+  /* Primary right thumb column: Drift (bottom), Boost, Horn, Get off (top); left utility column: Seat, Cam, Radio. */
+  html[data-hud].driving [data-panel="living"] [data-act="drift"] { grid-column: 2; grid-row: 4; }
+  html[data-hud].driving [data-panel="living"] [data-act="boost"] { grid-column: 2; grid-row: 3; }
   html[data-hud].driving [data-panel="living"] [data-act="horn"] { grid-column: 2; grid-row: 2; }
   html[data-hud].driving [data-panel="living"] [data-act="leave"] { grid-column: 2; grid-row: 1; }
-  html[data-hud].driving [data-panel="living"] [data-act="seat"] { grid-column: 1; grid-row: 3; }
-  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 2; }
-  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 1; }
+  html[data-hud].driving [data-panel="living"] [data-act="seat"] { grid-column: 1; grid-row: 4; }
+  html[data-hud].driving [data-panel="living"] [data-act="cam"] { grid-column: 1; grid-row: 3; }
+  html[data-hud].driving [data-panel="living"] [data-act="radio"] { grid-column: 1; grid-row: 2; }
   @media (orientation: landscape) {
     html[data-hud]:not(.driving) [data-panel="living"]:has(> :nth-child(5)) { flex-wrap: wrap-reverse; block-size: calc(3 * 44px + 2 * 10px); inline-size: calc(2 * 96px + 10px); column-gap: 10px; }
-    html[data-hud].driving [data-panel="living"] { grid-auto-rows: 46px; }
+    html[data-hud].driving [data-panel="living"] { grid-auto-rows: 44px; gap: 6px; }
   }
 }
 `

@@ -1,82 +1,75 @@
 # Voxelmorphism
 
-A design language where every control is a small solid built from voxels. The rules are in
-[SPEC.md](SPEC.md). Not published and not open source yet.
+The UI kit every Voxelwright interface is built from: a design language where every control is a
+small solid object built from voxels. Plain HTML and CSS carry the interface; where a renderer is
+available, the kit draws each control as cubes behind its content. This README is for someone
+working in this folder. The concepts, the parts list and the API are in the guide:
+[The kit](../../guide/kit.md). The renderer and the Vox fonts: [Blocks and the Vox fonts](../../guide/blocks-and-fonts.md).
 
-## Showcase
+The code is Apache-2.0 (`LICENSE`). The fonts are under the SIL Open Font License and the keyboard
+recordings under MIT; `NOTICE` lists all three.
 
-Start the showcase from the Voxelwright checkout.
+## Where things are
+
+| Path | What it holds |
+| --- | --- |
+| `src/index.js` | The public API and `components`, the list of registered parts |
+| `src/components/` | One script per part, each opening with a comment that describes it |
+| `src/core/` | The stage, model, materials, light, looks, motion, sound, glyph sets, and the WebGL2 stand-in (`gl.js`) |
+| `src/looks/` | The lit look (`lit.js`), the instrument and its fittings |
+| `src/engine.js` | Re-exports the engine's WebGPU renderer from `../blocks/renderer.ts` |
+| `css/` | `_kit.css` (tokens and the first parts) and one sheet per part |
+| `voxelmorphism.css` | Generated from `css/` by `tools/css.mjs`. Never edit it by hand |
+| `fonts/` | IBM Plex, the Vox faces, and the faces the type study compared |
+| `showcase/` | Signal Desk, the parts catalogue (`showcase/parts/`) and design studies |
+| `tools/` | The local server and the checks |
+| `browser.mjs` | `copyModules(out)`, for static hosts and `npm pack` |
+| [SPEC.md](SPEC.md) | The rule book: grid, projection, materials, light, depth, motion, sound, accessibility |
+| [BUILDING.md](BUILDING.md) | How to build a part, and which tool each part uses |
+| [HILL.md](HILL.md) | The gates every change passes, and how a change to the look is judged |
+
+## Run the showcase
 
 ```sh
 cd engine/kit
 PORT=5989 node tools/serve.mjs
 ```
 
-Open [the showcase](http://127.0.0.1:5989/kit/showcase/). Signal Desk opens at the bare server address. Turn its dial, press a lamp key or change the enclosure. The build follows you through the parts catalog in the same tab. The original interactive rules are under Design notes.
-Run `PORT=5989 node tools/links.mjs` to check every page. Run `PORT=5989 node tools/instrument.mjs` to exercise the build controls, lighting, phone navigation and renderer preference.
+Open [the showcase](http://127.0.0.1:5989/kit/showcase/). The bare server address opens Signal
+Desk: turn its dial, press a lamp key or change the enclosure. Without `PORT` the server uses 5985.
+These docs use 5989; give every tool the same `PORT` as the server.
 
-## Use
+The server sends the `kit/`, `blocks/` and `probe/` folders of `engine/`, with TypeScript types
+stripped, so the kit's pages run on the engine's renderer straight from the checkout.
 
-A page in the engine root can use the kit directly.
+## Use it on a page
 
 ```html
 <link rel="stylesheet" href="kit/voxelmorphism.css">
-
 <button class="vx-button">Plant a seed</button>
 <label class="vx-toggle"><input type="checkbox" role="switch"><span class="vx-switch"></span>Water daily</label>
-
 <script type="module">
   import { adopt } from './kit/src/index.js';
   adopt();            // call again with a node after you add markup
 </script>
 ```
 
-The stylesheet alone is the plain version. Calling `adopt()` adds the voxels. Give the page `overflow-x: clip` (see Bleed in the spec).
+The stylesheet alone is the plain version, and `adopt()` adds the voxels. Give the page
+`overflow-x: clip`, because a part's canvas is larger than its box. A static site can import
+`copyModules` from `voxelmorphism/browser` to write the kit and its renderer into one public
+folder, then copy the stylesheet, `fonts/` and `NOTICE` beside it.
 
-The kit's `src/engine.js` imports the Voxelwright engine's WebGPU renderer from `../../blocks/renderer.ts`. The engine servers strip TypeScript types for the browser.
-Run `npm pack` in this directory to package the same renderer as plain JavaScript.
-Static generators can import `copyModules` from `voxelmorphism/browser` to write the kit,
-renderer and desk modules into one public directory. Copy the exported stylesheet and its
-adjacent fonts and notices into that directory’s `kit/` folder.
+## Check a change
 
-Its device takes a moment to arrive, so a page is plain first and `ready()` says when it is live:
+Run from `engine/kit` with the showcase server up:
 
-```js
-import { adopt, ready } from './kit/src/index.js';
-adopt();                       // remembered until the renderer arrives; the page is plain meanwhile
-const stage = await ready();   // the stage, or null if the page stays plain
+```sh
+node tools/css.mjs --check              # voxelmorphism.css is what css/ makes
+PORT=5989 node tools/links.mjs          # every showcase page loads
+PORT=5989 node tools/instrument.mjs     # Signal Desk's controls, lighting, phone layout, renderer choice
+PORT=5989 node tools/parts.mjs          # every part page and every part's own check
 ```
 
-Where there is no WebGPU the kit's own WebGL2 renderer stands in for now. To hand the kit another
-backend, or none, call `use(renderer)` or `use(null)` before the first `adopt()`.
-
-## What it exports
-
-| Name | What it does |
-|---|---|
-| `fitInstrument({ shell, caps, profile, lamp, level, rail })` | Fit the enclosure, caps, profile and backlight to the lit kit. Signal Desk displays the case light as `steady` or `spectrum`. |
-| `adopt(root?)` | Turn every part under `root` into voxels |
-| `release(root?)` | Give them back to plain CSS |
-| `live(el)` | The live model behind an element: `play('assemble' \| 'crumble')`, `spring()`, `rebuild()` |
-| `define(def)` | Register a part of your own |
-| `toast(text, { kind, duration })` | Show a toast; returns a function that dismisses it |
-| `closeDialog(el, value)` | Close a dialog the way its own buttons do |
-| `sound(on)`, `cue(name, { mass }?)` | Turn sound on from a user gesture; play a cue. A press or release is voiced for the cap the hand touched, or for `mass` square voxels |
-| `plant(part, opts)`, `pot(part, …)`, `stageOf(g)` | The plant generator |
-| `refresh(el)` | Redraw a part after changing what it is drawn from (values set from code are heard without it) |
-| `use(renderer)`, `ready()` | Hand the kit another renderer, or `null` for none; know when the page is live |
-| `defineMaterial(name, def)`, `MATERIALS`, `LIGHTS` | Materials and light |
-| `Model`, `Part`, `Spring`, `assemble`, `crumble` | The pieces parts are made from |
-
-## Fonts
-
-Text is IBM Plex Sans and IBM Plex Mono, under the SIL Open Font License (`fonts/*/OFL.txt`).
-Lettering is the kit's own glyph sets, Vox Block and Vox Sign, in `src/core/fonts/`, with flat
-copies inlined in the stylesheet for the plain version. The words on keys are Vox Text
-(`fonts/vox-text/`), the same glyphs as a font. Vox Zakon is a second face drawn after Zakon in
-the same grid: a display set (`zakon.js`, its spacing in `zakon-spacing.js`), a key set and a
-compact set of capitals (`zakon-text.js`), and its web fonts in `fonts/vox-zakon/`; a page picks
-it by setting `--vx-key-font` to "Vox Zakon Text" (the SF realm does, `page/typeface.ts`). Latin and Ukrainian are drawn. The other folders in `fonts/` are the
-candidates the type study compared (`showcase/type.html`); the kit does not load them.
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/kit/package.json":"c24276f0b21de044fa379d4a4606e799","engine/kit/src/index.js":"b3a2ef88b32f68f2cc0ac0759dbc73ff","engine/kit/tools/serve.mjs":"72b5e18d2ce1a19c10741ae4d719ac10"} -->
+The full set of gates is in [HILL.md](HILL.md). Visual changes follow the `ui-craft` skill
+(`../../.agents/skills/ui-craft/SKILL.md`). The site's tailored build of the kit is checked by
+`npm test` in `site/`.

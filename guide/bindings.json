@@ -18,7 +18,8 @@
     "engine/make/model.mjs": "lines:^const args =|^if .*args.push"
   },
   ".agents/skills/documentation-maintenance/SKILL.md": {
-    "AGENTS.md": "lines:^- Change docs|^- Keep README commands"
+    "AGENTS.md": "lines:^- Change docs|^- Keep README commands",
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\["
   },
   ".agents/skills/facade-evidence/SKILL.md": {
     "engine/bay/facade_evidence.py": "lines:^(SEGMENTER|CLASSIFIER) =|^cli.add_argument"
@@ -30,7 +31,11 @@
     "engine/page/realm-ui.ts": "lines:^export function realmControls"
   },
   ".agents/skills/game-sound/SKILL.md": {
-    "engine/page/sound/sound.ts": "lines:^export async function sound|^export interface Sound"
+    "engine/page/sound/sound.ts": "lines:^export async function sound|^export interface Sound",
+    "engine/page/sound/dsp.ts": "lines:^export const (CEILING|NOTE|SET)|^const MV|^if \\(m\\.(define|notes|set|hush|release|glide|place)",
+    "engine/page/sound/world.ts": "lines:^(drive|carEvent|horn)\\(|^for \\(const s of told\\.struck\\)|^voice\\.set\\(SET\\.(muffle|cover|wind),|radio\\.duck\\(",
+    "engine/plugins/sound/check.mjs": "lines:includes\\(\\`\\$\\{k\\} \\(",
+    "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(whoosh|whooshTail): \\{ how|^const MIN_WHOOSH_KMH =|^const (targetGain|amt) =|^for \\(const lateral of|^if \\(absSide > "
   },
   ".agents/skills/jolt-physics/SKILL.md": {
     "home/package.json": [
@@ -54,7 +59,9 @@
     "guide/docs.json": [
       "name",
       "navigation.groups"
-    ]
+    ],
+    "scripts/mint.mjs": "lines:^const MINT|mint validate",
+    "scripts/doc-site.mjs": "lines:errors.push\\(`"
   },
   ".agents/skills/quickjs-sandbox/SKILL.md": {
     "home/package.json": [
@@ -95,6 +102,9 @@
   ".agents/skills/sf-sky/SKILL.md": {
     "engine/page/almanac.ts": "lines:^export const SF|^export function (weatherOf|heavens)"
   },
+  ".agents/skills/site-craft/SKILL.md": {
+    "site/static/site.js": "lines:site-craft|use\\("
+  },
   ".agents/skills/sound-judge/SKILL.md": {
     "engine/test/judged.mjs": "lines:^const hard|^const was|^const fresh"
   },
@@ -127,76 +137,166 @@
       "devDependencies.playwright"
     ]
   },
+  "AGENTS.md": {
+    "package.json": [
+      "scripts.check"
+    ],
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\[",
+    "scripts/checks.mjs": "lines:name: 'docs"
+  },
+  "CONTRIBUTING.md": {
+    "engine/package.json": [
+      "scripts.core",
+      "scripts.check",
+      "scripts.sf",
+      "scripts.lobby"
+    ],
+    "site/package.json": [
+      "scripts.check"
+    ],
+    "deploy/package.json": [
+      "scripts.test"
+    ],
+    ".github/workflows/master.yml": "lines:^- run: cargo",
+    ".github/workflows/deploy.yml": "lines:^- run: npm test",
+    "scripts/checks.mjs": "checks",
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\["
+  },
+  "CREDITS.md": {
+    "deploy/worker.mjs": "lines:^export const WEATHER",
+    "engine/sf/pilot/current.json": [
+      "release"
+    ],
+    "scripts/packages.mjs": "lines:^const NODE ="
+  },
+  "DATA-LICENSES.md": {
+    "engine/sf/pilot/current.json": [
+      "release"
+    ],
+    "engine/bay/fetch.py": "lines:^(LAYERS|SF) ="
+  },
+  "DESIGN.md": {
+    ".agents/skills/game-hud/SKILL.md": "lines:^[1-5]\\. \\*\\*(Nothing|Corners|Seven|Number|A wheel)"
+  },
   "README.md": {
     "site/package.json": [
       "dependencies.voxelmorphism"
     ],
     "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
-    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
     "master/src/lib.rs": "lines:^\\.route\\(",
-    "host/package.json": [
-      "scripts.village"
-    ],
     "engine/package.json": [
       "scripts.core"
-    ],
-    "home/package.json": [
-      "dependencies.three",
-      "dependencies.cordis"
     ],
     "package.json": [
       "scripts.check"
     ],
-    "street/package.json": [
-      "scripts.world",
-      "scripts.page"
-    ],
-    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join",
-    "world": "file"
+    "world": "file",
+    "scripts/checks.mjs": "checks",
+    "engine/sf/pilot/current.json": [
+      "release"
+    ]
   },
   "deploy/README.md": {
     "deploy/package.json": [
       "scripts"
     ],
     "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
-    "deploy/worker.mjs": "lines:pathname\\."
+    "deploy/worker.mjs": "lines:pathname\\.",
+    "deploy/ship.mjs": "lines:const known =",
+    ".github/workflows/deploy.yml": "lines:paths:"
   },
   "engine/README.md": {
     "engine/package.json": [
-      "scripts",
-      "dependencies"
-    ]
+      "scripts"
+    ],
+    "engine/serve.mjs": "lines:arg\\('"
   },
   "engine/bay/README.md": {
     "engine/bay/run-city.sh": "lines:^(case |start[^)]*\\)|status\\)|\\*\\) echo \"usage:)",
     "engine/bay/street_inputs.py": "lines:add_argument",
-    "engine/bay/full_run.py": "lines:add_argument"
+    "engine/bay/full_run.py": "lines:add_argument|^CUT_RULE =|^PILOT =|^RADIUS =",
+    "engine/bay/intermediate.py": "lines:^LAYERS =",
+    "engine/bay/panel_gate.py": "lines:^SHADE_BLUE =",
+    "engine/bay/render_checks.py": "lines:^JUDGE_MODEL =",
+    "engine/bay/run-paint.sh": "lines:usage:",
+    "engine/bay/paint_service.py": "lines:hold-acceptance"
+  },
+  "engine/blocks/README.md": {
+    "engine/blocks/serve.mjs": "lines:arg\\('(port|reports)'|named\\(req|\\['blocks', 'probe', 'kit'\\]",
+    "engine/test/blocks.mjs": "lines:serve\\(0\\)",
+    "engine/test/all.mjs": "lines:\\['blocks',"
+  },
+  "engine/draw/README.md": {
+    "engine/draw/build.py": "lines:^PIXELS_MOST|^def one|grid\\.tofile",
+    "engine/draw/sheet.py": "lines:^def (cut|build)|^VIEWS",
+    "engine/draw/check.py": "file",
+    "engine/draw/pyproject.toml": "file",
+    "engine/make/drawn.mjs": "lines:spawn\\(uv, \\['run'"
+  },
+  "engine/ears/README.md": {
+    "engine/ears/pyproject.toml": "file",
+    "engine/ears/bench.mjs": "lines:^add\\('|^for \\(const (stuff|like|mood)|^export const SR|^const out = arg",
+    "engine/ears/judge.py": "lines:add_parser|add_argument|^KINDS",
+    "engine/ears/score.py": "lines:add_parser|add_argument|^\"(music|mix|oneshot|bed|tone|instrument)\": \\[|^lo, hi = \\(np\\.percentile|\"clip_ppm\", \"dc\", \"heard_median\"|^s = 100|^MUSICEVAL",
+    "engine/ears/look.py": "lines:add_argument",
+    "engine/ears/validate.py": "lines:add_parser",
+    "engine/ears/compare.py": "file",
+    "engine/test/judged.mjs": "lines:^run\\(|^const hard|^const fresh|^check\\(|--accept"
+  },
+  "engine/kit/BUILDING.md": {
+    "engine/kit/src/looks/lit.js": "lines:^rise: |^slab: |^export const (groove|recess|lamp) =|^const (key|bar|notice) =",
+    "engine/kit/src/core/light.js": "lines:^export function (ring|cap|bezel|hole)\\(|^export const (halo|byTheme|warmth) =",
+    "engine/kit/src/core/model.js": "lines:^(box|slab|carve|notch|text|plot|grow)\\(",
+    "engine/kit/tools/part.mjs": "lines:^//   PORT"
+  },
+  "engine/kit/HILL.md": {
+    "engine/kit/tools/baseline.mjs": "lines:^//   PORT",
+    "engine/kit/tools/film.mjs": "lines:rehearsal passed",
+    "engine/kit/tools/refs.mjs": "lines:writes shots"
   },
   "engine/kit/README.md": {
     "engine/kit/package.json": [
+      "license",
       "exports"
     ],
-    "engine/kit/src/index.js": "lines:^export ",
-    "engine/kit/tools/serve.mjs": "lines:^const port ="
+    "engine/kit/src/index.js": "lines:^export const components",
+    "engine/kit/tools/serve.mjs": "lines:^const port =|path === '/'",
+    "engine/kit/tools/css.mjs": "lines:--check"
+  },
+  "engine/kit/SPEC.md": {
+    "engine/kit/src/core/materials.js": "lines:^(enamel|signal|chalk|slate|steel|ivory|walnut|leaf|brick|ink): \\{|^day: '#|^toLight:|^shadow:|^seam:",
+    "engine/kit/src/core/motion.js": "lines:^export const (PRESS|RELEASE|SLIDE|CALM)|^const RETURN_DAMPING",
+    "engine/kit/src/core/look.js": "lines:^(rise|travel|slab|float|dialog|well|groove): ",
+    "engine/kit/src/looks/lit.js": "lines:^rise: |^slab: ",
+    "engine/kit/src/core/sound.js": "lines:Math.min\\(1\\.(07|12)|let jitter =",
+    "engine/kit/css/_kit.css": "lines:^--vx-(ground|ink|press-time|release-time|slide-time):"
   },
   "engine/kit/fonts/vox-block/README.md": {
     "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
-    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv",
+    "engine/kit/src/core/fonts/block.js": "lines:^cap: ",
+    "engine/kit/tools/type-inline.py": "lines:^for fam"
   },
   "engine/kit/fonts/vox-sign/README.md": {
     "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
-    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv",
+    "engine/kit/src/core/fonts/sign.js": "lines:^cap: |^id: 'sign'",
+    "engine/kit/tools/type-inline.py": "lines:^for fam"
   },
   "engine/kit/fonts/vox-text/README.md": {
     "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
-    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv",
+    "engine/kit/src/core/fonts/sentence.js": "lines:^cap: "
   },
   "engine/kit/fonts/vox-zakon/README.md": {
     "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =",
-    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv"
+    "engine/kit/tools/vox-text-export.mjs": "lines:process.argv",
+    "engine/kit/src/core/fonts/zakon.js": "lines:^cap: ",
+    "engine/kit/src/core/fonts/zakon-text.js": "lines:^id: 'zakontext|^cap: ",
+    "engine/page/typeface.ts": "lines:^zakon: \\{"
   },
   "engine/kit/src/core/audio/README.md": {
-    "engine/kit/src/core/sound.js": "lines:^export function (sound|cue)\\(",
+    "engine/kit/src/core/sound.js": "lines:^export function (sound|cue)\\(|highshelf|Never replay",
     "engine/kit/src/core/audio/press.wav": "file",
     "engine/kit/src/core/audio/release.wav": "file"
   },
@@ -204,10 +304,98 @@
     "engine/landing/ina/shoot.mjs": "lines:arg\\('(place|out|cells|server|fine)'",
     "engine/landing/ina/camera.json": [
       "camera"
-    ]
+    ],
+    "engine/sf/far/bake.py": "lines:^from matte import|^import looks"
+  },
+  "engine/mind/README.md": {
+    "engine/mind/think.mjs": "lines:^export function thinking|^const (TOGETHER_MOST|REMEMBERED) =",
+    "engine/mind/door.mjs": "lines:^const QUIET_MOST|^//   (GET|POST) ",
+    "engine/mind/form.mjs": "lines:^export (const|function) (SYSTEM|READING|asked|reading|read|readNotes|worldly|noted)\\b",
+    "engine/mind/talk.rule.js": "lines:^const NEAR",
+    "engine/helper.mjs": "lines:^//\\s+--(voice|no-voice|reply) "
+  },
+  "engine/page/sound/README.md": {
+    "engine/page/sound/lab.html": "lines:<script type=\"module\"",
+    "engine/serve.mjs": "lines:^const OPEN =|^const port =",
+    "engine/page/sound/dsp.ts": "lines:^export const CEILING|^registerProcessor",
+    "engine/page/sound/patch.ts": "lines:^export function (patch|sounds|compile)\\(",
+    "engine/test/all.mjs": "lines:^\\['(sound|music|heard|played|judged|sounded|radio)',",
+    "engine/voice.mjs": "lines:^//   node voice\\.mjs",
+    "engine/instrument.mjs": "lines:^//   node instrument\\.mjs",
+    "engine/page/sound/radio.ts": "lines:^export (const|function) "
+  },
+  "engine/player/README.md": {
+    "engine/package.json": [
+      "scripts.player",
+      "scripts.landing"
+    ],
+    "engine/player/scene.ts": "types:Scene",
+    "engine/player/index.html": "lines:^(unsupported|loading|ready|error) +\\{",
+    "engine/player/serve.mjs": "lines:arg\\('(port|dir)'",
+    "engine/player/build.mjs": "lines:^const pages =",
+    "engine/landing/landing.ts": "lines:e.key ===|^const MEND_AFTER"
   },
   "engine/sf/far/README.md": {
-    "engine/sf/far/check.mjs": "lines:arg\\('only'"
+    "engine/sf/far/check.mjs": "lines:arg\\('only'",
+    "engine/page/far.ts": "lines:query.get\\('far|^const NARROW",
+    "engine/sf/far/pack.mjs": "lines:^let \\[we, wn, wfrom, wto, wfar\\]|^export const (SIZE|BANDS)",
+    "engine/sf/far/grow.sh": "lines:^(node|\"\\$PY\") ",
+    "engine/sf/far/bake.py": "lines:^VERSION =",
+    "engine/landing/ina/matte.py": "lines:^DETAILED ="
+  },
+  "engine/sf/release.md": {
+    "engine/sf/release.py": "lines:cli.add_argument|receipt\\[\"release\"\\] != digest|\\(\"coreSha256\", core\\)|panel-floors.json|already exists",
+    "engine/sf/build.mjs": "lines:^const STAGED =|pointer.release !== pinned.release|holds no release",
+    "engine/bay/run-city.sh": "lines:release.py",
+    "engine/bay/compact_store.py": "lines:parser.add_argument"
+  },
+  "engine/sf/streets.md": {
+    "engine/bay/street_graph.py": "lines:^area = box|^shift = |rule.startswith|gauge|\"square\": name",
+    "engine/bay/transport.py": "lines:\"0\" if k == \"layer\"|allWay=|cli.add_argument",
+    "engine/sf/life.py": "lines:^ap.add_argument"
+  },
+  "engine/workshop/README.md": {
+    "engine/workshop/route.mjs": "lines:^//   (GET|POST) |^export const briefFor|const branch = `feature/264-plugin-|execFile\\(t3, \\['thread', 'start'|if \\(door !== 'near'\\)|^const timer = setInterval",
+    "engine/page/workshop.ts": "lines:^interface Sent",
+    "engine/helper.mjs": "lines:^//\\s+--(workshop-project|workshop-provider|workshop-checkout) "
+  },
+  "guide/blocks-and-fonts.md": {
+    "engine/blocks/pass.ts": "lines:^export interface Frame|^(pos|col|ao|surfaceBytes|normals|groundSoft)\\??:|SLOTS = 64|label: 'blocks:|^hold\\(16384\\)|^const DENSE",
+    "engine/blocks/stage.ts": "lines:SHEET = 1024|tries < 3|sheets.length === 4|copyTextureToTexture",
+    "engine/blocks/renderer.ts": "lines:^export async function renderer|ownsCanvas: true",
+    "engine/blocks/world.ts": "lines:^export async function stand|more than one lot holds",
+    "engine/kit/src/core/stage.js": "lines:surfaceBytes",
+    "engine/kit/src/index.js": "lines:^function auto\\(|navigator\\?\\.gpu",
+    "site/static/site.js": "lines:use\\(renderer\\(\\)\\)|use\\(null\\)",
+    "engine/kit/tools/vox-text-build.py": "lines:sys.argv|^U =|FontBuilder\\(",
+    "engine/kit/css/_kit.css": "lines:font-family: \"Vox",
+    "engine/kit/fonts/vox-text/OFL.txt": "lines:^Copyright",
+    "engine/page/typeface.ts": "lines:^zakon: \\{",
+    "engine/test/all.mjs": "lines:\\['blocks',"
+  },
+  "guide/building.md": {
+    "AGENTS.md": "lines:^- Track work in GitHub issues|^`\\[#<issue>\\] <change>`|^- GitHub's check workflows|^the Mac is the gate|^- Reviews are a tool|^- Record every dispatch|^- When work enters a new",
+    "scripts/check.mjs": "lines:^const \\{ values, positionals \\} = parseArgs|^ci: \\{|^webgl: \\{|^jobs: \\{|^const logDir",
+    ".claude/hooks/dispatch-log.mjs": "lines:^// PostToolUse hook|^// every mcp__",
+    "engine/package.json": [
+      "scripts.check"
+    ],
+    "site/package.json": [
+      "scripts.test"
+    ],
+    "scripts/docs.mjs": "lines:^const usage =|^const schema = ",
+    "scripts/doc-coverage.mjs": "lines:Docs-unchanged:\\[",
+    "scripts/hygiene.sh": "lines:^REPO=|^WORKTREES=|^LOG=|^STALE_DAYS=|^GRACE_S=|^MIN_FREE_GIB=|^JUNK=|feature-450|^--dry-run\\)|^--install\\)",
+    "scripts/checks.mjs": "checks"
+  },
+  "guide/cells.md": {
+    "engine/core/src/tree.rs": "lines:^//! |^pub const (SIDE|CELLS|UNIFORM|CHILD)|^pub type Kind|^pub fn encode",
+    "engine/core/src/kinds.rs": "lines:^pub const [A-Z_]+: (u8|Kind) =|^pub const fn (kind|material|colour|grey)",
+    "engine/core/src/bay.rs": "lines:^//! The frame|^fn pick\\(|^pub fn least_step",
+    "engine/page/bay.ts": "lines:^export const FRAME",
+    "engine/page/main.ts": "lines:levels: Number\\(query.get\\('levels'\\)",
+    "engine/serve.mjs": "lines:^const frame = \\(kind, seq, payload\\)|keep\\((ECHO|LOG),",
+    "engine/page/frames.ts": "lines:^export const LOG"
   },
   "guide/check-cli.md": {
     "scripts/check.mjs": "options"
@@ -215,120 +403,53 @@
   "guide/checks.md": {
     "scripts/checks.mjs": "checks"
   },
+  "guide/city-pipeline.md": {
+    "engine/bay/fetch.py": "lines:^(EPT|DEM|NAIP|SF|LAYERS) =",
+    "engine/bay/street_inputs.py": "lines:add_argument",
+    "engine/bay/full_run.py": "lines:add_argument|^def (build|verify|plan)\\(|^RADIUS =",
+    "engine/bay/tiles.py": "lines:^level [0-9]",
+    "engine/sf/release.py": "lines:cli.add_argument|from panel_gate import check|panel-floors.json",
+    "engine/sf/build.mjs": "lines:^//   node sf/build.mjs|^const STAGED =|pointer.release !== pinned.release",
+    "deploy/data.mjs": "lines:^//   node deploy/data.mjs|^const INPUTS =|record.pin !== pin|sha\\(listing\\) !== record.digest|sha\\(body\\) !== f.sha256",
+    "scripts/world.mjs": "lines:^step\\(",
+    "DATA-LICENSES.md": "lines:^\\| [A-Z]",
+    "engine/bay/panel-floors.json": "file",
+    "engine/bay/sf-squares.json": [
+      "lidar",
+      "planet"
+    ],
+    "engine/bay/intermediate.py": "lines:^LAYERS =",
+    "engine/sf/life.py": "lines:^ap.add_argument",
+    "engine/sf/pilot/current.json": [
+      "release"
+    ]
+  },
+  "guide/deploy.md": {
+    "deploy/cloudflare.config.ts": "lines:name:|domains:|runWorkerFirst|entrypoint",
+    "deploy/worker.mjs": "lines:^export const WEATHER|cacheTtlByStatus|status: 406|max-age=31536000|pathname === '/weather'",
+    "deploy/encoding.mjs": "file",
+    "deploy/assemble.mjs": "lines:^const SENT_BY_WORKER|^const BROTLI_ONLY_BINARY|all.length > 20000|biggest > 25|^if \\(!existsSync",
+    "deploy/ship.mjs": "lines:const known =|steps.push|fetch\\('https",
+    "deploy/data.mjs": "lines:^const INPUTS|const tag = |VOXELWRIGHT_DATA_URL requires",
+    "deploy/publish.sh": "lines:pages=|rollback|grep -qi",
+    ".github/workflows/deploy.yml": "lines:paths:|environment:",
+    "deploy/zahynailo-realm-rule-a.json": [
+      "expression",
+      "action_parameters.from_value.status_code"
+    ]
+  },
   "guide/documentation.md": {
-    "scripts/docs.mjs": "lines:^const usage =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith|^const schema = "
-  },
-  "guide/plugin-types.md": {
-    "engine/page/plugins.ts": "types"
-  },
-  "guide/project.md": {
-    "site/package.json": [
-      "dependencies.voxelmorphism"
-    ],
-    "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
-    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
-    "master/src/lib.rs": "lines:^\\.route\\(",
-    "host/package.json": [
-      "scripts.village"
-    ],
-    "engine/package.json": [
-      "scripts.core"
-    ],
-    "home/package.json": [
-      "dependencies.three",
-      "dependencies.cordis"
-    ],
-    "host/src/live.ts": "lines:mustGit\\(\\['archive'|^const home = join"
-  },
-  "guide/render-passes.md": {
-    "engine/page/plugins.ts": "types:Pass,Passes",
-    "engine/plugins/paint/page.ts": "lines:engine.draws.(add|remove)\\("
-  },
-  "home/README.md": {
-    "home/package.json": [
-      "scripts",
-      "dependencies.three",
-      "dependencies.cordis"
-    ],
-    "home/src/features.ts": "lines:^export const"
-  },
-  "home/bench/physics/README.md": {
-    "home/bench/physics/package.json": [
-      "scripts",
-      "dependencies"
-    ],
-    "home/bench/physics/core.ts": "types"
-  },
-  "host/README.md": {
-    "host/package.json": [
-      "scripts",
-      "dependencies.@anthropic-ai/claude-agent-sdk"
-    ]
-  },
-  "master/README.md": {
-    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
-    "master/src/lib.rs": "lines:^\\.route\\("
-  },
-  "probes/lobby-transport/README.md": {
-    "probes/lobby-transport/server.mjs": "lines:^const PORT",
-    "probes/lobby-transport/helper.mjs": "lines:^const PORT",
-    "probes/lobby-transport/host.mjs": "lines:process.argv|portRangeBegin|new Http3Server"
-  },
-  "site/README.md": {
-    "site/package.json": [
-      "scripts",
-      "engines",
-      "dependencies.voxelmorphism"
-    ]
-  },
-  "site/designs/support-button/README.md": {
-    "site/static/support/support-button.js": "lines:getAttribute\\(|observedAttributes|^const VERSIONS|customElements.define"
-  },
-  "site/features/README.md": {
-    "site/package.json": [
-      "scripts.flag-proof"
-    ],
-    "site/generator/features.mjs": "lines:includes\\(key\\)|\\.hooks\\.",
-    "site/lib/flags.mjs": "file"
-  },
-  "site/scripts/landing/README.md": {
-    "site/scripts/landing/prepare.mjs": "lines:^const (ina|sky|capture|cachePath) =|Expected the unpainted|Usage:",
-    "site/package.json": [
-      "dependencies.voxelmorphism"
-    ],
-    "site/lib/egg-overlay.mjs": "lines:^export const",
-    "site/scripts/landing/encode-eggs.mjs": "lines:^const out =|parseArgs\\(\\{|^(rick|apple):"
-  },
-  "street/README.md": {
-    "street/package.json": [
-      "scripts"
-    ],
-    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'"
-  },
-  "guide/quickstart.md": {
-    "world": "file",
-    "scripts/world.mjs": "lines:^step|const site =|console.log\\(`Open",
-    "deploy/data.mjs": "lines:const base =|let url =|record.pin !== pin|sha\\(listing\\) !== record.digest",
-    "engine/page/realm-ui.ts": "lines:Your AI…",
-    ".devcontainer/devcontainer.json": [
-      "forwardPorts"
-    ]
-  },
-  "guide/engine.md": {
-    "engine/page/main.ts": "lines:^(march|farModel|marine|pluginDraws|staff)\\.draw\\(encoder, to, v|^if \\(!off\\.has\\('|off\\.has\\('spoil'\\)|^world\\.update\\(|^const off = new Set|^const frame = ",
-    "engine/page/bay.ts": "lines:^export async function open|instantiateStreaming",
-    "engine/page/frames.ts": "lines:^export const LOG",
-    "engine/serve.mjs": "lines:^// With --world it also keeps one shared world \\(world.mjs\\)",
-    "engine/package.json": [
-      "scripts.core",
-      "scripts.check"
-    ]
+    "scripts/docs.mjs": "lines:^const usage =|^const STAMPS =|^if \\(selector|^if \\(Array.isArray\\(selector\\)|^if \\(!selector.startsWith|^const schema = ",
+    "scripts/doc-site.mjs": "lines:errors.push\\(`",
+    "scripts/doc-mentions.mjs": "lines:fail\\(path, `link",
+    "scripts/doc-coverage.mjs": "lines:^export const component|^const quiet|^  /|Docs-unchanged:\\[",
+    "scripts/checks.mjs": "lines:name: 'docs"
   },
   "guide/engine-core.md": {
     "engine/core/src/lib.rs": "lines:^pub mod |^pub extern \"C\" fn|^pub enum Edit|^(Ball \\{|Runs\\(|Rows\\(|Fine\\()|out\\.push\\(match words",
     "engine/core/src/tree.rs": "lines:^pub const (SIDE|CELLS|UNIFORM)|^pub type Kind",
     "engine/core/src/kinds.rs": "lines:^pub const [A-Z_]+: (u8|Kind) =",
-    "engine/core/build.mjs": "lines:execFileSync\\('cargo'|out = join",
+    "engine/core/build.mjs": "lines:execFileSync\\('cargo'|out = join|^const cache =|includes\\('--no-cache'\\)",
     "engine/core/.cargo/config.toml": "file",
     "engine/page/edits.ts": "lines:^export function (ball|rows|stream|fineRows)"
   },
@@ -343,7 +464,9 @@
     ],
     "engine/page/input.ts": "lines:^export function",
     "engine/page/plugins.ts": "types:Pass",
-    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed"
+    "engine/page/explore.ts": "lines:addEventListener\\('keydown', keyed",
+    "engine/page/deform.ts": "lines:^export const (MAX_DENTS|DEFORM_BYTES)|^export class VehicleDeformation|^recordImpact\\(|^repairVehicle\\(",
+    "engine/page/living.ts": "lines:^const (DENTS_FROM|CRASH_FROM|HEAD_ROOM|ENGINE_SEEN) =|^repair\\(thing\\)"
   },
   "guide/engine-plugins.md": {
     "engine/rules/run.mjs": "lines:^export const (RULES_MOST|SOURCE_MOST)|^const (START_MOST|STRIKES|WAITING_MOST)",
@@ -353,54 +476,92 @@
     "engine/page/plugins.ts": "types:PagePlugin",
     "engine/page/frames.ts": "lines:^export const LOG",
     "engine/plugins/gone/world.mjs": "file",
-    "engine/plug.mjs": "lines:^const port =|/plugins/look"
+    "engine/plug.mjs": "lines:^const port =|/plugins/look",
+    "engine/test/whole.mjs": "lines:^const (DOES|HEARS) =",
+    "engine/serve.mjs": "lines:^const (REALMS_MOST|IDLE|realmsDir) =|if \\(foreign\\(req\\)\\) return send",
+    "engine/make/rules.mjs": "lines:^export const CANNOT|^const TRIES",
+    "engine/page/local.ts": "types:Rules"
   },
-  "guide/cells.md": {
-    "engine/core/src/tree.rs": "lines:^//! |^pub const (SIDE|CELLS|UNIFORM|CHILD)|^pub type Kind|^pub fn encode",
-    "engine/core/src/kinds.rs": "lines:^pub const [A-Z_]+: (u8|Kind) =|^pub const fn (kind|material|colour|grey)",
-    "engine/core/src/bay.rs": "lines:^let head: Vec<i32>|^if head\\[0\\] != 0x3159_4142|^let (ground|top|class|tint|walls|rows|mut verts|trunks)|SFST|SFPT|^let mut p = Pack \\{",
-    "engine/bay/bake.py": "lines:head = struct.pack\\('<16i'",
-    "engine/page/bay.ts": "lines:^interface (Record|Manifest)|^export const FRAME|^async function released|at.version !== 1|sum !== at.release|manifest.frame !== FRAME|sea\\[level\\]",
-    "engine/page/main.ts": "lines:levels: Number\\(query.get\\('levels'\\)",
-    "engine/serve.mjs": "lines:^const frame = \\(kind, seq, payload\\)|keep\\((ECHO|LOG),",
+  "guide/engine.md": {
+    "engine/page/main.ts": "lines:^(march|farModel|marine|pluginDraws|staff)\\.draw\\(encoder, to, v|^if \\(!off\\.has\\('|off\\.has\\('spoil'\\)|^world\\.update\\(|^const off = new Set|^const frame = |^if \\(paused \\|\\| mapSys\\?\\.opaque\\)|portalDraw\\?\\.\\(encoder",
+    "engine/page/bay.ts": "lines:^export async function open|instantiateStreaming",
     "engine/page/frames.ts": "lines:^export const LOG",
-    "engine/sf/build.mjs": "lines:manifest.levels.reduce",
-    "engine/sf/release.py": "lines:\"levels\": levels"
+    "engine/serve.mjs": "lines:^// With --world it also keeps one shared world \\(world.mjs\\)",
+    "engine/package.json": [
+      "scripts.core",
+      "scripts.check"
+    ],
+    "engine/page/march.ts": "lines:^const (PANES|THROUGH) =|^fn litWindow"
   },
-  "guide/city-pipeline.md": {
-    "engine/bay/fetch.py": "lines:^(EPT|DEM|NAIP|SF|LAYERS) =",
-    "engine/bay/street_inputs.py": "lines:add_argument",
-    "engine/bay/full_run.py": "lines:add_argument|^def (build|verify|plan)\\(",
-    "engine/bay/tiles.py": "lines:^level [0-9]",
-    "engine/sf/release.py": "lines:cli.add_argument|from panel_gate import check|panel-floors.json",
-    "engine/sf/build.mjs": "lines:^//   node sf/build.mjs|^const STAGED =|pointer.release !== pinned.release",
-    "deploy/data.mjs": "lines:^//   node deploy/data.mjs|^const INPUTS =|record.pin !== pin|sha\\(listing\\) !== record.digest|sha\\(body\\) !== f.sha256",
-    "scripts/world.mjs": "lines:^step\\(",
-    "DATA-LICENSES.md": "lines:^\\| [A-Z]",
-    "engine/bay/panel-floors.json": "file"
+  "guide/gameplay.md": {
+    "engine/page/keys.ts": "lines:^Key[A-Z]: '|^export const (OWN|YIELDED|FREE)",
+    "engine/page/living.ts": "lines:^const (LEAVE|GO|TURN|DRIFT|RISE): Binding|^(drive|fly|hover|ride): \\{ name|^const headlightLevel|^const cycleLights|^const extraRows|^const boostAsk|button\\('(drift|boost)'",
+    "engine/page/drive-cam.ts": "lines:^export const DRIVE_CAM_MODES",
+    "engine/page/stunts.ts": "lines:^const [A-Z_]+ = |^export type StuntKind",
+    "engine/page/tracks.ts": "lines:^const (MAX_SEGS|MAX_SPILLS|LIFE) =",
+    "engine/page/street.ts": "lines:^const (DRAWN|CYCLE|SLOW|TRAFFIC|MAX_CRASH_LIVING|CRASH_SCAN|HORN_CAR_REACH|NEAR_MISS_[A-Z_]+)\\b",
+    "engine/page/gamepad.ts": "lines:^export const (STICK|TRIGGER|TOUCH)_DEADZONE|fireKey\\('Key|heldCodes\\.add\\('",
+    "engine/page/play-hud.ts": "lines:^export const HUDS|get\\('hud'\\)",
+    "engine/page/person.ts": "lines:^export const (CANOPY|AS_IT_IS)",
+    "engine/page/explore.ts": "lines:^const (STANDS|AGAIN|FLY|ROUND|BACK)\\b",
+    "engine/page/modes.ts": "lines:^export const HOURS|^const WEATHER_EVERY",
+    "engine/page/almanac.ts": "lines:^export (const|function) (weatherOf|heavens|sfHour|fresh)\\b",
+    "engine/page/weather.ts": "lines:^const [A-Z_]+ =",
+    "engine/page/eggs-said.ts": "lines:^export const PHRASES|^\\['",
+    "engine/page/eggs-things.ts": "lines:^const SPOTS",
+    "engine/page/host.ts": "lines:^export const (tell|hear)",
+    "engine/page/signs.ts": "lines:^export (type|interface|function) ",
+    "engine/page/wand.ts": "lines:^const (MODES|AREA_LEAST)",
+    "engine/page/spells.ts": "lines:ROWS_MOST =",
+    "engine/page/gps.ts": "lines:snapToRoad\\(map, [sd]x|arrived:",
+    "engine/page/minimap.ts": "lines:offRouteM >|^const (BASE_SPAN|MAX_DRIVE_ZOOM) =|^targetAhead = |^targetSpeedGlow = |^targetDriftGlow = ",
+    "engine/page/main.ts": "lines:query\\.(get|has)\\('|^own\\.keys\\.set\\(|^controls\\.always\\('|^if \\(!t\\.alive [|][|] t\\.motor\\.feet\\.length < 2",
+    "engine/page/far.ts": "lines:query\\.get\\('",
+    "engine/page/bay.ts": "lines:query\\.(get|has)\\('",
+    "engine/page/march.ts": "lines:\\.get\\('(through|panes|tries|walk|fine)'\\)",
+    "engine/sf/realm.json": [
+      "rules"
+    ],
+    "engine/sf/fleet.mjs": "lines:^(coupe|saloon|hatch|suv|van|truck|bus): +\\{ power",
+    "engine/sf/cars.mjs": "lines:^kept\\('|^return \\{ \\.\\.\\.motor, power",
+    "engine/core/src/bodies/living.rs": "lines:^let boost_(thrust|top) =|^let (in_burnout|min_fuel|bonus|mult) = |^self\\.launch_timer = 0\\.8;|^self\\.(boost_fuel|burnout_charge) = \\(self\\.(boost_fuel|burnout_charge) [-+] |^if rolls > self\\.top \\* 0\\.45|^if self\\.on >= 2 && self\\.air_time >= |^GRASS [|] EARTH|^WATER => |^1\\.0 - 0\\.22 \\* wet|^self\\.surf_base = if|^\\(\\(self\\.(top|wheelbase) - ",
+    "engine/page/summon.ts": "lines:^const MAX_R =|^if \\(opts\\.land\\.feet_at|^if \\(maxG - minG >|^candidates\\.sort|^if \\(w && Math\\.hypot|^front: 0, grip:",
+    "engine/page/cockpit.ts": "lines:^const (WIPER_PARK|WIPER_PEAK|RAIN_ON|NIGHT_ON) =|^const (sweepDur|dwell) =",
+    "engine/page/wheels.ts": "lines:^const MAX_WHEELS =|^export function carveWheelWells",
+    "engine/page/sound/radio.ts": "lines:^\\{ id: '|^let remembered =|^if \\(raw === |^const TOAST_MS ="
   },
-  "guide/making.md": {
-    "engine/page/ask.ts": "types:Ask,Done",
-    "engine/make/form.mjs": "lines:^export const (MATERIALS|SIZE_MOST)|^//   \\[\"",
-    "engine/make/cells.mjs": "lines:^export const CMS|^const KEYS",
-    "engine/make/program.mjs": "lines:^export const SIDE_MOST|^const (PAGES|RUN_MS|ANSWER_MOST)|setInterruptHandler|wasmMemory",
-    "engine/make/model.mjs": "lines:^const ENV|^const args =|CLAUDE_CODE_DISABLE|init.tools\\?\\.length|mkdtemp\\(",
-    "engine/page/models.ts": "lines:^export const AT|^(anthropic|openai|gemini|openrouter): 'https",
-    "engine/make/maker.mjs": "lines:^export async function (make|undo)\\(|^export const useProgram|^//   (world|journal|model|core|program) |read\\(got.text, \\{ lenient: true",
-    "engine/make.mjs": "lines:maker.useProgram",
-    "engine/helper.mjs": "lines:^//   POST /ask|if \\(!names.includes\\(req.headers.host\\)\\)|if \\(origin !== undefined && !allowed.has\\(origin\\)\\)|if \\(!same\\(req.headers\\['x-village-secret'\\]",
-    "engine/page/maker.ts": "lines:^// What is answered here|^//   (at, look, tops|stands|send|things) |if \\(!ask.typed\\) return refused",
-    "engine/make/served.mjs": "lines:/world/ask`, \\{ method: 'POST'",
-    "engine/make/place.mjs": "lines:^export async function stands",
-    "engine/page/local.ts": "lines:making\\?: boolean \\| 'preview'|on only where the address has `\\?making=1`"
+  "guide/hosting.md": {
+    "engine/server.mjs": "lines:^const \\{ values: a \\}|^world: string|^master: string|^'ice-ports'|^'things-minute'|^a\\['release-cache'\\]|^a\\.reports|console\\.log\\(`(a dedicated|lobby)",
+    "scripts/packages.mjs": "lines:^const NODE =|^'(darwin-arm64|linux-x64)':|^const NATIVE =|^'page/core.wasm'|^'#!/bin/sh'|^const page =",
+    "engine/ground.mjs": "lines:^export async function ground|^const FETCH_MOST|--arrive is",
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
+    "engine/door.mjs": "lines:^const fresh =|kept\\.most = Math|^log\\(`\\$\\{name\\}",
+    "engine/serve.mjs": "lines:^const (LOG_MOST|GROUND_WAIT) |^const realmsDir|^const fineDir|^const peopleFile",
+    "master/src/main.rs": "lines:village-master \\{\\} on"
+  },
+  "guide/index.md": {
+    "engine/sf/pilot/current.json": [
+      "release"
+    ],
+    "deploy/cloudflare.config.ts": "lines:runWorkerFirst|^domains:|^name: world",
+    "engine/page/connect.ts": "lines:^const hostOf =",
+    "engine/page/local.ts": "lines:^return LOCAL && q.get\\('lobbies'\\)",
+    "engine/sf/realm.json": [
+      "rules.lobbies",
+      "rules.making"
+    ],
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ]
   },
   "guide/kit.md": {
     "engine/kit/package.json": [
       "name",
+      "license",
       "exports",
       "scripts.prepare"
     ],
-    "engine/kit/src/index.js": "lines:^export function (use|ready|adopt|release|live|define)\\(|^export \\{ (Model|MATERIALS)|^if \\(document.documentElement.hasAttribute\\('data-vx-plain'\\)\\)",
+    "engine/kit/src/index.js": "lines:^export |^(button|accordion|bubble|navs|calendar), |^function auto\\(",
     "engine/kit/src/engine.js": "lines:^export",
     "engine/kit/css/_kit.css": "lines:^--vx(-[a-z]+)*:",
     "engine/kit/browser.mjs": "lines:^export function copyModules",
@@ -410,24 +571,256 @@
       "dependencies.voxelmorphism",
       "scripts.test"
     ],
-    "site/test/kit.test.mjs": "lines:^test\\("
+    "site/test/kit.test.mjs": "lines:^test\\(",
+    "engine/kit/src/core/look.js": "lines:^(rise|travel|slab|float|dialog|well|groove): ",
+    "engine/kit/src/looks/lit.js": "lines:^rise: |^slab: |^export const THEMES",
+    "engine/kit/src/core/materials.js": "lines:^export const LIGHTS|^toLight:",
+    "engine/kit/src/core/motion.js": "lines:^export const (PRESS|RELEASE|SLIDE|CALM)",
+    "engine/kit/src/core/stage.js": "lines:rootMargin"
   },
-  "guide/building.md": {
-    "AGENTS.md": "lines:^- Track work in GitHub issues|^`\\[#<issue>\\] <change>`|^- GitHub's check workflows|^the Mac is the gate|^- Reviews are a tool|^- Record every dispatch|^- When work enters a new",
-    "scripts/check.mjs": "lines:^const \\{ values, positionals \\} = parseArgs|^ci: \\{|^webgl: \\{|^jobs: \\{|^const logDir",
-    ".claude/hooks/dispatch-log.mjs": "lines:^// PostToolUse hook|^// every mcp__",
+  "guide/living.md": {
+    "engine/mind/think.mjs": "lines:^const (THOUGHT_MOST|TOGETHER_MOST|REMEMBERED) =",
+    "engine/mind/form.mjs": "lines:^export const (LISTENING_MOST|WHO_MOST|NOTES_MOST|SAY_MOST)|^const ALIEN|^const SAY =",
+    "engine/mind/door.mjs": "lines:^const (QUIET_MOST|NOBODY) =|if \\(out\\.get\\(b\\.n\\)\\?\\.key !== b\\.voice\\)",
+    "engine/mind/model.mjs": "lines:^const ENV|^const args =|if \\(init\\.tools\\?\\.length",
+    "engine/mind/voice.mjs": "lines:^export function voices?\\(",
+    "engine/mind/talk.rule.js": "lines:^const NEAR",
+    "engine/page/living.ts": "types:Controls",
+    "engine/page/person.ts": "lines:^export const (BODY|ON_FOOT)",
+    "engine/page/moves.ts": "lines:^export const CHANNELS",
+    "engine/rules/bodies.mjs": "lines:^export const CAN",
+    "engine/rules/kept.mjs": "lines:^(kart|car|broom|craft)\\(",
+    "engine/helper.mjs": "lines:^//\\s+--(voice|no-voice) "
+  },
+  "guide/making.md": {
+    "engine/page/ask.ts": "types:Ask,Done",
+    "engine/make/form.mjs": "lines:^export const (MATERIALS|SIZE_MOST)|^//   \\[\"",
+    "engine/make/cells.mjs": "lines:^export const CMS|^const KEYS",
+    "engine/make/program.mjs": "lines:^export const SIDE_MOST|^const (PAGES|RUN_MS|ANSWER_MOST)|setInterruptHandler|wasmMemory",
+    "engine/make/model.mjs": "lines:^const ENV|^const args =|CLAUDE_CODE_DISABLE|init.tools\\?\\.length|mkdtemp\\(",
+    "engine/page/models.ts": "lines:^export const AT|^(anthropic|openai|gemini|openrouter): 'https|^const (SMALL|PREVIEW|SPECIALIZED|FALLS_BACK) =|^export function preferred|^const tier = /opus/i",
+    "engine/make/maker.mjs": "lines:^export async function (make|undo)\\(|^export const useProgram|^//   (world|journal|model|core|program) |read\\(got.text, \\{ lenient: true|^const (FINE_REACH_MOST|FINE_NEAR_MOST|TRIES) =",
+    "engine/make.mjs": "lines:maker.useProgram",
+    "engine/helper.mjs": "lines:^//   POST /ask|if \\(!names.includes\\(req.headers.host\\)\\)|if \\(origin !== undefined && !allowed.has\\(origin\\)\\)|if \\(!same\\(req.headers\\['x-village-secret'\\]|^const mayDraw|if \\(draw && ask\\.typed|^//\\s+--(first|no-draw|reply) ",
+    "engine/page/maker.ts": "lines:^// What is answered here|^//   (at, look, tops|stands|send|things) |if \\(!ask.typed\\) return refused",
+    "engine/make/served.mjs": "lines:/world/ask`, \\{ method: 'POST'",
+    "engine/make/place.mjs": "lines:^export async function stands",
+    "engine/page/local.ts": "lines:making\\?: boolean \\| 'preview'|on only where the address has `\\?making=1`|^const OPEN: Rules",
+    "engine/sf/realm.json": [
+      "rules.models",
+      "rules.making"
+    ],
+    "engine/door.mjs": "lines:^thingsMinute:",
+    "engine/make/drawn.mjs": "lines:^export const ENDPOINT|^const (cmFor|UNLIKE)|'X-Fal-Store-IO'|^if \\(process\\.env\\.FAL_KEY\\)",
+    "engine/make/library.mjs": "lines:^export const (LIBRARY|SHIPPED)",
+    "engine/make/fine.mjs": "lines:^export const grained",
+    "engine/make/best.mjs": "lines:^export async function wished"
+  },
+  "guide/master.md": {
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
+    "master/src/lib.rs": "lines:^\\.route\\(",
+    "master/src/host.rs": "lines:bye\\(&?st, &mut sock, \\d+|^#\\[serde\\(default|^(proto|name|about|pin|most|locked|listed|players): ",
+    "master/src/api.rs": "lines:StatusCode::[A-Z_]+,$|^\"(name|version|proto|about|lobbies)\":|HeaderValue::from_static|\\.min\\(60 \\* 24 \\* 365\\)",
+    "master/src/text.rs": "lines:^pub const|^const ALPHABET|0xff00",
+    "master/src/state.rs": "lines:^Some\\(\\[s\\[0\\], s\\[1\\], s\\[2\\]\\]\\)",
+    "master/src/stun.rs": "lines:^const "
+  },
+  "guide/multiplayer.md": {
+    "engine/door.mjs": "lines:^const (JOIN_WAIT|FRESH|HELLO_GRACE|MASTER_RATE|BODY_MOST|CTL_MOST|HIGH) |^const LIMITS|^thingsMinute|^waitingPerAddress|^\\{ m: '|^case '|^const youOf|^return `\\$\\{s\\[0\\]",
+    "engine/page/wire.ts": "lines:^export const|setTimeout\\(end",
+    "engine/page/door.ts": "lines:namedCurve|indexedDB\\.open|createDataChannel\\('|^const (OPEN_WAIT|SILENT)",
+    "engine/serve.mjs": "lines:^const (LOG_MOST|SIDE_MOST|STRANGER_RECORD_MOST) ",
+    "engine/page/local.ts": "lines:^lobbies\\?:",
+    "engine/sf/realm.json": [
+      "rules.lobbies"
+    ],
+    "engine/test/lobby-suite.mjs": "lines:^\\['",
     "engine/package.json": [
-      "scripts.check"
-    ],
-    "site/package.json": [
-      "scripts.test"
-    ],
-    "scripts/docs.mjs": "lines:^const usage =|^const schema = "
+      "scripts.lobby"
+    ]
   },
-  "guide/hosting.md": {
-    "engine/server.mjs": "lines:^a\\['release-cache'\\]|^a\\.reports|^const \\{ values: a \\}|^  world: string|^  master: string|console\\.log\\(`(a dedicated|lobby)",
-    "scripts/packages.mjs": "lines:^const NODE =|^  '(darwin-arm64|linux-x64)':|^const NATIVE =|^  'page/core.wasm'|^    '#!/bin/sh'",
-    "engine/ground.mjs": "lines:^export async function ground|^const FETCH_MOST",
-    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:"
+  "guide/plugin-types.md": {
+    "engine/page/plugins.ts": "types"
+  },
+  "guide/project.md": {
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ],
+    "deploy/assemble.mjs": "lines:^const realm =|^assemble\\(",
+    "master/src/lib.rs": "lines:^\\.route\\(",
+    "engine/package.json": [
+      "name",
+      "scripts.core"
+    ],
+    "engine/kit/package.json": [
+      "name"
+    ],
+    "deploy/cloudflare.config.ts": "lines:^name: world"
+  },
+  "guide/quickstart.md": {
+    "world": "file",
+    "scripts/world.mjs": "lines:^step|const site =|console.log\\(`Open",
+    "deploy/data.mjs": "lines:^throw new Error\\('VOXELWRIGHT_DATA_URL requires",
+    "engine/page/realm-ui.ts": "lines:Your AI…",
+    ".devcontainer/devcontainer.json": [
+      "forwardPorts"
+    ],
+    "engine/page/keys.ts": "lines:^Key[WEMB]: ",
+    "engine/page/street.ts": "lines:E  Take the",
+    "engine/page/connect.ts": "lines:Forget this key",
+    "engine/sf/boards.json": "lines:\"text\": \"EXPLORE\""
+  },
+  "guide/render-passes.md": {
+    "engine/page/plugins.ts": "types:Pass,Passes",
+    "engine/plugins/paint/page.ts": "lines:engine.draws.(add|remove)\\("
+  },
+  "guide/sf-release.md": {
+    "engine/sf/release.py": "lines:^def (encode|library|cut|restock|generate)\\(|\"version\": 1|\"frame\": \"10n4250\"|far\\[\"size\"\\] != 5000|cli.add_argument|\"panelSha256\": receipt_hash|already exists|panel must describe|check\\(receipt\\[\"scores\"\\], previous\\)",
+    "engine/page/bay.ts": "lines:^interface (Record|Manifest)|^async function released|at.version !== 1|sum !== at.release|manifest.version !== 1|manifest.frame !== FRAME|body.byteLength === found.bytes|^const digest =",
+    "engine/core/src/bay.rs": "lines:^fn read\\(b|^if head\\[0\\] != 0x3159_4142|^let (ground|top|class|tint|walls|rows|mut verts|trunks) =|SFST|SFPT|^const (ROAD|PAVEMENT|GRASS_HERE|WATER_HERE|YARD|CANOPY|BUILT|NONE):|^pub fn least_step|^(storey|module|home|special|ground_floor|seed): |contains\\(&r\\[6\\]\\)",
+    "engine/page/far.ts": "lines:^let (x|z|lu|y0|y1|lw|axis|side) = |^out\\.(rgb|shade|id|style) = |getUint32\\(4, true\\)|head.grouped",
+    "engine/sf/far/pack.mjs": "lines:^export const (SIZE|BANDS|LODS)|^const PACKED|Buffer.from\\('FAR1'\\)|^const listing = ",
+    "deploy/data.mjs": "lines:^//   node deploy/data.mjs|^const INPUTS =|^const tag = |record.pin !== pin|sha\\(listing\\) !== record.digest|sha\\(body\\) !== f.sha256|sha\\(readFileSync\\(join\\(VILLAGE, RELEASE",
+    "engine/sf/build.mjs": "lines:pointer.release !== pinned.release|^writeFileSync\\(join\\(out, 'bay/|^copyFileSync\\(join\\(root, 'sf/heroes.json'\\)|holds no release|^const GRAPHS =",
+    "engine/sf/marks.mjs": "lines:w.set\\(\\[0x4b52414d",
+    "engine/page/nav-data.ts": "lines:^export const MAP_MAGIC|ver !== 1 && ver !== 2",
+    "engine/bay/earth.py": "lines:^LEVELS =",
+    "scripts/world.mjs": "lines:^const home =|^step\\("
+  },
+  "guide/site.md": {
+    "site/package.json": [
+      "scripts",
+      "engines"
+    ],
+    "site/generator/build.mjs": "lines:write\\(outDir|mounted \\? \\[\\]|personalHome = personalHomeOn",
+    "site/lib/paths.mjs": "lines:^export function markdownTwin|^export const PAGE_ROUTE_PATTERNS|^export const postPath",
+    "site/generator/markdown.mjs": "lines:^\"(engine-scene|model-compare|model-note|ai-session)\": \\{|^export const PAGE_CODE",
+    "site/generator/feeds.mjs": "lines:slice\\(0, 30\\)|^const AI_CRAWLERS",
+    "site/lib/flags.mjs": "lines:^export function flagsOn|SITE_FLAGS",
+    "site/lib/session/format.mjs": "lines:^export const (FORMAT|TURN_TYPES|EVENTS)",
+    "site/site.config.mjs": "lines:base:|negotiateMarkdown:",
+    "site/generator/kit.mjs": "lines:^export const PARTS"
+  },
+  "guide/sound.md": {
+    "engine/page/sound/patch.ts": "lines:^export const (HOWS|ROLES|MODES_MOST)|^(bar|plate|bell|skin|string|tube|pipe|hollow|lump|cup): \\[|^for \\(const \\[key, lo, hi\\]|^if \\(!Array\\.isArray\\(m\\) \\|\\||^if \\(!Number\\.isInteger\\(p\\.count\\)|^if \\(!num\\(a\\.from|^how: How;|^pieces\\?: \\{|^air\\?: \\{",
+    "engine/page/sound/surface.ts": "types:Part,Surface",
+    "engine/page/sound/dsp.ts": "lines:^export const (CEILING|NOTE|SET|BUS)|^const (MV|LEAST)|^registerProcessor|^(glide|place|release)\\(id",
+    "engine/page/sound/sound.ts": "lines:^export async function sound|^export interface Sound|^const most = reach|^return \\{ gain, pan: side|^for \\(const type of|^if \\(session\\)",
+    "engine/page/sound/world.ts": "lines:^export function hearing|^const BLOWS? =|^place = threat|^if \\(radius < 8\\)|^(used|told|drive|carEvent|horn|spoke)\\(|^voice\\.set\\(SET\\.(rain|wind|fire|surf|rumble|muffle|cover),|^if \\(walked > 0\\.75\\)|radio\\.duck\\(",
+    "engine/page/sound/music/compose.ts": "lines:^export const (TRIES|MOODS|PACE|RADIO_MOODS)|^name: '(baydrive|twinpeaks|fillmore)'",
+    "engine/page/main.ts": "lines:query\\.get\\('sound'\\)|query\\.has\\('voices'\\)",
+    "engine/ears/score.py": "lines:^\"(music|mix|oneshot|bed|tone|instrument)\": \\[|^lo, hi = \\(np\\.percentile|\"clip_ppm\", \"dc\", \"heard_median\"|^s = 100",
+    "engine/test/judged.mjs": "lines:^const hard|^const fresh|^check\\(",
+    "engine/test/all.mjs": "lines:^\\['(sound|music|heard|played|judged|sounded|radio)',",
+    "engine/page/sound/radio.ts": "lines:^\\{ id: '|^(click|static|whoosh|whooshTail): \\{ how|^const (MIN_WHOOSH_KMH|TOAST_MS) =|^const (targetGain|amt) =|^let remembered =|^autoStartDelay = 0\\.|^for \\(const lateral of|^if \\(absSide > |^nearCarCool\\.set|^if \\(scanAcc <|^if \\(s [<>] 0\\) whooshCool",
+    "engine/page/sound/music/conductor.ts": "lines:^cut\\(mood|^const \\[lo, hi\\] = steady",
+    "engine/test/radio.mjs": "lines:^b?check\\("
+  },
+  "guide/village.md": {
+    "scripts/checks.mjs": "lines:cwd: '(home|host|street)'",
+    "host/src/village.ts": "lines:^(port: \\{ type|const approvalPort)",
+    "host/src/approval.ts": "lines:^//   [1-7]\\.",
+    "host/src/villager-input.ts": "lines:^export const ROUTES",
+    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
+    "street/src/server.ts": "lines:^const port =",
+    "home/src/features.ts": "lines:^export const"
+  },
+  "home/README.md": {
+    "home/package.json": [
+      "scripts",
+      "dependencies.three",
+      "dependencies.cordis",
+      "dependencies.jolt-physics"
+    ],
+    "home/src/features.ts": "lines:^export const",
+    "home/src/plugins/renderer.ts": "lines:^(const TIER_NAMES|const asked|const gpuMode|const fxParam|const forceWebGL|high:|medium:|low:)",
+    "home/src/plugins/camera.ts": "lines:^(const cam =|export const MODE)",
+    "home/src/main.ts": "lines:^(const start =|const only =|const GLOBAL =)",
+    "home/vite.config.ts": "lines:^(const port =|\"script-src|\"connect-src|const physicsCsp)",
+    "home/src/plugins/reminders.ts": "lines:^const POLL_MS",
+    "home/src/sealed.ts": "lines:^export (function|const)",
+    "scripts/checks.mjs": "lines:cwd: 'home'"
+  },
+  "home/bench/physics/README.md": {
+    "home/bench/physics/package.json": [
+      "scripts",
+      "dependencies"
+    ],
+    "home/bench/physics/core.ts": "types",
+    "home/bench/physics/run.ts": "lines:^const (quick|SHOTS)",
+    "home/src/engine/jolt.ts": "lines:^import initJolt",
+    "home/vite.config.ts": "lines:^const physicsCsp"
+  },
+  "host/README.md": {
+    "host/package.json": [
+      "scripts",
+      "dependencies.@anthropic-ai/claude-agent-sdk"
+    ],
+    "host/src/village.ts": "lines:^(//   npm run village|const DEFAULT_LABEL|port: \\{ type|const approvalPort|if \\(command ===|else if \\(command ===)",
+    "host/src/villager-cli.ts": "lines:^(agent|model|root|operators|'elder-executor'|'elder-timeout-ms'|'elder-per-hour'|'approval-port'|'approval-url'): \\{ type:",
+    "host/src/pairing.ts": "lines:^(export const (CODE_TTL_MS|SESSION_TTL_MS)|const COOKIE_PREFIX|  return `\\$\\{cookieName)",
+    "host/src/approval.ts": "lines:^//   [1-7]\\.",
+    "host/src/approval-server.ts": "lines:content-security-policy",
+    "host/src/promote.ts": "lines:^const PROMOTABLE",
+    "host/src/plugins/home-checks.ts": "lines:^(export const MIN_CHANGED_SHARE|// - (controller-files|build|screenshot))",
+    "host/src/plugins/claude-code.ts": "lines:^'--",
+    "host/src/sandbox.ts": "lines:^(allowedDomains|denyRead)",
+    "host/src/persona.ts": "lines:^const COMMANDS",
+    "host/src/villager-input.ts": "lines:^export const ROUTES",
+    "scripts/checks.mjs": "lines:cwd: 'host'"
+  },
+  "master/README.md": {
+    "master/src/config.rs": "lines:^#\\[arg|^pub \\w+:",
+    "master/src/lib.rs": "lines:^pub mod",
+    "master/test/e2e.mjs": "lines:^// (Usage|Ports|node|E2E_STUN)",
+    ".github/workflows/master.yml": "lines:^if: github\\.event_name|^- \\{ os:",
+    "master/Dockerfile": "lines:^(FROM|ENTRYPOINT)"
+  },
+  "probes/lobby-transport/README.md": {
+    "probes/lobby-transport/server.mjs": "lines:^const PORT",
+    "probes/lobby-transport/helper.mjs": "lines:^const PORT",
+    "probes/lobby-transport/host.mjs": "lines:process.argv|portRangeBegin|new Http3Server",
+    "master/test/e2e.mjs": "lines:probes', 'lobby-transport'|lib', '(rtc-load|stun)\\.mjs'"
+  },
+  "site/README.md": {
+    "site/package.json": [
+      "scripts",
+      "engines",
+      "dependencies.voxelmorphism"
+    ],
+    "site/site.config.mjs": "lines:base:|negotiateMarkdown:"
+  },
+  "site/designs/support-button/README.md": {
+    "site/static/support/support-button.js": "lines:getAttribute\\(|observedAttributes|^const VERSIONS|customElements.define",
+    "site/generator/pages.mjs": "lines:home \\? support|^const support"
+  },
+  "site/features/README.md": {
+    "site/package.json": [
+      "scripts.flag-proof"
+    ],
+    "site/generator/features.mjs": "lines:includes\\(key\\)|\\.hooks\\.",
+    "site/lib/flags.mjs": "file"
+  },
+  "site/scripts/landing/README.md": {
+    "site/scripts/landing/prepare.mjs": "lines:^const (ina|sky|capture|cachePath) =|Expected the unpainted|Usage:",
+    "site/package.json": [
+      "dependencies.voxelmorphism"
+    ],
+    "site/lib/egg-overlay.mjs": "lines:^export const",
+    "site/scripts/landing/encode-eggs.mjs": "lines:^const out =|parseArgs\\(\\{|^(rick|apple):",
+    "site/static/landing/eggs.js": "lines:^\\[(code|\"wake up\"|\"rickroll\")|>= 540|time - t < 4000",
+    "site/static/landing/beacons.js": "lines:^const (TALL|MOST|REACH) =",
+    "site/generator/build.mjs": "lines:mounted \\? \\[\\]"
+  },
+  "street/README.md": {
+    "street/package.json": [
+      "scripts"
+    ],
+    "street/src/block.ts": "lines:^import .*from '../../home/src/engine/world.ts'",
+    "street/src/server.ts": "lines:^(//\\s+(Usage|\\[--)|const hosts =|if \\(hosts|const port =|const withProblems|const cell =)",
+    "street/src/make.ts": "lines:^export const STREET_LIMITS",
+    "street/src/agents.ts": "lines:^const KEY_HOURS",
+    "street/vite.config.ts": "lines:server: \\{ port",
+    "scripts/checks.mjs": "lines:cwd: 'street'"
   }
 }

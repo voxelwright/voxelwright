@@ -134,7 +134,9 @@ function archive(stage, name, epoch, executables) {
   return { file: `${name}.tar.gz`, size: bytes.length, sha256: sha256(bytes) }
 }
 
+// The guide page's Mintlify frontmatter becomes an ordinary heading in the archive.
 const page = () => readFileSync(join(ROOT, 'guide', 'hosting.md'), 'utf8')
+  .replace(/^---\n[\s\S]*?^title: (.+)$[\s\S]*?^---\n/m, '# $1\n')
 const common = (stage) => {
   writeFileSync(join(stage, 'README.md'), page())
   for (const f of ['LICENSE', 'NOTICE']) copyFileSync(join(ROOT, f), join(stage, f))

@@ -13,8 +13,8 @@ export interface MapSystemOptions {
   format: GPUTextureFormat
   input: Input
   hud: Hud
-  /** Current player position & heading in world metres / radians (0 = North/-z, +pi/2 = East/+x), plus horizontal speed (m/s). */
-  player(): { x: number; y: number; z: number; yaw: number; speed: number; driving: boolean; flying: boolean }
+  /** Current player position & heading in world metres / radians (0 = North/-z, +pi/2 = East/+x), plus horizontal speed (m/s) and optional live driving state. */
+  player(): { x: number; y: number; z: number; yaw: number; speed: number; driving: boolean; flying: boolean; drifting?: boolean; slip?: number }
   /** Current daylight level (0 = night, 1 = day). */
   day(): number
   /** Whether the visitor has entered the world (false during first-view landing screen). */
@@ -36,7 +36,7 @@ export interface MapSystem {
   readonly destination: { x: number; z: number; name: string } | null
   readonly route: GpsRoute | null
   readonly progress: RouteProgress | null
-  readonly stats: { nodes: number; edges: number; buildings: number; places: number; renderMs: number }
+  readonly stats: { nodes: number; edges: number; buildings: number; places: number; renderMs: number; span: number; zoom: number; lookAhead: number }
   toggle(open?: boolean): void
   setMode(mode: '2d' | '3d'): void
   setDestination(x: number, z: number, name?: string): GpsRoute | null
@@ -528,6 +528,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
 
   const gpu = new MapGpu(opts.device, opts.format)
   const coarse = matchMedia('(pointer: coarse)')
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
   const html = document.documentElement
 
   // ── Minimap HUD DOM ──
@@ -647,9 +648,15 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   let lastRerouteAt = 0
   let pinDropAt = -10
 
-  // Smooth minimap chase camera state
+  // Smooth speed-reactive 3D minimap chase camera state
+  const BASE_SPAN = 132
+  const MAX_DRIVE_ZOOM = 1.85
   let mmYaw = 0
-  let mmSpan = 148
+  let mmSpan = BASE_SPAN
+  let mmLookAhead = 0
+  let mmTilt = 0.88
+  let mmSpeedNorm = 0
+  let mmDriftNorm = 0
   let mmYawInit = false
 
   // Smooth fullscreen interactive camera state (current + target + pan velocity)
@@ -1091,7 +1098,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
   }, { passive: false })
 
   // ── 2D Overlay Drawing: GTA VI Minimap ──
-  const drawMinimapOverlay = (vp: Float32Array, cam: MapCamera, playerYaw: number) => {
+  const drawMinimapOverlay = (vp: Float32Array, cam: MapCamera, playerYaw: number, speedGlow: number, driftGlow: number) => {
     const cssW = mmRoot.clientWidth, cssH = mmRoot.clientHeight
     if (cssW < 10 || cssH < 10) return
     const pad = cssW < 134 ? 6 : 8
@@ -1176,21 +1183,63 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
       ctx.restore()
     }
 
-    // 3. GTA VI circular dark-disc + white-ring + white directional chevron player badge!
+    // 3. GTA VI circular dark-disc + white-ring + white directional chevron player badge,
+    //    with a sleek speed-adaptive / drift-reactive glow & pulse while driving fast!
     {
       const cx = px + pad, cy = py + pad
       const relYaw = wrapAngle(playerYaw - cam.yaw)
       const r = cssW < 160 ? 7.5 : 9.5
+      const activeGlow = Math.max(speedGlow, driftGlow)
       ctx.save()
       ctx.translate(cx, cy)
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.65)'
-      ctx.shadowBlur = 6
+
+      if (activeGlow > 0.02) {
+        // Blend smoothly from electric cyan-white at high speed to hot neon-pink/amber while drifting.
+        const dMix = clamp(driftGlow * 1.15, 0, 1)
+        const gr = Math.round(108 + (255 - 108) * dMix)
+        const gg = Math.round(224 + (62 - 224) * dMix)
+        const gb = Math.round(255 + (148 - 255) * dMix)
+
+        // Subtle ambient aura tight to the player badge (always inside minimap bounds).
+        const auraR = r * (1.75 + activeGlow * 0.45)
+        const aura = ctx.createRadialGradient(0, 0, r * 0.75, 0, 0, auraR)
+        aura.addColorStop(0, `rgba(${gr}, ${gg}, ${gb}, ${(0.22 + activeGlow * 0.34).toFixed(3)})`)
+        aura.addColorStop(1, `rgba(${gr}, ${gg}, ${gb}, 0)`)
+        ctx.beginPath()
+        ctx.arc(0, 0, auraR, 0, Math.PI * 2)
+        ctx.fillStyle = aura
+        ctx.fill()
+
+        // Smooth speed/drift expanding pulse ring (static subtle accent ring under prefers-reduced-motion).
+        if (!reducedMotion.matches) {
+          const pulseFreq = 1.15 + speedGlow * 0.75 + driftGlow * 0.55
+          const pT = (time * pulseFreq) % 1
+          const ringR = r + 1 + pT * (r * (0.95 + activeGlow * 0.45))
+          const ringAlpha = (1 - pT) * (1 - pT) * (0.35 + activeGlow * 0.48)
+          ctx.beginPath()
+          ctx.arc(0, 0, ringR, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(${gr}, ${gg}, ${gb}, ${ringAlpha.toFixed(3)})`
+          ctx.lineWidth = 1.5 + driftGlow * 0.5
+          ctx.stroke()
+        } else {
+          ctx.beginPath()
+          ctx.arc(0, 0, r + 2.5, 0, Math.PI * 2)
+          ctx.strokeStyle = `rgba(${gr}, ${gg}, ${gb}, ${(0.28 + activeGlow * 0.32).toFixed(3)})`
+          ctx.lineWidth = 1.4
+          ctx.stroke()
+        }
+      }
+
+      ctx.shadowColor = activeGlow > 0.05
+        ? (driftGlow > 0.2 ? `rgba(255, 58, 146, ${(0.55 + driftGlow * 0.35).toFixed(2)})` : `rgba(108, 224, 255, ${(0.45 + speedGlow * 0.35).toFixed(2)})`)
+        : 'rgba(0, 0, 0, 0.65)'
+      ctx.shadowBlur = activeGlow > 0.05 ? 8 + activeGlow * 4 : 6
       ctx.beginPath()
       ctx.arc(0, 0, r, 0, Math.PI * 2)
       ctx.fillStyle = '#11161d'
       ctx.fill()
       ctx.lineWidth = 1.75
-      ctx.strokeStyle = '#ffffff'
+      ctx.strokeStyle = driftGlow > 0.25 ? '#ff72b2' : speedGlow > 0.45 ? '#ccf4ff' : '#ffffff'
       ctx.stroke()
       ctx.shadowBlur = 0
       ctx.rotate(relYaw)
@@ -1583,20 +1632,55 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) < 0.02) return
 
     if (!mmYawInit) { mmYaw = p.yaw; mmYawInit = true }
-    else mmYaw = wrapAngle(mmYaw + wrapAngle(p.yaw - mmYaw) * (1 - Math.exp(-dt * 10)))
+    else mmYaw = wrapAngle(mmYaw + wrapAngle(p.yaw - mmYaw) * (1 - Math.exp(-dt * (p.driving ? 8.5 : 10))))
 
-    // Dynamic zoom: tight crisp 3D blocks on foot (~135 m), smoothly opens up when driving/flying faster (up to 250 m).
-    const targetSpan = clamp(132 + p.speed * 2.6 + (p.flying ? 32 : 0), 132, 260)
-    mmSpan += (targetSpan - mmSpan) * (1 - Math.exp(-dt * 4.5))
+    // Speed-reactive 3D driving camera: smoothly zooms out 1.0x -> 1.85x from 0..180 km/h and shifts look-ahead forward
+    // along the car's heading so intersections, turns, and GPS routes read 2-3 SF blocks ahead. Zero work when on foot.
+    let targetSpan = BASE_SPAN
+    let targetAhead = 0
+    let targetTilt = 0.88
+    let targetSpeedGlow = 0
+    let targetDriftGlow = 0
+    if (p.driving) {
+      const kmh = p.speed * 3.6
+      const driveT = clamp(kmh / 180, 0, 1)
+      const speedEase = driveT * (0.45 + 0.55 * driveT)
+      targetSpan = BASE_SPAN * (1 + (MAX_DRIVE_ZOOM - 1) * speedEase)
+      targetAhead = speedEase * 52
+      targetTilt = 0.88 - speedEase * 0.08
+      targetSpeedGlow = clamp((kmh - 45) / 135, 0, 1)
+      targetDriftGlow = p.drifting ? clamp(0.65 + (p.slip ?? 0) * 0.35, 0, 1) : clamp(((p.slip ?? 0) - 0.25) * 1.4, 0, 0.55)
+    } else if (p.flying) {
+      targetSpan = clamp(BASE_SPAN + p.speed * 2.2 + 32, BASE_SPAN, BASE_SPAN * MAX_DRIVE_ZOOM)
+    }
 
+    // Asymmetric zoom damping: brisk zoom-out under acceleration, calmer zoom-in on braking so corner taps don't jerk the radar.
+    const spanRate = targetSpan > mmSpan ? 4.2 : 2.6
+    mmSpan += (targetSpan - mmSpan) * (1 - Math.exp(-dt * spanRate))
+    if (p.driving || mmLookAhead > 0.05) {
+      mmLookAhead += (targetAhead - mmLookAhead) * (1 - Math.exp(-dt * 3.6))
+      if (!p.driving && mmLookAhead < 0.05) mmLookAhead = 0
+    }
+    if (p.driving || Math.abs(mmTilt - 0.88) > 0.001) {
+      mmTilt += (targetTilt - mmTilt) * (1 - Math.exp(-dt * 3.2))
+      if (!p.driving && Math.abs(mmTilt - 0.88) < 0.001) mmTilt = 0.88
+    }
+    if (p.driving || mmSpeedNorm > 0.005 || mmDriftNorm > 0.005) {
+      mmSpeedNorm += (targetSpeedGlow - mmSpeedNorm) * (1 - Math.exp(-dt * 5.0))
+      mmDriftNorm += (targetDriftGlow - mmDriftNorm) * (1 - Math.exp(-dt * (targetDriftGlow > mmDriftNorm ? 11.0 : 4.5)))
+      if (!p.driving && mmSpeedNorm < 0.005) mmSpeedNorm = 0
+      if (!p.driving && mmDriftNorm < 0.005) mmDriftNorm = 0
+    }
+
+    const fwdX = Math.sin(mmYaw), fwdZ = -Math.cos(mmYaw)
     const dpr = Math.min(2, devicePixelRatio || 1)
     const w = Math.round(mmRoot.clientWidth * dpr)
     const h = Math.round(mmRoot.clientHeight * dpr)
     const mmCam: MapCamera = {
-      cx: p.x,
-      cz: p.z,
+      cx: p.x + fwdX * mmLookAhead,
+      cz: p.z + fwdZ * mmLookAhead,
       yaw: mmYaw,
-      tilt: 0.88,
+      tilt: mmTilt,
       span: mmSpan,
       style: 0,
       extrude: 0.92,
@@ -1614,7 +1698,7 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
     const t0 = performance.now()
     const vp = gpu.render(mmGpu, w, h, mmCam)
     renderMs = renderMs * 0.85 + (performance.now() - t0) * 0.15
-    if (vp) drawMinimapOverlay(vp, mmCam, p.yaw)
+    if (vp) drawMinimapOverlay(vp, mmCam, p.yaw, mmSpeedNorm, mmDriftNorm)
   }
 
   return {
@@ -1632,6 +1716,9 @@ export function createMapSystem(opts: MapSystemOptions): MapSystem {
         buildings: map?.nBldgs ?? 0,
         places: map?.places.length ?? 0,
         renderMs: Math.round(renderMs * 100) / 100,
+        span: Math.round(mmSpan * 10) / 10,
+        zoom: Math.round((mmSpan / BASE_SPAN) * 100) / 100,
+        lookAhead: Math.round(mmLookAhead * 10) / 10,
       }
     },
     toggle,

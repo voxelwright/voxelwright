@@ -72,5 +72,3 @@ Measured noise between two renders of the unchanged home: 0.00008 of pixels
 (one sample); the gate needs more than 0.0005.
 
 Refresh when either version changes or a probe contradicts this file.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"host/package.json":"a7eb6f4a557e6796d87eec1a389e8536"} -->

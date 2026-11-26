@@ -127,5 +127,3 @@ fracture; plan pre-fractured compounds swapped by the gadget layer.
 
 The `jolt-physics` version changes, the home's CSP or isolation headers
 change, or a probe contradicts a line above.
-
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"home/package.json":"6d29e1328d33b477b6e7058abf53f6a5","home/src/engine/jolt.ts":"c37f9c4202828de87176606d2fa993d6"} -->

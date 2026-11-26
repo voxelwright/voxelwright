@@ -19,6 +19,7 @@ import { realms, type Pose } from './realms.ts'
 import { portal } from './portal.ts'
 import { wheel } from './wheel.ts'
 import { car, fineCar, living, type Making } from './living.ts'
+import { stunts } from './stunts.ts'
 import { behindAt, person } from './person.ts'
 import { shots } from './shots.ts'
 import { puffs } from './puffs.ts'
@@ -29,11 +30,12 @@ import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
 import { tracks } from './tracks.ts'
+import { wheels, type WheelVehicle } from './wheels.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
 import type { Answer, Ask } from './mover.ts'
-import { read } from './told.ts'
+import { read, type Born } from './told.ts'
 import { wand, type Target as Aim } from './wand.ts'
 import { hands } from './hands.ts'
 import { before as beforeEye, block, inHand as carried } from './held.ts'
@@ -63,8 +65,11 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
+import { BREAK, HIT, WORLD as WORLD_SOUND } from './sound/kinds.ts'
+import type { Patch } from './sound/patch.ts'
 import { buildTownMap, parseMap } from './nav-data.ts'
 import { createMapSystem, type MapSystem } from './minimap.ts'
+import { createCarSummon } from './summon.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -208,6 +213,8 @@ async function main() {
   const shade = await under(device, gpu.format)
   // Tire skidmarks and ground vehicle light pools (tracks.ts).
   const roadTracks = await tracks(device, gpu.format)
+  // Animated 3D mechanical wheels for driven vehicles (wheels.ts).
+  const carWheels = await wheels(device, gpu.format)
   const folk = await people(device, gpu.format, march)
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
@@ -215,7 +222,7 @@ async function main() {
   // What is heard (#247): `?sound=0` leaves it out. The picture never waits for it: it is there when it is ready, and a
   // page that cannot make sound goes on without it.
   let ears: ReturnType<typeof hearing> | null = null
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1' }); }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, inside: () => alive.inside, driving: () => { const r = alive.riding; if (!r || (r.controls ?? 'drive') !== 'drive') return null; const w = alive.where(r); if (!w) return null; const nearby: [number, number, number][] = []; for (const t of alive.things) { if (t === r || !t.alive) continue; const tw = alive.where(t); if (tw) nearby.push(tw.at) } return { at: w.at, yaw: Math.atan2(w.front[0], -w.front[2]), kmh: alive.telemetry?.kmh ?? 0, nearby } }, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1', query }); }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -453,6 +460,7 @@ async function main() {
     smoke.light(sun, day)
     debris.light(sun, day)
     water.light(sun, day)
+    carWheels.light(sun, day)
   }
   const setHour = (h: number | null) => {
     hour = h === null ? null : ((h % 24) + 24) % 24
@@ -691,8 +699,10 @@ async function main() {
     }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
+    controls.poll?.(dt)
     shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
+    stuntHud.frame(dt)
     shot?.after(dt)
     steer(rate ? Math.max(1000 / rate, screenMs) : fastestMs, gap, resting)
     const v = view(), to = fit()
@@ -720,6 +730,7 @@ async function main() {
     gathering.step(dt)
     smoke.step(dt * tempo.rate)
     roadTracks.step(dt * tempo.rate)
+    if (!off.has('wheels')) carWheels.step(dt * tempo.rate, wheelVehicles(), groundUnder)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
@@ -735,6 +746,7 @@ async function main() {
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
       if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
+      if (!off.has('wheels')) carWheels.draw(encoder, to, v)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
@@ -744,7 +756,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day) * (alive.inside ? 0.45 : 1), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
     lap('draw')
@@ -943,13 +955,45 @@ async function main() {
   // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
   // (By the cells and by their size: the same cells may be a part of another shape.)
   const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
+  // A look made on the page's thread is made square (fine.ts `thing`), and its smooth faces (#38) off it, by a worker
+  // of the street's kind (streetfaces.ts): several times the cost, a hitch as someone gets in. Until they come, the
+  // pieces wearing it are drawn square; then they are given them (pieces.ts `refit`), and so is every later one.
+  const smoothing = new Map<Born, Piece[]>()
+  let smoother: Worker | null = null
+  const smoothen = (kinds: Uint16Array, size: readonly [number, number, number], born: Born) => {
+    if (!smoother) {
+      smoother = new Worker(new URL('./streetfaces.ts', import.meta.url), { type: 'module' })
+      smoother.onmessage = (e: MessageEvent<{ key: number; faces: Uint32Array<ArrayBuffer>; smooth: Uint32Array<ArrayBuffer> }>) => {
+        const born = smoothKeys.get(e.data.key)
+        smoothKeys.delete(e.data.key)
+        if (!born) return
+        born.faces = e.data.faces
+        born.smooth = e.data.smooth
+        for (const piece of smoothing.get(born) ?? []) falling.refit(piece, e.data.faces, e.data.smooth)
+        smoothing.delete(born)
+      }
+    }
+    smoothing.set(born, [])
+    const key = ++smoothAsked
+    smoothKeys.set(key, born)
+    smoother.postMessage({ key, raw: kinds.slice(), size: [size[0], size[1], size[2]], reach: 5 })
+  }
+  let smoothAsked = 0
+  const smoothKeys = new Map<number, Born>()
   const alive = living({
     body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null },
     kind: (x, y, z) => core.world_kind(x, y, z),
     send: (ask) => { if (!far) mover.postMessage(ask) },
     wake: () => { bodies = Math.max(bodies, 1) },
     piece: (id) => moving.get(id),
-    look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) },
+    look: (kinds, size) => {
+      let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map())
+      let born = by.get(size.join())
+      if (!born) { born = thing(kinds, size); by.set(size.join(), born); if (!born.smooth) smoothen(kinds, size, born) }
+      const piece = falling.add({ ...born, com: [...born.com], low: [...born.low] })
+      smoothing.get(born)?.push(piece)
+      return piece
+    },
     input: controls, hud: over, pose,
     ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M,
     world: far, made: () => made,
@@ -958,11 +1002,19 @@ async function main() {
     lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
     fx: {
       smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
-      exhaust: (at, dir, pop) => smoke.exhaust(at, dir, pop),
+      exhaust: (at, dir, pop, boost) => smoke.exhaust(at, dir, pop, boost),
       track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
       lift: (wheel) => roadTracks.lift(wheel),
       light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
       sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
+      // A hard crash (#37): road dust, chips of the paint struck, and shards of a window that cracked.
+      crash: (at, strength, kind, glass) => {
+        const c = hue(kind)
+        smoke.crash(at, strength)
+        debris.burst(at, 2, Math.round(4 + strength * 10), [c[0], c[1], c[2]], 0.3, 8, 0.9 + strength * 0.4)
+        if (glass) debris.burst([at[0], at[1] + 4, at[2]], 3, Math.round(8 + strength * 12), [0.5, 0.58, 0.62], 0.16, 3, 1.1)
+      },
+      engine: (at, level, dt) => smoke.engine(at, level, dt),
       rain: () => march.rain,
       day: () => march.day,
       surface: (x, z) => core.top_at(x, z) & 15,
@@ -971,8 +1023,10 @@ async function main() {
       drive: (v) => ears?.drive(v),
       event: (kind, force) => ears?.carEvent(kind, force),
       horn: (on) => ears?.horn(on),
+      radio: (action) => { if (action === 'next') ears?.radio.cycle(1); else ears?.radio.setDriving(action === 'enter') },
     },
   })
+  const stuntHud = stunts({ alive, hud: over, sound: () => ears?.voice ?? null })
   /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
   const shades = () => alive.things.flatMap((t) => {
     const w = alive.where(t)
@@ -981,6 +1035,27 @@ async function main() {
     const top = groundUnder(w.at[0], w.at[1], w.at[2]), q = w.rot
     return [{ at: w.at, yaw: Math.atan2(-2 * (q[0] * q[2] - q[1] * q[3]), 1 - 2 * (q[1] * q[1] + q[2] * q[2])), half: [t.size[0] / 2, t.size[2] / 2] as const, high: t.size[1], lift: Math.max(0, w.at[1] - t.size[1] / 2 - top) }]
   })
+  /** Active drivable wheeled vehicles fed to the 3D wheel pass (wheels.ts). */
+  const wheelVehicles = (): WheelVehicle[] => {
+    const out: WheelVehicle[] = []
+    const drive = alive.wheelDrive
+    for (const t of alive.things) {
+      if (!t.alive || t.motor.feet.length < 2 || (t.controls ?? 'drive') !== 'drive' || (t.motor.steer === 0 && t.motor.upright > 0)) continue
+      const piece = moving.get(t.id)
+      if (!piece) continue
+      const active = drive && drive.id === t.id ? drive : null
+      const st = !active && t.state ? t.state : null
+      const stBrake = st && ((st.go < -0.1 && st.speed > 8) || (st.go > 0.1 && st.speed < -8)) ? Math.min(1, Math.abs(st.go)) : 0
+      out.push({
+        id: t.id, pos: piece.pos, rot: piece.rot, size: t.size, low: t.low,
+        bornLow: piece.born.low, bornCom: piece.born.com,
+        front: t.motor.front, steerLimit: t.motor.steer, topSpeed: t.motor.top,
+        feet: t.motor.feet, hasFine: !!(t.fine?.length || t.kept?.length), profile: t.wheelProfile,
+        ...(active ? { steerInput: active.steer, throttle: active.throttle, brake: active.brake, handbrake: active.handbrake, fwdSpeed: active.fwdSpeed, latSpeed: active.latSpeed, slip: active.slip, drifting: active.drifting, burnout: active.burnout, decel: active.decel } : st ? { steerInput: st.turn, throttle: st.go, brake: stBrake, handbrake: st.rise > 0.1, fwdSpeed: st.speed } : {}),
+      })
+    }
+    return out
+  }
   /** The top of what is under a place, looked for down from `y` (cells): a kerb, a roof, a bridge as well as the ground. */
   const groundUnder = (x: number, y: number, z: number) => {
     const ix = Math.floor(x), iz = Math.floor(z)
@@ -1135,7 +1210,9 @@ async function main() {
         mapSpeed += (Math.min(120, inst) - mapSpeed) * 0.25
         mapLastX = x; mapLastZ = z; mapLastT = now
       }
-      return { x, y, z, yaw, speed: mapSpeed, driving: !!r, flying: !r && !me.on }
+      const tel = alive.telemetry
+      const liveSpeed = tel ? tel.kmh / 3.6 : mapSpeed
+      return { x, y, z, yaw, speed: liveSpeed, driving: !!r, flying: !r && !me.on, drifting: tel?.drifting ?? false, slip: tel?.slip ?? 0 }
     },
     onEngage: () => {
       if (BAY_ON) loadSfMap(3)
@@ -1774,7 +1851,28 @@ async function main() {
   }))
   if (LOCAL?.kept?.length && !far) void setDown()
   if (LOCAL?.street && lively && !far) {
-    const life = streetOf({ life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls, faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) } })
+    const nearMissWhoosh: Patch = { how: 'struck', hard: 0.1, rough: 1, shape: 'lump', pitch: 95, ring: 0.04, damp: 0.95, air: { from: 1800, to: 220, for: 0.28, gain: 0.9, q: 1.1 }, gain: 0.55 }
+    const life = streetOf({
+      life: new URL(LOCAL.street.life, location.href), cars: new URL(LOCAL.street.cars, location.href), land: core, hour: () => hour ?? 11, rain: () => march.rain, clock: () => folkClock.now(), shocks, cuts, bodies: () => inTheWay(), feet: () => me.feet?.at ?? null, pieces: falling, alive, hud: over, input: controls,
+      faces: (kinds, size, born) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); by.set(size.join(), born) },
+      onNearMiss: (info) => {
+        const intensity = Math.min(1, Math.max(0.35, (info.speedKmh - 55) / 110) * (1.2 - info.clearance * 0.25))
+        ears?.voice.play(nearMissWhoosh, { at: info.at, force: intensity, size: 1.15, reach: 16, travels: false })
+        window.dispatchEvent(new CustomEvent('voxelwright:nearmiss', { detail: info }))
+      },
+      onCrash: (info) => {
+        debris.burst(info.at, 2.5, Math.round(8 + info.force * 16), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + info.force * 0.5)
+        smoke.glint(info.at, 4 + info.force * 6)
+        ears?.carEvent('thump', Math.min(1, 0.45 + info.force * 0.55))
+        ears?.voice.play(HIT.steel, { at: info.at, force: info.force, size: 1.8, reach: 20, travels: false })
+        if (info.speed > 65) ears?.voice.play(BREAK.glass, { at: info.at, force: Math.min(0.85, (info.speed - 55) / 90), size: 0.95, reach: 16, travels: false })
+        window.dispatchEvent(new CustomEvent('voxelwright:crash', { detail: info }))
+      },
+      onHorn: (info) => {
+        ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch, dur: info.annoyed ? 0.15 : 0.22, force: 0.65, reach: 18, travels: false })
+        if (info.annoyed) ears?.voice.play(WORLD_SOUND.carHorn, { at: info.at, pitch: info.pitch * 1.03, dur: 0.18, after: 0.21, force: 0.7, reach: 18, travels: false })
+      },
+    })
     streetLife = life
     if (landing && first && !first.engaged) life.enabled = false
     if (query.get('people') !== '0') folk.from.push(life.folk)
@@ -1836,6 +1934,7 @@ async function main() {
     const afoot = me.on
     alive.forget()
     roadTracks.clear()
+    carWheels.clear()
     if (afoot) me.walk(false)
     mover.postMessage({ forget: true } satisfies Ask)
     moverAge++
@@ -1865,6 +1964,7 @@ async function main() {
     const afoot = me.on
     alive.forget()
     roadTracks.clear()
+    carWheels.clear()
     if (afoot) me.walk(false)
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()
@@ -1963,8 +2063,25 @@ async function main() {
   Object.defineProperties((globalThis as unknown as { engine: object }).engine, Object.getOwnPropertyDescriptors({ tiles: { tally, memory, water: seaAsked, where, device: DEVICE, hold: HOLD }, reset, local: LOCAL, rules: RULES, setDown, get street() { return streetLife }, seen, get fov() { return fov }, set fov(v: number) { fov = v }, /** Whether the first view left alone is drawn 30 times a second (`?rest=0` turns it off), and whether it is now. */ get rests() { return rests }, set rests(on: boolean) { rests = on }, get idling() { return resting }, watch: (each: (gap: number) => void) => { watchers.add(each); return () => watchers.delete(each) } }))
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
+  const carSummon = createCarSummon({
+    land: core, alive, hud: over,
+    origin: () => { const f = me.feet; return f ? { x: f.at[0], z: f.at[2], yaw: f.yaw } : { x: pose.x * M, z: pose.z * M, yaw: pose.yaw } },
+    street: () => streetLife,
+    ways: BAY_ON ? (at, r) => streets(at, r) : undefined,
+  })
+  own.keys.set('KeyG', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  // Mobile touch trigger for Summon Car (G): sleek 44x44 slim voxel key beside ✦ Make at bottom-left (play-hud.ts).
+  const summonPanel = over.panel('summon')
+  const summonBtn = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button' })
+  summonBtn.dataset.vxIcon = 'car'
+  summonBtn.setAttribute('data-vx-icon-only', '')
+  summonBtn.setAttribute('aria-label', 'Summon sports car')
+  summonBtn.title = 'Summon sports car (G)'
+  summonBtn.addEventListener('click', () => { if (!alive.riding && !(first && !first.engaged) && !far) void carSummon.summon() })
+  summonPanel.append(summonBtn)
+  resetting.add(() => carSummon.clear())
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, fineCar, me, tempo, shots: streaks, map: mapSys })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, stunts: stuntHud, car, fineCar, me, tempo, shots: streaks, map: mapSys, summonCar: () => carSummon.summon(), wheels: carWheels, smoothing: () => smoothing.size })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({

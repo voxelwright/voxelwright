@@ -24,10 +24,10 @@ export const CEILING = 0.89, KNEE = 0.6
 /** Numbers in a note: when (frames), which patch, pitch (Hz, or 0 for the patch's own over size), size (1 is the patch's own), force 0 to 1, how long held (s), left and right gain, low-pass (Hz), how much goes to the room, bus, and last: 0, or 1 for a piece of something breaking, or from 2 up a name for a note that is held until it is let go (`release`) and can be bent meanwhile (`glide`). */
 export const NOTE = 12
 /** Things set from outside and eased to: the beds' levels and where they are, the room, the buses, and the driven vehicle. */
-export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17, engineRpm: 18, engineLoad: 19, engineTone: 20, tireSlip: 21, roadRoll: 22, roadRough: 23 } as const
-const SETS = 24
+export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17, engineRpm: 18, engineLoad: 19, engineTone: 20, tireSlip: 21, roadRoll: 22, roadRough: 23, turboBoost: 24 } as const
+const SETS = 25
 /** The least and the most each may be set to: a level is 0 to 1 whoever asks. */
-const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1]
+const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1, 1]
 export const BUS = { world: 0, music: 1, play: 2 } as const
 const BLOCK = 128
 const MV = 64, MM = 12, SV = 16, TV = 16, AV = 24, GV = 40, PENDING = 4096
@@ -88,7 +88,7 @@ export class Synth {
     this.rPre = new Float32Array(Math.round(0.012 * sr))
     this.look = Math.round(0.003 * sr)
     this.lBuf = [new Float32Array(this.look), new Float32Array(this.look)]
-    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
+    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0])
     this.now.set(this.target)
   }
 
@@ -594,16 +594,16 @@ export class Synth {
     }
     // Driven vehicle: multi-harmonic engine growl with load-driven intake filter and turbo whine, dual-formant tire
     // screech when sliding, and surface-aware road roll. Silent and zero cost whenever nobody drives.
-    const rpm = now[SET.engineRpm], load = now[SET.engineLoad], tone = now[SET.engineTone]
+    const rpm = now[SET.engineRpm], load = now[SET.engineLoad], tone = now[SET.engineTone], boost = now[SET.turboBoost]
     if (rpm > 0.004) {
       const fade = Math.min(1, rpm / 0.06)
       const f0 = (24 + 14 * tone) + (96 + 78 * tone) * (rpm * rpm * 0.55 + rpm * 0.45)
       const inc = Math.min(0.3, f0 / sr), subInc = inc * 0.5
-      const turboOn = Math.max(0, tone - 0.4) * Math.max(0, rpm - 0.3) * load
-      const turboInc = Math.min(0.4, (1400 + 2800 * rpm) / sr)
-      const fc = Math.min(0.4 * sr, f0 * (2.5 + 6.5 * load + 2.4 * rpm))
+      const turboOn = Math.max(0, tone - 0.4) * Math.max(0, rpm - 0.3) * load + boost * 0.85
+      const turboInc = Math.min(0.4, (1400 + 2800 * rpm + 1800 * boost) / sr)
+      const fc = Math.min(0.4 * sr, f0 * (2.5 + 6.5 * load + 2.4 * rpm + 2.2 * boost))
       const g = Math.tan((Math.PI * fc) / sr), k = 1.05 - 0.38 * load, a = 1 / (1 + g * (g + k))
-      const drive = 1.15 + 1.75 * load, amp = fade * (0.14 + 0.14 * load + 0.07 * rpm)
+      const drive = 1.15 + 1.75 * load + 0.45 * boost, amp = fade * (0.14 + 0.14 * load + 0.07 * rpm + 0.04 * boost)
       const lope = 0.24 - 0.13 * tone
       const h3 = 0.26 + 0.2 * load, h4 = 0.14 + 0.22 * load, h6 = 0.05 + 0.15 * load
       let ph = S[50], sub = S[51], tph = S[52], z1 = S[53], z2 = S[54], air = S[55]
@@ -616,10 +616,11 @@ export class Synth {
         const raw = (0.58 * Math.sin(p) + 0.42 * Math.sin(2 * p) + h3 * Math.sin(3 * p) + h4 * Math.sin(4 * p) + h6 * Math.sin(6 * p)) * mod
         const nz = this.rand() * 2 - 1
         air += c1200 * (nz - air)
-        const sat = Math.tanh((raw + air * (0.12 + 0.22 * load)) * drive)
+        const sat = Math.tanh((raw + air * (0.12 + 0.22 * load + 0.24 * boost)) * drive)
         const v3 = sat - z2, v1 = a * (z1 + g * v3), v2 = z2 + g * v1
         z1 = 2 * v1 - z1; z2 = 2 * v2 - z2
-        const y = (v2 * 0.85 + v1 * 0.22 * load) * amp + Math.sin(TAU * tph) * turboOn * 0.042 * fade
+        const spool = Math.sin(TAU * tph) * turboOn * 0.046 * fade + (boost > 0.01 ? (Math.sin(TAU * tph * 1.5) * 0.45 + air * 0.9) * boost * 0.055 * fade : 0)
+        const y = (v2 * 0.85 + v1 * 0.22 * load) * amp + spool
         l[i] += y * 0.96; r[i] += y * 1.04
       }
       S[50] = ph; S[51] = sub; S[52] = tph; S[53] = z1; S[54] = z2; S[55] = air

@@ -127,5 +127,3 @@ and execution-facts record
 retain originating gaps, corrected assertions and incomplete controls. These are
 manually authored candidate instructions; independent Editor review precedes
 adoption. They do not prove automatic lesson capture or source-review completeness.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"AGENTS.md":"370a8eb9c2a3773ac4ab07277fdce3d6"} -->

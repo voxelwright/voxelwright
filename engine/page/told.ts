@@ -3,7 +3,11 @@
 // every body is now.
 
 /** A body as it came loose: its outside as faces (the core's `support::faces`), its size, its middle of mass from its own low corner, and where that corner was. */
-export interface Born { id: number; cells: number; size: [number, number, number]; com: [number, number, number]; low: [number, number, number]; faces: Uint32Array<ArrayBuffer> }
+export interface Born {
+  id: number; cells: number; size: [number, number, number]; com: [number, number, number]; low: [number, number, number]; faces: Uint32Array<ArrayBuffer>
+  /** Four words for each face (two words of `faces`), one a corner: its smooth normal and how open it is there (fine.ts `facesWithSmooth`, #38). None for the core's bodies. */
+  smooth?: Uint32Array<ArrayBuffer>
+}
 /** Where a body is: its middle of mass in the world's finest cells, and its turn as a quaternion (x, y, z, w). */
 export interface Placed { id: number; pos: [number, number, number]; rot: [number, number, number, number] }
 export interface Told {
@@ -26,8 +30,8 @@ export interface Told {
   struck: Struck[]
   /** Someone's body born (#264): its id, its size in cells and its middle of mass from its own low corner. It is in `moves` as every body is, and drawn by whoever draws people. */
   figures: { id: number; size: [number, number, number]; com: [number, number, number] }[]
-  /** How each living thing that is awake is doing (#245): its speed along its front (cells a second), how many feet are on the ground, how many touches it had in the last step, what it is told, and whether it is in the air. */
-  live: { id: number; speed: number; feet: number; touches: number; go: number; turn: number; rise: number; aloft: boolean; /** The turn from its own upright to the world's (x, y, z, w): no turn unless its down is not the world's. */ frame: [number, number, number, number] }[]
+  /** How each living thing that is awake is doing (#245): its speed along its front (cells a second), how many feet are on the ground, how many touches it had in the last step, what it is told, whether it is in the air, and vehicle boost/burnout state (#28). */
+  live: { id: number; speed: number; feet: number; touches: number; go: number; turn: number; rise: number; aloft: boolean; boosting: boolean; launching: boolean; boost: number; burnout: number; /** The turn from its own upright to the world's (x, y, z, w): no turn unless its down is not the world's. */ frame: [number, number, number, number] }[]
 }
 /**
  * One thing meeting another: `a` the body that struck, `b` the body struck or 0 for the standing world; where (the
@@ -54,7 +58,7 @@ export function read(words: Uint32Array<ArrayBuffer>): Told {
     else if (tag === FLOW) told.water = words.slice(at, at + n)
     else if (tag === BURST) told.bursts.push({ at: [f[at], f[at + 1], f[at + 2]], radius: words[at + 3] })
     else if (tag === STRUCK) told.struck.push({ a: words[at], b: words[at + 1], at: [f[at + 2], f[at + 3], f[at + 4]], speed: f[at + 5], push: f[at + 6], kindA: words[at + 7], kindB: words[at + 8], flags: words[at + 9] })
-    else if (tag === LIVE) for (let k = at; k < at + n; k += 12) told.live.push({ id: words[k], speed: f[k + 1], feet: words[k + 2], touches: words[k + 3], go: f[k + 4], turn: f[k + 5], rise: f[k + 6], aloft: words[k + 7] !== 0, frame: [f[k + 8], f[k + 9], f[k + 10], f[k + 11]] })
+    else if (tag === LIVE) for (let k = at; k < at + n; k += 12) { const flags = words[k + 7]; told.live.push({ id: words[k], speed: f[k + 1], feet: words[k + 2], touches: words[k + 3], go: f[k + 4], turn: f[k + 5], rise: f[k + 6], aloft: (flags & 1) !== 0, boosting: (flags & 2) !== 0, launching: (flags & 4) !== 0, boost: ((flags >>> 8) & 255) / 255, burnout: ((flags >>> 16) & 255) / 255, frame: [f[k + 8], f[k + 9], f[k + 10], f[k + 11]] }) }
     else if (tag === FIGURE) told.figures.push({ id: words[at], size: [words[at + 1], words[at + 2], words[at + 3]], com: [f[at + 4], f[at + 5], f[at + 6]] })
     else if (tag === MOVES) for (let k = at; k < at + n; k += 8) told.moves.push(placed(k))
     i = at + n

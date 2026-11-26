@@ -81,5 +81,3 @@ library under sustained load. Its author calls the HTTP/3 binding a
 
 Refresh when any pinned version changes, when Node ships native HTTP/3, or when
 a probe contradicts a line above.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"street/package.json":"b53d94d3628aeb04e44d8df6570e8b9f","engine/package.json":"fdfa402ecbc51ae3c14ea93a4a92dee1"} -->

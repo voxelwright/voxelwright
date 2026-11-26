@@ -1,4 +1,11 @@
-# Walk San Francisco
+---
+title: Walk San Francisco
+description: Walk San Francisco in voxels on your own machine with one command.
+---
+
+`./world` builds the engine, fetches the pinned city and serves it on your machine. It is the same San Francisco that runs at [voxelwright.world](https://voxelwright.world).
+
+## Run it
 
 Install Node.js 25 or newer and stable Rust with Cargo. Add the Wasm target once with `rustup target add wasm32-unknown-unknown`. Open the world in a WebGPU-capable browser such as Chrome.
 
@@ -8,12 +15,35 @@ From the repository root on macOS or Linux, run:
 ./world
 ```
 
-Open the printed address. The first view looks across the park. Choose **Explore** to enter the city. Keep the terminal open while you play and press Ctrl-C there to stop.
+It runs three steps and prints the time of each:
 
-Exploring needs no account or key. To make something new, open the realm settings, choose **Your AI…**, select your provider and paste your own API key. The browser sends requests directly to that provider. Use **Forget** in the same panel to remove the saved key.
+1. **Core build.** Builds the Rust core to WebAssembly.
+2. **Data fetch and verification.** Downloads the city data bundle named by the pin, checks it is for that pin and that every file is the one packed.
+3. **Realm build.** Builds the static realm into `engine/dist-sf`.
 
-The command downloads the pinned SF release bundle and verifies its contents. Each map layer retains its [data licence](../DATA-LICENSES.md). The default download comes from the public city release in [the project repository](https://github.com/voxelwright/voxelwright). To use a mirror, set `VOXELWRIGHT_DATA_URL` to an HTTPS release mirror with the pinned tag and data.tar under it. Local testing also accepts an HTTP loopback mirror. A maintainer can create the same mirror layout with `node deploy/data.mjs pack-local PIN DIRECTORY` after building a staged release.
+Then it serves the realm on port 5760 and prints the address to open, ending in `/sf/index.html`. Keep the terminal open while you play and press Ctrl-C there to stop.
 
-In a Dev Container, forward port 5760 and run the same command in its terminal. Open the forwarded port at `/sf/index.html`.
+The first view looks across the city from Ina Coolbrith Park. Choose the **EXPLORE** board twice to enter the city: the first click arms it, and a second at least 300 ms later goes in.
 
-<!-- docs-verified 03409093aefc4d710098470b694c6d44640b7a94 {"world":"2378ea1c03ac32ad3591a785e0f839d2","scripts/world.mjs":"6bb7423eb75caa8f17690348fcb1206d","deploy/data.mjs":"15bd42d30cf7f5fd7a248656d73c6af1","engine/page/realm-ui.ts":"50f922f5cf756bae80e066aebab8c939",".devcontainer/devcontainer.json":"ebccba2df47ccded145c15adee4d311b"} -->
+## What to try
+
+- Walk with WASD and look with the mouse. B switches between walking and flying.
+- Stand beside a car and press E to get in and drive.
+- Press M for the map. Click a place on it to get a route.
+- Open the realm settings to change the hour, the weather and the graphics.
+
+Every key, the gamepad and the touch controls are on [gameplay](/gameplay).
+
+## Make something
+
+Exploring needs no account or key. To make something new, open the realm settings, choose **Your AI…**, select your provider and paste your own API key. The browser sends requests directly to that provider. Use **Forget this key** in the same panel to remove the saved key.
+
+## The city's data
+
+The data bundle is a release asset in [the project repository](https://github.com/voxelwright/voxelwright). Each map layer keeps its [data licence](https://github.com/voxelwright/voxelwright/blob/main/DATA-LICENSES.md).
+
+To fetch it from a mirror instead, set `VOXELWRIGHT_DATA_URL`. [The data bundle](/deploy#the-data-bundle) says what a mirror serves and how to make one.
+
+## In a Dev Container
+
+The repository's Dev Container forwards port 5760. Run `./world` in its terminal and open the forwarded port at `/sf/index.html`.

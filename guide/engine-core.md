@@ -1,11 +1,21 @@
-# The core
+---
+title: The core
+description: The Rust core compiled to WebAssembly. It decides what every cell is, applies edits and moves what comes loose.
+---
 
-The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes. The page's workers, the mover and the shared world process all load that same file. Read [the engine](engine.md) first for where it sits.
+The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. The page's workers, the mover and the shared world process all load the same build of it, `engine/page/core.wasm`. Read [the engine](/engine) first for where it sits.
+
+## Build it
+
+`npm run core` in `engine/` runs `engine/core/build.mjs`, which builds the crate for `wasm32-unknown-unknown` with SIMD and bulk memory (`engine/core/.cargo/config.toml`) and copies it to `engine/page/core.wasm`.
+
+- **Same bytes everywhere.** The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes.
+- **Cached by source and compiler.** When `engine/core` is committed and clean, the build is kept in `~/.village/engine/core-cache` under the tree's hash and the `rustc` version, and a new worktree copies it instead of building. A `core/` with changes is always built and never kept. `--no-cache` builds anyway.
 
 ## Concepts
 
 - **Kind** (`Kind` in `engine/core/src/tree.rs`). A `u16`. The low byte is the material and its flags. The high byte is a colour from one shared palette of 256. Kind 0 is air. `engine/core/src/kinds.rs` names the materials and flags.
-- **Sector.** 64 cells a side (`SIDE`), `CELLS` cells in all. `tree::encode` writes a sector as a tree of words, described in [worlds as cells](cells.md).
+- **Sector.** 64 cells a side (`SIDE`), `CELLS` cells in all. `tree::encode` writes a sector as a tree of words, described in [worlds as cells](/cells).
 - **Scratch** (`engine/core/src/scratch.rs`). The dense 64³ array a sector is built in before it is encoded.
 - **Edit** (`Edit` in `engine/core/src/lib.rs`). `Ball`, `Runs`, `Rows` or `Fine`. `fill_of` makes a sector by running the place's rules (`city::make`), then applying the edits that reach it in order.
 - **Level** (`lod` in the code). The core makes a sector at any coarseness. At level `lod` a cell stands for 2^lod finest cells each way.
@@ -17,7 +27,7 @@ The core is the crate in `engine/core`. It decides what every cell of the world 
 | --- | --- |
 | `city.rs` | The generated town: hills, streets, houses, towers, parks. Synthetic data, made by rule, so none of it is stored. |
 | `land.rs` | The ground beyond the town: mountains, a plain, open country. |
-| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](city-pipeline.md) bakes. Where no pack is loaded the world is level water. |
+| `bay.rs` | San Francisco from data. Rules over packs that the [city pipeline](/city-pipeline) bakes. Where no pack is loaded the world is level water. |
 | `heroes.rs` | Landmarks written as programs, asked for any cell at any size. |
 | `scratch.rs` | Building a sector's cells, edits, blasts, finer cells. |
 | `tree.rs` | Encoding a sector as a tree. |
@@ -48,7 +58,7 @@ The exports fall into groups by prefix:
 | `ground_at`, `feet_at`, `paving_at`, `top_at`, `world_kind` | Questions about the world. `world_kind(x, y, z)` returns the kind of one cell, edits included, as the solver's copy holds it (0 for air). `top_at(x, z)` answers from the land's rule alone, before any edit. |
 | `world_edit`, `world_regrow`, `world_forget` | The solver's copy of the world, which loose bodies collide with. |
 | `bodies_*` | Blasts, fire, thrown balls, moving what is loose. |
-| `living_*` | Living things and people's bodies: spawn, drive, walk, place. |
+| `living_*` | Living things and people's bodies: spawn, drive, `living_drive_aux` (boost, rain wetness, surface grip), walk, place. |
 | `material_weighs` | Sets a material's weight while the core runs. |
 
 ## The edit format
@@ -66,17 +76,16 @@ Any other first word is read as `1`. Input from outside is read without harm: a 
 
 ## Invariants
 
-- Same edits in the same order give the same cells on every machine. The town, the land, the Bay and fire are computed from rules and hashes. Bodies are not bit-exact across machines, which is why a shared world's process decides them for everyone.
+- Same edits in the same order give the same cells on every machine. The town, the land, the Bay and fire are computed from rules and hashes. Bodies are not bit-exact across machines, which is why in a shared world the world process decides them for everyone.
 - A sector made at a coarser level shows what the finest copy holds wherever a row has been (`fill_of`).
 - The memory layout is private to each build. Plugins and pages call exported functions and never read the core's memory by offset, except for the documented results above.
 
 ## Check a change
 
 ```sh
-cd engine/core && cargo test --release     # the core's own tests
-cd engine && npm run core && npm run check
+(cd engine/core && cargo test --release)                       # the core's own tests
+npm --prefix engine run core                                   # build core.wasm
+npm --prefix engine run check                                  # the engine's checks
 ```
 
 A core can be swapped into a running server without a restart: build it, then `POST /core/look`. Each world process starts the new module and replays the kept edits. Bodies in flight are lost.
-
-<!-- docs-verified 4c2a4e6d8b95192626cedd0357e54cf9d8673015 {"engine/core/src/lib.rs":"0dfff0725a0f36b05e7a3acedacf8615","engine/core/src/tree.rs":"2b36ff2da4a2d3e1c196eca9b069764a","engine/core/src/kinds.rs":"c30ebd4301c6126c7b5c00a10dcd272b","engine/core/build.mjs":"f2e002ecf190fe86bf660486e1e58d40","engine/core/.cargo/config.toml":"f9415371f23b3134702e235897c3b230","engine/page/edits.ts":"41ecf2c88d16227f32797a4371ee5a48"} -->

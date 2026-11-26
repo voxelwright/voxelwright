@@ -74,11 +74,17 @@
   html.riding #aim { display: none; }
   html:not([data-hud]) [data-panel="living"] button { min-width: 84px; min-height: 44px; padding: 12px 14px; border: 0; border-radius: 12px; background: rgba(12, 16, 22, 0.72); color: #e8ecf1; font: 600 14px -apple-system, system-ui, sans-serif; touch-action: manipulation; }
   html:not([data-hud]) [data-panel="living"] button[aria-pressed="true"] { background: #e8ecf1; color: #10141a; }
+  /* First-person cockpit glass overlay (cockpit.ts): windshield rain, wipers, and night dash glow. */
+  [data-panel="cockpit"] { position: fixed; inset: 0; pointer-events: none; overflow: hidden; }
+  [data-panel="cockpit"][hidden] { display: none; }
+  [data-panel="cockpit"] canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; pointer-events: none; }
   /* Driving cluster (living.ts): speed, gear, 12-segment RPM bar, and DRIFT badge. Machined low-profile housing. */
   [data-panel="drive-hud"] { position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: none; flex-direction: column; gap: 5px; padding: 9px 13px 10px; border-radius: 3px; background: rgba(20, 26, 38, 0.74); border: 1.5px solid rgba(94, 114, 146, 0.44); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f2f5f9; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 6px 22px rgba(0, 0, 0, 0.34), inset 1px 1px 0 rgba(255, 255, 255, 0.14); }
   html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="drive-hud"] { display: flex; }
   html:has(#ask.open) [data-panel="drive-hud"] { display: none; }
   [data-panel="drive-hud"] .dh-top { display: flex; align-items: baseline; gap: 6px; }
+  [data-panel="drive-hud"] .dh-cam { font: 700 10px/1.2 -apple-system, system-ui, sans-serif; letter-spacing: 0.09em; text-transform: uppercase; color: rgba(232, 236, 241, 0.82); border-bottom: 1px solid rgba(232, 236, 241, 0.14); padding-bottom: 4px; transition: opacity 0.25s ease-out; }
+  @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-cam { transition: none; } }
   [data-panel="drive-hud"] .dh-spd { font: 700 28px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; min-width: 44px; text-align: right; }
   [data-panel="drive-hud"] .dh-unit { font: 600 10px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.06em; text-transform: uppercase; opacity: 0.62; margin-right: 4px; }
   [data-panel="drive-hud"] .dh-gear { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px; padding: 0 5px; border-radius: 2px; background: rgba(232, 236, 241, 0.14); border: 1px solid rgba(255, 255, 255, 0.14); font: 700 12px/1 ui-monospace, monospace; color: #f2f5f9; }
@@ -88,15 +94,91 @@
   [data-panel="drive-hud"] .dh-rpm i.on { background: #e8ecf1; }
   [data-panel="drive-hud"] .dh-rpm i.hot { background: #ffae34; }
   [data-panel="drive-hud"] .dh-rpm i.red { background: #ff453a; }
+  [data-panel="drive-hud"] .dh-boost { height: 3px; border-radius: 2px; background: rgba(232, 236, 241, 0.14); overflow: hidden; }
+  [data-panel="drive-hud"] .dh-boost i { display: block; height: 100%; width: 100%; border-radius: 2px; background: linear-gradient(90deg, #1ea7ff, #7ce8ff); transition: width 0.08s linear; }
+  [data-panel="drive-hud"].boost .dh-boost i { background: linear-gradient(90deg, #38b6ff, #e8fbff); box-shadow: 0 0 8px rgba(80, 210, 255, 0.85); }
+  [data-panel="drive-hud"].burn .dh-boost i { background: linear-gradient(90deg, #ff7a1a, #ffd666); }
+  @media (prefers-reduced-motion: reduce) { [data-panel="drive-hud"] .dh-boost i { transition: none; } }
   @media (pointer: coarse) {
     [data-panel="drive-hud"] { right: auto; bottom: auto; left: 50%; top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateX(-50%); padding: 6px 10px 7px; gap: 4px; border-radius: 3px; }
     [data-panel="drive-hud"] .dh-spd { font-size: 20px; min-width: 30px; }
     [data-panel="drive-hud"] .dh-gear { min-width: 18px; height: 18px; font-size: 11px; }
     [data-panel="drive-hud"] .dh-rpm { gap: 2px; height: 4px; }
     [data-panel="drive-hud"] .dh-rpm i { width: 7px; }
+    [data-panel="drive-hud"] .dh-boost { height: 3px; }
   }
   @media (pointer: coarse) and (orientation: portrait) {
     [data-panel="drive-hud"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 66px); transform: none; }
+  }
+  /* Driving stunt & combo HUD (stunts.ts): completely hidden until scoring, banking, or busting. */
+  [data-panel="stunts"] { position: absolute; left: 50%; top: max(22px, calc(env(safe-area-inset-top, 0px) + 14px)); transform: translateX(-50%); display: none; flex-direction: column; align-items: center; gap: 4px; min-width: 196px; max-width: min(380px, calc(100vw - 32px)); padding: 8px 16px 10px; border-radius: 13px; border: 1px solid rgba(255, 255, 255, 0.14); background: rgba(12, 16, 22, 0.76); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: #f4f7fb; pointer-events: none; font-variant-numeric: tabular-nums; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.34); overflow: hidden; opacity: 1; transition: opacity 0.22s ease-out, border-color 0.2s ease-out; }
+  /* On non-plain workshop pages where #hud status line is shown top-left, sit cleanly below it. */
+  @media (pointer: fine) { html:not(.plain) [data-panel="stunts"] { top: 48px; } }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="stunts"]:is([data-state="active"], [data-state="banked"], [data-state="busted"]) { display: flex; }
+  html:has(#ask.open) [data-panel="stunts"] { display: none; }
+  [data-panel="stunts"].fading { opacity: 0; }
+  [data-panel="stunts"][data-state="active"] { border-color: rgba(255, 174, 52, 0.32); }
+  [data-panel="stunts"][data-state="banked"] { border-color: rgba(98, 235, 159, 0.48); }
+  [data-panel="stunts"][data-state="busted"] { border-color: rgba(255, 69, 58, 0.48); }
+  [data-panel="stunts"] .st-row { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; }
+  [data-panel="stunts"] .st-label { font: 800 12px/1.1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: rgba(244, 247, 251, 0.86); white-space: nowrap; }
+  [data-panel="stunts"][data-state="banked"] .st-label { color: #62eb9f; }
+  [data-panel="stunts"][data-state="busted"] .st-label { color: #ff6961; }
+  [data-panel="stunts"] .st-score { font: 800 24px/1 -apple-system, system-ui, sans-serif; letter-spacing: -0.02em; color: #fff; white-space: nowrap; }
+  [data-panel="stunts"][data-state="banked"] .st-score { color: #62eb9f; }
+  [data-panel="stunts"][data-state="busted"] .st-score { color: rgba(244, 247, 251, 0.42); text-decoration: line-through; }
+  [data-panel="stunts"] .st-mult { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; height: 22px; padding: 0 7px; border-radius: 6px; background: rgba(232, 236, 241, 0.16); color: #f4f7fb; font: 800 12px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.02em; }
+  [data-panel="stunts"] .st-mult[data-tier="2"] { background: #ffc845; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="3"] { background: #ff9f2e; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="4"] { background: #ff6b2b; color: #10141a; }
+  [data-panel="stunts"] .st-mult[data-tier="5"] { background: #ff453a; color: #fff; }
+  [data-panel="stunts"] .st-mult[hidden] { display: none; }
+  [data-panel="stunts"] .st-chain { font: 600 11px/1.2 -apple-system, system-ui, sans-serif; color: rgba(232, 236, 241, 0.68); letter-spacing: 0.02em; white-space: nowrap; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  [data-panel="stunts"] .st-chain[hidden] { display: none; }
+  [data-panel="stunts"] .st-bar { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgba(255, 255, 255, 0.1); }
+  [data-panel="stunts"] .st-bar > i { display: block; width: 100%; height: 100%; transform-origin: left center; background: linear-gradient(90deg, #ffae34, #ff7a1a); will-change: transform; }
+  [data-panel="stunts"]:not([data-state="active"]) .st-bar { display: none; }
+  @keyframes st-pop { 0% { transform: translateX(-50%) scale(1.06); } 100% { transform: translateX(-50%) scale(1); } }
+  [data-panel="stunts"].pop { animation: st-pop 0.2s cubic-bezier(0.22, 1, 0.36, 1); }
+  @media (pointer: coarse) {
+    [data-panel="stunts"] { top: calc(env(safe-area-inset-top, 0px) + 74px); min-width: 164px; padding: 6px 12px 8px; border-radius: 11px; gap: 3px; }
+    [data-panel="stunts"] .st-label { font-size: 11px; }
+    [data-panel="stunts"] .st-score { font-size: 19px; }
+    [data-panel="stunts"] .st-mult { min-width: 24px; height: 19px; font-size: 11px; }
+    [data-panel="stunts"] .st-chain { font-size: 10px; }
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    [data-panel="stunts"] { top: calc(env(safe-area-inset-top, 0px) + 212px); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-panel="stunts"], [data-panel="stunts"].pop { animation: none !important; transition: opacity 0.12s linear !important; }
+  }
+  /* Procedural car radio station toast (sound/radio.ts): auto-fading pill shown briefly on tune, hidden when idle. */
+  [data-panel="radio-toast"] { --radio-accent: #ff4fa0; position: absolute; right: max(18px, env(safe-area-inset-right)); bottom: calc(max(18px, env(safe-area-inset-bottom)) + 96px); display: none; align-items: center; gap: 7px; padding: 6px 12px 6px 10px; border-radius: 999px; background: rgba(12, 16, 22, 0.78); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border: 1px solid rgba(255, 255, 255, 0.12); color: #f2f5f9; pointer-events: auto; cursor: pointer; box-shadow: 0 4px 18px rgba(0, 0, 0, 0.3); opacity: 0; transform: translateY(6px); transition: opacity 0.22s ease, transform 0.22s ease; white-space: nowrap; }
+  html.riding.driving:not(.drawer):not(.choosing):not(.map-open) [data-panel="radio-toast"]:not([hidden]) { display: inline-flex; }
+  html:has(#ask.open) [data-panel="radio-toast"] { display: none !important; }
+  [data-panel="radio-toast"].show { opacity: 1; transform: translateY(0); }
+  [data-panel="radio-toast"] .rt-note { color: var(--radio-accent); font: 700 13px/1 -apple-system, system-ui, sans-serif; }
+  [data-panel="radio-toast"] .rt-name { font: 700 11px/1 -apple-system, system-ui, sans-serif; letter-spacing: 0.08em; color: #f2f5f9; }
+  [data-panel="radio-toast"].is-off .rt-name { color: #b5bec9; }
+  [data-panel="radio-toast"] .rt-freq { font: 600 10px/1 ui-monospace, monospace; color: rgba(232, 236, 241, 0.6); padding-left: 4px; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+  [data-panel="radio-toast"] .rt-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 10px; margin-left: 2px; }
+  [data-panel="radio-toast"] .rt-bars i { display: block; width: 2px; height: 4px; border-radius: 1px; background: var(--radio-accent); animation: rt-eq 0.75s ease-in-out infinite alternate; }
+  [data-panel="radio-toast"] .rt-bars i:nth-child(2) { height: 9px; animation-delay: 0.18s; }
+  [data-panel="radio-toast"] .rt-bars i:nth-child(3) { height: 6px; animation-delay: 0.34s; }
+  @keyframes rt-eq { 0% { transform: scaleY(0.35); } 100% { transform: scaleY(1); } }
+  @media (pointer: coarse) {
+    [data-panel="radio-toast"] { left: auto; bottom: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 14px); transform: translateY(-4px); padding: 5px 10px 5px 8px; }
+    [data-panel="radio-toast"].show { transform: translateY(0); }
+  }
+  @media (pointer: coarse) and (orientation: portrait) {
+    [data-panel="radio-toast"] { left: auto; right: max(14px, env(safe-area-inset-right)); top: calc(env(safe-area-inset-top, 0px) + 152px); transform: translateY(-4px); }
+    [data-panel="radio-toast"].show { transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-panel="radio-toast"] { transform: none; transition: opacity 0.15s ease; }
+    [data-panel="radio-toast"].show { transform: none; }
+    [data-panel="radio-toast"] .rt-bars i { animation: none; }
   }
   #card h2 { margin: 0 0 4px; font: 600 13px -apple-system, system-ui, sans-serif; }
   #card p { margin: 2px 0; color: #cfd6df; }

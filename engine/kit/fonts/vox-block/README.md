@@ -1,9 +1,17 @@
-# vox-block
+# Vox Block
 
-Our own drawing: a glyph set from `src/core/fonts/` laid flat as a web font.
-Ten cells to the em, so one cell is 2 px at 20 px and one voxel at 40 px.
+The kit's own lettering face: the Vox Block glyph set (`../../src/core/fonts/block.js`) laid flat
+as a web font. Capitals 11 cells tall with a two-cell stroke, for signs and voxel headings. Ten
+cells to the em, so one cell is 2 px at 20 px and one voxel at 40 px. The stylesheet carries this
+face inlined as a data URI, so a heading has the same box with and without voxels.
 
-Build from `engine/kit` with `node tools/vox-text-export.mjs block > glyphs.json` and
-`python tools/vox-text-build.py glyphs.json fonts/vox-block "Vox Block" vox-block` (needs fonttools and brotli).
+Rebuild from `engine/kit` (needs Python with fonttools and brotli), then inline it again:
 
-<!-- docs-verified 00420ce4a7390b907c04f07adcd84a232f5ae4d1 {"engine/kit/tools/vox-text-build.py":"dce000ec93cee49b923176de30374c60","engine/kit/tools/vox-text-export.mjs":"56314cc0af7738c133733391e64d26ff"} -->
+```sh
+node tools/vox-text-export.mjs block > glyphs.json
+python tools/vox-text-build.py glyphs.json fonts/vox-block "Vox Block" vox-block
+python tools/type-inline.py
+```
+
+SIL Open Font License 1.1 with reserved font names (`OFL.txt`). How the Vox fonts are built:
+[Blocks and the Vox fonts](../../../../guide/blocks-and-fonts.md).

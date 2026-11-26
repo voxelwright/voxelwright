@@ -4,13 +4,20 @@
 // motor does the rest. A thing's motor and its control scheme are data, so a model can write
 // them with the thing; nothing here is run.
 import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
+import { cockpit, type CockpitState } from './cockpit.ts'
+import { VehicleDeformation, type DeformState } from './deform.ts'
+import { createDriveCam, type DriveCamMode } from './drive-cam.ts'
+import { touchSteerCurve } from './gamepad.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
 import type { Piece } from './pieces.ts'
-import type { Struck, Told } from './told.ts'
+import type { Placed, Struck, Told } from './told.ts'
 import type { Link } from './link.ts'
 import type { Things } from './things.ts'
+import { carveWheelWells, type WheelProfile } from './wheels.ts'
+import { sculptCoupe } from './car-sculpt.ts'
+import { POLISHED } from './spells.ts'
 
 /** A foot: where its ray starts (cells from the thing's own low corner), how far down it reaches, whether it steers and drives. */
 export interface Foot { at: [number, number, number]; reach: number; steers?: boolean; drives?: boolean }
@@ -136,7 +143,7 @@ export function factsLine(value: unknown): string {
   const top = pick('top_kmh'), sprint = pick('zero_to_100_s')
   return [top !== undefined ? `${Math.round(top)} km/h` : '', sprint !== undefined ? `0 to 100 in ${sprint.toFixed(1)} s` : ''].filter(Boolean).join(', ')
 }
-export interface Thing extends Making { id: number; alive: boolean; /** One line of what it was measured doing, for its card (`factsLine`). */ facts?: string; /** In a shared world: its look's parts as its record says them, fetched from the world. */ kept?: FineKept[]; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number] }
+export interface Thing extends Making { id: number; alive: boolean; /** One line of what it was measured doing, for its card (`factsLine`). */ facts?: string; /** In a shared world: its look's parts as its record says them, fetched from the world. */ kept?: FineKept[]; /** In a shared world: the id of its record there. */ ref?: string; /** How it is doing, as the solver last said: its speed along its front (cells a second), feet on the ground, touches, what it is told. */ state?: Told['live'][number]; /** Where its first rider sits, from its middle, in its own cells (its record's `seats`): for drawing whoever rides it from this page. */ seat?: [number, number, number]; /** Measured wheel-well dimensions from carving static wheels out of a fine look (wheels.ts). */ wheelProfile?: WheelProfile }
 
 export interface Living {
   /** Brings a thing to life. Resolves when the solver has made it; its id is 0 if it could not. */
@@ -158,7 +165,7 @@ export interface Living {
   /** Lets go of every living thing, as the solver does when it forgets the world (mover.ts `forget`): whoever rides is set down, looks are put away, and a spawn still waiting is answered as not made. */
   forget(): void
   /** Tells a thing what to do as its rider would, for a check or a script: held for a second unless said again. */
-  drive(thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump'): void
+  drive(thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean): void
   /** Sets a thing still at a place (its middle, cells) turned so (a quaternion): one brought to life where it was drawn standing (#450). On this page's own solver only. */
   place(thing: Thing, at: readonly [number, number, number], rot: readonly [number, number, number, number]): void
   /** Takes a thing out of the world at once, leaving nothing (a parked car that is drawn again where it stood, #450). On this page's own solver only. */
@@ -176,7 +183,15 @@ export interface Living {
   /** The eight corners of a thing's own box where they are now (cells), or null: what the controls keep off while it is ridden (play-hud.ts). */
   corners(thing: Thing): [number, number, number][] | null
   /** Live driving telemetry while driving a wheeled vehicle, or null. */
-  readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: 'close' | 'far'; fovAdd: number } | null
+  readonly telemetry: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number; boost: number; boosting: boolean; burnout: number; surface: 'paved' | 'wet' | 'offroad' } | null
+  /** First-person cockpit immersion state (inertia, windshield rain/wipers, night dash glow). */
+  readonly cockpit: CockpitState
+  /** How a vehicle's look is dented (#37, deform.ts): the dents of its first part, or null if it was never struck hard. */
+  damage(thing: Thing): DeformState | null
+  /** Makes a vehicle's look as it was made: no dents, scuffs or cracks, and its engine quiet. */
+  repair(thing: Thing): void
+  /** Live wheel-animation inputs while driving a wheeled vehicle, or null (wheels.ts). */
+  readonly wheelDrive: { id: number; steer: number; throttle: number; brake: number; handbrake: boolean; fwdSpeed: number; latSpeed: number; slip: number; drifting: boolean; burnout: number; decel: number } | null
 }
 
 const FRONTS = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]] as const
@@ -186,6 +201,12 @@ const AHEADS = [Math.PI / 2, -Math.PI / 2, Math.PI, 0]
 const SITTING_EYE = 12
 /** How far outside its thing's own box a driver's eye may be (cells). */
 const EYE_OUT = 6
+/** How fast a vehicle must close on what it strikes to be dented (cells a second: 1.8 m/s), and to throw sparks and chips (2.8 m/s). */
+const DENTS_FROM = 18, CRASH_FROM = 28
+/** How near the eye a damaged engine must be to steam or smoke (cells). */
+const ENGINE_SEEN = 900
+/** How far round a driver's eye and each seat the look is kept from being bent into (cells): the head as it turns and leans. */
+const HEAD_ROOM = 2
 const turned = (q: readonly number[], v: readonly number[]): [number, number, number] => {
   const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0])
   return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)]
@@ -222,20 +243,25 @@ export function living(o: {
   /** Driving visual FX: tire smoke, exhaust pops, persistent skidmarks, ground light pools, sparks, and weather/surface reads. */
   fx?: {
     smoke(at: readonly [number, number, number], vel: readonly [number, number, number], intensity: number, colour?: readonly [number, number, number]): void
-    exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean): void
+    exhaust(at: readonly [number, number, number], dir: readonly [number, number, number], pop?: boolean, boost?: boolean): void
     track(wheel: number, at: readonly [number, number, number], strength: number, colour?: readonly [number, number, number]): void
     lift(wheel?: number): void
     light(at: readonly [number, number, number], dir: readonly [number, number], size: readonly [number, number], colour: readonly [number, number, number], alpha: number): void
     sparks(at: readonly [number, number, number], strength: number): void
+    /** A hard crash (#37): dust, chips of the paint it was struck on (`kind`), and shards of glass if a window cracked. */
+    crash?(at: readonly [number, number, number], strength: number, kind: number, glass: boolean): void
+    /** A damaged engine under the bonnet (#37), for one frame of `dt` seconds: steam, then dark smoke, then flames as `level` goes from 0.35 to 1. */
+    engine?(at: readonly [number, number, number], level: number, dt: number): void
     rain(): number
     day(): number
     surface(x: number, z: number): number
   }
-  /** Driving audio hooks: continuous engine/tire/road beds, one-shot events, and horn. */
+  /** Driving audio hooks: continuous engine/tire/road beds, one-shot events, horn, and car radio. */
   audio?: {
-    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number } | null): void
+    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null): void
     event(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force?: number): void
     horn(on: boolean): void
+    radio?(action: 'next' | 'enter' | 'exit'): void
   }
 }): Living {
   const M = 10
@@ -244,16 +270,19 @@ export function living(o: {
   // The eye that rides: how much of the way back it is (0 to 1), and what it is kept out of.
   let room = 1, was: number[] | null = null
   const stands = standsBy(o.kind)
-  const wrap = (a: number) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a }
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
-  // GTA-style chase camera, 6-speed gearbox, drift & audio/FX telemetry state.
-  let camMode: 0 | 1 = 0
-  let chaseYaw = 0, orbitYaw = 0, orbitPitch = 0, lookIdle = 99
-  let camFov = 0, camRoll = 0, camPull = 0, camHill = 0, camEnergy = 0
-  let shakeAmp = 0, shakeT = 0
-  let prevAt: [number, number, number] | null = null, velSm = [0, 0, 0], prevFwd = 0, prevOn = 4
-  let gear = 1, rpm = 0.16, shiftCool = 0, popCool = 0, wasThrottle = 0, hornOn = false, smokeAcc = 0
-  let telemetryNow: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: 'close' | 'far'; fovAdd: number } | null = null
+  // Cinematic driving camera suite (drive-cam.ts), 6-speed gearbox, drift & audio/FX telemetry state.
+  let seatRoll = 0, boostFovPunch = 0, boostEnergyPunch = 0
+  const cam = createDriveCam({
+    pose: o.pose, ground: o.ground, stands,
+    lens: o.lens ? (fovAdd, rollAdd, energy) => o.lens!(fovAdd + boostFovPunch, inside ? seatRoll : rollAdd, Math.min(1, energy + boostEnergyPunch)) : undefined,
+  })
+  let prevAt: [number, number, number] | null = null, velSm: [number, number, number] = [0, 0, 0], prevFwd = 0, prevOn = 4
+  let gear = 1, rpm = 0.16, shiftCool = 0, popCool = 0, wasThrottle = 0, hornOn = false, smokeAcc = 0, boostAcc = 0, wasBoosting = false, wasLaunching = false
+  let lightMode: 'auto' | 'off' | 'low' | 'high' = 'auto'
+  const lampState: [number, number, number, number] = [0, 0, 0, 0]
+  let telemetryNow: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number; boost: number; boosting: boolean; burnout: number; surface: 'paved' | 'wet' | 'offroad' } | null = null
+  let wheelDriveNow: Living['wheelDrive'] = null
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
   let cue: { thing: Thing; remove(): void } | null = null, leave: (() => void) | null = null
@@ -262,17 +291,27 @@ export function living(o: {
   // are the kit's keys where the kit is (play-hud.ts) and are shown only by touch (index.html). While anyone rides
   // the page says so (`html.riding`): the keys of one on foot step aside meanwhile (realm-ui.ts).
   const coarse = matchMedia('(pointer: coarse)')
-  const held = { rise: 0, horn: false }
+  const held = { rise: 0, boost: false, horn: false }
   const buttons = o.hud.panel('living')
-  // Sleek speed, gear, RPM bar and DRIFT indicator shown while driving a car.
+  const cabin = cockpit(o.hud)
+  // Sleek speed, gear, RPM bar, subtle boost bar, camera-mode toast and DRIFT indicator shown while driving a car.
   const drivePanel = o.hud.panel('drive-hud')
-  drivePanel.innerHTML = '<div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div>'
+  drivePanel.innerHTML = '<div class="dh-cam" hidden></div><div class="dh-top"><span class="dh-spd">0</span><span class="dh-unit">km/h</span><span class="dh-gear">N</span><span class="dh-drift" hidden>DRIFT</span></div><div class="dh-rpm">' + '<i></i>'.repeat(12) + '</div><div class="dh-boost"><i style="width:100%"></i></div>'
+  const dhCam = drivePanel.querySelector<HTMLElement>('.dh-cam')!
   const dhSpd = drivePanel.querySelector<HTMLElement>('.dh-spd')!
   const dhGear = drivePanel.querySelector<HTMLElement>('.dh-gear')!
   const dhDrift = drivePanel.querySelector<HTMLElement>('.dh-drift')!
   const dhBars = [...drivePanel.querySelectorAll<HTMLElement>('.dh-rpm i')]
-  let lastHudSpd = -1, lastHudGear = '', lastHudBars = -1, lastHudDrift = false
-  const updateDriveHud = (kmh: number, g: number, r: number, drifting: boolean) => {
+  const dhBoost = drivePanel.querySelector<HTMLElement>('.dh-boost i')!
+  let camToastTimer: ReturnType<typeof setTimeout> | undefined
+  const showCamToast = () => {
+    clearTimeout(camToastTimer)
+    dhCam.textContent = `CAM · ${cam.label}`
+    dhCam.hidden = false
+    camToastTimer = setTimeout(() => { dhCam.hidden = true }, 1500)
+  }
+  let lastHudSpd = -1, lastHudGear = '', lastHudBars = -1, lastHudDrift = false, lastHudBoost = -1, lastHudBoosting = false, lastHudBurn = false
+  const updateDriveHud = (kmh: number, g: number, r: number, drifting: boolean, boostFuel = 1, boosting = false, burnoutCharge = 0) => {
     const s = Math.max(0, Math.round(kmh))
     if (s !== lastHudSpd) { dhSpd.textContent = String(s); lastHudSpd = s }
     const gl = g < 0 ? 'R' : g === 0 ? 'N' : String(g)
@@ -286,18 +325,30 @@ export function living(o: {
       lastHudBars = lit
     }
     if (drifting !== lastHudDrift) { dhDrift.hidden = !drifting; lastHudDrift = drifting }
+    const burn = burnoutCharge > 0.05
+    const pct = Math.max(0, Math.min(100, Math.round((burn ? burnoutCharge : boostFuel) * 100)))
+    if (pct !== lastHudBoost) { dhBoost.style.width = `${pct}%`; lastHudBoost = pct }
+    if (boosting !== lastHudBoosting) { drivePanel.classList.toggle('boost', boosting); lastHudBoosting = boosting }
+    if (burn !== lastHudBurn) { drivePanel.classList.toggle('burn', burn); lastHudBurn = burn }
   }
   const resetDriveState = () => {
-    camFov = 0; camRoll = 0; camPull = 0; camHill = 0; camEnergy = 0
-    shakeAmp = 0; shakeT = 0; prevAt = null; velSm = [0, 0, 0]; prevFwd = 0; prevOn = 4
-    gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0
+    cam.reset()
+    boostFovPunch = 0; boostEnergyPunch = 0
+    clearTimeout(camToastTimer)
+    dhCam.hidden = true
+    prevAt = null; velSm = [0, 0, 0]; prevFwd = 0; prevOn = 4
+    gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0; boostAcc = 0; wasBoosting = false; wasLaunching = false
+    lightMode = 'auto'; lampState[0] = lampState[1] = lampState[2] = lampState[3] = 0
     telemetryNow = null
+    wheelDriveNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
     held.horn = false
+    cabin.reset()
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
+    o.input.rumble?.(null)
     o.fx?.lift()
-    updateDriveHud(0, 0, 0.15, false)
+    updateDriveHud(0, 0, 0.15, false, 1, false, 0)
   }
   const button = (act: string, words: string, press: () => void, release?: () => void) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', className: 'vx-button', textContent: words })
@@ -308,19 +359,20 @@ export function living(o: {
   }
   let seat: HTMLButtonElement | null = null
   const showButtons = (scheme: Scheme | null) => {
-    held.rise = 0
-    held.horn = false
+    held.rise = 0; held.boost = false; held.horn = false
     document.documentElement.classList.toggle('riding', !!scheme)
     document.documentElement.classList.toggle('driving', scheme?.name === 'drive')
     if (!scheme) { buttons.replaceChildren(); seat = null; return }
-    // From the bottom up (the column stands on the corner under the right thumb): drift (or down/up), what is done once, the
-    // seat, and getting off at the top, farthest from the thumb. Driving adds Horn (hold) and Cam (toggle chase view).
+    // From the bottom up (the column stands on the corner under the right thumb): drift, boost, horn (or down/up),
+    // what is done once, seat, camera & radio, and getting off at the top, farthest from the thumb.
     const driftBtn = button('drift', 'Drift', () => { held.rise = 1 }, () => { held.rise = 0 })
     driftBtn.dataset.vxKind = 'main'
+    const boostBtn = button('boost', 'Boost', () => { held.boost = true }, () => { held.boost = false })
+    boostBtn.setAttribute('aria-label', 'Nitrous boost')
     const hornBtn = button('horn', 'Horn', () => { held.horn = true }, () => { held.horn = false })
     hornBtn.setAttribute('aria-label', 'Honk horn')
     const rises = scheme.name === 'drive'
-      ? [driftBtn, hornBtn]
+      ? [driftBtn, boostBtn, hornBtn]
       : scheme.lines.some((l) => l.rise)
         ? [button('down', 'Down', () => { held.rise = -1 }, () => { held.rise = 0 }), button('up', 'Up', () => { held.rise = 1 }, () => { held.rise = 0 })]
         : []
@@ -331,10 +383,14 @@ export function living(o: {
     seat.setAttribute('aria-pressed', String(inside))
     const driveExtras: HTMLButtonElement[] = []
     if (scheme.name === 'drive') {
-      const cam = button('cam', 'Cam', () => { camMode = camMode === 0 ? 1 : 0; cam.setAttribute('aria-pressed', String(camMode !== 0)) })
-      cam.setAttribute('aria-label', 'Switch camera view')
-      cam.setAttribute('aria-pressed', String(camMode !== 0))
-      driveExtras.push(cam)
+      const camBtn = button('cam', 'Cam', () => { if (inside) view(false); cam.cycle(); showCamToast() })
+      camBtn.setAttribute('aria-label', 'Cycle camera view')
+      driveExtras.push(camBtn)
+      if (o.audio?.radio) {
+        const radioBtn = button('radio', 'Radio', () => { o.audio?.radio?.('next') })
+        radioBtn.setAttribute('aria-label', 'Next car radio station')
+        driveExtras.push(radioBtn)
+      }
     }
     buttons.replaceChildren(...rises, ...onces, seat, ...driveExtras, ...leaves)
   }
@@ -360,7 +416,17 @@ export function living(o: {
   }
   // A thing's fine look (#245): a piece for each part, kept each frame where the body is, the body's own cells not drawn.
   // Its glass is seen through (pieces.ts), from the seat as from the street.
-  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number }
+  /** glass: where its glass cells are, three numbers a cell (#37: where a crack starts). */
+  interface Worn { piece: Piece; kinds: Uint16Array; size: [number, number, number]; low: [number, number, number]; per: number; glass: Int16Array }
+  /** Where a look's glass cells are (kind 11), three numbers a cell. */
+  const glassOf = (kinds: Uint16Array, [w, , d]: readonly number[]) => {
+    const at: number[] = []
+    for (let i = 0; i < kinds.length; i++) if ((kinds[i] & 15) === 11) at.push(i % w, Math.floor(i / (w * d)), Math.floor(i / w) % d)
+    return Int16Array.from(at)
+  }
+  // Its dents (#37): one record a part, by the thing's body and the part's place in its look.
+  const dents = new VehicleDeformation()
+  const dentId = (thing: Thing, part: number) => thing.id * FINE_PARTS + part
   const looks = new Map<Thing, Worn[]>()
   const wear = (thing: Thing, parts: { kinds: Uint16Array; size: [number, number, number]; per: number; low: [number, number, number] }[]) => {
     if (!o.look || !thing.alive || !things.includes(thing) || looks.has(thing) || !parts.length) return
@@ -368,15 +434,76 @@ export function living(o: {
     let filled = 0
     for (const f of parts) for (let i = 0; i < f.kinds.length; i++) if (f.kinds[i]) filled++
     if (!fineWithin(parts) || filled > FINE_FILLED) { console.warn(`a look of ${parts.length} parts with ${filled} filled cells is more than a look may be: the thing is drawn as its own cells`); return }
+    const carveWheels = (thing.controls ?? 'drive') === 'drive' && thing.motor.feet.length >= 2 && !(thing.motor.steer === 0 && thing.motor.upright > 0)
     looks.set(thing, parts.map((f) => {
-      const piece = o.look!(f.kinds, f.size)
+      const carved = carveWheels ? carveWheelWells(f.kinds, f.size, f.per, f.low, thing.motor, thing.size) : null
+      if (carved && !thing.wheelProfile) thing.wheelProfile = carved.profile
+      const kinds = carved ? carved.kinds : f.kinds
+      const piece = o.look!(kinds, f.size)
       // Placed by its low corner, so that a part is where `low` says however it is turned.
       piece.born.com = [0, 0, 0]
       piece.cell = 0
-      return { piece, kinds: f.kinds, size: f.size, low: f.low, per: f.per }
+      return { piece, kinds, size: f.size, low: f.low, per: f.per, glass: glassOf(kinds, f.size) }
     }))
   }
-  const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
+  const unwear = (thing: Thing) => {
+    // Its dents go with its look: a body's id may be given to another thing later.
+    looks.get(thing)?.forEach((w, i) => { w.piece.destroy(); dents.clearVehicle(dentId(thing, i)) })
+    looks.delete(thing)
+  }
+  /** Where a part of a thing's look is when its body is at `pos` turned `rot` (as `follow` places it). */
+  const partAt = (thing: Thing, body: Piece, w: Worn, pos: readonly number[], rot: readonly number[]): [number, number, number] => {
+    const b = body.born, v = turned(rot, [w.low[0] - (b.low[0] - thing.low[0]) - b.com[0], w.low[1] - (b.low[1] - thing.low[1]) - b.com[1], w.low[2] - (b.low[2] - thing.low[2]) - b.com[2]])
+    return [pos[0] + v[0], pos[1] + v[1], pos[2] + v[2]]
+  }
+  /**
+   * A vehicle struck hard (#37): each part of its look is dented where it was struck, pushed in from where it was
+   * struck. The core says where and how fast, not which way: the way out of the look's own box at that place, so
+   * a corner is struck from both its sides. The driver's eye and every seat are kept clear, with room for the head.
+   */
+  const dent = (thing: Thing, s: Struck, pose: Placed | undefined) => {
+    const worn = looks.get(thing), body = o.piece(thing.id)
+    if (!worn || !body) return
+    const pos = pose?.pos ?? body.pos, rot = pose?.rot ?? body.rot
+    const eye = eyeOf(thing), lo = [eye[0] - HEAD_ROOM, eye[1] - SITTING_EYE / 2, eye[2] - HEAD_ROOM], hi = [eye[0] + HEAD_ROOM, eye[1] + HEAD_ROOM, eye[2] + HEAD_ROOM]
+    for (const seat of thing.seats ?? []) for (let a = 0; a < 3; a++) {
+      lo[a] = Math.min(lo[a], seat[a] - (a === 1 ? 0 : HEAD_ROOM))
+      hi[a] = Math.max(hi[a], seat[a] + (a === 1 ? SITTING_EYE + HEAD_ROOM : HEAD_ROOM))
+    }
+    worn.forEach((w, i) => {
+      const at = partAt(thing, body, w, pos, rot), cell = 1 / w.per
+      // Where it was struck in the part's own cells, and from there the way out of its box.
+      const local = turned([-rot[0], -rot[1], -rot[2], rot[3]], [s.at[0] - at[0], s.at[1] - at[1], s.at[2] - at[2]])
+      const out = local.map((v, a) => { const d = Math.max(-1, Math.min(1, (v / cell - w.size[a] / 2) / (w.size[a] / 2))); return d * d * d * (a === 1 ? 0.5 : 1) })
+      if (Math.hypot(out[0], out[1], out[2]) < 1e-6) out[0] = 1
+      const cabin = { min: lo.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number], max: hi.map((v, a) => (v - w.low[a]) * w.per) as [number, number, number] }
+      const was = Math.max(0, ...(dents.get(dentId(thing, i))?.glassCrack ?? []))
+      const state = dents.recordImpact(dentId(thing, i), { pos: at, rot: [rot[0], rot[1], rot[2], rot[3]], cell, born: { com: [0, 0, 0], size: w.size }, front: thing.motor.front as 0 | 1 | 2 | 3 }, s.at, turned(rot, out), s.speed, s.push, cabin)
+      if (!state) return
+      w.piece.deform = state
+      // A blow that cracked its glass more: the cracks start at the glass nearest it.
+      if (Math.max(...state.glassCrack) > was && w.glass.length) {
+        let best = Infinity, near = 0
+        const x = local[0] / cell, y = local[1] / cell, z = local[2] / cell
+        for (let g = 0; g < w.glass.length; g += 3) { const far = (w.glass[g] - x) ** 2 + (w.glass[g + 1] - y) ** 2 + (w.glass[g + 2] - z) ** 2; if (far < best) { best = far; near = g } }
+        w.piece.crackAt = [w.glass[near] + 0.5, w.glass[near + 1] + 0.5, w.glass[near + 2] + 0.5]
+      }
+    })
+  }
+  const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
+    if (!thing) return
+    const body = o.piece(thing.id)
+    if (body) body.lamps = lamps
+    for (const w of looks.get(thing) ?? []) w.piece.lamps = lamps
+  }
+  const headlightLevel = (dark: number) => lightMode === 'high' ? 1.8 : lightMode === 'low' ? 1 : lightMode === 'off' ? 0 : dark > 0.12 ? 1 : 0
+  const cycleLights = () => {
+    const dark = o.fx ? Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15)) : 0
+    if (lightMode === 'auto') lightMode = dark > 0.12 ? 'high' : 'low'
+    else if (lightMode === 'low') lightMode = 'high'
+    else if (lightMode === 'high') lightMode = 'off'
+    else lightMode = 'low'
+  }
   const follow = () => {
     for (const [thing, worn] of looks) {
       const body = o.piece(thing.id)
@@ -419,23 +546,21 @@ export function living(o: {
     if (on === inside) return
     inside = on && !!riding
     seat?.setAttribute('aria-pressed', String(inside))
-    if (inside && riding) { head[0] = 0; head[1] = -0.08; o.lens?.(0, 0, 0) }
+    if (inside && riding) { cabin.reset(); head[0] = 0; head[1] = -0.08; o.lens?.(0, 0, 0) }
     else {
       // Behind again: looking the way the head was turned.
+      cabin.reset()
       o.pose.tilt = undefined
       const isDrive = riding && (riding.controls ?? 'drive') === 'drive'
-      chaseYaw = facing
-      orbitYaw = head[0]
-      orbitPitch = 0
-      lookIdle = 0
+      if (isDrive) cam.sync(facing, head[0], true)
       o.pose.yaw = facing + head[0]
-      o.pose.pitch = isDrive ? (camMode === 0 ? -0.135 : -0.19) : -0.22
+      o.pose.pitch = isDrive ? -0.135 : -0.22
       room = 0
     }
   }
-  const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump') => {
-    if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once); return }
-    o.send({ drive: { id: thing.id, go, turn, rise, roll: once === 'roll', jump: once === 'jump' } })
+  const tell = (thing: Thing, go: number, turn: number, rise: number, once?: 'roll' | 'jump', boost?: boolean, wetness?: number) => {
+    if (o.world) { if (thing.ref) o.world.drive(thing.ref, go, turn, rise, once, boost); return }
+    o.send({ drive: { id: thing.id, go, turn, rise, roll: once === 'roll', jump: once === 'jump', ...(boost !== undefined ? { boost } : {}), ...(wetness !== undefined ? { wetness } : {}) } })
     o.wake()
   }
   // In a shared world a thing lives when the world says which body it is: what it is comes from its record.
@@ -473,6 +598,7 @@ export function living(o: {
       if (at) { o.pose.x = at.at[0] / M - at.front[2] * (riding.size[2] / M / 2 + 1.2); o.pose.z = at.at[2] / M + at.front[0] * (riding.size[2] / M / 2 + 1.2); o.pose.y = Math.max(o.pose.y, o.ground(o.pose.x, o.pose.z) + 1.7) }
     }
     const was = riding
+    if (was && was !== thing) setLamps(was, undefined)
     view(false)
     riding = thing?.alive ? thing : null
     said = ''
@@ -482,7 +608,8 @@ export function living(o: {
       if (was?.ref) o.world?.ride(was.ref, false)
       if (riding?.ref) o.world?.ride(riding.ref, true)
       // Off: the seat's keys go first, and then the person is on their feet again (#367).
-      if (!riding) { leave?.(); leave = null; if (was && (was.controls ?? 'drive') === 'drive') o.audio?.event('door', 0.65) }
+      if (!riding) { leave?.(); leave = null; if (was && (was.controls ?? 'drive') === 'drive') { o.audio?.radio?.('exit'); o.audio?.event('door', 0.65) } }
+      else if (was && (was.controls ?? 'drive') === 'drive' && (riding.controls ?? 'drive') !== 'drive') o.audio?.radio?.('exit')
       if (!was !== !riding) o.ridden?.(!!riding)
     }
     const at = riding && where(riding)
@@ -491,25 +618,26 @@ export function living(o: {
     if (riding && at) {
       // The eye goes behind it, looking the way it faces and a little down (low & heroic for cars).
       facing = Math.atan2(at.front[0], -at.front[2])
-      chaseYaw = facing
-      orbitYaw = 0
-      orbitPitch = 0
-      lookIdle = 99
+      if (isDrive) cam.sync(facing, 0, true)
       o.pose.yaw = facing
-      o.pose.pitch = isDrive ? (camMode === 0 ? -0.135 : -0.19) : -0.22
+      o.pose.pitch = isDrive ? -0.135 : -0.22
       if (isDrive && was !== riding) {
         const mounted = riding
+        o.audio?.radio?.('enter')
         o.audio?.event('door', 0.72)
         setTimeout(() => { if (riding === mounted) o.audio?.event('start', 0.85) }, 140)
       }
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
-    const extraRows: readonly (readonly [string, string])[] = isDrive ? [['C', 'camera'], ['H', 'horn']] : []
-    o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
+    const refreshCard = () => {
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['Shift', 'boost'], ['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn'], ['N', 'radio']] : []
+      o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
+    }
+    refreshCard()
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { camMode = camMode === 0 ? 1 : 0; return true } if (isDrive && code === 'KeyH') return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && code === 'KeyN') { if (!e?.repeat) o.audio?.radio?.('next'); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
@@ -524,6 +652,8 @@ export function living(o: {
     get riding() { return riding },
     get inside() { return inside && !!riding },
     get telemetry() { return telemetryNow },
+    get cockpit() { return cabin.state },
+    get wheelDrive() { return wheelDriveNow },
     look: (thing) => ({ body: o.piece(thing.id)?.cell ?? null, parts: (looks.get(thing) ?? []).map((w) => { const p = w.piece; return { pos: [...p.pos] as [number, number, number], rot: [...p.rot] as [number, number, number, number], cell: p.cell, size: w.size, per: w.per } }) }),
     get rider() {
       const at = riding && where(riding)
@@ -590,18 +720,54 @@ export function living(o: {
         if (riding === thing) mount(null)
       }
       for (const state of told.live) { const thing = things.find((t) => t.id === state.id); if (thing) thing.state = state }
+      // The hardest blow each vehicle wearing a look took in this answer (#37): the core tells a pair's meeting each
+      // step, and one crash is several of them.
+      let hardest: Map<Thing, Struck> | null = null
       for (const s of told.struck) {
         struck.push(s)
         if (struck.length > 64) struck.shift()
         if (riding && (s.a === riding.id || s.b === riding.id) && (s.flags & 3) !== 0 && s.speed > 18) {
           const hit = Math.min(1, s.speed / 120)
-          shakeAmp = Math.max(shakeAmp, hit * 0.032)
+          cam.shake(hit * 0.032)
+          if (inside) cabin.jolt('hit', hit)
           o.fx?.sparks(s.at, hit)
+          o.input.pulse?.('crash', hit)
+        }
+        if (s.speed < DENTS_FROM) continue
+        for (const id of [s.a, s.b]) {
+          const thing = id ? things.find((t) => t.id === id) : undefined
+          if (!thing || !looks.has(thing) || (thing.controls ?? 'drive') !== 'drive') continue
+          hardest ??= new Map()
+          if ((hardest.get(thing)?.speed ?? 0) < s.speed) hardest.set(thing, s)
+        }
+      }
+      if (hardest) for (const [thing, s] of hardest) {
+        const cracked = Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0]))
+        dent(thing, s, told.moves.find((m) => m.id === thing.id))
+        if (s.speed >= CRASH_FROM && !reducedMotion.matches) {
+          const hit = Math.min(1, s.speed / 120)
+          // The ridden one already threw its sparks above.
+          if (thing !== riding) o.fx?.sparks(s.at, hit)
+          o.fx?.crash?.(s.at, hit, s.a === thing.id ? s.kindA : s.kindB, Math.max(...(dents.get(dentId(thing, 0))?.glassCrack ?? [0])) > cracked + 0.05)
         }
       }
     },
+    damage: (thing) => dents.get(dentId(thing, 0)) ?? null,
+    repair(thing) {
+      looks.get(thing)?.forEach((w, i) => { dents.repairVehicle(dentId(thing, i)); w.piece.crackAt = undefined })
+    },
     frame(dt) {
       follow()
+      // A struck engine steams, then smokes, then burns (#37), under the bonnet at its front: only near the eye, and
+      // gentler where motion is to be reduced.
+      if (o.fx?.engine) for (const [thing, worn] of looks) {
+        let level = 0
+        for (const w of worn) level = Math.max(level, w.piece.deform?.hoodDamage ?? 0)
+        if (level < 0.35) continue
+        const f = FRONTS[thing.motor.front], half = (thing.motor.front < 2 ? thing.size[0] : thing.size[2]) * 0.5
+        const at = placeOf(thing, [thing.size[0] / 2 + f[0] * half * 0.62, thing.size[1] * 0.8, thing.size[2] / 2 + f[2] * half * 0.62])
+        if (at && Math.hypot(at[0] - o.pose.x * M, at[1] - o.pose.y * M, at[2] - o.pose.z * M) < ENGINE_SEEN) o.fx.engine(at, level, reducedMotion.matches ? dt * 0.4 : dt)
+      }
       // Near is near the body when there is one (#367): by the eye, which rides three metres behind someone on foot, a kart
       // right beside them was out of reach and E did nothing until they had walked past it.
       const eye = o.body?.() ?? [o.pose.x * M, o.pose.y * M, o.pose.z * M]
@@ -622,29 +788,45 @@ export function living(o: {
       }
       if (cue) { cue.remove(); cue = null }
       const scheme = SCHEMES[riding.controls ?? 'drive'], axes = { go: 0, turn: 0, rise: 0 }
+      const isDrive = scheme.name === 'drive'
       for (const line of scheme.lines) {
         if (line.once) continue
         const way = (o.input.held(line.keys[0]) ? 1 : 0) - (o.input.held(line.keys[1]) ? 1 : 0)
         for (const axis of ['go', 'turn', 'rise'] as const) if (line[axis]) axes[axis] += way * line[axis]
       }
-      // A phone's left thumb: forward and back, left and right.
+      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick.
+      const gp = o.input.driveAxes ?? null
       const stick = o.input.stick
-      axes.go = Math.max(-1, Math.min(1, axes.go - stick[1]))
-      axes.turn = Math.max(-1, Math.min(1, axes.turn + stick[0]))
-      axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise))
+      const hasTouch = o.input.thumb !== null
+      if (isDrive && gp && !hasTouch) {
+        axes.go = Math.max(-1, Math.min(1, axes.go + gp.go))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + gp.turn))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + gp.handbrake + held.rise))
+      } else {
+        const turnStick = isDrive ? touchSteerCurve(stick[0], 0) : stick[0]
+        axes.go = Math.max(-1, Math.min(1, axes.go - stick[1] + (isDrive && gp ? gp.go : 0)))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + turnStick + (isDrive && gp ? gp.turn : 0)))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise + (isDrive && gp ? gp.handbrake : 0)))
+      }
       const asked = once
       once = undefined
       if (asked === 'leave') { mount(null); return false }
+      const boostAsk = isDrive && (o.input.held('ShiftLeft') || o.input.held('ShiftRight') || held.boost || (gp?.boost ?? 0) > 0.5)
+      const rainWet = isDrive && o.fx ? Math.max(0, Math.min(1, o.fx.rain())) : 0
       // Said when it changes, and again four times a second: what a thing is told holds for a second only.
-      const now = `${axes.go},${axes.turn},${axes.rise}`
+      const now = `${Math.round(axes.go * 1000)},${Math.round(axes.turn * 1000)},${Math.round(axes.rise * 1000)},${boostAsk ? 1 : 0},${Math.round(rainWet * 10)}`
       since += dt
-      if (now !== said || asked || (since > 0.25 && now !== '0,0,0')) { tell(riding, axes.go, axes.turn, axes.rise, asked); said = now; since = 0 }
+      if (now !== said || asked || (since > 0.25 && (axes.go !== 0 || axes.turn !== 0 || axes.rise !== 0 || boostAsk))) {
+        tell(riding, axes.go, axes.turn, axes.rise, asked, isDrive ? boostAsk : undefined, isDrive ? rainWet : undefined)
+        said = now
+        since = 0
+      }
       // The head still turns, round the thing.
       const [right, up] = o.input.turn()
-      const isDrive = scheme.name === 'drive'
       const at = where(riding)
       // Driving telemetry, 6-speed gearbox, procedural engine/tire/road audio, and tire smoke / skidmarks / light pools.
-      let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, frontY = 0
+      let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, onWheels = riding.motor.feet.length, rough = 0
+      let boostFuel = 1, boosting = false, launching = false, burnoutCharge = 0
       if (isDrive && at && dt > 0) {
         const wantHorn = o.input.held('KeyH') || held.horn
         if (wantHorn !== hornOn) { hornOn = wantHorn; o.audio?.horn(hornOn) }
@@ -663,31 +845,55 @@ export function living(o: {
         horizSpeed = Math.hypot(velSm[0], velSm[2])
         longAcc = Math.max(-220, Math.min(220, (fwdSpeed - prevFwd) / Math.max(dt, 0.008)))
         prevFwd = fwdSpeed
-        const front3d = turned(at.rot, FRONTS[riding.motor.front])
-        frontY = front3d[1]
-        const onWheels = riding.state ? riding.state.feet : riding.motor.feet.length
+        onWheels = riding.state ? riding.state.feet : riding.motor.feet.length
         const grounded = onWheels >= 2
+        boostFuel = riding.state ? riding.state.boost : 1
+        boosting = riding.state ? riding.state.boosting : false
+        launching = riding.state ? riding.state.launching : false
+        burnoutCharge = riding.state ? riding.state.burnout : 0
         // Suspension landing thump & camera punch after cresting an SF hill.
         if (prevOn === 0 && onWheels >= 2 && velSm[1] < -20) {
           const drop = Math.min(1, (-velSm[1] - 18) / 70)
           o.audio?.event('thump', 0.4 + drop * 0.6)
-          shakeAmp = Math.max(shakeAmp, 0.01 + drop * 0.024)
+          o.input.pulse?.('land', 0.4 + drop * 0.6)
+          cam.shake(0.01 + drop * 0.024)
+          if (inside) cabin.jolt('land', 0.35 + drop * 0.65)
         }
         prevOn = onWheels
         const handbraking = axes.rise > 0.1
         const braking = (axes.go < -0.1 && fwdSpeed > 8) || (axes.go > 0.1 && fwdSpeed < -8)
         const slipAngle = horizSpeed > 18 ? Math.abs(Math.atan2(latSpeed, Math.abs(fwdSpeed) + 8)) : 0
         drifting = grounded && horizSpeed > 26 && (slipAngle > 0.17 || (handbraking && Math.abs(axes.turn) > 0.15 && horizSpeed > 28))
-        const burnout = grounded && handbraking && axes.go > 0.5 && horizSpeed < 38 ? 0.75 : 0
+        const burnout = grounded && ((handbraking && axes.go > 0.5 && horizSpeed < 38) || burnoutCharge > 0.05) ? Math.min(1, 0.75 + burnoutCharge * 0.25) : 0
+        const launchSlip = grounded && launching ? 0.58 : 0
         const lockup = grounded && braking && Math.abs(fwdSpeed) > 35 && Math.abs(axes.go) > 0.6 ? 0.45 : 0
-        slipAmt = grounded ? Math.max(0, Math.min(1, Math.max(burnout, lockup, (slipAngle - 0.12) * 1.9 + (handbraking && horizSpeed > 24 ? 0.42 : 0)))) : 0
-        // 6-speed gearbox + rev limiter + upshift/overrun exhaust crackles.
+        slipAmt = grounded ? Math.max(0, Math.min(1, Math.max(burnout, launchSlip, lockup, (slipAngle - 0.12) * 1.9 + (handbraking && horizSpeed > 24 ? 0.42 : 0)))) : 0
+        // 6-speed gearbox + rev limiter + upshift/overrun/nitrous exhaust bursts.
         const top = Math.max(120, riding.motor.top)
         const RATIOS = [0, 0.21, 0.36, 0.52, 0.69, 0.85, 1.06]
         shiftCool = Math.max(0, shiftCool - dt)
         popCool = Math.max(0, popCool - dt)
         const exhaustDir = [-at.front[0], 0.12, -at.front[2]] as const
         const rearTip = placeOf(riding, [riding.motor.front === 0 ? 1 : riding.motor.front === 1 ? riding.size[0] - 1 : riding.size[0] * 0.5, 2.5, riding.motor.front === 2 ? 1 : riding.motor.front === 3 ? riding.size[2] - 1 : riding.size[2] * 0.5])
+        if (boosting && !wasBoosting) {
+          o.audio?.event('pop', 0.85)
+          if (rearTip) o.fx?.exhaust(rearTip, exhaustDir, false, true)
+        }
+        if (launching && !wasLaunching) {
+          o.audio?.event('pop', 0.72)
+          if (rearTip) o.fx?.exhaust(rearTip, exhaustDir, true)
+        }
+        if (boosting) {
+          boostAcc += dt * 28
+          if (boostAcc >= 1) {
+            boostAcc -= Math.floor(boostAcc)
+            if (rearTip) o.fx?.exhaust(rearTip, exhaustDir, false, true)
+          }
+        } else {
+          boostAcc = 0
+        }
+        wasBoosting = boosting
+        wasLaunching = launching
         if (fwdSpeed < -6 && axes.go < -0.1) {
           gear = -1
           const want = 0.22 + Math.min(0.68, Math.abs(fwdSpeed) / (top * 0.35))
@@ -696,16 +902,19 @@ export function living(o: {
           gear = 0
           rpm += (0.15 - rpm) * Math.min(1, dt * 6)
         } else {
-          if (gear <= 0) gear = 1
+          if (gear <= 0 || (burnout > 0 && fwdSpeed < 22)) gear = 1
           const hi = top * RATIOS[gear], lo = gear === 1 ? 0 : top * RATIOS[gear - 1] * 0.62
           let want = 0.2 + 0.78 * Math.max(0, Math.min(1.05, (Math.max(0, fwdSpeed) - lo) / Math.max(18, hi - lo)))
           if (burnout > 0 || !grounded) want = Math.max(want, 0.22 + Math.max(0, axes.go) * 0.74)
+          if (boosting) want = Math.max(want, 0.78 + Math.min(0.2, fwdSpeed / top * 0.2))
           if (drifting && axes.go > 0.2) want = Math.max(want, 0.68 + slipAmt * 0.24)
-          if (gear < 6 && want > 0.91 && shiftCool <= 0 && axes.go > 0.2 && grounded) {
+          if (gear < 6 && want > 0.91 && shiftCool <= 0 && axes.go > 0.2 && grounded && burnout === 0) {
             gear++
             shiftCool = 0.32
             rpm = Math.max(0.46, rpm - 0.34)
             o.audio?.event('shift', 0.68 + Math.min(0.3, Math.abs(axes.go) * 0.25))
+            o.input.pulse?.('shift', 0.5 + Math.min(0.4, Math.abs(axes.go) * 0.4))
+            if (inside) cabin.jolt('shift', 0.45 + Math.min(0.45, Math.abs(axes.go) * 0.45))
             if (gear >= 2 && top >= 260 && popCool <= 0) {
               popCool = 0.55
               o.audio?.event('pop', 0.65)
@@ -728,17 +937,30 @@ export function living(o: {
         wasThrottle = axes.go
         const kmh = Math.abs(fwdSpeed) * 0.36
         const mat = o.fx ? o.fx.surface(Math.round(at.at[0]), Math.round(at.at[2])) : 6
-        // Materials 1..3 are grass, earth, sand (off-road); 6..12 are asphalt, concrete, brick, stone, wood, steel (paved).
-        const offroad = mat >= 1 && mat <= 3
+        // Materials 1..4 are earth, rock, grass, sand (earth/grass/sand off-road); 6..12 are asphalt, concrete, brick, etc. (paved).
+        const offroad = mat === 1 || mat === 3 || mat === 4 || mat === 13
         const paved = !offroad
-        const wet = o.fx ? o.fx.rain() > 0.2 : false
-        const rough = grounded ? (paved ? (wet ? 0.32 : 0.05) : 0.9) : 0
+        const wet = rainWet > 0.2
+        rough = grounded ? (paved ? (wet ? 0.32 : 0.05) : 0.9) : 0
         const tone = Math.max(0, Math.min(1, (top - 180) / 360))
-        const load = Math.max(0, Math.min(1, (axes.go > 0.05 ? 0.45 + 0.55 * axes.go : 0.1) + (drifting ? 0.25 : 0)))
-        o.audio?.drive({ rpm, load, tone, slip: slipAmt, roll: grounded ? Math.min(1, horizSpeed / 260) : 0, rough })
-        updateDriveHud(kmh, gear, rpm, drifting)
-        telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: camMode === 0 ? 'close' : 'far', fovAdd: camFov }
-        // Tire smoke, skidmarks, and road light pools (brake glow + night headlights).
+        const load = Math.max(0, Math.min(1, (axes.go > 0.05 ? 0.45 + 0.55 * axes.go : 0.1) + (drifting || boosting ? 0.25 : 0)))
+        const turbo = boosting ? 1 : Math.min(0.65, burnoutCharge * 0.5 + (launching ? 0.55 : 0))
+        o.audio?.drive({ rpm, load, tone, slip: slipAmt, roll: grounded ? Math.min(1, horizSpeed / 260) : 0, rough, boost: turbo })
+        o.input.rumble?.({ rpm, slip: slipAmt, rough, speed: horizSpeed, grounded, drifting, boost: boosting ? 1 : (gp?.boost ?? 0) })
+        const motion = reducedMotion.matches ? 0 : 1
+        boostFovPunch += (motion * (boosting ? 5.5 : launching ? 2.2 : 0) - boostFovPunch) * Math.min(1, dt * 6.5)
+        boostEnergyPunch += (motion * (boosting ? 0.35 : 0) - boostEnergyPunch) * Math.min(1, dt * 5.5)
+        updateDriveHud(kmh, gear, rpm, drifting, boostFuel, boosting, burnoutCharge)
+        telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: cam.mode, fovAdd: cam.fovAdd + boostFovPunch, boost: boostFuel, boosting, burnout: burnoutCharge, surface: offroad ? 'offroad' : wet ? 'wet' : 'paved' }
+        wheelDriveNow = { id: riding.id, steer: axes.turn, throttle: axes.go, brake: braking ? Math.min(1, Math.abs(axes.go)) : 0, handbrake: handbraking, fwdSpeed, latSpeed, slip: slipAmt, drifting, burnout, decel: Math.max(0, -longAcc) }
+        // Sync dynamic vehicle lamp emissives (brake, reverse, headlights) on the vehicle body & fine look pieces.
+        const dark = o.fx ? Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15)) : 0
+        const headLevel = headlightLevel(dark)
+        const lampBrake = braking || handbraking || (axes.go < -0.1 && fwdSpeed >= -2 && gear !== -1) ? (handbraking ? 1.25 : 1) : 0
+        const lampRev = gear === -1 ? 1 : 0
+        lampState[0] = lampBrake; lampState[1] = lampRev; lampState[2] = headLevel; lampState[3] = riding.motor.front + 1
+        setLamps(riding, lampState)
+        // Tire smoke, skidmarks, and road light pools (brake glow, nitrous splash, reverse pool, and headlights).
         if (o.fx) {
           const rearFeet = riding.motor.feet.filter((f) => f.drives || !f.steers)
           const wheels = rearFeet.length ? rearFeet : riding.motor.feet
@@ -756,124 +978,87 @@ export function living(o: {
             const puffLevel = Math.max(slipAmt, wet && horizSpeed > 55 ? Math.min(0.55, (horizSpeed - 50) / 140) : 0, !paved && horizSpeed > 30 ? Math.min(0.65, horizSpeed / 120) : 0)
             if (emitSmoke && puffLevel > 0.14) o.fx.smoke(p, [-velSm[0] * 0.15, 6 + puffLevel * 12, -velSm[2] * 0.15], puffLevel, smokeCol)
           }
-          // Red brake-light asphalt splash when braking or pulling the handbrake; twin warm headlight cones at dusk/night.
+          // Red brake-light / cyan nitrous asphalt splash, white reverse pool in R, and headlight cones when on.
           const dir2: readonly [number, number] = [at.front[0], at.front[2]]
-          const dark = Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15))
           const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
           const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
-          if (braking || handbraking) {
+          if (boosting) {
+            const nosPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 11), at.at[1], at.at[2] - at.front[2] * (halfLen + 11)]
+            o.fx.light(nosPos, dir2, [18, halfWide + 12], [0.18, 0.72, 1.0], 0.42 + dark * 0.38 + (wet ? 0.18 : 0))
+          } else if (lampBrake > 0) {
             const backPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 9), at.at[1], at.at[2] - at.front[2] * (halfLen + 9)]
             o.fx.light(backPos, dir2, [14, halfWide + 10], [1.0, 0.08, 0.03], (0.28 + dark * 0.45 + (wet ? 0.2 : 0)) * (handbraking ? 1.15 : 1))
-          } else if (dark > 0.12) {
+          } else if (headLevel > 0) {
             const tailPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 6), at.at[1], at.at[2] - at.front[2] * (halfLen + 6)]
-            o.fx.light(tailPos, dir2, [8, halfWide + 5], [0.95, 0.06, 0.02], dark * 0.25)
+            o.fx.light(tailPos, dir2, [8, halfWide + 5], [0.95, 0.06, 0.02], (0.06 + dark * 0.22) * Math.min(1, headLevel))
           }
-          if (dark > 0.12) {
-            const beamPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + 68), at.at[1], at.at[2] + at.front[2] * (halfLen + 68)]
-            o.fx.light(beamPos, dir2, [74, halfWide + 26], [1.0, 0.93, 0.78], dark * (0.34 + (wet ? 0.12 : 0)))
+          if (lampRev > 0) {
+            const revPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 11), at.at[1], at.at[2] - at.front[2] * (halfLen + 11)]
+            o.fx.light(revPos, dir2, [13, halfWide + 7], [0.92, 0.96, 1.0], 0.12 + dark * 0.34 + (wet ? 0.12 : 0))
+          }
+          if (headLevel > 0) {
+            const hi = headLevel > 1.2
+            const reach = hi ? 96 : 68
+            const beamPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + reach), at.at[1], at.at[2] + at.front[2] * (halfLen + reach)]
+            o.fx.light(beamPos, dir2, [hi ? 104 : 74, halfWide + (hi ? 34 : 26)], hi ? [1.0, 0.97, 0.90] : [1.0, 0.93, 0.78], (0.12 + dark * 0.88) * (hi ? 0.52 : 0.34) + (wet ? 0.12 * dark : 0))
           }
         }
-      } else if (telemetryNow) {
+      } else if (telemetryNow || wheelDriveNow) {
         telemetryNow = null
+        wheelDriveNow = null
         o.audio?.drive(null)
+        o.input.rumble?.(null)
       }
 
-      const sitting = inside && at ? placeOf(riding, eyeOf(riding)) : null
-      if (inside && at && sitting) {
-        // In the seat: the eye is the driver's, and the whole frame turns and leans with the thing (main.ts `view`), so
-        // yaw and pitch are the head's own, from straight ahead.
-        head[0] += right
-        head[1] = Math.max(-1.4, Math.min(1.2, head[1] + up))
-        o.pose.x = sitting[0] / M; o.pose.y = sitting[1] / M; o.pose.z = sitting[2] / M
-        o.pose.tilt = [...at.rot]
-        o.pose.yaw = AHEADS[riding.motor.front] + head[0]
-        o.pose.pitch = head[1]
-        facing = Math.atan2(at.front[0], -at.front[2])
-        was = null
-        if (isDrive) {
-          const motion = reducedMotion.matches ? 0 : 1
-          const top = Math.max(120, riding.motor.top), speedFrac = Math.min(1.2, Math.abs(fwdSpeed) / Math.max(160, top))
-          const targetFov = motion * Math.min(10, speedFrac * speedFrac * 8 + speedFrac * 2)
-          camFov += (targetFov - camFov) * Math.min(1, dt * 6)
-          camEnergy += (motion * Math.max(0, Math.min(0.7, (Math.abs(fwdSpeed) * 0.36 - 65) / 130)) - camEnergy) * Math.min(1, dt * 5)
-          o.lens?.(camFov, 0, camEnergy)
+      if (inside && at) {
+        // In the seat: spring-damped head G-force inertia, windshield rain/wipers, and interior night dash glow (cockpit.ts).
+        const g = cabin.frame({
+          dt, longAcc, latSpeed, fwdSpeed, vertVel: velSm[1], steer: axes.turn, rough,
+          rain: o.fx ? o.fx.rain() : 0, day: o.fx ? o.fx.day() : 1, rpm, drifting,
+          reducedMotion: reducedMotion.matches, isDrive, topSpeed: Math.max(120, riding.motor.top),
+        })
+        const baseEye = eyeOf(riding), f = FRONTS[riding.motor.front], r = [-f[2], 0, f[0]]
+        const sitting = placeOf(riding, [baseEye[0] + f[0] * g.fwd + r[0] * g.lat, baseEye[1] + g.up, baseEye[2] + f[2] * g.fwd + r[2] * g.lat])
+        if (sitting) {
+          head[0] += right
+          head[1] = Math.max(-1.4, Math.min(1.2, head[1] + up))
+          o.pose.x = sitting[0] / M; o.pose.y = sitting[1] / M; o.pose.z = sitting[2] / M
+          o.pose.tilt = [...at.rot]
+          o.pose.yaw = AHEADS[riding.motor.front] + head[0] + g.yaw + (gp?.lookBack || o.input.held('KeyX') ? Math.PI : 0)
+          o.pose.pitch = Math.max(-1.45, Math.min(1.25, head[1] + g.pitch))
+          facing = Math.atan2(at.front[0], -at.front[2])
+          was = null
+          seatRoll = g.roll
+          if (isDrive) {
+            cam.frameSeat(dt, fwdSpeed, Math.max(120, riding.motor.top), reducedMotion.matches)
+            if (telemetryNow) telemetryNow.fovAdd = cam.fovAdd + boostFovPunch
+          } else {
+            o.lens?.(0, g.roll, 0)
+          }
+          return true
         }
-        return true
       }
       if (at && isDrive) {
-        // GTA 6-style low, velocity-blended, spring-damped chase camera with dynamic speed FOV, corner roll, and impact shake.
-        const carYaw = Math.atan2(at.front[0], -at.front[2])
-        facing = carYaw
-        if (Math.abs(right) > 0.0005 || Math.abs(up) > 0.0005) {
-          orbitYaw = wrap(orbitYaw + right)
-          orbitPitch = Math.max(-0.55, Math.min(0.65, orbitPitch + up))
-          lookIdle = 0
-        } else {
-          lookIdle += dt
-          if (lookIdle > 1.5 && horizSpeed > 14) {
-            const recenter = Math.exp(-dt * 3.4)
-            orbitYaw *= recenter
-            orbitPitch *= recenter
+        facing = Math.atan2(at.front[0], -at.front[2])
+        const parts = riding.fine ?? riding.kept
+        let x0 = 0, y0 = 0, z0 = 0, x1 = riding.size[0], y1 = riding.size[1], z1 = riding.size[2]
+        if (parts?.length) {
+          for (const p of parts) {
+            x0 = Math.min(x0, p.low[0]); y0 = Math.min(y0, p.low[1]); z0 = Math.min(z0, p.low[2])
+            x1 = Math.max(x1, p.low[0] + p.size[0] / p.per)
+            y1 = Math.max(y1, p.low[1] + p.size[1] / p.per)
+            z1 = Math.max(z1, p.low[2] + p.size[2] / p.per)
           }
         }
-        const top = Math.max(120, riding.motor.top)
-        const speedFrac = Math.min(1.25, Math.abs(fwdSpeed) / Math.max(160, top))
-        let targetYaw = carYaw
-        if (fwdSpeed > 22 && horizSpeed > 24) {
-          const velYaw = Math.atan2(velSm[0], -velSm[2])
-          const driftDiff = wrap(velYaw - carYaw)
-          // Blend toward the travel vector during drifts so the camera swings out to showcase the 3/4 side profile & tire smoke.
-          targetYaw = wrap(carYaw + driftDiff * (drifting ? 0.58 : 0.42))
-        }
-        const yawStiff = drifting ? 2.8 : 4.6 + speedFrac * 3.8
-        chaseYaw = wrap(chaseYaw + wrap(targetYaw - chaseYaw) * Math.min(1, dt * yawStiff))
-        const motion = reducedMotion.matches ? 0 : 1
-        // Dynamic FOV widening with speed + subtle acceleration surge / brake compression.
-        const targetFov = motion * (Math.min(14, speedFrac * speedFrac * 12 + speedFrac * 2.5) + Math.max(-2.4, Math.min(2.2, longAcc * 0.015)))
-        camFov += (targetFov - camFov) * Math.min(1, dt * 6.5)
-        // Subtle cornering camera roll into lateral g-forces.
-        const targetRoll = motion * Math.max(-0.028, Math.min(0.028, -latSpeed * 0.00055 - axes.turn * speedFrac * 0.012))
-        camRoll += (targetRoll - camRoll) * Math.min(1, dt * 7)
-        // Elastic pull-back on hard launch, push-in on hard braking.
-        const targetPull = motion * Math.max(-0.38, Math.min(0.58, longAcc * 0.0038 + (drifting ? 0.22 : 0)))
-        camPull += (targetPull - camPull) * Math.min(1, dt * 5)
-        // Hill pitch tracking so San Francisco climbs and crests frame cleanly ahead.
-        const targetHill = Math.max(-0.15, Math.min(0.15, frontY * 0.55))
-        camHill += (targetHill - camHill) * Math.min(1, dt * 4.5)
-        // High-speed radial lens energy for glow.ts post-process.
-        const targetEnergy = motion * Math.max(0, Math.min(1, (Math.abs(fwdSpeed) * 0.36 - 55) / 115))
-        camEnergy += (targetEnergy - camEnergy) * Math.min(1, dt * 5)
-        // Impact / landing camera shake.
-        let shakeYaw = 0, shakePitch = 0, shakeRoll = 0
-        if (shakeAmp > 0.0005 && motion > 0) {
-          shakeT += dt * 46
-          shakeYaw = Math.sin(shakeT * 1.13) * shakeAmp * 0.65
-          shakePitch = Math.cos(shakeT * 1.47) * shakeAmp * 0.75
-          shakeRoll = Math.sin(shakeT * 1.83) * shakeAmp * 0.55
-          shakeAmp *= Math.exp(-dt * 8.5)
-        } else {
-          shakeAmp = 0
-        }
-        const basePitch = camMode === 0 ? -0.135 : -0.19
-        o.pose.yaw = wrap(chaseYaw + orbitYaw + shakeYaw)
-        o.pose.pitch = Math.max(-1.2, Math.min(0.85, basePitch + camHill + orbitPitch + shakePitch))
-        o.lens?.(camFov, camRoll + shakeRoll, camEnergy)
-        const cp = Math.cos(o.pose.pitch), look = [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]
-        const len = Math.max(...riding.size)
-        const tall = innerHeight > innerWidth
-        const closeBack = ((len * 1.15 + 17) / M) * (tall ? 1.48 : 1)
-        const farBack = ((len * 1.58 + 26) / M) * (tall ? 1.35 : 1)
-        const back = (camMode === 0 ? closeBack : farBack) + camPull
-        const high = (camMode === 0 ? (riding.size[1] * 0.88 + 6.4) / M : (riding.size[1] * 1.05 + 8.5) / M) * (tall ? 1.15 : 1)
-        const headPos = [at.at[0], at.at[1] + riding.size[1] / 2 + 5, at.at[2]]
-        const wantY = Math.max(at.at[1] + (high - look[1] * back) * M, o.ground(at.at[0] / M - look[0] * back, at.at[2] / M - look[2] * back) * M + 4)
-        const off = [-look[0] * back * M, wantY - headPos[1], -look[2] * back * M], free = clearWay(stands, headPos, off)
-        const going = was && dt > 0 ? [(headPos[0] - was[0]) / dt * AHEAD, (headPos[2] - was[2]) / dt * AHEAD] : [0, 0], far = Math.hypot(going[0], going[1])
-        was = [headPos[0], headPos[1], headPos[2]]
-        room = roomAfter(room, free, far > 0.5 && far < 60 ? clearWay(stands, [headPos[0] + going[0], headPos[1], headPos[2] + going[1]], off) : 1, dt)
-        o.pose.x = (headPos[0] + off[0] * room) / M
-        o.pose.y = (headPos[1] + off[1] * room) / M
-        o.pose.z = (headPos[2] + off[2] * room) / M
+        cam.frame({
+          dt, at: at.at, rot: at.rot, front: at.front,
+          size: riding.size, visualBox: [x0, y0, z0, x1, y1, z1],
+          frontAxis: riding.motor.front, topSpeed: Math.max(120, riding.motor.top),
+          place: (local) => placeOf(riding!, local),
+          vel: velSm, fwdSpeed, latSpeed, horizSpeed, longAcc: longAcc + (boosting ? 75 : launching ? 45 : 0), steer: axes.turn, drifting,
+          feet: onWheels, turn: [right, up], lookBack: o.input.held('KeyX') || !!gp?.lookBack, reducedMotion: reducedMotion.matches,
+        })
+        if (telemetryNow) telemetryNow.fovAdd = cam.fovAdd + boostFovPunch
         return true
       }
       o.pose.yaw += right
@@ -943,55 +1128,14 @@ export function car(low: [number, number, number]): Making {
 }
 
 /**
- * The hand-written car with a look in cells of 2.5 cm (#245), written as a few lines of shapes: a body with rounded
- * ends and wheel arches, a cabin of glass on pillars under a roof, four wheels with hubs, lamps; and inside, a floor,
- * two seats in front and a bench behind, a dash and a steering wheel, so that the eye in the driver's seat sees
- * something. The body that moves is `car`'s; the look is 1.3 m high where the body is 1 m. About a megabyte of cells.
+ * The hand-written car with a look in cells of 2.5 cm (#245): `car`'s body wearing the sculpted coupe (car-sculpt.ts,
+ * #39) at its size, 4.2 m by 1.3 m by 1.8 m, its wheels on `car`'s feet. Its paint is polished (spells.ts `POLISHED`),
+ * so it is drawn as car paint (pieces.ts); inside, bucket seats, a dash and a wheel low enough that the eye in the
+ * driver's seat (V) sees over it. About 150,000 filled cells of 630,000.
  */
 export function fineCar(low: [number, number, number]): Making {
-  const body = car(low), P = 4, w = 168, h = 52, d = 72, cells = new Uint16Array(w * h * d)
-  const set = (x: number, y: number, z: number, k: number) => { if (x >= 0 && y >= 0 && z >= 0 && x < w && y < h && z < d) cells[(y * d + z) * w + x] = k }
-  const paint = kind(STEEL, hue(0, 4)), trim = kind(STEEL, 13), tyre = kind(STEEL, 14), hub = kind(STEEL, 6), glass = kind(GLASS), lamp = kind(LAMP), red = kind(LAMP, hue(0, 5)), seat = kind(10, hue(2, 9)), floor = kind(STEEL, 12)
-  const wheels = [[28, 12], [140, 12]]
-  // Where the glass of the cabin begins and ends along x at a height: the windscreen leans back, the rear window less.
-  const front = (y: number) => 118 - (y - 25) * 0.9, rear = (y: number) => 40 + (y - 25) * 0.6
-  for (let y = 6; y < h; y++) for (let z = 4; z < d - 4; z++) for (let x = 0; x < w; x++) {
-    const side = Math.min(z - 4, d - 5 - z), end = Math.min(x, w - 1 - x)
-    if (y < 25) {
-      // The lower body, its corners rounded, cut for the wheels; hollow where the cabin is, over a floor.
-      if (end < 6 && side < 6 && (6 - end) ** 2 + (6 - side) ** 2 > 36) continue
-      if (y > 20 && end < 3 && y - 20 > end + 1) continue
-      if (wheels.some(([cx, cy]) => (x - cx) ** 2 + (y - cy) ** 2 < 15 * 15) && side < 10) continue
-      const cabin = x > rear(25) - 2 && x < front(25) + 2 && side >= 2 && y > 8
-      if (cabin) continue
-      set(x, y, z, y < 8 && x > 36 && x < 124 && side >= 2 ? floor : paint)
-      continue
-    }
-    // The cabin: glass between pillars, a roof over it.
-    const x0 = rear(y), x1 = front(y), inset = (y - 25) * 0.15
-    if (x < x0 || x > x1 || side < inset) continue
-    const shell = x < x0 + 2 || x > x1 - 2 || side < inset + 2 || y >= 49
-    if (!shell) continue
-    // The roof and the sill are steel; the windscreen and the rear window are glass between pillars at the corners, and the sides glass but for those and one between the doors.
-    const ends = x < x0 + 2 || x > x1 - 2, pillar = y >= 49 || y < 27 || (ends ? side < inset + 4 : x < x0 + 4 || x > x1 - 4 || Math.abs(x - 80) < 2)
-    set(x, y, z, pillar ? paint : glass)
-  }
-  // Wheels: tyres with hubs, a little proud of the body.
-  for (const [cx, cy] of wheels) for (const [z0, z1] of [[0, 9], [d - 9, d]]) for (let z = z0; z < z1; z++) for (let y = 0; y < 25; y++) for (let x = cx - 13; x <= cx + 13; x++) {
-    const r = Math.hypot(x - cx, y - cy)
-    if (r < 12) set(x, y, z, r < 6 && (z === z0 || z === z1 - 1) ? hub : tyre)
-  }
-  // Lamps in front, red ones behind.
-  for (const z of [10, 11, 12, 13, 14, 15, 56, 57, 58, 59, 60, 61]) for (let y = 15; y < 20; y++) { set(w - 1, y, z, lamp); set(0, y, z, red) }
-  // Inside: two seats and a bench (a cushion and a back each), a dash, and the driver's wheel on its column.
-  for (const [x0, z0, z1] of [[70, 12, 32], [70, 40, 60], [44, 10, 62]]) for (let z = z0; z < z1; z++) {
-    for (let x = x0; x < x0 + 16; x++) for (let y = 9; y < 15; y++) set(x, y, z, seat)
-    for (let y = 15; y < 38; y++) for (let x = x0 - 4 + Math.floor((y - 15) / 6); x < x0 + Math.floor((y - 15) / 6); x++) set(x, y, z, seat)
-  }
-  for (let z = 6; z < d - 6; z++) for (let y = 22; y < 31; y++) for (let x = 104 + (y - 22); x < 120; x++) set(x, y, z, trim)
-  for (let a = 0; a < 64; a++) { const t = (a / 64) * Math.PI * 2; for (const r of [6, 7]) set(98, Math.round(32 + Math.sin(t) * r), Math.round(22 + Math.cos(t) * r), trim) }
-  for (let x = 98; x < 108; x++) set(x, 32 - Math.round((x - 98) * 0.4), 22, trim)
+  const body = car(low), { cells, size } = sculptCoupe({ L: 4.2, H: 1.3, W: 1.8, per: 4, wheels: [0.7, 3.5], wheelY: 0.3, wheelR: 0.3, tyreW: 0.22, eye: [1.9, 1.0, 0.55], paint: kind(STEEL, hue(0, 4)) | POLISHED })
   // The driver's eye over the left front seat, in the body's cells: 1 m over the ground, a little behind the wheel. A seat is where a
   // sitting rider's feet are drawn, their eye 1.2 m over them (`SITTING_EYE`): low, so that their head is under the roof.
-  return { ...body, name: 'car', fine: [{ size: [w, h, d], per: P, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
+  return { ...body, name: 'car', fine: [{ size, per: 4, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
 }

@@ -81,5 +81,3 @@ Peer dependency `zod` 4.6.7. The source is the installed `sdk.d.ts` and
 - `sessionStore`, `sandbox` and `canUseTool` were not used or verified.
 - The release is from November 6, 2026. Refresh this file when the pinned
   version changes or a probe contradicts it.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"host/package.json":"80477c94e5727fdb0f244bdeaab84fd2"} -->

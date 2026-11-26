@@ -1,15 +1,19 @@
-# The engine
+---
+title: The engine
+description: The engine at a glance. Its parts, how a frame is made and where a shared world runs.
+---
 
-The engine in `engine/` stores a world as cells and draws it in the browser. Its core is Rust compiled to WebAssembly. The page that draws is TypeScript on raw WebGPU, with no framework. A world can also run in a server process that many pages share. People and models change a running world through rules and plugins.
+The engine in `engine/` stores a world as cells and draws it in the browser. Its core is Rust compiled to WebAssembly. The page that draws is TypeScript on raw WebGPU, with no framework. A world can also run in a world server (`serve.mjs --world`) that many pages share. People and models change a running world through rules and plugins. What a player does in it (controls, driving, the map, the sky) is on [gameplay](/gameplay).
 
 ## Concepts
 
-- **Cell.** The world's unit of space: 10 cm a side in the finest copy of the world. A cell holds one **kind**, a 16-bit number. Kind 0 is air. See [the core](engine-core.md).
-- **Sector.** A cube of 64 × 64 × 64 cells, stored as a tree of 32-bit words. Sectors are what the core makes, what the page keeps on the GPU and what the ray marcher reads. See [worlds as cells](cells.md).
+- **Cell.** The world's unit of space: 10 cm a side in the finest copy of the world. A cell holds one **kind**, a 16-bit number. Kind 0 is air. See [the core](/engine-core).
+- **Sector.** A cube of 64 × 64 × 64 cells, stored as a tree of 32-bit words. Sectors are what the core makes, what the page keeps on the GPU and what the ray marcher reads. See [worlds as cells](/cells).
 - **Level.** A copy of the world whose cells are 2^level times larger. Level 0 holds the finest cells. The page keeps one box of sectors per level around the eye.
 - **Edit.** Something done to the world, written as whole numbers: a ball of one kind, a blast, or rows of cells. Every core applies the same edits in the same order and gets the same cells.
-- **Pass.** A drawing step in the frame. A plugin can add its own; see [page plugin types](plugin-types.md).
-- **Rule.** A script that a person or their model wrote, run in a sandbox beside a shared world. **Plugin.** Engine code from the checkout that gives rules something new to hear or do. See [plugins and rules](engine-plugins.md).
+- **Pass.** A drawing step in the frame. A plugin can add its own; see [page plugin types](/plugin-types).
+- **Rule.** A script that a person or their model wrote, run in a sandbox beside a shared world. **Plugin.** Engine code from the checkout that gives rules something new to hear or do. See [plugins and rules](/engine-plugins).
+- **Realm.** A world with its own record: its name, where people arrive, its sky and what a visitor may do. San Francisco is a static realm, a built folder whose record is `realm.json`, that the page runs alone. A server can also keep several realms, each with its own file and people. See [plugins, rules and realms](/engine-plugins).
 
 ## Parts
 
@@ -23,7 +27,7 @@ flowchart LR
     Mover["mover.ts<br/>moves loose bodies"]
     March["march.ts<br/>ray marcher in WGSL"]
   end
-  subgraph Server["Shared world (engine/serve.mjs)"]
+  subgraph Server["World server (engine/serve.mjs --world)"]
     Proc["world.mjs<br/>world process"]
     Rules["rules/<br/>one QuickJS thread per rule"]
     Plugins["plugins/&lt;name&gt;/world.mjs"]
@@ -55,14 +59,27 @@ The core in each place is the same `page/core.wasm`. The page instantiates it wi
 
 ## How a frame is made
 
-`frame` in `engine/page/main.ts` runs once per animation frame:
+`frame` in `engine/page/main.ts` runs once per animation frame. It skips the frame while the page is paused or the full-screen map covers the picture.
 
-1. Move the eye and step what the page simulates itself (people, the wand, street life).
+1. Move the eye and step what the page simulates itself: the car or body you control (or the free eye), stunts, the wand, sound and street life.
 2. `world.update` decides which sectors each box needs around the eye. It sends asks to the sector workers and uploads finished trees into the GPU pool.
-3. One command encoder records the drawing, in this order: `march.draw` (the world's cells), the far model of distant tiles, sea fog, water, shade under things, falling pieces, people, crumbs, smoke, then every plugin pass (`pluginDraws.draw`), then the wand's marker.
+3. One command encoder records the drawing, in this order: `march.draw` (the world's cells), a portal's window into another world, the far model of distant tiles, sea fog, water, shade under things, skidmarks and light on the road, vehicle wheels, falling pieces, people, crumbs, smoke, then every plugin pass (`pluginDraws.draw`), then the wand's marker.
 4. A final blit grades the picture onto the canvas, and `device.queue.submit` sends it.
 
-Above a fixed height the planet view replaces the march. To measure what one step costs, leave it out from the browser console with `engine.off.add('people')`. The names are `water`, `under`, `pieces`, `people`, `crumbs`, `puffs`, `flames` and `spoil`.
+Falling pieces include vehicles and other things built in finer cells. A curved panel in 2.5 cm cells is a staircase, and lit by each face's square normal it showed every step as bands, like a 3D print. Those things carry four extra words per face, one for each corner (`Born.smooth`, from `fine.ts` `facesWithSmooth`): a normal fitted to the shape round the corner, and how open the corner is to light. Faces that meet at a corner share it, and a face blends its corners across itself, so a curve has no steps in its light. Narrow seams such as door gaps are filled for the normals, so panels either side read as one surface, but still darken. The outside air is found by a flood fill, so a car's cabin counts as solid and its panels' normals point outward. Faces in the cabin keep their square normals, so the inside stays sharp from the driver's seat. `pieces.ts` lights a face by its smooth normals, darkens its hollows, and gives polished paint a clear coat and smooth glass true reflections of the sky, horizon and street. Bodies the core makes have no smooth words and draw as before. Turn smooth words off from the console with `engine.falling.smooth = false` to compare.
+
+Above a fixed height the planet view replaces the march. To measure what one drawing step costs, turn it off from the browser console, for example `engine.off.add('people')`. The names are `water`, `under` (shade under things, skidmarks and light on the road), `wheels` (driven cars' wheels, which also stops stepping them), `pieces`, `people`, `crumbs`, `puffs`, `flames` and `spoil`.
+
+## Glass
+
+The march looks through glass. A look that meets a pane goes on and shows what is behind it, tinted by the glass and by how much glass it crosses. A pane also keeps a little mirror, most of it at a glancing angle.
+
+- Only the first pane is looked through (`PANES` in `engine/page/march.ts`). The pane behind it, a pane too far off for its cells to be two pixels wide (`THROUGH`), and glass in the coarser boxes show what is likely there instead: a dim room, or from inside, the day. The look fades into that over a band, so a wall of windows has no seam.
+- At night a window with someone home (`litWindow`) shows a lit blind instead of the room.
+- The march writes how far off the first pane is and what it lets through (`march.panes`). The wand's ring, people and loose bodies read it, so they are tinted behind glass. Crumbs, smoke and water are drawn over it untinted.
+- Mirrors off (Shift+M, or `?mirrors=0`) is a pipeline of its own with no glass in it: a pane is a pale face again.
+
+`node test/glass.mjs` (in `engine/`) checks a lamp seen through glass from outside and inside, and hidden with mirrors off.
 
 ## A shared world
 
@@ -79,5 +96,3 @@ node test/all.mjs --changed   # only the checks that cover your branch's changes
 ```
 
 `node test/bench.mjs` (in `engine/`) measures frame cost. Run it before and after a change to the march or the frame.
-
-<!-- docs-verified 13b2f77f06751d55ddcb322bb0effe9444dde16b {"engine/page/main.ts":"1001dafb9cbfa737d710f93756c21cef","engine/page/bay.ts":"1d6f3b4eef9ce809f9e1dee89c7da251","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/serve.mjs":"2d5671d556d6b81fdfcfc2b9f7efa827","engine/package.json":"8893b007c397bfd634d8b0b6589fa6b1"} -->

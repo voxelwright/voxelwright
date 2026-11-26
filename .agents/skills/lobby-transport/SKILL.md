@@ -29,12 +29,12 @@ WebTransport client never connected anywhere in this probe), and that a browser'
 hole-punch is reasoning, not a run. Chromium also gates WebTransport to LAN and loopback
 addresses behind a permission.
 
-- **Master**: keeps one socket open to each host (server-sent events or a WebSocket);
+- **Master**: keeps one socket open to each host (built as a WebSocket at `GET /host`);
   takes one request from a client carrying its whole offer, pushes it to the host, and
   replies with the host's whole answer. No trickle. It never sees game traffic.
 - **Host**: holds that socket, answers each offer with node-datachannel, and serves the
-  world over the data channels: `ctl` (reliable), `down` (reliable, the stream), `up`
-  (reliable, the POSTs) and optionally an unordered `upu`. Pace `down` by
+  world over three reliable data channels: `ctl`, `down` (the stream) and `up` (the
+  requests). The door closes any other channel. Pace `down` by
   `bufferedAmount` and the `bufferedamountlow` event.
 
 ## Measured (see `results/`)
@@ -138,5 +138,3 @@ NAT is inferred from parts); WebTransport throughput across a real network; weri
 packaged server binary; the wording of Chrome's local-network prompt (not captured);
 Firefox. Refresh when a pinned version changes, when Safari or Chrome change local network
 rules, or when a probe contradicts a line above.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"probes/lobby-transport/package.json":"ba2468a3402e625e3153a2002425ee3d"} -->

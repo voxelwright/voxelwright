@@ -2,7 +2,7 @@
    Two versions, [data-version="unbiased"] (flat ink, a speech bubble that came alive) and
    [data-version="skeuomorphic"] (an arcade button with googly eyes and label-maker tape),
    each for [data-theme="light"] and [data-theme="dark"].
-   Motion rules follow .claude/skills/site-craft: transform and opacity only, named
+   Motion rules follow .agents/skills/site-craft: transform and opacity only, named
    properties, the three site curves, transitions for anything that can be retriggered. */
 
 :host {

@@ -1,27 +1,72 @@
-# Deploy the realm and site
+# deploy
 
-The `voxelwright` Worker serves San Francisco at voxelwright.world and www.voxelwright.world. The `zahynailo` Worker serves the personal front page at zahynailo.dev and the blog under `/blog/` as static assets only (no Worker code runs). The main-branch workflow builds the realm and site once, then deploys and checks each Worker. It also runs by hand from Actions → deploy.
+Builds and ships the two Cloudflare Workers. `voxelwright` serves the San Francisco realm at voxelwright.world. `zahynailo` serves the owner's front page and blog at zahynailo.dev as static assets only. The main-branch workflow (`.github/workflows/deploy.yml`) builds both once and ships both. [The deploy guide](../guide/deploy.md) explains the request routing, the Brotli handling, `/weather`, the data bundle and the CI checks.
 
-## What is where
+**Every push to main that touches `engine/`, `site/` or `deploy/` deploys both sites publicly.**
 
-- **Static assets** hold two separate folders written by `assemble.mjs`. `deploy/dist` (for `zahynailo`) holds the site alone from `site/dist`: the personal front page at `/` (`index.html` and `index.md`), the blog under `/blog/`, `robots.txt`, `404.html` and the site's `_headers`, with no realm files and no alpha notice. `deploy/dist-world` (for `voxelwright`, about 6,823 files and 927 MB, largest 3.2 MB) holds the full-city 155-square SF realm: `engine/dist-sf/sf/*` at the root, beside its `page/`, `kit/`, `blocks/` and `bay/`, plus its own canonical and social metadata, `robots.txt`, `404.html` and `alpha.js`. Binary city payloads (`.bay`, `.far`, `.bin`) under `releases/` and `bay/` ship only as their quality-11 `.br` copies when present (every WebGPU browser sends `Accept-Encoding: br`; non-Brotli requests for a `.br`-only asset get `406 Not Acceptable` with `Vary: Accept-Encoding`), while JSON and text files keep both plain and `.br` copies. The personal blog board in the realm links to https://zahynailo.dev/blog/.
-- **The early-alpha notice:** `assemble.mjs` adds `alpha.js` (served at `/alpha.js`) only to `deploy/dist-world` (the realm), through `notice.mjs`. A dismissal is kept in `localStorage` for that origin. Neither the personal page nor the blog carries it.
-- **`worker.mjs` and `world-worker.mjs`** run only on the `voxelwright` Worker (`--mode world`), for `/releases/*` (the city's pinned release) and `/bay/*` (the road's marks and the landmarks). It sends the quality-11 Brotli copy that `sf/build.mjs` wrote beside each file, unchanged, so the bytes on the wire are the ones the realm's checks measure. Static assets alone can't do this. Setting `Content-Encoding: br` in `_headers` makes the edge compress the file a second time, and the edge doesn't compress `.bay`, `.far` or `.bin` files at all. The edge compresses the code itself, which comes to about 0.25 MB more than the local quality-11 copies. The `zahynailo` Worker has no entrypoint or `runWorkerFirst` rules, so it serves static assets directly and runs no Worker code.
-- **`/weather`** also runs on the `voxelwright` Worker (`worker.mjs`). It answers San Francisco's weather now for the realm's "SF now" sky: the latest report from the National Weather Service's SFO station that saw the sky, trimmed, kept ten minutes at the edge and five in the browser. If the service fails, it answers 502 and the sky keeps its own weather. To check it after a deploy, run `curl -s https://voxelwright.world/weather`.
-- **Domains:** `zahynailo.dev` and `www.zahynailo.dev` are custom domains in `cloudflare.config.ts`. A Single Redirect rule on the zone (`www.zahynailo.dev to the apex`) sends www to the apex with a 301 and keeps the path and query. Two more Single Redirect rules (`zahynailo-realm-rule-a.json` and `zahynailo-realm-rule-b.json`) send old realm share links on `/` to `https://voxelwright.world/`. All three are set through the Rulesets API, and deploys don't touch them.
-- **The city's data in CI:** the release, the street graphs and the kept car live in `~/.village`, not in git. `node deploy/data.mjs pack` bundles them as Brotli into one GitHub Release asset (`sf-data-<digest>`, about 750 MB for the full 155-square city) and writes `deploy/data.json`. Visitors download over HTTPS from the release URL or the mirror in `VOXELWRIGHT_DATA_URL`. The private workflow uses its existing Actions token with the GitHub Releases API. CI runs `node deploy/data.mjs fetch`, checks that the bundle is for the pin in `engine/sf/pilot/current.json` and that every file is the one packed, then builds. Cloudflare uploads only the assets whose hashes changed, so an unchanged release is never uploaded again.
+## Files
+
+| File | What it holds |
+| --- | --- |
+| `assemble.mjs` | Writes `dist/` (zahynailo.dev: `site/dist` as it is) and `dist-world/` (voxelwright.world: `engine/dist-sf` with the alpha notice). |
+| `notice.mjs`, `alpha.js` | The early-alpha notice that assembly adds to the realm's pages. |
+| `worker.mjs`, `world-worker.mjs`, `encoding.mjs` | The `voxelwright` Worker's code: `/weather`, and each release and bay file sent as its stored `.br` copy. |
+| `cloudflare.config.ts`, `wrangler.config.ts` | Both Workers. `--mode world` is `voxelwright`; the default is `zahynailo`. |
+| `data.mjs`, `data.json` | The realm's data bundle and the release that holds it. |
+| `ship.mjs` | One-command local deploy. |
+| `publish.sh` | CI's deploy, live check and rollback for each Worker. Actions only. |
+| `*-rule*.json` | Single Redirect rules on the two zones. |
+
+## Test
+
+```sh
+npm ci --prefix deploy
+npm --prefix deploy test
+```
+
+## Deploy by hand
+
+From a clean checkout with the pinned data present (see below), with the local `cf` CLI signed in (`cd deploy && npx cf accounts list` shows whether it is; `cf` and `wrangler` keep separate logins):
+
+```sh
+npm --prefix deploy run ship
+npm --prefix deploy run ship -- --dry-run      # print the steps only
+```
+
+It builds the core, the realm, the site and both folders, deploys `voxelwright` then `zahynailo` with `HEAD`'s SHA as the message, and checks what is live. Flags: `--world-only`, `--site-only`, `--public` (procedural eggs only), `--skip-build`, `--skip-live`, `--allow-dirty`, `--dry-run`. It does not install packages, run tests or fetch the data bundle.
+
+Or step by step:
+
+```sh
+npm ci --prefix site && npm ci --prefix deploy
+npm --prefix engine run core && node engine/sf/build.mjs
+npm --prefix site run build && node deploy/assemble.mjs
+(cd deploy && npx cf deploy --mode world)     # voxelwright.world from dist-world
+(cd deploy && npx cf deploy)                  # zahynailo.dev from dist
+```
+
+## When the pin or the city's data moves
+
+The release, the street graphs and the kept car live in `~/.village`, not in git. After `engine/sf/pilot/current.json` changes, or the graphs or the car change, on the machine that has `~/.village` and after a local `node engine/sf/build.mjs` (for the release's quality-11 copies):
+
+```sh
+node deploy/data.mjs pack     # uploads the bundle once; writes deploy/data.json
+git add deploy/data.json engine/sf/pilot/current.json
+```
+
+CI fails before it builds the realm, so nothing deploys, if the pin and `deploy/data.json` disagree. Don't delete old `sf-data-*` releases: rolling back to an older commit needs its bundle.
+
+When the first view changes too (a new pin, the arrival, the lens, the air or the boards), take the loader's pictures again and commit `engine/sf/loading.json`. The loader (`engine/page/loading.html`) shows that picture under fog until the realm is ready, so a stale one shows a different city first.
+
+```sh
+cd engine && node sf/loading.mjs
+```
 
 ## Private egg media
 
-For the owner’s build, run this from the repository root with dependencies installed and the pinned realm data present:
+The realm's and the landing's video eggs read clips from the folder in `VOXELWRIGHT_EGG_MEDIA`: `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A build without it ships procedural eggs only. `ship` uses `~/.village/engine/sf/eggs/media` when it exists. The public data bundle never holds the clips.
 
-```sh
-(export VOXELWRIGHT_EGG_MEDIA="$HOME/.village/engine/sf/eggs/media" && npm --prefix engine run core && node engine/sf/build.mjs && npm --prefix site run build && node deploy/assemble.mjs)
-```
-
-The directory holds `rick.mp4`, `bad-apple.mp4`, `matrix.m4a` and one `<id>.mp4` per entry in `engine/sf/memes.json`. A standalone site at `/` uses the two landing videos. The mounted blog has no landing of its own. Builds with the variable unset ship only the procedural eggs. The public data pack excludes the private media directory.
-
-When a clip changes, set `PRIVATE_OVERLAY_REPO` to the private repository that holds the clips. Rebuild the archive and upload it there:
+CI reads them from a private release. The repository variable `EGG_OVERLAY_TAG` names it (`eggs-overlay-<first 16 hex of the archive's SHA-256>`), `EGG_OVERLAY_REPO` picks the repository (default: this one), and the production secret `EGG_OVERLAY_TOKEN` reads another repository. Leave the tag unset for procedural eggs. When a clip changes, rebuild the archive and upload it:
 
 ```sh
 work=$(mktemp -d)
@@ -43,80 +88,34 @@ tag="eggs-overlay-$(printf '%.16s' "$digest")"
 gh release create "$tag" "$work/egg-media.tar" --repo "${PRIVATE_OVERLAY_REPO:?set the private overlay repository}" --title "Egg media overlay (private)" --notes "" --prerelease --latest=false
 ```
 
-The repository variable `EGG_OVERLAY_TAG` names that release. Set that variable on the repository running the workflow. Its `EGG_OVERLAY_REPO` variable selects the release repository (default: the workflow repository). For a separate private repository, supply a production environment secret `EGG_OVERLAY_TOKEN` with contents-read access there. The default token can read releases in the workflow repository. Leave the tag unset to build both realms with procedural eggs alone.
+Then set `EGG_OVERLAY_TAG` to the new tag.
 
-## When the pin or the city's other data moves
+## Redirects
 
-On the machine that has `~/.village`, after `engine/sf/pilot/current.json` changes, or after the street graphs or the kept car there changes:
+Four Single Redirect rules sit on the zones, and Cloudflare runs them before either Worker. Deploys never touch them. Changing them changes what the public internet sees, so it is the owner's call.
 
-```sh
-node deploy/data.mjs pack     # uploads the new bundle once; writes deploy/data.json
-git add deploy/data.json engine/sf/pilot/current.json
-```
+- `world-blog-rule.json`: `/blog` and below on voxelwright.world (either host) to zahynailo.dev.
+- `world-www-rule.json`: www.voxelwright.world to the apex.
+- `zahynailo-realm-rule-a.json`, `zahynailo-realm-rule-b.json`: `/` on zahynailo.dev with any of the realm's old query keys to `https://voxelwright.world/`, so old share links keep working. A query that is not the realm's (`?utm_source=`, `?view=2d`) stays on the front page. The list is split in two because the pinned `cf` CLI dies without a message when one `--body` carries all of it.
 
-When the first view changes too (a new pin, the arrival, the lens, the air or the boards), take the loader's pictures again: `cd engine && node sf/loading.mjs`, then commit `engine/sf/loading.json`. The loader (`engine/page/loading.html`) shows that view under fog that burns off as the realm loads and clears onto the live picture, so a stale one shows a different city just before the real one. The build writes each picture beside the page (`loading-wide-<hash>.webp`, `loading-upright-<hash>.webp`), and a visitor fetches only the one their window needs. The build says when `loading.json` came from another release.
-
-If the pin and `deploy/data.json` disagree, CI fails before it deploys. Don't delete old `sf-data-*` releases, because rolling the code back to an older commit needs its bundle.
-
-## Deploy by hand
-
-From a clean checkout with the pinned data present, run the one-command ship script (`deploy/ship.mjs`). It automatically includes `~/.village/engine/sf/eggs/media` when present (pass `--public` for procedural eggs only), checks local `cf` auth up front (`cf` and `wrangler` keep separate local logins — check `cf` auth with `cd deploy && npx cf accounts list`), builds `core` + SF realm + `site` + `assemble`, deploys both Workers tagged with `HEAD`'s SHA, and verifies live endpoints plus `engine/test/sf-live.mjs`:
-
-```sh
-npm --prefix deploy run ship
-# Useful flags: --world-only | --site-only | --public | --skip-build | --skip-live | --allow-dirty | --dry-run
-```
-
-Or run each step individually (`npm --prefix site run build` includes the personal front page at `/` by default; set `VOXELWRIGHT_EGG_MEDIA` before building to include the private clips):
-
-```sh
-npm ci --prefix site && npm ci --prefix deploy &&
-npm --prefix engine run core && node engine/sf/build.mjs &&
-npm --prefix site run build && node deploy/assemble.mjs
-```
-
-Then run either line, or both in order. World mode (`--mode world`) deploys `voxelwright` from `deploy/dist-world` with `world-worker.mjs` and its three Worker routes. The default mode deploys `zahynailo` from `deploy/dist` as an assets-only Worker (no Worker code).
-
-```sh
-(cd deploy && npx cf deploy --mode world)
-(cd deploy && npx cf deploy)
-```
-
-## Redirecting old realm share links on zahynailo.dev
-
-Old share links to the realm (such as `https://zahynailo.dev/?lobbies=1&master=…` or `https://zahynailo.dev/?at=…`) must land on `https://voxelwright.world/` with the same query, while `https://zahynailo.dev/` with no query or with non-realm parameters (such as `?utm_source=x` or `?view=2d`) stays on the personal page.
-
-`zahynailo-realm-rule-a.json` and `zahynailo-realm-rule-b.json` express this as two free Single Redirect rules on the `zahynailo.dev` zone. Together they match all 69 realm query keys at `/` using `any(http.request.uri.args.names[*] in { ... })` with a static target `https://voxelwright.world/` and `preserve_query_string: true`. It is two rules because the pinned `cf` CLI is killed, with no message, when one `--body` carries the whole list; each half goes through. They were installed on November 25, 2026 and deploys do not touch them. Cloudflare's Free plan allows 10 Single Redirect rules per zone ([Redirects availability](https://developers.cloudflare.com/rules/url-forwarding/#availability)) and supports `http.request.uri.args.names`, `any()`, and the `in` inline-list operator without regular expressions ([`http.request.uri.args.names`](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/http.request.uri.args.names/), [Operators](https://developers.cloudflare.com/ruleset-engine/rules-language/operators/#comparison-operators), [Functions](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#any)).
-
-Because `zahynailo.dev` already has a `http_request_dynamic_redirect` entry point ruleset (for `www.zahynailo.dev to the apex`), read its ID and append the two rules:
-
-```sh
-cd deploy
-npx cf rulesets entrypoint get http_request_dynamic_redirect --zone zahynailo.dev
-for part in a b; do npx cf rulesets rules create "$RULESET_ID" --zone zahynailo.dev --body "$(jq -c . zahynailo-realm-rule-$part.json)"; done
-```
-
-## The world's two redirects
-
-Two free Single Redirect rules sit on the voxelwright.world zone, and Cloudflare evaluates them before the Worker. `world-blog-rule.json` sends `/blog` and everything under it, on either hostname, to zahynailo.dev. `world-www-rule.json` sends www.voxelwright.world to the apex, so the page keeps one address and one browser store. Both keep the path and the query string. They were installed on November 25, 2026 with the command below and deploys do not touch them. With a token allowed to edit Single Redirects, run this for a zone with no redirect entry point yet. [Cloudflare Rulesets API](https://developers.cloudflare.com/rules/url-forwarding/single-redirects/create-api/)
+zahynailo.dev also has a www-to-apex rule that is not kept here. All are `301` and keep the query string. With a token allowed to edit Single Redirects, a zone with no redirect entry point gets one with its rules:
 
 ```sh
 cd deploy
 npx cf rulesets create --zone voxelwright.world --kind zone --phase http_request_dynamic_redirect --name 'World redirects' --rules "$(jq -sc . world-blog-rule.json world-www-rule.json)"
 ```
 
-If that phase already has an entry point, append the rule to its existing ID instead. Read the ID with the first command.
+A zone that has one already gets rules appended to it:
 
 ```sh
-npx cf rulesets entrypoint get http_request_dynamic_redirect --zone voxelwright.world
-npx cf rulesets rules create "$RULESET_ID" --zone voxelwright.world --body "$(cat world-blog-rule.json)"
+cd deploy
+npx cf rulesets entrypoint get http_request_dynamic_redirect --zone zahynailo.dev     # note its id
+for part in a b; do npx cf rulesets rules create "$RULESET_ID" --zone zahynailo.dev --body "$(jq -c . zahynailo-realm-rule-$part.json)"; done
 ```
 
 ## Roll back
 
-CI deploys voxelwright first, then zahynailo. The `voxelwright` live check reads the version on traffic, `/`, `/current.json` and the pinned Brotli manifest. The `zahynailo` live check reads the version on traffic, `/`, `/blog/` and `/blog/feed.xml`. On a failed live check CI attempts to roll that Worker back. The job stops on failure and records each attempted Worker’s outcome in the Actions summary, including its traffic status after an error. A first deployment has no previous version to restore.
-
-For a manual rollback, select the Worker by name. To choose a specific version, add its ID after `rollback`.
+CI deploys `voxelwright` first, then `zahynailo`, and rolls a Worker back itself when its live check fails after the upload (see [the guide](../guide/deploy.md#in-ci)). By hand, select the Worker by name, and add a version ID after `rollback` to pick one:
 
 ```sh
 cd deploy
@@ -128,22 +127,14 @@ npx wrangler rollback --name voxelwright -m "reason"
 
 ```sh
 cd engine && node test/sf-live.mjs --url https://voxelwright.world/
+curl -s https://voxelwright.world/weather
 ```
 
-This opens the realm in Chrome with WebGPU on a throttled link (25 Mbit/s, 40 ms). It fails unless the park shows within 8 MB on the wire, every release file arrives as Brotli, the Credits key lists the sources, every board's link and the blog's pages answer without a 404, and two clicks on EXPLORE put the visitor on the roof.
+`sf-live.mjs` opens the realm in Chrome with WebGPU at 25 Mbit/s and 40 ms. It fails unless the park shows within 8 MB on the wire, two clicks on EXPLORE reach the roof, the credits are on the page, and every board's link and the blog's pages answer without a 404.
 
-## Limits to know
+## Limits
 
-- Each request to `/releases/*`, `/bay/*` or `/weather` on the `voxelwright` Worker runs Worker code (a visitor in SF now asks `/weather` once every ten minutes), and the Free plan allows 100,000 a day. A visit that only loads the landing makes about 140 of them, and exploring makes more, so the cap is roughly 700 such visits a day. Past it those requests get 429 and the city stops loading until midnight UTC. Workers Paid ($5 a month) removes the cap. That is the owner's call. The `zahynailo` Worker is assets-only and does not count against this limit.
-- A static asset can be at most 25 MiB (the largest today is 3.2 MB in `dist-world` / 4.4 MB in `dist`), and a version can have at most 20,000 files on the Free plan (`dist-world` is about 6,823 files with `.br`-only binary tiles).
-- `CLOUDFLARE_API_TOKEN` is an Account API token with the "Edit Cloudflare Workers" permission policy, scoped to this account. `CLOUDFLARE_ACCOUNT_ID` is the account. Both are secrets of the repo's `production` environment, which only main may use, so a branch's workflow can't reach them.
-- The park is shown after about 6.1 MB on the wire locally (~6.35 MB from Cloudflare's edge, since the edge compresses code about 0.25 MB less tightly than local quality-11 copies): comfortably under both the 8 MB limit and the 6.75 MB budget.
-- Static assets answer a `Range` request with the whole file (200, not 206). Safari's video asks for ranges, so the eggs' videos (`/eggs/*.mp4`) may not play there. This is untested.
-- `zahynailo.workers.dev` also serves the site (`workersDev` in `cloudflare.config.ts`).
-- Only a machine with `~/.village` can run `node deploy/data.mjs pack`, and it needs a local `node engine/sf/build.mjs` first, for the release's quality-11 copies.
-
-## One repository
-
-The realm, the site and the Voxelmorphism kit stay in one repository with two Worker targets (#578).
-
-<!-- docs-verified 7da0557e95da1ce39128bd4d145f73c6212c6479 {"deploy/package.json":"d0901c848d9e3486e682fc6e7e44a232","deploy/assemble.mjs":"fd9345ff8ee4c546a4194cdd12de75e6","deploy/worker.mjs":"e5b7b80e71ce21564da2658088d5a459"} -->
+- Each request to `/releases/*`, `/bay/*` or `/weather` runs Worker code and counts against the Workers Free plan's 100,000 requests a day. Past it those requests fail and the city stops loading until the daily reset. Workers Paid removes the cap, which is the owner's call. `zahynailo` runs no code and never counts.
+- A static asset can be at most 25 MiB, and a version at most 20,000 files on the Free plan. `assemble.mjs` fails past either.
+- A static host may not serve byte ranges, so the eggs fetch each clip whole before playing it.
+- `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are secrets of the `production` environment. The workflow runs its job only on main.

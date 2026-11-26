@@ -214,7 +214,13 @@ falls). The cutter and the brick are edits of the page's own, told to the solver
   the speed it loses, over 8,000) breaks it (`crush`): the world there is emptied as by a
   blast of two to six cells, what was there comes out as lumps, and a box 6.4 m across is
   asked what that left unheld. One such place a step, eight a second at most. The ground
-  itself (earth, rock, grass, sand, asphalt) is not broken by what lands on it.
+  itself (earth, rock, grass, sand, asphalt) is not broken by what lands on it. When a
+  rolling vehicle, a lump or a piece of a broken body does it (#36), at most three new
+  bodies come of it, and a hit of under six cells asks a smaller box (20 x 32 x 20 or
+  28 x 48 x 28 cells, not 48 x 96 x 48).
+- Past 120 loose bodies (`DEBRIS`), a new fragment under 160 cells is dust, whatever made
+  it. Pieces of a broken body meet things at 36 or 48 points, those under 80 cells are
+  lumps, and those under 40 turn to dust where they stop.
 - What rests on a cell must not be more than it can bear (`kinds.rs` `bears`: brick 6,000
   cells, glass 3,000, concrete 40,000, steel 400,000): a house does not stand on a post one
   cell thick. The untouched city still stands with this.
@@ -1699,10 +1705,14 @@ full speed: say it again four times a second.
   parked askew along the world's cells each time.
 - **What breaks it** is how much of its speed one step takes (`tough`, 120 = 12 m/s lost in 1/120 s), not the
   hardest single touch (`knock`): a car's blow is shared by many touches and no one of them reached steel's 500. A
-  car into brick at 9 m/s lives; at 14 m/s it is shattered as any body is, and its pieces are plain bodies. A blast
-  that reaches it ends it; one further off throws it (`shove`).
-- **Its weight breaks nothing.** `crush` asks a living thing's touch to be closing at 1.5 m/s or more: resting, a
-  car's push on each touch is over `HARD` every step, and a pavement of concrete would be eaten under it.
+  thing that does not ride on wheels breaks past `tough`. A rolling vehicle wears instead (#36, `Body::crumple`):
+  nothing under half of `tough`; above it, `((knock / tough - 0.5) / 0.7)² / 4` of its reserve, so about eight
+  blows at 12 m/s end it, and one past 1.2 of `tough` (14.4 m/s) ends a fresh one. A broken thing's pieces are
+  plain bodies. A blast that reaches it ends it; one further off throws it (`shove`).
+- **A car glances** (#36): its touches rub at 0.24, not 0.7, and a hit closing at over 5 m/s gives a tenth back.
+- **Its weight breaks nothing.** `crush` asks a living thing's touch to be closing at 1.5 m/s or more, and a rolling
+  vehicle's at over 3.5 m/s, 0.32 s or more after the last crush: resting, a car's push on each touch is over `HARD`
+  every step, and a pavement of concrete would be eaten under it.
 - **Three things held a car that had broken a wall**, each found by what the page said held it (`LIVE`'s touches):
   rubble under its belly (a thing told to go ploughs through cells marked rubble, 48 a step, told as dust); and its
   own nose, pushed onward: a point half through a thin wall has its short way out on the far side, so the touch
@@ -3106,5 +3116,3 @@ version, so San Francisco has no water edge.
   its parts, lowest first; a building crossing a map tile's edge comes in two pieces.
 - Not built: a frame's edge (walking out of a zone), street names and addresses outside the baked squares,
   the sitting's `street` part in the Bay (it stands at the town's coordinates), packs in `world.mjs`.
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/core/src/tree.rs":"de32709e544145c628a2122a1d3b30a8"} -->

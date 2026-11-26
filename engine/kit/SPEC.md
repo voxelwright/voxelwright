@@ -1,12 +1,13 @@
 # Voxelmorphism
 
 Skeuomorphism painted controls to look like real materials. Voxelmorphism builds them: every
-control is a small solid made of voxels, lit by one light. It continues the rooftop billboards of
-the zahynailo.dev landing world, which are voxels that break and mend, and commits to the idea for
-a whole interface.
+control is a small solid made of voxels, lit by one light.
 
-This file is the rule book. Its paths and commands start in `engine/kit`.
-`voxelmorphism.css` and `src/` implement it. Open the examples at `http://127.0.0.1:5989/kit/showcase/`.
+This file is the rule book, for anyone building or changing a part: the exact sizes, colours,
+heights, timings and behaviours every part obeys. The overview is in the guide
+([The kit](../../guide/kit.md)); how to build a part is in [BUILDING.md](BUILDING.md). Paths and
+commands here start in `engine/kit`. `voxelmorphism.css` and `src/` implement it. Open the
+examples at `http://127.0.0.1:5989/kit/showcase/` (`PORT=5989 node tools/serve.mjs`).
 
 ## Hardware look
 
@@ -30,7 +31,6 @@ the construction rules in the numbered sections.
   clear pixel rows below the legend at the default scale. Inline keyboard shortcuts use miniature keycaps. Give each cap a visible
   top for its legend and a sidewall above the support. Its silhouette identifies the physical key.
   Keep the native `<kbd>` inline and outside the tab order.
-  <!-- 2026-11-18: “we can make them look like real keys” -->
 - The kit supplies an optional finish per material to renderers that support it. Ordinary
   cubes use full chamfer and zero gloss. Steel and enamel catch direct light. The well
   floor is matte. The ground filter spans one voxel at the default four-pixel scale.
@@ -104,7 +104,6 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
   the portion behind it. If the mount carries a lamp, keep its emitter fixed and check which
   surfaces receive its light as the control moves. This fit makes the travel legible. An
   exposed low-profile key can instead stand above a solid plate on a visible mount.
-  <!-- 2026-11-18: “they look floating on top” -->
 - Cabinet projection: a point at height `z` is drawn `z / 2` voxels to the right and `z / 2` down.
   The viewer stands up and to the left, so you see the top and the left side of everything.
 - The face that carries a label lands exactly on the element's box when the control is at rest.
@@ -117,9 +116,9 @@ low-profile hardware tier suited to live gameplay HUDs over a 3D scene:
 the emitter, frost spreads its light, and an opaque cap can pass it through a translucent legend.
 Apply the same reasoning to validation lights. Check where the bright core sits and how its
 light falls across the field housing when the material changes.
-<!-- 2026-11-18: “how light propagates through and interacts with materials” -->
 
-The base palette gives each material a day and night color, grain and emission.
+The base palette (`src/core/materials.js`) gives each material a day and night color, grain and
+emission. The lit look replaces several of these colours (`src/looks/lit.js`).
 
 | Material | Day | Night | Job |
 |---|---|---|---|
@@ -131,7 +130,7 @@ The base palette gives each material a day and night color, grain and emission.
 | Ivory | `#fbfcff` | `#ccd1f2` | The knob of a switch, and icons on enamel: it stays light at night so it can be found |
 | Walnut | `#7c4a29` | `#5a3520` | Structure that carries other things: shelves, frames |
 | Leaf | `#23a84b` | `#2ec25c` | Growth, progress, "it went well" |
-| Brick | `#e0331f` | `#ff5340` | Destructive actions, failure, pots |
+| Brick | `#d42c18` | `#ff5340` | Destructive actions, failure, pots |
 | Ink | `#0a0f3d` | `#eceefb` | Lettering and icons in voxels |
 | Soil, stem, petal, lamp | | | The garden and light sources |
 
@@ -143,7 +142,6 @@ The base palette gives each material a day and night color, grain and emission.
 - **Give every dedicated status LED a visible unlit fitting.** Put a lens or slot where the light
   originates, then illuminate that same fitting in place. A user can see where the signal will
   come from before selecting a row.
-  <!-- 2026-11-18: “LED indicators already exist where needed, they just glow up when active.” -->
 - At night, order by lightness is ground, slate, steel, chalk: a disabled control (steel) is
   always duller than a live one beside it.
 - Register a palette material with `defineMaterial(name, { day, night, jitter, glow })`.
@@ -177,6 +175,9 @@ The base palette gives each material a day and night color, grain and emission.
 | Menu, toast | 4 | Floats over the page for a moment |
 | Dialog | 6 | In front of everything, over a scrim of ink at 50% |
 | Well (field) | floor 2 below the page | Takes input |
+
+These are the default look's heights (`BASE` in `src/core/look.js`). The lit look stands a key 6
+high with 4 of travel, a card 5, a menu 6, a dialog 7, and cuts a well 4 deep.
 
 - A button is a keycap: a body, and a top one voxel smaller all round. The step is what makes it
   read as a block at arm's length. Shadow length follows height, so the scale above is visible.
@@ -215,7 +216,6 @@ Decide by how often it happens (from the site-craft rules):
   toasts and dialogs. Seeing the blocks come together distinguishes making an object from
   changing its state or scrolling it into view. Keep each control usable during the transition.
   With reduced motion, keep the overlay in place and fade it.
-  <!-- 2026-11-18: “when something is added to a page - it's built from blocks ... and if it removed - it breaks down.” -->
 - **Crumble** marks removal: the thing breaks into the same bricks, which fall down the page
   turning as they go and shrink away at the end. 270 to 340 ms, always shorter than the build.
   Content fades out in 80 ms first, so text is never seen breaking.
@@ -244,7 +244,6 @@ Decide by how often it happens (from the site-craft rules):
 - **Design a key’s downstroke and return as distinct events.** Audition both a quick tap and a
   held press. Check that the cap travels to its stop and the recorded impacts land with contact
   and return. Their timing gives a virtual switch its tactile feel.
-  <!-- 2026-11-18: “Each click must be satisfying.” -->
 - A key plays two short local recordings of a Cherry MX Brown switch under a PBT cap. The downstroke
   lands on press and the lighter return lands on release. The enclosure voices both through a
   high shelf. Walnut softens the treble and alloy lifts it. Other cues use Web Audio synthesis.
@@ -342,21 +341,21 @@ Decide by how often it happens (from the site-craft rules):
   `../blocks/renderer.ts` in the same Voxelwright checkout.
 - **Where there is no WebGPU** the kit's own WebGL2 renderer (`src/core/gl.js`) still stands in,
   drawing into one hidden canvas and copying. It draws the same picture. It goes when the plain
-  version looks right; a browser without WebGPU then gets the plain page. A real iPhone drew the
-  engine page on 17 November 2026, which was the condition for this.
+  version looks right; a browser without WebGPU then gets the plain page.
 - A page that is plain by choice (`data-vx-plain` on the root) asks for no GPU device.
   `PORT=5989 node tools/default.mjs` checks who draws in each case.
 - At rest nothing runs: no frame loop, no timers. A part is redrawn only when its state changes.
   Parts off screen are not drawn until they come near.
 - Voxels are instanced cubes with per-voxel colour, corner occlusion and a seam; one extra pass
-  draws depth from the light. A button is about 500 voxels; a dialog about 6,000.
-- **Bleed.** A part's canvas is larger than its box by 5 to 16 voxels a side, for its shadow and
+  draws depth from the light. How the engine's renderer does it is in the guide
+  ([Blocks and the Vox fonts](../../guide/blocks-and-fonts.md)).
+- **Bleed.** A part's canvas is larger than its box by its `pad` (up to 16 voxels a side), for its shadow and
   for pieces in flight. Give the page `overflow-x: clip` so bleed never widens it, and do not put a
   part inside `overflow: hidden` unless you mean to cut its shadow.
 - The renderer is behind one call, `draw(frame, target)`. The target is the part's 2D context,
   or the part's canvas itself for a renderer that says `ownsCanvas: true` and draws into each
-  canvas with its own context (measured in real Safari with 59 parts redrawn every frame: 29 ms
-  a frame that way, against 159 copying from one WebGPU canvas and 378 for the WebGL2 stand-in). `use(renderer)` hands the kit another
+  canvas with its own context. In Safari that is several times faster than copying from one
+  shared canvas, which makes the page's thread wait for the GPU. `use(renderer)` hands the kit another
   backend without touching a part, and `use(null)` says none: the page stays plain. It takes a
   renderer or a promise for one: until it settles the page is plain,
   `adopt()` and `release()` are remembered in order, and `ready()` resolves to the stage, or to
@@ -402,7 +401,8 @@ PORT=5989 node tools/film.mjs dialog-open --dark
 ```
 
 - Time is stepped by hand (`stage.manual = true`, `stage.advance(1 / 60)`), so the film is the same
-  on any machine. Each scene becomes a contact sheet in `shots/film/` with the time on every frame.
+  on any machine. Each scene becomes a contact sheet, with the time on every frame, in the `film` folder of
+  the kit's uncommitted `shots` output.
 - The report reads the voxels themselves and prints, per scene: how long it took to settle against
   the range this spec gives, and any `no response` (nothing changed on the frame of the input),
   `pop` (voxels that appear at over a third of their size in one frame), `snap` (a voxel that moves
@@ -447,12 +447,13 @@ text face on top of them.
   aliases, not copies) and in Vox Text. Plex's Cyrillic is a separate file behind
   `unicode-range`, fetched only by a page that has Cyrillic in it.
 - Lowercase in lettering exists as a set (Vox Sentence) and is not used: headings are capitals.
-- Chosen by the owner after a study with five review rounds on real parts
-  (`/kit/showcase/type.html`, and `?lang=uk` for Ukrainian).
+  The same set, laid flat, is Vox Text.
+- The type study that chose these faces is `/kit/showcase/type.html` (`?lang=uk` for Ukrainian).
+  How the fonts are built is in the guide ([Blocks and the Vox fonts](../../guide/blocks-and-fonts.md)).
 
 ## 16. The kit
 
-Button (with icons: chevron, plus, check, cross, drop, seed), toggle, slider, text field, note
-card, list, menu, dialog, tabs, meter (plain and growth), toast. Also the sign (voxel lettering
-that breaks and mends, on a board or bare as a heading) and the block (one solid).
-Markup for each is at the top of its file in `src/components/`.
+Every registered part is in `components` in `src/index.js`, grouped in the guide
+([The kit](../../guide/kit.md#the-parts)); which tool each uses is in [BUILDING.md](BUILDING.md).
+A part's file in `src/components/` opens with a comment describing it, usually with its markup.
+The catalogue pages are under `showcase/parts/`. Button icons are in `src/core/icons.js`.

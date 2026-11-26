@@ -2,43 +2,31 @@
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
   "name": "Voxelwright",
+  "description": "A stack for worlds that people make by talking: the engine, its kit, its servers and how agents build it.",
   "colors": {
     "primary": "#52745C"
   },
+  "navbar": {
+    "links": [
+      { "label": "Walk the city", "href": "https://voxelwright.world" }
+    ],
+    "primary": { "type": "github", "href": "https://github.com/voxelwright/voxelwright" }
+  },
+  "footer": {
+    "socials": { "github": "https://github.com/voxelwright/voxelwright" }
+  },
   "navigation": {
     "groups": [
-      {
-        "group": "Start here",
-        "pages": [
-          "quickstart",
-          "hosting",
-          "project",
-          "building"
-        ]
-      },
+      { "group": "Start here", "pages": ["index", "quickstart", "project", "building"] },
+      { "group": "Play", "pages": ["gameplay", "sound"] },
       {
         "group": "World and engine",
-        "pages": [
-          "cells",
-          "city-pipeline",
-          "engine",
-          "engine-core",
-          "engine-page",
-          "engine-plugins",
-          "render-passes",
-          "plugin-types",
-          "making",
-          "kit"
-        ]
+        "pages": ["engine", "engine-core", "engine-page", "cells", "city-pipeline", "sf-release", "making", "living", "engine-plugins", "render-passes", "plugin-types"]
       },
-      {
-        "group": "Contributing",
-        "pages": [
-          "documentation",
-          "checks",
-          "check-cli"
-        ]
-      }
+      { "group": "Look", "pages": ["kit", "blocks-and-fonts"] },
+      { "group": "Servers and the web", "pages": ["multiplayer", "master", "hosting", "deploy", "site"] },
+      { "group": "Contributing", "pages": ["documentation", "checks", "check-cli"] },
+      { "group": "History", "pages": ["village"] }
     ]
   }
 }

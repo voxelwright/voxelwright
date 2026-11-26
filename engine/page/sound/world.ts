@@ -13,6 +13,7 @@ import type { Told } from '../told.ts'
 import { conductor } from './music/conductor.ts'
 import { MODES, MOODS, PACE, moodKey, resolve } from './music/compose.ts'
 import { played } from './things.ts'
+import { createRadio } from './radio.ts'
 import { speak, type Way } from './voice.ts'
 import type { Things } from '../things.ts'
 import type { Hud } from '../hud.ts'
@@ -40,6 +41,10 @@ export interface Scene {
   kind(x: number, y: number, z: number): number
   /** Whether the person at this page is currently riding a vehicle (suppresses walking footsteps). */
   riding?(): boolean
+  /** Whether the listener is sitting inside an enclosed vehicle cabin (warms cabin acoustics and softens exterior weather). */
+  inside?(): boolean
+  /** Live driven car pose, speed (km/h), and nearby vehicles for car radio and Doppler pass-by whooshes. */
+  driving?(): { at: readonly [number, number, number]; yaw: number; kmh: number; nearby?: readonly (readonly [number, number, number])[] } | null
   /** The made things, the layer over the picture and the keys, once the page has them: for things that sound and are played. */
   seam?(): { things: Things; hud: Hud; input: Input }
 }
@@ -52,8 +57,9 @@ const BLOW = 30
 const BLOWS = 5
 const M = 10, G = 98
 
-export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { music: boolean }) {
+export function hearing(voice: Sound, scene: Scene, { music: withMusic, query }: { music: boolean; query?: URLSearchParams }) {
   const music = withMusic ? conductor(voice) : null
+  const radio = createRadio(voice, { ambient: music, query })
   /** How much is going wrong near by, 0 to 1: blasts, things coming down, fire. It dies away over some seconds. */
   let threat = 0, snow = false, snowLooked = -9, place = ''
   /** Made things that sound and are played: there once the page's own parts are (asked each frame until they are). */
@@ -204,23 +210,26 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
     realm = { key: moodKey(m.like, 0, typeof m.mode === 'string' && Object.hasOwn(MODES, m.mode) ? m.mode : ''), pace: num(m.pace, PACE[0], PACE[1], 0), drive: typeof m.drive === 'number' ? num(m.drive, 0, 1, 0) : null, now: m.now === true }
   }
   return {
-    voice, blast, count, music, sounded, tuned, follows,
+    voice, blast, count, music, radio, sounded, tuned, follows,
     /** Updates the driven vehicle's continuous engine, tire screech, and road roll beds (null silences them). */
-    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number } | null) {
+    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number; boost?: number } | null) {
       voice.set(SET.engineRpm, v ? v.rpm : 0)
       voice.set(SET.engineLoad, v ? v.load : 0)
       voice.set(SET.engineTone, v ? v.tone : 0)
       voice.set(SET.tireSlip, v ? v.slip : 0)
       voice.set(SET.roadRoll, v ? v.roll : 0)
       voice.set(SET.roadRough, v ? v.rough : 0)
+      voice.set(SET.turboBoost, v?.boost ?? 0)
     },
     /** Plays a one-shot vehicle foley sound: door thump, ignition bark, upshift burble, exhaust pop, or landing thud. */
     carEvent(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force = 0.75) {
       const map = { door: WORLD.carDoor, start: WORLD.carStart, shift: WORLD.carShift, pop: WORLD.carPop, thump: WORLD.carThump } as const
       voice.play(map[kind], { force: Math.min(1, Math.max(0.15, force)) * (0.92 + 0.16 * Math.random()), size: 0.94 + 0.12 * Math.random(), gain: 0.75, room: 0.12 })
+      if (kind === 'thump' && force > 0.55) radio.duck(force * 0.45, 0.2)
     },
     /** Holds or releases a punchy dual-tone car horn. */
     horn(on: boolean) {
+      radio.setHorn(on)
       if (on && !hornIds.length) {
         const a = voice.hold(WORLD.carHorn, { pitch: 415, force: 0.75, gain: 0.55, room: 0.2, bus: 0 })
         const b = voice.hold(WORLD.carHorn, { pitch: 523, force: 0.7, gain: 0.48, room: 0.2, bus: 0 })
@@ -270,6 +279,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
         voice.play(HIT.steel, { at: s.at, force: f * 0.8, size: 1.7, reach: 16, travels: false })
         if ((s.flags & 4) !== 0) voice.play(BREAK[mat] ?? BREAK.brick, { at: s.at, force: Math.min(1, f * 0.95), size: 1.4, reach: 18, travels: false })
         if (s.speed > 55) voice.play(BREAK.glass, { at: s.at, force: Math.min(0.8, (s.speed - 45) / 90), size: 0.9, reach: 14, travels: false })
+        if (s.speed > 32) radio.duck(f, 0.28)
         count.blows++
       }
       if (struckQuiet.size > 256) struckQuiet.clear()
@@ -305,17 +315,18 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
     /** Once a frame: where the ears are, and the beds brought to what is so there. */
     frame(at: readonly [number, number, number], facing: number, dt: number) {
       eye[0] = at[0]; eye[1] = at[1]; eye[2] = at[2]; yaw = facing
-      if (!things && scene.seam) try { const s = scene.seam(); things = played(voice, s.things, s.hud, s.input) } catch { /* the page has not made them yet */ }
+      if (!things && scene.seam) try { const s = scene.seam(); things = played(voice, s.things, s.hud, s.input); radio.attachHud(s.hud) } catch { /* the page has not made them yet */ }
       things?.frame(eye)
       clock += dt
       const under = scene.under(), ground = scene.ground(Math.round(eye[0]), Math.round(eye[2])), high = Math.max(0, (eye[1] - Math.max(ground, 0)) / M)
       const speed = Math.hypot(eye[0] - last[0], eye[1] - last[1], eye[2] - last[2]) / M / Math.max(dt, 1e-3)
+      const cabin = !under && !!scene.inside?.()
       voice.set(SET.under, under ? 1 : 0)
-      voice.set(SET.muffle, under ? 650 : 20000)
-      voice.set(SET.cover, under ? 1 : 0)
+      voice.set(SET.muffle, under ? 650 : cabin ? 3400 : 20000)
+      voice.set(SET.cover, under ? 1 : cabin ? 0.45 : 0)
       voice.set(SET.rain, scene.rain())
       // Wind: a little always, more the higher the ears are over the land and the faster they go through the air.
-      voice.set(SET.wind, Math.min(1, 0.06 + high / 400 + speed / 90 + 0.2 * scene.rain()))
+      voice.set(SET.wind, Math.min(1, 0.06 + high / 400 + speed / 90 + 0.2 * scene.rain()) * (cabin ? 0.6 : 1))
       // Fire: the nearer and the more of it, the louder; it comes from where most of it is.
       const flames = scene.flames()
       let fire = 0, fx = 0, fz = 0, near = Infinity
@@ -378,6 +389,13 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
         music.drive = leaning ? Math.min(1, Math.max(0, (drive ?? 0.5) + 0.5 * leaning)) : drive
         music.steady = !!realm
         music.tick()
+      }
+      if (scene.driving) {
+        const d = scene.driving()
+        radio.setDriving(!!d)
+        if (d) radio.frame(d.at, d.yaw, dt, d.kmh, scene.kind, d.nearby)
+      } else {
+        radio.frame(eye, yaw, dt, speed * 3.6, scene.kind)
       }
       followed(eye, dt)
       voice.listen(eye, yaw)

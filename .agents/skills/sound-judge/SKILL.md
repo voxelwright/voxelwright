@@ -114,5 +114,3 @@ rest as principle until a measurement here supports it.
   is unknown. Taste choices are on the page `~/.village/engine/ears/taste/index.html`; write his answers here.
 - The public baseline records each clip's accepted score and out-of-range measures. Composition also has rule checks in `test/music.mjs`.
 - No iPhone or speaker has played it; the page path was not tapped again after the change (same worklet file).
-
-<!-- docs-verified d275af1c4ec25f6efc898f9e37606571023eeed1 {"engine/test/judged.mjs":"fb39eaf69657b120ad59fec94599cdf3"} -->

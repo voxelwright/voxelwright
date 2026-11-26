@@ -149,5 +149,3 @@ proposes how to structure parts so that one edit reaches every use.
   his to decide, ask once, with a recommendation.
 - Things only the owner can do go in one batch at the end: a real phone,
   listening, uploads to Cloudflare, taste vetoes.
-
-<!-- docs-verified f9a6b0a446ebed84ee4222918f4765d025f53a80 {"AGENTS.md":"5b7a792dc11ff135858ebfa05f0dc8ea"} -->

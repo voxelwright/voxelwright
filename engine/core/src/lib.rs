@@ -555,6 +555,13 @@ pub extern "C" fn living_drive(id: u32, go: f32, turn: f32, rise: f32, roll: i32
     INSTANCE.with_borrow_mut(|i| moving(i).drive(id, go, turn, rise, roll != 0, jump != 0) as u32)
 }
 
+/// Extra driving state for a living vehicle (#28): nitrous boost (`> 0.5`), rain wetness (`0..1`), and optional
+/// explicit surface grip override (`<= 0` uses `city::top`). Keeps `living_drive`'s ABI unchanged. Returns 1 if found.
+#[unsafe(no_mangle)]
+pub extern "C" fn living_drive_aux(id: u32, boost: f32, wetness: f32, surface_grip: f32) -> u32 {
+    INSTANCE.with_borrow_mut(|i| moving(i).drive_aux(id, boost, wetness, surface_grip) as u32)
+}
+
 /// A living thing lives no more: it is a loose body, and cells again where it comes to lie. Returns 1 if there was one.
 #[unsafe(no_mangle)]
 pub extern "C" fn living_end(id: u32) -> u32 {

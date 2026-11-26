@@ -186,7 +186,7 @@ try {
         })
         check(shown.afoot.length === 0, `${scheme}: the keys of one on foot are not shown while riding${shown.afoot.length ? ` (${shown.afoot.join(', ')})` : ''}`)
         if (phone) {
-          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'horn', 'cam', 'seat', 'leave'], acts = shown.keys.map((k) => k.act)
+          const want = scheme === 'hover' ? ['down', 'up', 'roll', 'seat', 'leave'] : ['drift', 'boost', 'horn', 'cam', 'radio', 'seat', 'leave'], acts = shown.keys.map((k) => k.act)
           check(want.every((a) => acts.includes(a)), `${scheme}: the thing's keys are shown (${acts.join(', ')})`)
           const bad = shown.keys.filter((k) => !k.reached || k.w < 44 || k.h < 44)
           check(bad.length === 0, `${scheme}: each of its keys is 44 px a side or more, and a touch at its middle reaches it${bad.length ? `: not ${bad.map((k) => `${k.act} ${k.w}x${k.h}${k.reached ? '' : ' (under something)'}`).join(', ')}` : ''}`)

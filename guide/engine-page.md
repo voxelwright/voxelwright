@@ -1,6 +1,9 @@
-# The page
+---
+title: The page
+description: The browser side of the engine. Sectors live on the GPU, a ray is marched per pixel, and everything else draws over that.
+---
 
-`engine/page` is the browser side of [the engine](engine.md). It keeps the sectors around the eye on the GPU, draws them by marching a ray per pixel in WGSL, and draws everything else over that picture. It uses raw WebGPU with no framework or bundler: `engine/serve.mjs` serves the TypeScript files with Node's type stripping. Start it with `npm run serve` (in `engine/`) and open `/city`.
+`engine/page` is the browser side of [the engine](/engine). It keeps the sectors around the eye on the GPU, draws them by marching a ray per pixel in WGSL, and draws everything else over that picture. It uses raw WebGPU with no framework or bundler: `engine/serve.mjs` serves the TypeScript files with Node's type stripping. Start it with `npm run serve` (in `engine/`) and open `/city`.
 
 ## Concepts
 
@@ -32,7 +35,7 @@ sequenceDiagram
 
 A worker keeps nothing between asks. Each ask carries every edit that reaches its column, so any worker can answer any ask, and a worker that fails is replaced and its asks sent again (`hire` in `world.ts`). An answer to an older ask for the same slot is dropped.
 
-<!-- schema engine/page/worker.ts Ask,Answer -->
+{/* schema engine/page/worker.ts Ask,Answer */}
 ```ts
 export interface Ask {
     id: number;
@@ -61,7 +64,7 @@ export interface Answer {
 }
 ```
 
-In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](engine-core.md#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
+In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one word is that kind) or the number of words in its tree. `words` holds the trees one after another. `edits` uses the core's [edit format](/engine-core#the-edit-format). `lacking` means a San Francisco tile did not arrive, so the column was made as water and will be asked for again.
 
 ## Files to know
 
@@ -72,12 +75,33 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
 | `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
+| `deform.ts` | Vehicle damage: dents, scuffs, cracked glass and engine damage recorded from crashes, packed for `pieces.ts` (see [vehicle damage](#vehicle-damage)). |
+| `fine.ts`, `streetfaces.ts` | Faces of things in cells finer than the world's (vehicles' looks). `facesWithSmooth` also gives each outside face smooth words at its four corners: a normal fitted to the shape round the corner and how open it is (#38). The street's cars get theirs in the `streetfaces.ts` worker. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
-| `input.ts` | Keys, pointer and touch for play. Modes form a stack; a lane pushes its own mode and pops it. |
+| `living.ts`, `person.ts`, `people.ts`, `residents.ts` | Living things, a person's own body, figures and the town's residents ([living things and people](/living)). |
+| `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
-| `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](plugin-types.md)). |
-| `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](cells.md)). |
+| `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |
+| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts and the EXPLORE board ([gameplay](/gameplay)). |
+| `car-sculpt.ts` | The GT coupe sculpted from continuous shapes (`fineCar`, the `G` summon and the SF library coupe), plus `coarser` and the edge-leak sealer that keep vehicle shells closed across levels. |
+| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen map and GPS routes ([gameplay](/gameplay)). |
+| `realms.ts`, `portal.ts`, `wheel.ts` | Stepping between realms without a reload ([realms](/engine-plugins#realms)). |
+| `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
+| `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
+| `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
+
+## Vehicle damage
+
+A drivable thing that wears a fine look is dented where it is struck (#37). The core reports each crash as a `STRUCK` record with a place, a closing speed and a push, but no direction. `living.ts` keeps the hardest blow each vehicle took in one answer. For a blow at 1.8 m/s or more, it gives each part of the look a dent at that place, pushed in from the side of the part's box nearest the hit. `deform.ts` holds up to six dents a part. Each dent has a centre, a radius, a direction and a depth, all in the part's own cells. Nearby blows deepen an existing dent, and blows near the driver's eye and seats are kept out of it: no dent, however it is moved, reaches that room. The same record holds how scuffed the paint is, how damaged the engine is, and how cracked each window is.
+
+`pieces.ts` draws a struck piece bent, in its vertex shader, with no new meshing:
+
+- A struck piece draws from a copy of its faces cut into rows one cell long. Every corner then lies on the cell lattice, so faces that meet still meet once bent. Merged rows bent only at their ends opened gaps beside their neighbours. A piece never struck draws its merged faces, and the shader returns before any dent work.
+- Paint and lamps keep the unbent position, so a bent panel keeps its own paint.
+- In a dent, the outside paint is scraped to primer and bare steel and loses some of its clear coat. Inside the cabin, nothing is scraped. A blow that cracks a window marks the glass cell nearest it (`Piece.crackAt`). The glass breaks into a mosaic with a web of cracks spreading from that cell, wider for a harder blow, and the view still shows through.
+
+Crashes at 2.8 m/s or more throw sparks, dust, chips of the struck paint and, when a window cracked, glass. A damaged engine steams, then smokes and finally burns (`puffs.ts` `engine`). Where `prefers-reduced-motion` is set, the debris is left out and the smoke is lighter. `living.repair(thing)` makes a look as it was made. Dents go with the look when the thing breaks, is taken away, or the world is forgotten, so a new car never inherits them. `node engine/test/dents.mjs` crashes the fine car into a block and checks the dent, the driver's clear room, the picture of the struck corner against the same view repaired, and the repair.
 
 ## Invariants
 
@@ -95,5 +119,3 @@ node test/bench.mjs               # frame cost before and after
 ```
 
 Add `?pool=`, `?grid=` or `?levels=` to `/city` to try other sizes for the pool, the boxes and the number of levels.
-
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"engine/page/worker.ts":"e99afb289778a685cc5c0fc996cc3c2e","engine/page/world.ts":"9ddf726d184807da7cbb5267b9f8fb4b","engine/page/march.ts":"2dd1ea66bf0292768b2f55c8749524ee","engine/page/main.ts":"4db19705b2d4d1cd08864bb529d3159c","engine/package.json":"83c296e8585f38f1346548d6aed7e5bb","engine/page/input.ts":"87ea91747fb483c7955adaed7cde6121","engine/page/plugins.ts":"bccd33977348a0dc89afed82531a0a2f","engine/page/explore.ts":"0125e7ca46dc9c20396443fc70f93c22"} -->
