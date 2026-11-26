@@ -256,8 +256,8 @@ async function blast(p) {
 step('arriving')
 {
   const corner = await dedicated('Corner Shop', 6, [9, 11], ['--release', folder, '--about', 'Meet at the corner', '--most', '8'])
-  // What the list leaves in the address, with making (the realm's rule is "preview") and the page kept quiet and small.
-  const as = `lobbies=1&master=${encodeURIComponent(MASTER)}&making=1&sound=0&scale=0.5`
+  // What the list leaves in the address, with the page kept quiet and small.
+  const as = `lobbies=1&master=${encodeURIComponent(MASTER)}&sound=0&scale=0.5`
   const pair = [await stranger('Wren', as), await stranger('Odile', as)]
   await Promise.all(pair.map((p) => up(p)))
   const tap = (p, x, y) => (PHONE ? p.page.touchscreen.tap(x, y) : p.page.mouse.click(x, y))

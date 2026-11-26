@@ -7,8 +7,9 @@
 //
 // The realm runs in a frame of a host page of the check's own (as the landing holds it), so that every message it
 // posts to its host is heard. It fails unless:
-//   - without `?making=1`: no panel, no key in the settings, and neither connect.js nor models.js is asked for;
-//   - with it: nothing of them is asked for before the bar is used; a new wish with nothing connected asks to connect,
+//   - without `?making=1` (making is on by default in SF): neither connect.js nor models.js is asked for until a wish
+//     needs it, and the settings key is ready once in the realm;
+//   - a new wish with nothing connected asks to connect,
 //     and the panel opens; for each provider in turn a made-up key shows its models, the first one chosen is a strong
 //     one, and connecting makes the same wish, which stands (its cells in the page's core), with the cost line; the
 //     first by keyboard alone; forgetting leaves nothing under `village.ai`, and the next new wish asks again;
@@ -39,7 +40,7 @@ mkdirSync(shots, { recursive: true })
 
 // ── The host page: the realm in a frame, and every message it posts kept ──
 const HOST = `<!doctype html><meta charset="utf-8"><title>host</title><style>html,body{margin:0;height:100%;background:#000}iframe{border:0;width:100vw;height:100vh;display:block}</style>
-<iframe src="/sf/index.html?making=1" allow="fullscreen"></iframe>
+<iframe src="/sf/index.html" allow="fullscreen"></iframe>
 <script>window.heard = []; addEventListener('message', (e) => window.heard.push(JSON.stringify(e.data)))</script>`
 // A second tab of the same site: connect.js alone, with a bar that answers "Not now" to whatever it is asked (two whole
 // realms in one browser starve each other here; what a tab follows is this origin's storage, the same either way).
@@ -95,18 +96,18 @@ const until = async (frame, from) => {
   return { files: got.length, bytes: got.reduce((n, a) => n + (a.wire ?? 0), 0) }
 }
 
-// ── Without ?making=1 ──
+// ── Cold load (default URL, no ?making=1) ──
 {
   const c = await context(), page = await c.newPage()
   watch(page)
   const from = Date.now()
   await page.goto(`${site.url}/sf/index.html`)
   const shown = await until(page, from)
-  console.log(`  without ?making=1: ${shown.files} files, ${(shown.bytes / 1e6).toFixed(2)} MB on the wire until the park is shown`)
+  console.log(`  cold load: ${shown.files} files, ${(shown.bytes / 1e6).toFixed(2)} MB on the wire until the park is shown`)
   await enter(page)
-  const off = await page.evaluate(() => ({ making: typeof globalThis.engine.making, panel: !!document.querySelector('#connect'), key: !!document.querySelector('#realm button.ai'), line: !!document.querySelector('#ai-line') }))
-  check(off.making === 'undefined' && !off.panel && !off.key && !off.line, `without ?making=1: no seam (${off.making}), no panel, no key in the settings, no line`)
-  check(ours(from).length === 0, `without ?making=1: connect.js and models.js are never asked for (${ours(from).join(', ') || 'none'})`)
+  const idle = await page.evaluate(() => ({ making: typeof globalThis.engine.making, panel: !!document.querySelector('#connect'), key: !!document.querySelector('#realm button.ai'), line: !!document.querySelector('#ai-line') }))
+  check(idle.making === 'object' && !idle.panel && idle.key && !idle.line, `in the realm before a wish: seam ready (${idle.making}), settings key present (${idle.key}), no panel, no line`)
+  check(ours(from).length === 0, `before a wish needs it: connect.js and models.js are never asked for (${ours(from).join(', ') || 'none'})`)
   await c.close()
 }
 
@@ -165,7 +166,7 @@ for (const [label, opts, safe] of [
   watch(rp)
   const phone = label === 'phone'
   if (phone) { const cdp = await rc.newCDPSession(rp); await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: safe }) }
-  await rp.goto(`${site.url}/sf/index.html?making=1`)
+  await rp.goto(`${site.url}/sf/index.html`)
   await rp.waitForFunction(() => globalThis.engine?.explore && globalThis.engine.seen?.whole > 0, null, { timeout: 300_000 })
   await rp.evaluate(() => globalThis.engine.explore.go())
   await rp.waitForFunction(() => globalThis.engine.first.engaged && globalThis.engine.explore.state === 'in', null, { timeout: 60_000 })
@@ -256,7 +257,7 @@ for (const [label, opts, safe] of [
   await rc.close()
 }
 
-// ── With ?making=1, in a host's frame ──
+// ── In a host's frame (default URL, no ?making=1) ──
 const c = await context()
 const page = await c.newPage()
 watch(page)
@@ -264,9 +265,9 @@ const from = Date.now()
 await page.goto(`${site.url}/host.html`)
 const realm = await (async () => { for (;;) { const f = page.frames().find((f) => f.url().includes('/sf/index.html')); if (f) return f; await page.waitForTimeout(100) } })()
 const shownWith = await until(realm, from)
-console.log(`  with ?making=1: ${shownWith.files} files, ${(shownWith.bytes / 1e6).toFixed(2)} MB on the wire until the park is shown`)
+console.log(`  in host frame: ${shownWith.files} files, ${(shownWith.bytes / 1e6).toFixed(2)} MB on the wire until the park is shown`)
 await enter(realm)
-check(ours(from).length === 0, `with ?making=1, in the realm: nothing of connect.js or models.js asked for before a wish needs it (${ours(from).join(', ') || 'none'})`)
+check(ours(from).length === 0, `in the realm: nothing of connect.js or models.js asked for before a wish needs it (${ours(from).join(', ') || 'none'})`)
 const shot = (name) => page.screenshot({ path: join(shots, `${name}.png`) })
 
 // A host page's words open nothing and reach no model.
