@@ -28,8 +28,8 @@ npm run serve       # http://127.0.0.1:5740/city to fly; / runs the measuring fl
 
 Fly with WASD, the mouse after a click, Space and C for up and down, Shift for fast, the
 wheel for speed. A click uses the tool picked on what is ahead; keys 1 to 7 or the bar pick it: a hammer, a charge, a big charge, a cannon, a torch, a cutter (a level cut 9 m across), a brick. F sets what is ahead alight whatever is picked. On a phone the left
-thumb moves, the right thumb looks, and the red button uses the tool picked. H shows how many steps each
-pixel took, L and M turn shadows and mirrors off (M also what glass lets through), K traces every shadow instead of using the sun's maps.
+thumb moves, the right thumb looks, and the red button uses the tool picked. M opens the full-screen 2D/3D map and GPS navigator (click or tap anywhere to route; tap the minimap on touch). H shows how many steps each
+pixel took, L and Shift+M turn shadows and mirrors off (Shift+M also what glass lets through), K traces every shadow instead of using the sun's maps.
 
 A shared world: `node serve.mjs --world ~/.village/engine/world/some.log`, then `/city?shared=1` in as many
 windows as you like (`&name=Ada` to be called something; Enter opens a line to say something). Everyone there sees
