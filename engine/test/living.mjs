@@ -118,8 +118,8 @@ try {
   await phone.tap('#cues p')
   await phone.waitForFunction(() => globalThis.engine.alive.riding, null, { timeout: 5000 }).catch(() => {})
   const on = await phone.evaluate(() => ({ riding: !!globalThis.engine.alive.riding, buttons: [...document.querySelectorAll('[data-panel="living"] button')].map((b) => b.textContent) }))
-  check(on.riding && on.buttons.includes('get off'), `on a phone, a car asked for in the address is got on by touching its cue ("${words}"), and there is a button to get off (${on.buttons.join(', ')})`)
-  await phone.tap('[data-panel="living"] button')
+  check(on.riding && on.buttons.includes('Get off') && on.buttons.includes('Drift'), `on a phone, a car asked for in the address is got on by touching its cue ("${words}"), and there are Drift and Get off buttons (${on.buttons.join(', ')})`)
+  await phone.tap('[data-panel="living"] button[data-act="leave"]')
   await phone.waitForTimeout(300)
   check(!(await phone.evaluate(() => !!globalThis.engine.alive.riding)), 'touched, it gets off')
 } catch (e) {

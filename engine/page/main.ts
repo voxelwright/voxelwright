@@ -28,6 +28,7 @@ import { street as streetOf, type Street } from './street.ts'
 import { NAMED } from './moves.ts'
 import { pieces, type Piece } from './pieces.ts'
 import { under } from './under.ts'
+import { tracks } from './tracks.ts'
 import { restedRows, rowsOf, thing } from './fine.ts'
 import { presence, seedOf } from './presence.ts'
 import type { Shock } from './residents.ts'
@@ -205,6 +206,8 @@ async function main() {
   const marine = await fog(device, gpu.format, march)
   // The shade under each living thing (#245, under.ts): pieces cast nothing into the sun's maps.
   const shade = await under(device, gpu.format)
+  // Tire skidmarks and ground vehicle light pools (tracks.ts).
+  const roadTracks = await tracks(device, gpu.format)
   const folk = await people(device, gpu.format, march)
   // The wand (#246): how a spell is aimed.
   const staff = await wand(device, gpu.format, march, core, controls, over)
@@ -212,7 +215,7 @@ async function main() {
   // What is heard (#247): `?sound=0` leaves it out. The picture never waits for it: it is there when it is ready, and a
   // page that cannot make sound goes on without it.
   let ears: ReturnType<typeof hearing> | null = null
-  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1' }); }).catch(() => {})
+  if (query.get('sound') !== '0') void sound().then((voice) => { ears = hearing(voice, { ground: core.ground_at, paving: core.paving_at, rain: () => march.rain, under: () => march.under, flames: () => flames, bodies: () => bodies, hour: () => hour ?? 12, making: () => wishes.busy > 0, kind: core.world_kind, riding: () => !!alive.riding, seam: () => ({ things: made, hud: over, input: controls }), who: (id) => { if (far && id === far.me) return 'here'; const o = others?.where(id); if (o) return [o[0], o[1] + 12, o[2]]; const t = alive.things.find((t) => t.alive && t.ref === id), w = t && alive.where(t); return w ? w.at : null } }, { music: query.get('music') === '1' }); }).catch(() => {})
   march.detail = Number(query.get('detail') ?? 1)
   march.maps = query.get('maps') !== '0'
 
@@ -237,6 +240,8 @@ async function main() {
   let fov = Number(query.get('fov') ?? (arrive && upright?.fov) ?? (directLL ? undefined : LOCAL?.fov) ?? 70)
   /** How far the picture is turned about the look, clockwise as the eye sees, radians: a photograph's camera has it (#423). */
   const roll = (Number(query.get('roll') ?? (directLL ? 0 : LOCAL?.roll) ?? 0) * Math.PI) / 180
+  /** Dynamic driving camera offsets set each frame by living.ts (0 whenever not driving). */
+  let driveFov = 0, driveRoll = 0, driveEnergy = 0
   // The loader's pictures are of the arrival as the realm frames it (sf/loading.mjs): which one this eye is, or none.
   const pictured = !!arrive && !['look', 'fov', 'roll'].some((k) => query.has(k))
   loading.view(pictured ? (upright ? 'upright' : 'wide') : null)
@@ -314,14 +319,15 @@ async function main() {
     const cp = Math.cos(pose.pitch), forward = [Math.sin(pose.yaw) * cp, Math.sin(pose.pitch), -Math.cos(pose.yaw) * cp] as const
     const level = [Math.cos(pose.yaw), 0, Math.sin(pose.yaw)] as const
     const plumb = [level[1] * forward[2] - level[2] * forward[1], level[2] * forward[0] - level[0] * forward[2], level[0] * forward[1] - level[1] * forward[0]] as const
-    const cr = Math.cos(roll), sr = Math.sin(roll)
-    const right = roll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
-    const up = roll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
+    const curRoll = roll + driveRoll, curFov = Math.min(115, Math.max(40, fov + driveFov))
+    const cr = Math.cos(curRoll), sr = Math.sin(curRoll)
+    const right = curRoll ? ([level[0] * cr + plumb[0] * sr, level[1] * cr + plumb[1] * sr, level[2] * cr + plumb[2] * sr] as const) : level
+    const up = curRoll ? ([plumb[0] * cr - level[0] * sr, plumb[1] * cr - level[1] * sr, plumb[2] * cr - level[2] * sr] as const) : plumb
     // Someone whose down is not the world's (person.ts): the eye's whole frame is turned with them.
-    if (pose.tilt) { const q = pose.tilt, t = (v: readonly number[]) => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] as const }; return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward: t(forward), right: t(right), up: t(up), tanHalf: Math.tan((fov * Math.PI) / 360) } }
+    if (pose.tilt) { const q = pose.tilt, t = (v: readonly number[]) => { const [x, y, z, w] = q, tx = 2 * (y * v[2] - z * v[1]), ty = 2 * (z * v[0] - x * v[2]), tz = 2 * (x * v[1] - y * v[0]); return [v[0] + w * tx + (y * tz - z * ty), v[1] + w * ty + (z * tx - x * tz), v[2] + w * tz + (x * ty - y * tx)] as const }; return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward: t(forward), right: t(right), up: t(up), tanHalf: Math.tan((curFov * Math.PI) / 360) } }
     // Under the sea: under its top, where the ground by itself lies under it too (not in a pit dug on land).
     march.under = pose.y < 0 && core.ground_at(Math.round(pose.x * M), Math.round(pose.z * M)) < -1
-    return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward, right, up, tanHalf: Math.tan((fov * Math.PI) / 360) }
+    return { eye: [pose.x * M * FINE, pose.y * M * FINE, pose.z * M * FINE], forward, right, up, tanHalf: Math.tan((curFov * Math.PI) / 360) }
   }
   /** Where a place in the world is on the screen (CSS pixels), or null behind the eye: for what the hud keeps beside a thing. */
   const project = (at: readonly [number, number, number]): [number, number] | null => {
@@ -713,6 +719,7 @@ async function main() {
     debris.step(dt * tempo.rate, (x, z) => core.ground_at(Math.floor(x), Math.floor(z)))
     gathering.step(dt)
     smoke.step(dt * tempo.rate)
+    roadTracks.step(dt * tempo.rate)
     lap('step')
     for (const level of world.moved) march.sun.age(level)
     march.tend(encoder, v, world.nearlyWhole())
@@ -727,6 +734,7 @@ async function main() {
       marine.draw(encoder, to, farModel.depth, v, (now - started) / 1000)
       if (!off.has('water')) water.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('under') && alive.things.length) shade.draw(encoder, to, v, shades(), groundUnder, march.day, march.sun.s)
+      if (!off.has('under')) roadTracks.draw(encoder, to, v, groundUnder)
       if (!off.has('pieces')) falling.draw(encoder, to, v, march.sun.s, undefined, (flags & MIRRORS) !== 0)
       if (!off.has('people')) folk.draw(encoder, to, v, (now - started) / 1000)
       if (!off.has('crumbs')) debris.draw(encoder, to, v)
@@ -736,7 +744,7 @@ async function main() {
       staff.draw(encoder, to, v, (now - started) / 1000)
     }
     easeMood(Math.min(resting ? gap : frameMs, 100) / 1000, grade)
-    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint)
+    blit(encoder, to, context.getCurrentTexture().createView(), march.under || pose.y > SPACE ? 0 : march.rain * (0.35 + 0.65 * march.day), (now - started) / 1000, march.under ? [1.25, 0.35] : realmLook.grade ?? grade, march.under || pose.y > SPACE ? 0 : 1 - march.day, realmLook.tint, driveEnergy)
     if (timed) { encoder.resolveQuerySet(clock.set, 0, 4, clock.resolved, 0); encoder.copyBufferToBuffer(clock.resolved, 0, clock.read, 0, 32) }
     device.queue.submit([encoder.finish()])
     lap('draw')
@@ -935,7 +943,36 @@ async function main() {
   // to make): a page fetches each part once (living.ts), so a second car of a kind shares them and makes nothing.
   // (By the cells and by their size: the same cells may be a part of another shape.)
   const lookFaces = new WeakMap<Uint16Array, Map<string, ReturnType<typeof thing>>>()
-  const alive = living({ body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null }, kind: (x, y, z) => core.world_kind(x, y, z), send: (ask) => { if (!far) mover.postMessage(ask) }, wake: () => { bodies = Math.max(bodies, 1) }, piece: (id) => moving.get(id), look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) }, input: controls, hud: over, pose, ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M, world: far, made: () => made, ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } }, dropped: (id) => moving.delete(id) })
+  const alive = living({
+    body: () => { const f = me.feet; return f ? [f.at[0], f.at[1] + 10, f.at[2]] : null },
+    kind: (x, y, z) => core.world_kind(x, y, z),
+    send: (ask) => { if (!far) mover.postMessage(ask) },
+    wake: () => { bodies = Math.max(bodies, 1) },
+    piece: (id) => moving.get(id),
+    look: (kinds, size) => { let by = lookFaces.get(kinds); if (!by) lookFaces.set(kinds, by = new Map()); let born = by.get(size.join()); if (!born) { born = thing(kinds, size); by.set(size.join(), born) } return falling.add({ ...born, com: [...born.com], low: [...born.low] }) },
+    input: controls, hud: over, pose,
+    ground: (x, z) => core.ground_at(Math.round(x * M), Math.round(z * M)) / M,
+    world: far, made: () => made,
+    ridden: (on) => { if (on) { wasAfoot = me.on; if (wasAfoot) me.walk(false) } else if (wasAfoot) { wasAfoot = false; me.walk(true) } },
+    dropped: (id) => moving.delete(id),
+    lens: (fovAdd, rollAdd, energy) => { driveFov = fovAdd; driveRoll = rollAdd; driveEnergy = energy },
+    fx: {
+      smoke: (at, vel, intensity, colour) => smoke.tireSmoke(at, vel, intensity, colour),
+      exhaust: (at, dir, pop) => smoke.exhaust(at, dir, pop),
+      track: (wheel, at, strength, colour) => roadTracks.mark(wheel, [at[0], groundUnder(at[0], at[1] + 6, at[2]), at[2]], strength, colour),
+      lift: (wheel) => roadTracks.lift(wheel),
+      light: (at, dir, size, colour, alpha) => roadTracks.spill({ at, dir, size, colour, alpha }),
+      sparks: (at, strength) => { debris.burst(at, 2.5, Math.round(6 + strength * 14), [1.0, 0.72, 0.18], 0.35, 1.4, 0.85 + strength * 0.5); smoke.glint(at, 4 + strength * 5) },
+      rain: () => march.rain,
+      day: () => march.day,
+      surface: (x, z) => core.top_at(x, z) & 15,
+    },
+    audio: {
+      drive: (v) => ears?.drive(v),
+      event: (kind, force) => ears?.carEvent(kind, force),
+      horn: (on) => ears?.horn(on),
+    },
+  })
   /** Where under each living thing the ground is darkened (under.ts): its footprint, turned as it is, and how far it is off the ground. */
   const shades = () => alive.things.flatMap((t) => {
     const w = alive.where(t)
@@ -1798,6 +1835,7 @@ async function main() {
     for (const each of resetting) each()
     const afoot = me.on
     alive.forget()
+    roadTracks.clear()
     if (afoot) me.walk(false)
     mover.postMessage({ forget: true } satisfies Ask)
     moverAge++
@@ -1826,6 +1864,7 @@ async function main() {
     moverAge++
     const afoot = me.on
     alive.forget()
+    roadTracks.clear()
     if (afoot) me.walk(false)
     for (const piece of moving.values()) piece.destroy()
     for (const l of lying) l.piece.destroy()

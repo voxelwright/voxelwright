@@ -23,11 +23,11 @@ const TAU = Math.PI * 2
 export const CEILING = 0.89, KNEE = 0.6
 /** Numbers in a note: when (frames), which patch, pitch (Hz, or 0 for the patch's own over size), size (1 is the patch's own), force 0 to 1, how long held (s), left and right gain, low-pass (Hz), how much goes to the room, bus, and last: 0, or 1 for a piece of something breaking, or from 2 up a name for a note that is held until it is let go (`release`) and can be bent meanwhile (`glide`). */
 export const NOTE = 12
-/** Things set from outside and eased to: the beds' levels and where they are, the room, the buses. */
-export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17 } as const
-const SETS = 18
+/** Things set from outside and eased to: the beds' levels and where they are, the room, the buses, and the driven vehicle. */
+export const SET = { rain: 0, wind: 1, fire: 2, firePan: 3, fireLp: 4, surf: 5, surfPan: 6, under: 7, rumble: 8, rumblePan: 9, muffle: 10, roomTime: 11, roomGain: 12, world: 13, music: 14, play: 15, master: 16, cover: 17, engineRpm: 18, engineLoad: 19, engineTone: 20, tireSlip: 21, roadRoll: 22, roadRough: 23 } as const
+const SETS = 24
 /** The least and the most each may be set to: a level is 0 to 1 whoever asks. */
-const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1]
+const LEAST = [0, 0, 0, -1, 40, 0, -1, 0, 0, -1, 40, 0.1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], MOST = [1, 1, 1, 1, 20000, 1, 1, 1, 1, 1, 20000, 8, 1, 1.5, 1.5, 1.5, 1, 1, 1, 1, 1, 1, 1, 1]
 export const BUS = { world: 0, music: 1, play: 2 } as const
 const BLOCK = 128
 const MV = 64, MM = 12, SV = 16, TV = 16, AV = 24, GV = 40, PENDING = 4096
@@ -73,7 +73,7 @@ export class Synth {
   // Grains: a drop of rain, a crack of the fire, a bubble.
   private gOn = new Uint8Array(GV); private gPh = new Float32Array(GV); private gInc = new Float32Array(GV); private gMul = new Float32Array(GV); private gAmp = new Float32Array(GV); private gDec = new Float32Array(GV); private gGl = new Float32Array(GV); private gGr = new Float32Array(GV)
   // Beds' own state.
-  private bed = new Float64Array(64)
+  private bed = new Float64Array(96)
   // The room.
   private rLen: Int32Array; private rBuf: Float32Array[]; private rAt = new Int32Array(4); private rZ = new Float32Array(4); private rPre: Float32Array; private rPreAt = 0
   // The ceiling.
@@ -88,7 +88,7 @@ export class Synth {
     this.rPre = new Float32Array(Math.round(0.012 * sr))
     this.look = Math.round(0.003 * sr)
     this.lBuf = [new Float32Array(this.look), new Float32Array(this.look)]
-    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0])
+    this.target.set([0, 0, 0, 0, 20000, 0, 0, 0, 0, 0, 20000, 0.9, 0.5, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0])
     this.now.set(this.target)
   }
 
@@ -591,6 +591,74 @@ export class Synth {
       for (let i = 0; i < len; i++) { const n1 = this.rand() * 2 - 1; a += c80 * (n1 - a); b += c300 * (n1 - b); c += c80 * (b - c); const y = (a * 3 + c * 1.5) * rumble; l[i] += y * gl; r[i] += y * gr }
       S[44] = a; S[45] = b; S[46] = c
       for (let k = 30 * rumble * dt; k > 0; k--) if (this.rand() < k) this.grain(180 + 1400 * this.rand() ** 2, 0.004 + 0.02 * this.rand(), rumble * (0.05 + 0.2 * this.rand() ** 2), -0.2, Math.max(-1, Math.min(1, pan + (this.rand() - 0.5) * 0.6)))
+    }
+    // Driven vehicle: multi-harmonic engine growl with load-driven intake filter and turbo whine, dual-formant tire
+    // screech when sliding, and surface-aware road roll. Silent and zero cost whenever nobody drives.
+    const rpm = now[SET.engineRpm], load = now[SET.engineLoad], tone = now[SET.engineTone]
+    if (rpm > 0.004) {
+      const fade = Math.min(1, rpm / 0.06)
+      const f0 = (24 + 14 * tone) + (96 + 78 * tone) * (rpm * rpm * 0.55 + rpm * 0.45)
+      const inc = Math.min(0.3, f0 / sr), subInc = inc * 0.5
+      const turboOn = Math.max(0, tone - 0.4) * Math.max(0, rpm - 0.3) * load
+      const turboInc = Math.min(0.4, (1400 + 2800 * rpm) / sr)
+      const fc = Math.min(0.4 * sr, f0 * (2.5 + 6.5 * load + 2.4 * rpm))
+      const g = Math.tan((Math.PI * fc) / sr), k = 1.05 - 0.38 * load, a = 1 / (1 + g * (g + k))
+      const drive = 1.15 + 1.75 * load, amp = fade * (0.14 + 0.14 * load + 0.07 * rpm)
+      const lope = 0.24 - 0.13 * tone
+      const h3 = 0.26 + 0.2 * load, h4 = 0.14 + 0.22 * load, h6 = 0.05 + 0.15 * load
+      let ph = S[50], sub = S[51], tph = S[52], z1 = S[53], z2 = S[54], air = S[55]
+      for (let i = 0; i < len; i++) {
+        ph += inc; if (ph >= 1) ph -= 1
+        sub += subInc; if (sub >= 1) sub -= 1
+        tph += turboInc; if (tph >= 1) tph -= 1
+        const p = TAU * ph
+        const mod = 1 + lope * Math.sin(TAU * sub)
+        const raw = (0.58 * Math.sin(p) + 0.42 * Math.sin(2 * p) + h3 * Math.sin(3 * p) + h4 * Math.sin(4 * p) + h6 * Math.sin(6 * p)) * mod
+        const nz = this.rand() * 2 - 1
+        air += c1200 * (nz - air)
+        const sat = Math.tanh((raw + air * (0.12 + 0.22 * load)) * drive)
+        const v3 = sat - z2, v1 = a * (z1 + g * v3), v2 = z2 + g * v1
+        z1 = 2 * v1 - z1; z2 = 2 * v2 - z2
+        const y = (v2 * 0.85 + v1 * 0.22 * load) * amp + Math.sin(TAU * tph) * turboOn * 0.042 * fade
+        l[i] += y * 0.96; r[i] += y * 1.04
+      }
+      S[50] = ph; S[51] = sub; S[52] = tph; S[53] = z1; S[54] = z2; S[55] = air
+    }
+    const slip = now[SET.tireSlip], rough = now[SET.roadRough]
+    if (slip > 0.008) {
+      // Asphalt tire howl: two closely-spaced narrow resonances that warble with road grip, fading into gravel wash off-road.
+      S[60] += dt * (7.5 + 5 * slip)
+      const wob = Math.sin(S[60]) * 55 + Math.sin(S[60] * 2.13) * 28
+      const asphalt = 1 - Math.min(1, rough * 1.2)
+      const f1 = Math.min(0.4 * sr, 820 + 380 * slip + wob), f2 = Math.min(0.4 * sr, 1340 + 480 * slip - wob * 0.8)
+      const g1 = Math.tan((Math.PI * f1) / sr), k1 = 0.09 + 0.06 * (1 - slip), a1 = 1 / (1 + g1 * (g1 + k1))
+      const g2 = Math.tan((Math.PI * f2) / sr), k2 = 0.11 + 0.06 * (1 - slip), a2 = 1 / (1 + g2 * (g2 + k2))
+      const sqAmp = slip * slip * 0.22 * asphalt, scrubAmp = slip * (0.09 + 0.14 * rough)
+      let x1 = S[61], x2 = S[62], y1 = S[63], y2 = S[64], scL = S[65], scR = S[66]
+      for (let i = 0; i < len; i++) {
+        const n1 = this.rand() * 2 - 1, n2 = this.rand() * 2 - 1
+        const v3 = n1 - x2, v1 = a1 * (x1 + g1 * v3), v2 = x2 + g1 * v1; x1 = 2 * v1 - x1; x2 = 2 * v2 - x2
+        const w3 = n2 - y2, w1 = a2 * (y1 + g2 * w3), w2 = y2 + g2 * w1; y1 = 2 * w1 - y1; y2 = 2 * w2 - y2
+        scL += c1200 * (n1 - scL); scR += c1200 * (n2 - scR)
+        const sL = Math.tanh((v1 * 1.1 + w1 * 0.55) * 0.45) * sqAmp + scL * scrubAmp
+        const sR = Math.tanh((w1 * 1.1 + v1 * 0.55) * 0.45) * sqAmp + scR * scrubAmp
+        l[i] += sL; r[i] += sR
+      }
+      S[61] = x1; S[62] = x2; S[63] = y1; S[64] = y2; S[65] = scL; S[66] = scR
+      if (rough > 0.25) for (let k = 45 * slip * rough * dt; k > 0; k--) if (this.rand() < k) this.grain(400 + 2400 * this.rand() ** 2, 0.003 + 0.012 * this.rand(), 0.08 * slip * rough, -0.35, this.rand() * 2 - 1)
+    }
+    const roll = now[SET.roadRoll]
+    if (roll > 0.008) {
+      const amp = roll * (0.09 + 0.05 * rough)
+      let r1 = S[70], r2 = S[71], r3 = S[72]
+      for (let i = 0; i < len; i++) {
+        const n1 = this.rand() * 2 - 1, n2 = this.rand() * 2 - 1
+        r1 += c80 * (n1 - r1); r2 += c300 * (n2 - r2); r3 += c1200 * (n1 - r3)
+        const lo = r1 * 1.6 + r2 * 0.55, hi = (r3 - r2) * 0.22
+        l[i] += (lo + hi) * amp; r[i] += (lo - hi * 0.6) * amp
+      }
+      S[70] = r1; S[71] = r2; S[72] = r3
+      if (rough > 0.3) for (let k = 28 * roll * rough * dt; k > 0; k--) if (this.rand() < k) this.grain(260 + 1800 * this.rand() ** 2, 0.003 + 0.01 * this.rand(), 0.05 * roll * rough, -0.25, this.rand() * 2 - 1)
     }
     for (let v = 0; v < GV; v++) {
       if (!this.gOn[v]) continue

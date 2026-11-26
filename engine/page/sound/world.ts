@@ -38,6 +38,8 @@ export interface Scene {
   making(): boolean
   /** What a cell is (the core's `world_kind`). */
   kind(x: number, y: number, z: number): number
+  /** Whether the person at this page is currently riding a vehicle (suppresses walking footsteps). */
+  riding?(): boolean
   /** The made things, the layer over the picture and the keys, once the page has them: for things that sound and are played. */
   seam?(): { things: Things; hud: Hud; input: Input }
 }
@@ -57,6 +59,8 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
   /** Made things that sound and are played: there once the page's own parts are (asked each frame until they are). */
   let things: ReturnType<typeof played> | null = null
   const seen = new Map<number, { x: number; y: number; z: number; vx: number; vy: number; vz: number; t: number; quiet: number }>()
+  const struckQuiet = new Map<number, number>()
+  let hornIds: number[] = []
   const eye = [0, 0, 0] as [number, number, number]
   let yaw = 0, last = [0, 0, 0], walked = 0, foot = 0, shore = { level: 0, pan: 0 }, looked = 0, grind = 0, grindPan = 0, loose = 0, clock = 0
   /** What it has played: blows heard as themselves, blows folded into the heap's grinding. */
@@ -201,6 +205,32 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
   }
   return {
     voice, blast, count, music, sounded, tuned, follows,
+    /** Updates the driven vehicle's continuous engine, tire screech, and road roll beds (null silences them). */
+    drive(v: { rpm: number; load: number; tone: number; slip: number; roll: number; rough: number } | null) {
+      voice.set(SET.engineRpm, v ? v.rpm : 0)
+      voice.set(SET.engineLoad, v ? v.load : 0)
+      voice.set(SET.engineTone, v ? v.tone : 0)
+      voice.set(SET.tireSlip, v ? v.slip : 0)
+      voice.set(SET.roadRoll, v ? v.roll : 0)
+      voice.set(SET.roadRough, v ? v.rough : 0)
+    },
+    /** Plays a one-shot vehicle foley sound: door thump, ignition bark, upshift burble, exhaust pop, or landing thud. */
+    carEvent(kind: 'door' | 'start' | 'shift' | 'pop' | 'thump', force = 0.75) {
+      const map = { door: WORLD.carDoor, start: WORLD.carStart, shift: WORLD.carShift, pop: WORLD.carPop, thump: WORLD.carThump } as const
+      voice.play(map[kind], { force: Math.min(1, Math.max(0.15, force)) * (0.92 + 0.16 * Math.random()), size: 0.94 + 0.12 * Math.random(), gain: 0.75, room: 0.12 })
+    },
+    /** Holds or releases a punchy dual-tone car horn. */
+    horn(on: boolean) {
+      if (on && !hornIds.length) {
+        const a = voice.hold(WORLD.carHorn, { pitch: 415, force: 0.75, gain: 0.55, room: 0.2, bus: 0 })
+        const b = voice.hold(WORLD.carHorn, { pitch: 523, force: 0.7, gain: 0.48, room: 0.2, bus: 0 })
+        if (a) hornIds.push(a)
+        if (b) hornIds.push(b)
+      } else if (!on && hornIds.length) {
+        for (const id of hornIds) voice.release(id)
+        hornIds = []
+      }
+    },
     /** How far the music is leant on now, eased (-1 to 1). */
     get lean() { return leaning },
     /** The sounds that follow someone now, for checks: which is on whom, whether it sounds, its pitch as it is. */
@@ -228,6 +258,21 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
       count.tellings++; count.moved += told.moves.length
       for (const b of told.bursts) blast(b.at, b.radius)
       for (const d of told.dust) if ((d.kind & 15) === 11 && d.amount > 2) voice.play(BREAK.glass, { at: d.at, force: Math.min(1, 0.4 + d.amount / 40), reach: 8 })
+      // Real impacts reported by the core for living things (cars hitting walls, kerbs, props, or each other).
+      for (const s of told.struck) {
+        if ((s.flags & 3) === 0 || s.speed < 12) continue
+        const lastAt = struckQuiet.get(s.a) ?? 0
+        if (now < lastAt) continue
+        struckQuiet.set(s.a, now + 0.11)
+        const f = Math.min(1, (s.speed / 120) ** 0.85) * (0.9 + 0.2 * Math.random())
+        const mat = stuff(s.kindB)
+        voice.play(HIT[mat] ?? HIT.concrete, { at: s.at, force: f, size: 1.3 + 0.5 * f, reach: 14, travels: false })
+        voice.play(HIT.steel, { at: s.at, force: f * 0.8, size: 1.7, reach: 16, travels: false })
+        if ((s.flags & 4) !== 0) voice.play(BREAK[mat] ?? BREAK.brick, { at: s.at, force: Math.min(1, f * 0.95), size: 1.4, reach: 18, travels: false })
+        if (s.speed > 55) voice.play(BREAK.glass, { at: s.at, force: Math.min(0.8, (s.speed - 45) / 90), size: 0.9, reach: 14, travels: false })
+        count.blows++
+      }
+      if (struckQuiet.size > 256) struckQuiet.clear()
       const blows: { at: [number, number, number]; hard: number; cells: number; kind: number }[] = []
       for (const m of told.moves) {
         const was = seen.get(m.id)
@@ -303,7 +348,7 @@ export function hearing(voice: Sound, scene: Scene, { music: withMusic }: { musi
       voice.set(SET.rumblePan, grindPan)
       // Steps: with the eye at head height over the ground and going at a walk or a run, a foot falls every 75 cm.
       const along = Math.hypot(eye[0] - last[0], eye[2] - last[2]) / M
-      if (!under && high < 2.6 && speed > 0.4 && speed < 9) {
+      if (!under && !scene.riding?.() && high < 2.6 && speed > 0.4 && speed < 9) {
         walked += along
         if (walked > 0.75) {
           walked = 0; foot ^= 1
