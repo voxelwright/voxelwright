@@ -251,6 +251,8 @@ export function living(o: {
   const cam = createDriveCam({ pose: o.pose, ground: o.ground, stands, lens: o.lens })
   let prevAt: [number, number, number] | null = null, velSm: [number, number, number] = [0, 0, 0], prevFwd = 0, prevOn = 4
   let gear = 1, rpm = 0.16, shiftCool = 0, popCool = 0, wasThrottle = 0, hornOn = false, smokeAcc = 0
+  let lightMode: 'auto' | 'off' | 'low' | 'high' = 'auto'
+  const lampState: [number, number, number, number] = [0, 0, 0, 0]
   let telemetryNow: { kmh: number; gear: number; rpm: number; slip: number; drifting: boolean; cam: DriveCamMode; fovAdd: number } | null = null
   // What was last said to the thing ridden and when, where the thing faced, and what is asked once (a roll, a jump, getting off).
   let said = '', since = 0, facing = 0, once: 'roll' | 'jump' | 'leave' | undefined
@@ -299,6 +301,7 @@ export function living(o: {
     dhCam.hidden = true
     prevAt = null; velSm = [0, 0, 0]; prevFwd = 0; prevOn = 4
     gear = 1; rpm = 0.16; shiftCool = 0; popCool = 0; wasThrottle = 0; smokeAcc = 0
+    lightMode = 'auto'; lampState[0] = lampState[1] = lampState[2] = lampState[3] = 0
     telemetryNow = null
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
     o.lens?.(0, 0, 0)
@@ -373,6 +376,20 @@ export function living(o: {
     }))
   }
   const unwear = (thing: Thing) => { for (const w of looks.get(thing) ?? []) w.piece.destroy(); looks.delete(thing) }
+  const setLamps = (thing: Thing | null, lamps?: [number, number, number, number]) => {
+    if (!thing) return
+    const body = o.piece(thing.id)
+    if (body) body.lamps = lamps
+    for (const w of looks.get(thing) ?? []) w.piece.lamps = lamps
+  }
+  const headlightLevel = (dark: number) => lightMode === 'high' ? 1.8 : lightMode === 'low' ? 1 : lightMode === 'off' ? 0 : dark > 0.12 ? 1 : 0
+  const cycleLights = () => {
+    const dark = o.fx ? Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15)) : 0
+    if (lightMode === 'auto') lightMode = dark > 0.12 ? 'high' : 'low'
+    else if (lightMode === 'low') lightMode = 'high'
+    else if (lightMode === 'high') lightMode = 'off'
+    else lightMode = 'low'
+  }
   const follow = () => {
     for (const [thing, worn] of looks) {
       const body = o.piece(thing.id)
@@ -466,6 +483,7 @@ export function living(o: {
       if (at) { o.pose.x = at.at[0] / M - at.front[2] * (riding.size[2] / M / 2 + 1.2); o.pose.z = at.at[2] / M + at.front[0] * (riding.size[2] / M / 2 + 1.2); o.pose.y = Math.max(o.pose.y, o.ground(o.pose.x, o.pose.z) + 1.7) }
     }
     const was = riding
+    if (was && was !== thing) setLamps(was, undefined)
     view(false)
     riding = thing?.alive ? thing : null
     said = ''
@@ -495,14 +513,14 @@ export function living(o: {
     }
     // The card says the keys: by touch the keys are there to be touched instead (on a phone it lay under Credits and Back).
     const refreshCard = () => {
-      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['C', `camera · ${cam.label}`], ['X', 'look back'], ['H', 'horn']] : []
+      const extraRows: readonly (readonly [string, string])[] = isDrive ? [['C', `camera · ${cam.label}`], ['X', 'look back'], ['L', 'lights'], ['H', 'horn']] : []
       o.hud.card(riding && scheme && !coarse.matches ? { title: riding.name, note: riding.facts, rows: [...scheme.lines.filter((l) => l.once !== 'leave').map((line) => [line.shown, line.does] as const), ...extraRows, ['V', 'look from the seat'] as const, ...scheme.lines.filter((l) => l.once === 'leave').map((line) => [line.shown, line.does] as const)] } : null)
     }
     refreshCard()
     // Riding is a mode of its own: the keys and the look are the thing's, and the keys that are pressed once are taken here.
     leave?.()
     reach(false)
-    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
+    leave = scheme ? o.input.push({ name: 'mounted', solid: true, key: (code, e) => { if (code === 'KeyV') { view(!inside); return true } if (isDrive && code === 'KeyC') { if (inside) view(false); cam.cycle(); showCamToast(); refreshCard(); return true } if (isDrive && code === 'KeyL') { if (!e?.repeat) cycleLights(); return true } if (isDrive && (code === 'KeyX' || code === 'KeyH')) return true; const line = scheme.lines.find((l) => l.once && l.keys[0] === code); if (line) once = line.once; return !!line } }) : null
     once = undefined
     showButtons(scheme || null)
   }
@@ -742,7 +760,14 @@ export function living(o: {
         o.input.rumble?.({ rpm, slip: slipAmt, rough, speed: horizSpeed, grounded, drifting, boost: gp?.boost ?? 0 })
         updateDriveHud(kmh, gear, rpm, drifting)
         telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: cam.mode, fovAdd: cam.fovAdd }
-        // Tire smoke, skidmarks, and road light pools (brake glow + night headlights).
+        // Sync dynamic vehicle lamp emissives (brake, reverse, headlights) on the vehicle body & fine look pieces.
+        const dark = o.fx ? Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15)) : 0
+        const headLevel = headlightLevel(dark)
+        const lampBrake = braking || handbraking || (axes.go < -0.1 && fwdSpeed >= -2 && gear !== -1) ? (handbraking ? 1.25 : 1) : 0
+        const lampRev = gear === -1 ? 1 : 0
+        lampState[0] = lampBrake; lampState[1] = lampRev; lampState[2] = headLevel; lampState[3] = riding.motor.front + 1
+        setLamps(riding, lampState)
+        // Tire smoke, skidmarks, and road light pools (brake glow, reverse splash, and headlights).
         if (o.fx) {
           const rearFeet = riding.motor.feet.filter((f) => f.drives || !f.steers)
           const wheels = rearFeet.length ? rearFeet : riding.motor.feet
@@ -760,21 +785,26 @@ export function living(o: {
             const puffLevel = Math.max(slipAmt, wet && horizSpeed > 55 ? Math.min(0.55, (horizSpeed - 50) / 140) : 0, !paved && horizSpeed > 30 ? Math.min(0.65, horizSpeed / 120) : 0)
             if (emitSmoke && puffLevel > 0.14) o.fx.smoke(p, [-velSm[0] * 0.15, 6 + puffLevel * 12, -velSm[2] * 0.15], puffLevel, smokeCol)
           }
-          // Red brake-light asphalt splash when braking or pulling the handbrake; twin warm headlight cones at dusk/night.
+          // Red brake-light asphalt splash when braking/handbraking, white reverse pool in R, and headlight cones when on.
           const dir2: readonly [number, number] = [at.front[0], at.front[2]]
-          const dark = Math.max(0, Math.min(1, 1 - o.fx.day() * 1.15))
           const halfLen = (riding.motor.front < 2 ? riding.size[0] : riding.size[2]) * 0.5
           const halfWide = (riding.motor.front < 2 ? riding.size[2] : riding.size[0]) * 0.5
-          if (braking || handbraking) {
+          if (lampBrake > 0) {
             const backPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 9), at.at[1], at.at[2] - at.front[2] * (halfLen + 9)]
             o.fx.light(backPos, dir2, [14, halfWide + 10], [1.0, 0.08, 0.03], (0.28 + dark * 0.45 + (wet ? 0.2 : 0)) * (handbraking ? 1.15 : 1))
-          } else if (dark > 0.12) {
+          } else if (headLevel > 0) {
             const tailPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 6), at.at[1], at.at[2] - at.front[2] * (halfLen + 6)]
-            o.fx.light(tailPos, dir2, [8, halfWide + 5], [0.95, 0.06, 0.02], dark * 0.25)
+            o.fx.light(tailPos, dir2, [8, halfWide + 5], [0.95, 0.06, 0.02], (0.06 + dark * 0.22) * Math.min(1, headLevel))
           }
-          if (dark > 0.12) {
-            const beamPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + 68), at.at[1], at.at[2] + at.front[2] * (halfLen + 68)]
-            o.fx.light(beamPos, dir2, [74, halfWide + 26], [1.0, 0.93, 0.78], dark * (0.34 + (wet ? 0.12 : 0)))
+          if (lampRev > 0) {
+            const revPos: readonly [number, number, number] = [at.at[0] - at.front[0] * (halfLen + 11), at.at[1], at.at[2] - at.front[2] * (halfLen + 11)]
+            o.fx.light(revPos, dir2, [13, halfWide + 7], [0.92, 0.96, 1.0], 0.12 + dark * 0.34 + (wet ? 0.12 : 0))
+          }
+          if (headLevel > 0) {
+            const hi = headLevel > 1.2
+            const reach = hi ? 96 : 68
+            const beamPos: readonly [number, number, number] = [at.at[0] + at.front[0] * (halfLen + reach), at.at[1], at.at[2] + at.front[2] * (halfLen + reach)]
+            o.fx.light(beamPos, dir2, [hi ? 104 : 74, halfWide + (hi ? 34 : 26)], hi ? [1.0, 0.97, 0.90] : [1.0, 0.93, 0.78], (0.12 + dark * 0.88) * (hi ? 0.52 : 0.34) + (wet ? 0.12 * dark : 0))
           }
         }
       } else if (telemetryNow) {
