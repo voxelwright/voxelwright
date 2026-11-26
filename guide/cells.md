@@ -82,7 +82,7 @@ What a reader must do, as `released` in `engine/page/bay.ts` does:
 
 1. Fetch the pointer once per page load, past any cache.
 2. Fetch the manifest and check its SHA-256 against `release`. Refuse a mismatch, an unknown `version` or another `frame`.
-3. From then on ask only for objects that manifest lists. A key in `sea`, or a key not listed, is water and needs no request. A listed tile that fails to load is an error, never water.
+3. From then on ask only for objects that manifest lists. A key in `sea`, or a key not listed, is water and needs no request. A listed tile that fails to load is an error, never water. Per-square `names/<square>.json` files are fetched lazily around the eye rather than all at startup.
 
 The full specification, including the far model, street life, vehicles and promotion after a visual check, is [engine/sf/release.md](../engine/sf/release.md). How a release is made is in [the city pipeline](city-pipeline.md).
 
@@ -92,4 +92,4 @@ The full specification, including the far model, street life, vehicles and promo
 - A new pack header field or array changes `read` in `bay.rs`, `bake.py` and every staged tile. Old tiles are then refused, not misread, because the reader checks lengths exactly.
 - A change to `tree.rs` encoding must change the WGSL reader in `engine/page/march.ts` in the same commit, because the GPU reads the words directly.
 
-<!-- docs-verified 7395eccfb62b043807f729073dfc0b4483063163 {"engine/core/src/tree.rs":"02263380a20615fc50f449a0d04be2e0","engine/core/src/kinds.rs":"929afd0ffdb18c6ae56caf9449d546bd","engine/core/src/bay.rs":"686067144d8691f839fdbf67c17a0182","engine/bay/bake.py":"3827dff4cef6f8ca3beb4dc39f3b3b53","engine/page/bay.ts":"010b9e247f4b1a3e7447f1eaf7610d2d","engine/page/main.ts":"5dfbe68c246dfe39741141ac8fd9b2a7","engine/serve.mjs":"ed02ff9bc2fec74458c497cc4161929f","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/sf/build.mjs":"a02914d1ec1942ee616eccb9a1233d66","engine/sf/release.py":"6e154c6d4d4e67bc12d1bdd68591911e"} -->
+<!-- docs-verified 9075b5ef14578ad2fef8aab83b15a5e17ec14e5a {"engine/core/src/tree.rs":"02263380a20615fc50f449a0d04be2e0","engine/core/src/kinds.rs":"929afd0ffdb18c6ae56caf9449d546bd","engine/core/src/bay.rs":"9d62bad0aba6c79d30498345f47a2bd2","engine/bay/bake.py":"3827dff4cef6f8ca3beb4dc39f3b3b53","engine/page/bay.ts":"3c703f4b66b11eed07072d235b11d9dd","engine/page/main.ts":"5dfbe68c246dfe39741141ac8fd9b2a7","engine/serve.mjs":"ed02ff9bc2fec74458c497cc4161929f","engine/page/frames.ts":"982add52463aa24c413035bc86d1cd99","engine/sf/build.mjs":"a02914d1ec1942ee616eccb9a1233d66","engine/sf/release.py":"6e154c6d4d4e67bc12d1bdd68591911e"} -->

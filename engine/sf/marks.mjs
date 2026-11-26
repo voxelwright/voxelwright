@@ -88,6 +88,7 @@ export function marksOf(graphs, { tags = null, colours = { ways: {}, nodes: {} }
     const n = r.lanesInferred ? 1 : r.lanes
     for (let k = 1; k < n; k++) { const off = both ? k * LANE : (k - n / 2) * LANE; add(shift(a, off), shift(b, off), STYLE.whiteDash) }
   }
+  const crossings = []
   for (const g of graphs) for (const c of g.crossings ?? []) {
     if (seen.has(`c${c.id}`)) continue
     seen.add(`c${c.id}`)
@@ -95,7 +96,40 @@ export function marksOf(graphs, { tags = null, colours = { ways: {}, nodes: {} }
     const colour = colours.ways[c.id.split('/')[0]] ?? colours.nodes[c.nodes[0]] ?? colours.nodes[c.nodes[1]]
     // A rainbow crossing is six bands of colour, whatever its markings tag says of its lines.
     if (colour === 'rainbow' && style) style = STYLE.crossBars
-    if (style && Math.hypot(c.line[1][0] - c.line[0][0], c.line[1][1] - c.line[0][1]) >= 20) add(c.line[0], c.line[c.line.length - 1], style | ((COLOUR[colour] ?? 0) << 4))
+    if (style && Math.hypot(c.line[1][0] - c.line[0][0], c.line[1][1] - c.line[0][1]) >= 20) {
+      crossings.push([c.line[0].map(Math.round), c.line[c.line.length - 1].map(Math.round), style | ((COLOUR[colour] ?? 0) << 4)])
+    }
+  }
+  // Merge collinear touching crossing halves (OSM splits crosswalks at street centrelines, which broke rainbow bar
+  // order and left mid-street gaps across regular crossings).
+  const ptKey = (p, style) => `${style}:${p[0]},${p[1]}`
+  const byEnd = new Map()
+  const dir = (a, b) => { const dx = b[0] - a[0], dz = b[1] - a[1], l = Math.hypot(dx, dz) || 1; return [dx / l, dz / l] }
+  for (let i = 0; i < crossings.length; i++) {
+    const [a, b, st] = crossings[i]
+    for (const p of [a, b]) { const k = ptKey(p, st); let list = byEnd.get(k); if (!list) byEnd.set(k, (list = [])); list.push(i) }
+  }
+  const usedCross = new Uint8Array(crossings.length)
+  for (let i = 0; i < crossings.length; i++) {
+    if (usedCross[i]) continue
+    usedCross[i] = 1
+    let [a, b, st] = crossings[i]
+    for (const end of [1, 0]) {
+      for (;;) {
+        const cur = end ? b : a, [ux, uz] = end ? dir(a, b) : dir(b, a)
+        const next = (byEnd.get(ptKey(cur, st)) ?? []).find((j) => {
+          if (usedCross[j]) return false
+          const [c, d] = crossings[j], other = c[0] === cur[0] && c[1] === cur[1] ? d : c
+          const [vx, vz] = dir(cur, other)
+          return ux * vx + uz * vz > 0.96
+        })
+        if (next === undefined) break
+        usedCross[next] = 1
+        const [c, d] = crossings[next], other = c[0] === cur[0] && c[1] === cur[1] ? d : c
+        if (end) b = other; else a = other
+      }
+    }
+    add(a, b, st)
   }
   // The rails of the squares covered (street-tags.json holds the whole city's).
   const inside = (p) => covers.some((c) => p[0] >= c[0] - 50 && p[1] >= c[1] - 50 && p[0] < c[2] + 50 && p[1] < c[3] + 50)

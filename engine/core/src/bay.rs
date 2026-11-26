@@ -217,10 +217,11 @@ fn pick(packs: &[Pack], x: i32, z: i32, size: i32) -> Option<&Pack> {
     packs.iter().find(|p| p.gstep >= least && p.holds(x, z)).or_else(|| packs.iter().find(|p| p.holds(x, z)))
 }
 
-/// The finest sampling worth holding for cells `size` wide: 1 m to cells of 0.8 m, 2 m to 6.4 m, 16 m past that.
+/// The finest sampling worth holding for cells `size` wide: 1 m to cells of 0.8 m, 2 m at 1.6 m (covering the
+/// handover to the far model at 500 m), and 16 m past that (where the far model draws the city).
 /// The page's bay.ts asks for packs by the same rule.
 pub fn least_step(size: i32) -> i32 {
-    if size <= 8 { 0 } else if size <= 64 { 20 } else { 160 }
+    if size <= 8 { 0 } else if size <= 16 { 20 } else { 160 }
 }
 
 /// Lets every pack go: the world is the town's again.
@@ -335,6 +336,12 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     for (i, t) in p.trunks.iter().enumerate() {
+        // Never plant a tree trunk directly inside an asphalt carriageway, nor keep skinny poles (>7.5 m tall with
+        // measured crown radius <= 1.2 m) that lidar misclassified as tall green needles.
+        let measured = t[3] >> 8;
+        if p.tstep > 0 && (p.surface(t[0], t[1]).0 & 7 == ROAD || (measured > 0 && measured <= 12 && t[2] - p.ground(t[0], t[1]) > 75)) {
+            continue;
+        }
         for pz in patch(t[1] - REACH, p.gz0, p.pw)..=patch(t[1] + REACH, p.gz0, p.pw) {
             for px in patch(t[0] - REACH, p.gx0, p.pw)..=patch(t[0] + REACH, p.gx0, p.pw) {
                 p.stems[(pz * p.pw + px) as usize].push(i as u32);
@@ -366,6 +373,58 @@ fn read(b: &[u8]) -> Option<Pack> {
         }
     }
     if !p.fixtures.is_empty() {
+        // Snap stop-sign fixtures (r == 5 cm vertical posts + octagon bars) that landed on asphalt onto the nearest
+        // surveyed pavement within 7.2 m, or drop stray mid-road ones with no adjacent pavement.
+        if p.tstep > 0 {
+            let mut moved: Vec<(i32, i32, Option<(i32, i32, i32)>)> = Vec::new();
+            for r in &p.fixtures {
+                if r[6] != 5 || r[0] != r[3] || r[2] != r[5] || (r[4] - r[1]).abs() < 20 {
+                    continue;
+                }
+                if p.surface(r[0], r[2]).0 & 7 != ROAD {
+                    continue;
+                }
+                let mut dest = None;
+                'search: for rad in (4..=72).step_by(4) {
+                    for a in 0..16 {
+                        let ang = a as f32 * (std::f32::consts::TAU / 16.0);
+                        let nx = r[0] + (ang.cos() * rad as f32).round() as i32;
+                        let nz = r[2] + (ang.sin() * rad as f32).round() as i32;
+                        if p.surface(nx, nz).0 & 7 == PAVEMENT {
+                            let sx = nx + (ang.cos() * 4.0).round() as i32;
+                            let sz = nz + (ang.sin() * 4.0).round() as i32;
+                            let (fx, fz) = if p.surface(sx, sz).0 & 7 == PAVEMENT { (sx, sz) } else { (nx, nz) };
+                            let dy = p.ground(fx, fz) - r[1];
+                            dest = Some((fx - r[0], dy, fz - r[2]));
+                            break 'search;
+                        }
+                    }
+                }
+                moved.push((r[0], r[2], dest));
+            }
+            if !moved.is_empty() {
+                p.fixtures.retain_mut(|r| {
+                    if r[6] != 5 {
+                        return true;
+                    }
+                    let mx = (r[0] + r[3]) / 2;
+                    let mz = (r[2] + r[5]) / 2;
+                    if let Some((_, _, shift)) = moved.iter().find(|&&(px, pz, _)| (mx - px).abs() <= 4 && (mz - pz).abs() <= 4) {
+                        match shift {
+                            Some((dx, dy, dz)) => {
+                                r[0] += *dx; r[3] += *dx;
+                                r[1] += *dy; r[4] += *dy;
+                                r[2] += *dz; r[5] += *dz;
+                                true
+                            }
+                            None => false,
+                        }
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
         p.fixtures_near = vec![Vec::new(); (p.pw * p.pw) as usize];
         for (i, r) in p.fixtures.iter().enumerate() {
             let pad = (r[6] + 9) / 10 + 2;
@@ -607,7 +666,9 @@ impl Pack {
             let length = dx*dx+dz*dz;
             let t = if length > 0.0 { ((ux*dx+uz*dz)/length).clamp(0.0,1.0) } else { 0.0 };
             let cable = r[6] <= 3;
-            if cable && size > 2 { continue; }
+            // Thin aerial cables (<= 3 cm radius) are rendered as 2.5 cm fine subcells at L0 (size == 1); at size >= 2
+            // (20 cm+) they bloat into solid beams and cast coarse sawtooth shadows across streets.
+            if cable && size > 1 { continue; }
             // A cell is in a rod when its middle is within the rod's radius, and never less than the 0.71 of a cell
             // that keeps a thin one whole at any slant. Added to the radius, it made a stop sign's plate a red box
             // 1 m across and 24 cm deep and every lamp's mast 38 cm thick (#450).
@@ -930,26 +991,34 @@ fn column<'a>(packs: &'a [Pack], x: i32, z: i32, size: i32) -> Column<'a> {
             Some(t) if t > g + 4 => {
                 let tall = t - g;
                 let ragged = (hash(x >> 2, z >> 2, 7) % 7) as i32;
+                let on_road = class & 7 == ROAD;
                 match p.trunk(x, z) {
                     // A tree: its crown is round underneath, deepest at the trunk and rising to its rim; past the
                     // rim what the lidar saw is a spray of leaves and no more.
                     Some((far, trunk)) if tall >= 28 => {
                         let high = (trunk[2] - g).max(tall);
-                        let deep = (high as f32 * 0.55).clamp(16.0, 90.0);
                         let measured = trunk[3] >> 8;
                         let rim = if measured > 0 { measured.min(REACH) as f32 } else { (high as f32 * 0.4).clamp(14.0, REACH as f32) };
-                        let middle = g as f32 + high as f32 - deep / 2.0;
-                        let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
-                        let foot = (under as i32 + ragged).max(g + 18).min(t - 3);
-                        // The trunk goes a third of the way up into its crown, where its limbs take over. Up to the
-                        // crown's top it showed through the crown's openings as a bare rod from above (#450).
-                        let crown = ((g as f32 + high as f32 - deep) as i32).max(g + 18);
-                        What::Crown { foot, top: t, trunk: (far <= (trunk[3] & 255) as f32 + 0.5).then(|| crown + (t - crown) / 3),
-                            tint, edge: (far/rim.max(1.0)).min(1.0) }
+                        // Suppress detached lidar leaf specks hovering past the tree's own crown rim (e.g. on adjacent upper walls).
+                        if far > rim + 4.0 {
+                            What::Open
+                        } else {
+                            // Bound crown depth proportionally to crown width so narrow tall trees/palms don't extrude into vertical columns.
+                            let deep = (high as f32 * 0.55).clamp(16.0, 90.0).min((rim * 2.2).max(20.0));
+                            let middle = g as f32 + high as f32 - deep / 2.0;
+                            let under = if far < rim { middle - deep / 2.0 * (1.0 - (far / rim) * (far / rim)).sqrt() } else { (t as f32 - 22.0).max(middle) };
+                            let min_foot = if on_road { g + 32 } else { g + 18 };
+                            let foot = (under as i32 + ragged).max(min_foot).min(t - 3);
+                            // The trunk goes a third of the way up into its crown, where its limbs take over. Up to the
+                            // crown's top it showed through the crown's openings as a bare rod from above (#450).
+                            let crown = ((g as f32 + high as f32 - deep) as i32).max(g + 18);
+                            What::Crown { foot, top: t, trunk: (!on_road && far <= (trunk[3] & 255) as f32 + 0.5).then(|| crown + (t - crown) / 3),
+                                tint, edge: (far/rim.max(1.0)).min(1.0) }
+                        }
                     }
-                    // A bush or a hedge is leaves to the ground.
-                    _ => What::Crown { foot: if tall < 28 { g + 1 } else { t - (tall / 2).clamp(10, 40) + ragged },
-                        top: t, trunk: None, tint, edge: 0.6 },
+                    // A bush or a hedge is leaves to the ground; suppress floating mid-air canopy blobs (tall >= 28 without a trunk).
+                    _ if tall < 28 && !on_road => What::Crown { foot: g + 1, top: t, trunk: None, tint, edge: 0.6 },
+                    _ => What::Open,
                 }
             }
             _ => What::Open,
@@ -1080,7 +1149,17 @@ fn kind_at(c: &Column, x: i32, y: i32, z: i32, size: i32) -> Kind {
             if detail & 16 != 0 && p.along > 2.0 && p.along < p.long - 2.0 && p.far < 14.0 {
                 let canopy = 32 - (p.far * 0.42) as i32;
                 if (canopy-1..=canopy).contains(&street_y) || p.far > 12.0 && (canopy-4..canopy).contains(&street_y) {
-                    return kind(PLASTER, if p.along as i32 / 4 % 2 == 0 { grey(2) } else { colour(8, 8) });
+                    let stripe = p.along as i32 / 4 % 2 == 0;
+                    let aw = match b.seed % 7 {
+                        0 => if stripe { grey(2) } else { colour(0, 8) },    // burgundy & cream stripe
+                        1 => if stripe { grey(2) } else { colour(14, 8) },   // navy & cream stripe
+                        2 => if stripe { grey(2) } else { colour(8, 8) },    // forest green & cream stripe
+                        3 => if stripe { grey(2) } else { colour(2, 7) },    // terracotta & cream stripe
+                        4 => grey(11),                                       // charcoal canvas
+                        5 => colour(14, 9),                                  // deep navy canvas
+                        _ => colour(1, 8),                                   // dark rust canvas
+                    };
+                    return kind(PLASTER, aw);
                 }
             }
             if detail & 32 != 0 && up >= b.storey - 2 && up < top-5 && p.far <= 10.0 {
@@ -1634,5 +1713,48 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn road_trunks_floating_canopy_and_road_stop_signs_are_cleaned() {
+        let mut bytes = Vec::new();
+        let (gw, tw) = (5i32, 32i32);
+        // Header: 64 bytes; gstep=80, gw=5 (320 cells), tstep=10, tw=32 (320 cells), 0 buildings, 0 verts, 1 trunk on road
+        let head = [0x3159_4142i32, 1, 0, 0, 80, gw, 0, 0, 10, tw, 0, 0, 0, 0, 1, 0];
+        for w in head { bytes.extend(w.to_le_bytes()); }
+        for _ in 0..(gw * gw) { bytes.extend(100i16.to_le_bytes()); }
+        let mut top = vec![100i16; (tw * tw) as usize];
+        let mut cls = vec![ROAD; (tw * tw) as usize];
+        // Right half (x >= 160) is pavement; left half (x < 160) is road.
+        for j in 0..tw {
+            for i in 16..tw { cls[(j * tw + i) as usize] = PAVEMENT; }
+        }
+        // Put floating canopy (tall=60, no trunk nearby) on pavement at (280, 280), and a trunk on road at (100, 100).
+        cls[(28 * tw + 28) as usize] = PAVEMENT | CANOPY;
+        top[(28 * tw + 28) as usize] = 160;
+        cls[(10 * tw + 10) as usize] = ROAD | CANOPY;
+        top[(10 * tw + 10) as usize] = 220;
+        for t in top { bytes.extend(t.to_le_bytes()); }
+        bytes.extend(&cls);
+        bytes.extend(vec![0u8; (tw * tw) as usize]);
+        // 1 trunk standing on road at (100, 100)
+        for v in [100i32, 100, 220, 2] { bytes.extend(v.to_le_bytes()); }
+        // SFST: 1 stop sign post + 1 octagon bar standing on road at (140, 140), 2 m from pavement at x=160
+        bytes.extend(b"SFST");
+        bytes.extend(2u32.to_le_bytes());
+        for v in [140i32, 100, 140, 140, 127, 140, 5, kind(STEEL, grey(9)) as i32] { bytes.extend(v.to_le_bytes()); }
+        for v in [136i32, 124, 140, 144, 124, 140, 5, kind(STEEL, colour(0, 4)) as i32] { bytes.extend(v.to_le_bytes()); }
+
+        let pack = read(&bytes).expect("valid pack");
+        // Road trunk was not added to stems.
+        assert!(pack.stems.iter().all(|s| s.is_empty()), "road trunk should be skipped");
+        // Stop sign moved off ROAD onto PAVEMENT (x >= 160).
+        assert_eq!(pack.fixtures.len(), 2);
+        assert!(pack.fixtures[0][0] >= 160 && pack.surface(pack.fixtures[0][0], pack.fixtures[0][2]).0 & 7 == PAVEMENT);
+        assert_eq!((pack.fixtures[1][0] + pack.fixtures[1][3]) / 2, pack.fixtures[0][0]);
+        // Trunkless tall floating canopy at (285, 285) becomes Open.
+        let packs = [pack];
+        let c = column(&packs, 285, 285, 1);
+        assert!(matches!(c.what, What::Open), "trunkless tall canopy should not float");
     }
 }
