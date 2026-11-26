@@ -15,6 +15,7 @@ export const OWN: Readonly<Record<string, string>> = {
   // ride, through the portal): an offer on V worked or not by what the person had done since the page opened.
   KeyV: 'where the eye rides, on foot',
   KeyO: 'open the billboard ahead',
+  KeyM: 'the map',
 }
 
 /**
@@ -24,7 +25,7 @@ export const OWN: Readonly<Record<string, string>> = {
  */
 export const YIELDED: Readonly<Record<string, string>> = {
   KeyE: 'get on a ride, take up an instrument, beside one',
-  KeyR: 'rain', KeyF: 'fire ahead', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows', KeyM: 'mirrors',
+  KeyR: 'rain', KeyF: 'fire ahead', KeyH: 'heat', KeyK: 'maps', KeyL: 'shadows',
 }
 
 /** Handed, in order, to offers that asked for no key: letters the page never listens for. */

@@ -1221,8 +1221,8 @@ function gapsAll() {
 }
 
 let topsAsked = 0, topsSince = Date.now()
-/** The road's marks (/bay/marks.bin), once made. */
-let roadMarks = null
+/** The road's marks (/bay/marks.bin) and 3D map binary (/bay/map.bin), once made. */
+let roadMarks = null, navMap = null
 const server = createServer((req, res) => {
   const url = new URL(req.url ?? '/', 'http://x')
   if (!named(req.headers.host)) return send(res, 403, 'not by that name')
@@ -1295,10 +1295,21 @@ const server = createServer((req, res) => {
   }
   // The release every world here stands on (#526): its pointer and its own objects, the bytes its worlds' processes hold.
   if (ground && url.pathname.startsWith('/release/')) return done(Promise.resolve().then(() => ground.object(decodeURIComponent(url.pathname.slice(9)))).then((bytes) => (bytes ? send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream') : send(res, 404, 'not of the release this world holds'))))
-  // Its landmarks and road's marks are the ones its worlds hold, for every page here.
-  if (ground && ['/bay/heroes.json', '/bay/marks.bin', '/bay/marks-squares.bin'].includes(url.pathname)) {
-    const bytes = url.pathname === '/bay/heroes.json' ? ground.heroes : url.pathname === '/bay/marks.bin' ? ground.marks : ground.squares
-    return bytes ? send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream') : send(res, 404, 'no road marks')
+  // Its landmarks, road's marks and 3D map binary are the ones its worlds hold, for every page here.
+  if (ground && ['/bay/heroes.json', '/bay/marks.bin', '/bay/marks-squares.bin', '/bay/map.bin'].includes(url.pathname)) {
+    const bytes = url.pathname === '/bay/heroes.json' ? ground.heroes : url.pathname === '/bay/marks.bin' ? ground.marks : url.pathname === '/bay/marks-squares.bin' ? ground.squares : ground.map
+    if (bytes) return send(res, 200, bytes, url.pathname.endsWith('.json') ? TYPES['.json'] : 'application/octet-stream')
+    if (url.pathname !== '/bay/map.bin') return send(res, 404, 'no road marks')
+  }
+  // The 3D minimap & GPS navigation binary (/bay/map.bin), lazily compiled once from the staged SF release + street graphs.
+  if (url.pathname === '/bay/map.bin') {
+    const graphs = process.env.VILLAGE_BAY_GRAPHS ?? join(homedir(), '.village', 'engine', 'bay', 'sf-450-city', 'packs', 'graph')
+    const staged = join(homedir(), '.village', 'engine', 'bay', '450-city-paint', 'sf')
+    const pin = JSON.parse(readFileSync(join(root, 'sf', 'pilot', 'current.json'), 'utf8'))
+    const stagedRel = join(staged, dirname(pin.manifest)), builtRel = join(root, 'dist-sf', 'sf', dirname(pin.manifest))
+    const relDir = existsSync(join(stagedRel, 'tiles')) ? stagedRel : builtRel
+    navMap ??= import('./sf/map.mjs').then((m) => m.buildMap({ releaseDir: relDir, graphDir: graphs }).bytes)
+    return void navMap.then((bytes) => send(res, 200, bytes, 'application/octet-stream'), (e) => { navMap = null; console.error(`no 3D map binary: ${e.message}`); send(res, 404, 'no 3D map') })
   }
   // The road's marks for the whole city (#450, sf/marks.mjs over the city run's street graphs), as sf/build.mjs writes
   // them beside a realm's tiles: made once, the first time they are asked for.

@@ -86,8 +86,12 @@ html:is([data-hud="quiet"], [data-hud="wheel"]).away :is(#first .credits, #realm
 /* (The place's name is not a control: in play it still says where one has come to, and goes.) */
 html:is([data-hud="quiet"], [data-hud="wheel"]).away:not(.arrived) #where { opacity: 0 !important; transition: opacity 0.4s ease-out; }
 html[data-hud="quiet"] :is(#where, #first .credits, #realm .fold) { transition: opacity 0.25s ease-out; }
-/* On a desk the wand's key was under the credits key, both in the bottom left corner: it stands over the place's name. */
-@media (pointer: fine) { html[data-hud] [data-panel="wand-take"] { bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); left: max(16px, env(safe-area-inset-left)); } }
+/* On a desk the minimap occupies bottom-left once engaged: Credits stands beside it, and the street name & wand key stand above it. */
+@media (pointer: fine) {
+  html:not(.first) #first .corner { left: calc(max(18px, env(safe-area-inset-left)) + 264px); bottom: max(18px, env(safe-area-inset-bottom)); }
+  html:not(.first) #where { bottom: calc(env(safe-area-inset-bottom, 0px) + 186px) !important; }
+  html[data-hud] [data-panel="wand-take"] { bottom: calc(env(safe-area-inset-bottom, 0px) + 224px); left: max(18px, env(safe-area-inset-left)); }
+}
 /* The place's name says where one has come to, and goes (as a game names a region on arrival). */
 html[data-hud] #where { transition: opacity 0.6s ease-out; }
 html[data-hud]:not(.arrived) #where { opacity: 0; }
@@ -556,7 +560,7 @@ export function playHud(o: {
       } else { x = (vw - w) / 2; y = vh * 0.62 }
       x = Math.max(s.left + 12 + up, Math.min(vw - s.right - 12 - w - bleed, x))
       // Clear of the keys too: where the card would meet one (by the solids of both), it goes up above them.
-      const keys = [...root.querySelectorAll<HTMLElement>('.act .use, .act .up, .act .down, .act .walks, .held')].filter((el) => el.offsetParent).map((el) => { const r = el.getBoundingClientRect(), k = solidOf(el); return { left: r.left - k.lift - k.bleed, top: r.top - k.lift - k.bleed, right: r.right + k.bleed, bottom: r.bottom + k.bleed } })
+      const keys = [...root.querySelectorAll<HTMLElement>('.act .use, .act .up, .act .down, .act .walks, .held'), ...document.querySelectorAll<HTMLElement>('#minimap')].filter((el) => el.offsetParent).map((el) => { const r = el.getBoundingClientRect(), k = solidOf(el); return { left: r.left - k.lift - k.bleed, top: r.top - k.lift - k.bleed, right: r.right + k.bleed, bottom: r.bottom + k.bleed } })
       for (const k of keys) if (x - up < k.right && x + w + bleed > k.left && y - up < k.bottom && y + h + bleed > k.top) y = Math.min(y, k.top - gap - h - bleed)
       y = Math.max(s.top + 20 + up, y)
       place(cues, x, y)

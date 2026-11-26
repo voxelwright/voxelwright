@@ -42,7 +42,7 @@ import { LIBRARY, caster, known, type Spell } from './spells.ts'
 import { SIDE, World } from './world.ts'
 import { far as farOf } from './far.ts'
 import { fog } from './fog.ts'
-import { BAY, DEVICE, HOLD, heroes as landmarksOf, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
+import { BAY, DEVICE, HOLD, heroes as landmarksOf, mapData, place as placeOf, names as streets, ON as BAY_ON, START as BAY_START, STREAM, end, lists, marks as roadMarks, memory, near, open, share, silent, tally, underfoot, warm, water as seaAsked, where, whereabouts, WORLD } from './bay.ts'
 import { flight } from './flight.ts'
 import { input } from './input.ts'
 import { hud } from './hud.ts'
@@ -62,6 +62,8 @@ import { cadence, describe, environment, reporter } from '../probe/tell.ts'
 import { loading } from './loading.ts'
 import { sound } from './sound/sound.ts'
 import { hearing } from './sound/world.ts'
+import { buildTownMap, parseMap } from './nav-data.ts'
+import { createMapSystem, type MapSystem } from './minimap.ts'
 
 const query = new URLSearchParams(location.search)
 const numbers = (name: string, fallback: number[]) => query.get(name)?.split(',').map(Number) ?? fallback
@@ -573,7 +575,6 @@ async function main() {
   own.keys.set('BracketRight', () => setHour((hour ?? 14) + 0.5))
   own.keys.set('BracketLeft', () => setHour((hour ?? 14) - 0.5))
   own.keys.set('KeyL', () => { flags ^= SHADOWS })
-  own.keys.set('KeyM', () => { flags ^= MIRRORS })
   own.keys.set('KeyK', () => { march.maps = !march.maps })
 
   // The GPU's own time for the march, where the device can say: the page's own march, and the march of the world
@@ -620,6 +621,7 @@ async function main() {
   }
 
   const watchers = new Set<(gap: number) => void>()
+  let mapSys: MapSystem | null = null
   let paused = false, saying = ''
   /** Parts of a frame left out, by name, for finding what a slow frame is spent on: pieces, crumbs, puffs, flames, spoil. */
   const off = new Set<string>()
@@ -673,7 +675,7 @@ async function main() {
     const dt = Math.min(0.1, (now - last) / 1000)
     const gap = now - last
     for (const each of watchers) each(gap)
-    if (paused) { last = now; requestAnimationFrame(frame); return }
+    if (paused || mapSys?.opaque) { last = now; requestAnimationFrame(frame); return }
     // Rest is not lateness: the screen's rate, and how long a frame takes, are counted only from frames at that rate.
     if (wasResting && !resting) frameMs = screenMs
     if (!resting) {
@@ -1070,6 +1072,68 @@ async function main() {
   const seated: Person = { at: [0, 0, 0], yaw: 0, seed: seedOf(others?.name ?? 'me'), move: { move: NAMED.sit, t: 10 } }
   folk.from.push((_view, seconds) => { const r = alive.rider; if (!r || alive.inside) return []; /* With the eye brought right in over them (a wall behind), their own figure is not drawn in its way: as on foot. */ if (Math.hypot(pose.x * M - r.at[0], pose.y * M - r.at[1] - 12, pose.z * M - r.at[2]) < 9) return []; seated.at = r.at; seated.yaw = r.yaw; seated.time = seconds; seated.look = me.carry ? { ...(me.limbs.look ?? {}), carry: me.carry } : me.limbs.look; return [seated] })
   controls.always('KeyB', () => { me.walk(!me.on); return true })
+  // ── 3D Minimap, Full-Screen Map & GPS Navigation ────────────────────────
+  let mapLastX = pose.x, mapLastZ = pose.z, mapLastT = performance.now(), mapSpeed = 0
+  let townCenter: [number, number] | null = null
+  const loadSfMap = (tries: number): void => void mapData().then((bytes) => {
+    const parsed = bytes ? parseMap(bytes, LOCAL?.name ?? 'San Francisco') : null
+    if (parsed) mapSys?.setMapData(parsed)
+    else if (tries > 1) setTimeout(() => loadSfMap(tries - 1), 8000)
+  })
+  mapSys = createMapSystem({
+    device, format: gpu.format, input: controls, hud: over,
+    day: () => march.day,
+    engaged: () => first?.engaged ?? true,
+    paused: () => paused,
+    player: () => {
+      const r = alive.rider, f = me.feet
+      const x = r ? r.at[0] / M : f ? f.at[0] / M : pose.x
+      const y = r ? r.at[1] / M : f ? f.at[1] / M : pose.y
+      const z = r ? r.at[2] / M : f ? f.at[2] / M : pose.z
+      // Heading: use rider yaw when driving, camera yaw when walking/flying so minimap rotates responsively with look!
+      const yaw = r ? r.yaw : pose.yaw
+      const now = performance.now(), dt = Math.max(0.016, (now - mapLastT) / 1000)
+      if (dt > 0.04) {
+        const inst = Math.hypot(x - mapLastX, z - mapLastZ) / dt
+        mapSpeed += (Math.min(120, inst) - mapSpeed) * 0.25
+        mapLastX = x; mapLastZ = z; mapLastT = now
+      }
+      return { x, y, z, yaw, speed: mapSpeed, driving: !!r, flying: !r && !me.on }
+    },
+    onEngage: () => {
+      if (BAY_ON) loadSfMap(3)
+      else { townCenter = [pose.x, pose.z]; mapSys?.setMapData(buildTownMap(core, pose.x, pose.z)) }
+    },
+    onVisit: async (x, z, name) => {
+      const gx = Math.round(x * M), gz = Math.round(z * M)
+      over.notice(`Going to ${name}…`, 2500)
+      if (alive.riding) alive.mount(null)
+      if (me.on) me.walk(false)
+      if (STREAM) {
+        mover.postMessage({ bay: [gx, gz] } as never)
+        shadow?.postMessage({ bay: [gx, gz] } as never)
+        await Promise.race([underfoot(inner, gx, gz), new Promise((r) => setTimeout(r, 6000))])
+        void near(inner, gx, gz)
+      }
+      const floor = Math.max(core.ground_at(gx, gz), core.feet_at(gx, gz)) / M
+      Object.assign(pose, { x, y: Math.max(12, floor + 22), z, pitch: -0.22 })
+      over.notice(`Arrived at ${name}`, 3000)
+    },
+  })
+  watchers.add((gap) => {
+    mapSys?.frame(gap / 1000)
+    if (!BAY_ON && townCenter && Math.hypot(pose.x - townCenter[0], pose.z - townCenter[1]) > 650) {
+      townCenter = [pose.x, pose.z]
+      mapSys?.setMapData(buildTownMap(core, pose.x, pose.z))
+    }
+  })
+  controls.always('KeyM', (e) => {
+    if (e.repeat || e.ctrlKey || e.metaKey || e.altKey) return false
+    if (e.shiftKey) { flags ^= MIRRORS; return true }
+    if (first && !first.engaged) return false
+    mapSys?.toggle()
+    return true
+  })
   // What a rule says this person's body can do, and how fast the world goes (rules/bodies.mjs): the world's clock is
   // everyone's but those a rule spares, who move as they always did while all else slows.
   // A blow on this page's own person (rules/blows.mjs): thrown the way it went, or put on the ground.
@@ -1861,7 +1925,7 @@ async function main() {
   // Realms (#264), on a line of their own.
   Object.assign((globalThis as unknown as { engine: object }).engine, { realms: realm, pieces: () => moving.size, look: () => ({ hour, rain: march.rain, ...realmLook }) })
   // Living things, on a line of their own: every lane adds to the line above.
-  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, fineCar, me, tempo, shots: streaks })
+  Object.assign((globalThis as unknown as { engine: object }).engine, { alive, car, fineCar, me, tempo, shots: streaks, map: mapSys })
   // The portal (#264, portal.ts), an experiment: a second world like this one, marched into a window.
   // Made last, and the page goes on without it if it cannot be: nothing else waits on it.
   const gate = far && realm ? await portal({

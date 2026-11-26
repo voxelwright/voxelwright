@@ -429,6 +429,8 @@ const markedSquares = () => (squaring ??= (async () => {
  * the bake's paint by then, so until they come the roads are bare; one that failed is asked for again on the next call.
  */
 export const marks = () => markFile('marks.bin', 'the roads are bare asphalt until they come')
+/** The 3D minimap and road navigation graph (map.bin, sf/map.mjs): fetched lazily once the visitor engages so cold load stays lean. */
+export const mapData = () => markFile('map.bin', 'the 3D minimap and GPS map are unavailable until loaded')
 
 /** A square held whole (`?bay=a,b`), from the page server. */
 async function whole(url: string): Promise<ArrayBuffer | null> {

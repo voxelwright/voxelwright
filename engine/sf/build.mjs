@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { brotliCompressSync, constants } from 'node:zlib'
 import { marksBytes, marksIn, said, squaresBytes } from './marks.mjs'
+import { buildMap } from './map.mjs'
 import { releaseCredits } from '../page/release-credits.ts'
 import { seated } from './boards.mjs'
 
@@ -192,6 +193,9 @@ writeFileSync(join(out, 'bay/marks.bin'), marks)
 // The squares they cover alone, for every core at once (page/bay.ts); the marks come after the first picture.
 writeFileSync(join(out, 'bay/marks-squares.bin'), squaresBytes(marksMade))
 console.log(`  road marks: ${said(marks)}`)
+const mapMade = buildMap({ releaseDir: join(out, 'sf', dirname(pointer.manifest)), graphDir: GRAPHS })
+writeFileSync(join(out, 'bay/map.bin'), mapMade.bytes)
+console.log(`  3D map & GPS: ${mapMade.summary}`)
 // The loader (page/loading.html): the realm's name and its first view under fog, there from the first byte (just after
 // the engine's canvas, which main.ts takes as the page's first). Its pictures are sf/loading.json (sf/loading.mjs),
 // each written beside the page under a name of its bytes; the loader asks for the one its window frames, and lays its
