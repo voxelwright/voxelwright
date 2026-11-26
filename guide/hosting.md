@@ -56,7 +56,7 @@ mkdir -p ~/fern-hollow
 (umask 077; printf '%s\n' 'a long admin password' > ~/fern-hollow/admin.txt)
 ./voxelwright-server-<version>-<platform>/bin/voxelwright-server \
   --world ~/fern-hollow/world.log \
-  --release https://zahynailo.dev/current.json \
+  --release https://voxelwright.world/current.json \
   --master http://127.0.0.1:8790 \
   --name "Fern Hollow" --about "bricks and talk" --most 8 \
   --admin-password-file ~/fern-hollow/admin.txt
@@ -65,7 +65,7 @@ mkdir -p ~/fern-hollow
 Within a few seconds it prints:
 
 ```
-the ground is San Francisco, release 89d8b029f0d2 (https://zahynailo.dev/current.json, objects kept in /home/you/fern-hollow/world.releases once checked)
+the ground is San Francisco, release 89d8b029f0d2 (https://voxelwright.world/current.json, objects kept in /home/you/fern-hollow/world.releases once checked)
 a dedicated server on San Francisco release 89d8b029f0d2
 listed with the master as lobby n502edtshm60; its private code is 0k2xjp011q0my49n9aqz
 lobby n502edtshm60, code 0k2xjp011q0my49n9aqz: a page joins with ?lobbies=1&master=http%3A%2F%2F127.0.0.1%3A8790&lobby=n502edtshm60
@@ -102,7 +102,9 @@ curl http://127.0.0.1:8790/lobbies
 {"lobbies":[{"id":"n502edtshm60","name":"Fern Hollow","about":"bricks and talk","pin":"89d8b029f0d2…","players":0,"most":8,"locked":false,"since":1795649891}],"next":null}
 ```
 
-A page joins at the game's address with `?lobbies=1&master=<the master's address>&lobby=<the id>`. A private server is joined with its code in place of the id.
+A page joins at the game's address, `https://voxelwright.world/`, with `?lobbies=1&master=<the master's address>&lobby=<the id>`. It asks the visitor before it goes to a master that a link names. A private server is joined with its code in place of the id.
+
+The game's page is served over https, so for anyone else to join, the master must have an `https://` address: put it behind a proxy that ends TLS (step 1) and give that address to the server's `--master` and to the link. A master on plain `http://127.0.0.1` can be reached only from a browser on the same machine, and only where the browser lets an https page ask this machine: Chrome asks for permission first, and Safari refuses.
 
 ## What is inside
 
