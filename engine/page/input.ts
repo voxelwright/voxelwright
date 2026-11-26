@@ -18,6 +18,10 @@
 // owner takes it off: one lane taking its mode off (the feet's, as a ride starts or B is pressed) must never take
 // another lane's with it, since that lane would go on thinking its mode is there and its keys would do nothing.
 
+import { gamepad, radialDeadzone, TOUCH_DEADZONE, type DriveAxes, type RumbleImpact, type RumbleTelemetry } from './gamepad.ts'
+
+export type { DriveAxes, RumbleImpact, RumbleTelemetry }
+
 export interface Mode {
   readonly name: string
   /** Stops what is under it: keys and clicks go no further down, and the modes below are not live. */
@@ -59,6 +63,14 @@ export interface Input {
   hold(code: string, down: boolean): void
   /** Where the left thumb went down to steer, and where it is now (client px), while it is down: for what shows the stick. */
   readonly thumb: { readonly from: readonly [number, number]; readonly at: readonly [number, number] } | null
+  /** Full analog driving axes from a connected gamepad, or null when no gamepad is active. */
+  readonly driveAxes?: DriveAxes | null
+  /** Polls connected gamepads once per frame (zero overhead when no gamepad is connected). */
+  poll?(dt: number): void
+  /** Continuous dual-motor haptic feedback while driving; pass null to silence motors. */
+  rumble?(telemetry: RumbleTelemetry | null): void
+  /** One-shot strong-motor haptic pulse for hill landings, gear upshifts, and crash impacts. */
+  pulse?(kind: RumbleImpact, intensity?: number): void
 }
 
 /** Whether keys typed there are letters of the page's own DOM (a line someone is writing on). A key, a fader or a radio in focus takes no letters: W still walks (#450). */
@@ -75,8 +87,19 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   /** From the top down, until one takes it or a solid one has been asked. */
   const each = (ask: (mode: Mode) => boolean | void) => { for (let i = stack.length - 1; i >= 0; i--) { if (ask(stack[i]) === true || stack[i].solid) return } }
   const use = () => each((m) => m.use?.())
+  const live = (name: string) => {
+    for (let i = stack.length - 1; i >= 0; i--) { if (stack[i].name === name) return true; if (stack[i].solid) return false }
+    return false
+  }
   /** Whether a still mode is live: from the top down to the first solid one. */
   const still = () => { for (let i = stack.length - 1; i >= 0; i--) { if (stack[i].still) return true; if (stack[i].solid) return false } return false }
+  const dispatchKey = (code: string) => {
+    if (top()?.text) return
+    const synth = typeof KeyboardEvent === 'function' ? new KeyboardEvent('keydown', { code }) : ({ code, preventDefault() {} } as unknown as KeyboardEvent)
+    if (!top()?.every && !still() && everywhere.get(code)?.(synth) === true) return
+    each((m) => m.key?.(code, synth))
+  }
+  const pad = gamepad({ key: dispatchKey, use, isMounted: () => live('mounted'), isText: () => !!top()?.text })
 
   addEventListener('keydown', (e) => {
     if (written(e.target) || top()?.text) return
@@ -122,17 +145,33 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
   canvas.addEventListener('pointercancel', lift)
 
   return {
-    held: (code) => down.has(code),
+    held: (code) => down.has(code) || (!top()?.text && pad.held(code)),
     turn() { const t: [number, number] = [right, up]; right = 0; up = 0; return t },
     get stick() {
-      stick[0] = touch.move ? Math.max(-1, Math.min(1, touch.move.dx)) : 0
-      stick[1] = touch.move ? Math.max(-1, Math.min(1, touch.move.dy)) : 0
+      if (touch.move) {
+        const [sx, sy] = radialDeadzone(touch.move.dx, touch.move.dy, TOUCH_DEADZONE)
+        stick[0] = sx
+        stick[1] = sy
+      } else if (pad.active) {
+        stick[0] = pad.stick[0]
+        stick[1] = pad.stick[1]
+      } else {
+        stick[0] = 0
+        stick[1] = 0
+      }
       return stick
     },
+    get driveAxes() { return pad.driveAxes },
+    poll(dt: number) {
+      const [gr, gu] = pad.poll(dt)
+      if (gr !== 0 || gu !== 0) { right += gr; up += gu }
+    },
+    rumble(telemetry: RumbleTelemetry | null) { pad.rumble(telemetry) },
+    pulse(kind: RumbleImpact, intensity?: number) { pad.pulse(kind, intensity) },
     push(mode) {
       stack.push(mode)
       empty()
-      if (mode.text) document.exitPointerLock?.()
+      if (mode.text) { document.exitPointerLock?.(); pad.stopRumble() }
       return () => {
         const at = stack.indexOf(mode)
         if (at < 0) return
@@ -140,10 +179,7 @@ export function input(canvas: HTMLCanvasElement, { phone = false, useButton = nu
         empty()
       }
     },
-    live(name) {
-      for (let i = stack.length - 1; i >= 0; i--) { if (stack[i].name === name) return true; if (stack[i].solid) return false }
-      return false
-    },
+    live,
     get top() { return top()?.name ?? '' },
     get locked() { return document.pointerLockElement === canvas },
     always(code, act) { everywhere.set(code, act) },

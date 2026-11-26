@@ -4,6 +4,7 @@
 // motor does the rest. A thing's motor and its control scheme are data, so a model can write
 // them with the thing; nothing here is run.
 import { AHEAD, clearWay, roomAfter, standsBy } from './eye.ts'
+import { touchSteerCurve } from './gamepad.ts'
 import type { Hud } from './hud.ts'
 import type { Input } from './input.ts'
 import type { Answer, Ask } from './mover.ts'
@@ -295,6 +296,7 @@ export function living(o: {
     if (hornOn) { hornOn = false; o.audio?.horn(false) }
     o.lens?.(0, 0, 0)
     o.audio?.drive(null)
+    o.input.rumble?.(null)
     o.fx?.lift()
     updateDriveHud(0, 0, 0.15, false)
   }
@@ -584,6 +586,7 @@ export function living(o: {
           const hit = Math.min(1, s.speed / 120)
           shakeAmp = Math.max(shakeAmp, hit * 0.032)
           o.fx?.sparks(s.at, hit)
+          o.input.pulse?.('crash', hit)
         }
       }
     },
@@ -609,26 +612,35 @@ export function living(o: {
       }
       if (cue) { cue.remove(); cue = null }
       const scheme = SCHEMES[riding.controls ?? 'drive'], axes = { go: 0, turn: 0, rise: 0 }
+      const isDrive = scheme.name === 'drive'
       for (const line of scheme.lines) {
         if (line.once) continue
         const way = (o.input.held(line.keys[0]) ? 1 : 0) - (o.input.held(line.keys[1]) ? 1 : 0)
         for (const axis of ['go', 'turn', 'rise'] as const) if (line[axis]) axes[axis] += way * line[axis]
       }
-      // A phone's left thumb: forward and back, left and right.
+      // Gamepad full analog driving axes (triggers + curved left stick) and smooth-curved touch thumbstick.
+      const gp = o.input.driveAxes ?? null
       const stick = o.input.stick
-      axes.go = Math.max(-1, Math.min(1, axes.go - stick[1]))
-      axes.turn = Math.max(-1, Math.min(1, axes.turn + stick[0]))
-      axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise))
+      const hasTouch = o.input.thumb !== null
+      if (isDrive && gp && !hasTouch) {
+        axes.go = Math.max(-1, Math.min(1, axes.go + gp.go))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + gp.turn))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + gp.handbrake + held.rise))
+      } else {
+        const turnStick = isDrive ? touchSteerCurve(stick[0], 0) : stick[0]
+        axes.go = Math.max(-1, Math.min(1, axes.go - stick[1] + (isDrive && gp ? gp.go : 0)))
+        axes.turn = Math.max(-1, Math.min(1, axes.turn + turnStick + (isDrive && gp ? gp.turn : 0)))
+        axes.rise = Math.max(-1, Math.min(1, axes.rise + held.rise + (isDrive && gp ? gp.handbrake : 0)))
+      }
       const asked = once
       once = undefined
       if (asked === 'leave') { mount(null); return false }
       // Said when it changes, and again four times a second: what a thing is told holds for a second only.
-      const now = `${axes.go},${axes.turn},${axes.rise}`
+      const now = `${Math.round(axes.go * 1000)},${Math.round(axes.turn * 1000)},${Math.round(axes.rise * 1000)}`
       since += dt
       if (now !== said || asked || (since > 0.25 && now !== '0,0,0')) { tell(riding, axes.go, axes.turn, axes.rise, asked); said = now; since = 0 }
       // The head still turns, round the thing.
       const [right, up] = o.input.turn()
-      const isDrive = scheme.name === 'drive'
       const at = where(riding)
       // Driving telemetry, 6-speed gearbox, procedural engine/tire/road audio, and tire smoke / skidmarks / light pools.
       let longAcc = 0, latSpeed = 0, fwdSpeed = 0, horizSpeed = 0, slipAmt = 0, drifting = false, frontY = 0
@@ -658,6 +670,7 @@ export function living(o: {
         if (prevOn === 0 && onWheels >= 2 && velSm[1] < -20) {
           const drop = Math.min(1, (-velSm[1] - 18) / 70)
           o.audio?.event('thump', 0.4 + drop * 0.6)
+          o.input.pulse?.('land', 0.4 + drop * 0.6)
           shakeAmp = Math.max(shakeAmp, 0.01 + drop * 0.024)
         }
         prevOn = onWheels
@@ -693,6 +706,7 @@ export function living(o: {
             shiftCool = 0.32
             rpm = Math.max(0.46, rpm - 0.34)
             o.audio?.event('shift', 0.68 + Math.min(0.3, Math.abs(axes.go) * 0.25))
+            o.input.pulse?.('shift', 0.5 + Math.min(0.4, Math.abs(axes.go) * 0.4))
             if (gear >= 2 && top >= 260 && popCool <= 0) {
               popCool = 0.55
               o.audio?.event('pop', 0.65)
@@ -723,6 +737,7 @@ export function living(o: {
         const tone = Math.max(0, Math.min(1, (top - 180) / 360))
         const load = Math.max(0, Math.min(1, (axes.go > 0.05 ? 0.45 + 0.55 * axes.go : 0.1) + (drifting ? 0.25 : 0)))
         o.audio?.drive({ rpm, load, tone, slip: slipAmt, roll: grounded ? Math.min(1, horizSpeed / 260) : 0, rough })
+        o.input.rumble?.({ rpm, slip: slipAmt, rough, speed: horizSpeed, grounded, drifting, boost: gp?.boost ?? 0 })
         updateDriveHud(kmh, gear, rpm, drifting)
         telemetryNow = { kmh, gear, rpm, slip: slipAmt, drifting, cam: camMode === 0 ? 'close' : 'far', fovAdd: camFov }
         // Tire smoke, skidmarks, and road light pools (brake glow + night headlights).
@@ -763,6 +778,7 @@ export function living(o: {
       } else if (telemetryNow) {
         telemetryNow = null
         o.audio?.drive(null)
+        o.input.rumble?.(null)
       }
 
       const sitting = inside && at ? placeOf(riding, eyeOf(riding)) : null
@@ -773,7 +789,7 @@ export function living(o: {
         head[1] = Math.max(-1.4, Math.min(1.2, head[1] + up))
         o.pose.x = sitting[0] / M; o.pose.y = sitting[1] / M; o.pose.z = sitting[2] / M
         o.pose.tilt = [...at.rot]
-        o.pose.yaw = AHEADS[riding.motor.front] + head[0]
+        o.pose.yaw = AHEADS[riding.motor.front] + head[0] + (gp?.lookBack ? Math.PI : 0)
         o.pose.pitch = head[1]
         facing = Math.atan2(at.front[0], -at.front[2])
         was = null
@@ -842,7 +858,7 @@ export function living(o: {
           shakeAmp = 0
         }
         const basePitch = camMode === 0 ? -0.135 : -0.19
-        o.pose.yaw = wrap(chaseYaw + orbitYaw + shakeYaw)
+        o.pose.yaw = wrap(chaseYaw + orbitYaw + (gp?.lookBack ? Math.PI : 0) + shakeYaw)
         o.pose.pitch = Math.max(-1.2, Math.min(0.85, basePitch + camHill + orbitPitch + shakePitch))
         o.lens?.(camFov, camRoll + shakeRoll, camEnergy)
         const cp = Math.cos(o.pose.pitch), look = [Math.sin(o.pose.yaw) * cp, Math.sin(o.pose.pitch), -Math.cos(o.pose.yaw) * cp]

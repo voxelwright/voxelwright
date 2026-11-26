@@ -38,6 +38,7 @@ let checks = [
   ['wand', 'node', ['test/wand.mjs'], true],
   ['spells', 'node', ['test/spells.mjs'], true],
   ['keys', 'node', ['test/keys.mjs'], false],
+  ['gamepad', 'node', ['test/gamepad.mjs'], false],
   ['turns', 'node', ['test/turns.mjs'], false],
   ['hands', 'node', ['test/hands.mjs'], true],
   ['hold', 'node', ['test/hold.mjs'], true],

@@ -691,6 +691,7 @@ async function main() {
     }
     last = now
     // Riding a thing, the eye goes where it goes; otherwise where the keys take it.
+    controls.poll?.(dt)
     shot?.before?.()
     if (!alive.frame(dt) && !me.frame(dt)) walk(dt)
     shot?.after(dt)
