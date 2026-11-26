@@ -1,5 +1,6 @@
-// zahynailo.dev's one Worker (#450). Everything is a static asset; this runs only for the paths cloudflare.config.ts
-// sends it first (the city's release and the engine's binary files) and answers each with the quality-11 Brotli copy
+// The voxelwright Worker's code (voxelwright.world, through world-worker.mjs; #450). Everything else is a static asset;
+// this runs only for the paths cloudflare.config.ts sends it first (the city's release, the engine's binary files and
+// /weather) and answers each release or bay file with the quality-11 Brotli copy
 // sf/build.mjs wrote beside it (`<file>.br`), byte for byte. Static assets alone cannot: an asset given
 // `Content-Encoding: br` in _headers is compressed a second time, and `.bay`, `.far` and `.bin` files are sent
 // uncompressed. `encodeBody: "manual"` sends the stored bytes as they are.

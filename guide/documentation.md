@@ -5,13 +5,11 @@ description: How a page stays true to the code with bindings, stamps, the covera
 
 Every README, skill and guide page names the source it describes. When that source changes, the page turns red until someone reads the change and confirms the page still holds. Change the page in the same pull request as its source.
 
-<Note>
-Three checks keep the docs honest, and all three run in `npm run check -- --ci`:
+Three checks run in `npm run check -- --ci`:
 
 - **`docs`** compares each page with the source it is bound to, and checks every path, link, command and flag it mentions.
 - **`docs-coverage`** fails a branch that changes a component's source without touching any of that component's pages.
 - **`docs-site`** builds `guide/` with the Mintlify CLI and checks its links.
-</Note>
 
 Run `npm ci --prefix home` once for the repository's TypeScript parser. Then, from the root:
 
@@ -83,4 +81,4 @@ Never update stamps in bulk to clear a failure. A stamp says someone read the ch
 
 4. Rerun the gate. The commit that last changed a page's line in `guide/stamps.json` is the verification baseline, and the failure prints a `git diff` from it. A shallow clone prints the commit recorded at verification instead. That range also includes edits that were uncommitted when the page was verified.
 
-A green check establishes agreement with the selected source. It cannot tell whether a paragraph accurately explains intent, whether every claim has a binding, or whether an external deployment works. For behavior a reader relies on, add a small runnable example beside the prose, as in [Drawing from a page plugin](/render-passes). For intent, ask the reviewer to read the claim against the change.
+A green check establishes agreement with the selected source. It cannot tell whether a paragraph accurately explains intent, whether every claim has a binding, or whether an external deployment works. For behaviour a reader relies on, add a small runnable example beside the prose, as in [Drawing from a page plugin](/render-passes). For intent, ask the reviewer to read the claim against the change.

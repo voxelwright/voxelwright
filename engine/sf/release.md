@@ -1,67 +1,86 @@
-# San Francisco release, v1
+# Staging and pinning a San Francisco release
 
-Fetch `sf/current.json` once per page load with revalidation. Its `manifest` is relative to the pointer URL. The lowercase 64-hex `release` is SHA-256 of the exact decoded manifest bytes, including its final newline. Check it before loading assets. Give every worker the same resolved manifest and base URL until reload.
+How to cut a release with `release.py`. What a release contains, the BAY1 and FAR1 formats and what a reader checks are in [the San Francisco release](../../guide/sf-release.md).
 
-The manifest contains `version: 1`, `frame: "10n4250"`, a displayable list of `credits`, a `names` dictionary keyed by southwest UTM square name, and three `levels` in increasing resolution-step order. All object records have a relative `path`, decoded `bytes` and lowercase decoded-byte `sha256`. Resolve paths relative to the manifest URL.
-
-For each level, `level` is the integer index. `size` is the tile side and `gstep` the ground sampling interval, both in 10 cm cells. The frame origin is NAD83 UTM 10N (500000 E, 4250000 N), with x east and z south. Divide x and z in cells by size and floor each to obtain the key `x_z`, including for negative positions. Look up that key in `tiles` for its BAY1 object. A key in the `sea` list is verified open water and takes no request. An unlisted key is outside inventory. A failed fetch for a listed object is a load error.
-
-The layout is `sf/releases/<release>/manifest.json`, with `tiles/<level>/<x>_<z>.bay` and `names/<square>.json` underneath the same directory. Immutable objects may be served with Brotli content encoding. The generator hashes uncompressed bytes. Replace the pointer after all objects exist.
-
-Run the following from the repository root to stage a six-square release from the retained pilot packs. The output directory represents the site's sf directory.
+Run every command from the repository root with the Bay's Python:
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/sf/release.py ~/.village/engine/bay/450-paint/final/pilot /tmp/village-sf/sf
+PY=~/.village/engine/bay/venv/bin/python
 ```
 
-## Optional far model
+## 1. Stage
 
-Supply `--far /local/build/far.json` to include face objects in the pin. The far producer writes this v1 inventory beside its `far/<band>/<key>.far` objects. The generator checks each path, length and SHA-256, then includes the producer's inventory, LODs and credit in the same release digest.
-
-The runtime manifest has `far.size = 5000` cells and `far.bands = [4,1,0]` in metres. Each `far.tiles[x_z]` is a three-element array of object records or null. Each FAR1 object contains its section headers and face payload. Fetch coarse band 0 first and add finer bands toward the eye. Unlisted keys have no far coverage.
-
-`far.landing` is optional: the faces seen from the landing's eye (`sf/far/landing.mjs`), so that the first picture has the skyline in about half a megabyte. It holds that `eye` in cells and `tiles[x_z]`, one object record each at `far/landing/<x>_<z>.far`, in the bands' FAR1 layout. While the eye is within 20 m of it, the page fetches these before anything else of the far model and holds the place's first show for them. Cut it again whenever the far tiles or the landing's camera in `sf/realm.json` change.
-
-## New street life or vehicles
-
-`--life` and `--cars` add the `life.py` and `cars.mjs` outputs as the `life` and `cars` objects, each with its producer's `index.json`. The life objects are one per square (with its signal heads) plus `transit`, the streetcar and cable car routes and the bus and trolleybus routes with their stops. When only these change, restage the pinned release with them and keep every other object:
+`ROOT` is a verified `full_run.py` output (`<root>/state.json` and `<root>/packs/`). `OUT` is a staging folder that plays the site's `sf/` folder. The city job stages into `~/.village/engine/bay/sf-450-city/sf` on its own.
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --life <life dir> --cars <cars dir> - ~/.village/engine/bay/450-city-paint/sf
+$PY engine/sf/release.py ROOT OUT
 ```
 
-A new landing cut is restocked the same way, with `--landing <dir>` (the folder `sf/far/landing.mjs` wrote, `landing.json` and `far/landing/`). It becomes `far.landing`; every far band stays as it was. `--base <digest>` starts from another release staged in the same folder instead of its `current.json`:
+It checks every object against the run's checkpoint hashes, writes `OUT/releases/<digest>/`, and prints the digest with "panel required to promote". Options:
+
+| Option | Adds |
+| --- | --- |
+| `--far FAR_JSON` | The far model: the listing `sf/far/pack.mjs` writes, with the `far/<band>/` folders beside it |
+| `--life DIR`, `--cars DIR` | Street life from `sf/life.py` and vehicles from `sf/cars.mjs`. Without them, `<root>/life` and `<root>/cars` are used if present. |
+| `--graphs DIR` | Street graphs from outside the run. Otherwise `<root>/packs/graph` is used. |
+| `--paint BATCH_JSON` | An accepted facade paint batch, written into the level-0 tiles as `SFPT` rows |
+| `--compact-store DIR` | Keep tiles as shared zstd bases in `DIR` instead of full copies |
+| `--inventory-only` | Write the manifest only, for inspection |
+
+## 2. Promote after the panel
+
+New tiles need the visual panel. Score each of the 16 places in `engine/bay/neighbourhoods.json` at street level and at 100 m, then run the same command with the receipt:
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/sf/release.py --restock --landing ~/.village/engine/sf/far/landing --base <digest> - ~/.village/engine/bay/450-city-paint/sf
+$PY engine/sf/release.py ROOT OUT --panel RECEIPT [--core CORE_WASM]
 ```
 
-New far tiles are restocked the same way, with `--far <far.json>`: a listing in `pack.mjs`'s layout, beside its `far/<band>/` objects, that holds only the tiles to replace. Each replaces the base's tile of the same key, checked as a full stage checks it, and the listing's `wedge` (#423's wedge: its apex in cells, its bearings and its reach in metres) and `light` (the faces' fitted light: `fill` and `gain`) replace the base's. Restock `--far` first, then cut the landing from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
+The receipt is JSON with:
 
-It checks the base manifest against its digest, clones the other objects beside it, never touches the pinned release or `current.json`, and prints the new digest. Copy that manifest to `engine/sf/pilot/releases/<digest>/` and name it in `engine/sf/pilot/current.json`. `sf/build.mjs` takes the release a checkout pins from that folder, so other checkouts keep theirs. The tiles are unchanged, so the panel is not rerun, and the new pointer carries no panel receipt.
+| Field | Value |
+| --- | --- |
+| `release` | The candidate's digest |
+| `previousRelease` | The release `<out>/current.json` pins now, or `null` for the first |
+| `coreSha256` | SHA-256 of the tested core Wasm: the page's built core by default, or the file `--core` names |
+| `panelSpecSha256` | SHA-256 of `engine/bay/neighbourhoods.json` |
+| `scores` | Each place name to `[street, 100 m]`, both numbers from 0 to 10 |
 
-## Promotion after a visual pass
+`release.py` moves `<out>/current.json` only if every score is at least the previous pin's and the floor in `engine/bay/panel-floors.json`. It saves the receipt as `panel-<sha256>.json` beside the release. A stale receipt or one lower score leaves the pointer as it was.
 
-The generator stages a local candidate and prints its digest. Score each fixed camera from `engine/bay/neighbourhoods.json` at street level and at 100 m. Run the same command with `--panel /path/to/panel.json` to move `current.json`. The receipt contains the candidate `release`, the `previousRelease` currently pinned in this output directory (JSON null for a first release), the SHA-256 of the tested Wasm in `coreSha256`, the SHA-256 of `neighbourhoods.json` in `panelSpecSha256`, and a `scores` object keyed by all sixteen place names. The default Wasm comes from `engine/page/core.wasm` by default. Pass `--core` for a staged build. Each value is a pair of numbers ordered street, 100 m. Every value must equal or exceed the preceding pin and the committed visual floors. A stale receipt or one lower score leaves the existing pointer in place. Inventory-only output stages metadata for inspection.
+## 3. Restock street life, vehicles or the far model
 
-A prototype may append an `SFPT` trailer to a level-zero BAY1 tile, following the optional `SFST` fixtures. All numbers are little-endian. The four-byte magic and uint32 record count precede records containing the directed edge's vertex index (uint32), absolute base height in 10 cm cells (int32), width and height (uint16 each), and width × height palette bytes in row-major order from the bottom. Each texel covers 30 cm along and up its edge. Zero uses the procedural wall. The building's existing style field identifies Transamerica's perimeter truss and surveyed tall lobby or arcade uses. Install the matching core with a painted pin.
-
-## Street life and vehicles
-
-`sf/cars.mjs` cleans each vehicle's finest outside look before it makes the coarser ones (`sf/sculpt-cars.mjs`: specks off, pinholes and gaps between edges sealed, nubs smoothed) and prints what it changed. `node sf/car-shots.mjs --out DIR` draws each car close up, by day and at night, from the seat, for looking at before and after a change. Supply the directories written by `sf/life.py` and `sf/cars.mjs` as `--life DIR --cars DIR`, or place them under the bake root as `life/` and `cars/`. Each optional manifest member has an `index` object record and an `objects` dictionary. Life keys are the exact named squares in the release. Car keys are the vehicle IDs. Every record has the ordinary manifest-relative path, decoded length and SHA-256. The index files keep their producer format and resolve their child paths relative to the index. The release digest covers both indexes and their complete libraries.
-
-A static build can take `--street-manifest …/releases/<digest>/manifest.json`. It checks the digest and each library object, sets both realm street URLs inside that pin, and uses the original square and car loaders. Older standalone builds still use the six-square sample. To apply a gated paint batch to verified cell tiles, pass `--paint …/450-city-paint/accepted/<batch>.json` to the release generator. The resulting tile bytes enter the normal release digest and promotion gate.
-
-The combined local pilot manifest at `pilot/releases/877b9a7e5695183243d79a2f148e9166b85a3354f61e0f41b5903317edb4ea5f/manifest.json` is a worked example with 149 cell tiles, six graph and life squares, four vehicles and 1,360 far objects. Its two street indexes are included in the 1,533 verified objects.
-
-## Compact local storage
-
-The city runner checkpoints decoded square and tile hashes. After a checkpoint, it writes the base with zstd level 3, decodes the stored object, checks SHA-256 and switches the square or tile to a `.bay.zst` link. It retains the survey ZIP. The cutter opens the frozen bake recipe and decodes the contributors for one tile group in its private scratch directory.
-
-Pass `--compact-store ~/.village/engine/bay/sf-450-city/objects` when staging city release generations. Each compact pin has a local `.bay-store` link. The store shares the zstd geometry base and individual SFPT wall records across versions. Reassembly preserves record order and checks the complete tile hash. Names, graphs, life, vehicles and far objects share verified library directories across paint generations. When the city publication job supersedes an unpublished candidate, it compresses its manifest and keeps its objects available to the exporter. Promoted manifests stay directly readable. The public manifest, paths, decoded lengths and pins use the ordinary static format.
-
-To export one object for a static build or a consuming stream, run the following from the repository root. Omitting `--object` exports all objects and the manifest to an explicitly chosen destination. The local city services keep their releases compact.
+When the tiles stay the same, restage the pinned release with only the new parts. `sf/cars.mjs` cleans each vehicle's finest outside look with `sf/sculpt-cars.mjs` before building coarser looks (specks off, pinholes and edge gaps sealed, nubs smoothed), and `node sf/car-shots.mjs --out DIR` draws each car close up by day and night for before-and-after checks. `ROOT` is unused, so pass `-`:
 
 ```sh
-~/.village/engine/bay/venv/bin/python engine/bay/compact_store.py "$manifest" "$destination" --object tiles/0/206_265.bay
+$PY engine/sf/release.py --restock --life LIFE_DIR --cars CARS_DIR - OUT
+$PY engine/sf/release.py --restock --far FAR_JSON - OUT
+$PY engine/sf/release.py --restock --landing LANDING_DIR --base DIGEST - OUT
 ```
+
+- `--far` takes a listing holding only the far tiles to replace. Its `wedge` and `light` replace the base's.
+- `--landing` takes the folder `sf/far/landing.mjs` wrote (its listing and the `far/landing/<key>.far` objects).
+- `--base DIGEST` starts from another release staged in `OUT` instead of the one `<out>/current.json` pins.
+
+Restock `--far` first, then cut the first view (`landing.mjs`) from that release and restock `--landing` with `--base` set to it, because a cut holds faces of the tiles it was made from.
+
+A restock checks the base manifest against its digest, clones the other objects, refuses a digest that already exists, prints the new digest and never moves `<out>/current.json`. The tiles are unchanged, so it needs no panel.
+
+## 4. Pin, build and bundle
+
+1. Make sure the release is under `~/.village/engine/bay/450-city-paint/sf/releases/<digest>/`. `build.mjs` reads it there by default and `data.mjs pack` reads it nowhere else. The city job stages into `~/.village/engine/bay/sf-450-city/sf`, so restock into the paint folder or copy the release folder across.
+2. Copy the release's `manifest.json` to `engine/sf/pilot/releases/<digest>/manifest.json`.
+3. Put the digest in `engine/sf/pilot/current.json` (`version`, `release`, `manifest`).
+4. Run `node engine/sf/build.mjs`. It builds the pinned release from the paint folder and fails if that folder does not hold it. `--staged DIR` builds whatever another staging folder's pointer names. The build fills the quality-11 Brotli cache the bundle needs.
+5. Run `node deploy/data.mjs pack` and commit the pin, the manifest copy and `deploy/data.json` together.
+
+Other checkouts keep their own pin, because `build.mjs` takes the release this checkout names.
+
+## Compact storage
+
+With `--compact-store`, a staged release keeps a `.bay-store` link instead of a tiles folder. `build.mjs` and `deploy/data.mjs` export it on their own. To export by hand, all objects or one:
+
+```sh
+$PY engine/bay/compact_store.py MANIFEST DESTINATION [--object PATH]
+```
+
+The store shares zstd geometry bases and `SFPT` rows across releases. Every hash still describes the decoded bytes, so the public files are the ordinary static format.

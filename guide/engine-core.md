@@ -3,7 +3,14 @@ title: The core
 description: The Rust core compiled to WebAssembly. It decides what every cell is, applies edits and moves what comes loose.
 ---
 
-The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. `npm run core` in `engine/` builds it once for `wasm32-unknown-unknown` with SIMD into `engine/page/core.wasm`. The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes. The page's workers, the mover and the shared world process all load that same file. Read [the engine](/engine) first for where it sits.
+The core is the crate in `engine/core`. It decides what every cell of the world is, applies edits, and moves what comes loose. The page's workers, the mover and the shared world process all load the same build of it, `engine/page/core.wasm`. Read [the engine](/engine) first for where it sits.
+
+## Build it
+
+`npm run core` in `engine/` runs `engine/core/build.mjs`, which builds the crate for `wasm32-unknown-unknown` with SIMD and bulk memory (`engine/core/.cargo/config.toml`) and copies it to `engine/page/core.wasm`.
+
+- **Same bytes everywhere.** The build writes source paths as `/rustc`, `/cargo` and `/core`, so the served file names no one's home folder and two machines build the same bytes.
+- **Cached by source and compiler.** When `engine/core` is committed and clean, the build is kept in `~/.village/engine/core-cache` under the tree's hash and the `rustc` version, and a new worktree copies it instead of building. A `core/` with changes is always built and never kept. `--no-cache` builds anyway.
 
 ## Concepts
 
@@ -69,15 +76,16 @@ Any other first word is read as `1`. Input from outside is read without harm: a 
 
 ## Invariants
 
-- Same edits in the same order give the same cells on every machine. The town, the land, the Bay and fire are computed from rules and hashes. Bodies are not bit-exact across machines, which is why a shared world's process decides them for everyone.
+- Same edits in the same order give the same cells on every machine. The town, the land, the Bay and fire are computed from rules and hashes. Bodies are not bit-exact across machines, which is why in a shared world the world process decides them for everyone.
 - A sector made at a coarser level shows what the finest copy holds wherever a row has been (`fill_of`).
 - The memory layout is private to each build. Plugins and pages call exported functions and never read the core's memory by offset, except for the documented results above.
 
 ## Check a change
 
 ```sh
-cd engine/core && cargo test --release     # the core's own tests
-cd engine && npm run core && npm run check
+(cd engine/core && cargo test --release)                       # the core's own tests
+npm --prefix engine run core                                   # build core.wasm
+npm --prefix engine run check                                  # the engine's checks
 ```
 
 A core can be swapped into a running server without a restart: build it, then `POST /core/look`. Each world process starts the new module and replays the kept edits. Bodies in flight are lost.

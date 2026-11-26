@@ -1,32 +1,63 @@
 # Street graph, v1
 
-A release with street life includes a `graph` dictionary in its manifest. It maps square name to the same file record as `names`, under `graph/<square>.json`. Load adjacent squares for a seam. Positions are absolute integer [x east, z south] pairs in 10 cm cells in the release frame.
+The street graph is where cars may drive, people may walk and rails run, one file per 1 km square. A release lists them in its manifest's `graph` section as `graph/<square>.json` ([the San Francisco release](../../guide/sf-release.md)). [street_graph.py](../bay/street_graph.py) writes them from OSM and DataSF observations, [transport.py](../bay/transport.py) adds road levels and traffic controls, and [life.py](life.py) cuts them down to the street life the page runs.
 
-Each file contains its `version`, `square` and the following arrays.
+Positions are integer `[x, z]` pairs in 10 cm cells in the release frame: x east and z south of 500,000 m east, 4,250,000 m north in UTM zone 10N.
 
-| Array | Geometry and connectivity |
+## A file
+
+`{version: 1, square, ...arrays}`. A segment is included whole when it touches the square or a 5 m collar around it, so neighbouring files overlap. Load the adjacent squares for a seam and join by id.
+
+| Array | Each entry |
 | --- | --- |
-| roads | Directed carriageway segments in traffic order. Each has id, two OSM node IDs in nodes, line, street name, nearest DataSF centreline CNN or null, lanes in this direction, and lanesInferred. OSM one-way direction is respected. If no directional count is tagged, a two-way split assumes equal shares with a minimum of one lane. |
-| turns | Pairs of road IDs for permitted continuations at a shared OSM node. Excludes immediate reversals and applies simple OSM via-node turn restrictions. Via-way, conditional, and per-lane restrictions have no representation in v1. |
-| pavements | Bidirectional mapped footway, pavement, pedestrian street, path or steps. Endpoints in nodes join by OSM ID, including to crossings. |
-| crossings | Mapped crossing ways with shared pedestrian nodes, line and markings tag or null. A null marking gives no paint evidence. |
-| kerbs | DataSF surveyed polylines clipped to the square plus a 5 m overlap. id is the source objectid and can occur on several pieces. |
-| tracks | Mapped cable railway and SF narrow-gauge tram track centre segments. Each has id, nodes and line. |
-| parking | An OSM parking-tagged side, kind and line offset 3.2 m from the source centreline. Use for parked-car placement. Exact stall boundaries and parking restrictions are unknown. |
+| `roads` | A directed carriageway segment in traffic order: `id`, the two OSM node ids in `nodes`, `line`, street `name`, the nearest DataSF centreline `cnn` or null, `lanes` in this direction, `lanesInferred`, and the OSM `highway`, `tunnel`, `bridge` and `layer` strings. OSM one-way is respected. An untagged two-way road splits its lanes evenly, at least one each way. |
+| `turns` | `[from road id, to road id]` for each allowed continuation at a shared OSM node. U-turns are left out, and simple via-node turn restrictions are applied. Via-way, conditional and per-lane restrictions are not represented. |
+| `pavements` | A mapped footway, pavement, pedestrian street, path or steps, both directions: `id`, `nodes`, `line`, `kind`. Ends join by OSM node id, crossings included. |
+| `crossings` | A mapped crossing way: `id`, `nodes`, `line`, `kind`, and its `markings` tag or null. Null is no evidence of paint. |
+| `kerbs` | A DataSF surveyed kerb polyline clipped to the square and its collar: `id` (the source object id, which can repeat across pieces) and `line`. Use kerbs for street-edge placement where present. |
+| `tracks` | A cable car or San Francisco narrow-gauge (1067 mm) tram track centre segment: `id`, `nodes`, `line`. |
+| `parking` | An OSM parking-tagged side of a road: `id` (the segment's `<OSM way>/<from node>/<to node>` plus `/left` or `/right`), `side`, `kind`, and `line` offset 3.2 m from the centreline. Stall boundaries and restrictions are unknown. |
 
-Road, foot and track segment IDs are `OSMway/fromNode/toNode`, stable across squares. Parking appends its side. Join neighbouring arrays by ID and turns by ordered pair. A segment is included in full when it touches the square or its 5 m collar. Mapped ways can end where coverage or mapping ends. Kerb geometry is the source for street-edge placement where present. Pedestrian routing uses the explicit foot graph.
+Road, pavement and track ids are `<OSM way>/<from node>/<to node>`, stable across squares. Mapped ways can end where coverage or mapping ends.
 
-The inputs beside each lidar archive include OSM map observations and the active DataSF registered-business categories and coordinates. The private intermediate contains no business names or mailing addresses.
+For `tunnel`, `bridge` and `layer`, a surveyed way defaults to `"no"`, `"no"` and `"0"`, and subtypes such as `building_passage` are kept. Null means the way could not be matched to the city-wide tag extract.
 
-Each directed road includes its OSM `highway` string. `tunnel`, `bridge`, and `layer` retain their OSM text values, including subtypes such as `building_passage`. For a surveyed way the defaults are `"no"`, `"no"`, and `"0"`. A null means the way could not be reconciled to the supplemental survey. Life stores the same fields once per way in `roadTags[wayId]`.
+## Points
 
-The following point inventories are owned by the square containing the point in its half-open bounds. Points use the same integer 10 cm X/Z frame as the road graph.
+Each point belongs to the one square whose half-open bounds contain it, so these arrays do not overlap.
 
-| Array | Source and interpretation |
+| Array | Source and meaning |
 | --- | --- |
-| `controls` | OSM road nodes tagged `stop` or `traffic_signals`, with node ID, point, kind and optional direction. Only `stop=all` gives `allWay: true`; null means the scope is unknown. |
-| `stopSigns` | DataSF Stop Signs, with object ID and point, plus CNN, street-facing direction or source status when supplied. |
-| `signals` | DataSF Traffic Signals, including inventory object ID, point, CNN and signal number when supplied. |
-| `photoStopSigns` | Mapillary sign observations, as individual points. An observed sign has no inferred junction ownership. |
+| `controls` | OSM road nodes tagged `stop` or `traffic_signals`: `node`, `point`, `kind`, `direction`. `allWay` is true only for `stop=all`; null means unknown. |
+| `stopSigns` | [DataSF Stop Signs](https://data.sf.gov/d/4542-gpa3): `id`, `point`, and the CNN, facing or status when supplied |
+| `signals` | [DataSF Traffic Signals](https://data.sf.gov/d/ybh5-27n2): `id`, `point`, CNN and signal number when supplied |
+| `photoStopSigns` | Mapillary stop-sign sightings as bare points, with no junction inferred |
 
-`bay/transport.py <city-root> <output-graphs>` joins the retained city data with a cached city-wide OSM tag extract and two municipal inventories. It checkpoints each enriched output and its input hashes. All four point inventories travel in the life file too. [Stop Signs](https://data.sf.gov/d/4542-gpa3) · [Traffic Signals](https://data.sf.gov/d/ybh5-27n2)
+## Street life
+
+`life.py` writes `<square>.json`, `transit.json` and an `index.json` of `{path, bytes, sha256}` records. A life file keeps `walk`, `roads`, `park`, `rail` and `heads` as flat number arrays, carries the four point arrays above, and stores each way's OSM tags once in `roadTags`. Its docstring gives every field. `transit.json` holds the streetcar and cable car routes and the bus and trolleybus routes with their stops.
+
+```sh
+~/.village/engine/bay/venv/bin/python engine/sf/life.py --graphs GRAPHS --out OUT
+~/.village/engine/bay/venv/bin/python engine/bay/transport.py ROOT OUT
+```
+
+The inputs never hold business names or mailing addresses: only the DataSF registered-business categories and coordinates.
+
+`?street=0` turns street life off in the realm.
+
+## Check the streets
+
+`test/street.mjs` checks the street paint, repainted cars and street shots, and `test/sf-life.mjs` counts people and vehicles and times frames with street life on and off. From the repository root:
+
+```sh
+cd engine
+node test/street.mjs [--parts cars,marks,shots] [--no-build] [--places "Powell,Castro"]
+node test/sf-life.mjs [--no-build]
+node sf/street-shots.mjs --out ~/.village/engine/sf/street-2/new [--only city|realm]
+~/.village/engine/bay/venv/bin/python -I sf/street_checks.py ~/.village/engine/sf/street-2/new
+~/.village/engine/bay/venv/bin/python -I sf/street_sheet.py photos ~/.village/engine/sf/street-2/new
+~/.village/engine/bay/venv/bin/python -I sf/street_sheet.py sheet OLD NEW OUT
+```
+
+`street_sheet.py photos` finds a Mapillary photograph for each view that has none, and `sheet` lays old render, new render and photograph side by side.

@@ -2,7 +2,8 @@
 
 A feature is a folder here, `features/<name>/`. It is built into the site only when
 `site.config.mjs` has `flags: { "<name>": true }`. Off is the default, and with the flag off the
-build does not read the folder at all.
+build does not read the folder at all. [The site guide](../../guide/site.md#feature-flags) shows where
+flags sit in the build.
 
 A feature folder may hold:
 
