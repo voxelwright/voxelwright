@@ -58,7 +58,8 @@ html.first #realm .sky :is(.foot, .vx-groove) { display: none; }
   html.first #realm.folds .sky:has(.modes) .vx-slider { display: none; }
   html.first #realm.folds .sky .weather { grid-column: 1; grid-row: 3 / span 2; }
   html.first #realm.folds .sky header.g { grid-column: 2; grid-row: 3; }
-  html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; }
+  html.first #realm.folds .sky .graphics { grid-column: 2; grid-row: 4; grid-auto-flow: row; grid-template-columns: 0.85fr 1.15fr; }
+  html.first #realm.folds .sky .graphics > label:last-child { grid-column: 1 / -1; }
   /* (The resolution's rows would take the panel down over BLOG: in the first view they wait for the realm's own panel.) */
   html.first #realm.folds .sky .part.res > * { display: none; }
 }

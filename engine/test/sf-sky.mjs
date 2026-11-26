@@ -75,8 +75,11 @@ const look = (page) => page.evaluate(() => {
     over: boards.filter((b) => meets(grown, b)).map((b) => b.id), credits: meets(grown, box(document.querySelector('#first .credits'))),
     panel: vis(document.querySelector('#realm .sky')), others,
     parts: Object.fromEntries(Object.entries({ weather: '#realm .sky .weather', graphics: '#realm .sky .graphics', time: '#realm .sky .vx-slider', say: '#realm .sky .say', reset: '#realm .sky .reset', home: '#realm .sky .home' }).map(([n, s]) => [n, vis(document.querySelector(s))])),
-    weather: e.realmControls.sky.weather, preset: e.graphics.preset, kept: (() => { try { return localStorage.getItem('village.graphics') } catch { return null } })(),
+    weather: e.realmControls.sky.weather, preset: e.graphics.preset, resolution: e.graphics.resolution, kept: (() => { try { return localStorage.getItem('village.graphics') } catch { return null } })(),
     checked: document.querySelector('#realm input[name=realm-graphics]:checked')?.value ?? null,
+    resAutoShown: vis(document.querySelector('#realm .sky .res-auto')),
+    resFpsShown: vis(document.querySelector('#realm .sky .res-fps')),
+    resManualShown: vis(document.querySelector('#realm .sky .res-manual')),
     focus: !!document.activeElement && document.querySelector('#realm').contains(document.activeElement),
     engaged: e.first.engaged, first: document.documentElement.classList.contains('first'), state: e.explore.state,
   }
@@ -122,8 +125,23 @@ try {
     await page.waitForTimeout(600)
     const used = await look(page)
     check(used.weather === 'fog', `a press on Fog brings fog (${used.weather})`)
-    check(used.preset === 'low' && used.kept === 'low' && used.checked === 'low', `a press on Low draws at Low and keeps it (${used.preset}, kept ${used.kept}, checked ${used.checked})`)
+    check(used.preset === 'low' && used.kept === 'low' && used.checked === 'low' && used.resolution.auto === true, `a press on Low draws at Low, keeps it, and leaves Dynamic resolution On (${used.preset}, kept ${used.kept}, checked ${used.checked}, auto ${used.resolution.auto})`)
     check(!used.focus && !used.engaged && used.state === 'idle', `neither leaves the focus on the control (${used.focus}) nor asks for the way in (${used.state})`)
+    // Where the resolution section is shown (desk and upright phone), Dynamic resolution is On by default with Target FPS
+    // shown and the slider hidden; turning it Off shows the slider and hides Target FPS, without affecting Graphics.
+    if (used.resAutoShown) {
+      check(used.resFpsShown && !used.resManualShown, 'Dynamic resolution On by default shows Target FPS and hides the resolution slider')
+      await press(page, phone, ...(await middle(page, '#realm .sky .res-auto')))
+      await page.waitForTimeout(400)
+      const manual = await look(page)
+      await page.screenshot({ path: join(shots, `${size}-manual-res.png`) })
+      check(!manual.resolution.auto && !manual.resFpsShown && manual.resManualShown && manual.preset === 'low', `turning Dynamic resolution Off shows the slider, hides Target FPS, and keeps Graphics preset (${JSON.stringify({ auto: manual.resolution.auto, fps: manual.resFpsShown, manual: manual.resManualShown, preset: manual.preset })})`)
+      check(!manual.covers.length, `with the resolution slider shown, the open panel still leaves clear ${manual.keep.join('; ')}${manual.covers.length ? ` (but covers ${manual.covers.join(', ')})` : ''}`)
+      await press(page, phone, ...(await middle(page, '#realm .sky .res-auto')))
+      await page.waitForTimeout(400)
+      const backOn = await look(page)
+      check(backOn.resolution.auto && backOn.resFpsShown && !backOn.resManualShown, 'turning Dynamic resolution back On restores Target FPS and hides the slider')
+    }
     if (!phone) {
       // The hour's fader dragged and let go over the picture gives the keys back too.
       const [fx, fy] = await middle(page, '#realm .sky .vx-slider')
@@ -144,7 +162,7 @@ try {
     await ready(page)
     const kept = await look(page)
     check(kept.preset === 'low' && kept.checked === 'low' && !kept.panel && kept.key, `after a reload Low is still chosen (${kept.preset}, checked ${kept.checked}), the key there and its panel folded`)
-    await page.evaluate(() => { try { localStorage.removeItem('village.graphics') } catch { /* nothing kept */ } })
+    await page.evaluate(() => { try { localStorage.removeItem('village.graphics'); localStorage.removeItem('village.resolution') } catch { /* nothing kept */ } })
 
     if (size !== 'side') {
       // Open the panel, then go in: the panel is folded on the roof. On a desk by two presses on the board (the panel

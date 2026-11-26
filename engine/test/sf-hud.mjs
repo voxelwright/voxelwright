@@ -369,17 +369,42 @@ try {
         const press = async (sel) => { const r = await page.evaluate((sel) => { const b = document.querySelector(sel)?.getBoundingClientRect(); return b && b.width > 0 ? [b.left + b.width / 2, b.top + b.height / 2] : null }, sel); if (!r) return false; if (phone) await page.touchscreen.tap(r[0], r[1]); else await page.mouse.click(r[0], r[1]); await page.waitForTimeout(400); return true }
         const opened = await press('#realm .fold')
         await look('sky', 'the Sky panel open', true)
-        const keys = await page.evaluate(() => ({ say: !!document.querySelector('#realm .sky .say')?.checkVisibility(), graphics: [...document.querySelectorAll('#realm .sky input[name=realm-graphics]')].map((el) => el.value), chosen: document.querySelector('#realm .sky input[name=realm-graphics]:checked')?.value }))
-        check(opened && keys.say && keys.graphics.join() === 'auto,low,medium,high' && keys.chosen === 'auto', `the Sky panel has a Say key and the graphics, Auto chosen (${JSON.stringify(keys)})`)
-        // Low: the scale pinned at 0.3, no shadows or mirrors, and kept.
+        const keys = await page.evaluate(() => ({
+          say: !!document.querySelector('#realm .sky .say')?.checkVisibility(),
+          graphics: [...document.querySelectorAll('#realm .sky input[name=realm-graphics]')].map((el) => el.value),
+          chosen: document.querySelector('#realm .sky input[name=realm-graphics]:checked')?.value,
+          rates: [...document.querySelectorAll('#realm .sky .rates label')].map((el) => el.textContent.trim()),
+        }))
+        check(opened && keys.say && keys.graphics.join() === 'low,medium,high' && keys.chosen === 'high', `the Sky panel has a Say key and the graphics, High chosen (${JSON.stringify(keys)})`)
+        // Graphics presets change shadows/mirrors only and never change resolution (scale or dynamic resolution state).
+        const beforeLow = await page.evaluate(() => ({ scale: globalThis.engine.scale, res: globalThis.engine.graphics.resolution }))
         await press('#realm .sky label:has(input[value=low])')
-        const set = await page.evaluate(() => { const e = globalThis.engine; let kept = null; try { kept = localStorage.getItem('village.graphics') } catch {} return { preset: e.graphics.preset, scale: e.scale, pinned: e.graphics.pinned, flags: e.flags, kept } })
-        check(set.preset === 'low' && set.scale === 0.3 && set.pinned && (set.flags & 3) === 0 && set.kept === 'low', `Low is chosen by a press: the scale pinned at 0.3, shadows and mirrors off, written to the browser's storage (${JSON.stringify(set)})`)
-        await press('#realm .sky label:has(input[value=auto])')
-        const auto = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, pinned: globalThis.engine.graphics.pinned, flags: globalThis.engine.flags }))
-        check(auto.preset === 'auto' && !auto.pinned && (auto.flags & 3) === 3, `Auto again: shadows and mirrors back, the scale the GPU's to steer (${JSON.stringify(auto)})`)
+        const set = await page.evaluate(() => { const e = globalThis.engine; let kept = null; try { kept = localStorage.getItem('village.graphics') } catch {} return { preset: e.graphics.preset, scale: e.scale, pinned: e.graphics.pinned, res: e.graphics.resolution, flags: e.flags, kept } })
+        check(set.preset === 'low' && set.scale === beforeLow.scale && set.res.auto === beforeLow.res.auto && (set.flags & 3) === 0 && set.kept === 'low', `Low is chosen by a press: shadows and mirrors off, resolution untouched, written to storage (${JSON.stringify(set)})`)
+        await press('#realm .sky label:has(input[value=high])')
+        const high = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, scale: globalThis.engine.scale, res: globalThis.engine.graphics.resolution, flags: globalThis.engine.flags }))
+        check(high.preset === 'high' && high.scale === beforeLow.scale && high.res.auto === beforeLow.res.auto && (high.flags & 3) === 3, `High again: shadows and mirrors back, resolution untouched (${JSON.stringify(high)})`)
+        // Dynamic resolution On/Off: On shows Target FPS toggles (clearly labeled FPS) and hides the slider; Off shows the slider and hides Target FPS.
+        await press('#realm .sky label.res-auto')
+        const dynOn = await page.evaluate(() => ({
+          res: globalThis.engine.graphics.resolution,
+          fpsShown: !!document.querySelector('#realm .sky .res-fps')?.checkVisibility(),
+          sliderShown: !!document.querySelector('#realm .sky .res-manual')?.checkVisibility(),
+          rates: [...document.querySelectorAll('#realm .sky .rates label')].map((el) => el.textContent.trim()),
+        }))
+        check(dynOn.res.auto && dynOn.fpsShown && !dynOn.sliderShown && dynOn.rates.some((t) => /FPS/.test(t)), `Dynamic resolution On shows Target FPS toggles and hides the resolution slider (${JSON.stringify(dynOn)})`)
+        await press('#realm .sky .rates label:has(input[value="30"])')
+        const fps30 = await page.evaluate(() => ({ res: globalThis.engine.graphics.resolution, preset: globalThis.engine.graphics.preset }))
+        check(fps30.res.auto && fps30.res.target === 30 && fps30.preset === 'high', `Target FPS 30 selected without changing graphics preset (${JSON.stringify(fps30)})`)
+        await press('#realm .sky label.res-auto')
+        const dynOff = await page.evaluate(() => ({
+          res: globalThis.engine.graphics.resolution,
+          fpsShown: !!document.querySelector('#realm .sky .res-fps')?.checkVisibility(),
+          sliderShown: !!document.querySelector('#realm .sky .res-manual')?.checkVisibility(),
+        }))
+        check(!dynOff.res.auto && !dynOff.fpsShown && dynOff.sliderShown, `Dynamic resolution Off hides Target FPS and shows the resolution slider (${JSON.stringify(dynOff)})`)
         // (Pinned again for the pictures that follow, as at the start.)
-        await page.evaluate(() => { globalThis.engine.scale = 0.75 })
+        await page.evaluate(() => { globalThis.engine.scale = 0.75; try { localStorage.removeItem('village.resolution') } catch {} })
         // Say: the line opens with the focus in it (a phone's keyboard comes up for that), stays, and takes what is typed.
         await press('#realm .sky .say')
         const line = await page.evaluate(() => { const f = document.querySelector('#realm .egg-line input'); return { open: !!f?.closest('label')?.checkVisibility(), focused: document.activeElement === f, folded: !document.querySelector('#realm .sky')?.checkVisibility() } })
@@ -402,14 +427,14 @@ try {
           check(backed && after.credits && !after.key, `one tap on it goes back to the view, the credits key there and the key gone (${JSON.stringify(after)})`)
         }
       }
-      // A preset chosen is there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.
+      // A preset and resolution setting chosen are there again when the page is opened again (once: a load is long), and an address's ?shadows=0 is kept over it.
       if (mode === 'default' && size === 'wide') {
-        await page.evaluate(() => { globalThis.engine.graphics.preset = 'high' })
+        await page.evaluate(() => { globalThis.engine.graphics.preset = 'high'; globalThis.engine.graphics.resolution = { auto: false, scale: 0.6 } })
         await page.goto(`${site.url}/sf/index.html?shadows=0`)
         await page.waitForFunction(() => globalThis.engine?.graphics, null, { timeout: 300_000 })
-        const again = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, scale: globalThis.engine.scale, flags: globalThis.engine.flags }))
-        check(again.preset === 'high' && again.scale === 0.8 && (again.flags & 3) === 2, `opened again, the page has High as chosen (the scale 0.8), and the address's ?shadows=0 over it (${JSON.stringify(again)})`)
-        await page.evaluate(() => { globalThis.engine.graphics.preset = 'auto'; try { localStorage.removeItem('village.graphics') } catch {} })
+        const again = await page.evaluate(() => ({ preset: globalThis.engine.graphics.preset, scale: globalThis.engine.scale, res: globalThis.engine.graphics.resolution, flags: globalThis.engine.flags }))
+        check(again.preset === 'high' && again.scale === 0.6 && !again.res.auto && (again.flags & 3) === 2, `opened again, the page has High and manual 0.6 resolution as chosen, and the address's ?shadows=0 over it (${JSON.stringify(again)})`)
+        await page.evaluate(() => { globalThis.engine.graphics.preset = 'high'; globalThis.engine.graphics.resolution = { auto: true, target: 60 }; try { localStorage.removeItem('village.graphics'); localStorage.removeItem('village.resolution') } catch {} })
       }
       check(errors.length === 0, `no errors${errors.length ? `: ${errors.slice(0, 2).join(' | ')}` : ''}`)
       results[`${mode}-${size}`] = at

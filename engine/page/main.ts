@@ -511,53 +511,54 @@ async function main() {
   /** In a shared world, the hour the town's residents are out by: the realm's own, else eleven, as the world's process has it (world.mjs `hourNow`), whatever hour this page shows. Null where the world is the page's own. */
   let worldHour: (() => number) | null = null
   let flags = (query.get('shadows') === '0' ? 0 : SHADOWS) | (query.get('mirrors') === '0' ? 0 : MIRRORS) | (query.get('heat') === '1' ? HEAT : 0) | (query.get('flat') === '1' ? FLAT : 0)
-  // How the picture is drawn, as chosen in the realm's Sky panel (#450) and kept in this browser. Auto is the page as it
-  // was: the march's scale follows the GPU (`steer`), and its shadows and mirrors are what the address says. Each other
-  // preset pins the scale and chooses those two passes. What the address says is kept whatever is chosen: a scale it
-  // fixes (`?scale=`), and shadows or mirrors it turns off (`?shadows=0`, `?mirrors=0`).
-  const PRESETS = { auto: null, low: { scale: 0.3, flags: 0 }, medium: { scale: 0.5, flags: SHADOWS }, high: { scale: 0.8, flags: SHADOWS | MIRRORS } } as const
+  // How the picture is drawn, as chosen in the realm's Sky panel (#450) and kept in this browser. Graphics presets
+  // control rendering passes (shadows and mirrors) only and never change resolution. What the address says is kept
+  // whatever is chosen: shadows or mirrors it turns off (`?shadows=0`, `?mirrors=0`), and a scale it fixes (`?scale=`).
+  const PRESETS = { low: { flags: 0 }, medium: { flags: SHADOWS }, high: { flags: SHADOWS | MIRRORS } } as const
   type Preset = keyof typeof PRESETS
   const addressed = flags & (SHADOWS | MIRRORS)
-  let preset: Preset = 'auto', custom = false
-  // The resolution, as the Sky panel's fader and its Auto switch have it: pinned at a scale by hand, or the GPU's to
-  // steer (`steer`) for a frame rate, 30 or 60 a second or the screen's own (0). A preset is the same thing chosen
-  // with its passes: Auto steers, the others pin. What is chosen is kept in this browser beside the preset.
+  let preset: Preset = 'high'
+  // Dynamic resolution, as the Sky panel's switch, Target FPS bank and manual slider have it: on by default, steering
+  // the march's scale (`steer`) for a target frame rate (30 or 60 FPS, or the screen's own rate = 0); when off, pinned
+  // at the slider's scale. Independent of Graphics presets: neither affects the other.
   let rate = 60
   const RATES = [30, 60, 0] as const
   const steered = () => !fixed && held < 1e6
   const keepResolution = () => { try { localStorage.setItem('village.resolution', JSON.stringify({ auto: steered(), scale, target: rate })) } catch { /* this visit only */ } }
   const draws = (p: Preset, keep = true) => {
-    preset = p; custom = false
-    const to = PRESETS[p]
-    flags = (flags & ~(SHADOWS | MIRRORS)) | ((to ? to.flags : SHADOWS | MIRRORS) & addressed)
-    if (!fixed) { if (to) { scale = to.scale; held = 1e9 } else { held = 0 } }
+    preset = p
+    flags = (flags & ~(SHADOWS | MIRRORS)) | (PRESETS[p].flags & addressed)
     // (Storage may be refused, a private window: the choice is then this visit's.)
-    if (keep) { try { localStorage.setItem('village.graphics', p) } catch { /* this visit only */ } keepResolution() }
+    if (keep) try { localStorage.setItem('village.graphics', p) } catch { /* this visit only */ }
   }
-  /** The resolution by hand: a scale pins it (on steer's grid of 0.05, 0.3 to 1), `auto` gives it back to the GPU, `target` is the frame rate steered for. An address's `?scale=` is kept over it. */
+  /** Dynamic resolution and manual scale: `auto` turns dynamic resolution on or off, `target` is the FPS steered for (0: screen max), `scale` pins a manual scale (0.3 to 1 on steer's 0.05 grid). An address's `?scale=` wins over it. */
   const resolve = (to: { scale?: number; auto?: boolean; target?: number }, keep = true) => {
     if (fixed) return
     if (to.target !== undefined && (RATES as readonly number[]).includes(to.target)) rate = to.target
     if (to.auto === true) held = 0
     else if (to.auto === false || to.scale !== undefined) { scale = Math.round(Math.max(0.3, Math.min(1, to.scale ?? scale)) * 20) / 20; held = 1e9 }
-    // Moved off what the preset draws, the preset is no longer what the page has.
-    const of = PRESETS[preset]
-    if (to.auto !== undefined || to.scale !== undefined) custom = of ? steered() || scale !== of.scale : !steered()
     if (keep) keepResolution()
   }
   // (Taken up again only where the Sky panel is, which can change it: the realm's page, below.)
   const keptGraphics = () => {
     try {
       const kept = localStorage.getItem('village.graphics')
-      if (kept && kept !== 'auto' && kept in PRESETS) draws(kept as Preset, false)
+      if (kept && kept in PRESETS) draws(kept as Preset, false)
       const res = JSON.parse(localStorage.getItem('village.resolution') ?? 'null') as { auto?: unknown; scale?: unknown; target?: unknown } | null
-      if (res && typeof res === 'object') resolve({ ...(typeof res.target === 'number' ? { target: res.target } : {}), ...(res.auto === true ? { auto: true } : typeof res.scale === 'number' ? { scale: res.scale } : {}) }, false)
+      if (res && typeof res === 'object') {
+        const next: { scale?: number; auto?: boolean; target?: number } = {}
+        if (typeof res.target === 'number') next.target = res.target
+        if (res.auto === true) next.auto = true
+        else if (res.auto === false || typeof res.scale === 'number') {
+          next.auto = false
+          if (typeof res.scale === 'number') next.scale = res.scale
+        }
+        resolve(next, false)
+      }
     } catch { /* nothing kept */ }
   }
-  /** The preset chosen, or 'custom' once the fader or the switch has moved the resolution off it. */
-  const shownPreset = () => custom ? 'custom' : preset
   const graphics = {
-    presets: Object.keys(PRESETS) as Preset[], get: shownPreset, set: (p: string) => { if (p in PRESETS) draws(p as Preset) },
+    presets: Object.keys(PRESETS) as Preset[], get: () => preset, set: (p: string) => { if (p in PRESETS) draws(p as Preset) },
     resolution: { rates: RATES, get: () => ({ scale, auto: steered(), target: rate, fixed }), set: resolve },
   }
   own.keys.set('KeyH', () => { flags ^= HEAT })
@@ -1786,7 +1787,7 @@ async function main() {
     // In a lobby it stays folded, as it is on the roof alone (#526).
     first?.during(() => { realmUi.fold(true); return () => { if (!joined) realmUi.rest() } })
     if (joined) realmUi.fold(true)
-    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return shownPreset() }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (a preset, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
+    Object.assign((globalThis as unknown as { engine: object }).engine, { realmControls: realmUi, graphics: { get presets() { return graphics.presets }, get preset() { return preset }, set preset(p: string) { graphics.set(p) }, /** The resolution: { scale, auto, target, fixed }; set with any of scale, auto and target, as the panel does. */ get resolution() { return graphics.resolution.get() }, set resolution(to: { scale?: number; auto?: boolean; target?: number }) { resolve(to) }, /** The screen's own frame, ms, as a target of 0 aims at. */ get screenMs() { return fastestMs }, /** Whether the scale is pinned (manual resolution, the address, a check), not the GPU's to steer. */ get pinned() { return fixed || held > 1e6 } } })
     // The controls in play, kept off the body (#450, play-hud.ts): the wheel, or `?hud=context|quiet`, or `?hud=classic` for the realm's own as they were.
     const explored = () => (globalThis as unknown as { engine: { explore?: { state: string; back(): Promise<void> } } }).engine.explore
     const played = playHud({ ui: realmUi, me, input: controls, project, fine: FINE, tools: tools.map((t) => t.name), tool: () => tool, pickTool, watch: (each) => void watchers.add(each), engaged: () => first?.engaged ?? true, wand: staff, back: { go: () => void explored()?.back(), can: () => explored()?.state === 'in' } })

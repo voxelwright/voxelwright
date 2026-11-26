@@ -46,7 +46,7 @@ export interface RealmPage {
 const MODE_NAMES: Record<Mode, string> = { light: 'Light', dark: 'Dark', sf: 'SF now' }
 const MODE_TITLES: Record<Mode, string> = { light: 'The city at a quarter past five, the sun low and the towers warm', dark: 'The city at half past nine at night, every window lit', sf: "San Francisco's own time, sun and moon, and its weather as the National Weather Service last saw it at SFO" }
 
-const GRAPHICS: Record<string, string> = { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High' }
+const GRAPHICS: Record<string, string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 const NAMES: Record<Weather, string> = { clear: 'Clear', overcast: 'Overcast', fog: 'Fog', rain: 'Rain' }
 const clock = (h: number) => { const m = Math.round(h * 60) % 1440; return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}` }
@@ -77,13 +77,17 @@ const STYLE = /* css */ `
 /* (Its two parts, the sky's and the rest, are one column of the panel; side by side on a phone on its side.) */
 #realm .sky .part { display: contents; }
 #realm .sky .foot { display: flex; justify-content: flex-end; gap: calc(var(--vx) * 3); }
-/* The graphics, two by two as the weather (Medium is as wide as Overcast). */
-#realm .sky .graphics { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
+/* The graphics: three quality tiers across one row, with Medium given extra room so its words stay clear of its walls. */
+#realm .sky .graphics { grid-auto-flow: column; grid-template-columns: 1fr 1.4fr 1fr; }
 #realm .sky .foot .say { margin-inline-end: auto; }
-/* The resolution: a fader (a picture's size is set by where it stands and moved finely), its Auto switch, and the frame rates Auto holds, three across. */
+/* Dynamic resolution: a slide switch on its header row; when on, a bank of Target FPS keys; when off, a resolution fader. */
+#realm .sky .res-auto { display: flex; align-items: center; justify-content: space-between; inline-size: 100%; min-block-size: calc(var(--vx) * 9); gap: calc(var(--vx) * 2); }
+#realm .sky .res-auto .r-title { font: 600 13px/1.2 var(--vx-font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--vx-ink-quiet); }
+#realm .sky :is(.res-fps, .res-manual) { display: grid; gap: calc(var(--vx) * 2); }
+#realm .sky h3 { margin: 0; font: 600 12px/1 var(--vx-font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--vx-ink-quiet); }
+#realm .sky .sub output { font-size: 16px; }
 #realm .sky .rates { grid-auto-flow: row; grid-template-columns: 1fr 1fr; }
-/* (By touch the keys are the smaller size: four across fit, and the panel stays short enough to leave the boards clear.) */
-@media (pointer: coarse) { #realm .sky .rates { grid-template-columns: repeat(4, 1fr); } }
+#realm .sky .rates > label:last-child { grid-column: 1 / -1; }
 /* (The resolution is a part of its own, a third column on a phone on its side; in one column it comes before the keys at the foot.) */
 #realm .sky .part.res > * { order: 1; }
 #realm .sky .vx-groove, #realm .sky .foot { order: 2; }
@@ -114,6 +118,7 @@ html:is([data-hud="quiet"], [data-hud="wheel"]).away #realm .lobbies { opacity: 
   #realm .fold { display: block; position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(12px, env(safe-area-inset-top)); }
   /* (On a phone the panel is words a column wide: the smaller size of the key font, as the tools have, its cells still whole pixels, typeface.ts.) */
   #realm .sky { top: calc(max(12px, env(safe-area-inset-top)) + 56px); right: max(12px, env(safe-area-inset-right)); inline-size: min(calc(100vw - 24px), calc(var(--vx) * 76)); --vx-key-size: var(--vx-key-small); }
+  #realm .sky .res-auto { min-block-size: calc(var(--vx) * 11); }
   /* The line to say something on (eggs.ts) stands at the top by touch: the phone's keyboard comes up over the bottom. Its
      words are 16 px, under which Safari zooms the page to the field. */
   #realm .egg-line { bottom: auto !important; top: calc(env(safe-area-inset-top, 0px) + 140px) !important; z-index: 2; }
@@ -199,11 +204,20 @@ export function realmControls(page: RealmPage) {
       <div class="foot">${page.say ? '<button class="vx-button say" type="button" aria-keyshortcuts="Enter" title="Say something to the city (Enter)">Say…</button>' : ''}${page.ai ? '<button class="vx-button ai" type="button" aria-haspopup="dialog" title="Connect your own AI to make new things">Your AI…</button>' : ''}<button class="vx-button reset" type="button" data-vx-kind="danger" title="Put the world back as it was (Backspace)">Reset world</button></div>
       </div>
       ${page.graphics?.resolution ? `<div class="part res">
-      <header class="r"><h2>Resolution</h2><output class="res" aria-live="off"></output></header>
-      <span class="vx-slider"><input class="res" type="range" min="30" max="100" step="5" aria-label="Resolution, percent of the screen's pixels"></span>
-      <div class="vx-toggle-group rates" role="radiogroup" aria-label="Auto resolution: off, or the frames a second it holds">
-        <label title="Off: the resolution stays where the fader is"><input type="radio" name="realm-rate" value="off">Off</label>
-        ${page.graphics.resolution.rates.map((r) => `<label title="Auto: the resolution follows the GPU to hold ${r ? `${r} frames a second` : 'the screen’s own rate'}"><input type="radio" name="realm-rate" value="${r}">${r || 'Max'}</label>`).join('')}
+      <label class="vx-toggle res-auto" title="Dynamic resolution: adjust resolution automatically to hold the target FPS">
+        <span class="r-title">Dynamic resolution</span>
+        <input type="checkbox" role="switch" class="res-auto">
+        <span class="vx-switch"></span>
+      </label>
+      <div class="res-fps">
+        <header class="sub"><h3>Target FPS</h3></header>
+        <div class="vx-toggle-group rates" role="radiogroup" aria-label="Target FPS">
+          ${page.graphics.resolution.rates.map((r) => `<label title="${r ? `Target ${r} FPS` : 'Target the screen’s max refresh rate'}"><input type="radio" name="realm-rate" value="${r}">${r ? `${r} FPS` : 'Max FPS'}</label>`).join('')}
+        </div>
+      </div>
+      <div class="res-manual" hidden>
+        <header class="sub"><h3>Resolution</h3><output class="res" aria-live="off"></output></header>
+        <span class="vx-slider"><input class="res" type="range" min="30" max="100" step="5" aria-label="Resolution, percent of the screen's pixels"></span>
       </div>
       </div>` : ''}
     </section>
@@ -230,7 +244,7 @@ export function realmControls(page: RealmPage) {
   const modeKeys = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-mode]')]
   const tools = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-tool]')]
   const graphics = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-graphics]')]
-  const res = page.graphics?.resolution, resIn = root.querySelector<HTMLInputElement>('input.res'), resOut = root.querySelector<HTMLOutputElement>('output.res')
+  const res = page.graphics?.resolution, resAuto = root.querySelector<HTMLInputElement>('input.res-auto'), resFps = root.querySelector<HTMLElement>('.res-fps'), resManual = root.querySelector<HTMLElement>('.res-manual'), resIn = root.querySelector<HTMLInputElement>('input.res'), resOut = root.querySelector<HTMLOutputElement>('output.res')
   const rates = [...root.querySelectorAll<HTMLInputElement>('input[name=realm-rate]')]
   const panel = $<HTMLElement>('.sky'), fold = $<HTMLButtonElement>('.fold')
   const stick = $<HTMLElement>('.stick'), cap = $<HTMLElement>('.stick .cap')
@@ -255,18 +269,27 @@ export function realmControls(page: RealmPage) {
   root.querySelector('button.lobbies')?.addEventListener('click', () => { if (coarse.matches) folded(true); page.servers?.() })
   root.querySelector('button.ai')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.ai?.() })
   for (const g of graphics) g.addEventListener('change', () => { if (g.checked) page.graphics?.set(g.value) })
-  // The fader pins the resolution where it is let stand (Auto goes off); a rate chosen is what Auto holds, and turns it on.
+  // Dynamic resolution On/Off: On steers resolution to hold Target FPS; Off pins it where the slider stands.
   let sizing = false
   resIn?.addEventListener('pointerdown', () => { sizing = true })
   addEventListener('pointerup', () => { sizing = false })
+  resAuto?.addEventListener('change', () => res?.set({ auto: resAuto.checked }))
   resIn?.addEventListener('input', () => res?.set({ scale: Number(resIn.value) / 100 }))
-  for (const r of rates) r.addEventListener('change', () => { if (r.checked) res?.set(r.value === 'off' ? { auto: false } : { target: Number(r.value), auto: true }) })
+  for (const r of rates) r.addEventListener('change', () => { if (r.checked) res?.set({ target: Number(r.value), auto: true }) })
+  // The kit's voxels, once the world is drawing: the page is plain until they come, and stays so with ?kit=plain.
+  let kit: { adopt(root?: Element): void; refresh?(el: Element): void } | null = null
   // The line opens in the same press, so that a phone brings its keyboard up (Safari does only for a focus the hand made).
   // Where the panel is a drawer behind its key, it is folded first: the line is to be read.
   // (The line was hidden when the kit took up the controls, and is drawn as a card of it once it is shown.)
   root.querySelector('.say')?.addEventListener('click', () => { if (coarse.matches || root.classList.contains('folds')) folded(true); page.say?.(); const line = root.querySelector('.egg-line:not([hidden])'); if (line && !line.hasAttribute('data-vx-live')) kit?.adopt(line) })
   // On a phone the panel folds away behind its key.
-  const folded = (on: boolean) => { panel.hidden = on; fold.setAttribute('aria-expanded', String(!on)); root.classList.toggle('open', !on) }
+  const folded = (on: boolean) => {
+    panel.hidden = on; fold.setAttribute('aria-expanded', String(!on)); root.classList.toggle('open', !on)
+    if (!on && kit) {
+      for (const el of panel.querySelectorAll('.vx-slider, .vx-toggle-group, .vx-switch')) if (!el.closest('[hidden]')) kit.refresh?.(el)
+      kit.refresh?.(panel)
+    }
+  }
   fold.addEventListener('click', () => folded(!panel.hidden))
   folded(coarse.matches)
   // The bank of tools stands down the right edge on a phone and lies along the bottom elsewhere.
@@ -301,15 +324,24 @@ export function realmControls(page: RealmPage) {
     if (t !== shownTool) { shownTool = t; tools.forEach((el, i) => { el.checked = i === t }) }
     const g = page.graphics?.get() ?? ''
     if (g !== shownGraphics) { shownGraphics = g; for (const el of graphics) el.checked = el.value === g }
-    // The resolution as the page has it: under Auto the fader goes where the GPU steers it.
-    if (res && resIn && resOut) {
+    // Dynamic resolution: On shows the Target FPS bank; Off shows the manual resolution fader.
+    if (res && resAuto && resFps && resManual && resIn && resOut) {
       const r = res.get(), at = String(Math.round(r.scale * 100)), key = `${at},${r.auto},${r.target},${r.fixed}`
       if (key !== shownRes) {
+        const toggled = resFps.hidden !== !r.auto
         shownRes = key
+        resAuto.checked = r.auto
+        resFps.hidden = !r.auto
+        resManual.hidden = r.auto
         if (!sizing) resIn.value = at
-        resOut.value = r.auto ? `Auto ${at}%` : `${at}%`
-        for (const el of rates) el.checked = r.auto ? el.value === String(r.target) : el.value === 'off'
-        for (const el of [resIn, ...rates]) el.disabled = r.fixed
+        resOut.value = `${at}%`
+        for (const el of rates) el.checked = el.value === String(r.target)
+        for (const el of [resAuto, resIn, ...rates]) el.disabled = r.fixed
+        if (toggled && !panel.hidden && kit) {
+          const shown = r.auto ? resFps.querySelector('.rates') : resManual.querySelector('.vx-slider')
+          if (shown) kit.refresh?.(shown)
+          kit.refresh?.(panel)
+        }
       }
     }
     // The kit's day and night follow the hour (SPEC: a world with a time of day sets data-theme from its clock).
@@ -334,8 +366,6 @@ export function realmControls(page: RealmPage) {
     }
   })
 
-  // The kit's voxels, once the world is drawing: the page is plain until they come, and stays so with ?kit=plain.
-  let kit: { adopt(root?: Element): void; refresh?(el: Element): void } | null = null
   if (!plainOnly) {
     const at = new URL('../kit/src/index.js', import.meta.url).href
     void import(at).then((k) => { kit = k; k.adopt(root) }).catch(() => {})
