@@ -74,17 +74,18 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `world.ts` | Boxes, slots, the pool, asks to workers. |
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
-| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts`, `wheels.ts` | The other passes of a frame. |
+| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
-| `living.ts`, `drive-cam.ts`, `cockpit.ts` | Driven vehicles, telemetry, the five-mode cinematic driving camera suite (`C` cycles, `X` looks back, `V` toggles the driver seat), and first-person cockpit immersion (head G-force inertia, windshield rain wipers, night dash glow, cabin acoustics). |
+| `living.ts`, `person.ts`, `people.ts`, `residents.ts` | Living things, a person's own body, figures and the town's residents ([living things and people](/living)). |
 | `input.ts` | Keys, pointer, touch and gamepad for play. Modes form a stack; a lane pushes its own mode and pops it. |
-| `gamepad.ts` | Standard W3C Gamepad API input (analog triggers, steering curves, right-stick orbit, dual-motor haptic rumble) and touch steering curve. Zero polling overhead until `gamepadconnected`. |
 | `hud.ts` | The DOM over the picture: the ask bar, cues, notices, panels. |
-| `stunts.ts` | Driving stunt and combo tracker (`engine.stunts`): drifts, hill jumps, 180/360 spins, traffic near-misses (`voxelwright:nearmiss`), speed runs, x1–x5 combos, banking chime, and `[data-panel="stunts"]`. |
-| `minimap.ts`, `map-gpu.ts` | Speed-reactive 3D WebGPU minimap, fullscreen 2D/3D map, and GPS navigation. |
-| `summon.ts` | Instant street-level sports coupe delivery (`G` key on foot). |
-| `car-sculpt.ts` | The GT coupe sculpted from continuous shapes at any size: the default car's look (`fineCar`), the coupe `G` brings and the SF library's coupe. Also `coarser`, which makes a look coarser without opening its shell, and the leak sealer for gaps between cells that meet only at an edge. |
+| `ask.ts`, `making.ts`, `kept.ts`, `maker.ts`, `models.ts` | The ask bar's wishes: the helper, the ghost of what is kept, and making in the page with a visitor's own AI ([making](/making)). |
+| `drive-cam.ts`, `cockpit.ts`, `wheels.ts`, `summon.ts`, `gamepad.ts`, `stunts.ts`, `explore.ts` | Driving cameras, the first-person cockpit, drawn car wheels, summoning a car, the gamepad, stunts and the EXPLORE board ([gameplay](/gameplay)). |
+| `car-sculpt.ts` | The GT coupe sculpted from continuous shapes (`fineCar`, the `G` summon and the SF library coupe), plus `coarser` and the edge-leak sealer that keep vehicle shells closed across levels. |
+| `minimap.ts`, `map-gpu.ts`, `gps.ts` | The 3D minimap, the full-screen map and GPS routes ([gameplay](/gameplay)). |
+| `realms.ts`, `portal.ts`, `wheel.ts` | Stepping between realms without a reload ([realms](/engine-plugins#realms)). |
+| `door.ts`, `lobbies.ts` | Joining a lobby on someone else's machine ([multiplayer](/multiplayer)). |
 | `plugins.ts` | Loading plugin page sides and the pass registry ([page plugin types](/plugin-types)). |
 | `bay.ts` | Loading the core (`open`) and San Francisco tiles from a release ([worlds as cells](/cells)). |
 

@@ -5,17 +5,16 @@ export default {
   description: "Pavlo Zahynailo’s writing and interactive Voxelmorphism experiments.",
   language: "en",
   origin: "https://zahynailo.dev",
-  // Where the site is mounted on its origin (lib/paths.mjs). The Village realm owns "/" on
-  // zahynailo.dev, so the site lives under /blog/: the posts list is /blog/, everything else the
-  // site has is below it, and the landing ("/") is not built. "/" builds the whole origin.
+  // Where the site is mounted on its origin (lib/paths.mjs). The personal front page
+  // (generator/front.mjs) owns "/" on zahynailo.dev, so the site lives under /blog/: the posts list
+  // is /blog/, everything else the site has is below it, and the 3D landing is not built.
+  // "/" builds the whole origin, with the landing at "/".
   base: "/blog/",
 
-  // Answer `Accept: text/markdown` on page routes from the Worker.
-  // Off by default: every page view would then invoke the Worker and count against the
-  // Workers Free plan's 100,000 requests a day, and over the limit those requests get 429
-  // instead of the static page. Turn on once the account is on Workers Paid.
+  // Answer `Accept: text/markdown` on page routes from src/worker.mjs (site/cloudflare.config.ts).
+  // That config is used only by `npm run dev`, which always negotiates whatever this says; the
+  // deployed zahynailo.dev is deploy/'s assets-only Worker and never runs src/worker.mjs.
   // The static .md URLs and <link rel="alternate"> work either way and cost nothing.
-  // `npm run dev` always negotiates, whatever this says.
   negotiateMarkdown: false,
 
   // Every page is built from the Voxelmorphism kit (generator/pages.mjs, notes/voxelmorphism.md);

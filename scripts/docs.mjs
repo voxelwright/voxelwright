@@ -92,7 +92,8 @@ const schemas = body => body.replace(schema, (_, file, names) =>
   `{/* schema ${file} ${names} */}\n\`\`\`ts\n${declarations(file, read(file), names.split(',')).join('\n\n')}\n\`\`\``)
 
 function inventory() {
-  const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', ':(glob)guide/*.md').split('\n')
+  const paths = git('ls-files', '--cached', '--others', '--exclude-standard', '--', '*README.md', '.agents/skills/*/SKILL.md', ':(glob)guide/*.md',
+    'AGENTS.md', 'CONTRIBUTING.md', 'DESIGN.md', 'CREDITS.md', 'DATA-LICENSES.md', 'engine/kit/*.md', 'engine/sf/*.md').split('\n')
   const errors = paths.filter(page => !Object.hasOwn(bindings, page)).map(page => `${page} needs a source in guide/bindings.json`)
   errors.push(...Object.keys(stamps).filter(page => !Object.hasOwn(bindings, page))
     .map(page => `${STAMPS} has a stamp for ${page}, which has no binding: delete the line`))

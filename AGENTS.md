@@ -5,7 +5,10 @@ the kit, the fonts, the sound engine, the site generator, the servers, the
 docs, and how agents build it. What it builds is a game: one systemic,
 multiplayer world that people make by talking, where their own agents live as
 characters. Its places so far are San Francisco, a shared street (`street/`)
-and Village, a private home for a family (`home/`, `host/`). The project began
+and Village, a private home for a family (`home/`, `host/`). The active stack
+is the engine (`engine/`), its kit (`engine/kit`), the master server
+(`master/`), the site generator (`site/`) and the deploy (`deploy/`); Village
+and the street (`home/`, `host/`, `street/`) are paused. The project began
 as Village; the [names](guide/project.md#names) note says what each name means
 now. The bar is PlayStation's Dreams and Spawn (spawn.co), done better: take
 every good idea, wherever it is from, and build original work with it. It is
@@ -33,7 +36,7 @@ sixteen unmerged PRs, and the home itself was never started. Avoid repeating tha
 
 ## Delivery
 
-- Change docs in the same pull request as their source. The [documentation gate](guide/documentation.md) enforces this.
+- Change docs in the same pull request as their source. The [documentation gate](guide/documentation.md) enforces this: the `docs-coverage` check fails a branch that changes a component's source without touching its pages, unless a `Docs-unchanged:` line in a commit message or the PR body says why.
 - Track work in GitHub issues. Branches use `feature/`. Commit subjects use
   `[#<issue>] <change>`.
 - The lead decides, builds or delegates, and merges to main. Builders write
