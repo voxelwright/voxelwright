@@ -33,8 +33,10 @@ mkdirSync(keeps)
 // ── The made-up shelf ───────────────────────────────────────────────────────────────────────────────────────────
 // Two living cars, as the bench writes a build (test/kept-car.mjs): "a BMW X3" and "a Tesla Model 3".
 const car = fineCar([0, 0, 0]), look = car.fine[0]
+// The bench writes a material and a colour, never the polish a look's paint carries (spells.ts `POLISHED`).
+const bench = (cells) => cells.map((k) => k & ~0xf0)
 for (const name of ['BMW X3', 'Tesla Model 3']) {
-  const build = { name, living: { body: { size: car.size, cells: [...car.cells] }, motor: car.motor, seats: car.seats, eye: car.eye }, parts: { whole: { size: look.size, per: look.per, low: look.low, cells: Buffer.from(look.cells.buffer).toString('base64') } }, asked: {}, measured: {} }
+  const build = { name, living: { body: { size: car.size, cells: [...car.cells] }, motor: car.motor, seats: car.seats, eye: car.eye }, parts: { whole: { size: look.size, per: look.per, low: look.low, cells: Buffer.from(bench(look.cells).buffer).toString('base64') } }, asked: {}, measured: {} }
   writeFileSync(join(dir, 'build.json'), JSON.stringify(build))
   await importTo(join(dir, 'build.json'), { shelf: shelfDir })
 }

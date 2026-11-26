@@ -15,6 +15,8 @@ import type { Struck, Told } from './told.ts'
 import type { Link } from './link.ts'
 import type { Things } from './things.ts'
 import { carveWheelWells, type WheelProfile } from './wheels.ts'
+import { sculptCoupe } from './car-sculpt.ts'
+import { POLISHED } from './spells.ts'
 
 /** A foot: where its ray starts (cells from the thing's own low corner), how far down it reaches, whether it steers and drives. */
 export interface Foot { at: [number, number, number]; reach: number; steers?: boolean; drives?: boolean }
@@ -1006,55 +1008,14 @@ export function car(low: [number, number, number]): Making {
 }
 
 /**
- * The hand-written car with a look in cells of 2.5 cm (#245), written as a few lines of shapes: a body with rounded
- * ends and wheel arches, a cabin of glass on pillars under a roof, four wheels with hubs, lamps; and inside, a floor,
- * two seats in front and a bench behind, a dash and a steering wheel, so that the eye in the driver's seat sees
- * something. The body that moves is `car`'s; the look is 1.3 m high where the body is 1 m. About a megabyte of cells.
+ * The hand-written car with a look in cells of 2.5 cm (#245): `car`'s body wearing the sculpted coupe (car-sculpt.ts,
+ * #39) at its size, 4.2 m by 1.3 m by 1.8 m, its wheels on `car`'s feet. Its paint is polished (spells.ts `POLISHED`),
+ * so it is drawn as car paint (pieces.ts); inside, bucket seats, a dash and a wheel low enough that the eye in the
+ * driver's seat (V) sees over it. About 150,000 filled cells of 630,000.
  */
 export function fineCar(low: [number, number, number]): Making {
-  const body = car(low), P = 4, w = 168, h = 52, d = 72, cells = new Uint16Array(w * h * d)
-  const set = (x: number, y: number, z: number, k: number) => { if (x >= 0 && y >= 0 && z >= 0 && x < w && y < h && z < d) cells[(y * d + z) * w + x] = k }
-  const paint = kind(STEEL, hue(0, 4)), trim = kind(STEEL, 13), tyre = kind(STEEL, 14), hub = kind(STEEL, 6), glass = kind(GLASS), lamp = kind(LAMP), red = kind(LAMP, hue(0, 5)), seat = kind(10, hue(2, 9)), floor = kind(STEEL, 12)
-  const wheels = [[28, 12], [140, 12]]
-  // Where the glass of the cabin begins and ends along x at a height: the windscreen leans back, the rear window less.
-  const front = (y: number) => 118 - (y - 25) * 0.9, rear = (y: number) => 40 + (y - 25) * 0.6
-  for (let y = 6; y < h; y++) for (let z = 4; z < d - 4; z++) for (let x = 0; x < w; x++) {
-    const side = Math.min(z - 4, d - 5 - z), end = Math.min(x, w - 1 - x)
-    if (y < 25) {
-      // The lower body, its corners rounded, cut for the wheels; hollow where the cabin is, over a floor.
-      if (end < 6 && side < 6 && (6 - end) ** 2 + (6 - side) ** 2 > 36) continue
-      if (y > 20 && end < 3 && y - 20 > end + 1) continue
-      if (wheels.some(([cx, cy]) => (x - cx) ** 2 + (y - cy) ** 2 < 15 * 15) && side < 10) continue
-      const cabin = x > rear(25) - 2 && x < front(25) + 2 && side >= 2 && y > 8
-      if (cabin) continue
-      set(x, y, z, y < 8 && x > 36 && x < 124 && side >= 2 ? floor : paint)
-      continue
-    }
-    // The cabin: glass between pillars, a roof over it.
-    const x0 = rear(y), x1 = front(y), inset = (y - 25) * 0.15
-    if (x < x0 || x > x1 || side < inset) continue
-    const shell = x < x0 + 2 || x > x1 - 2 || side < inset + 2 || y >= 49
-    if (!shell) continue
-    // The roof and the sill are steel; the windscreen and the rear window are glass between pillars at the corners, and the sides glass but for those and one between the doors.
-    const ends = x < x0 + 2 || x > x1 - 2, pillar = y >= 49 || y < 27 || (ends ? side < inset + 4 : x < x0 + 4 || x > x1 - 4 || Math.abs(x - 80) < 2)
-    set(x, y, z, pillar ? paint : glass)
-  }
-  // Wheels: tyres with hubs, a little proud of the body.
-  for (const [cx, cy] of wheels) for (const [z0, z1] of [[0, 9], [d - 9, d]]) for (let z = z0; z < z1; z++) for (let y = 0; y < 25; y++) for (let x = cx - 13; x <= cx + 13; x++) {
-    const r = Math.hypot(x - cx, y - cy)
-    if (r < 12) set(x, y, z, r < 6 && (z === z0 || z === z1 - 1) ? hub : tyre)
-  }
-  // Lamps in front, red ones behind.
-  for (const z of [10, 11, 12, 13, 14, 15, 56, 57, 58, 59, 60, 61]) for (let y = 15; y < 20; y++) { set(w - 1, y, z, lamp); set(0, y, z, red) }
-  // Inside: two seats and a bench (a cushion and a back each), a dash, and the driver's wheel on its column.
-  for (const [x0, z0, z1] of [[70, 12, 32], [70, 40, 60], [44, 10, 62]]) for (let z = z0; z < z1; z++) {
-    for (let x = x0; x < x0 + 16; x++) for (let y = 9; y < 15; y++) set(x, y, z, seat)
-    for (let y = 15; y < 38; y++) for (let x = x0 - 4 + Math.floor((y - 15) / 6); x < x0 + Math.floor((y - 15) / 6); x++) set(x, y, z, seat)
-  }
-  for (let z = 6; z < d - 6; z++) for (let y = 22; y < 31; y++) for (let x = 104 + (y - 22); x < 120; x++) set(x, y, z, trim)
-  for (let a = 0; a < 64; a++) { const t = (a / 64) * Math.PI * 2; for (const r of [6, 7]) set(98, Math.round(32 + Math.sin(t) * r), Math.round(22 + Math.cos(t) * r), trim) }
-  for (let x = 98; x < 108; x++) set(x, 32 - Math.round((x - 98) * 0.4), 22, trim)
+  const body = car(low), { cells, size } = sculptCoupe({ L: 4.2, H: 1.3, W: 1.8, per: 4, wheels: [0.7, 3.5], wheelY: 0.3, wheelR: 0.3, tyreW: 0.22, eye: [1.9, 1.0, 0.55], paint: kind(STEEL, hue(0, 4)) | POLISHED })
   // The driver's eye over the left front seat, in the body's cells: 1 m over the ground, a little behind the wheel. A seat is where a
   // sitting rider's feet are drawn, their eye 1.2 m over them (`SITTING_EYE`): low, so that their head is under the roof.
-  return { ...body, name: 'car', fine: [{ size: [w, h, d], per: P, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
+  return { ...body, name: 'car', fine: [{ size, per: 4, low: [0, 0, 0], cells }], seats: [[19.5, -1.5, 5.5], [19.5, -1.5, 12.5]], eye: [19, 10, 5.5] }
 }
