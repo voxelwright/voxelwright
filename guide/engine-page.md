@@ -71,7 +71,7 @@ In `sizes`, each sector from `y0` up has 0 for air, 1 for a single kind (the one
 | `world.ts` | Boxes, slots, the pool, asks to workers. |
 | `worker.ts` | One core instance that makes sectors. |
 | `march.ts` | The ray marcher's WGSL and pipelines. `engine.march.reshade` swaps its shader while the page runs. |
-| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts` | The other passes of a frame. |
+| `sun.ts`, `far.ts`, `water.ts`, `people.ts`, `pieces.ts`, `crumbs.ts`, `puffs.ts`, `tracks.ts`, `wheels.ts` | The other passes of a frame. |
 | `edits.ts` | Building edits as the core reads them. |
 | `mover.ts`, `link.ts` | What moves loose bodies: a local worker, or the shared world's stream. |
 | `living.ts`, `drive-cam.ts`, `cockpit.ts` | Driven vehicles, telemetry, the five-mode cinematic driving camera suite (`C` cycles, `X` looks back, `V` toggles the driver seat), and first-person cockpit immersion (head G-force inertia, windshield rain wipers, night dash glow, cabin acoustics). |
